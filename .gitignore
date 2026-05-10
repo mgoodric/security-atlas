@@ -1,0 +1,11 @@
+.DS_Store
+.claude/settings.local.json
+.claude/cache/
+.idea/
+.vscode/
+*.swp
+*.swo
+.envrc
+.env
+.env.local
+node_modules/
