@@ -12,7 +12,7 @@
 
 The spine is the [Secure Controls Framework](https://securecontrolsframework.com/) — ~1,400 controls already crosswalked to 200+ authority documents using NIST IR 8477 Set Theory Relationship Mapping (STRM) — and the wire format is [NIST OSCAL](https://pages.nist.gov/OSCAL/). Where Vanta and Drata commit you to a vendor-controlled evidence collector, security-atlas commits to a hybrid event-driven + query-driven evidence pipeline that composes existing OSS scanners (Prowler, Steampipe, Cloud Custodian, OPA, Cartography, osquery) rather than rebuilding them. Manual controls and the messy reality of partial coverage and exceptions are first-class. Scope is multidimensional (business unit × environment × geography × cloud × data class), not a single hierarchy. Risk is derived from controls, not joined to them.
 
-Three load-bearing decisions distinguish the design: **(1)** the Unified Control Framework is a directed labeled graph with STRM-typed edges through SCF anchors — not flat per-framework crosswalk tables that decay; **(2)** evidence ingestion and control evaluation are separated stages with an append-only ledger between them, enabling point-in-time audit replay and audit-period freezing; **(3)** board reporting is a v1 feature, not a v3 nicety, with a templated narrative auto-drafted from real metrics and human-approved before publish.
+Three load-bearing decisions distinguish the design: **(1)** the Unified Control Framework is a directed labeled graph with STRM-typed edges through SCF anchors — not flat per-framework crosswalk tables that decay (worked out in [`UCF_GRAPH_MODEL.md`](./UCF_GRAPH_MODEL.md)); **(2)** evidence ingestion and control evaluation are separated stages with an append-only ledger between them, enabling point-in-time audit replay and audit-period freezing; **(3)** board reporting is a v1 feature, not a v3 nicety, with a templated narrative auto-drafted from real metrics and human-approved before publish. Security questionnaires (CAIQ, SIG, HECVAT, customer bespoke) plug into the same UCF graph — questions are mapped to SCF anchors so one approved answer pre-populates equivalent questions across questionnaires (§4.6).
 
 The v1 success test is binary: does our primary user run their next SOC 2 audit out of security-atlas, generate their next board pack from it, and not reach for Vanta or a Google Sheet to fill a gap? If yes, v1 is done.
 
@@ -245,6 +245,8 @@ Policies are governance documents that reference controls (the inverse of "contr
 
 This is the section the existing tools get wrong. It is the heart of the platform.
 
+> **Deep dive:** the graph model is fully worked out — diagrams, traversal queries, versioning, storage decisions, and a concrete "one MFA evidence record satisfies six frameworks" walkthrough — in the companion document [`UCF_GRAPH_MODEL.md`](./UCF_GRAPH_MODEL.md).
+
 ### 3.1 The graph, not the spreadsheet
 
 Vanta-shaped tools maintain framework crosswalks as flat tables: `(control_in_framework_A, control_in_framework_B)`. This decays with every framework revision and silently rounds N:M relationships to 1:1.
@@ -393,6 +395,113 @@ Conflation of these is the most common error in the GRC engineering discourse. W
 Manual controls render the same UI surface as automated ones: a control card with its mappings, freshness clock, current state. The difference is the evaluation source — for `manual_periodic`, an authorized owner uploads evidence (a screenshot, a signed PDF, a meeting log) on the schedule; for `manual_attested`, a roleholder asserts the state with a digital acknowledgment that becomes an evidence record. Both feed the same evidence ledger.
 
 If the org has 30% manual controls, that 30% looks no less rigorous in the dashboard than the automated 70%. This is intentional — pretending manual controls don't exist is the most common path to "the tool says we're green but we're not."
+
+### 4.6 Security questionnaires (CAIQ, SIG, HECVAT, customer)
+
+Security questionnaires are the dominant inbound demand on a security-product startup's GRC program — every prospect of meaningful size sends a CAIQ, a SIG Lite, or a bespoke Word doc before contract. Practitioner research consistently shows: **the same answers get rewritten for every customer, in spreadsheets, by hand**, even when the org owns Vanta or Drata. This is the highest-ROI workflow we ship.
+
+#### 4.6.1 The questionnaire is a graph node
+
+Every question is a first-class node in the same UCF graph that holds framework requirements (see [`UCF_GRAPH_MODEL.md`](./UCF_GRAPH_MODEL.md)). Questions are mapped to **SCF anchors** with STRM-typed edges, exactly like framework requirements:
+
+```
+QuestionnaireQuestion[CAIQ-IAM-02] --equal/1.0--> SCF:IAC-06 (MFA)
+QuestionnaireQuestion[SIG-G.1.1]   --equal/0.9--> SCF:IAC-06
+QuestionnaireQuestion[HECVAT-AAAI-04] --subset_of/1.0--> SCF:IAC-06
+```
+
+Once mapped, **answering one question generates a candidate answer for every equivalent question across questionnaires**. A CAIQ answer about MFA pre-fills the SIG question and the HECVAT question. The UCF graph's payoff extends from "one control satisfies six frameworks" to "one answer pre-populates six questionnaires."
+
+#### 4.6.2 Entities
+
+| Entity | Purpose | Key fields |
+|---|---|---|
+| `Questionnaire` | A template (CAIQ v4.1, SIG Lite 2026, custom-customer-X) | `id`, `name`, `version`, `source` (csa/shared_assessments/educause/custom), `domain_taxonomy[]`, `license_class` (free/restricted/proprietary), `import_policy` |
+| `QuestionnaireQuestion` | One question in a template | `id`, `questionnaire_id`, `code` (e.g., `IAM-02`), `domain`, `text`, `answer_type` (yes_no_na / scaled / freeform), `linked_scf_anchors[]` (with strength) |
+| `QuestionnaireResponse` | An instance — "our answers to CAIQ for customer X, on date Y" | `id`, `questionnaire_id`, `for_customer` (or `for_org` for self-published), `period_id` (frozen evidence window), `status` (draft / under_review / approved / sent), `pdf_export_uri` |
+| `QuestionnaireAnswer` | One answer within a response | `id`, `response_id`, `question_id`, `answer_value`, `narrative`, `cited_evidence_ids[]`, `cited_policy_ids[]`, `cited_control_ids[]`, `authored_by`, `ai_assisted` (bool), `ai_model` (if assisted), `human_approved` (bool), `human_approver` (if approved) |
+| `AnswerLibrary` | Reusable canonical answers — the "we always say this for MFA" pattern | `id`, `scf_anchor_id`, `canonical_text`, `last_reviewed_at`, `review_owner` |
+
+#### 4.6.3 License posture (the part that matters)
+
+[Research, May 2026.](#sources)
+
+| Questionnaire | Current version | Ships in security-atlas? | Mechanism |
+|---|---|---|---|
+| **CAIQ v4.1** (CSA) | 283 questions, 17 domains, Dec 2025 | **No (template not bundled)** — but ingest + answer flow ships v1 | User downloads from CSA, imports the file. Avoids CSA commercial-embed license. |
+| **CAIQ-Lite v4.1** (CSA) | 138 questions | Same as above | Same. |
+| **SIG 2026 Lite** (Shared Assessments) | ~128 questions | **No** — Shared Assessments membership is members-only (~$7,200/yr). Ingest customer-supplied responses only. | Import from customer-provided file. |
+| **SIG 2026 Core** (Shared Assessments) | ~855 questions | Same. | Same. |
+| **HECVAT 4.1.5** (EDUCAUSE/REN-ISAC) | 321 questions, free | **Yes — bundled** | Ships in `questionnaire_templates/` with default SCF mappings. |
+| **VSAQ** (Google, Apache-2.0, unmaintained) | n/a | Yes — reference schema only | Bundled as a schema example, not a live questionnaire. |
+| **Custom customer questionnaires** | Word/Excel/PDF | Yes — universal import | Parser extracts questions; user maps each to SCF (AI-suggested) once; future receipts auto-map. |
+| **NIST CSF / CIS CSAT self-assessments** | Free | v2 | Bundled as orthogonal "internal assessment" templates. |
+
+**Concrete OSS stance:** ship the SCF crosswalk and HECVAT bundled (both permissive). For CAIQ and SIG, we ship the *machinery* (ingest, mapping, AI-assist, export), not the *content*. The user provides the file; we provide the workflow.
+
+#### 4.6.4 Workflows
+
+**Inbound (customer sent us a questionnaire):**
+
+```
+Customer sends CAIQ.xlsx
+    │
+    ▼
+Import — parse to QuestionnaireQuestion rows
+    │
+    ▼
+SCF mapping — match each question to SCF anchors
+  - Cached for canonical questionnaires (CAIQ, SIG, HECVAT)
+  - AI-suggested for bespoke; human approves the mapping once,
+    then it's permanent for that template
+    │
+    ▼
+Answer drafting per question:
+  1. Check AnswerLibrary for SCF anchor → use canonical answer if present
+  2. Else: RAG over evidence ledger + policies, scoped to mapped SCF anchor
+  3. Generate candidate answer with required citations to evidence_id / policy_id
+  4. Show DRAFT to human reviewer with "approve / edit / reject"
+    │
+    ▼
+Reviewer approves answer-by-answer (no bulk-approve all)
+    │
+    ▼
+Export — PDF + Excel (CAIQ format) / + customer's original format
+    │
+    ▼
+QuestionnaireResponse pinned to evidence period (audit-period freezing)
+```
+
+**Outbound (publish our own CAIQ/HECVAT):**
+
+The org maintains its own CAIQ-formatted self-attestation as a *living artifact* derived from current evidence. Whenever evidence drifts past freshness or a control fails, the published CAIQ flags out-of-date answers. A staleness banner gates re-publish.
+
+#### 4.6.5 AI-assist boundary (explicit)
+
+This is the highest-risk feature in the entire platform. Practitioner research is unambiguous: **auditors and prospects roll eyes at AI-generated security questionnaire responses** that hallucinate control claims. Our boundary is hard:
+
+| Allowed | Not allowed |
+|---|---|
+| AI suggests a draft answer with **mandatory citations** to specific evidence IDs and/or policy IDs. | AI publishes any answer without one-click human approval. |
+| AI explains gaps ("evidence covers SCF:IAC-06 but freshness is 95 days, consider re-running before answering"). | AI fabricates control coverage that has no evidence backing. |
+| AI suggests SCF mapping for an unmapped question; human approves once, mapping is canonical thereafter. | AI auto-approves its own mappings. |
+| AI summarizes prior responses for similarity matching. | AI uses Tenant A's confidential prior answer to seed Tenant B's draft. |
+
+Provenance is enforced at the schema level: `QuestionnaireAnswer.ai_assisted=true` answers cannot have `human_approved=true` without `human_approver` set, and the audit log shows model name + version + timestamp + diff between AI draft and final.
+
+**Inference backend is pluggable:**
+
+- **Default: local Ollama** with a small instruction-tuned model (`llama3.1:8b`, `qwen2.5:14b`, or similar). Ships in the docker-compose. No data leaves the deployment.
+- **Optional: cloud** — Anthropic, OpenAI, or Bedrock via API key. Off by default. When enabled, the deployment owner explicitly opts in per-tenant; a banner indicates "AI assist routes to {provider}" wherever drafts appear.
+- **The grounding stack is the same** for either backend: pgvector or Qdrant for embeddings of (a) prior approved answers, (b) policy chunks, (c) recent evidence summaries. Citations are required at retrieval, not generation — the model can only cite documents that the retriever returned.
+
+#### 4.6.6 Roadmap placement
+
+| Phase | What we ship |
+|---|---|
+| **v1** | Universal questionnaire import (Excel/CSV/JSON/Word). HECVAT bundled. CAIQ/SIG ingest of customer-provided files. Manual answer authoring with cited evidence. AnswerLibrary for canonical SCF-anchored answers. PDF export. **No AI-assist yet.** |
+| **v2** | Local-Ollama AI-assisted drafting with mandatory citations. Cloud-LLM optional. Inbound questionnaire batch processing. Per-customer answer libraries with diff/review. |
+| **v3** | Native CAIQ + HECVAT publish to STAR Registry / trust center. Outbound self-published questionnaires that auto-stale on evidence drift. Optional CSA membership integration to bundle CAIQ template. Vendor-questionnaire portability across portfolio orgs. |
 
 ---
 
@@ -709,6 +818,8 @@ These are decisions the canvas does **not** resolve. Each is a real choice with 
 12. **Governance of the control catalog itself.** Who reviews community-contributed controls? "Verified" tier? Build this from the start to avoid a later quality crisis.
 13. **Solo-operator vs multi-tenant tension.** The primary persona deploys single-tenant; OSS distribution wants multi-tenant. Postgres RLS handles the data model, but the UX for "I'm the only user" should not feel multi-tenant. Design for hidden multi-tenancy in single-user mode.
 14. **The board narrative LLM boundary.** The auto-drafted narrative is the most valuable feature for solo operators *and* the highest-risk feature if it hallucinates. Spend time on the prompt engineering, the human-approval UX, and the audit trail of every generated word.
+15. **CSA / Shared Assessments licensing posture.** Bundling CAIQ or SIG templates inside the OSS distribution requires commercial licenses we do not currently hold. v1 ships the *machinery* (ingest, AI-assist, export) and the user provides the file. v3 may revisit if customer demand justifies CSA membership. Document this clearly in the project README so contributors don't accidentally PR bundled templates.
+16. **AI inference backend default.** Local Ollama is the v2 default (no data leaves deployment, fits the security-product-startup trust story). Cloud LLM (Anthropic / OpenAI / Bedrock) is opt-in per-tenant. Decide which 1–2 local models to ship-test against to set quality expectations.
 
 ---
 
