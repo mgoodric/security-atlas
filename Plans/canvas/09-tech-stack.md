@@ -1,0 +1,49 @@
+**security-atlas canvas** · [← index](../ARCHITECTURE_CANVAS.md)
+
+---
+
+# 9. Architecture and Tech Stack
+
+Opinionated. One choice per slot, defended in one paragraph.
+
+## 9.1 Backing data store
+
+**PostgreSQL 16+ (primary) + S3-compatible object store (artifacts) + ClickHouse (evidence ledger analytics, optional v2).**
+
+Postgres because: row-level security, JSONB flexibility for evolving evidence payloads, mature operational tooling, and you can run it anywhere from a Pi to RDS. Object store for evidence artifacts that exceed 1 MB. ClickHouse only when evidence-record volume crosses ~10⁹ — added behind a read-model interface so v1 doesn't depend on it.
+
+Reject: Neo4j as primary (the graph is not big enough to need it; we use Postgres with `ltree` and recursive CTEs, or `pg_graph` extensions, for graph traversals). Reject: Mongo (schemaless evidence is a bug, not a feature; provenance demands schema).
+
+## 9.2 Backend language/runtime
+
+**Go for the platform core; Python for the connector SDK reference implementation; community connectors in any language over the gRPC contract.**
+
+Go because: static binary deploy, low operational overhead for self-host, strong concurrency for evidence-stream consumers, mature OSCAL bindings via compliance-trestle interop (which is Python — so we ship a stable gRPC bridge for it). Python for connectors because the data-engineering ergonomics dominate.
+
+## 9.3 Event/queue layer
+
+**NATS JetStream for v1.**
+
+JetStream gives us durable streams, key-value, and object store in one binary, with at-least-once delivery and stream replay (critical for evidence reprocessing). Self-host is one binary. Cloud is straightforward. Reject: Kafka (operational overhead), SQS (vendor lock for self-host), Redis Streams (no durability guarantees we want).
+
+## 9.4 Plugin architecture
+
+Three extension surfaces, narrow on purpose:
+
+| Surface | What you can extend | Mechanism |
+|---------|---------------------|-----------|
+| Connector | New evidence sources | gRPC contract per [§4.1](./04-evidence-engine.md) |
+| Control bundle | New controls / mappings | Versioned bundle uploaded to a registry; signed |
+| Notification sink | Where alerts/digests go | Webhook + a small handful of native sinks |
+
+That's it for v1. No "plugin everything" surface. Plugins are installed per-deployment, not per-tenant, in v1 — keeps the security model simple. Per-tenant plugin marketplaces are a v3 conversation.
+
+## 9.5 Auth model
+
+**OIDC for authentication, RBAC + ABAC for authorization.**
+
+OIDC because every credible IdP speaks it; we ship as a relying party only, never as an IdP. RBAC for coarse roles (`admin`, `grc_engineer`, `control_owner`, `auditor`, `viewer`). ABAC for the fine cuts that matter (`auditor X can only see scope cells within audit_period Y for client Z`). Authorization decisions live in OPA — same engine that evaluates control policies, so the security model is auditable in the same substrate as the controls.
+
+---
+
+[← Canvas index](../ARCHITECTURE_CANVAS.md) · [← 8. Audit Workflow](./08-audit-workflow.md) · **Next:** [10. Roadmap →](./10-roadmap.md)
