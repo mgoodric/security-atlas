@@ -1,0 +1,49 @@
+# 030 — OSCAL SSP + POA&M export pipeline
+
+**Cluster:** Audit workflow
+**Estimate:** 3d
+**Type:** HITL
+
+## Narrative
+
+Implement the OSCAL export pipeline that produces the audit-handoff bundle: System Security Plan (SSP), Assessment Plan + Assessment Results (AP/AR), and Plan of Action and Milestones (POA&M). The data comes from across the platform: org profile + scope cells + applicable controls + control implementations + linked policies + sample populations + walkthroughs + audit comments + findings. Use IBM `compliance-trestle` (Python, bridged via gRPC) for OSCAL JSON v1.1.x serialization. Export bundles are cosign-signed for tamper detection at handoff. HITL: an auditor partner should validate the first generated SSP before merge to confirm it imports cleanly into their tooling. The slice delivers value because Matt's SOC 2 audit handoff is now a single signed bundle — the binary v1 success test depends on this.
+
+## Acceptance criteria
+
+- [ ] AC-1: `oscal-export` CLI generates an SSP for an `AuditPeriod` as OSCAL JSON v1.1.x
+- [ ] AC-2: SSP includes: org profile, scope cells, control implementations (from slice 010 + 012), linked policies (from slice 022)
+- [ ] AC-3: Assessment Plan + Assessment Results generated from sample populations (slice 026) + walkthroughs (slice 027) + audit comments (slice 029)
+- [ ] AC-4: POA&M generated from open findings with milestones, owners, due dates
+- [ ] AC-5: Export bundle is cosign-signed; signature included in metadata
+- [ ] AC-6: IBM compliance-trestle round-trip validation passes
+- [ ] AC-7: HITL: auditor partner validates the first SSP import into their tooling; documented in `docs/audit-log/oscal-validation.md`
+- [ ] AC-8: `oscal-export` and audit-pack PDF available via UI + CLI
+
+## Constitutional invariants honored
+
+- **Invariant 8 (OSCAL wire format):** export honors the canonical OSCAL models
+- **Invariant 10 (audit-period freezing):** export pulls from a frozen audit period
+
+## Canvas references
+
+- `Plans/canvas/03-ucf.md` §3.4 (OSCAL ingest and export)
+- `Plans/canvas/08-audit-workflow.md` §8.2 (OSCAL SSP/POA&M export)
+
+## Dependencies
+
+- #008, #012, #017, #018, #026, #028
+
+## Anti-criteria (P0)
+
+- Does NOT skip cosign signing of export bundle
+- Does NOT export from a non-frozen period
+- Does NOT permit AI auto-generation of SSP narrative without human approval per section
+- Does NOT skip HITL validation gate
+
+## Skill mix (3–5)
+
+- Go + gRPC bridge to Python compliance-trestle
+- OSCAL JSON v1.1.x schema
+- cosign / sigstore for signing
+- Compliance domain knowledge (HITL)
+- CLI design (cobra commands)
