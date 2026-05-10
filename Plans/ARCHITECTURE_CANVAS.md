@@ -307,23 +307,45 @@ We treat **CSA CCM** as opt-in import for cloud-native overlays, because its com
 
 ## 4. Evidence Engine
 
-### 4.1 Connector SDK (defined first, before any connector)
+### 4.1 Evidence SDK (defined first, before any connector)
 
-The SDK contract is the architectural commitment. Every connector — first-party or community — implements:
+The SDK contract is the architectural commitment. The ledger has exactly one canonical inbound API: `IngestEvidence(record) → EvidenceReceipt`. The SDK exposes that API through **two complementary profiles**, not a primary and a fallback:
+
+| Profile | Direction | Who initiates | Use when |
+|---|---|---|---|
+| **Connector** (pull / subscribe) | Platform → Source | security-atlas reaches out and queries / subscribes | Source has a stable API and we have credentials to reach it |
+| **Pusher** (push) | Source → Platform | Source initiates and pushes to security-atlas | Source is behind a firewall, ephemeral (CI), event-emitting (webhook), or owns its scheduling |
+
+Many real connectors implement both. The GitHub connector pulls org/repo state on a schedule *and* receives push events from GitHub's webhook subscription — both flow into the same ledger via the same `IngestEvidence` call. CI/CD evidence (SAST, SCA, container scans, deploy events) is push-only by nature. Custom internal tools, aggregating middleware, telemetry-tap configurations (Vector / OTEL collectors), and air-gapped data diodes all become first-class evidence sources via push.
+
+Connector profile methods (gRPC, language-agnostic, runs as a separate process):
 
 | Method | Returns | Notes |
 |--------|---------|-------|
-| `describe()` | `ConnectorManifest` | name, version, supported source types, required scopes, rate-limit hints |
-| `auth_methods()` | `[AuthMethod]` | OIDC, API key, IAM role, OAuth flow, SCIM token |
-| `health_check(creds)` | `HealthResult` | Can we reach the source? |
-| `list_evidence_kinds()` | `[EvidenceKind]` | Each kind has a stable schema URI. |
-| `pull(kind, since, scope_filter)` | `Stream<EvidenceRecord>` | For query-driven snapshot evidence. |
-| `subscribe(kind, scope_filter)` | `Stream<EvidenceRecord>` | For event-driven streams (when source supports). |
-| `verify_provenance(record)` | `bool` | Cryptographic re-verification when applicable. |
+| `Describe()` | `ConnectorManifest` | name, version, supported source types, required scopes, rate-limit hints, **profiles_supported** |
+| `AuthMethods()` | `[AuthMethod]` | OIDC, API key, IAM role, OAuth flow, SCIM token |
+| `HealthCheck(creds)` | `HealthResult` | Can we reach the source? |
+| `ListEvidenceKinds()` | `[EvidenceKind]` | Each kind has a registered schema URI. |
+| `Pull(kind, since, scope_filter)` | `Stream<EvidenceRecord>` | Snapshot/query mode. |
+| `Subscribe(kind, scope_filter)` | `Stream<EvidenceRecord>` | Event-driven streams (when source supports). |
+| `VerifyProvenance(record)` | `bool` | Cryptographic re-verification when applicable. |
 
-A connector **declares** which evidence kinds it supports event-driven vs query-only; the engine routes accordingly. The SDK is language-agnostic over a gRPC contract — connectors run as separate processes, can be written in any language, and are sandboxed.
+Pusher profile surface (REST + gRPC + CLI + per-language SDKs):
 
-This contract was written before listing any connector deliberately, so AWS-shaped assumptions don't leak.
+| Endpoint / surface | Purpose |
+|---|---|
+| `POST /v1/evidence:push` | Single record or batch (≤100). Idempotency-key required. Schema-validated. |
+| `Push(stream<EvidenceRecord>)` (gRPC) | High-throughput streaming push. |
+| `security-atlas evidence push` CLI | Universal escape hatch — works from any shell, CI, cron. |
+| Go / Python / TypeScript / Java SDKs | Embed in customer code. |
+
+Push auth: short-lived OIDC tokens from CI IdPs (GitHub Actions, GitLab CI, AWS IRSA), platform-issued API keys, or mTLS — each scoped at issue time to (tenant × evidence_kind set × scope predicate × TTL). Idempotency keys, rate limits, schema-registry validation, and provenance metadata are all mandatory. Anonymous push, schemaless push, and scope-less push are explicitly rejected.
+
+**The schema registry** is the contract enforcement point. Every `evidence_kind` has a stable identifier, a JSON Schema, an owner, default SCF anchor mappings, and semver. Tenants can register private kinds for custom internal tools without touching the global namespace — the OpenTelemetry-semantic-conventions analog.
+
+> **Deep dive:** the full SDK contract — both profiles, push security threat model, middleware patterns (aggregating, telemetry-tap, air-gapped one-way bridge, cross-cluster federation), CLI and SDK details, and roadmap — is in [`EVIDENCE_SDK.md`](./EVIDENCE_SDK.md).
+
+This contract was written before listing any connector deliberately, so AWS-shaped assumptions don't leak. The push profile was added because pull-only architectures structurally cannot ingest CI/CD evidence, behind-firewall sources, telemetry-tap deployments, or air-gapped systems — all of which a security-product startup encounters in the first year.
 
 ### 4.2 v1 connector roster
 
@@ -538,6 +560,66 @@ Multi-tenancy is enforced at the database layer using **PostgreSQL Row-Level Sec
 This is the only multi-tenancy strategy that does not depend on application-code correctness. For self-host deployments, this means a single Postgres instance can safely serve multiple tenants. For SaaS deployments, each tenant gets its own RLS context.
 
 Storage tier (object store for large artifacts) uses per-tenant prefixes with tenant-scoped credentials — separate enforcement at separate layers.
+
+### 5.5 Framework scope — the per-framework subset of cells and controls
+
+The single most-misunderstood real-world fact about multi-framework programs is that **scope is per-framework, not global**. PCI's "cardholder data environment" (CDE) is not the same as HIPAA's "covered systems" is not the same as SOC 2's auditor-attested system is not the same as ISO 27001's ISMS scope. A control may be operationally applied across all 50 of an org's scope cells, but its evidence only *counts* for PCI in the 5 cells inside the CDE.
+
+This intersection — between a control's operational applicability and a framework's audit scope — is how a unified control library produces a *subset* of relevant controls per framework, automatically.
+
+**The model adds one entity:**
+
+```
+FrameworkScope {
+  id
+  framework_version_id            -- which framework version this scope belongs to
+  name                            -- "PCI 4.0 CDE", "HIPAA Covered Systems Q3 2026"
+  predicate                       -- a boolean over scope dimensions, same DSL as Control.applicability_expr
+  effective_from, effective_to    -- scope can change over time (e.g., post-segmentation)
+  status                          -- draft | approved | active | retired
+  approved_by, approval_evidence  -- who locked this scope, and the artifact (architecture diagram, SOW)
+}
+```
+
+**Two layers of applicability, intersected:**
+
+```
+Control.applicability_expr      // where the control IS applied (engineering reality)
+        ∩
+FrameworkScope.predicate         // what's in-scope for THIS framework (audit reality)
+        =
+effective_scope(control, framework)   // cells where the control's evidence COUNTS for this framework
+```
+
+**The canonical examples:**
+
+| Framework | Typical FrameworkScope predicate | Lever for scope reduction |
+|---|---|---|
+| **PCI DSS 4.0** (CDE) | `data_classification IN ('cardholder_data') OR connected_to_chd = true OR security_impacting_chd = true` | Network segmentation, tokenization, P2PE — each removes cells from the CDE |
+| **HIPAA Security Rule** (Covered) | `phi_handling = true OR product_line IN ('clinical', 'patient_portal')` | De-identification, BAA-bounded systems boundary |
+| **SOC 2** (System) | Auditor-defined; can be any predicate. Often `product_line = 'core_saas'` excluding `internal_tools` | Carving the system definition tightly with the auditor up front |
+| **ISO 27001** (ISMS) | Org-defined ISMS scope statement, codified as a predicate | The Statement of Applicability is the formal artifact |
+| **NIST CSF / 800-53** (System) | Per-system; for FedRAMP this is the authorization boundary | Boundary scoping is a heavy artifact, often diagrammed |
+| **GDPR** | Different shape — predicate over data records, not infrastructure cells. Special-cased. | Data minimization, anonymization |
+
+**How the graph traversal accounts for it:**
+
+When computing coverage for `framework_requirement R`:
+
+1. Walk `R → SCF anchors → controls` (the existing graph traversal).
+2. For each candidate control `C`, compute `effective_scope(C, R.framework) = C.applicability_expr ∩ R.framework.scope.predicate`.
+3. Coverage is the weighted strength × effectiveness aggregated **only over cells in `effective_scope`**, not over all cells where `C` is applied.
+
+The practical consequences the user actually feels:
+
+- **The PCI dashboard naturally filters down** from the org's full ~200 controls to the ~80 that map (via SCF) to in-scope PCI requirements, evaluated only over CDE cells.
+- **Scope-reduction work is a first-class operation.** Removing a system from the CDE is shrinking `FrameworkScope.predicate` — coverage math updates immediately, and the auditor sees a precise before/after.
+- **A single control can have different coverage scores for different frameworks at the same time.** Okta MFA might be 1.0 covered for SOC 2 (applied across the whole system) but 0.6 covered for PCI (one of the 5 CDE cells didn't have MFA enforced last week). Each number is honest in its own context.
+- **Framework scopes are versioned and audit-evidenced** in their own right — when did the CDE change, why, who approved, against what diagram. This is itself audit evidence.
+
+**Why this is hard for flat-table tools:** they can't intersect "control applicability" with "framework scope" because they don't model framework scope at all — they assume one global scope. Real programs have to maintain the intersection in spreadsheets. The graph model + `FrameworkScope` makes this a query, not a copy-paste exercise.
+
+**FrameworkScope vs. SCF anchor scope mappings:** these are different things. SCF anchors are framework-agnostic concepts. The mapping `FrameworkRequirement → SCF anchor` says "this concept is what the requirement is about." `FrameworkScope` separately says "even though the concept applies broadly, this framework's audit only cares about it in *these* cells." The two intersect at evaluation time.
 
 ---
 
@@ -820,6 +902,9 @@ These are decisions the canvas does **not** resolve. Each is a real choice with 
 14. **The board narrative LLM boundary.** The auto-drafted narrative is the most valuable feature for solo operators *and* the highest-risk feature if it hallucinates. Spend time on the prompt engineering, the human-approval UX, and the audit trail of every generated word.
 15. **CSA / Shared Assessments licensing posture.** Bundling CAIQ or SIG templates inside the OSS distribution requires commercial licenses we do not currently hold. v1 ships the *machinery* (ingest, AI-assist, export) and the user provides the file. v3 may revisit if customer demand justifies CSA membership. Document this clearly in the project README so contributors don't accidentally PR bundled templates.
 16. **AI inference backend default.** Local Ollama is the v2 default (no data leaves deployment, fits the security-product-startup trust story). Cloud LLM (Anthropic / OpenAI / Bedrock) is opt-in per-tenant. Decide which 1–2 local models to ship-test against to set quality expectations.
+17. **Schema-registry governance.** As community-contributed `evidence_kind` schemas land, who reviews them? "Verified" tier? Semver enforcement (additive minor versions, breaking-change deprecation windows)? This needs to be defined before community connectors and pushers proliferate and lock in inconsistent shapes.
+18. **Push credential issuance UX.** Short-lived OIDC tokens from CI IdPs are the right default for service accounts, but the UX for issuing platform API keys (rotation, scoping, revocation, audit) needs design — this is the credential type users will reach for first, and getting the scoping wrong is the path to "the CI key can push anything for any tenant."
+19. **FrameworkScope ownership.** Who owns the predicates? Engineering knows where systems live; the auditor approves what counts. The `approved_by` + `approval_evidence` fields exist, but the workflow (drafting → review → auditor approval → activation) needs UX design. Particularly load-bearing for PCI where scope reduction is the dominant lever.
 
 ---
 
