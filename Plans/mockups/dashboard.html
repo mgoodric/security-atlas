@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Program · security-atlas</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared/shell.css" />
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          brand: { 50:'#eef2ff', 100:'#e0e7ff', 200:'#c7d2fe', 500:'#6366f1', 600:'#4f46e5', 700:'#4338ca', 900:'#312e81' }
+        }
+      }
+    }
+  }
+</script>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+
+<!-- ==================== TOP BAR ==================== -->
+<header class="sticky top-0 z-20 bg-white border-b border-slate-200">
+  <div class="flex items-center h-12 px-4">
+    <a href="index.html" class="flex items-center gap-2 pr-4 border-r border-slate-200 mr-4">
+      <svg class="w-5 h-5 text-brand-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2 4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6l-8-4z" stroke-linejoin="round"/>
+        <path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="text-sm font-semibold tracking-tight">security-atlas</span>
+    </a>
+    <nav class="flex items-center gap-1 text-xs text-slate-500">
+      <span>Sentinel Labs</span>
+      <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg>
+      <span class="text-slate-900 font-medium">Program</span>
+    </nav>
+    <div class="ml-auto flex items-center gap-3">
+      <div class="flex items-center gap-2 px-2.5 py-1 bg-amber-50 border border-amber-200 rounded-full">
+        <span class="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse"></span>
+        <span class="text-xs font-medium text-amber-800">SOC 2 Type II · Q2 2026 in progress</span>
+      </div>
+      <div class="relative">
+        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+        <input type="text" placeholder="Search controls, evidence, risks…" class="pl-8 pr-3 py-1.5 w-64 text-sm bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-brand-500 focus:bg-white"/>
+        <kbd class="absolute right-2 top-1/2 -translate-y-1/2 mono text-[10px] text-slate-400 bg-white border border-slate-200 px-1 rounded">⌘K</kbd>
+      </div>
+      <div class="flex items-center gap-2 pl-3 border-l border-slate-200">
+        <div class="w-7 h-7 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-xs font-semibold">MG</div>
+        <span class="text-sm text-slate-700">Matt</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="flex">
+
+<!-- ==================== SIDEBAR ==================== -->
+<nav class="w-56 border-r border-slate-200 bg-white min-h-[calc(100vh-3rem)] py-4 px-3 text-sm">
+  <div class="space-y-0.5">
+    <a href="#" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-slate-100 text-slate-900 font-medium">
+      <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"/></svg>
+      Dashboard
+    </a>
+  </div>
+
+  <div class="mt-5 mb-1.5 px-2.5 text-[10px] uppercase tracking-wider font-medium text-slate-400">Controls</div>
+  <div class="space-y-0.5">
+    <a href="control.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
+      Controls
+      <span class="ml-auto mono text-[10px] text-slate-400">82</span>
+    </a>
+    <a href="#" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V4a2 2 0 00-2-2H4zm3 2h6v4H7V4zm8 8v4H5v-4h10z" clip-rule="evenodd"/></svg>
+      Frameworks
+      <span class="ml-auto mono text-[10px] text-slate-400">6</span>
+    </a>
+    <a href="#" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 6a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zm9-1a1 1 0 00-1 1v6a1 1 0 001 1h4a1 1 0 001-1v-6a1 1 0 00-1-1h-4z" clip-rule="evenodd"/></svg>
+      Mappings
+    </a>
+  </div>
+
+  <div class="mt-5 mb-1.5 px-2.5 text-[10px] uppercase tracking-wider font-medium text-slate-400">Evidence</div>
+  <div class="space-y-0.5">
+    <a href="#" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/><path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5z" clip-rule="evenodd"/></svg>
+      Evidence ledger
+    </a>
+    <a href="#" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path d="M11 17a1 1 0 001.447.894l4-2A1 1 0 0017 15V9.236a1 1 0 00-.553-.894l-4-2A1 1 0 0011 7.236V17zM15.211 6.276a1 1 0 000-1.788l-4.764-2.382a1 1 0 00-.894 0L4.789 4.488a1 1 0 000 1.788l4.764 2.382a1 1 0 00.894 0l4.764-2.382zM4.447 8.342A1 1 0 003 9.236V15a1 1 0 00.553.894l4 2A1 1 0 009 17V9.236a1 1 0 00-.553-.894l-4-2z"/></svg>
+      Connectors
+      <span class="ml-auto mono text-[10px] text-slate-400">7</span>
+    </a>
+  </div>
+
+  <div class="mt-5 mb-1.5 px-2.5 text-[10px] uppercase tracking-wider font-medium text-slate-400">Program</div>
+  <div class="space-y-0.5">
+    <a href="#" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>
+      Risk register
+      <span class="ml-auto mono text-[10px] text-rose-500">3</span>
+    </a>
+    <a href="#" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/></svg>
+      Policies
+    </a>
+    <a href="#" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z"/></svg>
+      Vendors
+    </a>
+    <a href="questionnaire.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 5v8a2 2 0 01-2 2h-5l-5 4v-4H4a2 2 0 01-2-2V5a2 2 0 012-2h12a2 2 0 012 2zM7 8H5v2h2V8zm2 0h2v2H9V8zm6 0h-2v2h2V8z" clip-rule="evenodd"/></svg>
+      Questionnaires
+      <span class="ml-auto mono text-[10px] text-slate-400">2</span>
+    </a>
+  </div>
+
+  <div class="mt-5 mb-1.5 px-2.5 text-[10px] uppercase tracking-wider font-medium text-slate-400">Audit</div>
+  <div class="space-y-0.5">
+    <a href="#" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v3.586l-1.293-1.293a1 1 0 10-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 11.586V8z" clip-rule="evenodd"/></svg>
+      Audit cycles
+    </a>
+    <a href="board-pack.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/></svg>
+      Board reports
+    </a>
+  </div>
+
+  <div class="mt-5 mb-1.5 px-2.5 text-[10px] uppercase tracking-wider font-medium text-slate-400">Admin</div>
+  <div class="space-y-0.5">
+    <a href="#" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/></svg>
+      Settings
+    </a>
+  </div>
+</nav>
+
+<!-- ==================== MAIN ==================== -->
+<main class="flex-1 min-w-0">
+  <div class="max-w-7xl mx-auto px-8 py-7">
+
+    <!-- header -->
+    <div class="flex items-baseline justify-between mb-6">
+      <div>
+        <div class="flex items-baseline gap-3">
+          <h1 class="text-2xl font-semibold tracking-tight">Program</h1>
+          <span class="text-sm text-slate-500">Sentinel Labs · production</span>
+        </div>
+        <p class="text-sm text-slate-500 mt-0.5">Snapshot taken 18 minutes ago · evidence freshness 87% within window</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="px-3 py-1.5 text-sm text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50">Export</button>
+        <button class="px-3 py-1.5 text-sm text-white bg-brand-600 rounded-md hover:bg-brand-700 flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.707-10.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L9.414 11H13a1 1 0 100-2H9.414l1.293-1.293z" clip-rule="evenodd"/></svg>
+          New board report
+        </button>
+      </div>
+    </div>
+
+    <!-- ==================== FRAMEWORK TILES ==================== -->
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-7">
+
+      <!-- SOC 2 -->
+      <div class="bg-white border border-slate-200 rounded-xl p-4 relative overflow-hidden">
+        <div class="flex items-start justify-between mb-3">
+          <div>
+            <div class="text-[11px] font-medium text-slate-500 uppercase tracking-wider">SOC 2</div>
+            <div class="mono text-[10px] text-slate-400">2017 TSC · in audit</div>
+          </div>
+          <span class="w-2 h-2 dot-pass rounded-full mt-1.5"></span>
+        </div>
+        <div class="flex items-baseline gap-1.5">
+          <span class="text-2xl font-semibold">94<span class="text-slate-400 text-lg font-normal">%</span></span>
+          <span class="text-xs font-medium text-emerald-600">▲ 2.1</span>
+        </div>
+        <svg class="w-full h-7 mt-1.5" viewBox="0 0 100 28" preserveAspectRatio="none">
+          <path d="M0,22 L10,21 L20,19 L30,20 L40,17 L50,15 L60,14 L70,11 L80,9 L90,7 L100,6" fill="none" stroke="rgb(16 185 129)" stroke-width="1.5"/>
+        </svg>
+        <div class="mt-1.5 text-[10px] text-slate-500 flex items-center gap-1.5"><span class="w-1 h-1 dot-pass rounded-full"></span>62 of 66 in scope</div>
+      </div>
+
+      <!-- ISO 27001 -->
+      <div class="bg-white border border-slate-200 rounded-xl p-4">
+        <div class="flex items-start justify-between mb-3">
+          <div>
+            <div class="text-[11px] font-medium text-slate-500 uppercase tracking-wider">ISO 27001</div>
+            <div class="mono text-[10px] text-slate-400">2022 · prep</div>
+          </div>
+          <span class="w-2 h-2 dot-warn rounded-full mt-1.5"></span>
+        </div>
+        <div class="flex items-baseline gap-1.5">
+          <span class="text-2xl font-semibold">78<span class="text-slate-400 text-lg font-normal">%</span></span>
+          <span class="text-xs font-medium text-emerald-600">▲ 5.4</span>
+        </div>
+        <svg class="w-full h-7 mt-1.5" viewBox="0 0 100 28" preserveAspectRatio="none">
+          <path d="M0,24 L10,23 L20,22 L30,20 L40,18 L50,17 L60,15 L70,13 L80,11 L90,10 L100,8" fill="none" stroke="rgb(245 158 11)" stroke-width="1.5"/>
+        </svg>
+        <div class="mt-1.5 text-[10px] text-slate-500 flex items-center gap-1.5"><span class="w-1 h-1 dot-warn rounded-full"></span>72 of 93 mapped</div>
+      </div>
+
+      <!-- NIST CSF -->
+      <div class="bg-white border border-slate-200 rounded-xl p-4">
+        <div class="flex items-start justify-between mb-3">
+          <div>
+            <div class="text-[11px] font-medium text-slate-500 uppercase tracking-wider">NIST CSF</div>
+            <div class="mono text-[10px] text-slate-400">2.0 · self</div>
+          </div>
+          <span class="w-2 h-2 dot-pass rounded-full mt-1.5"></span>
+        </div>
+        <div class="flex items-baseline gap-1.5">
+          <span class="text-2xl font-semibold">86<span class="text-slate-400 text-lg font-normal">%</span></span>
+          <span class="text-xs font-medium text-emerald-600">▲ 1.2</span>
+        </div>
+        <svg class="w-full h-7 mt-1.5" viewBox="0 0 100 28" preserveAspectRatio="none">
+          <path d="M0,18 L10,17 L20,16 L30,16 L40,14 L50,13 L60,12 L70,11 L80,11 L90,10 L100,9" fill="none" stroke="rgb(16 185 129)" stroke-width="1.5"/>
+        </svg>
+        <div class="mt-1.5 text-[10px] text-slate-500 flex items-center gap-1.5"><span class="w-1 h-1 dot-pass rounded-full"></span>97 of 113 covered</div>
+      </div>
+
+      <!-- HIPAA -->
+      <div class="bg-white border border-slate-200 rounded-xl p-4 opacity-75">
+        <div class="flex items-start justify-between mb-3">
+          <div>
+            <div class="text-[11px] font-medium text-slate-500 uppercase tracking-wider">HIPAA</div>
+            <div class="mono text-[10px] text-slate-400">Security Rule · v3 plan</div>
+          </div>
+          <span class="w-2 h-2 dot-mute rounded-full mt-1.5"></span>
+        </div>
+        <div class="text-sm text-slate-500 italic mt-3">Not in scope</div>
+        <div class="mt-2 text-[10px] text-slate-400">Activate when first PHI customer signs</div>
+      </div>
+
+      <!-- PCI DSS -->
+      <div class="bg-white border border-slate-200 rounded-xl p-4 opacity-75">
+        <div class="flex items-start justify-between mb-3">
+          <div>
+            <div class="text-[11px] font-medium text-slate-500 uppercase tracking-wider">PCI DSS</div>
+            <div class="mono text-[10px] text-slate-400">4.0 · not scoped</div>
+          </div>
+          <span class="w-2 h-2 dot-mute rounded-full mt-1.5"></span>
+        </div>
+        <div class="text-sm text-slate-500 italic mt-3">Not in scope</div>
+        <div class="mt-2 text-[10px] text-slate-400">No CDE defined</div>
+      </div>
+
+      <!-- GDPR -->
+      <div class="bg-white border border-slate-200 rounded-xl p-4">
+        <div class="flex items-start justify-between mb-3">
+          <div>
+            <div class="text-[11px] font-medium text-slate-500 uppercase tracking-wider">GDPR</div>
+            <div class="mono text-[10px] text-slate-400">Art. 32 + 33 · partial</div>
+          </div>
+          <span class="w-2 h-2 dot-warn rounded-full mt-1.5"></span>
+        </div>
+        <div class="flex items-baseline gap-1.5">
+          <span class="text-2xl font-semibold">64<span class="text-slate-400 text-lg font-normal">%</span></span>
+          <span class="text-xs font-medium text-slate-500">— flat</span>
+        </div>
+        <svg class="w-full h-7 mt-1.5" viewBox="0 0 100 28" preserveAspectRatio="none">
+          <path d="M0,14 L10,14 L20,14 L30,15 L40,14 L50,14 L60,13 L70,13 L80,14 L90,14 L100,13" fill="none" stroke="rgb(148 163 184)" stroke-width="1.5"/>
+        </svg>
+        <div class="mt-1.5 text-[10px] text-slate-500 flex items-center gap-1.5"><span class="w-1 h-1 dot-warn rounded-full"></span>privacy module v3</div>
+      </div>
+    </div>
+
+    <!-- ==================== SECONDARY GRID ==================== -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+
+      <!-- TOP RISKS AGING -->
+      <div class="lg:col-span-2 bg-white border border-slate-200 rounded-xl">
+        <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+          <div>
+            <h2 class="font-semibold text-slate-900">Top risks · aging</h2>
+            <p class="text-xs text-slate-500">Sorted by residual × age-in-treatment</p>
+          </div>
+          <a href="#" class="text-xs text-brand-600 hover:text-brand-700">View register →</a>
+        </div>
+        <div class="divide-y divide-slate-100">
+          <!-- risk row -->
+          <div class="px-5 py-3 grid grid-cols-12 gap-3 items-center text-sm hover:bg-slate-50">
+            <div class="col-span-5">
+              <div class="font-medium text-slate-900 flex items-center gap-2">
+                <span class="w-1.5 h-1.5 dot-fail rounded-full"></span>
+                Vendor concentration · CI/CD
+              </div>
+              <div class="text-xs text-slate-500 mt-0.5 mono">RISK-0014 · NIST 800-30 · residual 0.71</div>
+            </div>
+            <div class="col-span-2">
+              <span class="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-rose-50 text-rose-700">mitigate</span>
+            </div>
+            <div class="col-span-2 text-xs text-slate-500">
+              <span class="mono">112 days</span> open
+            </div>
+            <div class="col-span-2 flex items-center gap-1.5">
+              <div class="w-5 h-5 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-[10px] font-semibold">MG</div>
+              <span class="text-xs text-slate-600">Matt G.</span>
+            </div>
+            <div class="col-span-1 text-right">
+              <svg class="w-4 h-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg>
+            </div>
+          </div>
+          <div class="px-5 py-3 grid grid-cols-12 gap-3 items-center text-sm hover:bg-slate-50">
+            <div class="col-span-5">
+              <div class="font-medium text-slate-900 flex items-center gap-2">
+                <span class="w-1.5 h-1.5 dot-fail rounded-full"></span>
+                Unmanaged contractor laptops · privileged access
+              </div>
+              <div class="text-xs text-slate-500 mt-0.5 mono">RISK-0021 · FAIR · residual 0.68</div>
+            </div>
+            <div class="col-span-2">
+              <span class="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-rose-50 text-rose-700">mitigate</span>
+            </div>
+            <div class="col-span-2 text-xs text-slate-500">
+              <span class="mono">94 days</span> open
+            </div>
+            <div class="col-span-2 flex items-center gap-1.5">
+              <div class="w-5 h-5 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-[10px] font-semibold">MG</div>
+              <span class="text-xs text-slate-600">Matt G.</span>
+            </div>
+            <div class="col-span-1 text-right">
+              <svg class="w-4 h-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg>
+            </div>
+          </div>
+          <div class="px-5 py-3 grid grid-cols-12 gap-3 items-center text-sm hover:bg-slate-50">
+            <div class="col-span-5">
+              <div class="font-medium text-slate-900 flex items-center gap-2">
+                <span class="w-1.5 h-1.5 dot-warn rounded-full"></span>
+                Customer data export endpoints · PII exposure
+              </div>
+              <div class="text-xs text-slate-500 mt-0.5 mono">RISK-0009 · NIST 800-30 · residual 0.52</div>
+            </div>
+            <div class="col-span-2">
+              <span class="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-amber-50 text-amber-700">mitigate</span>
+            </div>
+            <div class="col-span-2 text-xs text-slate-500">
+              <span class="mono">61 days</span> open
+            </div>
+            <div class="col-span-2 flex items-center gap-1.5">
+              <div class="w-5 h-5 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-[10px] font-semibold">DK</div>
+              <span class="text-xs text-slate-600">Dana K.</span>
+            </div>
+            <div class="col-span-1 text-right">
+              <svg class="w-4 h-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg>
+            </div>
+          </div>
+          <div class="px-5 py-3 grid grid-cols-12 gap-3 items-center text-sm hover:bg-slate-50">
+            <div class="col-span-5">
+              <div class="font-medium text-slate-900 flex items-center gap-2">
+                <span class="w-1.5 h-1.5 dot-warn rounded-full"></span>
+                Single-tenant prod DB · noisy-neighbor + DR
+              </div>
+              <div class="text-xs text-slate-500 mt-0.5 mono">RISK-0033 · NIST 800-30 · residual 0.41</div>
+            </div>
+            <div class="col-span-2">
+              <span class="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-sky-50 text-sky-700">accept</span>
+            </div>
+            <div class="col-span-2 text-xs text-slate-500">
+              <span class="mono">38 days</span> open
+            </div>
+            <div class="col-span-2 flex items-center gap-1.5">
+              <div class="w-5 h-5 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-[10px] font-semibold">MG</div>
+              <span class="text-xs text-slate-600">Matt G.</span>
+            </div>
+            <div class="col-span-1 text-right">
+              <svg class="w-4 h-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- EVIDENCE FRESHNESS -->
+      <div class="bg-white border border-slate-200 rounded-xl">
+        <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+          <div>
+            <h2 class="font-semibold text-slate-900">Evidence freshness</h2>
+            <p class="text-xs text-slate-500">By freshness class</p>
+          </div>
+        </div>
+        <div class="p-5 space-y-3">
+          <div>
+            <div class="flex items-baseline justify-between mb-1">
+              <span class="text-xs text-slate-600">Realtime · &lt;24h</span>
+              <span class="mono text-xs text-slate-500">98%</span>
+            </div>
+            <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-emerald-500" style="width: 98%"></div></div>
+          </div>
+          <div>
+            <div class="flex items-baseline justify-between mb-1">
+              <span class="text-xs text-slate-600">Daily · &lt;7d</span>
+              <span class="mono text-xs text-slate-500">94%</span>
+            </div>
+            <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-emerald-500" style="width: 94%"></div></div>
+          </div>
+          <div>
+            <div class="flex items-baseline justify-between mb-1">
+              <span class="text-xs text-slate-600">Weekly · &lt;30d</span>
+              <span class="mono text-xs text-slate-500">89%</span>
+            </div>
+            <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-emerald-500" style="width: 89%"></div></div>
+          </div>
+          <div>
+            <div class="flex items-baseline justify-between mb-1">
+              <span class="text-xs text-slate-600">Monthly · &lt;90d</span>
+              <span class="mono text-xs text-slate-500">72%</span>
+            </div>
+            <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-amber-500" style="width: 72%"></div></div>
+          </div>
+          <div>
+            <div class="flex items-baseline justify-between mb-1">
+              <span class="text-xs text-slate-600">Quarterly · &lt;120d</span>
+              <span class="mono text-xs text-slate-500">61%</span>
+            </div>
+            <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-amber-500" style="width: 61%"></div></div>
+          </div>
+          <div>
+            <div class="flex items-baseline justify-between mb-1">
+              <span class="text-xs text-slate-600">Annual · &lt;400d</span>
+              <span class="mono text-xs text-slate-500">100%</span>
+            </div>
+            <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-emerald-500" style="width: 100%"></div></div>
+          </div>
+
+          <div class="pt-2 mt-2 border-t border-slate-100 text-xs text-slate-500">
+            <span class="text-rose-600 font-medium">14</span> records past valid_until · <a class="text-brand-600 hover:text-brand-700" href="#">refresh now</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TERTIARY GRID ==================== -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+
+      <!-- RECENT DRIFT -->
+      <div class="bg-white border border-slate-200 rounded-xl">
+        <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+          <div>
+            <h2 class="font-semibold text-slate-900">Recent drift · last 7 days</h2>
+            <p class="text-xs text-slate-500">Controls that flipped pass → fail</p>
+          </div>
+          <span class="mono text-xs text-rose-600 font-semibold">3 new</span>
+        </div>
+        <div class="divide-y divide-slate-100 text-sm">
+          <div class="px-5 py-3 hover:bg-slate-50">
+            <div class="flex items-center justify-between">
+              <a href="control.html" class="font-medium text-slate-900 hover:text-brand-600">Encryption at rest · RDS prod-eu</a>
+              <span class="mono text-xs text-rose-600">−0.18</span>
+            </div>
+            <div class="flex items-center gap-3 text-xs text-slate-500 mt-1">
+              <span class="mono">SCF:CRY-04</span>
+              <span>·</span>
+              <span>2 days ago</span>
+              <span>·</span>
+              <span>kms key rotation gap</span>
+            </div>
+          </div>
+          <div class="px-5 py-3 hover:bg-slate-50">
+            <div class="flex items-center justify-between">
+              <a href="#" class="font-medium text-slate-900 hover:text-brand-600">MFA enforcement · contractor workspace</a>
+              <span class="mono text-xs text-rose-600">−0.06</span>
+            </div>
+            <div class="flex items-center gap-3 text-xs text-slate-500 mt-1">
+              <span class="mono">SCF:IAC-06</span>
+              <span>·</span>
+              <span>3 days ago</span>
+              <span>·</span>
+              <span>2 new hires unenrolled</span>
+            </div>
+          </div>
+          <div class="px-5 py-3 hover:bg-slate-50">
+            <div class="flex items-center justify-between">
+              <a href="#" class="font-medium text-slate-900 hover:text-brand-600">Vuln remediation · critical → 7d</a>
+              <span class="mono text-xs text-rose-600">−0.22</span>
+            </div>
+            <div class="flex items-center gap-3 text-xs text-slate-500 mt-1">
+              <span class="mono">SCF:VPM-04</span>
+              <span>·</span>
+              <span>5 days ago</span>
+              <span>·</span>
+              <span>1 P1 finding open 11 days</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- UPCOMING -->
+      <div class="bg-white border border-slate-200 rounded-xl">
+        <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+          <div>
+            <h2 class="font-semibold text-slate-900">Upcoming · next 30 days</h2>
+            <p class="text-xs text-slate-500">Reviews, attestations, expirations</p>
+          </div>
+        </div>
+        <div class="divide-y divide-slate-100 text-sm">
+          <div class="px-5 py-3 hover:bg-slate-50 flex items-center gap-3">
+            <div class="w-10 text-center">
+              <div class="text-[10px] font-medium text-slate-500 uppercase">May</div>
+              <div class="text-lg font-semibold text-slate-900 leading-none">14</div>
+            </div>
+            <div class="flex-1">
+              <div class="font-medium text-slate-900">Q1 board report due</div>
+              <div class="text-xs text-slate-500">draft 64% complete · auto-narrative ready</div>
+            </div>
+            <span class="mono text-xs text-slate-400">4 days</span>
+          </div>
+          <div class="px-5 py-3 hover:bg-slate-50 flex items-center gap-3">
+            <div class="w-10 text-center">
+              <div class="text-[10px] font-medium text-slate-500 uppercase">May</div>
+              <div class="text-lg font-semibold text-slate-900 leading-none">21</div>
+            </div>
+            <div class="flex-1">
+              <div class="font-medium text-slate-900">Quarterly access review · prod</div>
+              <div class="text-xs text-slate-500">42 reviewers · 0 started</div>
+            </div>
+            <span class="mono text-xs text-amber-600">11 days</span>
+          </div>
+          <div class="px-5 py-3 hover:bg-slate-50 flex items-center gap-3">
+            <div class="w-10 text-center">
+              <div class="text-[10px] font-medium text-slate-500 uppercase">May</div>
+              <div class="text-lg font-semibold text-slate-900 leading-none">28</div>
+            </div>
+            <div class="flex-1">
+              <div class="font-medium text-slate-900">Acme Corp CAIQ response due</div>
+              <div class="text-xs text-slate-500">124 of 283 questions · 60 AI-drafted pending approval</div>
+            </div>
+            <span class="mono text-xs text-amber-600">18 days</span>
+          </div>
+          <div class="px-5 py-3 hover:bg-slate-50 flex items-center gap-3">
+            <div class="w-10 text-center">
+              <div class="text-[10px] font-medium text-slate-500 uppercase">Jun</div>
+              <div class="text-lg font-semibold text-slate-900 leading-none">02</div>
+            </div>
+            <div class="flex-1">
+              <div class="font-medium text-slate-900">Exception EXC-007 expires</div>
+              <div class="text-xs text-slate-500">Production logging retention · 30-day grace</div>
+            </div>
+            <span class="mono text-xs text-slate-400">23 days</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== ACTIVITY FEED ==================== -->
+    <div class="bg-white border border-slate-200 rounded-xl">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+        <div>
+          <h2 class="font-semibold text-slate-900">Recent activity</h2>
+          <p class="text-xs text-slate-500">Evidence ingest, control state changes, approvals</p>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <button class="px-2 py-1 text-slate-700 bg-slate-100 rounded">All</button>
+          <button class="px-2 py-1 text-slate-500 hover:bg-slate-100 rounded">Evidence</button>
+          <button class="px-2 py-1 text-slate-500 hover:bg-slate-100 rounded">Controls</button>
+          <button class="px-2 py-1 text-slate-500 hover:bg-slate-100 rounded">Approvals</button>
+        </div>
+      </div>
+      <div class="divide-y divide-slate-100 text-sm">
+
+        <div class="px-5 py-3 grid grid-cols-12 gap-3 items-center hover:bg-slate-50">
+          <div class="col-span-1"><span class="inline-block w-2 h-2 dot-pass rounded-full"></span></div>
+          <div class="col-span-7 truncate">
+            <span class="text-slate-900">aws-connector</span>
+            <span class="text-slate-500"> ingested 240 evidence records via </span>
+            <span class="mono text-slate-700">Pull</span>
+            <span class="text-slate-500"> for </span>
+            <span class="mono text-slate-700">SCF:CRY-04</span>
+          </div>
+          <div class="col-span-2 text-xs text-slate-500">all pass</div>
+          <div class="col-span-2 text-xs text-slate-400 text-right mono">18m ago</div>
+        </div>
+
+        <div class="px-5 py-3 grid grid-cols-12 gap-3 items-center hover:bg-slate-50">
+          <div class="col-span-1"><span class="inline-block w-2 h-2 dot-pass rounded-full"></span></div>
+          <div class="col-span-7 truncate">
+            <span class="text-slate-900">gitlab-ci</span>
+            <span class="text-slate-500"> pushed </span>
+            <span class="mono text-slate-700">sast.scan_result.v1</span>
+            <span class="text-slate-500"> for </span>
+            <span class="mono text-slate-700">SCF:VPM-04</span>
+          </div>
+          <div class="col-span-2 text-xs text-slate-500">pass · 0 findings</div>
+          <div class="col-span-2 text-xs text-slate-400 text-right mono">42m ago</div>
+        </div>
+
+        <div class="px-5 py-3 grid grid-cols-12 gap-3 items-center hover:bg-slate-50">
+          <div class="col-span-1"><span class="inline-block w-2 h-2 dot-warn rounded-full"></span></div>
+          <div class="col-span-7 truncate">
+            <span class="text-slate-900">Matt G.</span>
+            <span class="text-slate-500"> approved AI-drafted answer for </span>
+            <span class="mono text-slate-700">CAIQ-IAM-02</span>
+            <span class="text-slate-500"> on Acme questionnaire</span>
+          </div>
+          <div class="col-span-2 text-xs text-slate-500">human-approved</div>
+          <div class="col-span-2 text-xs text-slate-400 text-right mono">1h ago</div>
+        </div>
+
+        <div class="px-5 py-3 grid grid-cols-12 gap-3 items-center hover:bg-slate-50">
+          <div class="col-span-1"><span class="inline-block w-2 h-2 dot-fail rounded-full"></span></div>
+          <div class="col-span-7 truncate">
+            <span class="text-slate-900">okta-connector</span>
+            <span class="text-slate-500"> evidence flipped pass → fail for </span>
+            <span class="mono text-slate-700">SCF:IAC-06</span>
+            <span class="text-slate-500"> · contractor workspace</span>
+          </div>
+          <div class="col-span-2 text-xs text-rose-600">fail · 2 unenrolled</div>
+          <div class="col-span-2 text-xs text-slate-400 text-right mono">3h ago</div>
+        </div>
+
+        <div class="px-5 py-3 grid grid-cols-12 gap-3 items-center hover:bg-slate-50">
+          <div class="col-span-1"><span class="inline-block w-2 h-2 dot-pass rounded-full"></span></div>
+          <div class="col-span-7 truncate">
+            <span class="text-slate-900">Dana K.</span>
+            <span class="text-slate-500"> updated FrameworkScope </span>
+            <span class="mono text-slate-700">ISO27001:2022:ISMS</span>
+            <span class="text-slate-500"> · added analytics product line</span>
+          </div>
+          <div class="col-span-2 text-xs text-slate-500">awaiting approval</div>
+          <div class="col-span-2 text-xs text-slate-400 text-right mono">6h ago</div>
+        </div>
+
+        <div class="px-5 py-3 grid grid-cols-12 gap-3 items-center hover:bg-slate-50">
+          <div class="col-span-1"><span class="inline-block w-2 h-2 dot-pass rounded-full"></span></div>
+          <div class="col-span-7 truncate">
+            <span class="text-slate-500">Quarterly tabletop </span>
+            <span class="text-slate-900">incident response · ransomware scenario</span>
+            <span class="text-slate-500"> attested </span>
+          </div>
+          <div class="col-span-2 text-xs text-slate-500">manual evidence</div>
+          <div class="col-span-2 text-xs text-slate-400 text-right mono">yesterday</div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="mt-4 text-center">
+      <a href="#" class="text-xs text-slate-500 hover:text-slate-700">View full activity ledger →</a>
+    </div>
+
+  </div>
+</main>
+
+</div>
+
+</body>
+</html>

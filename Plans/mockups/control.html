@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MFA Enforcement · security-atlas</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared/shell.css" />
+<script>
+  tailwind.config = {
+    theme: { extend: { colors: { brand: { 50:'#eef2ff', 100:'#e0e7ff', 200:'#c7d2fe', 500:'#6366f1', 600:'#4f46e5', 700:'#4338ca', 900:'#312e81' } } } }
+  }
+</script>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+
+<!-- TOP BAR (same shell as dashboard) -->
+<header class="sticky top-0 z-20 bg-white border-b border-slate-200">
+  <div class="flex items-center h-12 px-4">
+    <a href="index.html" class="flex items-center gap-2 pr-4 border-r border-slate-200 mr-4">
+      <svg class="w-5 h-5 text-brand-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2 4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6l-8-4z" stroke-linejoin="round"/>
+        <path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="text-sm font-semibold tracking-tight">security-atlas</span>
+    </a>
+    <nav class="flex items-center gap-1 text-xs text-slate-500">
+      <span>Sentinel Labs</span>
+      <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg>
+      <a href="dashboard.html" class="hover:text-slate-700">Controls</a>
+      <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg>
+      <span class="text-slate-900 font-medium">MFA Enforcement</span>
+    </nav>
+    <div class="ml-auto flex items-center gap-3">
+      <div class="flex items-center gap-2 px-2.5 py-1 bg-amber-50 border border-amber-200 rounded-full">
+        <span class="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse"></span>
+        <span class="text-xs font-medium text-amber-800">SOC 2 Type II · Q2 2026 in progress</span>
+      </div>
+      <div class="flex items-center gap-2 pl-3 border-l border-slate-200">
+        <div class="w-7 h-7 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-xs font-semibold">MG</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ==================== CONTROL HEADER ==================== -->
+<div class="bg-white border-b border-slate-200">
+  <div class="max-w-7xl mx-auto px-8 py-6">
+    <div class="flex items-start justify-between gap-6">
+      <div class="flex-1 min-w-0">
+
+        <div class="flex items-center gap-2 mb-2">
+          <span class="mono text-xs text-slate-400">CTRL-0014</span>
+          <span class="text-slate-300">·</span>
+          <a href="#" class="inline-flex items-center gap-1 px-1.5 py-0.5 mono text-[11px] font-semibold bg-brand-50 text-brand-700 rounded">
+            SCF:IAC-06
+            <svg class="w-3 h-3 opacity-60" viewBox="0 0 20 20" fill="currentColor"><path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/><path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/></svg>
+          </a>
+          <span class="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-emerald-50 text-emerald-700">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>
+            active
+          </span>
+          <span class="text-slate-300">·</span>
+          <span class="text-xs text-slate-500">Workforce IAM family</span>
+        </div>
+
+        <h1 class="text-2xl font-semibold tracking-tight mb-1">MFA Enforcement (Workforce IAM)</h1>
+        <p class="text-sm text-slate-600 max-w-3xl">
+          All workforce identities authenticate to corp + production systems with phishing-resistant multi-factor authentication.
+          WebAuthn preferred; TOTP fallback for legacy paths. Enforced via Okta policy with break-glass exception process.
+        </p>
+
+        <div class="flex items-center gap-5 mt-4 text-sm">
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-500">Owner</span>
+            <div class="flex items-center gap-1.5">
+              <div class="w-5 h-5 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-[10px] font-semibold">MG</div>
+              <span>Matt Goodrich</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-500">Implementation</span>
+            <span>automated</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-500">Freshness class</span>
+            <span class="mono text-xs">daily · &lt;7d</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex flex-col items-end gap-2">
+        <div class="flex items-center gap-2">
+          <button class="px-3 py-1.5 text-sm text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50">Run query</button>
+          <button class="px-3 py-1.5 text-sm text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50">Edit YAML</button>
+          <button class="px-3 py-1.5 text-sm text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50">Request exception</button>
+        </div>
+        <div class="flex items-center gap-1.5 text-xs text-slate-500">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.93-12.518A1 1 0 0010 4a1 1 0 00-.93.518L5.4 11.482A1 1 0 006.291 13H8v3a1 1 0 102 0v-3h1.71a1 1 0 00.89-1.518L10.93 5.482z" clip-rule="evenodd"/></svg>
+          last evaluated <span class="mono text-slate-700">8 minutes ago</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI strip -->
+    <div class="grid grid-cols-4 gap-3 mt-6">
+      <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+        <div class="text-[11px] text-slate-500 uppercase tracking-wider">Effectiveness · 30d</div>
+        <div class="flex items-baseline gap-1.5 mt-1">
+          <span class="text-2xl font-semibold">0.94</span>
+          <span class="text-xs text-emerald-600 font-medium">▲ 0.03</span>
+        </div>
+      </div>
+      <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+        <div class="text-[11px] text-slate-500 uppercase tracking-wider">Evidence records · 30d</div>
+        <div class="flex items-baseline gap-1.5 mt-1">
+          <span class="text-2xl font-semibold mono">847</span>
+          <span class="text-xs text-slate-500">28/day avg</span>
+        </div>
+      </div>
+      <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+        <div class="text-[11px] text-slate-500 uppercase tracking-wider">Frameworks satisfied</div>
+        <div class="flex items-baseline gap-1.5 mt-1">
+          <span class="text-2xl font-semibold">6</span>
+          <span class="text-xs text-slate-500">via SCF anchor</span>
+        </div>
+      </div>
+      <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+        <div class="text-[11px] text-slate-500 uppercase tracking-wider">Effective scope cells</div>
+        <div class="flex items-baseline gap-1.5 mt-1">
+          <span class="text-2xl font-semibold mono">12</span>
+          <span class="text-xs text-slate-500">of 14 applicable</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== TABS ==================== -->
+<div class="bg-white border-b border-slate-200 sticky top-12 z-10">
+  <div class="max-w-7xl mx-auto px-8">
+    <div class="flex items-center gap-1 text-sm">
+      <a href="#" class="px-3 py-3 border-b-2 border-brand-600 text-brand-700 font-medium">Overview</a>
+      <a href="#" class="px-3 py-3 border-b-2 border-transparent text-slate-500 hover:text-slate-900">Evidence <span class="mono text-xs text-slate-400">847</span></a>
+      <a href="#" class="px-3 py-3 border-b-2 border-transparent text-slate-500 hover:text-slate-900">Mappings <span class="mono text-xs text-slate-400">11</span></a>
+      <a href="#" class="px-3 py-3 border-b-2 border-transparent text-slate-500 hover:text-slate-900">Effective scope <span class="mono text-xs text-slate-400">12</span></a>
+      <a href="#" class="px-3 py-3 border-b-2 border-transparent text-slate-500 hover:text-slate-900">Policies <span class="mono text-xs text-slate-400">2</span></a>
+      <a href="#" class="px-3 py-3 border-b-2 border-transparent text-slate-500 hover:text-slate-900">Risks <span class="mono text-xs text-slate-400">1</span></a>
+      <a href="#" class="px-3 py-3 border-b-2 border-transparent text-slate-500 hover:text-slate-900">History</a>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MAIN GRID ==================== -->
+<main>
+  <div class="max-w-7xl mx-auto px-8 py-7 grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+    <!-- LEFT 2/3 -->
+    <div class="lg:col-span-2 space-y-5">
+
+      <!-- COVERAGE BY FRAMEWORK -->
+      <section class="bg-white border border-slate-200 rounded-xl">
+        <header class="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+          <div>
+            <h2 class="font-semibold">Coverage by framework</h2>
+            <p class="text-xs text-slate-500">Routed through <span class="mono text-slate-700">SCF:IAC-06</span> · weighted by STRM strength × effectiveness</p>
+          </div>
+          <button class="text-xs text-brand-600 hover:text-brand-700">Open graph view →</button>
+        </header>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="text-[11px] uppercase tracking-wider text-slate-500 bg-slate-50">
+              <tr>
+                <th class="text-left font-medium px-5 py-2">Framework requirement</th>
+                <th class="text-left font-medium px-3 py-2">STRM</th>
+                <th class="text-right font-medium px-3 py-2">Strength</th>
+                <th class="text-right font-medium px-3 py-2">Coverage</th>
+                <th class="text-left font-medium px-3 py-2 w-32">Strength bar</th>
+                <th class="px-5 py-2"></th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              <tr class="hover:bg-slate-50">
+                <td class="px-5 py-3">
+                  <div class="font-medium text-slate-900">SOC 2 · CC6.6 — logical access controls over authentication</div>
+                  <div class="mono text-[11px] text-slate-400 mt-0.5">SOC2:2017:CC6.6</div>
+                </td>
+                <td class="px-3 py-3"><span class="inline-flex items-center px-2 py-0.5 mono text-[10px] font-semibold bg-emerald-50 text-emerald-700 rounded">equal</span></td>
+                <td class="px-3 py-3 text-right mono">1.00</td>
+                <td class="px-3 py-3 text-right mono font-semibold text-emerald-700">0.94</td>
+                <td class="px-3 py-3"><div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-emerald-500" style="width: 94%"></div></div></td>
+                <td class="px-5 py-3 text-right"><svg class="w-4 h-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg></td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="px-5 py-3">
+                  <div class="font-medium text-slate-900">ISO 27001:2022 · A.8.5 — secure authentication</div>
+                  <div class="mono text-[11px] text-slate-400 mt-0.5">ISO27001:2022:A.8.5</div>
+                </td>
+                <td class="px-3 py-3"><span class="inline-flex items-center px-2 py-0.5 mono text-[10px] font-semibold bg-emerald-50 text-emerald-700 rounded">equal</span></td>
+                <td class="px-3 py-3 text-right mono">1.00</td>
+                <td class="px-3 py-3 text-right mono font-semibold text-emerald-700">0.94</td>
+                <td class="px-3 py-3"><div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-emerald-500" style="width: 94%"></div></div></td>
+                <td class="px-5 py-3 text-right"><svg class="w-4 h-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg></td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="px-5 py-3">
+                  <div class="font-medium text-slate-900">NIST CSF 2.0 · PR.AA-03 — users and processes authenticated</div>
+                  <div class="mono text-[11px] text-slate-400 mt-0.5">NIST_CSF:2.0:PR.AA-03</div>
+                </td>
+                <td class="px-3 py-3"><span class="inline-flex items-center px-2 py-0.5 mono text-[10px] font-semibold bg-sky-50 text-sky-700 rounded">subset_of</span></td>
+                <td class="px-3 py-3 text-right mono">0.90</td>
+                <td class="px-3 py-3 text-right mono font-semibold text-emerald-700">0.85</td>
+                <td class="px-3 py-3"><div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-emerald-500" style="width: 85%"></div></div></td>
+                <td class="px-5 py-3 text-right"><svg class="w-4 h-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg></td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="px-5 py-3">
+                  <div class="font-medium text-slate-900">PCI DSS 4.0 · 8.4.2 — MFA for non-console admin access</div>
+                  <div class="mono text-[11px] text-slate-400 mt-0.5">PCI:4.0:8.4.2 · out of FrameworkScope (no CDE)</div>
+                </td>
+                <td class="px-3 py-3"><span class="inline-flex items-center px-2 py-0.5 mono text-[10px] font-semibold bg-emerald-50 text-emerald-700 rounded">equal</span></td>
+                <td class="px-3 py-3 text-right mono">1.00</td>
+                <td class="px-3 py-3 text-right mono text-slate-400">n/a</td>
+                <td class="px-3 py-3"><div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-slate-300" style="width: 0%"></div></div></td>
+                <td class="px-5 py-3 text-right"><svg class="w-4 h-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg></td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="px-5 py-3">
+                  <div class="font-medium text-slate-900">HIPAA Sec. 164.312(d) — person or entity authentication</div>
+                  <div class="mono text-[11px] text-slate-400 mt-0.5">HIPAA:164.312(d) · out of FrameworkScope (no PHI)</div>
+                </td>
+                <td class="px-3 py-3"><span class="inline-flex items-center px-2 py-0.5 mono text-[10px] font-semibold bg-amber-50 text-amber-700 rounded">intersects</span></td>
+                <td class="px-3 py-3 text-right mono">0.80</td>
+                <td class="px-3 py-3 text-right mono text-slate-400">n/a</td>
+                <td class="px-3 py-3"><div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-slate-300" style="width: 0%"></div></div></td>
+                <td class="px-5 py-3 text-right"><svg class="w-4 h-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg></td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="px-5 py-3">
+                  <div class="font-medium text-slate-900">GDPR Art. 32(1)(b) — appropriate technical measures</div>
+                  <div class="mono text-[11px] text-slate-400 mt-0.5">GDPR:Art.32(1)(b)</div>
+                </td>
+                <td class="px-3 py-3"><span class="inline-flex items-center px-2 py-0.5 mono text-[10px] font-semibold bg-amber-50 text-amber-700 rounded">intersects</span></td>
+                <td class="px-3 py-3 text-right mono">0.70</td>
+                <td class="px-3 py-3 text-right mono font-semibold text-amber-700">0.66</td>
+                <td class="px-3 py-3"><div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-amber-500" style="width: 66%"></div></div></td>
+                <td class="px-5 py-3 text-right"><svg class="w-4 h-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <footer class="px-5 py-3 border-t border-slate-100 bg-slate-50 text-xs text-slate-500 rounded-b-xl">
+          <strong class="text-slate-700">Reading this:</strong> coverage is strength × 30-day effectiveness, intersected with the framework's scope predicate. Where the framework is out of scope, coverage is n/a (the requirement is not evaluated for this org).
+        </footer>
+      </section>
+
+      <!-- GRAPH MINI VIEW -->
+      <section class="bg-white border border-slate-200 rounded-xl">
+        <header class="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+          <div>
+            <h2 class="font-semibold">UCF graph · neighborhood</h2>
+            <p class="text-xs text-slate-500">This control through the SCF anchor to framework requirements</p>
+          </div>
+          <button class="text-xs text-brand-600 hover:text-brand-700">Open in mappings inspector →</button>
+        </header>
+
+        <div class="p-6">
+          <!-- SVG graph -->
+          <svg viewBox="0 0 800 280" class="w-full h-64">
+            <!-- background grid -->
+            <defs>
+              <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgb(241 245 249)" stroke-width="1"/>
+              </pattern>
+              <marker id="arrow-emerald" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="rgb(16 185 129)"/>
+              </marker>
+              <marker id="arrow-sky" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="rgb(14 165 233)"/>
+              </marker>
+              <marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="rgb(245 158 11)"/>
+              </marker>
+              <marker id="arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="rgb(148 163 184)"/>
+              </marker>
+            </defs>
+            <rect width="800" height="280" fill="url(#grid)"/>
+
+            <!-- left side: this control -->
+            <g>
+              <rect x="20" y="115" width="180" height="50" rx="8" fill="rgb(238 242 255)" stroke="rgb(99 102 241)" stroke-width="2"/>
+              <text x="110" y="138" text-anchor="middle" font-size="11" font-weight="600" fill="rgb(49 46 129)">MFA Enforcement</text>
+              <text x="110" y="153" text-anchor="middle" font-size="10" font-family="JetBrains Mono, monospace" fill="rgb(79 70 229)">CTRL-0014</text>
+            </g>
+
+            <!-- arrow control -> anchor -->
+            <line x1="200" y1="140" x2="305" y2="140" stroke="rgb(99 102 241)" stroke-width="2" marker-end="url(#arrow-slate)"/>
+            <text x="252" y="132" text-anchor="middle" font-size="9" fill="rgb(100 116 139)" font-family="JetBrains Mono, monospace">anchored_at</text>
+
+            <!-- center: SCF anchor -->
+            <g>
+              <rect x="305" y="100" width="140" height="80" rx="10" fill="rgb(255 247 237)" stroke="rgb(245 158 11)" stroke-width="2"/>
+              <text x="375" y="125" text-anchor="middle" font-size="11" font-weight="700" fill="rgb(146 64 14)" font-family="JetBrains Mono, monospace">SCF:IAC-06</text>
+              <text x="375" y="142" text-anchor="middle" font-size="10" fill="rgb(146 64 14)">Multi-Factor</text>
+              <text x="375" y="156" text-anchor="middle" font-size="10" fill="rgb(146 64 14)">Authentication</text>
+              <text x="375" y="172" text-anchor="middle" font-size="9" fill="rgb(120 53 15)">semantic anchor</text>
+            </g>
+
+            <!-- right side: 6 framework reqs -->
+            <!-- SOC2 -->
+            <line x1="445" y1="125" x2="590" y2="32" stroke="rgb(16 185 129)" stroke-width="2" marker-end="url(#arrow-emerald)"/>
+            <text x="510" y="73" font-size="9" fill="rgb(16 185 129)" font-weight="600" font-family="JetBrains Mono, monospace">equal · 1.00</text>
+            <rect x="590" y="14" width="190" height="36" rx="6" fill="white" stroke="rgb(226 232 240)"/>
+            <text x="600" y="30" font-size="10" font-weight="600" fill="rgb(15 23 42)">SOC 2 · CC6.6</text>
+            <text x="600" y="44" font-size="9" fill="rgb(100 116 139)">logical access controls</text>
+
+            <!-- ISO -->
+            <line x1="445" y1="135" x2="590" y2="78" stroke="rgb(16 185 129)" stroke-width="2" marker-end="url(#arrow-emerald)"/>
+            <text x="510" y="100" font-size="9" fill="rgb(16 185 129)" font-weight="600" font-family="JetBrains Mono, monospace">equal · 1.00</text>
+            <rect x="590" y="60" width="190" height="36" rx="6" fill="white" stroke="rgb(226 232 240)"/>
+            <text x="600" y="76" font-size="10" font-weight="600" fill="rgb(15 23 42)">ISO 27001 · A.8.5</text>
+            <text x="600" y="90" font-size="9" fill="rgb(100 116 139)">secure authentication</text>
+
+            <!-- NIST CSF -->
+            <line x1="445" y1="145" x2="590" y2="124" stroke="rgb(14 165 233)" stroke-width="2" stroke-dasharray="0" marker-end="url(#arrow-sky)"/>
+            <text x="510" y="125" font-size="9" fill="rgb(14 165 233)" font-weight="600" font-family="JetBrains Mono, monospace">subset_of · 0.90</text>
+            <rect x="590" y="106" width="190" height="36" rx="6" fill="white" stroke="rgb(226 232 240)"/>
+            <text x="600" y="122" font-size="10" font-weight="600" fill="rgb(15 23 42)">NIST CSF · PR.AA-03</text>
+            <text x="600" y="136" font-size="9" fill="rgb(100 116 139)">users authenticated</text>
+
+            <!-- PCI -->
+            <line x1="445" y1="155" x2="590" y2="170" stroke="rgb(148 163 184)" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#arrow-slate)"/>
+            <text x="510" y="175" font-size="9" fill="rgb(148 163 184)" font-style="italic" font-family="JetBrains Mono, monospace">equal · 1.00 · out-of-scope</text>
+            <rect x="590" y="152" width="190" height="36" rx="6" fill="rgb(248 250 252)" stroke="rgb(226 232 240)" stroke-dasharray="3 3"/>
+            <text x="600" y="168" font-size="10" font-weight="600" fill="rgb(100 116 139)">PCI DSS · 8.4.2</text>
+            <text x="600" y="182" font-size="9" fill="rgb(148 163 184)">no CDE defined</text>
+
+            <!-- HIPAA -->
+            <line x1="445" y1="160" x2="590" y2="216" stroke="rgb(148 163 184)" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#arrow-slate)"/>
+            <text x="510" y="208" font-size="9" fill="rgb(148 163 184)" font-style="italic" font-family="JetBrains Mono, monospace">intersects · 0.80 · out-of-scope</text>
+            <rect x="590" y="198" width="190" height="36" rx="6" fill="rgb(248 250 252)" stroke="rgb(226 232 240)" stroke-dasharray="3 3"/>
+            <text x="600" y="214" font-size="10" font-weight="600" fill="rgb(100 116 139)">HIPAA · 164.312(d)</text>
+            <text x="600" y="228" font-size="9" fill="rgb(148 163 184)">no PHI in scope</text>
+
+            <!-- GDPR -->
+            <line x1="445" y1="165" x2="590" y2="262" stroke="rgb(245 158 11)" stroke-width="2" marker-end="url(#arrow-amber)"/>
+            <text x="510" y="245" font-size="9" fill="rgb(245 158 11)" font-weight="600" font-family="JetBrains Mono, monospace">intersects · 0.70</text>
+            <rect x="590" y="244" width="190" height="36" rx="6" fill="white" stroke="rgb(226 232 240)"/>
+            <text x="600" y="260" font-size="10" font-weight="600" fill="rgb(15 23 42)">GDPR · Art. 32(1)(b)</text>
+            <text x="600" y="274" font-size="9" fill="rgb(100 116 139)">appropriate measures</text>
+
+            <!-- legend -->
+            <g transform="translate(20, 220)">
+              <text font-size="10" fill="rgb(100 116 139)">
+                <tspan x="0" y="0" font-weight="600">Legend</tspan>
+              </text>
+              <line x1="0" y1="14" x2="20" y2="14" stroke="rgb(16 185 129)" stroke-width="2"/>
+              <text x="26" y="18" font-size="9" fill="rgb(100 116 139)">equal</text>
+              <line x1="60" y1="14" x2="80" y2="14" stroke="rgb(14 165 233)" stroke-width="2"/>
+              <text x="86" y="18" font-size="9" fill="rgb(100 116 139)">subset</text>
+              <line x1="125" y1="14" x2="145" y2="14" stroke="rgb(245 158 11)" stroke-width="2"/>
+              <text x="151" y="18" font-size="9" fill="rgb(100 116 139)">intersects</text>
+              <line x1="200" y1="14" x2="220" y2="14" stroke="rgb(148 163 184)" stroke-width="1.5" stroke-dasharray="3 3"/>
+              <text x="226" y="18" font-size="9" fill="rgb(100 116 139)">out-of-scope</text>
+            </g>
+          </svg>
+        </div>
+      </section>
+
+      <!-- EVIDENCE STREAM -->
+      <section class="bg-white border border-slate-200 rounded-xl">
+        <header class="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+          <div>
+            <h2 class="font-semibold">Evidence stream · recent</h2>
+            <p class="text-xs text-slate-500">Append-only ledger · 847 records in last 30 days</p>
+          </div>
+          <div class="flex items-center gap-2 text-xs">
+            <button class="px-2 py-1 text-slate-700 bg-slate-100 rounded">All</button>
+            <button class="px-2 py-1 text-slate-500 hover:bg-slate-100 rounded">pass</button>
+            <button class="px-2 py-1 text-slate-500 hover:bg-slate-100 rounded">fail</button>
+            <button class="px-2 py-1 text-slate-500 hover:bg-slate-100 rounded">push</button>
+            <button class="px-2 py-1 text-slate-500 hover:bg-slate-100 rounded">pull</button>
+          </div>
+        </header>
+
+        <div class="divide-y divide-slate-100 text-sm">
+          <div class="px-5 py-3 hover:bg-slate-50 grid grid-cols-12 gap-3 items-center">
+            <div class="col-span-1"><span class="inline-block w-2 h-2 dot-pass rounded-full"></span></div>
+            <div class="col-span-3 mono text-xs text-slate-500">evt-2026-05-10T16:00Z</div>
+            <div class="col-span-5">
+              <div class="font-medium text-slate-900">Okta MFA enforcement · prod-us</div>
+              <div class="mono text-[11px] text-slate-400 mt-0.5">okta-connector · pull · webauthn=99%, totp=1%</div>
+            </div>
+            <div class="col-span-2"><span class="mono text-xs text-emerald-700">pass</span></div>
+            <div class="col-span-1 text-right"><svg class="w-4 h-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg></div>
+          </div>
+          <div class="px-5 py-3 hover:bg-slate-50 grid grid-cols-12 gap-3 items-center">
+            <div class="col-span-1"><span class="inline-block w-2 h-2 dot-pass rounded-full"></span></div>
+            <div class="col-span-3 mono text-xs text-slate-500">evt-2026-05-10T16:00Z</div>
+            <div class="col-span-5">
+              <div class="font-medium text-slate-900">Okta MFA enforcement · prod-eu</div>
+              <div class="mono text-[11px] text-slate-400 mt-0.5">okta-connector · pull · webauthn=100%</div>
+            </div>
+            <div class="col-span-2"><span class="mono text-xs text-emerald-700">pass</span></div>
+            <div class="col-span-1 text-right"><svg class="w-4 h-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg></div>
+          </div>
+          <div class="px-5 py-3 hover:bg-slate-50 grid grid-cols-12 gap-3 items-center">
+            <div class="col-span-1"><span class="inline-block w-2 h-2 dot-fail rounded-full"></span></div>
+            <div class="col-span-3 mono text-xs text-slate-500">evt-2026-05-08T08:00Z</div>
+            <div class="col-span-5">
+              <div class="font-medium text-slate-900">Okta MFA enforcement · contractor workspace</div>
+              <div class="mono text-[11px] text-slate-400 mt-0.5">okta-connector · pull · 2 unenrolled accounts</div>
+            </div>
+            <div class="col-span-2"><span class="mono text-xs text-rose-600">fail</span></div>
+            <div class="col-span-1 text-right"><svg class="w-4 h-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg></div>
+          </div>
+          <div class="px-5 py-3 hover:bg-slate-50 grid grid-cols-12 gap-3 items-center">
+            <div class="col-span-1"><span class="inline-block w-2 h-2 dot-pass rounded-full"></span></div>
+            <div class="col-span-3 mono text-xs text-slate-500">evt-2026-05-07T22:14Z</div>
+            <div class="col-span-5">
+              <div class="font-medium text-slate-900">AWS IAM password policy assertion</div>
+              <div class="mono text-[11px] text-slate-400 mt-0.5">aws-connector · pull · MFA required for console + CLI</div>
+            </div>
+            <div class="col-span-2"><span class="mono text-xs text-emerald-700">pass</span></div>
+            <div class="col-span-1 text-right"><svg class="w-4 h-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg></div>
+          </div>
+          <div class="px-5 py-3 hover:bg-slate-50 grid grid-cols-12 gap-3 items-center">
+            <div class="col-span-1"><span class="inline-block w-2 h-2 dot-pass rounded-full"></span></div>
+            <div class="col-span-3 mono text-xs text-slate-500">evt-2026-05-07T10:42Z</div>
+            <div class="col-span-5">
+              <div class="font-medium text-slate-900">Quarterly access review · attestation</div>
+              <div class="mono text-[11px] text-slate-400 mt-0.5">manual · attested by Matt Goodrich · 42 of 42 reviewers</div>
+            </div>
+            <div class="col-span-2"><span class="mono text-xs text-emerald-700">pass</span></div>
+            <div class="col-span-1 text-right"><svg class="w-4 h-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg></div>
+          </div>
+        </div>
+
+        <footer class="px-5 py-2.5 text-center border-t border-slate-100">
+          <a href="#" class="text-xs text-brand-600 hover:text-brand-700">View all 847 records →</a>
+        </footer>
+      </section>
+    </div>
+
+    <!-- RIGHT 1/3 -->
+    <aside class="lg:col-span-1 space-y-5">
+
+      <!-- FRESHNESS CLOCK -->
+      <section class="bg-white border border-slate-200 rounded-xl p-5">
+        <h3 class="font-semibold text-sm mb-3">Freshness</h3>
+        <div class="flex items-center gap-4">
+          <svg class="w-16 h-16" viewBox="0 0 64 64">
+            <circle cx="32" cy="32" r="26" fill="none" stroke="rgb(241 245 249)" stroke-width="8"/>
+            <circle cx="32" cy="32" r="26" fill="none" stroke="rgb(16 185 129)" stroke-width="8" stroke-linecap="round"
+                    stroke-dasharray="163.36" stroke-dashoffset="32" transform="rotate(-90 32 32)"/>
+          </svg>
+          <div>
+            <div class="text-2xl font-semibold leading-none">8m</div>
+            <div class="text-xs text-slate-500 mt-1">since latest evidence</div>
+            <div class="text-[11px] text-slate-400 mt-0.5">window: 7d · freshness class daily</div>
+          </div>
+        </div>
+        <div class="mt-4 text-xs text-slate-500">
+          <div class="flex justify-between py-1 border-t border-slate-100"><span>Oldest record in window</span><span class="mono text-slate-700">6d 14h</span></div>
+          <div class="flex justify-between py-1 border-t border-slate-100"><span>Records past valid_until</span><span class="mono text-emerald-600">0</span></div>
+        </div>
+      </section>
+
+      <!-- EFFECTIVE SCOPE -->
+      <section class="bg-white border border-slate-200 rounded-xl">
+        <header class="px-5 py-3 border-b border-slate-100">
+          <h3 class="font-semibold text-sm">Effective scope</h3>
+          <p class="text-xs text-slate-500">applicability ∩ FrameworkScope</p>
+        </header>
+        <div class="p-5 space-y-2.5 text-sm">
+          <div>
+            <div class="flex items-center justify-between">
+              <span class="text-slate-700">SOC 2 system</span>
+              <span class="mono text-xs"><span class="text-emerald-600">12</span><span class="text-slate-400">/14</span> cells</span>
+            </div>
+            <div class="h-1 bg-slate-100 rounded-full overflow-hidden mt-1"><div class="h-full bg-emerald-500" style="width:86%"></div></div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between">
+              <span class="text-slate-700">ISO 27001 ISMS</span>
+              <span class="mono text-xs"><span class="text-emerald-600">12</span><span class="text-slate-400">/14</span> cells</span>
+            </div>
+            <div class="h-1 bg-slate-100 rounded-full overflow-hidden mt-1"><div class="h-full bg-emerald-500" style="width:86%"></div></div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between">
+              <span class="text-slate-700">GDPR (EU data)</span>
+              <span class="mono text-xs"><span class="text-amber-600">4</span><span class="text-slate-400">/14</span> cells</span>
+            </div>
+            <div class="h-1 bg-slate-100 rounded-full overflow-hidden mt-1"><div class="h-full bg-amber-500" style="width:29%"></div></div>
+          </div>
+          <div class="pt-2 border-t border-slate-100 text-xs text-slate-500">
+            applied in 14 scope cells; out-of-scope cells <span class="mono">2</span> (sandbox · public-data)
+          </div>
+        </div>
+      </section>
+
+      <!-- LINKED POLICIES -->
+      <section class="bg-white border border-slate-200 rounded-xl">
+        <header class="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+          <h3 class="font-semibold text-sm">Policies</h3>
+          <a href="#" class="text-xs text-brand-600 hover:text-brand-700">+ link</a>
+        </header>
+        <div class="divide-y divide-slate-100 text-sm">
+          <a href="#" class="flex items-center justify-between px-5 py-3 hover:bg-slate-50">
+            <div>
+              <div class="text-slate-900">Access Control Policy</div>
+              <div class="mono text-[11px] text-slate-400">v3.2 · published 2026-02-14</div>
+            </div>
+            <span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-emerald-50 text-emerald-700 rounded">approved</span>
+          </a>
+          <a href="#" class="flex items-center justify-between px-5 py-3 hover:bg-slate-50">
+            <div>
+              <div class="text-slate-900">Workforce Identity Standard</div>
+              <div class="mono text-[11px] text-slate-400">v1.5 · published 2026-01-09</div>
+            </div>
+            <span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-emerald-50 text-emerald-700 rounded">approved</span>
+          </a>
+        </div>
+      </section>
+
+      <!-- LINKED RISKS -->
+      <section class="bg-white border border-slate-200 rounded-xl">
+        <header class="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+          <h3 class="font-semibold text-sm">Risks treated</h3>
+          <a href="#" class="text-xs text-brand-600 hover:text-brand-700">+ link</a>
+        </header>
+        <div class="divide-y divide-slate-100 text-sm">
+          <a href="#" class="block px-5 py-3 hover:bg-slate-50">
+            <div class="flex items-center justify-between">
+              <div class="text-slate-900">Credential theft via phishing</div>
+              <span class="mono text-xs text-amber-600">0.34 residual</span>
+            </div>
+            <div class="mono text-[11px] text-slate-400 mt-0.5">RISK-0007 · NIST 800-30 · mitigate</div>
+          </a>
+        </div>
+      </section>
+
+      <!-- AUDIT LOG -->
+      <section class="bg-white border border-slate-200 rounded-xl">
+        <header class="px-5 py-3 border-b border-slate-100">
+          <h3 class="font-semibold text-sm">Audit log</h3>
+        </header>
+        <div class="p-5 space-y-2 text-xs">
+          <div class="text-slate-600"><span class="mono text-slate-400">2026-05-09</span> · Matt G. approved annual review</div>
+          <div class="text-slate-600"><span class="mono text-slate-400">2026-03-14</span> · Dana K. updated implementation_type to <code class="mono bg-slate-100 px-1 rounded">automated</code></div>
+          <div class="text-slate-600"><span class="mono text-slate-400">2026-01-09</span> · Matt G. linked policy <code class="mono bg-slate-100 px-1 rounded">Workforce Identity v1.5</code></div>
+          <div class="text-slate-600"><span class="mono text-slate-400">2025-11-02</span> · Created from SCF catalog</div>
+        </div>
+      </section>
+    </aside>
+  </div>
+</main>
+
+</body>
+</html>

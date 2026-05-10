@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Q1 2026 Board Pack · security-atlas</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared/shell.css" />
+<script>
+  tailwind.config = {
+    theme: { extend: { colors: { brand: { 50:'#eef2ff', 100:'#e0e7ff', 200:'#c7d2fe', 500:'#6366f1', 600:'#4f46e5', 700:'#4338ca', 900:'#312e81' } } } }
+  }
+</script>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+
+<!-- TOP BAR (slim) -->
+<header class="sticky top-0 z-20 bg-white border-b border-slate-200">
+  <div class="flex items-center h-12 px-4">
+    <a href="index.html" class="flex items-center gap-2 pr-4 border-r border-slate-200 mr-4">
+      <svg class="w-5 h-5 text-brand-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2 4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6l-8-4z" stroke-linejoin="round"/>
+        <path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="text-sm font-semibold tracking-tight">security-atlas</span>
+    </a>
+    <nav class="flex items-center gap-1 text-xs text-slate-500">
+      <a href="dashboard.html" class="hover:text-slate-700">Sentinel Labs</a>
+      <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg>
+      <span>Board reports</span>
+      <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg>
+      <span class="text-slate-900 font-medium">Q1 2026</span>
+    </nav>
+    <div class="ml-auto flex items-center gap-2">
+      <button class="px-3 py-1.5 text-sm text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50 inline-flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z"/></svg>
+        Export PDF
+      </button>
+      <button class="px-3 py-1.5 text-sm text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50">Copy Markdown</button>
+      <button class="px-3 py-1.5 text-sm text-white bg-brand-600 rounded-md hover:bg-brand-700 inline-flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+        Approve & publish
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-5xl mx-auto px-8 py-10">
+
+  <!-- COVER / HEADER -->
+  <div class="mb-10">
+    <div class="flex items-center gap-2 mb-3">
+      <span class="mono text-xs text-slate-500">REPORT-Q1-2026 · DRAFT</span>
+      <span class="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold bg-amber-50 text-amber-700 rounded uppercase tracking-wider">draft · 64% complete</span>
+    </div>
+    <h1 class="text-4xl font-semibold tracking-tight text-slate-900 mb-2">Q1 2026 Security Program Report</h1>
+    <p class="text-slate-600 max-w-3xl">Sentinel Labs · period 2026-01-01 → 2026-03-31. Posture, top risks, control coverage trend, and program asks for the May 14 board meeting.</p>
+
+    <div class="mt-6 grid grid-cols-4 gap-3">
+      <div>
+        <div class="text-[11px] text-slate-500 uppercase tracking-wider">Period</div>
+        <div class="text-sm font-medium mt-0.5">Q1 2026</div>
+      </div>
+      <div>
+        <div class="text-[11px] text-slate-500 uppercase tracking-wider">Generated</div>
+        <div class="text-sm font-medium mt-0.5 mono">2026-05-10 11:42 PT</div>
+      </div>
+      <div>
+        <div class="text-[11px] text-slate-500 uppercase tracking-wider">Author</div>
+        <div class="text-sm font-medium mt-0.5">Matt Goodrich (CISO)</div>
+      </div>
+      <div>
+        <div class="text-[11px] text-slate-500 uppercase tracking-wider">Approver</div>
+        <div class="text-sm font-medium mt-0.5 text-slate-400">pending</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 1: POSTURE SUMMARY -->
+  <section class="bg-white border border-slate-200 rounded-2xl p-7 mb-6">
+    <div class="flex items-baseline justify-between mb-5">
+      <div>
+        <span class="mono text-xs text-slate-400">§ 01</span>
+        <h2 class="text-xl font-semibold tracking-tight">Program posture</h2>
+      </div>
+      <span class="text-xs text-slate-500">Snapshot at quarter end · 2026-03-31</span>
+    </div>
+
+    <!-- stat row -->
+    <div class="grid grid-cols-4 gap-3 mb-5">
+      <div class="border border-slate-200 rounded-lg p-4">
+        <div class="text-[11px] text-slate-500 uppercase tracking-wider">SOC 2</div>
+        <div class="flex items-baseline gap-1.5 mt-1.5">
+          <span class="text-2xl font-semibold">94<span class="text-slate-400 text-lg font-normal">%</span></span>
+          <span class="text-xs font-medium text-emerald-600">▲ 2.1</span>
+        </div>
+        <div class="text-xs text-emerald-700 mt-1">audit-ready</div>
+      </div>
+      <div class="border border-slate-200 rounded-lg p-4">
+        <div class="text-[11px] text-slate-500 uppercase tracking-wider">ISO 27001</div>
+        <div class="flex items-baseline gap-1.5 mt-1.5">
+          <span class="text-2xl font-semibold">78<span class="text-slate-400 text-lg font-normal">%</span></span>
+          <span class="text-xs font-medium text-emerald-600">▲ 5.4</span>
+        </div>
+        <div class="text-xs text-amber-700 mt-1">readiness in progress</div>
+      </div>
+      <div class="border border-slate-200 rounded-lg p-4">
+        <div class="text-[11px] text-slate-500 uppercase tracking-wider">NIST CSF 2.0</div>
+        <div class="flex items-baseline gap-1.5 mt-1.5">
+          <span class="text-2xl font-semibold">86<span class="text-slate-400 text-lg font-normal">%</span></span>
+          <span class="text-xs font-medium text-emerald-600">▲ 1.2</span>
+        </div>
+        <div class="text-xs text-emerald-700 mt-1">strong baseline</div>
+      </div>
+      <div class="border border-slate-200 rounded-lg p-4">
+        <div class="text-[11px] text-slate-500 uppercase tracking-wider">GDPR Art. 32+33</div>
+        <div class="flex items-baseline gap-1.5 mt-1.5">
+          <span class="text-2xl font-semibold">64<span class="text-slate-400 text-lg font-normal">%</span></span>
+          <span class="text-xs font-medium text-slate-500">— flat</span>
+        </div>
+        <div class="text-xs text-amber-700 mt-1">privacy module needed</div>
+      </div>
+    </div>
+
+    <!-- auto narrative -->
+    <div class="bg-slate-50 border border-slate-200 rounded-lg p-5">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2">
+          <span class="inline-flex items-center gap-1.5 px-2 py-0.5 mono text-[10px] font-semibold bg-violet-50 text-violet-700 rounded">
+            <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+            AI-drafted · llama3.1-8b · approved
+          </span>
+          <span class="text-xs text-slate-500">approved by Matt G. · 2 hours ago</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="text-xs text-slate-500 hover:text-slate-700">edit</button>
+          <button class="text-xs text-slate-500 hover:text-slate-700">regenerate</button>
+        </div>
+      </div>
+      <p class="text-[15px] leading-relaxed text-slate-800">
+        We exited Q1 in <strong class="text-emerald-700">audit-ready state for SOC 2</strong> (94%, up 2.1 points), with the final 6% representing planned manual evidence collection that completes in the audit window. <strong>ISO 27001 readiness rose to 78%</strong> (up 5.4 points), tracking ahead of the Q3 prospect-driven audit; the remaining gap concentrates in A.8 (asset management) where the inventory connector lands in May. <strong>NIST CSF 2.0 baseline remains strong at 86%</strong> with one regression in PR.AA driven by contractor MFA enforcement, now remediated.
+        Our GDPR coverage held flat at 64% pending the privacy module rollout in v2 — we expect this to be a board-level topic in Q3 once the EU enterprise pipeline matures.
+      </p>
+    </div>
+
+    <p class="mt-4 text-xs text-slate-500">
+      Coverage definition: weighted SCF-anchored evidence pass rate intersected with each framework's scope predicate, over the period. Methodology unchanged from prior quarter.
+    </p>
+  </section>
+
+  <!-- SECTION 2: TOP RISKS -->
+  <section class="bg-white border border-slate-200 rounded-2xl p-7 mb-6">
+    <div class="flex items-baseline justify-between mb-5">
+      <div>
+        <span class="mono text-xs text-slate-400">§ 02</span>
+        <h2 class="text-xl font-semibold tracking-tight">Top risks · aging</h2>
+      </div>
+      <span class="text-xs text-slate-500">Residual score × age-in-treatment</span>
+    </div>
+
+    <table class="w-full text-sm">
+      <thead class="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
+        <tr>
+          <th class="text-left font-medium pb-2 pr-3">Risk</th>
+          <th class="text-left font-medium pb-2 pr-3">Treatment</th>
+          <th class="text-right font-medium pb-2 pr-3">Residual</th>
+          <th class="text-right font-medium pb-2 pr-3">Open</th>
+          <th class="text-left font-medium pb-2">Owner</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        <tr>
+          <td class="py-3 pr-3">
+            <div class="font-medium text-slate-900">Vendor concentration · CI/CD</div>
+            <div class="mono text-[11px] text-slate-400">RISK-0014 · NIST 800-30</div>
+          </td>
+          <td class="py-3 pr-3"><span class="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-rose-50 text-rose-700">mitigate</span></td>
+          <td class="py-3 pr-3 text-right mono text-rose-700">0.71</td>
+          <td class="py-3 pr-3 text-right mono text-slate-600">112 d</td>
+          <td class="py-3">Matt G.</td>
+        </tr>
+        <tr>
+          <td class="py-3 pr-3">
+            <div class="font-medium text-slate-900">Unmanaged contractor laptops · privileged access</div>
+            <div class="mono text-[11px] text-slate-400">RISK-0021 · FAIR · ALE $480k</div>
+          </td>
+          <td class="py-3 pr-3"><span class="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-rose-50 text-rose-700">mitigate</span></td>
+          <td class="py-3 pr-3 text-right mono text-rose-700">0.68</td>
+          <td class="py-3 pr-3 text-right mono text-slate-600">94 d</td>
+          <td class="py-3">Matt G.</td>
+        </tr>
+        <tr>
+          <td class="py-3 pr-3">
+            <div class="font-medium text-slate-900">Customer data export endpoints · PII exposure</div>
+            <div class="mono text-[11px] text-slate-400">RISK-0009 · NIST 800-30</div>
+          </td>
+          <td class="py-3 pr-3"><span class="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-amber-50 text-amber-700">mitigate</span></td>
+          <td class="py-3 pr-3 text-right mono text-amber-700">0.52</td>
+          <td class="py-3 pr-3 text-right mono text-slate-600">61 d</td>
+          <td class="py-3">Dana K.</td>
+        </tr>
+        <tr>
+          <td class="py-3 pr-3">
+            <div class="font-medium text-slate-900">Single-tenant prod DB · noisy-neighbor + DR</div>
+            <div class="mono text-[11px] text-slate-400">RISK-0033 · NIST 800-30</div>
+          </td>
+          <td class="py-3 pr-3"><span class="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-sky-50 text-sky-700">accept</span></td>
+          <td class="py-3 pr-3 text-right mono text-amber-700">0.41</td>
+          <td class="py-3 pr-3 text-right mono text-slate-600">38 d</td>
+          <td class="py-3">Matt G.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="mt-4 bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm text-slate-700">
+      <div class="flex items-center gap-2 mb-1.5">
+        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 mono text-[10px] font-semibold bg-violet-50 text-violet-700 rounded">AI-drafted</span>
+        <span class="text-xs text-slate-500">approved · 2h ago</span>
+      </div>
+      <p>RISK-0014 (vendor concentration on CI/CD) and RISK-0021 (contractor laptops) are the only risks open more than 90 days. Both have approved treatment plans with mid-Q2 milestones. Recommend the board ratify the contractor-laptop endpoint-management investment ($85k Q2 budget) as the dependency that unlocks closing RISK-0021.</p>
+    </div>
+  </section>
+
+  <!-- SECTION 3: COVERAGE TREND -->
+  <section class="bg-white border border-slate-200 rounded-2xl p-7 mb-6">
+    <div class="flex items-baseline justify-between mb-5">
+      <div>
+        <span class="mono text-xs text-slate-400">§ 03</span>
+        <h2 class="text-xl font-semibold tracking-tight">Control coverage trend</h2>
+      </div>
+      <div class="flex items-center gap-3 text-xs">
+        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>SOC 2</span>
+        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-amber-500"></span>ISO 27001</span>
+        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-sky-500"></span>NIST CSF</span>
+      </div>
+    </div>
+
+    <!-- chart -->
+    <div class="bg-slate-50 border border-slate-200 rounded-lg p-5">
+      <svg viewBox="0 0 700 220" class="w-full h-56">
+        <!-- y-axis grid -->
+        <line x1="40" y1="20" x2="680" y2="20" stroke="rgb(226 232 240)" stroke-width="1" stroke-dasharray="2 2"/>
+        <line x1="40" y1="70" x2="680" y2="70" stroke="rgb(226 232 240)" stroke-width="1" stroke-dasharray="2 2"/>
+        <line x1="40" y1="120" x2="680" y2="120" stroke="rgb(226 232 240)" stroke-width="1" stroke-dasharray="2 2"/>
+        <line x1="40" y1="170" x2="680" y2="170" stroke="rgb(226 232 240)" stroke-width="1" stroke-dasharray="2 2"/>
+        <line x1="40" y1="200" x2="680" y2="200" stroke="rgb(148 163 184)" stroke-width="1"/>
+        <text x="32" y="24" font-size="10" fill="rgb(148 163 184)" text-anchor="end">100%</text>
+        <text x="32" y="74" font-size="10" fill="rgb(148 163 184)" text-anchor="end">75%</text>
+        <text x="32" y="124" font-size="10" fill="rgb(148 163 184)" text-anchor="end">50%</text>
+        <text x="32" y="174" font-size="10" fill="rgb(148 163 184)" text-anchor="end">25%</text>
+        <!-- x-axis labels -->
+        <text x="80" y="215" font-size="10" fill="rgb(100 116 139)" text-anchor="middle">Jan 6</text>
+        <text x="190" y="215" font-size="10" fill="rgb(100 116 139)" text-anchor="middle">Jan 27</text>
+        <text x="300" y="215" font-size="10" fill="rgb(100 116 139)" text-anchor="middle">Feb 17</text>
+        <text x="410" y="215" font-size="10" fill="rgb(100 116 139)" text-anchor="middle">Mar 10</text>
+        <text x="520" y="215" font-size="10" fill="rgb(100 116 139)" text-anchor="middle">Mar 31</text>
+        <text x="630" y="215" font-size="10" fill="rgb(100 116 139)" text-anchor="middle">today</text>
+
+        <!-- SOC 2 line (emerald) -->
+        <path d="M 80,35 L 135,33 L 190,30 L 245,29 L 300,26 L 355,28 L 410,24 L 465,22 L 520,20 L 575,19 L 630,15"
+              fill="none" stroke="rgb(16 185 129)" stroke-width="2"/>
+        <circle cx="630" cy="15" r="4" fill="rgb(16 185 129)"/>
+        <text x="638" y="18" font-size="10" font-weight="600" fill="rgb(16 185 129)">94%</text>
+
+        <!-- ISO line (amber) -->
+        <path d="M 80,108 L 135,102 L 190,95 L 245,88 L 300,82 L 355,76 L 410,68 L 465,62 L 520,54 L 575,48 L 630,44"
+              fill="none" stroke="rgb(245 158 11)" stroke-width="2"/>
+        <circle cx="630" cy="44" r="4" fill="rgb(245 158 11)"/>
+        <text x="638" y="47" font-size="10" font-weight="600" fill="rgb(245 158 11)">78%</text>
+
+        <!-- NIST line (sky) -->
+        <path d="M 80,52 L 135,50 L 190,48 L 245,46 L 300,44 L 355,42 L 410,40 L 465,38 L 520,34 L 575,30 L 630,28"
+              fill="none" stroke="rgb(14 165 233)" stroke-width="2"/>
+        <circle cx="630" cy="28" r="4" fill="rgb(14 165 233)"/>
+        <text x="638" y="31" font-size="10" font-weight="600" fill="rgb(14 165 233)">86%</text>
+
+        <!-- y-axis -->
+        <line x1="40" y1="20" x2="40" y2="200" stroke="rgb(148 163 184)" stroke-width="1"/>
+      </svg>
+    </div>
+
+    <div class="grid grid-cols-3 gap-3 mt-4 text-sm">
+      <div class="bg-emerald-50 border border-emerald-100 rounded-lg p-3">
+        <div class="text-xs text-emerald-700 mb-0.5">SOC 2 · 90-day delta</div>
+        <div class="font-semibold text-emerald-900">+7.4 pts</div>
+        <div class="text-xs text-emerald-700 mt-0.5">86.6 → 94.0</div>
+      </div>
+      <div class="bg-amber-50 border border-amber-100 rounded-lg p-3">
+        <div class="text-xs text-amber-700 mb-0.5">ISO 27001 · 90-day delta</div>
+        <div class="font-semibold text-amber-900">+12.8 pts</div>
+        <div class="text-xs text-amber-700 mt-0.5">65.2 → 78.0</div>
+      </div>
+      <div class="bg-sky-50 border border-sky-100 rounded-lg p-3">
+        <div class="text-xs text-sky-700 mb-0.5">NIST CSF · 90-day delta</div>
+        <div class="font-semibold text-sky-900">+4.6 pts</div>
+        <div class="text-xs text-sky-700 mt-0.5">81.4 → 86.0</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 4: OPERATIONAL METRICS -->
+  <section class="bg-white border border-slate-200 rounded-2xl p-7 mb-6">
+    <div class="flex items-baseline justify-between mb-5">
+      <div>
+        <span class="mono text-xs text-slate-400">§ 04</span>
+        <h2 class="text-xl font-semibold tracking-tight">Operational metrics</h2>
+      </div>
+      <span class="text-xs text-slate-500">Quarterly outcomes</span>
+    </div>
+
+    <div class="grid grid-cols-4 gap-3 mb-4">
+      <div class="border border-slate-200 rounded-lg p-4">
+        <div class="text-xs text-slate-500 mb-1">Phishing pass rate</div>
+        <div class="flex items-baseline gap-2">
+          <span class="text-2xl font-semibold">97<span class="text-slate-400 text-base font-normal">%</span></span>
+          <span class="text-xs font-medium text-emerald-600">target ≥95%</span>
+        </div>
+        <div class="text-xs text-slate-500 mt-1 mono">3 campaigns · 218 employees</div>
+      </div>
+      <div class="border border-slate-200 rounded-lg p-4">
+        <div class="text-xs text-slate-500 mb-1">P1 patch · median</div>
+        <div class="flex items-baseline gap-2">
+          <span class="text-2xl font-semibold">4<span class="text-slate-400 text-base font-normal"> days</span></span>
+          <span class="text-xs font-medium text-emerald-600">target ≤7</span>
+        </div>
+        <div class="text-xs text-slate-500 mt-1 mono">14 findings · 1 SLA miss</div>
+      </div>
+      <div class="border border-slate-200 rounded-lg p-4">
+        <div class="text-xs text-slate-500 mb-1">Incidents</div>
+        <div class="flex items-baseline gap-2">
+          <span class="text-2xl font-semibold">2</span>
+          <span class="text-xs font-medium text-emerald-600">both contained &lt; SLA</span>
+        </div>
+        <div class="text-xs text-slate-500 mt-1 mono">SEV-3, SEV-4</div>
+      </div>
+      <div class="border border-slate-200 rounded-lg p-4">
+        <div class="text-xs text-slate-500 mb-1">Vendor reviews on time</div>
+        <div class="flex items-baseline gap-2">
+          <span class="text-2xl font-semibold">12<span class="text-slate-400 text-base font-normal">/14</span></span>
+          <span class="text-xs font-medium text-amber-600">86%</span>
+        </div>
+        <div class="text-xs text-slate-500 mt-1 mono">2 late · low criticality</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 5: INVESTMENT VS COVERAGE -->
+  <section class="bg-white border border-slate-200 rounded-2xl p-7 mb-6">
+    <div class="flex items-baseline justify-between mb-5">
+      <div>
+        <span class="mono text-xs text-slate-400">§ 05</span>
+        <h2 class="text-xl font-semibold tracking-tight">Investment vs coverage</h2>
+      </div>
+      <span class="text-xs text-slate-500">Q1 spend tied to coverage delta · enter manually</span>
+    </div>
+
+    <div class="grid grid-cols-2 gap-5">
+      <div class="border border-slate-200 rounded-lg p-5">
+        <div class="text-xs text-slate-500 mb-2">Q1 program spend</div>
+        <div class="text-2xl font-semibold mb-3">$184,200</div>
+        <div class="space-y-1.5 text-sm">
+          <div class="flex justify-between"><span class="text-slate-600">Tooling (security-atlas, Okta, 1P)</span><span class="mono text-slate-700">$71,400</span></div>
+          <div class="flex justify-between"><span class="text-slate-600">External pentest (Q1)</span><span class="mono text-slate-700">$48,000</span></div>
+          <div class="flex justify-between"><span class="text-slate-600">Security training + phishing</span><span class="mono text-slate-700">$22,800</span></div>
+          <div class="flex justify-between"><span class="text-slate-600">Compliance audit prep</span><span class="mono text-slate-700">$42,000</span></div>
+        </div>
+      </div>
+      <div class="border border-slate-200 rounded-lg p-5">
+        <div class="text-xs text-slate-500 mb-2">Coverage delta this quarter</div>
+        <div class="text-2xl font-semibold mb-3">+8.3 weighted points</div>
+        <div class="text-sm text-slate-600 mb-3">across the three primary frameworks · weighted by audit pressure</div>
+        <div class="mt-2 pt-3 border-t border-slate-200 text-sm">
+          <div class="text-xs text-slate-500 mb-1">Implied cost per coverage point</div>
+          <div class="text-lg font-semibold text-slate-900">$22,193</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 6: VENDOR RISK BURNDOWN -->
+  <section class="bg-white border border-slate-200 rounded-2xl p-7 mb-6">
+    <div class="flex items-baseline justify-between mb-5">
+      <div>
+        <span class="mono text-xs text-slate-400">§ 06</span>
+        <h2 class="text-xl font-semibold tracking-tight">Vendor risk burndown</h2>
+      </div>
+      <span class="text-xs text-slate-500">High-criticality reviews</span>
+    </div>
+
+    <div class="grid grid-cols-3 gap-3 text-sm">
+      <div class="border border-slate-200 rounded-lg p-4">
+        <div class="text-xs text-slate-500">High-criticality vendors</div>
+        <div class="text-2xl font-semibold mt-1">14</div>
+      </div>
+      <div class="border border-slate-200 rounded-lg p-4">
+        <div class="text-xs text-slate-500">Reviewed on time</div>
+        <div class="text-2xl font-semibold mt-1 text-emerald-700">12</div>
+      </div>
+      <div class="border border-slate-200 rounded-lg p-4">
+        <div class="text-xs text-slate-500">Past due</div>
+        <div class="text-2xl font-semibold mt-1 text-rose-700">2</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 7: ASKS OF THE BOARD -->
+  <section class="bg-white border border-slate-200 rounded-2xl p-7 mb-6">
+    <div class="flex items-baseline justify-between mb-5">
+      <div>
+        <span class="mono text-xs text-slate-400">§ 07</span>
+        <h2 class="text-xl font-semibold tracking-tight">Asks of the board</h2>
+      </div>
+      <span class="inline-flex items-center gap-1.5 px-2 py-0.5 mono text-[10px] font-semibold bg-slate-100 text-slate-600 rounded">human-authored only</span>
+    </div>
+
+    <div class="bg-amber-50/40 border border-amber-200 rounded-lg p-5 text-sm leading-relaxed text-slate-800">
+      <ol class="list-decimal pl-5 space-y-3">
+        <li><strong>Ratify the $85k Q2 endpoint-management investment</strong> for contractor laptops — unlocks closing RISK-0021 (90+ days open).</li>
+        <li><strong>Approve the ISO 27001 audit window</strong> for late Q3 2026 (prospect-driven). Estimated external cost $42–60k.</li>
+        <li><strong>Decision needed on FedRAMP exploration</strong> — two federal prospects in Q2 pipeline; readiness lift is significant (12–18 months). Recommend defer to Q4 strategy review.</li>
+        <li><strong>Acknowledge the GDPR posture flat-line</strong> as expected pending the privacy-module rollout — no remediation action requested this quarter.</li>
+      </ol>
+    </div>
+
+    <button class="mt-3 text-xs text-brand-600 hover:text-brand-700">+ add ask</button>
+  </section>
+
+  <!-- APPROVAL FOOTER -->
+  <div class="bg-white border-2 border-brand-200 rounded-2xl p-7 mb-10">
+    <div class="flex items-center justify-between">
+      <div>
+        <h3 class="font-semibold text-slate-900">Approve and publish</h3>
+        <p class="text-sm text-slate-600 mt-0.5">Approving freezes this report at the current data snapshot. PDF and OSCAL assessment-results bundle will be generated.</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-xs text-slate-500">Approver: Matt Goodrich</span>
+        <button class="px-4 py-2 text-sm text-white bg-brand-600 rounded-md hover:bg-brand-700 font-medium">Approve & publish</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- META -->
+  <div class="text-xs text-slate-500 space-y-1">
+    <div>Generated by security-atlas board-report engine · all metrics sourced from the evidence ledger and risk register.</div>
+    <div>AI-drafted narrative sections require explicit human approval before publish. Model: <span class="mono">llama3.1:8b-instruct-q5</span> (local) · provenance log retained.</div>
+  </div>
+</main>
+
+</body>
+</html>
