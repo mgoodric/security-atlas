@@ -8,7 +8,7 @@ Open-source GRC platform — a control-graph + evidence-pipeline for security pr
 
 ## Prerequisites
 
-- Go 1.24+
+- Go 1.25+
 - Node.js 20+
 - Python 3.11+ (for `oscal-bridge` and ruff)
 - Postgres 16+ (for migrations + integration tests) — `brew install postgresql@16` or via Docker

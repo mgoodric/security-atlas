@@ -25,10 +25,10 @@ const (
 
 // Client is a thread-safe Evidence push client. Use NewClient to construct.
 type Client struct {
-	conn      *grpc.ClientConn
-	stub      evidencev1.EvidenceIngestServiceClient
-	bearer    string
-	ownsConn  bool
+	conn     *grpc.ClientConn
+	stub     evidencev1.EvidenceIngestServiceClient
+	bearer   string
+	ownsConn bool
 }
 
 // Option configures the Client.

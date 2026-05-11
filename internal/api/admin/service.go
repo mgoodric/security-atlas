@@ -54,9 +54,9 @@ func (s *Service) Rotate(_ context.Context, req *adminv1.RotateRequest) (*adminv
 		return nil, status.Errorf(codes.Internal, "rotate: %v", err)
 	}
 	return &adminv1.RotateResponse{
-		Handle:                handleFromCred(successor),
-		BearerToken:           bearer,
-		PredecessorExpiresAt:  timestamppb.New(predecessorExpiresAt),
+		Handle:               handleFromCred(successor),
+		BearerToken:          bearer,
+		PredecessorExpiresAt: timestamppb.New(predecessorExpiresAt),
 	}, nil
 }
 
