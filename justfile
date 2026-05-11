@@ -96,7 +96,7 @@ tidy:
 migrate-up:
     psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
     atlas migrate hash --dir file://migrations/sql
-    atlas migrate apply --env local
+    atlas migrate apply -c file://migrations/atlas.hcl --env local
 
 # Roll back the most recent migration. Atlas OSS does not automate `down`
 # the same way as `up`; we apply the hand-authored .down.sql via psql and
@@ -107,7 +107,7 @@ migrate-down:
 
 # Atlas migration status (which migrations applied, which pending)
 migrate-status:
-    atlas migrate status --env local
+    atlas migrate status -c file://migrations/atlas.hcl --env local
 
 # Atlas migration hash regeneration (run before adding a new migration)
 migrate-hash:
