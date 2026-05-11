@@ -28,6 +28,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/evidence"
 	"github.com/mgoodric/security-atlas/internal/api/idemstore"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 )
 
@@ -41,6 +42,8 @@ type Server struct {
 	idemStore         idemstore.Store
 	connectorRegistry connectorregistry.Store
 	dbPool            *pgxpool.Pool
+	ingestService     *ingest.Service
+	evidencePushRate  float64
 }
 
 // IssueBootstrapCredential mints a credential for the supplied tenant and
@@ -68,6 +71,16 @@ type Config struct {
 	// only mounts when this field is populated, so unit-only servers
 	// keep the slice-003 IsRegistered surface.
 	SchemaRegistry *schemaregistry.Service
+	// IngestService, when non-nil, routes evidence pushes through the
+	// slice-013 DB-backed ingestion stage (writes to evidence_records,
+	// validates via schema registry, audits every attempt). When nil,
+	// the slice-003 in-memory fallback runs — used by unit tests that
+	// don't want a Postgres dependency.
+	IngestService *ingest.Service
+	// EvidencePushRate is the per-credential token-bucket replenish rate
+	// for the slice-013 REST push endpoint. 0 disables rate limiting
+	// (used by tests). Production defaults: 100 records/second.
+	EvidencePushRate float64
 }
 
 // New constructs the Server with its services and interceptors mounted.
@@ -95,7 +108,7 @@ func New(cfg Config) *Server {
 			authInterceptor(cred),
 		),
 	)
-	evidencev1.RegisterEvidenceIngestServiceServer(grpcServer, evidence.New(reg, idem, nil))
+	evidencev1.RegisterEvidenceIngestServiceServer(grpcServer, evidence.New(cfg.IngestService, reg, idem))
 	adminv1.RegisterAdminCredentialsServiceServer(grpcServer, admin.New(cred))
 	connectorsv1.RegisterConnectorRegistryServiceServer(grpcServer, connectors.New(connReg))
 
@@ -105,6 +118,8 @@ func New(cfg Config) *Server {
 		registry:          reg,
 		idemStore:         idem,
 		connectorRegistry: connReg,
+		ingestService:     cfg.IngestService,
+		evidencePushRate:  cfg.EvidencePushRate,
 	}
 }
 

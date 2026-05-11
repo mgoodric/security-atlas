@@ -13,6 +13,59 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 013 — Evidence ledger write API + push endpoint.** New
+  `POST /v1/evidence:push` REST endpoint (single record or batch up to 100) and refactored gRPC `EvidenceIngestService.Push` both wrap the
+  same canonical ingestion stage in
+  `internal/evidence/ingest.Service.Process`. The ingestion stage is the
+  boundary slice 015 will preserve when swapping the in-process call for
+  a NATS JetStream publish — verified by `TestPackageBoundary_AC9`. New
+  migration `20260511000004_evidence_ledger.sql` extends
+  `evidence_records` with `idempotency_key`, `evidence_kind`,
+  `schema_version`, `credential_id`, `ingestion_path`,
+  `source_attribution` (JSONB), and `control_ref` (free-form anchor
+  text); relaxes `control_id` to NULL so a push can carry an SCF anchor
+  (`scf:VPM-04`) without a UUID. The companion down migration drops
+  rows with `control_id IS NULL` before restoring `NOT NULL` — rolling
+  back ingestion accepts that ingested-without-UUID rows are lost,
+  consistent with the append-only ledger semantics. Hardens the RLS
+  shape on the table from the slice-002 single `tenant_isolation
+USING`-only policy into the append-only split used by slices 014 /
+  017: explicit `tenant_read`, explicit `tenant_insert WITH CHECK`,
+  and NO `tenant_update` / `tenant_delete` policies — `FORCE ROW
+LEVEL SECURITY` with no policy for a command denies that command,
+  so `evidence_records` is append-only by construction. A sibling
+  `evidence_audit_log` table records every push attempt (accepted OR
+  rejected) keyed by credential id (AC-7); decision enum constrained
+  by CHECK. Idempotency dedup is a partial UNIQUE index on
+  `(tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL`;
+  replay protection clamps `observed_at` to ±24h of `received_at`
+  (AC-8). Inline payloads above 1 MiB are rejected with a pointer to
+  `payload_uri` until slice 036 lands the S3 redirect (AC-6 partial
+  — documented). Per-credential token-bucket rate limiter at the HTTP
+  layer returns 429 with `Retry-After` (AC-5). Credential scope is
+  enforced by `credstore.Credential.Kinds` (allow-list) and
+  `ScopePredicate` (key=value subset over scope dimensions); both are
+  evaluated inside `ingest.Service.Process` so the gRPC and REST
+  transports share the enforcement (EVIDENCE_SDK §4.3 / §9). Schema
+  validation goes through the slice-014 hook
+  `schemaregistry.Service.ValidatePayload(ctx, tenantID, kind, version, payload)`
+  — unknown `evidence_kind` rejected with `FailedPrecondition` / 412;
+  payload that violates the registered JSON Schema rejected with
+  `InvalidArgument` / 400. Sha256 hashing of the canonicalized
+  EvidenceRecord lands on each receipt and is checked on dedup —
+  same idempotency_key with different content is rejected with
+  `AlreadyExists` / 409 (AC-4). Integration tests cover AC-1 through
+  AC-9 + cross-tenant isolation + append-only invariant against real
+  Postgres with `atlas_app` (NOSUPERUSER NOBYPASSRLS). CI's
+  `tests-integration` step now runs `./internal/evidence/ingest/...` +
+  `./internal/api/schemaregistry/...`. Anti-criteria honored:
+  anonymous push rejected at HTTP/gRPC middleware (slice 003) plus
+  defensive check in `Process`; schemaless push rejected via slice-014
+  `IsRegistered` + `ValidatePayload`; non-append-only mutation
+  rejected at both the sqlc surface (no `UpdateEvidenceRecord` /
+  `DeleteEvidenceRecord` query exists) and the RLS layer (no UPDATE
+  or DELETE policy on the table); cross-tenant write blocked by
+  `tenant_insert WITH CHECK` (verified by integration test).
 - **Slice 019 — Risk register CRUD with pluggable methodology.** Adds
   per-treatment fields (`accepted_until`, `accepter`, `instrument_reference`)
   to the slice-002 `risks` table, plus a `risk_control_links` join table

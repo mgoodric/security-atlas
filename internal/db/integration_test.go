@@ -30,11 +30,15 @@ import (
 // Postgres SQLSTATE code used in assertions.
 const pgErrForeignKeyViolation = "23503"
 
-var appPool *pgxpool.Pool
+var (
+	appPool   *pgxpool.Pool
+	adminPool *pgxpool.Pool
+)
 
-// TestMain opens a single pgxpool against the application role and reuses it
-// across tests. Tests scope themselves with unique UUIDs and clean up after
-// their own rows.
+// TestMain opens both the application-role pool (for RLS-bound queries) and
+// the admin-role pool (atlas_migrate, BYPASSRLS) for cleanup of append-only
+// tables that the application role intentionally cannot delete from
+// (evidence_records, evidence_audit_log — slice 013).
 func TestMain(m *testing.M) {
 	url := os.Getenv("DATABASE_URL_APP")
 	if url == "" {
@@ -51,8 +55,19 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	appPool = pool
+	if adminURL := os.Getenv("DATABASE_URL"); adminURL != "" {
+		ap, err := pgxpool.New(ctx, adminURL)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "pgxpool.New(admin): %v\n", err)
+			os.Exit(1)
+		}
+		adminPool = ap
+	}
 	code := m.Run()
 	pool.Close()
+	if adminPool != nil {
+		adminPool.Close()
+	}
 	os.Exit(code)
 }
 
@@ -211,12 +226,16 @@ func TestRLS_CompositeFK_PreventsCrossTenantReference(t *testing.T) {
 	// FK lookup is (tenantA, controlB.id) → controls — no match, so the FK
 	// rejects the insert.
 	withTenantTx(t, tenantA, false, func(ctx context.Context, tx pgx.Tx) {
+		// Slice 013 added a NOT NULL `control_ref` (free-form anchor text)
+		// alongside the optional UUID `control_id`. The composite FK still
+		// fires when control_id is set to a UUID owned by a different
+		// tenant — that's the invariant this test validates.
 		_, err := tx.Exec(ctx, `
 			INSERT INTO evidence_records
-				(id, tenant_id, control_id, observed_at, provenance, result, hash)
+				(id, tenant_id, control_id, control_ref, observed_at, provenance, result, hash)
 			VALUES
-				($1, $2, $3, now(), '{"connector_id":"test"}'::jsonb, 'pass', 'abc123')
-		`, uuid.NewString(), tenantA, controlB)
+				($1, $2, $3, $4, now(), '{"connector_id":"test"}'::jsonb, 'pass', 'abc123')
+		`, uuid.NewString(), tenantA, controlB, "scf:IAC-11")
 		if err == nil {
 			t.Fatal("expected FK violation referencing other tenant's control; got nil error")
 		}
@@ -238,10 +257,20 @@ func TestSchema_TenantScopedTablesAcceptInserts(t *testing.T) {
 	frameworkVersionID := uuid.NewString()
 
 	t.Cleanup(func() {
+		// Slice 013's append-only RLS shape means atlas_app can no longer
+		// DELETE from evidence_records. Clean those rows via the admin
+		// pool (BYPASSRLS) so we can subsequently DELETE the parent
+		// controls. The remaining tenant-scoped rows still go through
+		// the app pool so the RLS surface stays exercised.
+		if adminPool != nil {
+			ctxA, cancelA := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancelA()
+			_, _ = adminPool.Exec(ctxA, `DELETE FROM evidence_audit_log WHERE tenant_id = $1`, tenant)
+			_, _ = adminPool.Exec(ctxA, `DELETE FROM evidence_records WHERE tenant_id = $1`, tenant)
+		}
 		withTenantTx(t, tenant, true, func(ctx context.Context, tx pgx.Tx) {
 			for _, stmt := range []string{
 				`DELETE FROM framework_scopes WHERE tenant_id = $1`,
-				`DELETE FROM evidence_records WHERE tenant_id = $1`,
 				`DELETE FROM policies WHERE tenant_id = $1`,
 				`DELETE FROM scopes WHERE tenant_id = $1`,
 				`DELETE FROM risks WHERE tenant_id = $1`,
@@ -291,12 +320,15 @@ func TestSchema_TenantScopedTablesAcceptInserts(t *testing.T) {
 			t.Fatalf("INSERT scopes: %v", err)
 		}
 
+		// Slice 013: control_ref (free-form anchor text) is required;
+		// control_id (UUID) remains optional. This smoke test sets both
+		// to keep the composite-FK path exercised.
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO evidence_records
-				(id, tenant_id, control_id, scope_id, observed_at, provenance, result, hash)
+				(id, tenant_id, control_id, control_ref, scope_id, observed_at, provenance, result, hash)
 			VALUES
-				($1, $2, $3, $4, now(), '{"connector_id":"aws"}'::jsonb, 'pass', 'sha-abc')
-		`, uuid.NewString(), tenant, controlID, scopeID); err != nil {
+				($1, $2, $3, $4, $5, now(), '{"connector_id":"aws"}'::jsonb, 'pass', 'sha-abc')
+		`, uuid.NewString(), tenant, controlID, "scf:AAA-01", scopeID); err != nil {
 			t.Fatalf("INSERT evidence_records: %v", err)
 		}
 
