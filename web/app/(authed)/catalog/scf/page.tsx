@@ -1,9 +1,9 @@
-"use client"
+"use client";
 
-import { useQuery } from "@tanstack/react-query"
-import Link from "next/link"
-import { useRouter } from "next/navigation"
-import { useEffect } from "react"
+import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
 import {
   Card,
@@ -11,9 +11,9 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Skeleton } from "@/components/ui/skeleton"
+} from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -21,21 +21,21 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
-import { APIError, listAnchors } from "@/lib/api"
+} from "@/components/ui/table";
+import { APIError, listAnchors } from "@/lib/api";
 
 export default function SCFCatalogPage() {
-  const router = useRouter()
+  const router = useRouter();
   const { data, isLoading, error } = useQuery({
     queryKey: ["anchors"],
     queryFn: () => listAnchorsFromCookieSession(),
-  })
+  });
 
   useEffect(() => {
     if (error instanceof APIError && error.status === 401) {
-      router.push("/login?from=/catalog/scf")
+      router.push("/login?from=/catalog/scf");
     }
-  }, [error, router])
+  }, [error, router]);
 
   return (
     <div className="space-y-6">
@@ -61,7 +61,8 @@ export default function SCFCatalogPage() {
           <CardHeader>
             <CardTitle>{data.length} anchors</CardTitle>
             <CardDescription>
-              Subset bundled with slice 005; full SCF catalog imports with slice 006.
+              Subset bundled with slice 005; full SCF catalog imports with slice
+              006.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -77,7 +78,9 @@ export default function SCFCatalogPage() {
                 {data.map((anchor) => (
                   <TableRow key={anchor.id} className="cursor-pointer">
                     <TableCell className="font-mono text-xs">
-                      <Link href={`/catalog/scf/${anchor.id}`}>{anchor.scf_id}</Link>
+                      <Link href={`/catalog/scf/${anchor.id}`}>
+                        {anchor.scf_id}
+                      </Link>
                     </TableCell>
                     <TableCell>{anchor.family}</TableCell>
                     <TableCell>
@@ -96,7 +99,7 @@ export default function SCFCatalogPage() {
         </Card>
       ) : null}
     </div>
-  )
+  );
 }
 
 function AnchorSkeletons() {
@@ -106,17 +109,19 @@ function AnchorSkeletons() {
         <Skeleton key={i} className="h-10 w-full" />
       ))}
     </div>
-  )
+  );
 }
 
 // listAnchorsFromCookieSession hits a same-origin Next.js route handler
 // (/api/anchors) that proxies the bearer cookie into the upstream API.
 // Going through a route handler keeps the bearer httpOnly on the client.
 async function listAnchorsFromCookieSession() {
-  const res = await fetch("/api/anchors")
+  const res = await fetch("/api/anchors");
   if (!res.ok) {
-    throw new APIError(res.status, `${res.status} ${res.statusText}`)
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
   }
-  const body = (await res.json()) as { anchors: Awaited<ReturnType<typeof listAnchors>> }
-  return body.anchors
+  const body = (await res.json()) as {
+    anchors: Awaited<ReturnType<typeof listAnchors>>;
+  };
+  return body.anchors;
 }

@@ -1,5 +1,5 @@
-import { signOut } from "@/app/login/actions"
-import { Button } from "@/components/ui/button"
+import { signOut } from "@/app/login/actions";
+import { Button } from "@/components/ui/button";
 
 export function TopBar() {
   return (
@@ -14,5 +14,5 @@ export function TopBar() {
         </Button>
       </form>
     </header>
-  )
+  );
 }

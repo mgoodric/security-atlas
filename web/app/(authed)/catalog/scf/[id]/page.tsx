@@ -1,20 +1,20 @@
-"use client"
+"use client";
 
-import { useQuery } from "@tanstack/react-query"
-import Link from "next/link"
-import { useParams, useRouter } from "next/navigation"
-import { useEffect } from "react"
+import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
+} from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -22,29 +22,32 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
-import { APIError, type AnchorDetail } from "@/lib/api"
+} from "@/components/ui/table";
+import { APIError, type AnchorDetail } from "@/lib/api";
 
 export default function SCFAnchorDetailPage() {
-  const router = useRouter()
-  const { id } = useParams<{ id: string }>()
+  const router = useRouter();
+  const { id } = useParams<{ id: string }>();
 
   const { data, isLoading, error } = useQuery<AnchorDetail>({
     queryKey: ["anchor", id],
     queryFn: () => fetchAnchorDetail(id),
     enabled: Boolean(id),
-  })
+  });
 
   useEffect(() => {
     if (error instanceof APIError && error.status === 401) {
-      router.push(`/login?from=/catalog/scf/${id}`)
+      router.push(`/login?from=/catalog/scf/${id}`);
     }
-  }, [error, router, id])
+  }, [error, router, id]);
 
   return (
     <div className="space-y-6">
       <div className="text-sm">
-        <Link href="/catalog/scf" className="text-muted-foreground hover:underline">
+        <Link
+          href="/catalog/scf"
+          className="text-muted-foreground hover:underline"
+        >
           ← All anchors
         </Link>
       </div>
@@ -60,25 +63,25 @@ export default function SCFAnchorDetailPage() {
 
       {data ? <AnchorDetailView detail={data} /> : null}
     </div>
-  )
+  );
 }
 
 function AnchorDetailView({ detail }: { detail: AnchorDetail }) {
   const byFramework = new Map<
     string,
     { framework: string; version: string; rows: typeof detail.requirements }
-  >()
+  >();
   for (const r of detail.requirements) {
-    const key = r.framework_version.id
-    const existing = byFramework.get(key)
+    const key = r.framework_version.id;
+    const existing = byFramework.get(key);
     if (existing) {
-      existing.rows.push(r)
+      existing.rows.push(r);
     } else {
       byFramework.set(key, {
         framework: r.framework_version.framework,
         version: r.framework_version.version,
         rows: [r],
-      })
+      });
     }
   }
 
@@ -91,7 +94,9 @@ function AnchorDetailView({ detail }: { detail: AnchorDetail }) {
         <h1 className="text-2xl font-semibold tracking-tight">
           {detail.anchor.name}
         </h1>
-        <p className="text-sm text-muted-foreground">{detail.anchor.description}</p>
+        <p className="text-sm text-muted-foreground">
+          {detail.anchor.description}
+        </p>
       </div>
 
       {[...byFramework.values()].map((group) => (
@@ -113,8 +118,12 @@ function AnchorDetailView({ detail }: { detail: AnchorDetail }) {
               <TableBody>
                 {group.rows.map((r) => (
                   <TableRow key={r.requirement.id}>
-                    <TableCell className="font-mono text-xs">{r.requirement.code}</TableCell>
-                    <TableCell className="text-sm">{r.requirement.text}</TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {r.requirement.code}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {r.requirement.text}
+                    </TableCell>
                     <TableCell>
                       <Badge variant="secondary">{r.strm_type}</Badge>
                     </TableCell>
@@ -137,13 +146,15 @@ function AnchorDetailView({ detail }: { detail: AnchorDetail }) {
         </Alert>
       ) : null}
     </div>
-  )
+  );
 }
 
 async function fetchAnchorDetail(id: string): Promise<AnchorDetail> {
-  const res = await fetch(`/api/anchors/${encodeURIComponent(id)}/requirements`)
+  const res = await fetch(
+    `/api/anchors/${encodeURIComponent(id)}/requirements`,
+  );
   if (!res.ok) {
-    throw new APIError(res.status, `${res.status} ${res.statusText}`)
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
   }
-  return (await res.json()) as AnchorDetail
+  return (await res.json()) as AnchorDetail;
 }

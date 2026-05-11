@@ -1,4 +1,4 @@
-import Link from "next/link"
+import Link from "next/link";
 
 import {
   Card,
@@ -6,7 +6,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
+} from "@/components/ui/card";
 
 export default function DashboardPage() {
   return (
@@ -23,7 +23,8 @@ export default function DashboardPage() {
           <CardHeader>
             <CardTitle>SCF anchor browser</CardTitle>
             <CardDescription>
-              Inspect SCF control anchors and the framework requirements that map to each.
+              Inspect SCF control anchors and the framework requirements that
+              map to each.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -46,5 +47,5 @@ export default function DashboardPage() {
         </Card>
       </div>
     </div>
-  )
+  );
 }

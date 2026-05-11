@@ -1,18 +1,24 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
-import { signIn } from "./actions"
+import { signIn } from "./actions";
 
-type SearchParams = Promise<{ from?: string; error?: string }>
+type SearchParams = Promise<{ from?: string; error?: string }>;
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: SearchParams
+  searchParams: SearchParams;
 }) {
-  const { from, error } = await searchParams
+  const { from, error } = await searchParams;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
@@ -20,8 +26,9 @@ export default async function LoginPage({
         <CardHeader>
           <CardTitle>Sign in to security-atlas</CardTitle>
           <CardDescription>
-            Paste a bearer token issued by <code>atlas-cli credentials issue</code>{" "}
-            or printed to stderr at server startup.
+            Paste a bearer token issued by{" "}
+            <code>atlas-cli credentials issue</code> or printed to stderr at
+            server startup.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -52,5 +59,5 @@ export default async function LoginPage({
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }

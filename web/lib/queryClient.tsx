@@ -2,7 +2,7 @@
 // One instance per server request; one shared singleton in the browser.
 //
 // See https://tanstack.com/query/latest/docs/framework/react/guides/advanced-ssr
-import { QueryClient } from "@tanstack/react-query"
+import { QueryClient } from "@tanstack/react-query";
 
 function makeQueryClient() {
   return new QueryClient({
@@ -12,15 +12,15 @@ function makeQueryClient() {
         retry: 1,
       },
     },
-  })
+  });
 }
 
-let browserQueryClient: QueryClient | undefined
+let browserQueryClient: QueryClient | undefined;
 
 export function getQueryClient() {
   if (typeof window === "undefined") {
-    return makeQueryClient()
+    return makeQueryClient();
   }
-  browserQueryClient ??= makeQueryClient()
-  return browserQueryClient
+  browserQueryClient ??= makeQueryClient();
+  return browserQueryClient;
 }

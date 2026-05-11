@@ -1,6 +1,6 @@
-import Link from "next/link"
+import Link from "next/link";
 
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard" },
@@ -11,14 +11,14 @@ const NAV = [
   { href: "/policies", label: "Policies" },
   { href: "/audits", label: "Audits" },
   { href: "/settings", label: "Settings" },
-]
+];
 
 export function Sidebar({ active }: { active?: string }) {
   return (
     <aside className="w-56 shrink-0 border-r bg-muted/30 p-4">
       <nav className="flex flex-col gap-1">
         {NAV.map((item) => {
-          const isActive = active ? active === item.href : false
+          const isActive = active ? active === item.href : false;
           return (
             <Link
               key={item.href}
@@ -32,9 +32,9 @@ export function Sidebar({ active }: { active?: string }) {
             >
               {item.label}
             </Link>
-          )
+          );
         })}
       </nav>
     </aside>
-  )
+  );
 }
