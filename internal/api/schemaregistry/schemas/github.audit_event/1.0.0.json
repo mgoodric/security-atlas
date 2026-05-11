@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/github.audit_event/1.0.0.json",
+  "x-evidence-kind": "github.audit_event.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["MON-01", "MON-02"],
+  "title": "GitHub organization audit event",
+  "description": "One organization-scoped audit event delivered via webhook (X-GitHub-Event family). Payload is the canonicalized subset of fields the platform evaluator depends on; the full GitHub delivery body is stored in the ledger payload column at ingest time.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_type", "action", "actor", "created_at", "org"],
+  "properties": {
+    "event_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Value of the X-GitHub-Event delivery header, e.g. repository, member, organization, push, branch_protection_rule."
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Per-event action discriminator (created, deleted, edited, member_added, etc.)."
+    },
+    "actor": {
+      "type": "string",
+      "minLength": 1,
+      "description": "GitHub login of the user or app that triggered the event."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "org": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo": {
+      "type": "string",
+      "description": "Repository full_name (org/name) when the event is repo-scoped; omitted for org-only events."
+    },
+    "delivery_id": {
+      "type": "string",
+      "description": "GitHub X-GitHub-Delivery UUID — also used directly as the record's idempotency_key."
+    }
+  }
+}

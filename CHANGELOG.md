@@ -47,7 +47,60 @@ auto-generated notes.
   pretend to verify it. Multi-tenant from day one (no
   `tenant_count == 1` branching) per the recently-resolved canvas
   open-q #13.
-
+- **Slice 044 — GitHub connector.** New stateless connector binary
+  `connectors/github/cmd/atlas-github` emitting three evidence kinds:
+  `github.repo_protection.v1` (pull — per-repo branch-protection state
+  on the default branch; reuses the slice-014-shipped schema unchanged),
+  `github.scim_user.v1` (pull — per-user lifecycle from the SCIM v2
+  Users endpoint scoped to a GitHub Enterprise organization), and
+  `github.audit_event.v1` (push — verified organization webhook
+  deliveries). Two new platform schemas added under
+  `internal/api/schemaregistry/schemas/<kind>/1.0.0.json` with
+  `x-evidence-kind`, `x-semver`, `x-owner`, `x-default-scf-anchors`
+  extension keys; the embedded `//go:embed all:schemas` directive
+  picks them up automatically and slice 014's `ImportPlatformSchemas`
+  inserts them as global rows at boot via `ON CONFLICT DO NOTHING`
+  semantics. `internal/api/schemaregistry.DefaultSeed` extended with
+  the two new kinds so unit-only servers (no DB) accept records for
+  them without bespoke seeding. Subcommands: `register` (announces
+  the connector via `ConnectorRegistryService.Register` declaring
+  three `SupportedKinds` and `["pull","push"]` profiles), `run` (pulls
+  org repos + SCIM users; pass/fail for branch protection is gated on
+  `required_reviews >= 1`; 404 on the protection endpoint is a definitive
+  FAIL not inconclusive; SCIM `ErrSCIMUnavailable` is a clean skip so
+  non-Enterprise orgs still get repo_protection records), `webhook`
+  (HTTP receiver verifying `X-Hub-Signature-256` with HMAC-SHA256 via
+  `hmac.Equal` constant-time compare, deriving the evidence
+  `idempotency_key` verbatim from `X-GitHub-Delivery`, returning 401
+  on missing/malformed/bad signature, 400 on missing delivery or org,
+  and 204 on accepted push), `scopes` (prints the canonical
+  least-privilege PAT scope list at runtime). Auth: fine-grained PAT
+  via `GITHUB_TOKEN` env or `--pat` flag; GitHub App configuration
+  surface is wired but the JWT signer + token exchange land in slice
+  045 (the App path returns `ErrAppNotWired` so the user sees a clear
+  "use PAT" error rather than a silent fallthrough). Idempotency keys
+  follow slice 004's hour-truncation pattern for repo (sha256 of
+  `github.repo_protection|<repo>|<hour>`) and SCIM (`github.scim_user|<scim_user_id>|<hour>`)
+  emitters; the webhook emitter uses the `X-GitHub-Delivery` UUID
+  directly. Anti-criteria (P0) honored: documented PAT scopes are
+  read-only on Repository: Administration, Repository: Metadata,
+  Organization: Members, and Organization: Webhooks (the
+  `DocumentedScopes` unit test rejects any future widening to
+  admin/write/delete access); webhook signature verification is the
+  first action after body read with no bypass path; `Credential.String`
+  redacts the bearer so accidental log lines never leak the PAT;
+  webhook secret is read only from `$GITHUB_WEBHOOK_SECRET` (never via
+  flag) and the binary refuses to start when it is empty;
+  `idempotency_key` is rejected as missing when `X-GitHub-Delivery` is
+  absent rather than fabricated. Tests: HTTP fixtures use
+  `httptest.NewServer` to replay realistic GitHub REST + SCIM payloads
+  (no mock-out of the JSON contract); the HMAC fixture pins both accept
+  and reject paths (correct signature, missing header, wrong prefix,
+  bad hex, tampered body, wrong secret); platform-side bufconn
+  integration tests verify register/list, push of all three kinds,
+  scope dimensions, actor_id format `connector:github:<service>@<version>`,
+  and dedup by idempotency key for both repo_protection (hour key) and
+  audit_event (verbatim delivery UUID).
 - **Slice 013 — Evidence ledger write API + push endpoint.** New
   `POST /v1/evidence:push` REST endpoint (single record or batch up to 100) and refactored gRPC `EvidenceIngestService.Push` both wrap the
   same canonical ingestion stage in
