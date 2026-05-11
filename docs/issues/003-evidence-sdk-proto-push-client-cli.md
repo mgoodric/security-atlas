@@ -16,6 +16,12 @@ Define the gRPC contract for the Evidence SDK in `proto/evidence/v1/`: `IngestEv
 - [ ] AC-4: Server stub rejects (with explicit error) any record where `evidence_kind` isn't registered in the schema registry (mocked at this point)
 - [ ] AC-5: Re-sending the same `idempotency_key` returns the original receipt without writing a duplicate (mock dedup)
 - [ ] AC-6: Receipt includes sha256 of canonical record form
+- [ ] AC-7: `security-atlas-cli credentials issue --tenant=<id> --scope=<predicate-json> --kinds=<comma-separated kinds> --ttl=<duration>` issues a scoped API key; the bearer token is returned **once at issue time** and never retrievable again (write-once, hashed at rest per slice 034)
+- [ ] AC-8: `security-atlas-cli credentials rotate --id=<key-id>` issues a successor key; old key remains valid until explicit revoke (rotation window enables zero-downtime credential rotation in CI)
+- [ ] AC-9: `security-atlas-cli credentials revoke --id=<key-id>` invalidates the key immediately; subsequent push attempts with the revoked key return 401
+- [ ] AC-10: `security-atlas-cli credentials list --tenant=<id>` lists active keys with id, scope, kinds, ttl, last-used-at (never returns the bearer token)
+
+**Note on AC-7–10:** these subcommands wrap admin endpoints implemented in slice 034 (which owns the `api_keys` table + CRUD). Per the D4 review decision, GUI for credential issuance is deferred to v1.x; CLI is the v1 surface (sufficient for solo Matt and CI pipelines).
 
 ## Constitutional invariants honored
 

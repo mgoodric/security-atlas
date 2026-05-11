@@ -1,7 +1,7 @@
 # 030 — OSCAL SSP + POA&M export pipeline
 
 **Cluster:** Audit workflow
-**Estimate:** 3d
+**Estimate:** 4–5d
 **Type:** HITL
 
 ## Narrative
@@ -31,7 +31,7 @@ Implement the OSCAL export pipeline that produces the audit-handoff bundle: Syst
 
 ## Dependencies
 
-- #008, #012, #017, #018, #026, #028
+- #008, #012, #017, #018, #022, #026, #028
 
 ## Anti-criteria (P0)
 

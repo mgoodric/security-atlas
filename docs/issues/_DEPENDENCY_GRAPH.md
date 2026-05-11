@@ -3,6 +3,7 @@
 Visualizes the 49 slices and their dependencies. Companion to [`_INDEX.md`](./_INDEX.md).
 
 > **Reading:** arrows point **from** a prerequisite **to** a dependent. Layer = topological depth from the root.
+> **Last updated:** post-review (commit applying `_REVIEW.md` D1–D6 findings). New edges: 005→034, 010→014, 012→015, 030→022, 037 deps expanded, 040→015/021/023. Removed: 028→016.
 
 ```mermaid
 graph TD
@@ -125,8 +126,16 @@ graph TD
     I003 --> I048
     I003 --> I049
 
+    I004 --> I037
+
+    I005 --> I037
+    I005 --> I040
+    I005 --> I041
+    I005 --> I043
+
     I006 --> I007
     I006 --> I008
+    I006 --> I037
     I007 --> I008
     I007 --> I010
 
@@ -138,6 +147,7 @@ graph TD
     I009 --> I011
 
     I010 --> I012
+    I010 --> I037
 
     I013 --> I004
     I013 --> I011
@@ -154,7 +164,13 @@ graph TD
     I013 --> I048
     I013 --> I049
 
+    I014 --> I010
     I014 --> I013
+    I014 --> I037
+
+    I015 --> I012
+    I015 --> I037
+    I015 --> I040
 
     I012 --> I016
     I012 --> I020
@@ -163,7 +179,6 @@ graph TD
     I012 --> I040
     I012 --> I041
 
-    I016 --> I028
     I016 --> I031
     I016 --> I040
 
@@ -182,8 +197,14 @@ graph TD
     I020 --> I031
     I020 --> I040
 
-    I022 --> I023
+    I021 --> I040
 
+    I022 --> I023
+    I022 --> I030
+
+    I023 --> I040
+
+    I034 --> I005
     I034 --> I023
     I034 --> I037
 
@@ -215,14 +236,13 @@ graph TD
 
     I036 --> I011
     I036 --> I027
+    I036 --> I037
 
     I037 --> I038
 
-    I005 --> I040
-    I005 --> I041
-    I005 --> I043
-
     I032 --> I043
+
+    %% Removed per D6 review decision: I016 --> I028 (freezing uses raw observed_at; doesn't need freshness read-model)
 
     %% Styling
     classDef spineClass fill:#dbeafe,stroke:#1e40af,stroke-width:2px
@@ -239,11 +259,11 @@ graph LR
     I001[001 skeleton<br/>1.5d] --> I002[002 schema<br/>3d]
     I002 --> I006[006 SCF<br/>2d]
     I006 --> I007[007 SOC2<br/>1.5d]
-    I007 --> I010[010 50 ctrls<br/>3d]
+    I007 --> I010[010 50 ctrls<br/>5–7d]
     I010 --> I012[012 eval<br/>2.5d]
     I012 --> I016[016 freshness<br/>1.5d]
     I016 --> I028[028 freeze<br/>2d]
-    I028 --> I030[030 OSCAL<br/>3d]
+    I028 --> I030[030 OSCAL<br/>4–5d]
     I030 --> I032[032 board pack<br/>2.5d]
     I032 --> I043[043 board view<br/>2d]
 
@@ -251,7 +271,9 @@ graph LR
     class I001,I002,I006,I007,I010,I012,I016,I028,I030,I032,I043 critical
 ```
 
-**Critical path total:** ~24 day-equivalents serialized.
+**Critical path total:** ~28 day-equivalents serialized (post-review re-estimates).
+
+> Note: 016 → 028 is no longer a dependency (D6 review decision); freezing uses raw `observed_at`. 016 remains on the path because user-journey-wise the dashboard's drift signal should be visible before the audit cycle's freezing step — but 028 itself does not require 016 to land first.
 
 ## Parallelism layers
 
@@ -268,7 +290,7 @@ graph LR
     Trunk --> S022[022 policy lib]
     Trunk --> S033[033 RLS]
     Trunk --> S024[024 vendor lite<br/>after 017]
-    Trunk --> S034[034 OIDC<br/>only needs 001]
+    Trunk --> S034[034 OIDC + api_keys<br/>only needs 001]
 
     classDef stream fill:#ecfdf5,stroke:#065f46
     class S003,S006,S009,S014,S017,S019,S022,S033,S024,S034 stream
@@ -278,17 +300,19 @@ Realistic team-of-3 sustains ~3 parallel streams.
 
 ## DAG validation
 
-No cycles. Verified by mental traversal — every edge points forward in the topological order shown in `_INDEX.md`.
+No cycles. Verified by mental traversal — every edge points forward in the topological order shown in `_INDEX.md`. Re-verified post-review-edits (no new edges introduce cycles).
 
-## Cluster boundaries summary
+## Cluster boundaries summary (recomputed post-review)
 
 | Layer | Slices | Notes |
 |---|---|---|
 | **Trunk (deps-free)** | 001 | Skeleton — no deps |
-| **Layer 1 (only 001)** | 002, 003, 034, 039 | Schema, SDK, OIDC, CLI release |
-| **Layer 2 (002 + 003 chain)** | 006, 009, 014, 017, 019, 022, 024, 033 | Major parallelism layer |
-| **Layer 3** | 013, 007, 015, 018, 023, 035, 036 | Push API + traversal-deps + auth chain |
-| **Layer 4** | 004, 008, 010, 011, 016, 020, 021, 025 | Feature middle |
-| **Layer 5** | 005, 012, 026, 027, 028, 029, 037, 044-049 | Frontend bootstrap + audit workflow + connectors |
-| **Layer 6** | 030, 031, 038, 040, 041, 042 | OSCAL, board brief, K8s, dashboard views |
+| **Layer 1 (only 001)** | 002, 003, 034 | Schema, SDK, OIDC + api_keys (039 moved to Layer 2 per D5 — it depends on 003) |
+| **Layer 2 (002 + 003 chain)** | 006, 009, 014, 017, 019, 022, 024, 033, 039 | Major parallelism layer (039 added per D5 layer fix) |
+| **Layer 3** | 013, 007, 018, 023, 035, 036 | Push API + traversal-deps + auth chain (note: 015 moves to Layer 4 because it depends on 013) |
+| **Layer 4** | 004, 008, 010, 011, 015, 016 *(was Layer 4)*, 020, 021, 025 | Feature middle. 010 now depends on 014 (Layer 2) + 007/009 (Layer 2/3); still Layer 4. |
+| **Layer 5** | 005 *(now waits on 034 + 008)*, 012, 026, 027, 028, 029, 044-049 | Frontend bootstrap + audit workflow + remaining connectors |
+| **Layer 6** | 030 *(now waits on 022 too)*, 031, 037 *(recomputed: now needs 004, 005, 006, 010, 014, 015 + originals)*, 038, 040 *(now waits on 015, 021, 023)*, 041, 042 | OSCAL, board brief, deployment bundle, frontend views |
 | **Layer 7** | 032, 043 | Final board pack + view |
+
+> Post-review changes: 039 moved from Layer 1 → Layer 2 (depends on 003); 037 recomputed — it stays at Layer 6 because its expanded deps' max layer (005 at Layer 5) places it one layer later than before (was Layer 5). 040 also moves to Layer 6 because it now waits on 015 + 021 + 023.

@@ -30,7 +30,9 @@ Implement the load-bearing `AuditPeriod` entity and the freezing primitive that 
 
 ## Dependencies
 
-- #013, #016
+- #013
+
+(Earlier draft listed #016 as a dependency; freezing uses raw `observed_at` from the ledger and does not require the freshness read-model from slice 016. Dependency dropped per D6 review decision.)
 
 ## Anti-criteria (P0)
 

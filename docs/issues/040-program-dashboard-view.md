@@ -30,7 +30,7 @@ Build the program dashboard view per `Plans/mockups/dashboard.html`. Real data b
 
 ## Dependencies
 
-- #005, #012, #016, #020, #024
+- #005, #012, #015, #016, #020, #021, #023, #024
 
 ## Anti-criteria (P0)
 

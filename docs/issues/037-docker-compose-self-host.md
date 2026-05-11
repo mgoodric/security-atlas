@@ -31,7 +31,7 @@ Build the docker-compose self-host bundle that meets the 4-hour-to-first-evidenc
 
 ## Dependencies
 
-- #002, #013, #034
+- #002, #004, #005, #006, #010, #013, #014, #015, #034, #036
 
 ## Anti-criteria (P0)
 

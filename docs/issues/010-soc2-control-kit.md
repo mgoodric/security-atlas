@@ -1,7 +1,7 @@
 # 010 — SCF-anchored control kit (50 SOC 2 controls bundled)
 
 **Cluster:** Control-as-code
-**Estimate:** 3d
+**Estimate:** 5–7d
 **Type:** HITL
 
 ## Narrative
@@ -31,7 +31,7 @@ Author the v1 stock control kit: 50 SOC 2 controls expressed in the bundle forma
 
 ## Dependencies
 
-- #009, #007
+- #009, #007, #014
 
 ## Anti-criteria (P0)
 

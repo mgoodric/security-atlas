@@ -31,7 +31,7 @@ Build the read-only evaluation stage that consumes the evidence ledger and compu
 
 ## Dependencies
 
-- #010, #013, #017
+- #010, #013, #015, #017
 
 ## Anti-criteria (P0)
 

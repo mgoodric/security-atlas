@@ -29,7 +29,7 @@ Scaffold the Next.js 15 App Router project under `web/` with shadcn/ui + Tailwin
 
 ## Dependencies
 
-- #001, #008
+- #001, #008, #034
 
 ## Anti-criteria (P0)
 

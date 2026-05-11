@@ -1,8 +1,9 @@
 # v1 Issue Index — Tracer-Bullet Vertical Slices
 
-**Total:** 49 slices · **~90 day-equivalents** · **Critical path:** 11 slices (~24 days)
+**Total:** 49 slices · **~95 day-equivalents** · **Critical path:** 11 slices (~28 days)
 **Spine:** 001–005 honor CLAUDE.md "When code begins" ordering.
-**Status:** Ready for review — no code committed yet.
+**Status:** Ready for execution — `_REVIEW.md` decisions applied (commit history).
+**Last updated:** 2026-05-11 after review-finding application (D1–D6 resolved).
 
 > Tracer-bullet slicing: each slice cuts vertically through every layer (schema, API, UI, tests) — *not* horizontally through one layer. A completed slice is demoable on its own.
 
@@ -26,8 +27,8 @@
 | [019](./019-risk-register-crud.md) | Risk CRUD + NIST 800-30 + 5x5 + ALE-band | Risk register | AFK | 2 | 002 | Ready |
 | [022](./022-policy-library.md) | Policy library + 5 stock policies | Policies | HITL | 2 | 002 | Ready |
 | [033](./033-postgres-rls-enforcement.md) | Postgres RLS enforcement everywhere | Multi-tenancy | AFK | 2 | 002 | Ready |
-| [034](./034-oidc-rp-local-users.md) | OIDC RP + local users | Auth | AFK | 1.5 | 001 | Ready |
-| [013](./013-evidence-ledger-write-api.md) | Evidence ledger write API + push endpoint | Evidence pipeline | AFK | 3 | 002, 003, 014 | Ready |
+| [034](./034-oidc-rp-local-users.md) | OIDC RP + local users + api_keys CRUD | Auth | AFK | 2.5 | 001 | Ready |
+| [013](./013-evidence-ledger-write-api.md) | Evidence ledger write API + push endpoint (ingestion-as-function) | Evidence pipeline | AFK | 3 | 002, 003, 014 | Ready |
 | [007](./007-soc2-crosswalk-loader.md) | SOC 2 v2017 (TSC) crosswalk loader | Catalog | HITL | 1.5 | 006 | Ready |
 | [018](./018-framework-scope-intersection.md) | FrameworkScope predicate + intersection compute | Scope | AFK | 1.5 | 017 | Ready |
 | [024](./024-vendor-lite-module.md) | Vendor lite module | Vendor | AFK | 1.5 | 002, 017 | Ready |
@@ -43,11 +44,11 @@
 | [048](./048-jira-linear-connector.md) | Jira/Linear ticket connector | Connectors | AFK | 1 | 003, 013 | Ready |
 | [049](./049-manual-upload-csv-connector.md) | Manual upload / CSV / S3 / SFTP escape-hatch | Connectors | AFK | 1 | 003, 013 | Ready |
 | [008](./008-ucf-graph-traversal-api.md) | UCF graph traversal query API | Catalog | AFK | 2 | 002, 006, 007 | Ready |
-| [010](./010-soc2-control-kit.md) | SCF-anchored control kit (50 SOC 2 controls) | Control-as-code | HITL | 3 | 009, 007 | Ready |
+| [010](./010-soc2-control-kit.md) | SCF-anchored control kit (50 SOC 2 controls) | Control-as-code | HITL | 5–7 | 009, 007, 014 | Ready |
 | [011](./011-manual-control-attestation.md) | Manual control type + attestation flow | Control-as-code | AFK | 1.5 | 009, 013, 036 | Ready |
 | [025](./025-auditor-role-scoped-access.md) | Auditor role + scoped read-only access | Audit | AFK | 1.5 | 033, 035 | Ready |
-| [005](./005-frontend-bootstrap.md) | Frontend bootstrap (Next.js + auth + SCF browser) | Spine | AFK | 2 | 001, 008 | Ready |
-| [012](./012-control-state-evaluation.md) | Control state evaluation engine | Control-as-code | AFK | 2.5 | 010, 013, 017 | Ready |
+| [005](./005-frontend-bootstrap.md) | Frontend bootstrap (Next.js + auth + SCF browser) | Spine | AFK | 2 | 001, 008, 034 | Ready |
+| [012](./012-control-state-evaluation.md) | Control state evaluation engine | Control-as-code | AFK | 2.5 | 010, 013, 015, 017 | Ready |
 | [039](./039-cli-release-pipeline.md) | CLI binary distribution + release pipeline | Infra | AFK | 1 | 001, 003 | Ready |
 | [026](./026-sample-pull-primitives.md) | Sample-pull primitives (Population + Sample) | Audit | AFK | 1.5 | 013, 017 | Ready |
 | [027](./027-walkthrough-recording.md) | Walkthrough recording (annotated + hash/sign) | Audit | AFK | 2 | 025, 036 | Ready |
@@ -55,12 +56,12 @@
 | [016](./016-evidence-freshness-drift.md) | Evidence freshness + drift detection | Evidence pipeline | AFK | 1.5 | 012 | Ready |
 | [020](./020-risk-control-linkage-residual.md) | Risk → control linkage + residual derivation | Risk register | AFK | 2 | 019, 012 | Ready |
 | [021](./021-exception-waiver-workflow.md) | Exception/waiver workflow + auto-expiry | Risk register | AFK | 1.5 | 019, 017 | Ready |
-| [028](./028-audit-period-freezing.md) | AuditPeriod + freezing primitive | Audit | AFK | 2 | 013, 016 | Ready |
-| [030](./030-oscal-ssp-poam-export.md) | OSCAL SSP + POA&M export pipeline | Audit | HITL | 3 | 008, 012, 017, 018, 026, 028 | Ready |
+| [028](./028-audit-period-freezing.md) | AuditPeriod + freezing primitive | Audit | AFK | 2 | 013 | Ready |
+| [030](./030-oscal-ssp-poam-export.md) | OSCAL SSP + POA&M export pipeline | Audit | HITL | 4–5 | 008, 012, 017, 018, 022, 026, 028 | Ready |
 | [031](./031-monthly-board-brief.md) | Monthly board brief (templated, no LLM) | Board | AFK | 1.5 | 012, 016, 020 | Ready |
-| [037](./037-docker-compose-self-host.md) | docker-compose self-host bundle | Infra | AFK | 1.5 | 002, 013, 034 | Ready |
+| [037](./037-docker-compose-self-host.md) | docker-compose self-host bundle | Infra | AFK | 1.5 | 002, 004, 005, 006, 010, 013, 014, 015, 034, 036 | Ready |
 | [038](./038-helm-chart.md) | Helm chart for K8s | Infra | AFK | 2 | 037 | Ready |
-| [040](./040-program-dashboard-view.md) | Program dashboard view | Frontend | AFK | 2.5 | 005, 012, 016, 020, 024 | Ready |
+| [040](./040-program-dashboard-view.md) | Program dashboard view | Frontend | AFK | 2.5 | 005, 012, 015, 016, 020, 021, 023, 024 | Ready |
 | [041](./041-control-detail-view.md) | Control detail view + UCF mini-viz | Frontend | AFK | 3 | 005, 008, 012 | Ready |
 | [042](./042-audit-workspace-view.md) | Audit workspace view (sample + walkthrough + comments) | Frontend | AFK | 2.5 | 025, 026, 027, 029 | Ready |
 | [032](./032-quarterly-board-pack.md) | Quarterly board pack + investment-vs-coverage | Board | AFK | 2.5 | 031, 030 | Ready |
@@ -68,27 +69,27 @@
 
 ## Effort by cluster
 
-| Cluster | Slices | Days |
-|---|---|---|
-| Spine | 5 | 12 |
-| Catalog & UCF graph | 3 | 5.5 |
-| Control-as-code | 4 | 9 |
-| Evidence pipeline | 4 | 8 |
-| Scope + FrameworkScope | 2 | 3.5 |
-| Risk register | 3 | 5.5 |
-| Policies | 2 | 3 |
-| Vendor lite | 1 | 1.5 |
-| Audit workflow | 6 | 11.5 |
-| Board reporting | 2 | 4 |
-| Multi-tenancy / auth | 3 | 5.5 |
-| Infra / deploy | 4 | 5.5 |
-| Frontend views | 4 | 10 |
-| Remaining connectors | 6 | 5.5 |
-| **Total** | **49** | **~90** |
+| Cluster | Slices | Days | Change |
+|---|---|---|---|
+| Spine | 5 | 12 | — |
+| Catalog & UCF graph | 3 | 5.5 | — |
+| Control-as-code | 4 | 11–13 | +2–4 (slice 010 bump) |
+| Evidence pipeline | 4 | 8 | — |
+| Scope + FrameworkScope | 2 | 3.5 | — |
+| Risk register | 3 | 5.5 | — |
+| Policies | 2 | 3 | — |
+| Vendor lite | 1 | 1.5 | — |
+| Audit workflow | 6 | 12.5–13.5 | +1–2 (slice 030 bump) |
+| Board reporting | 2 | 4 | — |
+| Multi-tenancy / auth | 3 | 6.5 | +1 (slice 034 absorbs api_keys CRUD) |
+| Infra / deploy | 4 | 5.5 | — |
+| Frontend views | 4 | 10 | — |
+| Remaining connectors | 6 | 5.5 | — |
+| **Total** | **49** | **~94–95** | **+4–7d vs initial** |
 
 ## Critical path (longest dependency chain)
 
-11 slices · ~24 day-equivalents:
+11 slices · ~28 day-equivalents (after slice 010 bump from 3d to 5–7d):
 
 ```
 001 skeleton → 002 schema → 006 SCF importer → 007 SOC 2 crosswalk →
@@ -99,11 +100,13 @@
 
 This path threads the binary v1 success test: real evidence flows → controls evaluate → audit cycle → board pack.
 
+> Note: post-review, slice 028 no longer depends on 016 (D6 decision); but 016 remains on the critical path through 012 → 016 → 028 because the dashboard's drift surface is needed before the audit cycle's freezing step in the user journey.
+
 ## Maximum parallelism
 
 After slices 001 + 002 land (~4.5 days in), up to **10 streams** can run in parallel:
 
-003 · 006 · 009 · 014 · 017 · 019 · 022 · 024 · 033 · 034 · (+ 005 after 008)
+003 · 006 · 009 · 014 · 017 · 019 · 022 · 024 · 033 · 034 · (+ 005 after 008 + 034)
 
 Realistic at 3-dev team: 3 sustained parallel streams.
 
@@ -115,7 +118,7 @@ See `Plans/canvas/11-open-questions.md` for the full list. Items most likely to 
 - **#13 Solo-operator vs multi-tenant tension** — UX-level decision affecting slices 033, 034, 037
 - **#19 FrameworkScope ownership workflow** — UX design affects slice 018
 - **#17 Schema-registry governance** — affects slice 014's community contribution flow (likely deferred to v2)
-- **#18 Push credential issuance UX** — affects slice 035's API-key UX
+- **#18 Push credential issuance UX — resolved per D4 review decision:** v1 ships **CLI-only** issuance via slice 003 (`security-atlas-cli credentials issue/rotate/revoke/list`) wrapping admin endpoints owned by slice 034 (api_keys table + CRUD). GUI deferred to v1.x. Slice 034 estimate bumped from 1.5d → 2.5d to absorb this scope.
 
 ## Quality gates self-check
 
@@ -124,11 +127,12 @@ See `Plans/canvas/11-open-questions.md` for the full list. Items most likely to 
 - ✅ Every slice cites at least one constitutional invariant (or anti-pattern rejection)
 - ✅ Every slice has explicit dependency list
 - ✅ Every slice has anti-criteria block
-- ✅ Every slice estimate in 0.5–3 day range
+- ✅ Every slice estimate in 0.5–7 day range (post-review estimates: 010 at 5–7d and 030 at 4–5d exceed the original 3d ceiling — acknowledged as more honest than artificially tight)
 - ✅ Every slice names 3–5 skill mix
 - ✅ Dependency graph is a DAG (verified)
-- ✅ Spine ordering honored (001 → 002 precedes 003 precedes 004 + 013; 005 follows 008)
+- ✅ Spine ordering honored (001 → 002 precedes 003 precedes 004 + 013; 005 follows 008 + 034)
 - ✅ No slice drifts into phase 2/3 (ISO/PCI/HIPAA/GDPR mappings, AI-assist drafting, trust center, ClickHouse, plugin marketplace, OSCAL ingest)
+- ✅ Architectural invariant 2 (ingestion/eval separation) honored from slice 013 onward via ingestion-stage-as-function path; slice 015 swaps queue substrate without changing the boundary (per D1 review decision)
 
 ## Mode markers
 

@@ -6,7 +6,7 @@
 
 ## Narrative
 
-Implement the canonical inbound API for the evidence ledger: `POST /v1/evidence:push` (REST, batch ≤100) + `Push(stream<EvidenceRecord>)` (gRPC streaming). Both wrap the same internal `IngestEvidence` call. Every accepted record is canonicalized, hashed (sha256 of canonical form), schema-validated against the schema registry (slice 014), checked for idempotency (replay protection within 24h window), scope-tagged, and written to the append-only `evidence_records` table. Every write produces a signed receipt with the hash. Records that fail any check are rejected with explicit errors and logged to the audit log. The slice delivers value because connectors (slice 004+), the CLI (slice 003), and middleware can all push real evidence and see it land queryable.
+Implement the canonical inbound API for the evidence ledger: `POST /v1/evidence:push` (REST, batch ≤100) + `Push(stream<EvidenceRecord>)` (gRPC streaming). Both wrap the same internal `IngestEvidence` call into the **ingestion stage** — a logically separate function path (`internal/evidence/ingest`) that canonicalizes, hashes (sha256 of canonical form), schema-validates against the schema registry (slice 014), checks for idempotency (replay protection within 24h window), scope-tags, and writes to the append-only `evidence_records` table. In this slice the ingestion stage is invoked **synchronously** from the API handler; slice 015 swaps in NATS JetStream as the durable buffer between API and ingestion stage without modifying the ingestion-stage function itself. The logical separation between API and ingestion honors invariant 2 from day one — slice 015 is a substrate swap, not a separation introduction. Every write produces a signed receipt with the hash. Records that fail any check are rejected with explicit errors and logged to the audit log. The slice delivers value because connectors (slice 004+), the CLI (slice 003), and middleware can all push real evidence and see it land queryable.
 
 ## Acceptance criteria
 
@@ -18,6 +18,7 @@ Implement the canonical inbound API for the evidence ledger: `POST /v1/evidence:
 - [ ] AC-6: Records with `payload > 1MB` redirect the payload to S3 (slice 036); `payload_uri` set
 - [ ] AC-7: Audit log entry for every push attempt — accepted or rejected — keyed by credential id
 - [ ] AC-8: `observed_at` more than 24h skewed from `received_at` is rejected (replay protection)
+- [ ] AC-9: Ingestion-stage logic lives in a separate `internal/evidence/ingest` package; the HTTP/gRPC handler calls `ingest.Process(ctx, record)` rather than writing the ledger directly. Slice 015 will swap this synchronous call for a NATS publish without modifying the ingestion package — verified by an integration test that asserts the package boundary holds before and after slice 015
 
 ## Constitutional invariants honored
 
