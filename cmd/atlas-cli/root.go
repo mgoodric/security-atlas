@@ -83,7 +83,7 @@ func runAdminRPC(fn func(ctx context.Context, c adminv1.AdminCredentialsServiceC
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	resp, err := fn(ctx, client)
 	if err != nil {
