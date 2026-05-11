@@ -123,7 +123,7 @@ Legal values (use exactly these strings):
 | 015 | NATS JetStream buffer + ingestion stage                | `ready`     | —                                               | —     | —          | —          | dep 013 merged                        |
 | 016 | Evidence freshness + drift detection                   | `not-ready` | —                                               | —     | —          | —          | waits on 012                          |
 | 017 | Scope dimensions + applicability_expr + single-cell    | `merged`    | scope/017-scope-dimensions-applicability        | gh#9  | 2026-05-11 | 2026-05-11 | —                                     |
-| 018 | FrameworkScope predicate + intersection compute        | `ready`     | —                                               | —     | —          | —          | open-q #19 FrameworkScope UX — gate   |
+| 018 | FrameworkScope predicate + intersection compute        | `ready`     | —                                               | —     | —          | —          | open-q #19 resolved (ADR-0001); 2d    |
 | 019 | Risk CRUD + NIST 800-30 + 5x5 + ALE-band               | `merged`    | risk/019-risk-register-crud                     | gh#10 | 2026-05-11 | 2026-05-11 | open-q #4 resolved at merge           |
 | 020 | Risk → control linkage + residual derivation           | `not-ready` | —                                               | —     | —          | —          | waits on 019, 012                     |
 | 021 | Exception/waiver workflow + auto-expiry                | `ready`     | —                                               | —     | —          | —          | deps 019, 017 merged                  |
@@ -138,11 +138,11 @@ Legal values (use exactly these strings):
 | 030 | OSCAL SSP + POA&M export pipeline                      | `not-ready` | —                                               | —     | —          | —          | waits on 008, 012, 017, 018, 026, 028 |
 | 031 | Monthly board brief (templated, no LLM)                | `not-ready` | —                                               | —     | —          | —          | waits on 012, 016, 020                |
 | 032 | Quarterly board pack + investment-vs-coverage          | `not-ready` | —                                               | —     | —          | —          | waits on 031, 030                     |
-| 033 | Postgres RLS enforcement everywhere                    | `ready`     | —                                               | —     | —          | —          | open-q #13 affects UX                 |
-| 034 | OIDC RP + local users                                  | `ready`     | —                                               | —     | —          | —          | open-q #13 affects UX                 |
+| 033 | Postgres RLS enforcement everywhere                    | `ready`     | —                                               | —     | —          | —          | open-q #13 resolved (multi-tenant v1) |
+| 034 | OIDC RP + local users                                  | `ready`     | —                                               | —     | —          | —          | open-q #13 resolved (multi-tenant v1) |
 | 035 | RBAC roles + ABAC via OPA embedded                     | `not-ready` | —                                               | —     | —          | —          | waits on 033, 034 · HITL on roles     |
 | 036 | S3 artifact store integration                          | `ready`     | —                                               | —     | —          | —          | dep 013 merged; closes 013 AC-6 gap   |
-| 037 | docker-compose self-host bundle                        | `not-ready` | —                                               | —     | —          | —          | waits on 002, 013, 034 · open-q #13   |
+| 037 | docker-compose self-host bundle                        | `not-ready` | —                                               | —     | —          | —          | waits on 034; open-q #13 resolved     |
 | 038 | Helm chart for K8s                                     | `not-ready` | —                                               | —     | —          | —          | waits on 037                          |
 | 039 | CLI binary distribution + release pipeline             | `merged`    | infra/039-cli-release-pipeline                  | gh#7  | 2026-05-11 | 2026-05-11 | —                                     |
 | 040 | Program dashboard view                                 | `not-ready` | —                                               | —     | —          | —          | waits on 005, 012, 016, 020, 024      |
@@ -164,12 +164,12 @@ Legal values (use exactly these strings):
 | 007 | SOC 2 v2017 (TSC) crosswalk loader              | catalog           | 1.5     | HITL · critical path                                         |
 | 009 | Control bundle format spec + parser + upload    | control-as-code   | 2       | unlocks 010, 011                                             |
 | 015 | NATS JetStream buffer + ingestion stage         | evidence-pipeline | 1.5     | dep 013 just merged; preserves ingestion-stage boundary      |
-| 018 | FrameworkScope predicate + intersection compute | scope             | 1.5     | open-q #19 unresolved — pick-gate                            |
+| 018 | FrameworkScope predicate + intersection compute | scope             | 2       | open-q #19 resolved (ADR-0001); estimate 1.5d → 2d           |
 | 021 | Exception/waiver workflow + auto-expiry         | risk              | 1.5     | dep 019 just merged                                          |
 | 022 | Policy library + 5 stock policies               | policies          | 2       | HITL                                                         |
 | 026 | Sample-pull primitives (Population + Sample)    | audit             | 1.5     | dep 013 just merged                                          |
-| 033 | Postgres RLS enforcement everywhere             | auth              | 2       | open-q #13; universal-conflict — solo                        |
-| 034 | OIDC RP + local users                           | auth              | 1.5     | open-q #13 — solo                                            |
+| 033 | Postgres RLS enforcement everywhere             | auth              | 2       | open-q #13 resolved; universal-conflict — solo run           |
+| 034 | OIDC RP + local users                           | auth              | 1.5     | open-q #13 resolved (multi-tenant v1)                        |
 | 036 | S3 artifact store integration                   | infra             | 1       | dep 013 merged; closes 013 AC-6 PARTIAL gap                  |
 | 044 | GitHub connector                                | connectors        | 1       | dep 013 just merged                                          |
 | 045 | Okta connector                                  | connectors        | 1       | dep 013 just merged                                          |
@@ -191,6 +191,6 @@ _None._ Parallel batch 2 fully merged 2026-05-11 in order 024 → 019 → 013. W
 - Parallel batch 1 (014 + 017 + 039) merged on 2026-05-11 in order 039 → 014 → 017.
 - Open question **#01 SCF licensing** was cleared by the time slice 006 merged.
 - Open question **#04 Risk methodology default** is **resolved** in slice 019's narrative (nist_800_30 + 5x5 + ALE-band locked in as default; FAIR pluggable for top-N risks).
-- Open question **#13 solo-vs-multi-tenant** affects slices 033, 034, 037. Worth resolving before merging 033 or 034 — batch-pick gate.
-- Open question **#19 FrameworkScope UX** affects slice 018; now-blocking since 017 has merged — batch-pick gate.
+- Open question **#13 solo-vs-multi-tenant** is **resolved** (2026-05-11): build multi-tenant from day one. The solo operator is a single-tenant deployment of the multi-tenant system. UI may hide tenant chrome when `tenant_count == 1`, but data model + authz never branch. Unblocks 033, 034, 037.
+- Open question **#19 FrameworkScope UX** is **resolved** (2026-05-11) via [`docs/adr/0001-framework-scope-workflow.md`](../adr/0001-framework-scope-workflow.md): four-state lifecycle (`draft → review → approved → activated`), in-app attestation as primary approval evidence with optional file upload, any predicate edit re-approves (strict). Unblocks 018 (estimate bumped 1.5d → 2d for the workflow scope).
 - Status changes should be committed directly to `main` as small `chore(status): NNN → <state>` commits — they're not feature work and don't need a feature branch.
