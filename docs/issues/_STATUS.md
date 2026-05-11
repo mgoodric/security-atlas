@@ -97,7 +97,7 @@ Legal values (use exactly these strings):
 | 021 | Exception/waiver workflow + auto-expiry                | `not-ready` | —                                             | —     | —           | —           | waits on 019, 017                     |
 | 022 | Policy library + 5 stock policies                      | `ready`     | —                                             | —     | —           | —           | HITL on policy text                   |
 | 023 | Policy acknowledgment workflow                         | `not-ready` | —                                             | —     | —           | —           | waits on 022, 034                     |
-| 024 | Vendor lite module                                     | `in-progress` | vendor/024-vendor-lite-module                | —     | 2026-05-11  | —           | —                                     |
+| 024 | Vendor lite module                                     | `in-review` | vendor/024-vendor-lite-module                | gh#11 | 2026-05-11  | —           | —                                     |
 | 025 | Auditor role + scoped read-only access                 | `not-ready` | —                                             | —     | —           | —           | waits on 033, 035                     |
 | 026 | Sample-pull primitives (Population + Sample)           | `not-ready` | —                                             | —     | —           | —           | waits on 013, 017                     |
 | 027 | Walkthrough recording (annotated + hash/sign)          | `not-ready` | —                                             | —     | —           | —           | waits on 025, 036                     |
