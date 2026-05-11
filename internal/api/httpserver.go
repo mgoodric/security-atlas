@@ -15,11 +15,13 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
+	fwscopesapi "github.com/mgoodric/security-atlas/internal/api/frameworkscopes"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
 	"github.com/mgoodric/security-atlas/internal/api/vendors"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/vendor"
@@ -95,6 +97,25 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/vendors/{id}", vendorsH.GetVendor)
 	root.Patch("/v1/vendors/{id}", vendorsH.UpdateVendor)
 	root.Delete("/v1/vendors/{id}", vendorsH.DeleteVendor)
+	// Slice 018: FrameworkScope predicate + four-state workflow + intersection
+	// compute. Routes appended per the parallel-batch convention (chi rejects
+	// two Mounts at "/"). The /effective-scope route lives under
+	// /v1/controls/{id}/ alongside the slice-017 /applicability route.
+	fwH := fwscopesapi.New(
+		frameworkscope.NewStore(s.dbPool),
+		scope.NewStore(s.dbPool),
+	)
+	root.Post("/v1/framework-scopes", fwH.Create)
+	root.Get("/v1/framework-scopes", fwH.List)
+	// Sub-resource transitions are PATCH, distinct from the generic PATCH
+	// on /v1/framework-scopes/{id} (which edits predicate). chi resolves
+	// the literal-segment routes first within the same method.
+	root.Patch("/v1/framework-scopes/{id}/submit", fwH.Submit)
+	root.Patch("/v1/framework-scopes/{id}/approve", fwH.Approve)
+	root.Patch("/v1/framework-scopes/{id}/activate", fwH.Activate)
+	root.Get("/v1/framework-scopes/{id}", fwH.Get)
+	root.Patch("/v1/framework-scopes/{id}", fwH.Patch)
+	root.Get("/v1/controls/{id}/effective-scope", fwH.EffectiveScope)
 	return root
 }
 

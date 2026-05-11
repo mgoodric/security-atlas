@@ -11,9 +11,20 @@ import (
 )
 
 type Querier interface {
+	// AC-8: approved -> activated. The caller must supply effective_from
+	// (timestamptz). The application supersedes the prior `activated` row in
+	// the same transaction by calling SupersedePreviousActivated below; both
+	// statements run inside one tx so the partial unique index never sees
+	// two `activated` rows at once.
+	ActivateFrameworkScope(ctx context.Context, arg ActivateFrameworkScopeParams) (FrameworkScope, error)
 	// Idempotent: ON CONFLICT DO NOTHING because the PK already enforces no
 	// duplicates, so re-adding is a no-op.
 	AddVendorScopeCell(ctx context.Context, arg AddVendorScopeCellParams) error
+	// AC-7: review -> approved. Records approver_user_id, approved_at, and the
+	// predicate_hash captured at this moment so a later predicate edit can prove
+	// "the approval was for THIS text, not the current text" (ADR-0001 §positive).
+	// Optional approval-evidence file URL + hash are passed by the handler.
+	ApproveFrameworkScope(ctx context.Context, arg ApproveFrameworkScopeParams) (FrameworkScope, error)
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
 	CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
@@ -25,6 +36,21 @@ type Querier interface {
 	// Returns one row per criticality present in the result set; empty bands are
 	// not included (callers fill in zero where needed).
 	CountVendorsForBurndown(ctx context.Context, arg CountVendorsForBurndownParams) ([]CountVendorsForBurndownRow, error)
+	// Slice 018: FrameworkScope predicate + four-state workflow queries.
+	//
+	// Conventions match slice 014/017/019:
+	//   * `tenant_id` is always the first parameter (RLS reads it via the GUC,
+	//     but we additionally pass it explicitly so query plans use the index).
+	//   * Time-sensitive transitions (`now()`) are issued by the DB so the
+	//     application doesn't have to choose a clock.
+	//   * Workflow transition queries use guarded UPDATEs (`AND state = '<from>'`)
+	//     so concurrent transitions fail loudly with rowcount=0 rather than
+	//     silently overwriting state.
+	// Insert a new framework_scope row in `draft` state. The predicate is the
+	// canonicalized JSON the application produced; predicate_hash is sha256 of
+	// the same JSON (the application computes and passes both to keep the DB
+	// trigger comparison cheap).
+	CreateFrameworkScope(ctx context.Context, arg CreateFrameworkScopeParams) (FrameworkScope, error)
 	// Insert a new risk. The application validates methodology-specific
 	// inherent_score and per-treatment required fields BEFORE calling this.
 	// DB-side CHECK constraints (slice 019) are defense-in-depth, not the
@@ -41,12 +67,20 @@ type Querier interface {
 	// INSERT WITH CHECK policy. dpa_signed_at is required by CHECK constraint
 	// whenever dpa_signed=true.
 	CreateVendor(ctx context.Context, arg CreateVendorParams) (Vendor, error)
+	// Used by tests + cleanup paths. Production deployments will rarely delete
+	// a scope (supersession is the lifecycle exit); the row is preserved as
+	// audit trail.
+	DeleteFrameworkScope(ctx context.Context, arg DeleteFrameworkScopeParams) error
 	DeleteRisk(ctx context.Context, arg DeleteRiskParams) error
 	DeleteVendor(ctx context.Context, arg DeleteVendorParams) error
 	// Flip every "current" framework_version for the given framework to "legacy"
 	// so a new release can take over without violating the at-most-one-current
 	// invariant. Caller scopes the transaction.
 	DemoteCurrentFrameworkVersions(ctx context.Context, frameworkID pgtype.UUID) error
+	// Returns the currently-active framework scope for a given framework version,
+	// i.e. the (at most one) row in state `activated` for that (tenant, fv) pair.
+	// AC-3: a partial UNIQUE index guarantees at most one row matches.
+	GetActivatedFrameworkScope(ctx context.Context, arg GetActivatedFrameworkScopeParams) (FrameworkScope, error)
 	// Returns the JSON-encoded applicability_expr for a single control. The column
 	// is TEXT (slice 002); slice 017 stores JSON in that text.
 	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)
@@ -63,6 +97,12 @@ type Querier interface {
 	// (tenant_id, idempotency_key)?". Returns at most one row because the
 	// partial UNIQUE index `evidence_records_tenant_idem_uniq` enforces it.
 	GetEvidenceRecordByIdempotency(ctx context.Context, arg GetEvidenceRecordByIdempotencyParams) (EvidenceRecord, error)
+	// AC-13: historical query — return the row that was the active scope at the
+	// supplied timestamp. The row whose effective_from <= as_of AND (the row was
+	// not yet superseded at as_of OR was never superseded).
+	// ORDER BY effective_from DESC LIMIT 1 picks the most-recent applicable row.
+	GetFrameworkScopeAsOf(ctx context.Context, arg GetFrameworkScopeAsOfParams) (FrameworkScope, error)
+	GetFrameworkScopeByID(ctx context.Context, arg GetFrameworkScopeByIDParams) (FrameworkScope, error)
 	GetRiskByID(ctx context.Context, arg GetRiskByIDParams) (Risk, error)
 	GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnchor, error)
 	// Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
@@ -136,6 +176,12 @@ type Querier interface {
 	// on observed_at lets the evaluator stream historical state without
 	// worrying about UPDATEs since slice 002.
 	ListEvidenceRecordsByControl(ctx context.Context, arg ListEvidenceRecordsByControlParams) ([]EvidenceRecord, error)
+	// Newest first. Caller filters by framework_version + state in the
+	// application layer because sqlc-static optional WHERE is noisy; the row
+	// count per tenant is bounded by (#frameworks × scope-versions) which stays
+	// under a few hundred for any realistic deployment.
+	ListFrameworkScopes(ctx context.Context, tenantID pgtype.UUID) ([]FrameworkScope, error)
+	ListFrameworkScopesByFrameworkVersion(ctx context.Context, arg ListFrameworkScopesByFrameworkVersionParams) ([]FrameworkScope, error)
 	ListFrameworkVersionsBySlug(ctx context.Context, slug string) ([]FrameworkVersion, error)
 	ListFrameworks(ctx context.Context) ([]Framework, error)
 	// AC-4 overdue calc — vendors whose last_review_date + cadence is older than
@@ -171,7 +217,21 @@ type Querier interface {
 	ListVendors(ctx context.Context, arg ListVendorsParams) ([]Vendor, error)
 	// Point a framework at its current version.
 	SetLatestVersion(ctx context.Context, arg SetLatestVersionParams) error
+	// AC-6: draft -> review. Guarded so callers can never re-submit an already
+	// under-review row by accident (would still be valid but masks bugs).
+	SubmitFrameworkScope(ctx context.Context, arg SubmitFrameworkScopeParams) (FrameworkScope, error)
+	// AC-8: in the same transaction as ActivateFrameworkScope, transition the
+	// previously-activated row (if any) to `superseded`, point its
+	// superseded_by at the new row, stamp superseded_at = now(). Skips the
+	// new row itself (id <> @new_id) so a re-running activation is idempotent.
+	SupersedePreviousActivated(ctx context.Context, arg SupersedePreviousActivatedParams) error
 	UnlinkRiskControl(ctx context.Context, arg UnlinkRiskControlParams) error
+	// Patch the predicate. The BEFORE UPDATE trigger
+	// (framework_scopes_bounce_on_predicate_change_trg) ensures that if this row
+	// was in `review` or `approved`, NEW.state falls back to `draft` and the
+	// approval columns are nulled. Application code reads back the row state to
+	// surface the `approval_invalidated` banner per AC-9.
+	UpdateFrameworkScopePredicate(ctx context.Context, arg UpdateFrameworkScopePredicateParams) (FrameworkScope, error)
 	// Full-update path (PATCH handler reads existing, mutates fields, writes).
 	// updated_at is set explicitly so the schema's per-row default doesn't
 	// silently keep stale values.

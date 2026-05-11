@@ -339,9 +339,20 @@ func TestSchema_TenantScopedTablesAcceptInserts(t *testing.T) {
 			t.Fatalf("INSERT policies: %v", err)
 		}
 
+		// Slice 018 reshaped framework_scopes: state, predicate (jsonb),
+		// predicate_hash are now NOT NULL with no default. Supply the
+		// canonical-true predicate and its sha256 hash so the row inserts
+		// cleanly under the slice-014 four-policy RLS.
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO framework_scopes (id, tenant_id, framework_version_id, name)
-			VALUES ($1, $2, $3, 'Q3 2026 audit boundary')
+			INSERT INTO framework_scopes (
+				id, tenant_id, framework_version_id, name,
+				state, predicate, predicate_hash
+			)
+			VALUES (
+				$1, $2, $3, 'Q3 2026 audit boundary',
+				'draft', '{"op":"true"}'::jsonb,
+				encode(sha256('{"op":"true"}'::bytea), 'hex')
+			)
 		`, uuid.NewString(), tenant, frameworkVersionID); err != nil {
 			t.Fatalf("INSERT framework_scopes: %v", err)
 		}

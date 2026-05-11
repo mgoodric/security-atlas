@@ -13,6 +13,41 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 018 — FrameworkScope predicate + four-state workflow +
+  intersection compute.** New `framework_scopes` workflow gates the
+  audit-binding scope predicate behind
+  `draft → review → approved → activated → superseded`, implemented per
+  [`docs/adr/0001-framework-scope-workflow.md`](docs/adr/0001-framework-scope-workflow.md).
+  Schema migration `20260511000007_framework_scopes_workflow.sql`
+  reshapes the slice-002 table: predicate becomes JSONB,
+  `predicate_hash` is sha256-of-canonical-JSON, approval/activation
+  columns split per ADR. A `BEFORE UPDATE` trigger
+  (`framework_scopes_bounce_on_predicate_change_trg`) bounces any row
+  in `review`/`approved` back to `draft` and nulls approval columns
+  when `predicate_hash` changes — verified by
+  `TestPredicateEditBouncesApproved`. A partial unique index
+  (`framework_scopes_one_active`) guarantees one `activated` row per
+  `(tenant_id, framework_version_id)`. New REST endpoints
+  `POST /v1/framework-scopes`, `GET /v1/framework-scopes`,
+  `PATCH /v1/framework-scopes/{id}` (predicate edit + invalidation
+  banner), and the workflow transitions
+  `PATCH /v1/framework-scopes/{id}/{submit,approve,activate}`.
+  Approver-role gate via new `Credential.IsApprover` flag + sibling
+  `IssueApprover` minted via `IssueBootstrapApproverCredential` (slice
+  035 graduates this to OPA RBAC). Canvas-§5.5 intersection compute
+  lands at `GET /v1/controls/{id}/effective-scope?framework_version=…`
+  — returns `control.applicability_expr ∩ framework_scope.predicate`;
+  out-of-scope controls return empty `effective_scope` (downstream
+  coverage interprets as `n/a`, never `fail`). Next.js page at
+  `/framework-scopes/{framework_version_id}` lists current + historical
+  rows with state badges, an inline predicate editor, and an
+  effective-from picker on activate. Optional approval-evidence file
+  upload (URL + sha256 hex) is recorded verbatim — the file's signature
+  is the auditor's domain and the platform deliberately does not
+  pretend to verify it. Multi-tenant from day one (no
+  `tenant_count == 1` branching) per the recently-resolved canvas
+  open-q #13.
+
 - **Slice 013 — Evidence ledger write API + push endpoint.** New
   `POST /v1/evidence:push` REST endpoint (single record or batch up to 100) and refactored gRPC `EvidenceIngestService.Push` both wrap the
   same canonical ingestion stage in
