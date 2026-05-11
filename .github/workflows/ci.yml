@@ -60,8 +60,6 @@ jobs:
         with:
           go-version: "1.24"
           cache: true
-      - name: Install Atlas CLI
-        run: curl -sSfL https://atlasgo.sh | sh -s -- --community
       - name: Bootstrap roles
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
       - name: Set role passwords (CI-scoped)
@@ -69,25 +67,26 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
             -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
           echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
-      - name: Regenerate Atlas hash + apply migrations
+      - name: Apply forward migrations
         run: |
-          atlas migrate hash --dir file://migrations/sql
-          atlas migrate apply -c file://migrations/atlas.hcl --env local
+          for f in migrations/sql/*.sql; do
+            case "$f" in
+              *.down.sql) ;;
+              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
+            esac
+          done
       - name: Run integration tests
         run: go test -tags=integration -race -v ./internal/db/...
       - name: Migration round-trip — down then up
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/sql/20260511000000_init.down.sql
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP TABLE IF EXISTS atlas_schema_revisions"
-          # Verify no user tables / enum types remain.
           remaining_tables=$(psql "$DATABASE_URL" -t -A -c "SELECT count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r'")
           remaining_types=$(psql "$DATABASE_URL" -t -A -c "SELECT count(*) FROM pg_type WHERE typnamespace = 'public'::regnamespace AND typtype = 'e'")
           if [ "$remaining_tables" != "0" ] || [ "$remaining_types" != "0" ]; then
             echo "down migration left $remaining_tables tables + $remaining_types enums"
             exit 1
           fi
-          # Re-apply forward to prove up→down→up cleanliness.
-          atlas migrate apply -c file://migrations/atlas.hcl --env local
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/sql/20260511000000_init.sql
 
   lint-go:
     name: Go · lint

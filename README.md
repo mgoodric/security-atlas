@@ -12,7 +12,6 @@ Open-source GRC platform — a control-graph + evidence-pipeline for security pr
 - Node.js 20+
 - Python 3.11+ (for `oscal-bridge` and ruff)
 - Postgres 16+ (for migrations + integration tests) — `brew install postgresql@16` or via Docker
-- [`atlas`](https://atlasgo.io) (declarative migrations) — `brew install ariga/tap/atlas`
 - [`sqlc`](https://docs.sqlc.dev) (type-safe Go from SQL) — `brew install sqlc`
 - [`just`](https://just.systems) — `brew install just`
 - [`pre-commit`](https://pre-commit.com) — `pip install pre-commit`
@@ -85,7 +84,7 @@ After `just install-hooks`, commits with malformed Go (or unformatted YAML / JSO
 | `oscal-bridge/`                             | Python service wrapping `compliance-trestle`                                                              | slice 030                           |
 | `proto/`                                    | gRPC protobuf definitions                                                                                 | slice 003                           |
 | `schemas/`                                  | JSON Schemas for `evidence_kind`                                                                          | slice 014                           |
-| `migrations/`                               | Versioned SQL migrations + Atlas config + role bootstrap                                                  | slice 002                           |
+| `migrations/`                               | Versioned SQL migrations + role bootstrap (psql-applied in slice 002; tracker tool TBD)                   | slice 002                           |
 | `policies/`                                 | OPA Rego (authz + control policies)                                                                       | slice 035                           |
 | `deploy/docker/` `deploy/helm/`             | Deployment artifacts                                                                                      | slices 037, 038                     |
 

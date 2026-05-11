@@ -92,26 +92,21 @@ tidy:
 # Integration tests use it.
 # ATLAS_DEV_URL is a separate ephemeral Postgres for `atlas migrate diff`.
 
-# Apply bootstrap roles then run versioned Atlas migrations
+# Apply bootstrap roles, then the versioned SQL migrations in order.
+# Plain psql for slice 002 — one migration doesn't justify a versioning tool.
+# A real migration runner lands when slice N adds the second migration.
 migrate-up:
     psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
-    atlas migrate hash --dir file://migrations/sql
-    atlas migrate apply -c file://migrations/atlas.hcl --env local
+    for f in migrations/sql/*.sql; do \
+        case "$f" in *.down.sql) ;; *) \
+            echo "applying $f"; \
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; \
+        ;; esac; \
+    done
 
-# Roll back the most recent migration. Atlas OSS does not automate `down`
-# the same way as `up`; we apply the hand-authored .down.sql via psql and
-# rewind Atlas's revision tracker manually.
+# Roll back: apply the latest .down.sql in reverse-timestamp order.
 migrate-down:
     psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/sql/20260511000000_init.down.sql
-    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP TABLE IF EXISTS atlas_schema_revisions"
-
-# Atlas migration status (which migrations applied, which pending)
-migrate-status:
-    atlas migrate status -c file://migrations/atlas.hcl --env local
-
-# Atlas migration hash regeneration (run before adding a new migration)
-migrate-hash:
-    atlas migrate hash --dir file://migrations/sql
 
 # Start a local Postgres 16 in Docker for development
 db-up:
