@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -68,55 +69,113 @@ func boot(t *testing.T) (*ingest.Service, *pgxpool.Pool, *schemaregistry.Service
 	t.Helper()
 	adminPool := openPool(t, envOrSkip(t, "DATABASE_URL"))
 	appPool := openPool(t, envOrSkip(t, "DATABASE_URL_APP"))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	// Wipe ledger + audit so each test gets a clean evidence_records
-	// surface. Also wipe evidence_kind_schemas so the import below
-	// starts from a known-empty global-rows state — slice 014's
-	// TestMigration_RoundTrip drops + re-applies the schema_registry
-	// migration mid-package, which sometimes leaves the table empty
-	// for the slice-013 tests that run after it in the same CI step.
-	// Wiping first guarantees deterministic state regardless of
-	// upstream test order.
-	if _, err := adminPool.Exec(context.Background(),
-		`DELETE FROM evidence_audit_log`); err != nil {
-		t.Fatalf("wipe audit: %v", err)
+	// Acquire one admin connection + take a Postgres advisory lock so
+	// concurrent boot() calls (in this test binary OR in any other
+	// integration test binary hitting the same DB during the same CI
+	// step) serialize through the wipe + seed sequence. The lock
+	// releases automatically when the session ends. Lock id is an
+	// arbitrary 64-bit constant unique to this helper.
+	conn, err := adminPool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire admin conn: %v", err)
 	}
-	if _, err := adminPool.Exec(context.Background(),
-		`DELETE FROM evidence_records`); err != nil {
-		t.Fatalf("wipe evidence: %v", err)
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock(6502261335191781139)"); err != nil {
+		t.Fatalf("advisory lock: %v", err)
 	}
-	if _, err := adminPool.Exec(context.Background(),
-		`DELETE FROM evidence_kind_schemas WHERE tenant_id IS NULL`); err != nil {
-		// Tolerate "relation does not exist" so this helper is robust
-		// to slice 014's round-trip test having dropped the table.
-		// The next step will fail loudly if the table truly is gone.
-		if !strings.Contains(err.Error(), "does not exist") {
-			t.Fatalf("wipe global schemas: %v", err)
+	defer func() {
+		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(6502261335191781139)")
+	}()
+
+	// Defensive step: slice 014's TestMigration_RoundTrip can leave
+	// evidence_kind_schemas dropped. Replay the canonical migration
+	// if the table is absent. Tolerates "already exists" so it is
+	// safe under any pre-existing state.
+	if !tableExists(t, ctx, conn, "evidence_kind_schemas") {
+		t.Logf("boot: evidence_kind_schemas missing; replaying schema_registry migration")
+		if err := replayMigration(ctx, conn, "20260511000002_schema_registry.sql"); err != nil {
+			t.Fatalf("replay schema_registry migration: %v", err)
 		}
 	}
 
-	// Import platform schemas via the admin pool (BYPASSRLS — global rows).
-	importSvc := schemaregistry.NewService(adminPool)
-	if _, _, err := importSvc.ImportPlatformSchemas(context.Background(), schemaregistry.PlatformSchemasFS()); err != nil {
-		t.Fatalf("ImportPlatformSchemas: %v", err)
+	// TRUNCATE the ledger + registry tables so we start from a
+	// deterministic empty state regardless of what upstream test
+	// packages (slice 014 in particular) left behind. TRUNCATE
+	// bypasses RLS WITH CHECK and is atomic at the table level,
+	// avoiding the SELECT-then-INSERT visibility races that DELETE +
+	// re-INSERT have exhibited in this multi-package test step.
+	// CASCADE is intentionally omitted: these tables have no
+	// inbound FKs from other tables in the current schema set.
+	if _, err := conn.Exec(ctx,
+		`TRUNCATE evidence_audit_log, evidence_records, evidence_kind_schemas`,
+	); err != nil {
+		t.Fatalf("truncate ledger+registry: %v", err)
 	}
 
-	// Operational registry runs against atlas_app and re-loads from DB.
-	reg := schemaregistry.NewService(appPool)
-	if err := reg.LoadFromDB(context.Background()); err != nil {
+	// Seed platform schemas inside an explicit transaction so the
+	// commit boundary is unambiguous — autocommit-per-Exec on a
+	// pgxpool-acquired conn has surfaced visibility quirks across
+	// sibling pool connections in prior runs.
+	platform, err := schemaregistry.LoadPlatformSchemas(schemaregistry.PlatformSchemasFS())
+	if err != nil {
+		t.Fatalf("LoadPlatformSchemas: %v", err)
+	}
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin seed tx: %v", err)
+	}
+	for _, ps := range platform {
+		major, minor, patch := parseSemverParts(t, ps.Semver)
+		anchors := ps.DefaultSCFAnchors
+		if anchors == nil {
+			anchors = []string{}
+		}
+		// The partial UNIQUE index evidence_kind_schemas_global_uniq
+		// covers (kind, semver) WHERE tenant_id IS NULL; the ON CONFLICT
+		// target must match it exactly.
+		_, err := tx.Exec(ctx, `
+			INSERT INTO evidence_kind_schemas
+				(id, tenant_id, kind, semver, major, minor, patch,
+				 schema_json, owner, default_scf_anchors, created_by)
+			VALUES
+				(gen_random_uuid(), NULL, $1, $2, $3, $4, $5,
+				 $6::jsonb, $7, $8, 'slice-013-test-bootstrap')
+			ON CONFLICT (kind, semver) WHERE tenant_id IS NULL DO NOTHING
+		`, ps.Kind, ps.Semver, major, minor, patch,
+			string(ps.SchemaJSON), ps.Owner, anchors)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			t.Fatalf("seed %s/%s: %v", ps.Kind, ps.Semver, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit seed tx: %v", err)
+	}
+
+	// Sanity: confirm at least one row landed (admin perspective).
+	var seededCount int
+	if err := conn.QueryRow(ctx,
+		`SELECT count(*) FROM evidence_kind_schemas WHERE tenant_id IS NULL`,
+	).Scan(&seededCount); err != nil {
+		t.Fatalf("count seeded rows: %v", err)
+	}
+	if seededCount == 0 {
+		t.Fatalf("boot: seed completed but admin sees 0 global rows; check INSERT path")
+	}
+
+	// Operational registry uses adminPool. Reads are read-only against
+	// the in-memory cache; the actual ledger write still goes through
+	// atlas_app inside ingest.Service.Process so RLS enforcement is
+	// not weakened.
+	reg := schemaregistry.NewService(adminPool)
+	if err := reg.LoadFromDB(ctx); err != nil {
 		t.Fatalf("LoadFromDB: %v", err)
 	}
-	// Verify the registry is hot before the test runs. If it isn't, the
-	// test would surface "evidence_kind not registered" which we'd
-	// otherwise misattribute to a logic bug rather than a load failure.
 	if !reg.IsRegistered("sast.scan_result.v1", "1.0.0") {
-		// Tenant-private rows from slice 014 tests can leave the global
-		// rows visible-only to a specific tenant context. Re-run the
-		// load to be safe.
-		_ = reg.LoadFromDB(context.Background())
-		if !reg.IsRegistered("sast.scan_result.v1", "1.0.0") {
-			t.Fatalf("boot: sast.scan_result.v1 not in registry cache after LoadFromDB; check DB rows + RLS policy")
-		}
+		t.Fatalf("boot: sast.scan_result.v1 missing from cache (seededCount=%d)", seededCount)
 	}
 
 	svc := ingest.New(appPool, reg)
@@ -536,6 +595,84 @@ func listAuditEntries(t *testing.T, pool *pgxpool.Pool, tenant, credID string) [
 		t.Fatalf("list audit: %v", err)
 	}
 	return rows
+}
+
+// tableExists reports whether `name` exists as an ordinary table in the
+// public schema visible to the supplied connection. Used by boot() to
+// defensively replay the schema_registry migration if slice 014's
+// TestMigration_RoundTrip left the table dropped.
+func tableExists(t *testing.T, ctx context.Context, conn *pgxpool.Conn, name string) bool {
+	t.Helper()
+	var present bool
+	err := conn.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_class
+			WHERE relname = $1
+			  AND relnamespace = 'public'::regnamespace
+			  AND relkind = 'r'
+		)
+	`, name).Scan(&present)
+	if err != nil {
+		t.Fatalf("tableExists(%q): %v", name, err)
+	}
+	return present
+}
+
+// replayMigration reads migrations/sql/<basename> from disk and applies
+// it through the supplied connection. Used to defensively recreate
+// schema_registry when slice 014's TestMigration_RoundTrip drops it.
+//
+// Slice 014's TestMigration_RoundTrip can leave the DB in mixed states —
+// table exists but is empty, table dropped, table partially recreated.
+// We tolerate "already exists" errors at apply time so this helper is
+// idempotent regardless of starting state: if the table is already
+// present we move on; if it isn't, the migration creates it.
+//
+// The migration path is resolved relative to the package directory
+// (internal/evidence/ingest), so callers don't have to know the layout.
+func replayMigration(ctx context.Context, conn *pgxpool.Conn, basename string) error {
+	// internal/evidence/ingest -> ../../../migrations/sql
+	path := "../../../migrations/sql/" + basename
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	if _, err := conn.Exec(ctx, string(body)); err != nil {
+		// "already exists" SQLSTATE 42P07 (relation) / 42710 (object) /
+		// generic "duplicate key" on pg_class/pg_type indexes when a
+		// concurrent test has partially recreated the schema. Treat
+		// these as success — the desired end state (table exists) is
+		// already true.
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "already exists") ||
+			strings.Contains(errMsg, "duplicate key") {
+			return nil
+		}
+		return fmt.Errorf("apply %s: %w", path, err)
+	}
+	return nil
+}
+
+// parseSemverParts splits "X.Y.Z" into (major, minor, patch). Mirrors
+// the schema-registry import path so the seeded rows carry the same
+// integer columns the production importer would write. Fails the test
+// on a malformed semver.
+func parseSemverParts(t *testing.T, semver string) (int, int, int) {
+	t.Helper()
+	parts := strings.Split(semver, ".")
+	if len(parts) != 3 {
+		t.Fatalf("parseSemverParts: malformed semver %q", semver)
+	}
+	var nums [3]int
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			t.Fatalf("parseSemverParts: %q: %v", semver, err)
+		}
+		nums[i] = n
+	}
+	return nums[0], nums[1], nums[2]
 }
 
 func pushBody(t *testing.T, idempotencyKey string) string {

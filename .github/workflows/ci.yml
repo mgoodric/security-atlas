@@ -76,8 +76,15 @@ jobs:
             esac
           done
       - name: Run integration tests
+        # `-p 1` serializes test packages so multiple binaries do not
+        # race on the shared Postgres test database. The db,
+        # schemaregistry, and evidence/ingest packages share rows in
+        # evidence_kind_schemas and evidence_records; running them
+        # concurrently surfaces duplicate-key + missing-relation errors
+        # that disappear under serial execution. Local reproducer:
+        #   go test -tags=integration -race -p 1 ./internal/...
         run: |
-          go test -tags=integration -race -v \
+          go test -tags=integration -race -p 1 -v \
             ./internal/db/... \
             ./internal/api/scfimport/... \
             ./internal/api/anchors/... \
