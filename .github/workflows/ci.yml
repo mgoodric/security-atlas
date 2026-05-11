@@ -101,6 +101,21 @@ jobs:
         with:
           version: latest
 
+  proto:
+    name: Proto · lint + generate diff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+      - name: Lint protos
+        run: buf lint
+      - name: Generate Go bindings + assert no diff
+        run: |
+          buf generate
+          git diff --exit-code -- gen/proto || (echo "gen/proto changed; run 'just proto-generate' locally and commit" && exit 1)
+
   build-frontend:
     name: Frontend · install + build
     runs-on: ubuntu-latest
