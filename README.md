@@ -36,33 +36,32 @@ After `just install-hooks`, commits with malformed Go (or unformatted YAML / JSO
 
 ## Task surface (`just`)
 
-| Recipe                  | What it does                                                          |
-| ----------------------- | --------------------------------------------------------------------- |
-| `just`                  | List all recipes                                                      |
-| `just db-up`            | Start a local Postgres 16 in Docker                                   |
-| `just db-down`          | Tear down the local Postgres                                          |
-| `just migrate-up`       | Bootstrap roles + apply Atlas migrations (requires `$DATABASE_URL`)   |
-| `just migrate-down`     | Roll back the latest migration (uses hand-authored `.down.sql`)       |
-| `just migrate-status`   | Atlas migration revision status                                       |
-| `just sqlc-generate`    | Run `sqlc generate` against the schema                                |
-| `just test-integration` | Run integration tests (requires `$DATABASE_URL_APP`)                  |
-| `just build`            | Build all components (Go + frontend)                                  |
-| `just build-go`         | Build Go binaries only                                                |
-| `just build-frontend`   | Build the `web/` workspace                                            |
-| `just test`             | Run all tests                                                         |
-| `just test-go`          | Run Go tests (`go test -race ./...` in CI)                            |
-| `just test-frontend`    | Run frontend tests                                                    |
-| `just lint`             | Run all linters (Go + frontend + Python)                              |
-| `just lint-go`          | `golangci-lint run ./...`                                             |
-| `just lint-frontend`    | `npm run lint` in `web/`                                              |
-| `just lint-python`      | `ruff check .`                                                        |
-| `just fmt`              | Format all code (in-place)                                            |
-| `just fmt-go`           | `gofmt -w` + `goimports -w -local github.com/mgoodric/security-atlas` |
-| `just fmt-python`       | `ruff format .`                                                       |
-| `just install-hooks`    | Install pre-commit hooks (one-time)                                   |
-| `just hooks-run`        | Run pre-commit against the whole tree                                 |
-| `just tidy`             | `go mod tidy` and fail if `go.mod`/`go.sum` change                    |
-| `just ci`               | Run what CI runs (lint + test + build)                                |
+| Recipe                  | What it does                                                              |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `just`                  | List all recipes                                                          |
+| `just db-up`            | Start a local Postgres 16 in Docker                                       |
+| `just db-down`          | Tear down the local Postgres                                              |
+| `just migrate-up`       | Bootstrap roles + apply forward SQL migrations (requires `$DATABASE_URL`) |
+| `just migrate-down`     | Apply the latest reverse migration                                        |
+| `just sqlc-generate`    | Run `sqlc generate` against the schema                                    |
+| `just test-integration` | Run integration tests (requires `$DATABASE_URL_APP`)                      |
+| `just build`            | Build all components (Go + frontend)                                      |
+| `just build-go`         | Build Go binaries only                                                    |
+| `just build-frontend`   | Build the `web/` workspace                                                |
+| `just test`             | Run all tests                                                             |
+| `just test-go`          | Run Go tests (`go test -race ./...` in CI)                                |
+| `just test-frontend`    | Run frontend tests                                                        |
+| `just lint`             | Run all linters (Go + frontend + Python)                                  |
+| `just lint-go`          | `golangci-lint run ./...`                                                 |
+| `just lint-frontend`    | `npm run lint` in `web/`                                                  |
+| `just lint-python`      | `ruff check .`                                                            |
+| `just fmt`              | Format all code (in-place)                                                |
+| `just fmt-go`           | `gofmt -w` + `goimports -w -local github.com/mgoodric/security-atlas`     |
+| `just fmt-python`       | `ruff format .`                                                           |
+| `just install-hooks`    | Install pre-commit hooks (one-time)                                       |
+| `just hooks-run`        | Run pre-commit against the whole tree                                     |
+| `just tidy`             | `go mod tidy` and fail if `go.mod`/`go.sum` change                        |
+| `just ci`               | Run what CI runs (lint + test + build)                                    |
 
 ---
 
