@@ -122,7 +122,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing `file` form part")
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Read the whole body. We hash twice — once here for the
 	// PutInput.ContentHash field (so the store can defence-in-depth

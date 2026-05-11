@@ -89,11 +89,11 @@ type PutInput struct {
 // PresignedDownload is what Store.GetPresigned returns: the metadata
 // (so callers can render filename/size/type) plus the time-bounded URL.
 type PresignedDownload struct {
-	Artifact    Artifact
-	URL         string
-	ExpiresAt   time.Time
-	TTLSeconds  int64
-	PayloadURI  string // canonical s3:// URI for reference
+	Artifact   Artifact
+	URL        string
+	ExpiresAt  time.Time
+	TTLSeconds int64
+	PayloadURI string // canonical s3:// URI for reference
 }
 
 // Errors surfaced by the Store. Handlers map them to HTTP codes.

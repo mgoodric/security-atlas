@@ -49,29 +49,11 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
-      minio:
-        # Slice 036 S3 artifact store. MinIO is the open-source
-        # S3-compatible backend; integration tests run against it on
-        # the same Actions runner network. Credentials are workflow-
-        # ephemeral (production rotates real S3 IAM creds).
-        #
-        # The `bitnami/minio` image is used because it accepts the server
-        # arguments via env vars (MINIO_DEFAULT_BUCKETS), letting us bind
-        # GitHub Actions service-container semantics without an entrypoint
-        # override (which Actions doesn't expose cleanly).
-        image: bitnami/minio:latest
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-          MINIO_DEFAULT_BUCKETS: atlas-artifacts-test
-        ports:
-          - 9000:9000
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 20
-          --health-start-period 15s
+      # Slice 036 MinIO is started as a workflow step below rather than a
+      # `services:` entry because GitHub Actions service containers do not
+      # support a `command` / args override, and the official
+      # `minio/minio` image needs `server /data` passed explicitly. Started
+      # via `docker run` in the `Start MinIO` step.
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable
       # The app role's password is set by a step below from a workflow-scoped
@@ -88,6 +70,25 @@ jobs:
         with:
           go-version: "1.25"
           cache: true
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+          # Wait for readiness (up to ~60s).
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/live; then
+              echo "minio ready"; break
+            fi
+            sleep 2
+          done
+          # Create the test bucket using a short-lived mc container on the
+          # same docker network. The MinIO admin client (`mc`) is the
+          # canonical bucket-bootstrap tool.
+          docker run --rm --network host minio/mc \
+            sh -c "mc alias set local http://localhost:9000 minioadmin minioadmin && mc mb -p local/atlas-artifacts-test"
       - name: Bootstrap roles
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
       - name: Set role passwords (CI-scoped)
