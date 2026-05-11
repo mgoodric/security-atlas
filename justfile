@@ -120,9 +120,14 @@ db-up:
 db-down:
     docker rm -f security-atlas-pg
 
-# Generate sqlc code (no queries yet in slice 002 — canary that the schema parses)
+# Generate sqlc code from the migration schema + queries
 sqlc-generate:
     sqlc generate
+
+# Import an SCF catalog JSON release into Postgres. DATABASE_URL must point
+# at a role with INSERT on scf_anchors (atlas_migrate by default).
+import-scf path:
+    go run ./cmd/atlas-cli catalog import-scf "{{path}}"
 
 # ----- Connectors -----
 

@@ -15,6 +15,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	adminv1 "github.com/mgoodric/security-atlas/gen/proto/admin/v1"
 	connectorsv1 "github.com/mgoodric/security-atlas/gen/proto/connectors/v1"
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
@@ -38,6 +40,7 @@ type Server struct {
 	registry          schemaregistry.Registry
 	idemStore         idemstore.Store
 	connectorRegistry connectorregistry.Store
+	dbPool            *pgxpool.Pool
 }
 
 // IssueBootstrapCredential mints a credential for the supplied tenant and

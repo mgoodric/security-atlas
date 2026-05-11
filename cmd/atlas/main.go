@@ -1,8 +1,9 @@
 // Package main is the security-atlas platform server entrypoint.
 //
 // Hosts the gRPC server (Evidence + Admin + Connectors) and an HTTP server
-// (anchors browser API). Both share the in-memory stores; both stop on
-// SIGINT/SIGTERM via a common context.
+// (anchors + frameworks API). Both share the in-memory credentials store;
+// the HTTP server additionally needs a Postgres pool to back the catalog
+// queries. Both listeners stop on SIGINT/SIGTERM via a common context.
 package main
 
 import (
@@ -12,6 +13,9 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
 )
@@ -22,13 +26,11 @@ const (
 )
 
 func main() {
-	grpcAddr := os.Getenv("ATLAS_GRPC_ADDR")
-	if grpcAddr == "" {
-		grpcAddr = defaultGRPCAddr
-	}
-	httpAddr := os.Getenv("ATLAS_HTTP_ADDR")
-	if httpAddr == "" {
-		httpAddr = defaultHTTPAddr
+	grpcAddr := envOr("ATLAS_GRPC_ADDR", defaultGRPCAddr)
+	httpAddr := envOr("ATLAS_HTTP_ADDR", defaultHTTPAddr)
+	dbURL := os.Getenv("DATABASE_URL_APP")
+	if dbURL == "" {
+		dbURL = os.Getenv("DATABASE_URL")
 	}
 
 	srv := api.New(api.Config{})
@@ -46,6 +48,23 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	var pool *pgxpool.Pool
+	if dbURL != "" {
+		dialCtx, dialCancel := context.WithTimeout(ctx, 10*time.Second)
+		defer dialCancel()
+		p, err := pgxpool.New(dialCtx, dbURL)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: pgxpool.New: %v\n", err)
+			os.Exit(1)
+		}
+		defer p.Close()
+		pool = p
+		srv.AttachDB(pool)
+		fmt.Fprintf(os.Stderr, "atlas: pgx pool ready\n")
+	} else {
+		fmt.Fprintln(os.Stderr, "atlas: DATABASE_URL_APP not set — HTTP server will refuse to start")
+	}
+
 	var wg sync.WaitGroup
 	errCh := make(chan error, 2)
 
@@ -58,14 +77,16 @@ func main() {
 		}
 	}()
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		fmt.Fprintf(os.Stderr, "atlas: HTTP listening on %s\n", httpAddr)
-		if err := srv.RunHTTP(ctx, httpAddr); err != nil {
-			errCh <- fmt.Errorf("http: %w", err)
-		}
-	}()
+	if pool != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fmt.Fprintf(os.Stderr, "atlas: HTTP listening on %s\n", httpAddr)
+			if err := srv.RunHTTP(ctx, httpAddr); err != nil {
+				errCh <- fmt.Errorf("http: %w", err)
+			}
+		}()
+	}
 
 	wg.Wait()
 	close(errCh)
@@ -73,4 +94,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "atlas: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
