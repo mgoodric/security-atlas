@@ -3,7 +3,17 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-11 (parallel batch 3 claim-stake — 018, 036, 044 → in-progress)
+**Last reconciled:** 2026-05-11 (slice 018 → in-review, PR #13)
+
+## Drift detected — 2026-05-11 (slice 018 → in-review)
+
+Slice 018 (FrameworkScope predicate + intersection + four-state workflow) completed and opened for review:
+
+| Row | Transition                  | PR    |
+| --- | --------------------------- | ----- |
+| 018 | `in-progress` → `in-review` | gh#13 |
+
+**Counts delta:** in-progress −1 · in-review +1.
 
 ## Drift detected — 2026-05-11 (parallel batch 3 claim-stake)
 
@@ -137,7 +147,7 @@ Legal values (use exactly these strings):
 | 015 | NATS JetStream buffer + ingestion stage                | `ready`       | —                                               | —     | —          | —          | dep 013 merged                        |
 | 016 | Evidence freshness + drift detection                   | `not-ready`   | —                                               | —     | —          | —          | waits on 012                          |
 | 017 | Scope dimensions + applicability_expr + single-cell    | `merged`      | scope/017-scope-dimensions-applicability        | gh#9  | 2026-05-11 | 2026-05-11 | —                                     |
-| 018 | FrameworkScope predicate + intersection compute        | `in-progress` | scope/018-framework-scope-intersection          | —     | 2026-05-11 | —          | open-q #19 resolved (ADR-0001); 2d    |
+| 018 | FrameworkScope predicate + intersection compute        | `in-review`   | scope/018-framework-scope-intersection          | gh#13 | 2026-05-11 | —          | open-q #19 resolved (ADR-0001); 2d    |
 | 019 | Risk CRUD + NIST 800-30 + 5x5 + ALE-band               | `merged`      | risk/019-risk-register-crud                     | gh#10 | 2026-05-11 | 2026-05-11 | open-q #4 resolved at merge           |
 | 020 | Risk → control linkage + residual derivation           | `not-ready`   | —                                               | —     | —          | —          | waits on 019, 012                     |
 | 021 | Exception/waiver workflow + auto-expiry                | `ready`       | —                                               | —     | —          | —          | deps 019, 017 merged                  |
