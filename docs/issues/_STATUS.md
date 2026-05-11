@@ -86,7 +86,7 @@ Legal values (use exactly these strings):
 | 010 | SCF-anchored control kit (50 SOC 2 controls)           | `not-ready` | —                                             | —     | —           | —           | waits on 009, 007 · HITL on accuracy  |
 | 011 | Manual control type + attestation flow                 | `not-ready` | —                                             | —     | —           | —           | waits on 009, 013, 036                |
 | 012 | Control state evaluation engine                        | `not-ready` | —                                             | —     | —           | —           | waits on 010, 013, 017                |
-| 013 | Evidence ledger write API + push endpoint              | `in-progress` | evidence-pipeline/013-evidence-ledger-write-api | —     | 2026-05-11  | —           | critical path; consumes slice 014 hook |
+| 013 | Evidence ledger write API + push endpoint              | `in-review` | evidence-pipeline/013-evidence-ledger-write-api | gh#12 | 2026-05-11  | —           | critical path; consumes slice 014 hook |
 | 014 | Schema registry service (in-tree Go)                   | `merged`    | evidence-pipeline/014-schema-registry-service | gh#8  | 2026-05-11  | 2026-05-11  | —                                     |
 | 015 | NATS JetStream buffer + ingestion stage                | `not-ready` | —                                             | —     | —           | —           | waits on 013                          |
 | 016 | Evidence freshness + drift detection                   | `not-ready` | —                                             | —     | —           | —           | waits on 012                          |
