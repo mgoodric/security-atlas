@@ -51,7 +51,9 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable
-      DATABASE_URL_APP: postgres://atlas_app:atlas_app_local@localhost:5432/security_atlas?sslmode=disable
+      # The app role's password is set by a step below from a workflow-scoped
+      # value, then injected into DATABASE_URL_APP for the test step.
+      ATLAS_APP_PASSWORD: ${{ secrets.CI_ATLAS_APP_PASSWORD || 'ci-ephemeral' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -62,6 +64,11 @@ jobs:
         run: curl -sSfL https://atlasgo.sh | sh -s -- --community
       - name: Bootstrap roles
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
+      - name: Set role passwords (CI-scoped)
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
       - name: Regenerate Atlas hash + apply migrations
         run: |
           atlas migrate hash --dir file://migrations/sql
