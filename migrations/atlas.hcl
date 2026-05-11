@@ -1,35 +1,18 @@
-// Atlas environment config for security-atlas.
+// Atlas environment config for security-atlas. Source of truth for the
+// schema is the versioned SQL files under migrations/sql/. Atlas applies and
+// rolls them back; the actual SQL is hand-authored.
 //
-// Source of truth for the schema is migrations/sql/ — versioned SQL files
-// (forward + .down.sql reverse pairs). Atlas HCL `policy` / `row_security`
-// blocks are Pro-only, so SQL is the declarative substrate.
-//
-// Local usage:
-//   just migrate up         # atlas migrate apply --env local
-//   just migrate down N     # atlas migrate down --env local --amount N
-//   just migrate status     # atlas migrate status --env local
-//
-// CI uses DATABASE_URL injected by the GitHub Actions Postgres service.
+// Local + CI invocation:
+//   atlas migrate apply -c file://migrations/atlas.hcl --env local
 
 variable "url" {
   type    = string
   default = getenv("DATABASE_URL")
 }
 
-variable "dev_url" {
-  type    = string
-  default = getenv("ATLAS_DEV_URL")
-}
-
 env "local" {
-  url     = var.url
-  dev     = var.dev_url
+  url = var.url
   migration {
     dir = "file://migrations/sql"
-  }
-  format {
-    migrate {
-      apply = "{{ json . }}"
-    }
   }
 }
