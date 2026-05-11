@@ -12,10 +12,21 @@ import (
 
 type Querier interface {
 	CountSCFAnchorsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
+	CountScopeCells(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	// Insert a scope cell. dimensions_hash is the application-computed canonical
+	// hash; the UNIQUE (tenant_id, dimensions_hash) constraint rejects duplicates.
+	CreateScopeCell(ctx context.Context, arg CreateScopeCellParams) (ScopeCell, error)
+	// Insert a per-tenant scope dimension declaration. Used by the bootstrap seed
+	// (is_builtin=true) and by admins adding custom dimensions (is_builtin=false).
+	// tenant_id is captured directly so RLS evaluates the policy on insert.
+	CreateScopeDimension(ctx context.Context, arg CreateScopeDimensionParams) (ScopeDimension, error)
 	// Flip every "current" framework_version for the given framework to "legacy"
 	// so a new release can take over without violating the at-most-one-current
 	// invariant. Caller scopes the transaction.
 	DemoteCurrentFrameworkVersions(ctx context.Context, frameworkID pgtype.UUID) error
+	// Returns the JSON-encoded applicability_expr for a single control. The column
+	// is TEXT (slice 002); slice 017 stores JSON in that text.
+	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)
 	// Look up one schema visible to the tenant. Prefers the tenant's private
 	// row when one exists for the same (kind, semver); otherwise returns the
 	// global row. The ORDER BY puts the non-null tenant_id first.
@@ -33,6 +44,12 @@ type Querier interface {
 	// Updated / Unchanged (xmax-based detection inside ON CONFLICT can't
 	// distinguish "updated to the same content" from "actually updated").
 	GetSCFAnchorByVersionAndSCFID(ctx context.Context, arg GetSCFAnchorByVersionAndSCFIDParams) (ScfAnchor, error)
+	// Look up a cell by its dimensions hash. Used by the "create or get" path so
+	// a re-seed call does not 409 on the existing default cell.
+	GetScopeCellByHash(ctx context.Context, arg GetScopeCellByHashParams) (ScopeCell, error)
+	GetScopeCellByID(ctx context.Context, arg GetScopeCellByIDParams) (ScopeCell, error)
+	// Resolve a dimension by name within the current tenant context.
+	GetScopeDimensionByName(ctx context.Context, arg GetScopeDimensionByNameParams) (ScopeDimension, error)
 	// Insert a new schema row. The caller (slice 014 registry service) parses
 	// semver into major/minor/patch and supplies all three; the DB CHECK
 	// prevents negatives. Owner must be non-empty (CHECK constraint). The
@@ -67,6 +84,11 @@ type Querier interface {
 	ListSCFAnchorsForVersion(ctx context.Context, arg ListSCFAnchorsForVersionParams) ([]ScfAnchor, error)
 	// Paginated anchor list for the latest current SCF framework_version.
 	ListSCFAnchorsLatest(ctx context.Context, arg ListSCFAnchorsLatestParams) ([]ScfAnchor, error)
+	// Enumerate the active tenant's scope cells. Newest first.
+	ListScopeCells(ctx context.Context, tenantID pgtype.UUID) ([]ScopeCell, error)
+	// Enumerate the active tenant's declared dimensions. Ordering: builtins first
+	// (stable presentation in the admin UI), then alphabetical by name.
+	ListScopeDimensions(ctx context.Context, tenantID pgtype.UUID) ([]ScopeDimension, error)
 	// Point a framework at its current version.
 	SetLatestVersion(ctx context.Context, arg SetLatestVersionParams) error
 	// Update an existing anchor in place. Touches updated_at; the caller
