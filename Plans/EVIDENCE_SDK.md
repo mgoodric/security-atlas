@@ -1,7 +1,7 @@
 # Evidence SDK
 
 **Companion to** [`ARCHITECTURE_CANVAS.md`](./ARCHITECTURE_CANVAS.md) §4.
-**Purpose:** define the contract for getting evidence *into* the platform from any source — internal cloud APIs, external SaaS, CI/CD pipelines, custom internal tools, middleware, manual upload, anything.
+**Purpose:** define the contract for getting evidence _into_ the platform from any source — internal cloud APIs, external SaaS, CI/CD pipelines, custom internal tools, middleware, manual upload, anything.
 
 ---
 
@@ -11,12 +11,12 @@ The evidence ledger (canvas §4.3) is an append-only stream. It has exactly **on
 
 The SDK is the contract surface around that endpoint. It supports two **complementary** profiles, not a primary and a fallback:
 
-| Profile | Direction | Who initiates | Use when |
-|---|---|---|---|
-| **Connector** (pull / subscribe) | Platform → Source | security-atlas reaches out and queries / subscribes | Source has a stable API and we have credentials to reach it |
-| **Pusher** (push) | Source → Platform | Source initiates and pushes to security-atlas | Source is behind a firewall, ephemeral (CI), event-emitting (webhook), or owns its scheduling |
+| Profile                          | Direction         | Who initiates                                       | Use when                                                                                      |
+| -------------------------------- | ----------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **Connector** (pull / subscribe) | Platform → Source | security-atlas reaches out and queries / subscribes | Source has a stable API and we have credentials to reach it                                   |
+| **Pusher** (push)                | Source → Platform | Source initiates and pushes to security-atlas       | Source is behind a firewall, ephemeral (CI), event-emitting (webhook), or owns its scheduling |
 
-Many real connectors implement **both profiles** — e.g., the GitHub connector pulls org/repo state on a schedule *and* receives push events from GitHub's webhook subscription. Both flow into the same ledger via the same `IngestEvidence` call.
+Many real connectors implement **both profiles** — e.g., the GitHub connector pulls org/repo state on a schedule _and_ receives push events from GitHub's webhook subscription. Both flow into the same ledger via the same `IngestEvidence` call.
 
 ```mermaid
 graph LR
@@ -64,15 +64,15 @@ The mental model: **the ledger is the system of record; the SDK is how anyone �
 
 Pull-only architectures (Steampipe-pure, classic Vanta) struggle with a long tail of real evidence:
 
-| Reality | Pull-only outcome | Push profile outcome |
-|---|---|---|
-| CI/CD runs SAST in a private build cluster, no inbound network | "Sorry, no SAST evidence" or "install our agent" | CI pushes scan results at end of pipeline |
-| The org has a homegrown access-review tool with no API | Manual screenshot upload every quarter | Tool emits a JSON push when each review completes |
-| Fleet/osquery polling against laptops is one-shot, episodic | Either continuous polling burns battery or we miss intervals | Endpoint pushes when state changes |
-| A SaaS only emits webhooks, no polling endpoint | Connector has to fake-poll or scrape | Push profile is the natural fit |
-| A middleware aggregates 5 internal databases for a custom control | We rebuild that aggregation in our connector | Middleware pushes the already-computed result |
-| Air-gapped systems with one-way data diodes | Impossible to pull | Push from a queue on the protected side |
-| The user's existing telemetry pipeline (Vector, OTEL, Logstash) already moves the data | We duplicate ingestion | Pipeline tees a copy into security-atlas |
+| Reality                                                                                | Pull-only outcome                                            | Push profile outcome                              |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------- |
+| CI/CD runs SAST in a private build cluster, no inbound network                         | "Sorry, no SAST evidence" or "install our agent"             | CI pushes scan results at end of pipeline         |
+| The org has a homegrown access-review tool with no API                                 | Manual screenshot upload every quarter                       | Tool emits a JSON push when each review completes |
+| Fleet/osquery polling against laptops is one-shot, episodic                            | Either continuous polling burns battery or we miss intervals | Endpoint pushes when state changes                |
+| A SaaS only emits webhooks, no polling endpoint                                        | Connector has to fake-poll or scrape                         | Push profile is the natural fit                   |
+| A middleware aggregates 5 internal databases for a custom control                      | We rebuild that aggregation in our connector                 | Middleware pushes the already-computed result     |
+| Air-gapped systems with one-way data diodes                                            | Impossible to pull                                           | Push from a queue on the protected side           |
+| The user's existing telemetry pipeline (Vector, OTEL, Logstash) already moves the data | We duplicate ingestion                                       | Pipeline tees a copy into security-atlas          |
 
 Push is also the **enablement story for non-engineers**: writing a one-line shell command `security-atlas evidence push --kind=...` from a script or a button is dramatically lower-friction than writing a connector. Most organic adoption on the platform will start with push.
 
@@ -82,15 +82,15 @@ Push is also the **enablement story for non-engineers**: writing a one-line shel
 
 The connector profile from canvas §4.1 is unchanged in intent. Methods are exposed over a gRPC contract; the connector runs as a separate process and can be written in any language.
 
-| Method | Returns | Notes |
-|---|---|---|
-| `Describe()` | `ConnectorManifest` | name, version, supported source types, required scopes, rate-limit hints, **profiles_supported: [pull, subscribe, push]** |
-| `AuthMethods()` | `[AuthMethod]` | OIDC, API key, IAM role, OAuth flow, SCIM token |
-| `HealthCheck(creds)` | `HealthResult` | Reachability + token validity |
-| `ListEvidenceKinds()` | `[EvidenceKind]` | Each kind references a registered schema URI |
-| `Pull(kind, since, scope_filter)` | `Stream<EvidenceRecord>` | Snapshot/query mode |
-| `Subscribe(kind, scope_filter)` | `Stream<EvidenceRecord>` | Long-lived stream from source events |
-| `VerifyProvenance(record)` | `bool` | Cryptographic re-verification when applicable |
+| Method                            | Returns                  | Notes                                                                                                                     |
+| --------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `Describe()`                      | `ConnectorManifest`      | name, version, supported source types, required scopes, rate-limit hints, **profiles_supported: [pull, subscribe, push]** |
+| `AuthMethods()`                   | `[AuthMethod]`           | OIDC, API key, IAM role, OAuth flow, SCIM token                                                                           |
+| `HealthCheck(creds)`              | `HealthResult`           | Reachability + token validity                                                                                             |
+| `ListEvidenceKinds()`             | `[EvidenceKind]`         | Each kind references a registered schema URI                                                                              |
+| `Pull(kind, since, scope_filter)` | `Stream<EvidenceRecord>` | Snapshot/query mode                                                                                                       |
+| `Subscribe(kind, scope_filter)`   | `Stream<EvidenceRecord>` | Long-lived stream from source events                                                                                      |
+| `VerifyProvenance(record)`        | `bool`                   | Cryptographic re-verification when applicable                                                                             |
 
 A connector **declares which profiles** each evidence kind supports. The platform routes accordingly. The connector profile is platform-owned scheduling — security-atlas decides when to call `Pull` and how often.
 
@@ -98,16 +98,16 @@ A connector **declares which profiles** each evidence kind supports. The platfor
 
 ## 4. Pusher profile — push API surface
 
-The pusher profile flips control to the source. The pusher has a credential, knows the schema, and pushes records when *it* decides.
+The pusher profile flips control to the source. The pusher has a credential, knows the schema, and pushes records when _it_ decides.
 
 ### 4.1 Endpoints
 
 Two transport options, same semantics, both authenticated and tenant-scoped:
 
-| Endpoint | Use | Body |
-|---|---|---|
-| `POST /v1/evidence:push` (REST/JSON) | Maximum reach — works from cURL, any language, CI scripts | One `EvidenceRecord` or batch (≤100) |
-| `Push(stream<EvidenceRecord>) → stream<EvidenceReceipt>` (gRPC) | High-throughput push from connectors and middleware | Streamed records |
+| Endpoint                                                        | Use                                                       | Body                                 |
+| --------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------ |
+| `POST /v1/evidence:push` (REST/JSON)                            | Maximum reach — works from cURL, any language, CI scripts | One `EvidenceRecord` or batch (≤100) |
+| `Push(stream<EvidenceRecord>) → stream<EvidenceReceipt>` (gRPC) | High-throughput push from connectors and middleware       | Streamed records                     |
 
 Both wrap the same internal `IngestEvidence` call. The REST endpoint is the public-facing surface for external pushers.
 
@@ -115,18 +115,20 @@ Both wrap the same internal `IngestEvidence` call. The REST endpoint is the publ
 
 ```jsonc
 {
-  "idempotency_key": "ci-run-2026-05-10-abc123-step-sast",  // required, dedups within a window
-  "evidence_kind": "sast.scan_result.v1",                    // required, must be registered in the schema registry
-  "schema_version": "1.0.0",                                  // required, validated against registry
-  "control_id": "scf:VPM-04",                                 // required — control or SCF anchor
-  "scope": {                                                  // required — at least one dimension
+  "idempotency_key": "ci-run-2026-05-10-abc123-step-sast", // required, dedups within a window
+  "evidence_kind": "sast.scan_result.v1", // required, must be registered in the schema registry
+  "schema_version": "1.0.0", // required, validated against registry
+  "control_id": "scf:VPM-04", // required — control or SCF anchor
+  "scope": {
+    // required — at least one dimension
     "environment": "prod",
     "cloud_account": "aws:111122223333",
     "data_classification": "restricted"
   },
-  "observed_at": "2026-05-10T14:23:00Z",                      // required — when the source observed reality
-  "result": "pass",                                           // required — pass | fail | na | inconclusive
-  "payload": {                                                // schema-validated against evidence_kind
+  "observed_at": "2026-05-10T14:23:00Z", // required — when the source observed reality
+  "result": "pass", // required — pass | fail | na | inconclusive
+  "payload": {
+    // schema-validated against evidence_kind
     "tool": "semgrep",
     "tool_version": "1.96.0",
     "ruleset": "p/owasp-top-ten",
@@ -134,8 +136,9 @@ Both wrap the same internal `IngestEvidence` call. The REST endpoint is the publ
     "scanned_files": 1247,
     "scan_duration_seconds": 84
   },
-  "payload_uri": null,                                        // optional — for large artifacts in object store
-  "source_attribution": {                                     // who pushed this
+  "payload_uri": null, // optional — for large artifacts in object store
+  "source_attribution": {
+    // who pushed this
     "actor_type": "service_account",
     "actor_id": "ci.gitlab.com/sec-product-co/main",
     "session_id": "<JWT signature reference>"
@@ -149,13 +152,14 @@ Both wrap the same internal `IngestEvidence` call. The REST endpoint is the publ
 
 Pushers authenticate as one of three identity types:
 
-| Identity type | Credential | Use case |
-|---|---|---|
-| **Service account** | OIDC token from a trusted IdP (GitHub OIDC, GitLab CI OIDC, AWS IRSA, Workload Identity Federation) | CI runners — short-lived, auditable, no long-lived secrets |
-| **API key (PAT)** | Long-lived bearer token issued from the platform | Cron jobs, fixed scripts, middleware where OIDC isn't available |
-| **mTLS** | Client cert from the deployment's PKI | High-trust internal middleware, air-gapped pushers |
+| Identity type       | Credential                                                                                          | Use case                                                        |
+| ------------------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| **Service account** | OIDC token from a trusted IdP (GitHub OIDC, GitLab CI OIDC, AWS IRSA, Workload Identity Federation) | CI runners — short-lived, auditable, no long-lived secrets      |
+| **API key (PAT)**   | Long-lived bearer token issued from the platform                                                    | Cron jobs, fixed scripts, middleware where OIDC isn't available |
+| **mTLS**            | Client cert from the deployment's PKI                                                               | High-trust internal middleware, air-gapped pushers              |
 
 Every credential is **scoped** at issue time:
+
 - To a tenant (tenant_id)
 - To one or more `evidence_kind` values it may push (least-privilege)
 - To an optional scope predicate (e.g., "this CI account can only push for `cloud_account=aws:111122223333`")
@@ -199,10 +203,10 @@ Every push results in an `EvidenceRecord` with `provenance` populated:
 
 ```jsonc
 {
-  "ingestion_path": "push",                       // vs "pull" or "subscribe"
+  "ingestion_path": "push", // vs "pull" or "subscribe"
   "credential_id": "sa:gitlab-ci.sec-product",
   "credential_type": "oidc_service_account",
-  "ip_address_class": "vpn-egress",               // anonymized to class, not raw IP unless config requires
+  "ip_address_class": "vpn-egress", // anonymized to class, not raw IP unless config requires
   "received_at": "2026-05-10T14:23:01.842Z",
   "push_endpoint_version": "v1",
   "schema_version": "1.0.0",
@@ -295,14 +299,14 @@ Auth: the CLI auto-detects environment for OIDC tokens (GitHub Actions, GitLab C
 
 Push SDKs ship for the languages where the friction matters:
 
-| Language | Use | Status target |
-|---|---|---|
-| Go | First-party, used inside connectors and middleware | v1 |
-| Python | Data-engineering / ML pipelines | v1 |
-| TypeScript / Node | Cloudflare Workers, Vercel, edge functions | v1 |
-| Bash / cURL | Universal CI escape hatch | v1 (the CLI covers this) |
-| Java / Kotlin | Enterprise embed | v2 |
-| Rust | High-perf agents | v2 (community-driven likely) |
+| Language          | Use                                                | Status target                |
+| ----------------- | -------------------------------------------------- | ---------------------------- |
+| Go                | First-party, used inside connectors and middleware | v1                           |
+| Python            | Data-engineering / ML pipelines                    | v1                           |
+| TypeScript / Node | Cloudflare Workers, Vercel, edge functions         | v1                           |
+| Bash / cURL       | Universal CI escape hatch                          | v1 (the CLI covers this)     |
+| Java / Kotlin     | Enterprise embed                                   | v2                           |
+| Rust              | High-perf agents                                   | v2 (community-driven likely) |
 
 Each SDK exposes the same surface: `client.evidence.push(record)`, `client.evidence.push_batch([...])`, schema validation client-side before transport, automatic retry/backoff, structured errors.
 
@@ -319,7 +323,7 @@ SaaS webhook
    │
    ▼
 HTTP receiver (signature-verified, source-attributed)
-   │ 
+   │
    ▼ transform to canonical EvidenceRecord
    ▼
 internal IngestEvidence call (same code path as push)
@@ -336,30 +340,30 @@ This means: every connector that supports webhook input is, internally, just a p
 
 Push is a privileged operation. The threat model is explicit:
 
-| Threat | Mitigation |
-|---|---|
-| Attacker forges evidence to fake compliance | Credential auth + scope-pinning + signed receipts; pushes outside the credential's scope are rejected |
-| Compromised CI credential is used to flood ingestion | Per-credential rate limits + alerting on anomalous push rate |
-| Replay of an old push to backdate evidence | `observed_at` is in the payload; ingestion stage clamps `observed_at` to a max-skew window from `received_at`; replay detected via idempotency key |
-| Push of evidence outside the expected schema | Schema registry validation rejects on ingest |
-| Push that overwrites/contradicts pulled evidence | Pulled and pushed evidence are different records in the ledger; evaluation can prefer one source explicitly per `evidence_kind` configuration |
-| Side-channel via payload contents (PII, secrets) | Ingestion stage runs configurable redaction rules per `evidence_kind` before write |
-| Compromised pusher pushes for another tenant | Tenant scoping at credential issue + Postgres RLS at the ledger layer (canvas §5.4) — defense in depth |
+| Threat                                               | Mitigation                                                                                                                                         |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Attacker forges evidence to fake compliance          | Credential auth + scope-pinning + signed receipts; pushes outside the credential's scope are rejected                                              |
+| Compromised CI credential is used to flood ingestion | Per-credential rate limits + alerting on anomalous push rate                                                                                       |
+| Replay of an old push to backdate evidence           | `observed_at` is in the payload; ingestion stage clamps `observed_at` to a max-skew window from `received_at`; replay detected via idempotency key |
+| Push of evidence outside the expected schema         | Schema registry validation rejects on ingest                                                                                                       |
+| Push that overwrites/contradicts pulled evidence     | Pulled and pushed evidence are different records in the ledger; evaluation can prefer one source explicitly per `evidence_kind` configuration      |
+| Side-channel via payload contents (PII, secrets)     | Ingestion stage runs configurable redaction rules per `evidence_kind` before write                                                                 |
+| Compromised pusher pushes for another tenant         | Tenant scoping at credential issue + Postgres RLS at the ledger layer (canvas §5.4) — defense in depth                                             |
 
-The audit log retains every accepted *and* rejected push. A would-be attacker leaves traces.
+The audit log retains every accepted _and_ rejected push. A would-be attacker leaves traces.
 
 ---
 
 ## 10. Anti-patterns we explicitly reject
 
-| Anti-pattern | Why we reject |
-|---|---|
-| **Anonymous push** | No identity = no audit trail = evidence is worthless |
-| **Schemaless push** | Arbitrary JSON in the ledger turns evaluation into vibes |
+| Anti-pattern                                    | Why we reject                                                                                                     |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **Anonymous push**                              | No identity = no audit trail = evidence is worthless                                                              |
+| **Schemaless push**                             | Arbitrary JSON in the ledger turns evaluation into vibes                                                          |
 | **Auto-promote ad-hoc kinds to global schemas** | Forces schema discipline; ad-hoc tenant-local schemas are first-class but stay local until explicitly contributed |
-| **Push overwrites pull** | Two records, two provenance trails; the evaluation engine decides precedence per kind |
-| **Push without scope** | Scope is mandatory; "global" pushes are a footgun |
-| **Skip-validation push for performance** | Schema validation is on the hot path; if it's too slow we make validation faster, we don't bypass it |
+| **Push overwrites pull**                        | Two records, two provenance trails; the evaluation engine decides precedence per kind                             |
+| **Push without scope**                          | Scope is mandatory; "global" pushes are a footgun                                                                 |
+| **Skip-validation push for performance**        | Schema validation is on the hot path; if it's too slow we make validation faster, we don't bypass it              |
 
 ---
 
@@ -378,11 +382,11 @@ The push profile interacts with several other parts of the canvas:
 
 ## 12. Roadmap placement
 
-| Phase | What ships |
-|---|---|
+| Phase  | What ships                                                                                                                                                                                                                                                                                                                                                                        |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **v1** | REST `POST /v1/evidence:push` endpoint, schema registry (platform + tenant-private kinds), CLI, OIDC + API key auth, idempotency, rate limiting, signed receipts, audit log. Go and Python SDKs. ~10 platform `evidence_kind` schemas (sast, sca, container scan, manual attestation, access review completion, change ticket, vuln scan, deploy event, ci pipeline run, custom). |
-| **v2** | gRPC streaming push, TypeScript and Java SDKs, mTLS auth, webhook receivers as first-class connectors for top SaaS (GitHub, GitLab, Linear, Datadog, Slack), schema-registry contribution flow (community kinds), redaction policy editor. |
-| **v3** | Federation (one security-atlas pushes to another), schema-evolution tooling (semver enforcement, deprecation tracking), pusher fleet management UI, advanced provenance (Sigstore signing of pushed payloads). |
+| **v2** | gRPC streaming push, TypeScript and Java SDKs, mTLS auth, webhook receivers as first-class connectors for top SaaS (GitHub, GitLab, Linear, Datadog, Slack), schema-registry contribution flow (community kinds), redaction policy editor.                                                                                                                                        |
+| **v3** | Federation (one security-atlas pushes to another), schema-evolution tooling (semver enforcement, deprecation tracking), pusher fleet management UI, advanced provenance (Sigstore signing of pushed payloads).                                                                                                                                                                    |
 
 ---
 

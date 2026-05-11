@@ -88,7 +88,7 @@ EvidenceRecord {
 }
 ```
 
-Your internal `Control` named `MFA Enforcement (Workforce IAM)` is anchored at `SCF:IAC-06` ("Multi-Factor Authentication"). 
+Your internal `Control` named `MFA Enforcement (Workforce IAM)` is anchored at `SCF:IAC-06` ("Multi-Factor Authentication").
 
 ### 3.2 What the graph computes
 
@@ -162,13 +162,13 @@ graph LR
     end
 ```
 
-| Type | Meaning | Coverage rule | Example |
-|------|---------|---------------|---------|
-| `equal` | Source and target describe the same concept. | `coverage = strength * effectiveness` | `SOC2:CC6.6 equal SCF:IAC-06` |
-| `subset_of` | Source is fully covered by target — target is broader. | `coverage = strength * effectiveness` (full credit) | `SOC2:CC6.6 subset_of SCF:IAC-06` (SCF concept includes MFA + risk-based auth + step-up) |
-| `superset_of` | Source covers more than target — only partial credit. | `coverage = strength * effectiveness * scaling_factor` | `SCF:IAC-06 superset_of NIST_CSF:PR.AA-03` (CSF is narrower) |
-| `intersects_with` | Partial overlap; supplemental evidence needed for full coverage. | `coverage = strength * effectiveness` and UI flags as partial | `GDPR:Art.32 intersects_with SCF:IAC-06` |
-| `no_relationship` | Confirmed *no* overlap. Stored as data to suppress false suggestions. | `coverage = 0` | `PCI:9.4 no_relationship SCF:IAC-06` (physical access ≠ MFA) |
+| Type              | Meaning                                                               | Coverage rule                                                 | Example                                                                                  |
+| ----------------- | --------------------------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `equal`           | Source and target describe the same concept.                          | `coverage = strength * effectiveness`                         | `SOC2:CC6.6 equal SCF:IAC-06`                                                            |
+| `subset_of`       | Source is fully covered by target — target is broader.                | `coverage = strength * effectiveness` (full credit)           | `SOC2:CC6.6 subset_of SCF:IAC-06` (SCF concept includes MFA + risk-based auth + step-up) |
+| `superset_of`     | Source covers more than target — only partial credit.                 | `coverage = strength * effectiveness * scaling_factor`        | `SCF:IAC-06 superset_of NIST_CSF:PR.AA-03` (CSF is narrower)                             |
+| `intersects_with` | Partial overlap; supplemental evidence needed for full coverage.      | `coverage = strength * effectiveness` and UI flags as partial | `GDPR:Art.32 intersects_with SCF:IAC-06`                                                 |
+| `no_relationship` | Confirmed _no_ overlap. Stored as data to suppress false suggestions. | `coverage = 0`                                                | `PCI:9.4 no_relationship SCF:IAC-06` (physical access ≠ MFA)                             |
 
 **Why store `no_relationship` explicitly?** Because the alternative is "absence of an edge", which the graph engine cannot distinguish from "we haven't gotten around to mapping this yet." Storing the negative is the difference between "we know this isn't relevant" and "we don't know."
 
@@ -214,7 +214,7 @@ The migration story when you upgrade from ISO 27001:2013 to :2022:
 
 ## 6. Coverage strength propagation — multi-control requirements
 
-Most framework requirements are **broad** and need multiple SCF anchors to fully cover. PCI DSS 8 (Identification & Authentication) is satisfied by MFA *and* password policy *and* account lifecycle *and* session management.
+Most framework requirements are **broad** and need multiple SCF anchors to fully cover. PCI DSS 8 (Identification & Authentication) is satisfied by MFA _and_ password policy _and_ account lifecycle _and_ session management.
 
 ```mermaid
 graph TB
@@ -254,6 +254,7 @@ The graph is queried in two directions, all day, every day:
 `Evidence → Control → SCF anchor → FrameworkRequirements`
 
 Use cases:
+
 - After ingest, what new framework satisfactions just lit up?
 - A new evidence record arrived with a `fail` result — what frameworks just degraded?
 - An exception was approved — what coverage just changed?
@@ -263,6 +264,7 @@ Use cases:
 `FrameworkRequirement → SCF anchor(s) → Control(s) → Evidence`
 
 Use cases:
+
 - A SOC 2 auditor asks for evidence of `CC6.1` — what evidence do we have?
 - We're scoping ISO 27001 — what controls do we need to author for `A.8.5`?
 - We're missing coverage on `HIPAA 164.312-d` — which SCF anchors map to it that we don't yet have controls for?
@@ -309,7 +311,7 @@ If we ever do hit 10⁶+ edges or property-graph traversal patterns we don't hav
 
 ## 9. Editability — when users diverge from SCF
 
-SCF is the *default* spine, but no real org's controls match SCF exactly. The graph supports three escape hatches:
+SCF is the _default_ spine, but no real org's controls match SCF exactly. The graph supports three escape hatches:
 
 1. **Add a new SCF-shaped anchor.** Users define `org-anchors:custom-X` with the same interface. Same edges, same traversal, same coverage math. Used when SCF lacks a concept.
 2. **Override an SCF mapping for your tenant.** A user disagrees that `SCF:IAC-06 equal SOC2:CC6.6` for their context — they edit the edge type/strength locally. The override is per-tenant; the SCF default is untouched.

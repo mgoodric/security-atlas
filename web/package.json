@@ -1,0 +1,9 @@
+{
+  "name": "@security-atlas/web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "security-atlas frontend (Next.js 15 App Router + shadcn/ui + Tailwind 4). Next.js scaffolding lands in slice 005.",
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -75,6 +75,7 @@ Do not propose or implement these. They are documented failures of existing GRC 
 ### AI-assist boundary (hard)
 
 The platform supports AI assistance for:
+
 - **Suggesting** draft questionnaire answers with **mandatory citations** to specific evidence IDs and/or policy IDs
 - **Suggesting** SCF mappings for unmapped questionnaire questions (human approves once; mapping is canonical thereafter)
 - **Summarizing** prior responses for similarity matching
@@ -82,6 +83,7 @@ The platform supports AI assistance for:
 - **Explaining** gaps ("evidence covers SCF:IAC-06 but freshness is 95 days")
 
 The platform does NOT:
+
 - Publish any audit-binding artifact without one-click human approval
 - Fabricate control coverage that has no evidence backing
 - Auto-approve its own mappings
@@ -105,35 +107,35 @@ Schema-level enforcement: `ai_assisted=true` records cannot have `human_approved
 
 ## Tech stack (locked-in)
 
-| Layer | Choice | Notes |
-|---|---|---|
-| **Backend language** | Go (platform core) | Static binary, low operational overhead, strong concurrency for evidence streams |
-| **Secondary language** | Python (connector SDK reference + OSCAL bridge via compliance-trestle) | Bridged from Go via stable gRPC contract |
-| **Database** | PostgreSQL 16+ | RLS for tenancy, JSONB for evolving evidence, recursive CTEs for UCF graph traversal |
-| **DB access** | **sqlc + Atlas** | Type-safe Go from SQL; declarative migrations. Recursive CTEs and JSONB are first-class. No ORM impedance mismatch. |
-| **Object storage** | S3-compatible | For evidence artifacts > 1 MB |
-| **Analytics (optional v2)** | ClickHouse | Behind a read-model interface. Only when evidence-record volume crosses ~10⁹. |
-| **Event/queue** | NATS JetStream | Single binary; durable streams; replay for evidence reprocessing |
-| **IPC** | gRPC | Connector SDK contract + Python OSCAL bridge |
-| **Push API** | REST `POST /v1/evidence:push` + gRPC streaming + CLI + per-language SDKs (Go, Python, TypeScript, Java) | See `Plans/EVIDENCE_SDK.md` |
-| **Auth (AuthN)** | OIDC (relying party only — we are not an IdP) | Every credible IdP speaks it |
-| **Auth (AuthZ)** | RBAC (coarse roles) + ABAC (fine cuts) via OPA | Same OPA engine evaluates control queries and authorization decisions |
-| **OPA deployment** | Embedded Go library (v1) | Sidecar / central server is a v2 option |
-| **Frontend** | **Next.js 15 App Router + shadcn/ui + Tailwind 4 + TanStack Query** | Server Components for data-heavy dashboards; shadcn/ui aligns with mockups |
-| **Schema registry** | In-tree Go service (v1), backed by Postgres | Apicurio / external is a v3 option |
-| **Vector store** | pgvector (v2 when AI-assist lands) | Qdrant is a v3 option for large corpora |
-| **AI inference** | Local Ollama default (`llama3.1:8b-instruct-q5` baseline) | Cloud LLM opt-in per-tenant |
-| **Evidence integrity** | sha256 content-hash per record (v1) + cosign signing of audit-export bundles | Full Sigstore transparency-log in v3 |
-| **Observability** | OTEL native (traces + metrics + logs); default docker-compose bundles Prometheus + Grafana + Tempo + Loki | Production users route OTEL to their own stack |
-| **Build runner** | `just` (justfile at root) | Cross-language; cleaner than Make |
-| **Go tooling** | Go modules · `gofmt` · `goimports` · `golangci-lint` (strict) | Enforced via pre-commit + CI |
-| **Python tooling** | `uv` (env + deps) · `ruff` (format + lint) | Modern Python toolchain |
-| **TS tooling** | `npm` workspaces · `prettier` · `eslint` · `tsc --strict` | |
-| **CI/CD** | GitHub Actions | Free for OSS; OIDC token issuance for push credentials |
-| **Container** | Distroless base images; multi-stage builds | |
-| **Deployment** | docker-compose (self-host solo) · Helm chart (K8s SaaS) | Single VM is the target for v1 self-host |
-| **Repo shape** | **Monorepo** (single repo, all components, all languages) | Cross-cutting changes are one PR |
-| **Mockup framework** | Plain HTML + Tailwind via CDN | Iteration-1 only. Graduate to shadcn/ui React when frontend code begins. |
+| Layer                       | Choice                                                                                                    | Notes                                                                                                               |
+| --------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **Backend language**        | Go (platform core)                                                                                        | Static binary, low operational overhead, strong concurrency for evidence streams                                    |
+| **Secondary language**      | Python (connector SDK reference + OSCAL bridge via compliance-trestle)                                    | Bridged from Go via stable gRPC contract                                                                            |
+| **Database**                | PostgreSQL 16+                                                                                            | RLS for tenancy, JSONB for evolving evidence, recursive CTEs for UCF graph traversal                                |
+| **DB access**               | **sqlc + Atlas**                                                                                          | Type-safe Go from SQL; declarative migrations. Recursive CTEs and JSONB are first-class. No ORM impedance mismatch. |
+| **Object storage**          | S3-compatible                                                                                             | For evidence artifacts > 1 MB                                                                                       |
+| **Analytics (optional v2)** | ClickHouse                                                                                                | Behind a read-model interface. Only when evidence-record volume crosses ~10⁹.                                       |
+| **Event/queue**             | NATS JetStream                                                                                            | Single binary; durable streams; replay for evidence reprocessing                                                    |
+| **IPC**                     | gRPC                                                                                                      | Connector SDK contract + Python OSCAL bridge                                                                        |
+| **Push API**                | REST `POST /v1/evidence:push` + gRPC streaming + CLI + per-language SDKs (Go, Python, TypeScript, Java)   | See `Plans/EVIDENCE_SDK.md`                                                                                         |
+| **Auth (AuthN)**            | OIDC (relying party only — we are not an IdP)                                                             | Every credible IdP speaks it                                                                                        |
+| **Auth (AuthZ)**            | RBAC (coarse roles) + ABAC (fine cuts) via OPA                                                            | Same OPA engine evaluates control queries and authorization decisions                                               |
+| **OPA deployment**          | Embedded Go library (v1)                                                                                  | Sidecar / central server is a v2 option                                                                             |
+| **Frontend**                | **Next.js 15 App Router + shadcn/ui + Tailwind 4 + TanStack Query**                                       | Server Components for data-heavy dashboards; shadcn/ui aligns with mockups                                          |
+| **Schema registry**         | In-tree Go service (v1), backed by Postgres                                                               | Apicurio / external is a v3 option                                                                                  |
+| **Vector store**            | pgvector (v2 when AI-assist lands)                                                                        | Qdrant is a v3 option for large corpora                                                                             |
+| **AI inference**            | Local Ollama default (`llama3.1:8b-instruct-q5` baseline)                                                 | Cloud LLM opt-in per-tenant                                                                                         |
+| **Evidence integrity**      | sha256 content-hash per record (v1) + cosign signing of audit-export bundles                              | Full Sigstore transparency-log in v3                                                                                |
+| **Observability**           | OTEL native (traces + metrics + logs); default docker-compose bundles Prometheus + Grafana + Tempo + Loki | Production users route OTEL to their own stack                                                                      |
+| **Build runner**            | `just` (justfile at root)                                                                                 | Cross-language; cleaner than Make                                                                                   |
+| **Go tooling**              | Go modules · `gofmt` · `goimports` · `golangci-lint` (strict)                                             | Enforced via pre-commit + CI                                                                                        |
+| **Python tooling**          | `uv` (env + deps) · `ruff` (format + lint)                                                                | Modern Python toolchain                                                                                             |
+| **TS tooling**              | `npm` workspaces · `prettier` · `eslint` · `tsc --strict`                                                 |                                                                                                                     |
+| **CI/CD**                   | GitHub Actions                                                                                            | Free for OSS; OIDC token issuance for push credentials                                                              |
+| **Container**               | Distroless base images; multi-stage builds                                                                |                                                                                                                     |
+| **Deployment**              | docker-compose (self-host solo) · Helm chart (K8s SaaS)                                                   | Single VM is the target for v1 self-host                                                                            |
+| **Repo shape**              | **Monorepo** (single repo, all components, all languages)                                                 | Cross-cutting changes are one PR                                                                                    |
+| **Mockup framework**        | Plain HTML + Tailwind via CDN                                                                             | Iteration-1 only. Graduate to shadcn/ui React when frontend code begins.                                            |
 
 ---
 
@@ -268,21 +270,21 @@ security-atlas/
 
 These are explicitly deferred. Do not pick one unilaterally. (Full list: `Plans/canvas/11-open-questions.md`.)
 
-| Decision | Decide before… |
-|---|---|
-| Project license (Apache 2.0 vs AGPL) | First public code push beyond Plans/ |
-| SCF redistribution terms (legal review) | Bundling SCF catalog in releases |
-| Hosted offering or pure OSS governance | Public launch |
-| FrameworkScope ownership workflow UX | PCI/HIPAA modules ship |
-| Push credential issuance UX (API key rotation, scoping, revocation) | Push CLI ships |
-| Schema-registry governance for community `evidence_kind`s | Community connectors land |
-| AI-assistance boundary in contributor docs | First AI feature lands |
-| Risk-methodology default lock (NIST 800-30 + 5x5 + dollar-banded vs FAIR) | Risk module ships |
-| Privacy module shape (sibling vs first-class) | GDPR support work begins |
-| Disclosure / breach-notification workflow shape | HIPAA / GDPR Art. 33 work |
-| CCM / FedRAMP elevation timing | When user demand surfaces |
-| Control catalog governance (community-contributed controls, verified tier) | Public marketplace conversation |
-| Docs site generator (mkdocs Material vs Docusaurus) | Docs site begins |
+| Decision                                                                   | Decide before…                       |
+| -------------------------------------------------------------------------- | ------------------------------------ |
+| Project license (Apache 2.0 vs AGPL)                                       | First public code push beyond Plans/ |
+| SCF redistribution terms (legal review)                                    | Bundling SCF catalog in releases     |
+| Hosted offering or pure OSS governance                                     | Public launch                        |
+| FrameworkScope ownership workflow UX                                       | PCI/HIPAA modules ship               |
+| Push credential issuance UX (API key rotation, scoping, revocation)        | Push CLI ships                       |
+| Schema-registry governance for community `evidence_kind`s                  | Community connectors land            |
+| AI-assistance boundary in contributor docs                                 | First AI feature lands               |
+| Risk-methodology default lock (NIST 800-30 + 5x5 + dollar-banded vs FAIR)  | Risk module ships                    |
+| Privacy module shape (sibling vs first-class)                              | GDPR support work begins             |
+| Disclosure / breach-notification workflow shape                            | HIPAA / GDPR Art. 33 work            |
+| CCM / FedRAMP elevation timing                                             | When user demand surfaces            |
+| Control catalog governance (community-contributed controls, verified tier) | Public marketplace conversation      |
+| Docs site generator (mkdocs Material vs Docusaurus)                        | Docs site begins                     |
 
 ---
 

@@ -1,0 +1,5 @@
+[project]
+name = "security-atlas-sdk"
+version = "0.0.0"
+description = "security-atlas Python SDK for evidence push (lands in slice 003)."
+requires-python = ">=3.11"

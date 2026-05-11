@@ -1,11 +1,73 @@
+### OS / editor
 .DS_Store
-.claude/settings.local.json
-.claude/cache/
 .idea/
 .vscode/
 *.swp
 *.swo
+
+### Local config / secrets
+.claude/settings.local.json
+.claude/cache/
 .envrc
 .env
 .env.local
+.env.*.local
+
+### Defense-in-depth: common credential file patterns (pre-commit hooks
+### also detect-private-key + detect-aws-credentials; this gitignores
+### them before the hook even fires).
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+id_ecdsa*
+credentials.json
+service-account*.json
+.aws/
+.gnupg/
+.ssh/
+
+### Node
 node_modules/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+.npm/
+.yarn/
+.pnp.*
+
+### Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+.uv/
+*.egg-info/
+
+### Go
+*.out
+*.test
+coverage.txt
+bin/
+
+### Tooling caches
+.cache/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+### Coverage
+coverage/
+.coverage
+htmlcov/
+
+### Tracking / audit
+.agentdiff/

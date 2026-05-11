@@ -304,15 +304,15 @@ No cycles. Verified by mental traversal — every edge points forward in the top
 
 ## Cluster boundaries summary (recomputed post-review)
 
-| Layer | Slices | Notes |
-|---|---|---|
-| **Trunk (deps-free)** | 001 | Skeleton — no deps |
-| **Layer 1 (only 001)** | 002, 003, 034 | Schema, SDK, OIDC + api_keys (039 moved to Layer 2 per D5 — it depends on 003) |
-| **Layer 2 (002 + 003 chain)** | 006, 009, 014, 017, 019, 022, 024, 033, 039 | Major parallelism layer (039 added per D5 layer fix) |
-| **Layer 3** | 013, 007, 018, 023, 035, 036 | Push API + traversal-deps + auth chain (note: 015 moves to Layer 4 because it depends on 013) |
-| **Layer 4** | 004, 008, 010, 011, 015, 016 *(was Layer 4)*, 020, 021, 025 | Feature middle. 010 now depends on 014 (Layer 2) + 007/009 (Layer 2/3); still Layer 4. |
-| **Layer 5** | 005 *(now waits on 034 + 008)*, 012, 026, 027, 028, 029, 044-049 | Frontend bootstrap + audit workflow + remaining connectors |
-| **Layer 6** | 030 *(now waits on 022 too)*, 031, 037 *(recomputed: now needs 004, 005, 006, 010, 014, 015 + originals)*, 038, 040 *(now waits on 015, 021, 023)*, 041, 042 | OSCAL, board brief, deployment bundle, frontend views |
-| **Layer 7** | 032, 043 | Final board pack + view |
+| Layer                         | Slices                                                                                                                                                       | Notes                                                                                         |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| **Trunk (deps-free)**         | 001                                                                                                                                                          | Skeleton — no deps                                                                            |
+| **Layer 1 (only 001)**        | 002, 003, 034                                                                                                                                                | Schema, SDK, OIDC + api_keys (039 moved to Layer 2 per D5 — it depends on 003)                |
+| **Layer 2 (002 + 003 chain)** | 006, 009, 014, 017, 019, 022, 024, 033, 039                                                                                                                  | Major parallelism layer (039 added per D5 layer fix)                                          |
+| **Layer 3**                   | 013, 007, 018, 023, 035, 036                                                                                                                                 | Push API + traversal-deps + auth chain (note: 015 moves to Layer 4 because it depends on 013) |
+| **Layer 4**                   | 004, 008, 010, 011, 015, 016 _(was Layer 4)_, 020, 021, 025                                                                                                  | Feature middle. 010 now depends on 014 (Layer 2) + 007/009 (Layer 2/3); still Layer 4.        |
+| **Layer 5**                   | 005 _(now waits on 034 + 008)_, 012, 026, 027, 028, 029, 044-049                                                                                             | Frontend bootstrap + audit workflow + remaining connectors                                    |
+| **Layer 6**                   | 030 _(now waits on 022 too)_, 031, 037 _(recomputed: now needs 004, 005, 006, 010, 014, 015 + originals)_, 038, 040 _(now waits on 015, 021, 023)_, 041, 042 | OSCAL, board brief, deployment bundle, frontend views                                         |
+| **Layer 7**                   | 032, 043                                                                                                                                                     | Final board pack + view                                                                       |
 
 > Post-review changes: 039 moved from Layer 1 → Layer 2 (depends on 003); 037 recomputed — it stays at Layer 6 because its expanded deps' max layer (005 at Layer 5) places it one layer later than before (was Layer 5). 040 also moves to Layer 6 because it now waits on 015 + 021 + 023.

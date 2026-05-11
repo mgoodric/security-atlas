@@ -24,17 +24,17 @@ Because all framework-to-framework relationships are derived through SCF anchors
 
 NIST IR 8477 defines five relationship types, each with a strength score 0.0–1.0:
 
-| Relationship | Meaning | Example |
-|--------------|---------|---------|
-| `subset_of` | Source is fully covered by target. | `ISO27001:A.9.4.2 subset_of SCF:IAC-22` |
-| `superset_of` | Source covers more than target. | `SCF:IAC-01 superset_of SOC2:CC6.1` (SCF is broader) |
-| `intersects_with` | Partial overlap. | `PCI:8.3 intersects_with HIPAA:164.312(d)` |
-| `equal` | Logically equivalent. | `NIST_800_53:AC-2 equal SCF:IAC-15` |
-| `no_relationship` | Confirmed *no* overlap. (Yes, this is data — it suppresses false suggestions.) | |
+| Relationship      | Meaning                                                                        | Example                                              |
+| ----------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------- |
+| `subset_of`       | Source is fully covered by target.                                             | `ISO27001:A.9.4.2 subset_of SCF:IAC-22`              |
+| `superset_of`     | Source covers more than target.                                                | `SCF:IAC-01 superset_of SOC2:CC6.1` (SCF is broader) |
+| `intersects_with` | Partial overlap.                                                               | `PCI:8.3 intersects_with HIPAA:164.312(d)`           |
+| `equal`           | Logically equivalent.                                                          | `NIST_800_53:AC-2 equal SCF:IAC-15`                  |
+| `no_relationship` | Confirmed _no_ overlap. (Yes, this is data — it suppresses false suggestions.) |                                                      |
 
 A **strength** field captures auditor judgment: `(equal, 1.0)` is full confidence; `(intersects_with, 0.4)` flags partial coverage that needs supplemental evidence.
 
-This means **one piece of evidence can satisfy N controls automatically** when their SCF anchors are connected, and the platform can compute *coverage strength* per requirement: if your evidence covers SCF:IAC-22 with strength 1.0, and ISO27001:A.9.4.2 → SCF:IAC-22 with strength 0.8, the ISO requirement is covered at 0.8 — and the UI surfaces the gap.
+This means **one piece of evidence can satisfy N controls automatically** when their SCF anchors are connected, and the platform can compute _coverage strength_ per requirement: if your evidence covers SCF:IAC-22 with strength 1.0, and ISO27001:A.9.4.2 → SCF:IAC-22 with strength 0.8, the ISO requirement is covered at 0.8 — and the UI surfaces the gap.
 
 ## 3.3 Versioning strategy
 
@@ -44,20 +44,21 @@ This means **one piece of evidence can satisfy N controls automatically** when t
 
 ## 3.4 OSCAL ingest and export
 
-| Direction | OSCAL model | Use |
-|-----------|-------------|-----|
-| Ingest | `catalog` | Import a framework version (NIST 800-53r5 catalog ships from NIST as OSCAL JSON). |
-| Ingest | `profile` | Import a tailored baseline (FedRAMP Moderate). |
-| Ingest | `component-definition` | Import "this AWS service satisfies these controls" definitions. |
-| Export | `system-security-plan` (SSP) | Generate the SSP for an auditor. |
-| Export | `assessment-plan` / `assessment-results` | Generate the audit plan and what we found. |
-| Export | `plan-of-action-and-milestones` (POA&M) | Track open findings to remediation. |
+| Direction | OSCAL model                              | Use                                                                               |
+| --------- | ---------------------------------------- | --------------------------------------------------------------------------------- |
+| Ingest    | `catalog`                                | Import a framework version (NIST 800-53r5 catalog ships from NIST as OSCAL JSON). |
+| Ingest    | `profile`                                | Import a tailored baseline (FedRAMP Moderate).                                    |
+| Ingest    | `component-definition`                   | Import "this AWS service satisfies these controls" definitions.                   |
+| Export    | `system-security-plan` (SSP)             | Generate the SSP for an auditor.                                                  |
+| Export    | `assessment-plan` / `assessment-results` | Generate the audit plan and what we found.                                        |
+| Export    | `plan-of-action-and-milestones` (POA&M)  | Track open findings to remediation.                                               |
 
 We use [IBM compliance-trestle](https://github.com/oscal-compass/compliance-trestle) under the hood for OSCAL serialization; it is the most mature OSCAL SDK and CNCF/Linux Foundation–affiliated.
 
 ## 3.5 SCF as the canonical catalog
 
 We ship SCF (latest release) as the default control catalog. Users can:
+
 - Use SCF directly as their internal control library.
 - Override with a custom catalog while keeping SCF as the mapping spine.
 - Import additional catalogs (NIST 800-53, CSA CCM if licensed) as alternative anchor sets.

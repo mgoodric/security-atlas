@@ -28,20 +28,20 @@ The v1 success test is binary: does our primary user run their next SOC 2 audit 
 
 The canvas is split into focused sections. Each is a single concept, ingestible in 5–15 minutes. Read in order on first pass; jump in by topic thereafter.
 
-| # | Section | What's in it |
-|---|---|---|
-| 01 | [Vision and Positioning](./canvas/01-vision.md) | Product thesis · Why not Vanta/Drata/OpenGRC · Non-goals · Personas · Replacement-grade acceptance criteria · Anti-patterns we reject |
-| 02 | [Domain Primitives](./canvas/02-primitives.md) | Six entities — Control, Risk, Evidence, Scope, Framework/Version, Policy — with full field tables and an ER diagram |
-| 03 | [The Unified Control Framework](./canvas/03-ucf.md) | Graph not spreadsheet · STRM cardinality · Versioning · OSCAL · SCF as canonical catalog. Deep dive: [`UCF_GRAPH_MODEL.md`](./UCF_GRAPH_MODEL.md) |
-| 04 | [Evidence Engine](./canvas/04-evidence-engine.md) | Evidence SDK (connector + pusher profiles) · v1 connector roster · Ingestion/evaluation separation · Control-as-code · Manual evidence · Security questionnaires (CAIQ/SIG/HECVAT). Deep dive: [`EVIDENCE_SDK.md`](./EVIDENCE_SDK.md) |
-| 05 | [Scopes and Multitenancy](./canvas/05-scopes.md) | Scope dimensions · Per-cell evaluation · Inheritance/override · Postgres RLS · **FrameworkScope** (per-framework subset of cells and controls) |
-| 06 | [Risk Register Linkage](./canvas/06-risk.md) | Treatment statuses · Residual risk derivation · Exception/waiver workflow with auto-expiry |
-| 07 | [Metrics and Posture](./canvas/07-metrics.md) | KPIs · Leading vs lagging · Aggregation across scopes · Benchmarks · **Board reporting (first-class)** |
-| 08 | [Audit Workflow](./canvas/08-audit-workflow.md) | Auditor role · OSCAL SSP/POA&M export · Sample-pull primitives · **Audit-period freezing** · Audit Hub collaboration |
-| 09 | [Architecture and Tech Stack](./canvas/09-tech-stack.md) | Postgres + S3 · Go core + Python connector SDK · NATS JetStream · Plugin surfaces · OIDC + OPA |
-| 10 | [Roadmap and Sequencing](./canvas/10-roadmap.md) | MVP (solo operator, one framework, real audit, board-ready) · Phase 2 (mapping engine) · Phase 3 (audit ecosystem) |
-| 11 | [Open Questions Deferred](./canvas/11-open-questions.md) | 19 decisions the canvas does not resolve — licensing, governance, AI boundaries, UX workflows |
-|  · | [Sources](./canvas/sources.md) | All cited references |
+| #   | Section                                                  | What's in it                                                                                                                                                                                                                          |
+| --- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 01  | [Vision and Positioning](./canvas/01-vision.md)          | Product thesis · Why not Vanta/Drata/OpenGRC · Non-goals · Personas · Replacement-grade acceptance criteria · Anti-patterns we reject                                                                                                 |
+| 02  | [Domain Primitives](./canvas/02-primitives.md)           | Six entities — Control, Risk, Evidence, Scope, Framework/Version, Policy — with full field tables and an ER diagram                                                                                                                   |
+| 03  | [The Unified Control Framework](./canvas/03-ucf.md)      | Graph not spreadsheet · STRM cardinality · Versioning · OSCAL · SCF as canonical catalog. Deep dive: [`UCF_GRAPH_MODEL.md`](./UCF_GRAPH_MODEL.md)                                                                                     |
+| 04  | [Evidence Engine](./canvas/04-evidence-engine.md)        | Evidence SDK (connector + pusher profiles) · v1 connector roster · Ingestion/evaluation separation · Control-as-code · Manual evidence · Security questionnaires (CAIQ/SIG/HECVAT). Deep dive: [`EVIDENCE_SDK.md`](./EVIDENCE_SDK.md) |
+| 05  | [Scopes and Multitenancy](./canvas/05-scopes.md)         | Scope dimensions · Per-cell evaluation · Inheritance/override · Postgres RLS · **FrameworkScope** (per-framework subset of cells and controls)                                                                                        |
+| 06  | [Risk Register Linkage](./canvas/06-risk.md)             | Treatment statuses · Residual risk derivation · Exception/waiver workflow with auto-expiry                                                                                                                                            |
+| 07  | [Metrics and Posture](./canvas/07-metrics.md)            | KPIs · Leading vs lagging · Aggregation across scopes · Benchmarks · **Board reporting (first-class)**                                                                                                                                |
+| 08  | [Audit Workflow](./canvas/08-audit-workflow.md)          | Auditor role · OSCAL SSP/POA&M export · Sample-pull primitives · **Audit-period freezing** · Audit Hub collaboration                                                                                                                  |
+| 09  | [Architecture and Tech Stack](./canvas/09-tech-stack.md) | Postgres + S3 · Go core + Python connector SDK · NATS JetStream · Plugin surfaces · OIDC + OPA                                                                                                                                        |
+| 10  | [Roadmap and Sequencing](./canvas/10-roadmap.md)         | MVP (solo operator, one framework, real audit, board-ready) · Phase 2 (mapping engine) · Phase 3 (audit ecosystem)                                                                                                                    |
+| 11  | [Open Questions Deferred](./canvas/11-open-questions.md) | 19 decisions the canvas does not resolve — licensing, governance, AI boundaries, UX workflows                                                                                                                                         |
+| ·   | [Sources](./canvas/sources.md)                           | All cited references                                                                                                                                                                                                                  |
 
 ---
 
