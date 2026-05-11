@@ -1,0 +1,9 @@
+{
+  "name": "@security-atlas/sdk",
+  "private": true,
+  "version": "0.0.0",
+  "description": "security-atlas TypeScript SDK for evidence push (lands in slice 003). Will flip to private:false when slice 003 ships a publishable build.",
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,26 @@
+[project]
+name = "security-atlas-monorepo"
+version = "0.0.0"
+description = "security-atlas — open-source GRC platform (monorepo root)"
+requires-python = ">=3.11"
+
+[tool.uv.workspace]
+members = ["oscal-bridge"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

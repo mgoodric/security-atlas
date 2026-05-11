@@ -1,0 +1,18 @@
+License: DECISION-PENDING
+
+The security-atlas project license is unresolved (Apache 2.0 vs AGPL —
+see Plans/canvas/11-open-questions.md #03). Until the project license
+is chosen and committed in place of this file, the repository contents
+are shared for:
+
+- design review
+- contribution conversations
+- internal use by the repository owner
+
+The contents are NOT licensed for redistribution. Forking, derivative
+works, or commercial use require explicit written permission from the
+copyright holder until a permissive or copyleft license replaces this
+notice.
+
+Copyright (c) 2026 mgoodric and contributors. All rights reserved
+pending license resolution.

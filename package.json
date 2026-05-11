@@ -1,0 +1,13 @@
+{
+  "name": "security-atlas-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "description": "security-atlas — open-source GRC platform (monorepo root)",
+  "workspaces": [
+    "web",
+    "sdk/typescript"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}

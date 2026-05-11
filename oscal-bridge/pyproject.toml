@@ -1,0 +1,5 @@
+[project]
+name = "atlas-oscal-bridge"
+version = "0.0.0"
+description = "OSCAL serialization bridge wrapping IBM compliance-trestle (real bridge lands in slice 030)."
+requires-python = ">=3.11"
