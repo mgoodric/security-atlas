@@ -16,8 +16,10 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
+	"github.com/mgoodric/security-atlas/internal/api/vendors"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/scope"
+	"github.com/mgoodric/security-atlas/internal/vendor"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 )
 
@@ -63,6 +65,17 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/scopes/cells", scopesH.ListCells)
 	root.Get("/v1/scopes/dimensions", scopesH.ListDimensions)
 	root.Get("/v1/controls/{id}/applicability", scopesH.ControlApplicability)
+	// Slice 024: vendor lite module — CRUD + burndown. The burndown route
+	// is registered before /v1/vendors/{id} so chi's router matches the
+	// literal segment first (chi resolves routes in declaration order
+	// inside the same method).
+	vendorsH := vendors.New(vendor.NewStore(s.dbPool))
+	root.Post("/v1/vendors", vendorsH.CreateVendor)
+	root.Get("/v1/vendors", vendorsH.ListVendors)
+	root.Get("/v1/vendors/burndown", vendorsH.Burndown)
+	root.Get("/v1/vendors/{id}", vendorsH.GetVendor)
+	root.Patch("/v1/vendors/{id}", vendorsH.UpdateVendor)
+	root.Delete("/v1/vendors/{id}", vendorsH.DeleteVendor)
 	return root
 }
 
