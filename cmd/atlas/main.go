@@ -1,10 +1,8 @@
 // Package main is the security-atlas platform server entrypoint.
 //
-// Slice 003 boots the gRPC server with Evidence + Admin services backed
-// by in-memory stores. A bootstrap credential is minted at startup and
-// printed to stderr — the first AdminCredentials.Issue call uses it.
-// Slice 013 swaps in DB-backed evidence storage; slice 034 swaps the
-// credential store and removes the stderr bootstrap.
+// Hosts the gRPC server (Evidence + Admin + Connectors) and an HTTP server
+// (anchors browser API). Both share the in-memory stores; both stop on
+// SIGINT/SIGTERM via a common context.
 package main
 
 import (
@@ -12,17 +10,25 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/mgoodric/security-atlas/internal/api"
 )
 
-const defaultAddr = ":50051"
+const (
+	defaultGRPCAddr = ":50051"
+	defaultHTTPAddr = ":8080"
+)
 
 func main() {
-	addr := os.Getenv("ATLAS_GRPC_ADDR")
-	if addr == "" {
-		addr = defaultAddr
+	grpcAddr := os.Getenv("ATLAS_GRPC_ADDR")
+	if grpcAddr == "" {
+		grpcAddr = defaultGRPCAddr
+	}
+	httpAddr := os.Getenv("ATLAS_HTTP_ADDR")
+	if httpAddr == "" {
+		httpAddr = defaultHTTPAddr
 	}
 
 	srv := api.New(api.Config{})
@@ -40,9 +46,31 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	fmt.Fprintf(os.Stderr, "atlas: listening on %s\n", addr)
-	if err := srv.Run(ctx, addr); err != nil {
-		fmt.Fprintf(os.Stderr, "atlas: server: %v\n", err)
+	var wg sync.WaitGroup
+	errCh := make(chan error, 2)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		fmt.Fprintf(os.Stderr, "atlas: gRPC listening on %s\n", grpcAddr)
+		if err := srv.Run(ctx, grpcAddr); err != nil {
+			errCh <- fmt.Errorf("grpc: %w", err)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		fmt.Fprintf(os.Stderr, "atlas: HTTP listening on %s\n", httpAddr)
+		if err := srv.RunHTTP(ctx, httpAddr); err != nil {
+			errCh <- fmt.Errorf("http: %w", err)
+		}
+	}()
+
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		fmt.Fprintf(os.Stderr, "atlas: %v\n", err)
 		os.Exit(1)
 	}
 }
