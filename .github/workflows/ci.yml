@@ -49,11 +49,39 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      minio:
+        # Slice 036 S3 artifact store. MinIO is the open-source
+        # S3-compatible backend; integration tests run against it on
+        # the same Actions runner network. Credentials are workflow-
+        # ephemeral (production rotates real S3 IAM creds).
+        #
+        # The `bitnami/minio` image is used because it accepts the server
+        # arguments via env vars (MINIO_DEFAULT_BUCKETS), letting us bind
+        # GitHub Actions service-container semantics without an entrypoint
+        # override (which Actions doesn't expose cleanly).
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+          MINIO_DEFAULT_BUCKETS: atlas-artifacts-test
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+          --health-start-period 15s
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable
       # The app role's password is set by a step below from a workflow-scoped
       # value, then injected into DATABASE_URL_APP for the test step.
       ATLAS_APP_PASSWORD: ${{ secrets.CI_ATLAS_APP_PASSWORD || 'ci-ephemeral' }}
+      # Slice 036 — MinIO endpoint reachable from the runner.
+      MINIO_ENDPOINT: http://localhost:9000
+      MINIO_BUCKET: atlas-artifacts-test
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -89,7 +117,9 @@ jobs:
             ./internal/api/scfimport/... \
             ./internal/api/anchors/... \
             ./internal/api/schemaregistry/... \
-            ./internal/evidence/ingest/...
+            ./internal/evidence/ingest/... \
+            ./internal/artifact/... \
+            ./internal/api/artifacts/...
       - name: Migration round-trip — down then up
         run: |
           # Walk down migrations in reverse-alphabetical order (latest down first).

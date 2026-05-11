@@ -12,6 +12,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/anchors"
 	"github.com/mgoodric/security-atlas/internal/api/anchorseed"
+	artifactsapi "github.com/mgoodric/security-atlas/internal/api/artifacts"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
@@ -116,6 +117,15 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/framework-scopes/{id}", fwH.Get)
 	root.Patch("/v1/framework-scopes/{id}", fwH.Patch)
 	root.Get("/v1/controls/{id}/effective-scope", fwH.EffectiveScope)
+	// Slice 036: S3 artifact store — large-payload upload + short-TTL
+	// signed download. Routes only mount when an artifact store has been
+	// wired in via Server.AttachArtifactStore (or Config.ArtifactStore).
+	// Unit-only servers leave it nil.
+	if s.artifactStore != nil {
+		artifactsH := artifactsapi.New(s.artifactStore)
+		root.Post("/v1/artifacts:upload", artifactsH.Upload)
+		root.Get("/v1/artifacts/{id}", artifactsH.Get)
+	}
 	return root
 }
 
