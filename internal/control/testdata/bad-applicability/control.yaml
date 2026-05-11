@@ -1,0 +1,10 @@
+bundle_schema_version: "1"
+bundle_id: bad_applicability_test
+title: "Has malformed applicability_expr"
+scf_anchor_id: IAC-06
+implementation_type: automated
+
+applicability_expr:
+  op: "xor"
+  args:
+    - { op: "eq", dim: "environment", value: "prod" }

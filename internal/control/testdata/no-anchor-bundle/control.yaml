@@ -1,0 +1,4 @@
+bundle_schema_version: "1"
+bundle_id: no_anchor_test
+title: "Has no SCF anchor"
+implementation_type: automated

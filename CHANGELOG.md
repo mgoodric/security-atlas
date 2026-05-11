@@ -13,6 +13,44 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 009 — Control bundle format spec + parser + upload API.** New
+  control-as-code authoring path: a YAML manifest (`control.yaml`)
+  declaring `bundle_id`, `scf_anchor_id`, `title`, `implementation_type`,
+  optional `applicability_expr` (slice-017 JSON AST), optional
+  `evidence_queries[]`, and optional `manual_evidence_schema` (JSON
+  Schema). The format spec lives at
+  [`docs/spec/control-bundle.md`](docs/spec/control-bundle.md) with one
+  full worked example covering automated + manual implementation types.
+  Schema migration `20260511000009_control_bundle.sql` augments
+  slice-002's `controls` table in-place with `bundle_id` (natural key),
+  `superseded_by` (self-FK), `bundle_manifest_yaml` +
+  `bundle_manifest_hash` (verbatim + sha256), `scf_anchor_id` FK to the
+  `scf_anchors` catalog, `evidence_queries` JSONB, plus
+  `manual_evidence_schema`, `linked_policy_ids`, `freshness_class`,
+  `bundle_uploaded_by`. A partial unique index
+  (`controls_one_active_version_per_bundle`) guarantees exactly one
+  active row per `(tenant_id, bundle_id)`. RLS tightens from slice-002's
+  loose `tenant_isolation` to the four-policy split
+  (read/write/update/delete) matching slices 014/017/018/036. New REST
+  endpoint `POST /v1/controls:upload-bundle` accepts both
+  `multipart/form-data` (a `bundle.tar.gz` part) and
+  `application/json` (`{"manifest_yaml": "..."}`); admin-only auth gate
+  mirrors slice 014. The parser caps tarballs at 5 MB compressed, 20 MB
+  uncompressed, 500 entries, with explicit tar-slip rejection of
+  absolute paths and `..` segments. CLI subcommands
+  `security-atlas-cli controls validate <path>` (local-only,
+  no network) and `security-atlas-cli controls upload <path>` (tars
+  directories in-process; ships tarballs verbatim). Validation
+  composes three layers: structural (this slice), slice-017
+  applicability-expr well-formedness, slice-014 evidence_kind
+  registration. Re-uploading the same `bundle_id` creates a new row,
+  sets the prior row's `superseded_by` in the same transaction, and
+  returns the supersession chain in the HTTP response (AC-6).
+  Integration tests cover happy-path upload, re-upload supersession,
+  and unknown-SCF-anchor rejection against a real Postgres; unit tests
+  cover parser, tarball safety, and HTTP request-shape validation
+  without a DB. Fixtures live under
+  `internal/control/testdata/{minimal,aws-mfa,manual,no-anchor,bad-applicability}-bundle/`.
 - **Slice 018 — FrameworkScope predicate + four-state workflow +
   intersection compute.** New `framework_scopes` workflow gates the
   audit-binding scope predicate behind
