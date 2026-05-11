@@ -92,7 +92,7 @@ Legal values (use exactly these strings):
 | 016 | Evidence freshness + drift detection                   | `not-ready` | —                                             | —     | —           | —           | waits on 012                          |
 | 017 | Scope dimensions + applicability_expr + single-cell    | `merged`    | scope/017-scope-dimensions-applicability      | gh#9  | 2026-05-11  | 2026-05-11  | —                                     |
 | 018 | FrameworkScope predicate + intersection compute        | `ready`     | —                                             | —     | —           | —           | open-q #19 FrameworkScope UX — gate   |
-| 019 | Risk CRUD + NIST 800-30 + 5x5 + ALE-band               | `in-progress` | risk/019-risk-register-crud                  | —     | 2026-05-11  | —           | open-q #4 resolved (nist_800_30 lock) |
+| 019 | Risk CRUD + NIST 800-30 + 5x5 + ALE-band               | `in-review`   | risk/019-risk-register-crud                  | gh#10 | 2026-05-11  | —           | open-q #4 resolved (nist_800_30 lock) |
 | 020 | Risk → control linkage + residual derivation           | `not-ready` | —                                             | —     | —           | —           | waits on 019, 012                     |
 | 021 | Exception/waiver workflow + auto-expiry                | `not-ready` | —                                             | —     | —           | —           | waits on 019, 017                     |
 | 022 | Policy library + 5 stock policies                      | `ready`     | —                                             | —     | —           | —           | HITL on policy text                   |
