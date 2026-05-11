@@ -20,6 +20,14 @@ type Querier interface {
 	// Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
 	// framework version.
 	GetSCFAnchorBySCFID(ctx context.Context, scfID string) (ScfAnchor, error)
+	// Existing-row lookup. Returns ErrNoRows when the anchor doesn't exist yet.
+	// The importer calls this first to classify the upsert as Created /
+	// Updated / Unchanged (xmax-based detection inside ON CONFLICT can't
+	// distinguish "updated to the same content" from "actually updated").
+	GetSCFAnchorByVersionAndSCFID(ctx context.Context, arg GetSCFAnchorByVersionAndSCFIDParams) (ScfAnchor, error)
+	// Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
+	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
+	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
 	ListFrameworkVersionsBySlug(ctx context.Context, slug string) ([]FrameworkVersion, error)
 	ListFrameworks(ctx context.Context) ([]Framework, error)
 	// Paginated anchor list for a specific framework_version. Caller supplies
@@ -29,6 +37,9 @@ type Querier interface {
 	ListSCFAnchorsLatest(ctx context.Context, arg ListSCFAnchorsLatestParams) ([]ScfAnchor, error)
 	// Point a framework at its current version.
 	SetLatestVersion(ctx context.Context, arg SetLatestVersionParams) error
+	// Update an existing anchor in place. Touches updated_at; the caller
+	// decides whether to call this based on a content-equality check.
+	UpdateSCFAnchor(ctx context.Context, arg UpdateSCFAnchorParams) (ScfAnchor, error)
 	// Insert or update a framework row. The (tenant_id, slug) UNIQUE constraint
 	// in slice 002's schema treats NULLs as distinct, so a partial unique index
 	// on slug-when-tenant-is-null would be needed to catch global-catalog dupes
@@ -40,11 +51,6 @@ type Querier interface {
 	// as UpsertFramework above (avoids the NULLs-distinct gotcha on natural-key
 	// ON CONFLICT targets).
 	UpsertFrameworkVersion(ctx context.Context, arg UpsertFrameworkVersionParams) (FrameworkVersion, error)
-	// Idempotent insert keyed on (framework_version_id, scf_id) — both columns
-	// are NOT NULL so the NULLs-distinct gotcha doesn't apply here. Returns
-	// the resulting row plus an indication of whether the row was an insert
-	// (xmax = 0 on insert, non-zero on update).
-	UpsertSCFAnchor(ctx context.Context, arg UpsertSCFAnchorParams) (UpsertSCFAnchorRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

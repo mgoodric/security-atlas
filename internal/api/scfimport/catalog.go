@@ -193,7 +193,11 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cat *Catalog) (Report, error) 
 		return Report{}, fmt.Errorf("scfimport: set latest version: %w", err)
 	}
 
-	// 6. Upsert each anchor; tally created vs updated.
+	// 6. Look up + insert-or-update each anchor; tally counts. Two queries
+	//    per anchor (one read, one write) — keeps the Created/Updated/
+	//    Unchanged distinction honest. ON CONFLICT-based xmax detection
+	//    cannot distinguish "updated to the same content" from "actually
+	//    updated" because RETURNING runs after the SET.
 	report := Report{
 		ReleaseVersion:     cat.ReleaseVersion,
 		FrameworkID:        uuidString(framework.ID),
@@ -205,41 +209,58 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cat *Catalog) (Report, error) 
 		if err != nil {
 			return Report{}, fmt.Errorf("scfimport: marshal subtopics for %s: %w", ctl.SCFID, err)
 		}
-		row, err := q.UpsertSCFAnchor(ctx, dbx.UpsertSCFAnchorParams{
-			ID:                 uuidFromString("anchor-" + cat.ReleaseVersion + "-" + ctl.SCFID),
+
+		existing, lookupErr := q.GetSCFAnchorByVersionAndSCFID(ctx, dbx.GetSCFAnchorByVersionAndSCFIDParams{
 			FrameworkVersionID: version.ID,
 			ScfID:              ctl.SCFID,
-			Family:             ctl.Family,
-			Title:              ctl.Title,
-			Description:        ctl.Description,
-			Subtopics:          subtopics,
 		})
-		if err != nil {
-			return Report{}, fmt.Errorf("scfimport: upsert anchor %s: %w", ctl.SCFID, err)
-		}
 		switch {
-		case row.Inserted:
-			report.Created++
-		case wasContentUpdated(row, ctl, subtopics):
+		case lookupErr == nil:
+			if anchorContentEqual(existing, ctl, subtopics) {
+				report.Unchanged++
+				continue
+			}
+			if _, err := q.UpdateSCFAnchor(ctx, dbx.UpdateSCFAnchorParams{
+				ID:          existing.ID,
+				Family:      ctl.Family,
+				Title:       ctl.Title,
+				Description: ctl.Description,
+				Subtopics:   subtopics,
+			}); err != nil {
+				return Report{}, fmt.Errorf("scfimport: update anchor %s: %w", ctl.SCFID, err)
+			}
 			report.Updated++
+		case errors.Is(lookupErr, pgx.ErrNoRows):
+			if _, err := q.InsertSCFAnchor(ctx, dbx.InsertSCFAnchorParams{
+				ID:                 uuidFromString("anchor-" + cat.ReleaseVersion + "-" + ctl.SCFID),
+				FrameworkVersionID: version.ID,
+				ScfID:              ctl.SCFID,
+				Family:             ctl.Family,
+				Title:              ctl.Title,
+				Description:        ctl.Description,
+				Subtopics:          subtopics,
+			}); err != nil {
+				return Report{}, fmt.Errorf("scfimport: insert anchor %s: %w", ctl.SCFID, err)
+			}
+			report.Created++
 		default:
-			report.Unchanged++
+			return Report{}, fmt.Errorf("scfimport: lookup anchor %s: %w", ctl.SCFID, lookupErr)
 		}
 	}
 	return report, nil
 }
 
-// wasContentUpdated returns true when the upsert touched a meaningful
-// field (vs. a no-op rewrite). A row counted as Updated must reflect a
-// real content change; Unchanged is the steady-state idempotency signal.
-func wasContentUpdated(row dbx.UpsertSCFAnchorRow, ctl Control, subtopics []byte) bool {
+// anchorContentEqual returns true when the persisted row's content matches
+// the incoming control + subtopics — used to skip no-op writes and tally
+// Unchanged correctly.
+func anchorContentEqual(row dbx.ScfAnchor, ctl Control, subtopics []byte) bool {
 	if row.Family != ctl.Family || row.Title != ctl.Title || row.Description != ctl.Description {
-		return true
+		return false
 	}
 	if string(row.Subtopics) != string(subtopics) {
-		return true
+		return false
 	}
-	return false
+	return true
 }
 
 func uuidFromString(seed string) pgtype.UUID {

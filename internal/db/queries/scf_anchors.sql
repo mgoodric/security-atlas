@@ -51,20 +51,32 @@ JOIN frameworks f ON f.id = fv.framework_id
 WHERE f.slug = $1 AND fv.tenant_id IS NULL
 ORDER BY fv.effective_from DESC NULLS LAST, fv.version DESC;
 
--- name: UpsertSCFAnchor :one
--- Idempotent insert keyed on (framework_version_id, scf_id) — both columns
--- are NOT NULL so the NULLs-distinct gotcha doesn't apply here. Returns
--- the resulting row plus an indication of whether the row was an insert
--- (xmax = 0 on insert, non-zero on update).
+-- name: GetSCFAnchorByVersionAndSCFID :one
+-- Existing-row lookup. Returns ErrNoRows when the anchor doesn't exist yet.
+-- The importer calls this first to classify the upsert as Created /
+-- Updated / Unchanged (xmax-based detection inside ON CONFLICT can't
+-- distinguish "updated to the same content" from "actually updated").
+SELECT * FROM scf_anchors
+WHERE framework_version_id = $1 AND scf_id = $2;
+
+-- name: InsertSCFAnchor :one
+-- Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
+-- ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description, subtopics)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-ON CONFLICT (framework_version_id, scf_id) DO UPDATE
-SET family      = EXCLUDED.family,
-    title       = EXCLUDED.title,
-    description = EXCLUDED.description,
-    subtopics   = EXCLUDED.subtopics,
+RETURNING *;
+
+-- name: UpdateSCFAnchor :one
+-- Update an existing anchor in place. Touches updated_at; the caller
+-- decides whether to call this based on a content-equality check.
+UPDATE scf_anchors
+SET family      = $2,
+    title       = $3,
+    description = $4,
+    subtopics   = $5,
     updated_at  = now()
-RETURNING *, (xmax = 0) AS inserted;
+WHERE id = $1
+RETURNING *;
 
 -- name: ListSCFAnchorsForVersion :many
 -- Paginated anchor list for a specific framework_version. Caller supplies

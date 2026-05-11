@@ -84,6 +84,80 @@ func (q *Queries) GetSCFAnchorBySCFID(ctx context.Context, scfID string) (ScfAnc
 	return i, err
 }
 
+const getSCFAnchorByVersionAndSCFID = `-- name: GetSCFAnchorByVersionAndSCFID :one
+SELECT id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at FROM scf_anchors
+WHERE framework_version_id = $1 AND scf_id = $2
+`
+
+type GetSCFAnchorByVersionAndSCFIDParams struct {
+	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
+	ScfID              string      `json:"scf_id"`
+}
+
+// Existing-row lookup. Returns ErrNoRows when the anchor doesn't exist yet.
+// The importer calls this first to classify the upsert as Created /
+// Updated / Unchanged (xmax-based detection inside ON CONFLICT can't
+// distinguish "updated to the same content" from "actually updated").
+func (q *Queries) GetSCFAnchorByVersionAndSCFID(ctx context.Context, arg GetSCFAnchorByVersionAndSCFIDParams) (ScfAnchor, error) {
+	row := q.db.QueryRow(ctx, getSCFAnchorByVersionAndSCFID, arg.FrameworkVersionID, arg.ScfID)
+	var i ScfAnchor
+	err := row.Scan(
+		&i.ID,
+		&i.FrameworkVersionID,
+		&i.ScfID,
+		&i.Family,
+		&i.Title,
+		&i.Description,
+		&i.Subtopics,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const insertSCFAnchor = `-- name: InsertSCFAnchor :one
+INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description, subtopics)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at
+`
+
+type InsertSCFAnchorParams struct {
+	ID                 pgtype.UUID `json:"id"`
+	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
+	ScfID              string      `json:"scf_id"`
+	Family             string      `json:"family"`
+	Title              string      `json:"title"`
+	Description        string      `json:"description"`
+	Subtopics          []byte      `json:"subtopics"`
+}
+
+// Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
+// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
+func (q *Queries) InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error) {
+	row := q.db.QueryRow(ctx, insertSCFAnchor,
+		arg.ID,
+		arg.FrameworkVersionID,
+		arg.ScfID,
+		arg.Family,
+		arg.Title,
+		arg.Description,
+		arg.Subtopics,
+	)
+	var i ScfAnchor
+	err := row.Scan(
+		&i.ID,
+		&i.FrameworkVersionID,
+		&i.ScfID,
+		&i.Family,
+		&i.Title,
+		&i.Description,
+		&i.Subtopics,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listFrameworkVersionsBySlug = `-- name: ListFrameworkVersionsBySlug :many
 SELECT fv.id, fv.tenant_id, fv.framework_id, fv.version, fv.effective_from, fv.effective_to, fv.status, fv.requirement_count, fv.oscal_catalog_uri, fv.created_at
 FROM framework_versions fv
@@ -267,6 +341,50 @@ func (q *Queries) SetLatestVersion(ctx context.Context, arg SetLatestVersionPara
 	return err
 }
 
+const updateSCFAnchor = `-- name: UpdateSCFAnchor :one
+UPDATE scf_anchors
+SET family      = $2,
+    title       = $3,
+    description = $4,
+    subtopics   = $5,
+    updated_at  = now()
+WHERE id = $1
+RETURNING id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at
+`
+
+type UpdateSCFAnchorParams struct {
+	ID          pgtype.UUID `json:"id"`
+	Family      string      `json:"family"`
+	Title       string      `json:"title"`
+	Description string      `json:"description"`
+	Subtopics   []byte      `json:"subtopics"`
+}
+
+// Update an existing anchor in place. Touches updated_at; the caller
+// decides whether to call this based on a content-equality check.
+func (q *Queries) UpdateSCFAnchor(ctx context.Context, arg UpdateSCFAnchorParams) (ScfAnchor, error) {
+	row := q.db.QueryRow(ctx, updateSCFAnchor,
+		arg.ID,
+		arg.Family,
+		arg.Title,
+		arg.Description,
+		arg.Subtopics,
+	)
+	var i ScfAnchor
+	err := row.Scan(
+		&i.ID,
+		&i.FrameworkVersionID,
+		&i.ScfID,
+		&i.Family,
+		&i.Title,
+		&i.Description,
+		&i.Subtopics,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const upsertFramework = `-- name: UpsertFramework :one
 INSERT INTO frameworks (id, tenant_id, name, slug, issuer, description, latest_version_id)
 VALUES ($1, NULL, $2, $3, $4, $5, NULL)
@@ -356,71 +474,6 @@ func (q *Queries) UpsertFrameworkVersion(ctx context.Context, arg UpsertFramewor
 		&i.RequirementCount,
 		&i.OscalCatalogUri,
 		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const upsertSCFAnchor = `-- name: UpsertSCFAnchor :one
-INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description, subtopics)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-ON CONFLICT (framework_version_id, scf_id) DO UPDATE
-SET family      = EXCLUDED.family,
-    title       = EXCLUDED.title,
-    description = EXCLUDED.description,
-    subtopics   = EXCLUDED.subtopics,
-    updated_at  = now()
-RETURNING id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at, (xmax = 0) AS inserted
-`
-
-type UpsertSCFAnchorParams struct {
-	ID                 pgtype.UUID `json:"id"`
-	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
-	ScfID              string      `json:"scf_id"`
-	Family             string      `json:"family"`
-	Title              string      `json:"title"`
-	Description        string      `json:"description"`
-	Subtopics          []byte      `json:"subtopics"`
-}
-
-type UpsertSCFAnchorRow struct {
-	ID                 pgtype.UUID        `json:"id"`
-	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
-	ScfID              string             `json:"scf_id"`
-	Family             string             `json:"family"`
-	Title              string             `json:"title"`
-	Description        string             `json:"description"`
-	Subtopics          []byte             `json:"subtopics"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	Inserted           bool               `json:"inserted"`
-}
-
-// Idempotent insert keyed on (framework_version_id, scf_id) — both columns
-// are NOT NULL so the NULLs-distinct gotcha doesn't apply here. Returns
-// the resulting row plus an indication of whether the row was an insert
-// (xmax = 0 on insert, non-zero on update).
-func (q *Queries) UpsertSCFAnchor(ctx context.Context, arg UpsertSCFAnchorParams) (UpsertSCFAnchorRow, error) {
-	row := q.db.QueryRow(ctx, upsertSCFAnchor,
-		arg.ID,
-		arg.FrameworkVersionID,
-		arg.ScfID,
-		arg.Family,
-		arg.Title,
-		arg.Description,
-		arg.Subtopics,
-	)
-	var i UpsertSCFAnchorRow
-	err := row.Scan(
-		&i.ID,
-		&i.FrameworkVersionID,
-		&i.ScfID,
-		&i.Family,
-		&i.Title,
-		&i.Description,
-		&i.Subtopics,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Inserted,
 	)
 	return i, err
 }
