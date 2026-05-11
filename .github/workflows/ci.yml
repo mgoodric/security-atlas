@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.24"
           cache: true
       - name: Verify go.mod is tidy
         run: |
@@ -29,8 +29,64 @@ jobs:
           if [ -f go.sum ]; then git diff --exit-code -- go.sum; fi
       - name: Build all packages
         run: go build ./...
-      - name: Run tests
+      - name: Run unit tests
         run: go test -race ./...
+
+  tests-integration:
+    name: Go · integration (Postgres RLS)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: security_atlas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable
+      # The app role's password is set by a step below from a workflow-scoped
+      # value, then injected into DATABASE_URL_APP for the test step.
+      ATLAS_APP_PASSWORD: ${{ secrets.CI_ATLAS_APP_PASSWORD || 'ci-ephemeral' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+      - name: Bootstrap roles
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
+      - name: Set role passwords (CI-scoped)
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
+      - name: Apply forward migrations
+        run: |
+          for f in migrations/sql/*.sql; do
+            case "$f" in
+              *.down.sql) ;;
+              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
+            esac
+          done
+      - name: Run integration tests
+        run: go test -tags=integration -race -v ./internal/db/...
+      - name: Migration round-trip — down then up
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/sql/20260511000000_init.down.sql
+          remaining_tables=$(psql "$DATABASE_URL" -t -A -c "SELECT count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r'")
+          remaining_types=$(psql "$DATABASE_URL" -t -A -c "SELECT count(*) FROM pg_type WHERE typnamespace = 'public'::regnamespace AND typtype = 'e'")
+          if [ "$remaining_tables" != "0" ] || [ "$remaining_types" != "0" ]; then
+            echo "down migration left $remaining_tables tables + $remaining_types enums"
+            exit 1
+          fi
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/sql/20260511000000_init.sql
 
   lint-go:
     name: Go · lint
@@ -39,11 +95,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.24"
           cache: true
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.61
+          version: latest
 
   build-frontend:
     name: Frontend · install + build
@@ -80,7 +136,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.24"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"

@@ -23,9 +23,13 @@ build-frontend:
 # Run all tests
 test: test-go test-frontend
 
-# Run Go tests
+# Run Go tests (unit only — integration tests behind the `integration` build tag)
 test-go:
     go test ./...
+
+# Run integration tests (require Postgres reachable via DATABASE_URL_APP)
+test-integration:
+    go test -tags=integration -race ./internal/db/...
 
 # Run frontend tests
 test-frontend:
@@ -79,3 +83,43 @@ tidy:
     go mod tidy
     git diff --exit-code -- go.mod || (echo "go.mod changed; commit the diff" && exit 1)
     @if [ -f go.sum ]; then git diff --exit-code -- go.sum || (echo "go.sum changed; commit the diff" && exit 1); fi
+
+# ----- Database / migrations -----
+#
+# DATABASE_URL points at the migration role (superuser-or-BYPASSRLS). Atlas
+# uses it for DDL.
+# DATABASE_URL_APP points at the application role (NOSUPERUSER NOBYPASSRLS).
+# Integration tests use it.
+# ATLAS_DEV_URL is a separate ephemeral Postgres for `atlas migrate diff`.
+
+# Apply bootstrap roles, then the versioned SQL migrations in order.
+# Plain psql for slice 002 — one migration doesn't justify a versioning tool.
+# A real migration runner lands when slice N adds the second migration.
+migrate-up:
+    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
+    for f in migrations/sql/*.sql; do \
+        case "$f" in *.down.sql) ;; *) \
+            echo "applying $f"; \
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; \
+        ;; esac; \
+    done
+
+# Roll back: apply the latest .down.sql in reverse-timestamp order.
+migrate-down:
+    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/sql/20260511000000_init.down.sql
+
+# Start a local Postgres 16 in Docker for development
+db-up:
+    docker run -d --name security-atlas-pg \
+        -e POSTGRES_PASSWORD=postgres \
+        -e POSTGRES_DB=security_atlas \
+        -p 5432:5432 \
+        postgres:16-alpine
+
+# Tear down the local Postgres
+db-down:
+    docker rm -f security-atlas-pg
+
+# Generate sqlc code (no queries yet in slice 002 — canary that the schema parses)
+sqlc-generate:
+    sqlc generate

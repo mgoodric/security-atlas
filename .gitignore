@@ -6,8 +6,7 @@
 *.swo
 
 ### Local config / secrets
-.claude/settings.local.json
-.claude/cache/
+.claude/
 .envrc
 .env
 .env.local
