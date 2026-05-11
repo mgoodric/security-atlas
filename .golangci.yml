@@ -1,40 +1,42 @@
+version: "2"
 run:
   timeout: 5m
   modules-download-mode: readonly
 
 linters:
-  disable-all: true
+  default: none
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
-    - typecheck
-    - unused
-    - gofmt
-    - goimports
     - misspell
     - revive
-
-linters-settings:
-  goimports:
-    local-prefixes: github.com/mgoodric/security-atlas
-  revive:
-    severity: warning
+    - unused
+  settings:
+    revive:
+      severity: warning
+      rules:
+        - name: var-naming
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+  exclusions:
     rules:
-      - name: var-naming
-      - name: error-return
-      - name: error-strings
-      - name: error-naming
-    # `package-comments` and `exported` deferred until slice 002+ adds real public APIs;
-    # enabling now would spam every near-empty package in the skeleton.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - revive
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/mgoodric/security-atlas
 
 issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-        - revive
   max-issues-per-linter: 0
   max-same-issues: 0

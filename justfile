@@ -123,3 +123,23 @@ db-down:
 # Generate sqlc code (no queries yet in slice 002 — canary that the schema parses)
 sqlc-generate:
     sqlc generate
+
+# ----- Protobuf / gRPC -----
+
+# Lint the proto sources (buf STANDARD ruleset)
+proto-lint:
+    buf lint
+
+# Format proto sources in-place
+proto-format:
+    buf format -w
+
+# Generate Go bindings into gen/proto/. Commit the diff.
+proto-generate:
+    buf generate
+
+# What CI does: lint + generate + assert no diff against committed gen/
+proto-ci:
+    buf lint
+    buf generate
+    git diff --exit-code -- gen/proto || (echo "gen/proto changed; run 'just proto-generate' and commit" && exit 1)

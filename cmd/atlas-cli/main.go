@@ -1,15 +1,16 @@
-// Package main is the security-atlas-cli binary entrypoint.
-//
-// The CLI grows in slice 003 (Evidence SDK proto + Go push client + CLI)
-// with subcommands like `security-atlas evidence push` and
-// `security-atlas credentials issue/rotate/revoke/list` (per D4 review
-// resolution). For slice 001 (skeleton), it prints a marker.
+// Package main is the security-atlas-cli binary entrypoint. Slice 003
+// implements `evidence push` and `credentials {issue,rotate,revoke,list}`.
 package main
 
-import "fmt"
-
-const binary = "atlas-cli"
+import (
+	"fmt"
+	"os"
+)
 
 func main() {
-	fmt.Printf("%s: CLI binary — slice 001 skeleton (no subcommands yet)\n", binary)
+	root := newRootCmd()
+	if err := root.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
 }

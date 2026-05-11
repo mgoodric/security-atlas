@@ -1,0 +1,161 @@
+// security-atlas Evidence SDK — push profile contract.
+//
+// One canonical inbound API: EvidenceIngest.Push. Every connector, every
+// CI-pipeline pusher, and the reference CLI converge here. Wire format is
+// frozen on merge — field numbers and names cannot change without a major
+// version bump under proto/evidence/v2/.
+//
+// See Plans/EVIDENCE_SDK.md §4 for the full surface design (REST and gRPC
+// streaming variants land in later slices).
+
+syntax = "proto3";
+
+package evidence.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/mgoodric/security-atlas/gen/proto/evidence/v1;evidencev1";
+
+// EvidenceIngestService is the canonical inbound API for the evidence
+// ledger. Authentication is required (bearer token in `authorization`
+// metadata); the server resolves the bearer to a tenant_id and applies
+// tenant-scoped Row-Level Security on downstream writes (slice 013).
+service EvidenceIngestService {
+  // Push accepts a single evidence record. Idempotent on idempotency_key:
+  // a duplicate push with the same key and same hash returns the original
+  // receipt; a duplicate key with different content is rejected.
+  //
+  // Errors:
+  //   Unauthenticated     — missing or invalid bearer token
+  //   InvalidArgument     — required field missing or malformed
+  //   FailedPrecondition  — evidence_kind not in the schema registry
+  //   AlreadyExists       — idempotency_key reused with different content
+  //   PermissionDenied    — credential scope does not permit this push
+  rpc Push(PushRequest) returns (PushResponse);
+}
+
+message PushRequest {
+  EvidenceRecord record = 1;
+}
+
+message PushResponse {
+  EvidenceReceipt receipt = 1;
+}
+
+// EvidenceRecord is one observation about reality at a point in time. Every
+// numbered field below is required unless explicitly marked optional; the
+// server rejects records missing any required field (anti-criterion: no
+// schemaless, scope-less, or unattributed push).
+//
+// Field numbers 11–19 are reserved for forward-compatible additions
+// (provenance, redaction_applied, tags, signing). 20+ for new dimensions.
+message EvidenceRecord {
+  reserved 11 to 19;
+
+  // Idempotency dedup key. Required. Unique per (tenant, key) within the
+  // server's dedup window (24h once DB-backed in slice 013).
+  string idempotency_key = 1;
+
+  // Evidence-kind identifier (e.g., "sast.scan_result.v1"). Must be
+  // registered in the schema registry; the server rejects unregistered
+  // kinds (anti-criterion: no auto-create).
+  string evidence_kind = 2;
+
+  // Semver of the payload schema for this kind. Registry validates parseable
+  // semver and matches against published versions (full JSON-Schema check
+  // is slice 014).
+  string schema_version = 3;
+
+  // Control or SCF anchor this evidence applies to. Free-form for slice 003;
+  // referential integrity to the controls table lands in slice 013.
+  string control_id = 4;
+
+  // Scope dimensions for this evidence. At least one entry required. Each
+  // dimension is a key + ordered list of values (multi-valued dimensions
+  // supported for records that apply to several scope cells at once, e.g.
+  // a tenancy-wide deployment manifest applying to multiple cloud_account
+  // values). The server normalizes (sorts by key, sorts values) before
+  // hashing so client ordering does not affect tamper-evidence.
+  repeated ScopeDimension scope = 5;
+
+  // When the source observed reality (NOT when we received it). Required.
+  google.protobuf.Timestamp observed_at = 6;
+
+  // Evaluation result. Required.
+  Result result = 7;
+
+  // Raw payload, validated against the evidence_kind's JSON Schema by the
+  // server. Required (may be an empty struct for declarative kinds).
+  // Note: google.protobuf.Struct loses int64 precision above 2^53. For
+  // numeric-heavy payloads, push via payload_uri to object storage.
+  google.protobuf.Struct payload = 8;
+
+  // Client-claimed identity context. The server independently records its
+  // own observed provenance (credential id, received_at, IP class) when
+  // persisting; that server-side provenance lives on the stored record,
+  // not on the receipt. Required.
+  SourceAttribution source_attribution = 9;
+
+  // Optional URI for large payload artifacts in object storage. Explicit
+  // optional so "" and "unset" are distinguishable.
+  optional string payload_uri = 10;
+}
+
+// ScopeDimension is one (key, values[]) entry. Keys are dimension names
+// (e.g., "environment", "cloud_account", "data_classification"); values are
+// dimension-specific identifiers. Multi-valued dimensions express "this
+// record applies to all of these cells along this axis."
+message ScopeDimension {
+  string key = 1;
+  repeated string values = 2;
+}
+
+// Result enumerates evaluation outcomes for a single evidence record.
+enum Result {
+  RESULT_UNSPECIFIED = 0;
+  RESULT_PASS = 1;
+  RESULT_FAIL = 2;
+  RESULT_NA = 3;
+  RESULT_INCONCLUSIVE = 4;
+}
+
+// SourceAttribution carries the client's CLAIM about who produced the
+// record. The server independently records the credential it observed
+// for tamper-evidence purposes — the two are separate by design.
+message SourceAttribution {
+  // "service_account" | "human" | "system"
+  string actor_type = 1;
+
+  // Stable identifier for the actor (e.g., "ci.gitlab.com/org/repo").
+  string actor_id = 2;
+
+  // Optional opaque session reference (JWT signature, request id, etc.).
+  string session_id = 3;
+}
+
+// EvidenceReceipt is returned for every accepted push. Sufficient to prove
+// an evidence record was ingested at a given moment; the record itself is
+// read back via the ledger query API (slice 013).
+message EvidenceReceipt {
+  // Server-generated UUIDv7 for the stored record.
+  string record_id = 1;
+
+  // sha256 (hex-encoded) of the deterministic-protobuf-encoded bytes of
+  // the EvidenceRecord as the server observed it (i.e., post-normalization
+  // of repeated/map fields). Clients reproduce this by calling
+  // `proto.MarshalOptions{Deterministic: true}.Marshal(record)` and
+  // hashing the bytes. Cross-language: protobuf deterministic encoding is
+  // stable across Go (`MarshalOptions.Deterministic`), Python
+  // (`SerializeToString(deterministic=True)`), and protobuf-es
+  // (`toBinary({deterministic: true})`).
+  string hash = 2;
+
+  // When the server accepted the push.
+  google.protobuf.Timestamp ingested_at = 3;
+
+  // Server-observed credential id. Lets the client confirm "the credential
+  // the server saw matches the credential I used" without an extra round
+  // trip. Empty when the request was unauthenticated (rejected anyway).
+  string credential_id = 4;
+}
