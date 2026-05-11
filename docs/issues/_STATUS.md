@@ -173,7 +173,7 @@ Legal values (use exactly these strings):
 | 041 | Control detail view + UCF mini-viz                     | `not-ready`   | —                                               | —     | —          | —          | waits on 005, 008, 012                |
 | 042 | Audit workspace view (sample + walkthrough + comments) | `not-ready`   | —                                               | —     | —          | —          | waits on 025, 026, 027, 029           |
 | 043 | Board pack preview/export view                         | `not-ready`   | —                                               | —     | —          | —          | waits on 005, 032                     |
-| 044 | GitHub connector                                       | `in-progress` | connectors/044-github-connector                 | —     | 2026-05-11 | —          | deps 003, 013 merged                  |
+| 044 | GitHub connector                                       | `in-review`   | connectors/044-github-connector                 | gh#14 | 2026-05-11 | —          | deps 003, 013 merged                  |
 | 045 | Okta connector                                         | `ready`       | —                                               | —     | —          | —          | deps 003, 013 merged                  |
 | 046 | 1Password connector                                    | `ready`       | —                                               | —     | —          | —          | deps 003, 013 merged                  |
 | 047 | osquery/Fleet endpoint connector                       | `ready`       | —                                               | —     | —          | —          | deps 003, 013 merged                  |
