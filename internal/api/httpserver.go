@@ -15,7 +15,9 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
+	"github.com/mgoodric/security-atlas/internal/api/scopes"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/scope"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 )
 
@@ -53,6 +55,14 @@ func (s *Server) httpHandler() http.Handler {
 		root.Get("/v1/schemas/{kind}/{semver}", h.GetHTTP)
 		root.Post("/v1/schemas", h.RegisterHTTP)
 	}
+	// Slice 017: scope dimensions, scope cells, and per-control applicability.
+	// chi.Mux rejects mounting two routers on the same prefix, so the slice's
+	// individual routes are wired with Method() one-by-one onto the root.
+	scopesH := scopes.New(scope.NewStore(s.dbPool))
+	root.Post("/v1/scopes/cells", scopesH.CreateCell)
+	root.Get("/v1/scopes/cells", scopesH.ListCells)
+	root.Get("/v1/scopes/dimensions", scopesH.ListDimensions)
+	root.Get("/v1/controls/{id}/applicability", scopesH.ControlApplicability)
 	return root
 }
 

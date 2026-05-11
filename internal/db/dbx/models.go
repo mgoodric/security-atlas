@@ -693,3 +693,25 @@ type Scope struct {
 	CreatedAt          pgtype.Timestamptz       `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz       `json:"updated_at"`
 }
+
+type ScopeCell struct {
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	Label          string             `json:"label"`
+	Dimensions     []byte             `json:"dimensions"`
+	DimensionsHash string             `json:"dimensions_hash"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ScopeDimension struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	Name          string             `json:"name"`
+	ValueType     string             `json:"value_type"`
+	AllowedValues []byte             `json:"allowed_values"`
+	IsRequired    bool               `json:"is_required"`
+	IsBuiltin     bool               `json:"is_builtin"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
