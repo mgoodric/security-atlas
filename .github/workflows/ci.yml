@@ -84,11 +84,15 @@ jobs:
             fi
             sleep 2
           done
-          # Create the test bucket using a short-lived mc container on the
-          # same docker network. The MinIO admin client (`mc`) is the
-          # canonical bucket-bootstrap tool.
-          docker run --rm --network host minio/mc \
-            sh -c "mc alias set local http://localhost:9000 minioadmin minioadmin && mc mb -p local/atlas-artifacts-test"
+          # Create the test bucket using a short-lived mc container. The
+          # MinIO admin client (`mc`) is the canonical bucket-bootstrap
+          # tool. We inject the alias via the MC_HOST_<alias> env var so
+          # the single `mc mb` invocation has the alias without needing a
+          # separate `mc alias set` call (which would write config to
+          # ~/.mc/ that doesn't persist across `docker run` invocations).
+          docker run --rm --network host \
+            -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
+            minio/mc mb -p local/atlas-artifacts-test
       - name: Bootstrap roles
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
       - name: Set role passwords (CI-scoped)
