@@ -13,6 +13,40 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 019 — Risk register CRUD with pluggable methodology.** Adds
+  per-treatment fields (`accepted_until`, `accepter`, `instrument_reference`)
+  to the slice-002 `risks` table, plus a `risk_control_links` join table
+  (composite FK to `controls(tenant_id, id)`) so canvas §2.2's
+  `linked_control_ids[]` has a tenant-safe enforcement target. Open
+  question #04 (risk-methodology default) is resolved: per-risk
+  `methodology` defaults to `nist_800_30` with the qualitative 5x5
+  (likelihood × impact, 1..5) shape; `fair`, `cis_ram`, `iso_27005`,
+  and `qualitative_5x5` are first-class peers — no methodology is
+  globally enforced. `internal/risk` package: `Store` (pgx + tenancy
+  GUC), `methodology.go` (per-methodology JSON Schema validation via
+  `github.com/santhosh-tekuri/jsonschema/v6`, schemas inlined), and
+  `treatment.go` (canvas §6.1 rules: `accept` requires
+  `accepted_until` + `accepter`; `mitigate` requires at least one
+  linked control; `transfer` requires `instrument_reference`;
+  `avoid` is status-only). DB-level CHECK constraints
+  (`risks_accept_fields_required`, `risks_transfer_fields_required`)
+  add defense-in-depth for the two rules Postgres can express
+  without referencing another table. RLS tightened to the four-policy
+  split (`tenant_read` FOR SELECT, `tenant_write` FOR INSERT
+  WITH CHECK, `tenant_update` FOR UPDATE USING + WITH CHECK,
+  `tenant_delete` FOR DELETE) on both `risks` and
+  `risk_control_links`. New HTTP API: `POST /v1/risks`,
+  `GET /v1/risks` (filterable by treatment / category / methodology),
+  `GET /v1/risks/{id}`, `DELETE /v1/risks/{id}`, and
+  `GET /v1/risks/heatmap` (sparse + dense 5×5 grid for risks using
+  `nist_800_30` or `qualitative_5x5`; FAIR risks intentionally
+  excluded from the heatmap). Anti-criteria honored: methodology is
+  per-risk (no global enforcement); invalid treatment transitions
+  rejected with `ErrTreatmentValidation` and DB CHECK; methodology-
+  specific score validation never skipped (handler short-circuits to
+  400 on `ErrInherentScoreInvalid`). Integration test suite covers
+  every AC against real Postgres including cross-tenant isolation
+  for SELECT / INSERT / UPDATE / DELETE paths (Invariant 6).
 - **Slice 024 — Vendor lite module.** New `vendors` table (Postgres)
   with the minimum-viable TPRM fields: name, optional domain, criticality
   (low/medium/high), contract_start/end, dpa_signed + dpa_signed_at,

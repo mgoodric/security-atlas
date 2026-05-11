@@ -741,19 +741,29 @@ type Policy struct {
 }
 
 type Risk struct {
-	ID             pgtype.UUID        `json:"id"`
-	TenantID       pgtype.UUID        `json:"tenant_id"`
-	Title          string             `json:"title"`
-	Description    string             `json:"description"`
-	Category       RiskCategory       `json:"category"`
-	Methodology    RiskMethodology    `json:"methodology"`
-	InherentScore  []byte             `json:"inherent_score"`
-	Treatment      RiskTreatment      `json:"treatment"`
-	TreatmentOwner string             `json:"treatment_owner"`
-	ResidualScore  []byte             `json:"residual_score"`
-	ReviewDueAt    pgtype.Timestamptz `json:"review_due_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ID                  pgtype.UUID        `json:"id"`
+	TenantID            pgtype.UUID        `json:"tenant_id"`
+	Title               string             `json:"title"`
+	Description         string             `json:"description"`
+	Category            RiskCategory       `json:"category"`
+	Methodology         RiskMethodology    `json:"methodology"`
+	InherentScore       []byte             `json:"inherent_score"`
+	Treatment           RiskTreatment      `json:"treatment"`
+	TreatmentOwner      string             `json:"treatment_owner"`
+	ResidualScore       []byte             `json:"residual_score"`
+	ReviewDueAt         pgtype.Timestamptz `json:"review_due_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	AcceptedUntil       pgtype.Date        `json:"accepted_until"`
+	Accepter            string             `json:"accepter"`
+	InstrumentReference string             `json:"instrument_reference"`
+}
+
+type RiskControlLink struct {
+	RiskID    pgtype.UUID        `json:"risk_id"`
+	ControlID pgtype.UUID        `json:"control_id"`
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type ScfAnchor struct {

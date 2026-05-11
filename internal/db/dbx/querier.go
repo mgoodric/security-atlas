@@ -16,6 +16,7 @@ type Querier interface {
 	AddVendorScopeCell(ctx context.Context, arg AddVendorScopeCellParams) error
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
+	CountRiskControlLinks(ctx context.Context, arg CountRiskControlLinksParams) (int64, error)
 	CountSCFAnchorsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
 	CountScopeCells(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// AC-3 burndown: returns total + overdue counts per criticality band. Used
@@ -23,6 +24,11 @@ type Querier interface {
 	// Returns one row per criticality present in the result set; empty bands are
 	// not included (callers fill in zero where needed).
 	CountVendorsForBurndown(ctx context.Context, arg CountVendorsForBurndownParams) ([]CountVendorsForBurndownRow, error)
+	// Insert a new risk. The application validates methodology-specific
+	// inherent_score and per-treatment required fields BEFORE calling this.
+	// DB-side CHECK constraints (slice 019) are defense-in-depth, not the
+	// primary validation path.
+	CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, error)
 	// Insert a scope cell. dimensions_hash is the application-computed canonical
 	// hash; the UNIQUE (tenant_id, dimensions_hash) constraint rejects duplicates.
 	CreateScopeCell(ctx context.Context, arg CreateScopeCellParams) (ScopeCell, error)
@@ -34,6 +40,7 @@ type Querier interface {
 	// INSERT WITH CHECK policy. dpa_signed_at is required by CHECK constraint
 	// whenever dpa_signed=true.
 	CreateVendor(ctx context.Context, arg CreateVendorParams) (Vendor, error)
+	DeleteRisk(ctx context.Context, arg DeleteRiskParams) error
 	DeleteVendor(ctx context.Context, arg DeleteVendorParams) error
 	// Flip every "current" framework_version for the given framework to "legacy"
 	// so a new release can take over without violating the at-most-one-current
@@ -50,6 +57,7 @@ type Querier interface {
 	// when no tenant is supplied and by the push validator before slice 013
 	// lands tenant-private validation.
 	GetEvidenceKindSchemaGlobal(ctx context.Context, arg GetEvidenceKindSchemaGlobalParams) (EvidenceKindSchema, error)
+	GetRiskByID(ctx context.Context, arg GetRiskByIDParams) (Risk, error)
 	GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnchor, error)
 	// Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
 	// framework version.
@@ -66,6 +74,15 @@ type Querier interface {
 	// Resolve a dimension by name within the current tenant context.
 	GetScopeDimensionByName(ctx context.Context, arg GetScopeDimensionByNameParams) (ScopeDimension, error)
 	GetVendor(ctx context.Context, arg GetVendorParams) (Vendor, error)
+	// Returns risk counts grouped by (likelihood, impact) for risks whose
+	// methodology shares the 5x5 (likelihood, impact 1..5) shape. nist_800_30
+	// and qualitative_5x5 both use this shape (canvas §2.2 + AC-7); other
+	// methodologies (FAIR has LEF/LM) are intentionally excluded so the
+	// heatmap stays a single coherent visualization.
+	//
+	// The CAST chain (jsonb -> text -> int) is necessary because pgx cannot
+	// read jsonb-number values directly as int4 without an explicit cast.
+	HeatmapBuckets(ctx context.Context, tenantID pgtype.UUID) ([]HeatmapBucketsRow, error)
 	// Insert a new schema row. The caller (slice 014 registry service) parses
 	// semver into major/minor/patch and supplies all three; the DB CHECK
 	// prevents negatives. Owner must be non-empty (CHECK constraint). The
@@ -76,6 +93,9 @@ type Querier interface {
 	// Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
 	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
+	// Idempotent: ON CONFLICT DO NOTHING so re-running a "link these controls"
+	// request does not 23505 on a re-link.
+	LinkRiskControl(ctx context.Context, arg LinkRiskControlParams) error
 	// Bypass-RLS path used at boot by the platform-schema importer running as
 	// atlas_migrate. Returns every row regardless of tenant. Never reachable
 	// through the app role under RLS.
@@ -103,6 +123,12 @@ type Querier interface {
 	// (testability) and timezone semantics (vendor reviews are date-granular,
 	// not timestamp-granular).
 	ListOverdueVendors(ctx context.Context, arg ListOverdueVendorsParams) ([]Vendor, error)
+	// Returns all control links for a single risk.
+	ListRiskControlLinks(ctx context.Context, arg ListRiskControlLinksParams) ([]ListRiskControlLinksRow, error)
+	// Enumerate all risks for the tenant, newest first. Filters are applied
+	// in the application layer because sqlc's static typing makes optional
+	// WHERE clauses noisy; the row count is bounded by tenant-size anyway.
+	ListRisks(ctx context.Context, tenantID pgtype.UUID) ([]Risk, error)
 	// Paginated anchor list for a specific framework_version. Caller supplies
 	// limit + offset; default at the call site.
 	ListSCFAnchorsForVersion(ctx context.Context, arg ListSCFAnchorsForVersionParams) ([]ScfAnchor, error)
@@ -122,6 +148,11 @@ type Querier interface {
 	ListVendors(ctx context.Context, arg ListVendorsParams) ([]Vendor, error)
 	// Point a framework at its current version.
 	SetLatestVersion(ctx context.Context, arg SetLatestVersionParams) error
+	UnlinkRiskControl(ctx context.Context, arg UnlinkRiskControlParams) error
+	// Full-update path (PATCH handler reads existing, mutates fields, writes).
+	// updated_at is set explicitly so the schema's per-row default doesn't
+	// silently keep stale values.
+	UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, error)
 	// Update an existing anchor in place. Touches updated_at; the caller
 	// decides whether to call this based on a content-equality check.
 	UpdateSCFAnchor(ctx context.Context, arg UpdateSCFAnchorParams) (ScfAnchor, error)
