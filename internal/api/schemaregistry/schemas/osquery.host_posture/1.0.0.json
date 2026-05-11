@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/osquery.host_posture/1.0.0.json",
+  "x-evidence-kind": "osquery.host_posture.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["END-04", "CFG-02"],
+  "title": "osquery host posture snapshot",
+  "description": "One endpoint's posture as reported by osquery / Fleet.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["host_uuid", "hostname"],
+  "properties": {
+    "host_uuid": { "type": "string", "minLength": 1 },
+    "hostname": { "type": "string", "minLength": 1 },
+    "platform": { "type": "string" },
+    "os_version": { "type": "string" },
+    "disk_encryption_enabled": { "type": "boolean" },
+    "screen_lock_enabled": { "type": "boolean" },
+    "firewall_enabled": { "type": "boolean" },
+    "mdm_enrolled": { "type": "boolean" }
+  }
+}

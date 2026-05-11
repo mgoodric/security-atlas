@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/access_review.completion/1.0.0.json",
+  "x-evidence-kind": "access_review.completion.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IAC-17", "IAC-18"],
+  "title": "Access review completion",
+  "description": "A periodic access review run by a roleholder.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["review_id", "completed_by", "reviewer_role", "users_reviewed"],
+  "properties": {
+    "review_id": { "type": "string", "minLength": 1 },
+    "completed_by": { "type": "string", "minLength": 1 },
+    "reviewer_role": { "type": "string", "minLength": 1 },
+    "users_reviewed": { "type": "integer", "minimum": 0 },
+    "users_terminated": { "type": "integer", "minimum": 0 },
+    "users_role_changed": { "type": "integer", "minimum": 0 },
+    "notes": { "type": "string" }
+  }
+}

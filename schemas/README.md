@@ -1,7 +1,20 @@
-# schemas/
+# schemas/ (moved)
 
-JSON Schemas (draft 2020-12) for every registered `evidence_kind`. Each kind has a stable identifier (e.g., `aws.s3.bucket_encryption_state.v1`), a versioned JSON Schema, an owner attribution, and default SCF anchor mappings.
+The canonical JSON Schemas for every registered `evidence_kind` now live alongside the registry implementation:
 
-The schema registry service (slice 014) ingests schemas from this directory at platform startup and serves them at `/v1/schemas/<kind>/<semver>`.
+```
+internal/api/schemaregistry/schemas/<kind>/<semver>.json
+```
 
-Empty in slice 001. First schemas land with slice 014 + slice 004 (AWS S3 encryption).
+Slice 014 moved them there so Go's `//go:embed` directive can reach them — `//go:embed` cannot traverse upward out of its package, and the registry needs the bundle at compile time (constitutional: tests run without external file dependencies).
+
+This directory remains as a discovery breadcrumb. Add new platform schemas by writing the JSON file under the canonical path; `go test ./internal/api/schemaregistry/...` will round-trip it through embed-load and Postgres at boot.
+
+## Conventions
+
+- Filename: `<semver>.json` (e.g., `1.0.0.json`)
+- Required top-level extension keys: `x-evidence-kind`, `x-semver`, `x-owner`
+- Optional: `x-default-scf-anchors` — array of SCF anchor codes (e.g., `["IAC-06"]`)
+- Schema dialect: JSON Schema draft 2020-12
+
+See `internal/api/schemaregistry/embed.go` for the loader contract and `Plans/EVIDENCE_SDK.md` §4.5 for the design.

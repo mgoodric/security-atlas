@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 )
 
 const (
@@ -43,7 +44,26 @@ func main() {
 		dbURL = os.Getenv("DATABASE_URL")
 	}
 
-	srv := api.New(api.Config{})
+	// The schema registry needs a pool to back its DB store. Construct
+	// the pool first; if it succeeds, build the DB-backed registry and
+	// hand it to api.New. If no DATABASE_URL is set, fall back to the
+	// in-memory registry (slice-003 surface only — no HTTP endpoints).
+	ctxBoot, cancelBoot := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelBoot()
+
+	var schemaSvc *schemaregistry.Service
+	var pool *pgxpool.Pool
+	if dbURL != "" {
+		p, err := pgxpool.New(ctxBoot, dbURL)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: pgxpool.New: %v\n", err)
+			os.Exit(1)
+		}
+		pool = p
+		schemaSvc = schemaregistry.NewService(pool)
+	}
+
+	srv := api.New(api.Config{SchemaRegistry: schemaSvc})
 
 	if bootstrapTenant := os.Getenv("ATLAS_BOOTSTRAP_TENANT"); bootstrapTenant != "" {
 		cred, bearer, err := srv.IssueBootstrapCredential(bootstrapTenant)
@@ -58,19 +78,38 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	var pool *pgxpool.Pool
-	if dbURL != "" {
-		dialCtx, dialCancel := context.WithTimeout(ctx, 10*time.Second)
-		defer dialCancel()
-		p, err := pgxpool.New(dialCtx, dbURL)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "atlas: pgxpool.New: %v\n", err)
-			os.Exit(1)
-		}
-		defer p.Close()
-		pool = p
+	if pool != nil {
+		defer pool.Close()
 		srv.AttachDB(pool)
 		fmt.Fprintf(os.Stderr, "atlas: pgx pool ready\n")
+
+		// Import bundled platform schemas at boot. Idempotent — no-op when
+		// every kind is already present in the DB. Requires the connection
+		// to have BYPASSRLS (atlas_migrate) because global rows have
+		// tenant_id NULL.
+		if importerURL := os.Getenv("DATABASE_URL"); importerURL != "" && schemaSvc != nil {
+			impCtx, impCancel := context.WithTimeout(ctx, 30*time.Second)
+			impPool, err := pgxpool.New(impCtx, importerURL)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "atlas: schema import pool: %v\n", err)
+			} else {
+				impSvc := schemaregistry.NewService(impPool)
+				ins, tot, err := impSvc.ImportPlatformSchemas(impCtx, schemaregistry.PlatformSchemasFS())
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "atlas: schema import: %v\n", err)
+				} else {
+					fmt.Fprintf(os.Stderr, "atlas: schema import inserted=%d total=%d\n", ins, tot)
+				}
+				impPool.Close()
+			}
+			impCancel()
+			// Refresh the app-pool-backed cache so HTTP/gRPC see the new rows.
+			loadCtx, loadCancel := context.WithTimeout(ctx, 10*time.Second)
+			if err := schemaSvc.LoadFromDB(loadCtx); err != nil {
+				fmt.Fprintf(os.Stderr, "atlas: schema cache reload: %v\n", err)
+			}
+			loadCancel()
+		}
 	} else {
 		fmt.Fprintln(os.Stderr, "atlas: DATABASE_URL_APP not set — HTTP server will refuse to start")
 	}

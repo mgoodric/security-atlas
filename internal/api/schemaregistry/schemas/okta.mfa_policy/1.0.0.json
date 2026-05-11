@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/okta.mfa_policy/1.0.0.json",
+  "x-evidence-kind": "okta.mfa_policy.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IAC-06"],
+  "title": "Okta MFA policy state",
+  "description": "Effective MFA enforcement for one Okta group or application.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["policy_id", "policy_name", "mfa_required"],
+  "properties": {
+    "policy_id": { "type": "string", "minLength": 1 },
+    "policy_name": { "type": "string", "minLength": 1 },
+    "mfa_required": { "type": "boolean" },
+    "factors_allowed": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "applies_to_groups": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}
