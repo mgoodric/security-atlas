@@ -3,7 +3,19 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-11 (post-merge reconcile — parallel batch 1 fully merged)
+**Last reconciled:** 2026-05-11 (claim-stake — parallel batch 2 started: 013, 019, 024 → in-progress)
+
+## Drift detected — 2026-05-11 (parallel batch 2 claim-stake)
+
+Three slices flipped `ready` → `in-progress` with worktrees + branches assigned:
+
+| Row | Transition | Branch |
+| --- | --- | --- |
+| 013 | `ready` → `in-progress` | `evidence-pipeline/013-evidence-ledger-write-api` |
+| 019 | `ready` → `in-progress` | `risk/019-risk-register-crud` |
+| 024 | `ready` → `in-progress` | `vendor/024-vendor-lite-module` |
+
+**Counts delta:** ready −3 · in-progress +3.
 
 ## Drift detected — 2026-05-11 (post-merge reconcile)
 
@@ -40,8 +52,8 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 | ------------- | ------ |
 | `merged`      | 9      |
 | `in-review`   | 0      |
-| `in-progress` | 0      |
-| `ready`       | 9      |
+| `in-progress` | 3      |
+| `ready`       | 6      |
 | `blocked`     | 0      |
 | `not-ready`   | 31     |
 | **Total**     | **49** |
@@ -74,18 +86,18 @@ Legal values (use exactly these strings):
 | 010 | SCF-anchored control kit (50 SOC 2 controls)           | `not-ready` | —                                             | —     | —           | —           | waits on 009, 007 · HITL on accuracy  |
 | 011 | Manual control type + attestation flow                 | `not-ready` | —                                             | —     | —           | —           | waits on 009, 013, 036                |
 | 012 | Control state evaluation engine                        | `not-ready` | —                                             | —     | —           | —           | waits on 010, 013, 017                |
-| 013 | Evidence ledger write API + push endpoint              | `ready`     | —                                             | —     | —           | —           | critical path; consumes slice 014 hook |
+| 013 | Evidence ledger write API + push endpoint              | `in-progress` | evidence-pipeline/013-evidence-ledger-write-api | —     | 2026-05-11  | —           | critical path; consumes slice 014 hook |
 | 014 | Schema registry service (in-tree Go)                   | `merged`    | evidence-pipeline/014-schema-registry-service | gh#8  | 2026-05-11  | 2026-05-11  | —                                     |
 | 015 | NATS JetStream buffer + ingestion stage                | `not-ready` | —                                             | —     | —           | —           | waits on 013                          |
 | 016 | Evidence freshness + drift detection                   | `not-ready` | —                                             | —     | —           | —           | waits on 012                          |
 | 017 | Scope dimensions + applicability_expr + single-cell    | `merged`    | scope/017-scope-dimensions-applicability      | gh#9  | 2026-05-11  | 2026-05-11  | —                                     |
 | 018 | FrameworkScope predicate + intersection compute        | `ready`     | —                                             | —     | —           | —           | open-q #19 FrameworkScope UX — gate   |
-| 019 | Risk CRUD + NIST 800-30 + 5x5 + ALE-band               | `ready`     | —                                             | —     | —           | —           | open-q #4 resolved (nist_800_30 lock) |
+| 019 | Risk CRUD + NIST 800-30 + 5x5 + ALE-band               | `in-progress` | risk/019-risk-register-crud                  | —     | 2026-05-11  | —           | open-q #4 resolved (nist_800_30 lock) |
 | 020 | Risk → control linkage + residual derivation           | `not-ready` | —                                             | —     | —           | —           | waits on 019, 012                     |
 | 021 | Exception/waiver workflow + auto-expiry                | `not-ready` | —                                             | —     | —           | —           | waits on 019, 017                     |
 | 022 | Policy library + 5 stock policies                      | `ready`     | —                                             | —     | —           | —           | HITL on policy text                   |
 | 023 | Policy acknowledgment workflow                         | `not-ready` | —                                             | —     | —           | —           | waits on 022, 034                     |
-| 024 | Vendor lite module                                     | `ready`     | —                                             | —     | —           | —           | —                                     |
+| 024 | Vendor lite module                                     | `in-progress` | vendor/024-vendor-lite-module                | —     | 2026-05-11  | —           | —                                     |
 | 025 | Auditor role + scoped read-only access                 | `not-ready` | —                                             | —     | —           | —           | waits on 033, 035                     |
 | 026 | Sample-pull primitives (Population + Sample)           | `not-ready` | —                                             | —     | —           | —           | waits on 013, 017                     |
 | 027 | Walkthrough recording (annotated + hash/sign)          | `not-ready` | —                                             | —     | —           | —           | waits on 025, 036                     |
@@ -128,9 +140,13 @@ Legal values (use exactly these strings):
 
 **Nine slices ready.** Suggested parallel-batch trio: **013 + 019 + 024** (evidence-pipeline + risk + vendor — zero spine touches, three pre-allocated migration slots, all AFK, no open-q gates).
 
-## In-flight
+## In-flight (3 worktrees building)
 
-_None._ All prior-batch PRs (gh#7, gh#8, gh#9) merged 2026-05-11.
+- **013** — `evidence-pipeline/013-evidence-ledger-write-api` · `in-progress` since 2026-05-11
+- **019** — `risk/019-risk-register-crud` · `in-progress` since 2026-05-11
+- **024** — `vendor/024-vendor-lite-module` · `in-progress` since 2026-05-11
+
+Migration slots: 013 → `20260511000004`, 019 → `20260511000005`, 024 → `20260511000006`.
 
 ## Notes
 
