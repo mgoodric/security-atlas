@@ -1,7 +1,10 @@
 -- Reverse of 20260511000000_init.sql. Drops everything in dependency order
 -- and leaves the public schema byte-identical to a fresh database.
 
-DROP FUNCTION IF EXISTS current_tenant_matches(uuid);
+-- Drop function with CASCADE so dependent RLS policies on the tables below
+-- are removed first (otherwise Postgres rejects the DROP). The tables are
+-- dropped explicitly anyway via the CASCADE chain below.
+DROP FUNCTION IF EXISTS current_tenant_matches(uuid) CASCADE;
 
 DROP TABLE IF EXISTS framework_scopes CASCADE;
 DROP TABLE IF EXISTS evidence_records CASCADE;
