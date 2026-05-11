@@ -14,6 +14,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/anchorseed"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
@@ -67,6 +68,13 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/scopes/cells", scopesH.ListCells)
 	root.Get("/v1/scopes/dimensions", scopesH.ListDimensions)
 	root.Get("/v1/controls/{id}/applicability", scopesH.ControlApplicability)
+	// Slice 013: evidence ledger write API. Only mounted when an ingest
+	// service has been wired in (DB-backed). Unit-only servers leave it
+	// nil and exclusively use the slice-003 gRPC fallback path.
+	if s.ingestService != nil {
+		evidenceH := apievidence.NewHTTPHandler(s.ingestService, s.evidencePushRate)
+		root.Post("/v1/evidence:push", evidenceH.PushHTTP)
+	}
 	// Slice 019: risk register CRUD + 5x5 heatmap. Routes appended per the
 	// parallel-batch convention — chi.Mux rejects two Mounts at "/", and other
 	// batches are also appending here, so order-of-append must not matter.

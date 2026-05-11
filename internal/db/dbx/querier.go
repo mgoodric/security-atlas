@@ -16,6 +16,7 @@ type Querier interface {
 	AddVendorScopeCell(ctx context.Context, arg AddVendorScopeCellParams) error
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
+	CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountRiskControlLinks(ctx context.Context, arg CountRiskControlLinksParams) (int64, error)
 	CountSCFAnchorsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
 	CountScopeCells(ctx context.Context, tenantID pgtype.UUID) (int64, error)
@@ -57,6 +58,11 @@ type Querier interface {
 	// when no tenant is supplied and by the push validator before slice 013
 	// lands tenant-private validation.
 	GetEvidenceKindSchemaGlobal(ctx context.Context, arg GetEvidenceKindSchemaGlobalParams) (EvidenceKindSchema, error)
+	GetEvidenceRecordByID(ctx context.Context, arg GetEvidenceRecordByIDParams) (EvidenceRecord, error)
+	// Hot path for the push handler: "is there already a record under
+	// (tenant_id, idempotency_key)?". Returns at most one row because the
+	// partial UNIQUE index `evidence_records_tenant_idem_uniq` enforces it.
+	GetEvidenceRecordByIdempotency(ctx context.Context, arg GetEvidenceRecordByIdempotencyParams) (EvidenceRecord, error)
 	GetRiskByID(ctx context.Context, arg GetRiskByIDParams) (Risk, error)
 	GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnchor, error)
 	// Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
@@ -83,6 +89,11 @@ type Querier interface {
 	// The CAST chain (jsonb -> text -> int) is necessary because pgx cannot
 	// read jsonb-number values directly as int4 without an explicit cast.
 	HeatmapBuckets(ctx context.Context, tenantID pgtype.UUID) ([]HeatmapBucketsRow, error)
+	// AC-7: every push attempt — accepted or rejected — lands in the audit
+	// log keyed by credential id. The platform layer writes one row per
+	// decision; rejections include reason_code (validation, idempotency
+	// mismatch, scope violation, etc.).
+	InsertEvidenceAuditEntry(ctx context.Context, arg InsertEvidenceAuditEntryParams) (EvidenceAuditLog, error)
 	// Insert a new schema row. The caller (slice 014 registry service) parses
 	// semver into major/minor/patch and supplies all three; the DB CHECK
 	// prevents negatives. Owner must be non-empty (CHECK constraint). The
@@ -90,6 +101,13 @@ type Querier interface {
 	// (tenant_id, kind, semver) WHERE tenant_id IS NOT NULL enforce
 	// duplicate-version rejection.
 	InsertEvidenceKindSchema(ctx context.Context, arg InsertEvidenceKindSchemaParams) (EvidenceKindSchema, error)
+	// evidence_records + evidence_audit_log queries for slice 013.
+	//
+	// The append-only ledger contract: only INSERT and SELECT — no UPDATE,
+	// no DELETE. The schema enforces this at the RLS layer (no UPDATE /
+	// DELETE policy on the table); these queries enforce it at the sqlc
+	// surface (no UpdateEvidenceRecord, no DeleteEvidenceRecord exists).
+	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
 	// Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
 	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
@@ -100,6 +118,7 @@ type Querier interface {
 	// atlas_migrate. Returns every row regardless of tenant. Never reachable
 	// through the app role under RLS.
 	ListAllEvidenceKindSchemas(ctx context.Context) ([]EvidenceKindSchema, error)
+	ListEvidenceAuditEntriesByCredential(ctx context.Context, arg ListEvidenceAuditEntriesByCredentialParams) ([]EvidenceAuditLog, error)
 	// Returns every registered semver for a kind, visible to the tenant.
 	// Slice 014 uses this for AC-5 semver enforcement (a POST must check the
 	// prior versions of the same kind before accepting a new one).
@@ -113,6 +132,10 @@ type Querier interface {
 	// list endpoint pages with limit/offset; ordering by (kind, major DESC,
 	// minor DESC, patch DESC) puts the newest versions first within each kind.
 	ListEvidenceKindSchemasGlobal(ctx context.Context, arg ListEvidenceKindSchemasGlobalParams) ([]EvidenceKindSchema, error)
+	// Replay-friendly read for evaluation (slice 012+). Append-only ordering
+	// on observed_at lets the evaluator stream historical state without
+	// worrying about UPDATEs since slice 002.
+	ListEvidenceRecordsByControl(ctx context.Context, arg ListEvidenceRecordsByControlParams) ([]EvidenceRecord, error)
 	ListFrameworkVersionsBySlug(ctx context.Context, slug string) ([]FrameworkVersion, error)
 	ListFrameworks(ctx context.Context) ([]Framework, error)
 	// AC-4 overdue calc — vendors whose last_review_date + cadence is older than

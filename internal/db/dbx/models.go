@@ -649,6 +649,18 @@ type Control struct {
 	UpdatedAt          pgtype.Timestamptz        `json:"updated_at"`
 }
 
+type EvidenceAuditLog struct {
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	CredentialID   string             `json:"credential_id"`
+	Decision       string             `json:"decision"`
+	ReasonCode     string             `json:"reason_code"`
+	IdempotencyKey *string            `json:"idempotency_key"`
+	EvidenceKind   *string            `json:"evidence_kind"`
+	RecordID       pgtype.UUID        `json:"record_id"`
+	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+}
+
 type EvidenceKindSchema struct {
 	ID                      pgtype.UUID        `json:"id"`
 	TenantID                pgtype.UUID        `json:"tenant_id"`
@@ -669,21 +681,28 @@ type EvidenceKindSchema struct {
 }
 
 type EvidenceRecord struct {
-	ID              pgtype.UUID            `json:"id"`
-	TenantID        pgtype.UUID            `json:"tenant_id"`
-	EvidenceQueryID pgtype.UUID            `json:"evidence_query_id"`
-	ControlID       pgtype.UUID            `json:"control_id"`
-	ScopeID         pgtype.UUID            `json:"scope_id"`
-	ObservedAt      pgtype.Timestamptz     `json:"observed_at"`
-	IngestedAt      pgtype.Timestamptz     `json:"ingested_at"`
-	Provenance      []byte                 `json:"provenance"`
-	Result          EvidenceResult         `json:"result"`
-	Payload         []byte                 `json:"payload"`
-	PayloadUri      *string                `json:"payload_uri"`
-	Hash            string                 `json:"hash"`
-	FreshnessClass  EvidenceFreshnessClass `json:"freshness_class"`
-	ValidUntil      pgtype.Timestamptz     `json:"valid_until"`
-	CreatedAt       pgtype.Timestamptz     `json:"created_at"`
+	ID                pgtype.UUID            `json:"id"`
+	TenantID          pgtype.UUID            `json:"tenant_id"`
+	EvidenceQueryID   pgtype.UUID            `json:"evidence_query_id"`
+	ControlID         pgtype.UUID            `json:"control_id"`
+	ScopeID           pgtype.UUID            `json:"scope_id"`
+	ObservedAt        pgtype.Timestamptz     `json:"observed_at"`
+	IngestedAt        pgtype.Timestamptz     `json:"ingested_at"`
+	Provenance        []byte                 `json:"provenance"`
+	Result            EvidenceResult         `json:"result"`
+	Payload           []byte                 `json:"payload"`
+	PayloadUri        *string                `json:"payload_uri"`
+	Hash              string                 `json:"hash"`
+	FreshnessClass    EvidenceFreshnessClass `json:"freshness_class"`
+	ValidUntil        pgtype.Timestamptz     `json:"valid_until"`
+	CreatedAt         pgtype.Timestamptz     `json:"created_at"`
+	IdempotencyKey    *string                `json:"idempotency_key"`
+	EvidenceKind      *string                `json:"evidence_kind"`
+	SchemaVersion     *string                `json:"schema_version"`
+	CredentialID      *string                `json:"credential_id"`
+	IngestionPath     string                 `json:"ingestion_path"`
+	SourceAttribution []byte                 `json:"source_attribution"`
+	ControlRef        string                 `json:"control_ref"`
 }
 
 type Framework struct {

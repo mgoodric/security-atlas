@@ -19,6 +19,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
 
 const (
@@ -63,7 +64,20 @@ func main() {
 		schemaSvc = schemaregistry.NewService(pool)
 	}
 
-	srv := api.New(api.Config{SchemaRegistry: schemaSvc})
+	// Slice 013: wire the DB-backed ingestion stage when both the
+	// schema registry and the pool are available. Without them the
+	// server runs in the slice-003 in-memory fallback mode (gRPC only,
+	// no ledger writes).
+	var ingestSvc *ingest.Service
+	if pool != nil && schemaSvc != nil {
+		ingestSvc = ingest.New(pool, schemaSvc)
+	}
+
+	srv := api.New(api.Config{
+		SchemaRegistry:   schemaSvc,
+		IngestService:    ingestSvc,
+		EvidencePushRate: 100, // 100 records/sec default per EVIDENCE_SDK §4.6
+	})
 
 	if bootstrapTenant := os.Getenv("ATLAS_BOOTSTRAP_TENANT"); bootstrapTenant != "" {
 		cred, bearer, err := srv.IssueBootstrapCredential(bootstrapTenant)

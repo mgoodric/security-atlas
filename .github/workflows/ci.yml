@@ -80,7 +80,9 @@ jobs:
           go test -tags=integration -race -v \
             ./internal/db/... \
             ./internal/api/scfimport/... \
-            ./internal/api/anchors/...
+            ./internal/api/anchors/... \
+            ./internal/api/schemaregistry/... \
+            ./internal/evidence/ingest/...
       - name: Migration round-trip — down then up
         run: |
           # Walk down migrations in reverse-alphabetical order (latest down first).
