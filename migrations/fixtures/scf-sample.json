@@ -1,0 +1,347 @@
+{
+  "schema_version": "1.0",
+  "release_version": "test-2026.1",
+  "release_date": "2026-01-15",
+  "controls": [
+    {
+      "scf_id": "IAC-01",
+      "family": "IAC",
+      "title": "Identification & Authentication Policy",
+      "description": "Mechanisms exist to facilitate the implementation of identification and access management controls."
+    },
+    {
+      "scf_id": "IAC-06",
+      "family": "IAC",
+      "title": "Multi-Factor Authentication (MFA)",
+      "description": "Mechanisms exist to require Multi-Factor Authentication for privileged accounts, network access, and remote access."
+    },
+    {
+      "scf_id": "IAC-07",
+      "family": "IAC",
+      "title": "User Provisioning & Lifecycle",
+      "description": "Mechanisms exist to establish, activate, modify, disable, and remove logical access for users."
+    },
+    {
+      "scf_id": "IAC-15",
+      "family": "IAC",
+      "title": "Account Review",
+      "description": "Mechanisms exist to periodically review and validate user accounts and access privileges."
+    },
+    {
+      "scf_id": "IAC-21",
+      "family": "IAC",
+      "title": "Privileged Account Management",
+      "description": "Mechanisms exist to govern the privileged account lifecycle."
+    },
+
+    {
+      "scf_id": "AAA-01",
+      "family": "AAA",
+      "title": "Auditing & Accountability",
+      "description": "Mechanisms exist to facilitate the implementation of operational auditing and accountability."
+    },
+    {
+      "scf_id": "AAA-10",
+      "family": "AAA",
+      "title": "Event Log Retention",
+      "description": "Mechanisms exist to retain event logs for a defined period consistent with risk and legal requirements."
+    },
+    {
+      "scf_id": "AAA-12",
+      "family": "AAA",
+      "title": "Audit Log Review",
+      "description": "Mechanisms exist to provide for the review and analysis of audit records."
+    },
+
+    {
+      "scf_id": "AST-01",
+      "family": "AST",
+      "title": "Asset Management Policy",
+      "description": "Mechanisms exist to facilitate the implementation of asset management."
+    },
+    {
+      "scf_id": "AST-03",
+      "family": "AST",
+      "title": "Asset Inventory",
+      "description": "Mechanisms exist to maintain an authoritative inventory of technology assets."
+    },
+    {
+      "scf_id": "AST-09",
+      "family": "AST",
+      "title": "Asset Disposal",
+      "description": "Mechanisms exist to securely dispose of, destroy, or repurpose system components."
+    },
+
+    {
+      "scf_id": "BCD-02",
+      "family": "BCD",
+      "title": "Business Continuity Plan",
+      "description": "Mechanisms exist to document and assign roles and responsibilities for the continuity of operations."
+    },
+    {
+      "scf_id": "BCD-09",
+      "family": "BCD",
+      "title": "Backups",
+      "description": "Mechanisms exist to create recurring backups of data, software, and system configurations."
+    },
+    {
+      "scf_id": "BCD-11",
+      "family": "BCD",
+      "title": "Backup Testing",
+      "description": "Mechanisms exist to routinely test backups to verify recoverability."
+    },
+
+    {
+      "scf_id": "CFG-02",
+      "family": "CFG",
+      "title": "Secure Baseline Configurations",
+      "description": "Mechanisms exist to develop, document, and maintain secure baseline configurations for technology platforms."
+    },
+    {
+      "scf_id": "CFG-04",
+      "family": "CFG",
+      "title": "Configuration Change Control",
+      "description": "Mechanisms exist to authorize, document, and track configuration changes."
+    },
+
+    {
+      "scf_id": "CHG-02",
+      "family": "CHG",
+      "title": "Change Control Process",
+      "description": "Mechanisms exist to govern the technical configuration change control processes."
+    },
+
+    {
+      "scf_id": "CLD-01",
+      "family": "CLD",
+      "title": "Cloud Infrastructure Governance",
+      "description": "Mechanisms exist to govern the use of cloud computing infrastructure."
+    },
+    {
+      "scf_id": "CLD-09",
+      "family": "CLD",
+      "title": "Cloud Service Provider Risk Management",
+      "description": "Mechanisms exist to evaluate and manage cloud service provider risk."
+    },
+
+    {
+      "scf_id": "CPL-01",
+      "family": "CPL",
+      "title": "Compliance Management",
+      "description": "Mechanisms exist to facilitate the identification and implementation of relevant statutory, regulatory, and contractual requirements."
+    },
+    {
+      "scf_id": "CPL-03",
+      "family": "CPL",
+      "title": "Internal Audit Function",
+      "description": "Mechanisms exist to plan and conduct internal audits."
+    },
+
+    {
+      "scf_id": "CRY-01",
+      "family": "CRY",
+      "title": "Use of Cryptographic Controls",
+      "description": "Mechanisms exist to facilitate the use of cryptographic protections of data."
+    },
+    {
+      "scf_id": "CRY-04",
+      "family": "CRY",
+      "title": "Encryption At Rest",
+      "description": "Cryptographic mechanisms exist to protect the confidentiality of sensitive data at rest."
+    },
+    {
+      "scf_id": "CRY-08",
+      "family": "CRY",
+      "title": "Encryption In Transit",
+      "description": "Cryptographic mechanisms exist to protect the confidentiality and integrity of data in transit."
+    },
+    {
+      "scf_id": "CRY-09",
+      "family": "CRY",
+      "title": "Cryptographic Key Management",
+      "description": "Mechanisms exist to govern the cryptographic key management lifecycle."
+    },
+
+    {
+      "scf_id": "DCH-01",
+      "family": "DCH",
+      "title": "Data Classification & Handling",
+      "description": "Mechanisms exist to facilitate the implementation of data classification and handling."
+    },
+    {
+      "scf_id": "DCH-03",
+      "family": "DCH",
+      "title": "Data Retention",
+      "description": "Mechanisms exist to define and govern data retention."
+    },
+
+    {
+      "scf_id": "END-04",
+      "family": "END",
+      "title": "Endpoint Security",
+      "description": "Mechanisms exist to protect endpoint devices."
+    },
+    {
+      "scf_id": "END-07",
+      "family": "END",
+      "title": "Malicious Code Protection",
+      "description": "Mechanisms exist to detect and prevent malicious code execution on endpoints."
+    },
+
+    {
+      "scf_id": "GOV-01",
+      "family": "GOV",
+      "title": "Information Security Governance",
+      "description": "Mechanisms exist to facilitate the implementation of cybersecurity governance."
+    },
+    {
+      "scf_id": "GOV-04",
+      "family": "GOV",
+      "title": "Information Security Roles & Responsibilities",
+      "description": "Mechanisms exist to define security roles and responsibilities."
+    },
+
+    {
+      "scf_id": "HRS-01",
+      "family": "HRS",
+      "title": "Human Resources Security",
+      "description": "Mechanisms exist to address human resources security."
+    },
+    {
+      "scf_id": "HRS-04",
+      "family": "HRS",
+      "title": "Security Awareness Training",
+      "description": "Mechanisms exist to provide security awareness training."
+    },
+    {
+      "scf_id": "HRS-09",
+      "family": "HRS",
+      "title": "Personnel Termination Process",
+      "description": "Mechanisms exist to govern personnel termination."
+    },
+
+    {
+      "scf_id": "IRO-04",
+      "family": "IRO",
+      "title": "Incident Response Plan",
+      "description": "Mechanisms exist to maintain and make available a current and viable Incident Response Plan."
+    },
+    {
+      "scf_id": "IRO-09",
+      "family": "IRO",
+      "title": "Incident Reporting",
+      "description": "Mechanisms exist to report incidents within defined time frames."
+    },
+
+    {
+      "scf_id": "MON-01",
+      "family": "MON",
+      "title": "Continuous Monitoring",
+      "description": "Mechanisms exist to facilitate the implementation of enterprise-wide monitoring."
+    },
+    {
+      "scf_id": "MON-08",
+      "family": "MON",
+      "title": "Anomalous Behavior Detection",
+      "description": "Mechanisms exist to detect anomalous behavior."
+    },
+
+    {
+      "scf_id": "NET-01",
+      "family": "NET",
+      "title": "Network Security",
+      "description": "Mechanisms exist to facilitate the implementation of network security controls."
+    },
+    {
+      "scf_id": "NET-04",
+      "family": "NET",
+      "title": "Boundary Protection",
+      "description": "Mechanisms exist to protect network boundaries."
+    },
+    {
+      "scf_id": "NET-08",
+      "family": "NET",
+      "title": "Wireless Network Security",
+      "description": "Mechanisms exist to govern wireless network security."
+    },
+
+    {
+      "scf_id": "PES-04",
+      "family": "PES",
+      "title": "Physical Access Control",
+      "description": "Mechanisms exist to control physical access to facilities."
+    },
+
+    {
+      "scf_id": "PRI-01",
+      "family": "PRI",
+      "title": "Privacy Governance",
+      "description": "Mechanisms exist to facilitate the implementation of personal data governance."
+    },
+    {
+      "scf_id": "PRI-04",
+      "family": "PRI",
+      "title": "Data Subject Rights",
+      "description": "Mechanisms exist to support data subject rights."
+    },
+
+    {
+      "scf_id": "RSK-01",
+      "family": "RSK",
+      "title": "Risk Management Program",
+      "description": "Mechanisms exist to facilitate the implementation of risk management controls."
+    },
+    {
+      "scf_id": "RSK-04",
+      "family": "RSK",
+      "title": "Risk Assessment",
+      "description": "Mechanisms exist to conduct routine risk assessments."
+    },
+
+    {
+      "scf_id": "SEA-01",
+      "family": "SEA",
+      "title": "Secure Engineering Principles",
+      "description": "Mechanisms exist to facilitate the implementation of secure engineering practices."
+    },
+    {
+      "scf_id": "SEA-05",
+      "family": "SEA",
+      "title": "Secure Software Development",
+      "description": "Mechanisms exist to govern secure software development."
+    },
+
+    {
+      "scf_id": "TDA-01",
+      "family": "TDA",
+      "title": "Technology Development & Acquisition",
+      "description": "Mechanisms exist to govern technology development and acquisition."
+    },
+
+    {
+      "scf_id": "TPM-01",
+      "family": "TPM",
+      "title": "Third-Party Management",
+      "description": "Mechanisms exist to facilitate the implementation of third-party management."
+    },
+    {
+      "scf_id": "TPM-04",
+      "family": "TPM",
+      "title": "Third-Party Risk Assessments",
+      "description": "Mechanisms exist to conduct third-party risk assessments."
+    },
+
+    {
+      "scf_id": "VPM-01",
+      "family": "VPM",
+      "title": "Vulnerability & Patch Management Policy",
+      "description": "Mechanisms exist to facilitate the implementation of vulnerability and patch management controls."
+    },
+    {
+      "scf_id": "VPM-04",
+      "family": "VPM",
+      "title": "Vulnerability Remediation Process",
+      "description": "Mechanisms exist to identify, assess, prioritize, and remediate vulnerabilities."
+    }
+  ]
+}

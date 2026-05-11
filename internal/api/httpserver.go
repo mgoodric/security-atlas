@@ -8,34 +8,51 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/anchors"
 	"github.com/mgoodric/security-atlas/internal/api/anchorseed"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 )
 
+// AttachDB wires a pgx pool into the server. The HTTP handlers under /v1/
+// require it; absent a pool, RunHTTP returns an error. Set once at startup.
+func (s *Server) AttachDB(pool *pgxpool.Pool) { s.dbPool = pool }
+
 // HTTPHandlerForTests exposes the assembled HTTP handler so tests can
 // drive it via httptest.NewServer. Production callers should use RunHTTP.
-func (s *Server) HTTPHandlerForTests() http.Handler { return s.httpHandler() }
+// Returns nil when no DB pool has been attached (handlers need one).
+func (s *Server) HTTPHandlerForTests() http.Handler {
+	if s.dbPool == nil {
+		return nil
+	}
+	return s.httpHandler()
+}
 
-// httpHandler builds the platform's HTTP router: anchors API under /v1/,
-// auth middleware shared with the gRPC server, CORS for the local dev
-// frontend.
+// httpHandler builds the platform's HTTP router: anchors + frameworks API
+// under /v1/, auth middleware shared with the gRPC server, CORS for the
+// local dev frontend.
 func (s *Server) httpHandler() http.Handler {
 	root := chi.NewRouter()
 	root.Use(corsMiddleware)
 	root.Use(httpAuthMiddleware(s.credStore))
 
-	store := anchorseed.New()
-	root.Mount("/", anchors.New(store).Routes())
+	mappings := anchorseed.New()
+	queries := dbx.New(s.dbPool)
+	root.Mount("/", anchors.New(queries, mappings).Routes())
 	return root
 }
 
 // RunHTTP starts the HTTP server on addr (e.g., ":8080") and blocks until
 // ctx is canceled, at which point it shuts down within a 5-second grace.
+// Returns an error if no DB pool has been attached.
 func (s *Server) RunHTTP(ctx context.Context, addr string) error {
+	if s.dbPool == nil {
+		return errors.New("api: HTTP server requires a DB pool (call Server.AttachDB before RunHTTP)")
+	}
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           s.httpHandler(),

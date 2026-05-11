@@ -117,5 +117,6 @@ func newRootCmd() *cobra.Command {
 
 	root.AddCommand(newEvidenceCmd())
 	root.AddCommand(newCredentialsCmd())
+	root.AddCommand(newCatalogCmd())
 	return root
 }
