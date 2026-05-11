@@ -108,9 +108,15 @@ func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "security-atlas-cli",
 		Short:         "security-atlas CLI",
+		Version:       shortVersion(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	// Cobra renders --version using the Version field. Override the template
+	// so scripts can grep a stable single-line short form. The `version`
+	// subcommand (registered below) emits the verbose multi-field form.
+	root.SetVersionTemplate("{{.Version}}\n")
+
 	root.PersistentFlags().StringVar(&common.endpoint, "endpoint", "", "gRPC endpoint (env: SECURITY_ATLAS_ENDPOINT)")
 	root.PersistentFlags().StringVar(&common.token, "token", "", "bearer token (env: SECURITY_ATLAS_TOKEN)")
 	root.PersistentFlags().BoolVar(&common.insecure, "insecure", false, "disable TLS (loopback endpoints only)")
@@ -118,5 +124,6 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newEvidenceCmd())
 	root.AddCommand(newCredentialsCmd())
 	root.AddCommand(newCatalogCmd())
+	root.AddCommand(newVersionCmd())
 	return root
 }

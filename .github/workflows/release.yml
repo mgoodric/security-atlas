@@ -1,0 +1,126 @@
+# Release pipeline — security-atlas
+#
+# Triggered by tags matching v*. Builds 5 OS/arch targets via GoReleaser,
+# signs the checksums file with cosign (keyless OIDC via Sigstore Fulcio),
+# publishes to GitHub Releases, pushes the Homebrew formula to the tap.
+#
+# Run locally (dry, requires goreleaser + cosign + a temp PAT):
+#   GORELEASER_CURRENT_TAG=v0.0.0-dev goreleaser release --snapshot --clean --skip=publish,sign
+#
+# Verify a published checksum file post-release:
+#   cosign verify-blob \
+#     --certificate-identity-regexp 'https://github.com/mgoodric/security-atlas/\.github/workflows/release\.yml@.*' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     --certificate security-atlas_<version>_checksums.txt.pem \
+#     --signature  security-atlas_<version>_checksums.txt.sig \
+#     security-atlas_<version>_checksums.txt
+#
+# Security boundary (CLAUDE.md §AI-assist + supply-chain):
+# - NO private signing key is stored anywhere. Cosign uses Sigstore keyless
+#   OIDC; Fulcio issues a short-lived (~10 min) certificate bound to this
+#   exact workflow identity. Transparency log entry is published to Rekor.
+# - GH_TOKEN scopes are pinned at the job level, not the workflow level.
+# - HOMEBREW_TAP_TOKEN is the only long-lived secret; revoke-and-rotate if
+#   the tap repo is ever wiped or transferred.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      # No prerelease/nightly tag matcher here; if we want nightlies later
+      # we add a separate workflow with a snapshot build so the release
+      # pipeline can stay strict about tagged versions.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  goreleaser:
+    name: GoReleaser · build · sign · publish
+    runs-on: ubuntu-latest
+    permissions:
+      # contents:write — to upload release assets.
+      # id-token:write — to mint the OIDC token cosign trades for a Fulcio cert.
+      # packages:write — reserved for future GHCR pushes; harmless if unused.
+      contents: write
+      id-token: write
+      packages: write
+    steps:
+      - name: Checkout (with full history for changelog)
+        uses: actions/checkout@v4
+        with:
+          # GoReleaser needs the full history + tags to render the conv-commit
+          # changelog and to detect the previous tag.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: "v2.4.1"
+
+      - name: Install syft (SBOM)
+        # SBOM generation is best-effort; not gated by ship-gate but useful
+        # for downstream supply-chain consumers. GoReleaser auto-invokes it
+        # if present on PATH (current config does not declare sboms: yet —
+        # leaving syft installed so a follow-up slice can enable without
+        # changing the workflow).
+        uses: anchore/sbom-action/download-syft@v0
+        continue-on-error: true
+
+      - name: GoReleaser check
+        run: goreleaser check
+        env:
+          # GoReleaser CLI is shipped via the action; pin to v2.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          # contents:write token for GH Releases.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT with `contents:write` on mgoodric/homebrew-tap. Falls back
+          # to GITHUB_TOKEN — which cannot push to a sibling repo, so the
+          # brews block is configured with skip_upload: auto for that case.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN || secrets.GITHUB_TOKEN }}
+          # COSIGN_EXPERIMENTAL forces the keyless flow path; cosign v2 has
+          # this on by default but the explicit signal documents intent.
+          COSIGN_EXPERIMENTAL: "1"
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+
+      - name: Self-verify signed checksums
+        # Round-trip: download the just-published checksums + signature +
+        # cert from the release we just cut, then cosign-verify them.
+        # This is the ANTI-CRITERION guard — if verification ever silently
+        # breaks, this step fails and the release is broken-on-arrival
+        # rather than broken-in-the-wild. AC-2 evidence.
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}"
+          checksums="security-atlas_${version}_checksums.txt"
+          curl -fSL "${base}/${checksums}"     -o "${checksums}"
+          curl -fSL "${base}/${checksums}.sig" -o "${checksums}.sig"
+          curl -fSL "${base}/${checksums}.pem" -o "${checksums}.pem"
+          cosign verify-blob \
+            --certificate-identity-regexp "https://github.com/${GITHUB_REPOSITORY}/\.github/workflows/release\.yml@.*" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate "${checksums}.pem" \
+            --signature  "${checksums}.sig" \
+            "${checksums}"
+          echo "cosign verify-blob OK for ${checksums}"

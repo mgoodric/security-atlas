@@ -170,3 +170,29 @@ proto-ci:
     buf lint
     buf generate
     git diff --exit-code -- gen/proto || (echo "gen/proto changed; run 'just proto-generate' and commit" && exit 1)
+
+# ----- Release -----
+#
+# The release pipeline (.github/workflows/release.yml) runs on tag push.
+# These recipes are for local validation; they never push tags or assets.
+
+# Validate the GoReleaser config without building.
+release-check:
+    goreleaser check
+
+# Snapshot build into ./dist/ — no publish, no sign. Use to smoke-test
+# that all 5 OS/arch targets cross-compile on the current Go toolchain.
+release-snapshot:
+    goreleaser release --snapshot --clean --skip=publish,sign
+
+# Smoke test the installer script (offline, no network).
+install-script-test:
+    bash scripts/install_test.sh
+
+# Print the version embedded in a locally-built atlas-cli binary.
+# Useful for verifying ldflags wiring before cutting a tag.
+print-version version:
+    go build -ldflags "-X main.version={{version}}" -o /tmp/security-atlas-cli ./cmd/atlas-cli
+    /tmp/security-atlas-cli --version
+    /tmp/security-atlas-cli version
+    rm /tmp/security-atlas-cli
