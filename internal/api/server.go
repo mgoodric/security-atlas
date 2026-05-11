@@ -28,6 +28,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/evidence"
 	"github.com/mgoodric/security-atlas/internal/api/idemstore"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
+	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 )
@@ -44,6 +45,7 @@ type Server struct {
 	dbPool            *pgxpool.Pool
 	ingestService     *ingest.Service
 	evidencePushRate  float64
+	artifactStore     *artifact.Store
 }
 
 // IssueBootstrapCredential mints a credential for the supplied tenant and
@@ -89,6 +91,13 @@ type Config struct {
 	// for the slice-013 REST push endpoint. 0 disables rate limiting
 	// (used by tests). Production defaults: 100 records/second.
 	EvidencePushRate float64
+	// ArtifactStore, when non-nil, wires the slice-036 S3 artifact store
+	// into the HTTP server. Routes POST /v1/artifacts:upload and
+	// GET /v1/artifacts/{id} only mount when this is populated.
+	// Unit-only servers leave it nil — the platform binary constructs
+	// the Store with an S3 client and presigner pointed at the
+	// configured bucket (MinIO locally, S3 in prod).
+	ArtifactStore *artifact.Store
 }
 
 // New constructs the Server with its services and interceptors mounted.
@@ -128,7 +137,16 @@ func New(cfg Config) *Server {
 		connectorRegistry: connReg,
 		ingestService:     cfg.IngestService,
 		evidencePushRate:  cfg.EvidencePushRate,
+		artifactStore:     cfg.ArtifactStore,
 	}
+}
+
+// AttachArtifactStore wires the slice-036 artifact store after Server
+// construction. The platform binary builds the store with its S3 client
+// + presigner + bucket and calls this once at startup. Unit servers
+// don't need to call it.
+func (s *Server) AttachArtifactStore(store *artifact.Store) {
+	s.artifactStore = store
 }
 
 // Run starts the gRPC server on addr (e.g., ":50051") and blocks until ctx

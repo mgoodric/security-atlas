@@ -589,6 +589,26 @@ func (ns NullVendorReviewCadence) Value() (driver.Value, error) {
 	return string(ns.VendorReviewCadence), nil
 }
 
+type Artifact struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	StorageKey  string             `json:"storage_key"`
+	ContentHash *string            `json:"content_hash"`
+	SizeBytes   int64              `json:"size_bytes"`
+	ContentType string             `json:"content_type"`
+	UploadedBy  string             `json:"uploaded_by"`
+	UploadedAt  pgtype.Timestamptz `json:"uploaded_at"`
+}
+
+type ArtifactAccessLog struct {
+	ID         pgtype.UUID        `json:"id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	ArtifactID pgtype.UUID        `json:"artifact_id"`
+	Action     string             `json:"action"`
+	Actor      string             `json:"actor"`
+	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
+}
+
 type Control struct {
 	ID                 pgtype.UUID               `json:"id"`
 	TenantID           pgtype.UUID               `json:"tenant_id"`

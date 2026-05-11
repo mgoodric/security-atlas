@@ -36,6 +36,10 @@ type Querier interface {
 	// Returns one row per criticality present in the result set; empty bands are
 	// not included (callers fill in zero where needed).
 	CountVendorsForBurndown(ctx context.Context, arg CountVendorsForBurndownParams) ([]CountVendorsForBurndownRow, error)
+	// Insert an artifact row after the blob has been written to S3. RLS
+	// evaluates the INSERT WITH CHECK against current_tenant. content_hash
+	// may be NULL today but every code path in slice 036 supplies it.
+	CreateArtifact(ctx context.Context, arg CreateArtifactParams) (Artifact, error)
 	// Slice 018: FrameworkScope predicate + four-state workflow queries.
 	//
 	// Conventions match slice 014/017/019:
@@ -77,10 +81,19 @@ type Querier interface {
 	// so a new release can take over without violating the at-most-one-current
 	// invariant. Caller scopes the transaction.
 	DemoteCurrentFrameworkVersions(ctx context.Context, frameworkID pgtype.UUID) error
+	// Dedup lookup: returns an existing artifact id when the same content
+	// has already been uploaded by this tenant. Partial unique index
+	// (tenant_id, content_hash) WHERE content_hash IS NOT NULL keeps the
+	// result single-row.
+	FindArtifactByHash(ctx context.Context, arg FindArtifactByHashParams) (Artifact, error)
 	// Returns the currently-active framework scope for a given framework version,
 	// i.e. the (at most one) row in state `activated` for that (tenant, fv) pair.
 	// AC-3: a partial UNIQUE index guarantees at most one row matches.
 	GetActivatedFrameworkScope(ctx context.Context, arg GetActivatedFrameworkScopeParams) (FrameworkScope, error)
+	// Look up an artifact by id. RLS USING current_tenant_matches(tenant_id)
+	// means the row is invisible to other tenants — handler interprets
+	// pgx.ErrNoRows as 404 (no existence leak).
+	GetArtifact(ctx context.Context, arg GetArtifactParams) (Artifact, error)
 	// Returns the JSON-encoded applicability_expr for a single control. The column
 	// is TEXT (slice 002); slice 017 stores JSON in that text.
 	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)
@@ -158,6 +171,9 @@ type Querier interface {
 	// atlas_migrate. Returns every row regardless of tenant. Never reachable
 	// through the app role under RLS.
 	ListAllEvidenceKindSchemas(ctx context.Context) ([]EvidenceKindSchema, error)
+	// Per-artifact recent history. Used by the admin view (slice 040) and
+	// the audit-export bundler (slice 029). Cap at 100 rows.
+	ListArtifactAccessLog(ctx context.Context, arg ListArtifactAccessLogParams) ([]ArtifactAccessLog, error)
 	ListEvidenceAuditEntriesByCredential(ctx context.Context, arg ListEvidenceAuditEntriesByCredentialParams) ([]EvidenceAuditLog, error)
 	// Returns every registered semver for a kind, visible to the tenant.
 	// Slice 014 uses this for AC-5 semver enforcement (a POST must check the
@@ -215,6 +231,9 @@ type Querier interface {
 	// pattern keeps the query plan stable and lets sqlc emit a *VendorCriticality
 	// parameter so callers can pass nil for "no filter".
 	ListVendors(ctx context.Context, arg ListVendorsParams) ([]Vendor, error)
+	// Append a row to the access log. Action is enforced by CHECK
+	// ('upload' | 'download'). Caller passes tenant_id + artifact_id + actor.
+	LogArtifactAccess(ctx context.Context, arg LogArtifactAccessParams) error
 	// Point a framework at its current version.
 	SetLatestVersion(ctx context.Context, arg SetLatestVersionParams) error
 	// AC-6: draft -> review. Guarded so callers can never re-submit an already

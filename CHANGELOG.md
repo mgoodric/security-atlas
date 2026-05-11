@@ -101,6 +101,57 @@ auto-generated notes.
   scope dimensions, actor_id format `connector:github:<service>@<version>`,
   and dedup by idempotency key for both repo_protection (hour key) and
   audit_event (verbatim delivery UUID).
+- **Slice 036 — S3 artifact store integration.** New
+  `POST /v1/artifacts:upload` (multipart upload, bounded by
+  `http.MaxBytesReader` to a 100 MiB cap, server-side sha256 re-compute,
+  per-tenant key derivation as `tenant-{tenant_uuid}/{artifact_uuid}`
+  with no user-controlled segment) and `GET /v1/artifacts/{id}` (returns
+  short-TTL presigned URL; TTL clamped server-side via
+  `artifact.ClampTTL` to a 1h ceiling with a 15m default; cross-tenant
+  requests return 404 via RLS, never 403, so existence is not disclosed).
+  New migration `20260511000008_artifacts.sql` adds two tables:
+  `artifacts` (metadata row with `storage_key`, `content_hash`,
+  `size_bytes`, `content_type`, `uploaded_by`, `uploaded_at`; composite
+  `UNIQUE (tenant_id, id)`, `UNIQUE (tenant_id, storage_key)`, and a
+  partial `UNIQUE (tenant_id, content_hash) WHERE content_hash IS NOT NULL`
+  for upload-time dedup that sidesteps the NULLs-distinct gotcha) and
+  `artifact_access_log` (append-only audit row per upload + download
+  with an `action IN ('upload','download')` CHECK, FK to
+  `artifacts(tenant_id, id)` ON DELETE CASCADE). Both tables wear the
+  four-policy RLS pattern from slices 014/017/024
+  (`tenant_read`/`tenant_write`/`tenant_update`/`tenant_delete` under
+  FORCE ROW LEVEL SECURITY); `artifact_access_log` ships with SELECT +
+  INSERT policies only — explicit absence of UPDATE/DELETE policies
+  under FORCE makes the audit log append-only by construction (same
+  pattern as `evidence_audit_log` from slice 013). New
+  `internal/artifact` package exposes `Store.Put` (writes the blob to
+  S3 first, then inserts the metadata row; re-hashes server-side and
+  rejects any client-supplied hash that does not match; orphan-blob
+  cleanup on DB-insert failure), `Store.Get` (RLS-gated metadata lookup;
+  translates `pgx.ErrNoRows` to `ErrNotFound` for the 404 path),
+  `Store.Presign` (looks up the row FIRST so cross-tenant requests fail
+  before any S3 call; presigned URL TTL is clamped through `ClampTTL`
+  so the request query parameter cannot extend it past the ceiling),
+  and `Store.LogAccess` (one row per upload + download into
+  `artifact_access_log`). Closes the AC-6 PARTIAL gap from slice 013:
+  payloads above 1 MiB at the push endpoint were previously rejected
+  with a pointer to `payload_uri`; this slice lands the storage
+  destination that pointer addresses. The endpoint is **opaque
+  storage** — callers (e.g., slice 018's `approval_evidence_file_url`
+  column) hold the returned `payload_uri` without the platform
+  interpreting its semantics. MinIO is the default for local dev and
+  CI (new service container in the `tests-integration` job; new
+  `deploy/docker/docker-compose.yml` with bucket bootstrap via
+  `minio/mc`); production deployments swap in any S3-compatible backend
+  (AWS S3, Cloudflare R2, Wasabi, Ceph RadosGW) via `ARTIFACTS_BUCKET`
+
+  - endpoint env vars. New sqlc queries in
+    `internal/db/queries/artifacts.sql` (`CreateArtifact`, `GetArtifact`,
+    `FindArtifactByHash`, `LogArtifactAccess`, `ListArtifactAccessLog`).
+    Route mounts in `internal/api/httpserver.go` are append-only and
+    conditional on `Server.AttachArtifactStore` having been called, so
+    unit-only servers (no S3) keep their existing surface.
+
 - **Slice 013 — Evidence ledger write API + push endpoint.** New
   `POST /v1/evidence:push` REST endpoint (single record or batch up to 100) and refactored gRPC `EvidenceIngestService.Push` both wrap the
   same canonical ingestion stage in
