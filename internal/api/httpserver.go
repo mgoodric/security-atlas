@@ -1,0 +1,124 @@
+package api
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/mgoodric/security-atlas/internal/api/anchors"
+	"github.com/mgoodric/security-atlas/internal/api/anchorseed"
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
+)
+
+// HTTPHandlerForTests exposes the assembled HTTP handler so tests can
+// drive it via httptest.NewServer. Production callers should use RunHTTP.
+func (s *Server) HTTPHandlerForTests() http.Handler { return s.httpHandler() }
+
+// httpHandler builds the platform's HTTP router: anchors API under /v1/,
+// auth middleware shared with the gRPC server, CORS for the local dev
+// frontend.
+func (s *Server) httpHandler() http.Handler {
+	root := chi.NewRouter()
+	root.Use(corsMiddleware)
+	root.Use(httpAuthMiddleware(s.credStore))
+
+	store := anchorseed.New()
+	root.Mount("/", anchors.New(store).Routes())
+	return root
+}
+
+// RunHTTP starts the HTTP server on addr (e.g., ":8080") and blocks until
+// ctx is canceled, at which point it shuts down within a 5-second grace.
+func (s *Server) RunHTTP(ctx context.Context, addr string) error {
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           s.httpHandler(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
+	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	}
+}
+
+// corsMiddleware allows the Next.js dev origin to call the API with the
+// bearer token. Production frontends served from the same origin don't
+// trigger CORS.
+func corsMiddleware(next http.Handler) http.Handler {
+	const devOrigin = "http://localhost:3000"
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin == devOrigin {
+			w.Header().Set("Access-Control-Allow-Origin", devOrigin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// httpAuthMiddleware mirrors the gRPC auth interceptor: extract bearer
+// from the Authorization header, resolve via credstore, attach the
+// credential to context.
+func httpAuthMiddleware(store *credstore.Store) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token, ok := extractBearerFromHTTP(r)
+			if !ok {
+				writeAuthError(w, "authorization must be `Bearer <token>`")
+				return
+			}
+			cred, err := store.Authenticate(token)
+			if err != nil {
+				if errors.Is(err, credstore.ErrUnknownKey) {
+					writeAuthError(w, "invalid or revoked bearer token")
+					return
+				}
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			ctx := authctx.WithCredential(r.Context(), cred)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func extractBearerFromHTTP(r *http.Request) (string, bool) {
+	auth := r.Header.Get(sdk.MetadataAuthorization)
+	if auth == "" {
+		return "", false
+	}
+	parts := strings.SplitN(strings.TrimSpace(auth), " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+		return "", false
+	}
+	tok := strings.TrimSpace(parts[1])
+	return tok, tok != ""
+}
+
+func writeAuthError(w http.ResponseWriter, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_, _ = w.Write([]byte(`{"error":"` + msg + `"}`))
+}

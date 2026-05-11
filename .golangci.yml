@@ -2,6 +2,10 @@ version: "2"
 run:
   timeout: 5m
   modules-download-mode: readonly
+  # node_modules ships JS packages that sometimes vendor Go sources we
+  # don't own. Skip them so golangci-lint doesn't flag third-party drift.
+  build-tags:
+    - integration
 
 linters:
   default: none
@@ -22,6 +26,9 @@ linters:
         - name: error-strings
         - name: error-naming
   exclusions:
+    paths:
+      - node_modules
+      - web/.next
     rules:
       - path: _test\.go
         linters:
