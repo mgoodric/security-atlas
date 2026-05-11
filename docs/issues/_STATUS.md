@@ -164,7 +164,7 @@ Legal values (use exactly these strings):
 | 006 | SCF catalog importer + Framework/FrameworkVersion API  | `merged`      | catalog/006-scf-catalog-importer                | gh#6  | 2026-05-11 | 2026-05-11 | open-q #01 cleared at merge           |
 | 007 | SOC 2 v2017 (TSC) crosswalk loader                     | `ready`       | —                                               | —     | —          | —          | HITL on mapping spot-check            |
 | 008 | UCF graph traversal query API                          | `not-ready`   | —                                               | —     | —          | —          | waits on 007                          |
-| 009 | Control bundle format spec + parser + upload           | `in-progress` | control-as-code/009-control-bundle-format       | —     | 2026-05-11 | —          | unlocks 010, 011 critical path        |
+| 009 | Control bundle format spec + parser + upload           | `in-review`   | control-as-code/009-control-bundle-format       | gh#16 | 2026-05-11 | —          | unlocks 010, 011 critical path        |
 | 010 | SCF-anchored control kit (50 SOC 2 controls)           | `not-ready`   | —                                               | —     | —          | —          | waits on 009, 007 · HITL on accuracy  |
 | 011 | Manual control type + attestation flow                 | `not-ready`   | —                                               | —     | —          | —          | waits on 009, 013, 036                |
 | 012 | Control state evaluation engine                        | `not-ready`   | —                                               | —     | —          | —          | waits on 010, 013, 017                |
