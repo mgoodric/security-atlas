@@ -13,6 +13,40 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 024 — Vendor lite module.** New `vendors` table (Postgres)
+  with the minimum-viable TPRM fields: name, optional domain, criticality
+  (low/medium/high), contract_start/end, dpa_signed + dpa_signed_at,
+  review_cadence (monthly/quarterly/biannual/annual), last_review_date,
+  owner_user, optional linked_sow_uri, notes. Sized for ~30–80 vendors
+  (canvas §1.4 + §10.1). Partial UNIQUE index on
+  `(tenant_id, lower(domain)) WHERE domain IS NOT NULL` lets multiple
+  no-domain rows coexist (NULLs-distinct gotcha avoided). CHECK
+  constraints enforce non-empty name, DPA date when signed=true, and
+  `contract_end >= contract_start` when both set. Companion
+  `vendor_scope_cells` join table provides AC-6 scope tagging — vendors
+  scope per cell tuple, composite FK `(tenant_id, vendor_id)` keeps
+  cross-tenant references blocked. Row-Level Security mirrors slice
+  014's tenant_read/tenant_write/tenant_update/tenant_delete split with
+  explicit `WITH CHECK` so cross-tenant writes are denied at the
+  database. `internal/vendor.Store` provides CRUD with per-request
+  transactions applying the tenant GUC, plus burndown (AC-3) and
+  overdue (AC-4) computed in SQL via a stable `CASE review_cadence`
+  interval map. New HTTP API: `POST /v1/vendors`, `GET /v1/vendors`
+  (filter by criticality and overdue), `GET /v1/vendors/{id}`,
+  `PATCH /v1/vendors/{id}` (full-row replace — lite slice does not
+  support partial-merge semantics), `DELETE /v1/vendors/{id}`,
+  `GET /v1/vendors/burndown?criticality=high&as_of=YYYY-MM-DD` —
+  returns review-on-time fractions per criticality band, used by the
+  dashboard panel (slice 040) and the quarterly board pack (slice 032).
+  Next.js routes ship the AC-5 list view + create/edit form: `/vendors`
+  list with criticality + overdue filters and a burndown summary card,
+  `/vendors/new` create form, `/vendors/[id]` edit form, plus
+  proxy routes under `/api/vendors[/...]` that inject the bearer
+  cookie into upstream Authorization headers (mirrors `/api/anchors`).
+  Anti-criteria honored: no questionnaire issuance (phase 2), no
+  trust-center scraping (phase 2), no external IO — `linked_sow_uri`
+  and `domain` are opaque text never resolved. Tenant isolation
+  verified end-to-end by `TestRLS_OtherTenantCannotSeeVendors`.
 - **Slice 014 — Schema registry service.** New `evidence_kind_schemas`
   table (Postgres) holding the JSON Schema, owner, semver, default SCF
   anchors, and tenant scoping for every registered `evidence_kind`.

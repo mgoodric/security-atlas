@@ -11,8 +11,18 @@ import (
 )
 
 type Querier interface {
+	// Idempotent: ON CONFLICT DO NOTHING because the PK already enforces no
+	// duplicates, so re-adding is a no-op.
+	AddVendorScopeCell(ctx context.Context, arg AddVendorScopeCellParams) error
+	// Used before re-binding the full cell set on an update.
+	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
 	CountSCFAnchorsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
 	CountScopeCells(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	// AC-3 burndown: returns total + overdue counts per criticality band. Used
+	// by the dashboard panel (slice 040) and the quarterly board pack (slice 032).
+	// Returns one row per criticality present in the result set; empty bands are
+	// not included (callers fill in zero where needed).
+	CountVendorsForBurndown(ctx context.Context, arg CountVendorsForBurndownParams) ([]CountVendorsForBurndownRow, error)
 	// Insert a scope cell. dimensions_hash is the application-computed canonical
 	// hash; the UNIQUE (tenant_id, dimensions_hash) constraint rejects duplicates.
 	CreateScopeCell(ctx context.Context, arg CreateScopeCellParams) (ScopeCell, error)
@@ -20,6 +30,11 @@ type Querier interface {
 	// (is_builtin=true) and by admins adding custom dimensions (is_builtin=false).
 	// tenant_id is captured directly so RLS evaluates the policy on insert.
 	CreateScopeDimension(ctx context.Context, arg CreateScopeDimensionParams) (ScopeDimension, error)
+	// Insert a vendor. tenant_id is captured directly so RLS evaluates the
+	// INSERT WITH CHECK policy. dpa_signed_at is required by CHECK constraint
+	// whenever dpa_signed=true.
+	CreateVendor(ctx context.Context, arg CreateVendorParams) (Vendor, error)
+	DeleteVendor(ctx context.Context, arg DeleteVendorParams) error
 	// Flip every "current" framework_version for the given framework to "legacy"
 	// so a new release can take over without violating the at-most-one-current
 	// invariant. Caller scopes the transaction.
@@ -50,6 +65,7 @@ type Querier interface {
 	GetScopeCellByID(ctx context.Context, arg GetScopeCellByIDParams) (ScopeCell, error)
 	// Resolve a dimension by name within the current tenant context.
 	GetScopeDimensionByName(ctx context.Context, arg GetScopeDimensionByNameParams) (ScopeDimension, error)
+	GetVendor(ctx context.Context, arg GetVendorParams) (Vendor, error)
 	// Insert a new schema row. The caller (slice 014 registry service) parses
 	// semver into major/minor/patch and supplies all three; the DB CHECK
 	// prevents negatives. Owner must be non-empty (CHECK constraint). The
@@ -79,6 +95,14 @@ type Querier interface {
 	ListEvidenceKindSchemasGlobal(ctx context.Context, arg ListEvidenceKindSchemasGlobalParams) ([]EvidenceKindSchema, error)
 	ListFrameworkVersionsBySlug(ctx context.Context, slug string) ([]FrameworkVersion, error)
 	ListFrameworks(ctx context.Context) ([]Framework, error)
+	// AC-4 overdue calc — vendors whose last_review_date + cadence is older than
+	// the cutoff date. NULL last_review_date means "never reviewed" which always
+	// counts as overdue (a vendor with no review on file is by definition past
+	// due). Cadence -> interval mapping happens with a CASE in SQL so the query
+	// plan is stable. Cutoff is passed as DATE so the caller controls "now"
+	// (testability) and timezone semantics (vendor reviews are date-granular,
+	// not timestamp-granular).
+	ListOverdueVendors(ctx context.Context, arg ListOverdueVendorsParams) ([]Vendor, error)
 	// Paginated anchor list for a specific framework_version. Caller supplies
 	// limit + offset; default at the call site.
 	ListSCFAnchorsForVersion(ctx context.Context, arg ListSCFAnchorsForVersionParams) ([]ScfAnchor, error)
@@ -89,11 +113,22 @@ type Querier interface {
 	// Enumerate the active tenant's declared dimensions. Ordering: builtins first
 	// (stable presentation in the admin UI), then alphabetical by name.
 	ListScopeDimensions(ctx context.Context, tenantID pgtype.UUID) ([]ScopeDimension, error)
+	// Cells attached to one vendor.
+	ListVendorScopeCells(ctx context.Context, arg ListVendorScopeCellsParams) ([]pgtype.UUID, error)
+	// AC-2 filter by criticality. NULL criticality_filter means "all" — the
+	// (sqlc.narg('criticality')::vendor_criticality IS NULL OR criticality = sqlc.narg('criticality'))
+	// pattern keeps the query plan stable and lets sqlc emit a *VendorCriticality
+	// parameter so callers can pass nil for "no filter".
+	ListVendors(ctx context.Context, arg ListVendorsParams) ([]Vendor, error)
 	// Point a framework at its current version.
 	SetLatestVersion(ctx context.Context, arg SetLatestVersionParams) error
 	// Update an existing anchor in place. Touches updated_at; the caller
 	// decides whether to call this based on a content-equality check.
 	UpdateSCFAnchor(ctx context.Context, arg UpdateSCFAnchorParams) (ScfAnchor, error)
+	// Full-row update. Caller is responsible for sending every field; partial
+	// updates are not supported in lite (no PATCH semantics merge). updated_at
+	// is application-owned (no trigger).
+	UpdateVendor(ctx context.Context, arg UpdateVendorParams) (Vendor, error)
 	// Insert or update a framework row. The (tenant_id, slug) UNIQUE constraint
 	// in slice 002's schema treats NULLs as distinct, so a partial unique index
 	// on slug-when-tenant-is-null would be needed to catch global-catalog dupes

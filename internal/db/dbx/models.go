@@ -546,6 +546,93 @@ func (ns NullScopeEnvironment) Value() (driver.Value, error) {
 	return string(ns.ScopeEnvironment), nil
 }
 
+type VendorCriticality string
+
+const (
+	VendorCriticalityLow    VendorCriticality = "low"
+	VendorCriticalityMedium VendorCriticality = "medium"
+	VendorCriticalityHigh   VendorCriticality = "high"
+)
+
+func (e *VendorCriticality) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = VendorCriticality(s)
+	case string:
+		*e = VendorCriticality(s)
+	default:
+		return fmt.Errorf("unsupported scan type for VendorCriticality: %T", src)
+	}
+	return nil
+}
+
+type NullVendorCriticality struct {
+	VendorCriticality VendorCriticality `json:"vendor_criticality"`
+	Valid             bool              `json:"valid"` // Valid is true if VendorCriticality is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullVendorCriticality) Scan(value interface{}) error {
+	if value == nil {
+		ns.VendorCriticality, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.VendorCriticality.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullVendorCriticality) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.VendorCriticality), nil
+}
+
+type VendorReviewCadence string
+
+const (
+	VendorReviewCadenceMonthly   VendorReviewCadence = "monthly"
+	VendorReviewCadenceQuarterly VendorReviewCadence = "quarterly"
+	VendorReviewCadenceBiannual  VendorReviewCadence = "biannual"
+	VendorReviewCadenceAnnual    VendorReviewCadence = "annual"
+)
+
+func (e *VendorReviewCadence) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = VendorReviewCadence(s)
+	case string:
+		*e = VendorReviewCadence(s)
+	default:
+		return fmt.Errorf("unsupported scan type for VendorReviewCadence: %T", src)
+	}
+	return nil
+}
+
+type NullVendorReviewCadence struct {
+	VendorReviewCadence VendorReviewCadence `json:"vendor_review_cadence"`
+	Valid               bool                `json:"valid"` // Valid is true if VendorReviewCadence is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullVendorReviewCadence) Scan(value interface{}) error {
+	if value == nil {
+		ns.VendorReviewCadence, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.VendorReviewCadence.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullVendorReviewCadence) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.VendorReviewCadence), nil
+}
+
 type Control struct {
 	ID                 pgtype.UUID               `json:"id"`
 	TenantID           pgtype.UUID               `json:"tenant_id"`
@@ -714,4 +801,30 @@ type ScopeDimension struct {
 	IsBuiltin     bool               `json:"is_builtin"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Vendor struct {
+	ID             pgtype.UUID         `json:"id"`
+	TenantID       pgtype.UUID         `json:"tenant_id"`
+	Name           string              `json:"name"`
+	Domain         *string             `json:"domain"`
+	Criticality    VendorCriticality   `json:"criticality"`
+	ContractStart  pgtype.Date         `json:"contract_start"`
+	ContractEnd    pgtype.Date         `json:"contract_end"`
+	DpaSigned      bool                `json:"dpa_signed"`
+	DpaSignedAt    pgtype.Date         `json:"dpa_signed_at"`
+	ReviewCadence  VendorReviewCadence `json:"review_cadence"`
+	LastReviewDate pgtype.Date         `json:"last_review_date"`
+	OwnerUser      string              `json:"owner_user"`
+	LinkedSowUri   *string             `json:"linked_sow_uri"`
+	Notes          string              `json:"notes"`
+	CreatedAt      pgtype.Timestamptz  `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz  `json:"updated_at"`
+}
+
+type VendorScopeCell struct {
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	VendorID    pgtype.UUID        `json:"vendor_id"`
+	ScopeCellID pgtype.UUID        `json:"scope_cell_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
