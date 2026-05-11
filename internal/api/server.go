@@ -16,9 +16,12 @@ import (
 	"google.golang.org/grpc/status"
 
 	adminv1 "github.com/mgoodric/security-atlas/gen/proto/admin/v1"
+	connectorsv1 "github.com/mgoodric/security-atlas/gen/proto/connectors/v1"
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	"github.com/mgoodric/security-atlas/internal/api/admin"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/connectorregistry"
+	"github.com/mgoodric/security-atlas/internal/api/connectors"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/evidence"
 	"github.com/mgoodric/security-atlas/internal/api/idemstore"
@@ -30,10 +33,11 @@ import (
 // unexported; callers reach them through purposeful methods (e.g.
 // IssueBootstrapCredential) so the surface stays small as more services land.
 type Server struct {
-	GRPC      *grpc.Server
-	credStore *credstore.Store
-	registry  schemaregistry.Registry
-	idemStore idemstore.Store
+	GRPC              *grpc.Server
+	credStore         *credstore.Store
+	registry          schemaregistry.Registry
+	idemStore         idemstore.Store
+	connectorRegistry connectorregistry.Store
 }
 
 // IssueBootstrapCredential mints a credential for the supplied tenant and
@@ -62,6 +66,7 @@ func New(cfg Config) *Server {
 	cred := credstore.New(cfg.RotationGrace)
 	reg := schemaregistry.New(cfg.RegistrySeed)
 	idem := idemstore.New()
+	connReg := connectorregistry.New(nil)
 
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
@@ -71,12 +76,14 @@ func New(cfg Config) *Server {
 	)
 	evidencev1.RegisterEvidenceIngestServiceServer(grpcServer, evidence.New(reg, idem, nil))
 	adminv1.RegisterAdminCredentialsServiceServer(grpcServer, admin.New(cred))
+	connectorsv1.RegisterConnectorRegistryServiceServer(grpcServer, connectors.New(connReg))
 
 	return &Server{
-		GRPC:      grpcServer,
-		credStore: cred,
-		registry:  reg,
-		idemStore: idem,
+		GRPC:              grpcServer,
+		credStore:         cred,
+		registry:          reg,
+		idemStore:         idem,
+		connectorRegistry: connReg,
 	}
 }
 

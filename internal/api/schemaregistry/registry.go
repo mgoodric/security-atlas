@@ -35,13 +35,16 @@ type KindVersion struct {
 	Version string
 }
 
-// DefaultSeed returns the small starter set of evidence kinds that slice
-// 003 understands. Real kinds land with their respective connector slices.
+// DefaultSeed returns the starter set of evidence kinds the platform knows
+// about at boot. Connector slices add their own kinds here. Naming follows
+// `<vendor>.<resource>.<property>.v<n>` — slice 004 adds the AWS S3
+// bucket-encryption kind.
 func DefaultSeed() []KindVersion {
 	return []KindVersion{
 		{Kind: "sast.scan_result.v1", Version: "1.0.0"},
 		{Kind: "access_review.completion.v1", Version: "1.0.0"},
 		{Kind: "manual.attestation.v1", Version: "1.0.0"},
+		{Kind: "aws.s3.bucket_encryption_state.v1", Version: "1.0.0"},
 	}
 }
 
