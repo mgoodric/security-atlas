@@ -1,0 +1,17 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    # Schema is read from the migration tree. Slice 002 lands an init migration
+    # with no queries — first queries arrive with slice 013 (evidence ledger
+    # write API). The generated package is empty until then; this config
+    # serves as a canary that sqlc parses the schema cleanly.
+    schema: "migrations/sql/20260511000000_init.sql"
+    queries: "internal/db/queries"
+    gen:
+      go:
+        package: "dbx"
+        out: "internal/db/dbx"
+        sql_package: "pgx/v5"
+        emit_pointers_for_null_types: true
+        emit_interface: true
+        emit_json_tags: true

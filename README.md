@@ -2,15 +2,18 @@
 
 Open-source GRC platform — a control-graph + evidence-pipeline for security programs running against many frameworks (SOC 2, ISO 27001, NIST CSF, PCI DSS, HIPAA, GDPR).
 
-**Pre-implementation status.** Slice 001 ships the monorepo skeleton + CI green build only. See [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) for the design canvas and [`docs/issues/_INDEX.md`](./docs/issues/_INDEX.md) for the v1 roadmap (49 slices · ~94d critical path).
+**Early implementation.** Slices 001 (monorepo skeleton) and 002 (schema + migrations + tenancy plumbing) are in. See [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) for the design canvas and [`docs/issues/_INDEX.md`](./docs/issues/_INDEX.md) for the v1 roadmap (49 slices · ~94d critical path).
 
 ---
 
 ## Prerequisites
 
-- Go 1.22+
+- Go 1.24+
 - Node.js 20+
 - Python 3.11+ (for `oscal-bridge` and ruff)
+- Postgres 16+ (for migrations + integration tests) — `brew install postgresql@16` or via Docker
+- [`atlas`](https://atlasgo.io) (declarative migrations) — `brew install ariga/tap/atlas`
+- [`sqlc`](https://docs.sqlc.dev) (type-safe Go from SQL) — `brew install sqlc`
 - [`just`](https://just.systems) — `brew install just`
 - [`pre-commit`](https://pre-commit.com) — `pip install pre-commit`
 - [`golangci-lint`](https://golangci-lint.run) — `brew install golangci-lint`
@@ -34,26 +37,33 @@ After `just install-hooks`, commits with malformed Go (or unformatted YAML / JSO
 
 ## Task surface (`just`)
 
-| Recipe                | What it does                                                          |
-| --------------------- | --------------------------------------------------------------------- |
-| `just`                | List all recipes                                                      |
-| `just build`          | Build all components (Go + frontend)                                  |
-| `just build-go`       | Build Go binaries only                                                |
-| `just build-frontend` | Build the `web/` workspace                                            |
-| `just test`           | Run all tests                                                         |
-| `just test-go`        | Run Go tests (`go test -race ./...` in CI)                            |
-| `just test-frontend`  | Run frontend tests                                                    |
-| `just lint`           | Run all linters (Go + frontend + Python)                              |
-| `just lint-go`        | `golangci-lint run ./...`                                             |
-| `just lint-frontend`  | `npm run lint` in `web/`                                              |
-| `just lint-python`    | `ruff check .`                                                        |
-| `just fmt`            | Format all code (in-place)                                            |
-| `just fmt-go`         | `gofmt -w` + `goimports -w -local github.com/mgoodric/security-atlas` |
-| `just fmt-python`     | `ruff format .`                                                       |
-| `just install-hooks`  | Install pre-commit hooks (one-time)                                   |
-| `just hooks-run`      | Run pre-commit against the whole tree                                 |
-| `just tidy`           | `go mod tidy` and fail if `go.mod`/`go.sum` change                    |
-| `just ci`             | Run what CI runs (lint + test + build)                                |
+| Recipe                  | What it does                                                          |
+| ----------------------- | --------------------------------------------------------------------- |
+| `just`                  | List all recipes                                                      |
+| `just db-up`            | Start a local Postgres 16 in Docker                                   |
+| `just db-down`          | Tear down the local Postgres                                          |
+| `just migrate-up`       | Bootstrap roles + apply Atlas migrations (requires `$DATABASE_URL`)   |
+| `just migrate-down`     | Roll back the latest migration (uses hand-authored `.down.sql`)       |
+| `just migrate-status`   | Atlas migration revision status                                       |
+| `just sqlc-generate`    | Run `sqlc generate` against the schema                                |
+| `just test-integration` | Run integration tests (requires `$DATABASE_URL_APP`)                  |
+| `just build`            | Build all components (Go + frontend)                                  |
+| `just build-go`         | Build Go binaries only                                                |
+| `just build-frontend`   | Build the `web/` workspace                                            |
+| `just test`             | Run all tests                                                         |
+| `just test-go`          | Run Go tests (`go test -race ./...` in CI)                            |
+| `just test-frontend`    | Run frontend tests                                                    |
+| `just lint`             | Run all linters (Go + frontend + Python)                              |
+| `just lint-go`          | `golangci-lint run ./...`                                             |
+| `just lint-frontend`    | `npm run lint` in `web/`                                              |
+| `just lint-python`      | `ruff check .`                                                        |
+| `just fmt`              | Format all code (in-place)                                            |
+| `just fmt-go`           | `gofmt -w` + `goimports -w -local github.com/mgoodric/security-atlas` |
+| `just fmt-python`       | `ruff format .`                                                       |
+| `just install-hooks`    | Install pre-commit hooks (one-time)                                   |
+| `just hooks-run`        | Run pre-commit against the whole tree                                 |
+| `just tidy`             | `go mod tidy` and fail if `go.mod`/`go.sum` change                    |
+| `just ci`               | Run what CI runs (lint + test + build)                                |
 
 ---
 
@@ -75,7 +85,7 @@ After `just install-hooks`, commits with malformed Go (or unformatted YAML / JSO
 | `oscal-bridge/`                             | Python service wrapping `compliance-trestle`                                                              | slice 030                           |
 | `proto/`                                    | gRPC protobuf definitions                                                                                 | slice 003                           |
 | `schemas/`                                  | JSON Schemas for `evidence_kind`                                                                          | slice 014                           |
-| `migrations/`                               | Atlas declarative migrations (`schema.hcl`)                                                               | slice 002                           |
+| `migrations/`                               | Versioned SQL migrations + Atlas config + role bootstrap                                                  | slice 002                           |
 | `policies/`                                 | OPA Rego (authz + control policies)                                                                       | slice 035                           |
 | `deploy/docker/` `deploy/helm/`             | Deployment artifacts                                                                                      | slices 037, 038                     |
 
@@ -101,7 +111,23 @@ Read [`CLAUDE.md`](./CLAUDE.md) first. It documents:
 
 ## Status
 
-- **Slice 001** — Monorepo skeleton + CI green build (this slice)
+- **Slice 001** — Monorepo skeleton + CI green build
+- **Slice 002** — Schema + migrations for six primitives + FrameworkScope + tenancy plumbing (this slice)
 - See [`docs/issues/_INDEX.md`](./docs/issues/_INDEX.md) for the 49-slice v1 roadmap
+
+---
+
+## Tenancy + RLS
+
+Every tenant-scoped table carries `tenant_id` and has `ROW LEVEL SECURITY` (RLS) enabled with `FORCE ROW LEVEL SECURITY`. Policies compare `tenant_id::text` against the Postgres GUC `app.current_tenant` (set via `SET LOCAL` inside a transaction). If the GUC is unset, the comparison fails and the row is excluded — no default-allow path.
+
+Two database roles:
+
+- `atlas_migrate` — `BYPASSRLS`, used by Atlas for DDL only. Never used by application code.
+- `atlas_app` — `NOSUPERUSER NOBYPASSRLS`, used by the application and integration tests. RLS policies are enforced against this role.
+
+Application code attaches a tenant to context with `tenancy.WithTenant(ctx, tenantID)`, then applies it to an active transaction with `tenancy.ApplyTenant(ctx, tx)`. The `pgx.Tx` parameter is type-enforced — `SET LOCAL` outside a transaction is silently no-op'd, so the compiler is the guardrail.
+
+The catalog tables `frameworks` and `framework_versions` use a slightly relaxed policy: `tenant_id IS NULL OR tenant_id::text = current_setting('app.current_tenant', true)`. `NULL` is the global catalog (SCF, SOC 2, ISO 27001); non-NULL is a tenant-private custom framework.
 
 [GitHub](https://github.com/mgoodric/security-atlas)
