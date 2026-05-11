@@ -13,6 +13,42 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 014 — Schema registry service.** New `evidence_kind_schemas`
+  table (Postgres) holding the JSON Schema, owner, semver, default SCF
+  anchors, and tenant scoping for every registered `evidence_kind`.
+  Row-Level Security splits reads (global rows visible to every tenant;
+  tenant rows gated by `app.current_tenant`) from writes (tenant-only —
+  global rows can only be inserted by the bundled-schema importer
+  running as `atlas_migrate`). Ten v1 platform-bundled JSON Schemas
+  shipped under `internal/api/schemaregistry/schemas/<kind>/<semver>.json`:
+  `sast.scan_result.v1`, `access_review.completion.v1`,
+  `manual.attestation.v1`, `aws.s3.bucket_encryption_state.v1`,
+  `github.repo_protection.v1`, `okta.mfa_policy.v1`,
+  `1password.org_policy.v1`, `osquery.host_posture.v1`,
+  `jira.ticket_evidence.v1`, `manual.upload.v1` — all JSON Schema
+  draft 2020-12 with `x-evidence-kind`, `x-semver`, `x-owner`,
+  `x-default-scf-anchors` extension keys.
+  `internal/api/schemaregistry.Service` provides a DB-backed registry
+  with in-memory cache, semver enforcement (AC-5: additive minor bumps,
+  no silent major auto-bump, no skip/gap versions), JSON Schema 2020-12
+  payload validation via `github.com/santhosh-tekuri/jsonschema/v6`,
+  and tenant-aware lookup. `ValidatePayload` is the slice 013 push
+  hook (AC-6). New HTTP API: `GET /v1/schemas` (list global +
+  tenant-private kinds), `GET /v1/schemas/{kind}/{semver}` (one
+  schema), `POST /v1/schemas` (admin-only, tenant-scoped registration).
+  `IssueBootstrapAdminCredential` + `credstore.Credential.IsAdmin` add
+  minimal admin role plumbing for AC-4 (tenant-scoped admins; no
+  global admin in v1). The bundled-schema importer in `cmd/atlas`
+  walks the embedded FS at boot and inserts each kind into
+  `evidence_kind_schemas` if not already present (idempotent; runs
+  via the migrator pool because global rows have `tenant_id NULL`).
+  Anti-criteria honored: anonymous schema registration rejected at
+  HTTP layer and re-checked in `Service.Register`; silent major auto-
+  bump rejected by `EnforceSemver`; cross-tenant private-kind leak
+  prevented by RLS (tenant-write/read/update/delete policies) plus
+  per-request transaction setting `app.current_tenant`; kind without
+  owner rejected by DB CHECK `length(owner) > 0` and service-layer
+  `ErrEmptyOwner`.
 - **Slice 039 — CLI binary distribution + release pipeline.** Tagged
   releases (`v*.*.*`) trigger GoReleaser to build signed binaries for
   five OS/arch targets (`darwin_amd64`, `darwin_arm64`, `linux_amd64`,
@@ -27,6 +63,18 @@ auto-generated notes.
   unsigned binaries, no skipped cosign verification (the workflow
   self-verifies its own published checksums), no coupling to a
   non-permissive package channel.
+
+### Open questions
+
+- Plans/canvas/11-open-questions.md #17 (schema-registry governance)
+  remains **partially deferred** — semver enforcement is resolved
+  by slice 014; community-tier review process is not in scope.
+- Top-level `schemas/` directory now contains only a README pointing
+  to `internal/api/schemaregistry/schemas/`. Go's `//go:embed` cannot
+  reach upward out of a package, so the canonical location for
+  bundled JSON Schemas moved into the registry package. Worth a
+  follow-up discussion on whether to symlink or accept the
+  in-package path as canonical.
 
 ## [0.0.0] - 2026-05-11
 

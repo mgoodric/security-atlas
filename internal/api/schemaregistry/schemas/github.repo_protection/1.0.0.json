@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/github.repo_protection/1.0.0.json",
+  "x-evidence-kind": "github.repo_protection.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["TDA-06", "CHG-02"],
+  "title": "GitHub repository branch-protection state",
+  "description": "Default-branch protection configuration for one repository.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["repo_full_name", "default_branch", "required_reviews"],
+  "properties": {
+    "repo_full_name": { "type": "string", "minLength": 1 },
+    "default_branch": { "type": "string", "minLength": 1 },
+    "required_reviews": { "type": "integer", "minimum": 0 },
+    "require_code_owner_reviews": { "type": "boolean" },
+    "require_signed_commits": { "type": "boolean" },
+    "require_linear_history": { "type": "boolean" },
+    "enforce_admins": { "type": "boolean" }
+  }
+}

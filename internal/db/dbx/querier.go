@@ -16,6 +16,14 @@ type Querier interface {
 	// so a new release can take over without violating the at-most-one-current
 	// invariant. Caller scopes the transaction.
 	DemoteCurrentFrameworkVersions(ctx context.Context, frameworkID pgtype.UUID) error
+	// Look up one schema visible to the tenant. Prefers the tenant's private
+	// row when one exists for the same (kind, semver); otherwise returns the
+	// global row. The ORDER BY puts the non-null tenant_id first.
+	GetEvidenceKindSchemaForTenant(ctx context.Context, arg GetEvidenceKindSchemaForTenantParams) (EvidenceKindSchema, error)
+	// Look up one global schema by (kind, semver). Used by the GET endpoint
+	// when no tenant is supplied and by the push validator before slice 013
+	// lands tenant-private validation.
+	GetEvidenceKindSchemaGlobal(ctx context.Context, arg GetEvidenceKindSchemaGlobalParams) (EvidenceKindSchema, error)
 	GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnchor, error)
 	// Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
 	// framework version.
@@ -25,9 +33,33 @@ type Querier interface {
 	// Updated / Unchanged (xmax-based detection inside ON CONFLICT can't
 	// distinguish "updated to the same content" from "actually updated").
 	GetSCFAnchorByVersionAndSCFID(ctx context.Context, arg GetSCFAnchorByVersionAndSCFIDParams) (ScfAnchor, error)
+	// Insert a new schema row. The caller (slice 014 registry service) parses
+	// semver into major/minor/patch and supplies all three; the DB CHECK
+	// prevents negatives. Owner must be non-empty (CHECK constraint). The
+	// partial unique indexes on (kind, semver) WHERE tenant_id IS NULL and
+	// (tenant_id, kind, semver) WHERE tenant_id IS NOT NULL enforce
+	// duplicate-version rejection.
+	InsertEvidenceKindSchema(ctx context.Context, arg InsertEvidenceKindSchemaParams) (EvidenceKindSchema, error)
 	// Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
 	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
+	// Bypass-RLS path used at boot by the platform-schema importer running as
+	// atlas_migrate. Returns every row regardless of tenant. Never reachable
+	// through the app role under RLS.
+	ListAllEvidenceKindSchemas(ctx context.Context) ([]EvidenceKindSchema, error)
+	// Returns every registered semver for a kind, visible to the tenant.
+	// Slice 014 uses this for AC-5 semver enforcement (a POST must check the
+	// prior versions of the same kind before accepting a new one).
+	ListEvidenceKindSchemaVersionsForKind(ctx context.Context, arg ListEvidenceKindSchemaVersionsForKindParams) ([]EvidenceKindSchema, error)
+	// Returns every schema visible to the current tenant — both global rows
+	// (tenant_id IS NULL) and the tenant's private rows. RLS already gates
+	// tenant rows, but the WHERE clause is explicit so the query is the same
+	// shape with or without RLS in effect.
+	ListEvidenceKindSchemasForTenant(ctx context.Context, arg ListEvidenceKindSchemasForTenantParams) ([]EvidenceKindSchema, error)
+	// Returns every globally-registered schema (tenant_id IS NULL). The HTTP
+	// list endpoint pages with limit/offset; ordering by (kind, major DESC,
+	// minor DESC, patch DESC) puts the newest versions first within each kind.
+	ListEvidenceKindSchemasGlobal(ctx context.Context, arg ListEvidenceKindSchemasGlobalParams) ([]EvidenceKindSchema, error)
 	ListFrameworkVersionsBySlug(ctx context.Context, slug string) ([]FrameworkVersion, error)
 	ListFrameworks(ctx context.Context) ([]Framework, error)
 	// Paginated anchor list for a specific framework_version. Caller supplies

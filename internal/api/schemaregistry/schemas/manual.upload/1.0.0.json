@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/manual.upload/1.0.0.json",
+  "x-evidence-kind": "manual.upload.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["GOV-04"],
+  "title": "Manual file upload",
+  "description": "A human-uploaded artifact (PDF, screenshot, signed letter) cited as evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["uploaded_by", "filename", "content_type"],
+  "properties": {
+    "uploaded_by": { "type": "string", "minLength": 1 },
+    "filename": { "type": "string", "minLength": 1 },
+    "content_type": { "type": "string", "minLength": 1 },
+    "size_bytes": { "type": "integer", "minimum": 0 },
+    "description": { "type": "string" }
+  }
+}

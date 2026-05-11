@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/jira.ticket_evidence/1.0.0.json",
+  "x-evidence-kind": "jira.ticket_evidence.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["CHG-02", "GOV-04"],
+  "title": "Jira ticket evidence",
+  "description": "One Jira ticket cited as evidence (e.g., a change ticket).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ticket_key", "status"],
+  "properties": {
+    "ticket_key": { "type": "string", "minLength": 1 },
+    "project_key": { "type": "string" },
+    "summary": { "type": "string" },
+    "status": { "type": "string", "minLength": 1 },
+    "resolution": { "type": "string" },
+    "assignee": { "type": "string" },
+    "url": { "type": "string", "format": "uri" }
+  }
+}

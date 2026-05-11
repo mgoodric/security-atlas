@@ -562,6 +562,25 @@ type Control struct {
 	UpdatedAt          pgtype.Timestamptz        `json:"updated_at"`
 }
 
+type EvidenceKindSchema struct {
+	ID                      pgtype.UUID        `json:"id"`
+	TenantID                pgtype.UUID        `json:"tenant_id"`
+	Kind                    string             `json:"kind"`
+	Semver                  string             `json:"semver"`
+	Major                   int32              `json:"major"`
+	Minor                   int32              `json:"minor"`
+	Patch                   int32              `json:"patch"`
+	SchemaJson              []byte             `json:"schema_json"`
+	Owner                   string             `json:"owner"`
+	DefaultScfAnchors       []string           `json:"default_scf_anchors"`
+	DeprecatedAt            pgtype.Timestamptz `json:"deprecated_at"`
+	DeprecationWindowEndsAt pgtype.Timestamptz `json:"deprecation_window_ends_at"`
+	SupersededByVersion     *string            `json:"superseded_by_version"`
+	CreatedBy               string             `json:"created_by"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+}
+
 type EvidenceRecord struct {
 	ID              pgtype.UUID            `json:"id"`
 	TenantID        pgtype.UUID            `json:"tenant_id"`

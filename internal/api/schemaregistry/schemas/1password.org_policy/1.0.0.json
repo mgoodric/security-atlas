@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/1password.org_policy/1.0.0.json",
+  "x-evidence-kind": "1password.org_policy.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IAC-10"],
+  "title": "1Password organization policy state",
+  "description": "Org-level password and 2FA policy posture from the 1Password admin API.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["org_id", "two_factor_required"],
+  "properties": {
+    "org_id": { "type": "string", "minLength": 1 },
+    "two_factor_required": { "type": "boolean" },
+    "minimum_password_length": { "type": "integer", "minimum": 0 },
+    "domain_restrictions_enabled": { "type": "boolean" },
+    "active_members": { "type": "integer", "minimum": 0 }
+  }
+}

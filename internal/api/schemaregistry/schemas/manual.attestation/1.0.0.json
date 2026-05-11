@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/manual.attestation/1.0.0.json",
+  "x-evidence-kind": "manual.attestation.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["GOV-04"],
+  "title": "Manual attestation",
+  "description": "A human attestation that a control state holds at a moment in time.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["attestor", "statement"],
+  "properties": {
+    "attestor": { "type": "string", "minLength": 1 },
+    "statement": { "type": "string", "minLength": 1 },
+    "supporting_uri": { "type": "string", "format": "uri" }
+  }
+}

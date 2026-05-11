@@ -14,6 +14,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/anchorseed"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 )
@@ -43,6 +44,15 @@ func (s *Server) httpHandler() http.Handler {
 	mappings := anchorseed.New()
 	queries := dbx.New(s.dbPool)
 	root.Mount("/", anchors.New(queries, mappings).Routes())
+	if dbSvc, ok := s.registry.(*schemaregistry.Service); ok && dbSvc != nil {
+		// chi forbids two Mounts on the same path. Attach each schema
+		// route directly to the root router so they live alongside the
+		// anchors handlers.
+		h := schemaregistry.NewHTTPHandler(dbSvc)
+		root.Get("/v1/schemas", h.ListHTTP)
+		root.Get("/v1/schemas/{kind}/{semver}", h.GetHTTP)
+		root.Post("/v1/schemas", h.RegisterHTTP)
+	}
 	return root
 }
 

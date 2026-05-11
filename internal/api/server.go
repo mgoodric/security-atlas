@@ -51,10 +51,23 @@ func (s *Server) IssueBootstrapCredential(tenantID string) (credstore.Credential
 	return s.credStore.Issue(tenantID, "", nil, 0)
 }
 
+// IssueBootstrapAdminCredential mints an admin-flagged credential for the
+// supplied tenant. Tests use it to drive the slice-014 schema registration
+// flow (admin-only). Production deployments will graduate to a proper
+// admin issuance path in a later slice.
+func (s *Server) IssueBootstrapAdminCredential(tenantID string) (credstore.Credential, string, error) {
+	return s.credStore.IssueAdmin(tenantID, 0)
+}
+
 // Config groups the wiring inputs. Zero values yield a sane local setup.
 type Config struct {
 	RotationGrace time.Duration
 	RegistrySeed  []schemaregistry.KindVersion
+	// SchemaRegistry, when non-nil, replaces the default in-memory
+	// registry with a DB-backed Service. The HTTP handler for slice 014
+	// only mounts when this field is populated, so unit-only servers
+	// keep the slice-003 IsRegistered surface.
+	SchemaRegistry *schemaregistry.Service
 }
 
 // New constructs the Server with its services and interceptors mounted.
@@ -67,7 +80,12 @@ func New(cfg Config) *Server {
 	}
 
 	cred := credstore.New(cfg.RotationGrace)
-	reg := schemaregistry.New(cfg.RegistrySeed)
+	var reg schemaregistry.Registry
+	if cfg.SchemaRegistry != nil {
+		reg = cfg.SchemaRegistry
+	} else {
+		reg = schemaregistry.New(cfg.RegistrySeed)
+	}
 	idem := idemstore.New()
 	connReg := connectorregistry.New(nil)
 

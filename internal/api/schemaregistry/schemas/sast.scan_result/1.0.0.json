@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/sast.scan_result/1.0.0.json",
+  "x-evidence-kind": "sast.scan_result.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["VPM-04", "TDA-09"],
+  "title": "SAST scan result",
+  "description": "One static-analysis run from a CI pipeline, summarized.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tool", "findings_count"],
+  "properties": {
+    "tool": { "type": "string", "minLength": 1 },
+    "tool_version": { "type": "string" },
+    "ruleset": { "type": "string" },
+    "findings_count": { "type": "integer", "minimum": 0 },
+    "scanned_files": { "type": "integer", "minimum": 0 },
+    "scan_duration_seconds": { "type": "number", "minimum": 0 },
+    "report_uri": { "type": "string", "format": "uri" }
+  }
+}
