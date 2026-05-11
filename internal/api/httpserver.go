@@ -14,10 +14,12 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/anchorseed"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
 	"github.com/mgoodric/security-atlas/internal/api/vendors"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/vendor"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
@@ -65,6 +67,15 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/scopes/cells", scopesH.ListCells)
 	root.Get("/v1/scopes/dimensions", scopesH.ListDimensions)
 	root.Get("/v1/controls/{id}/applicability", scopesH.ControlApplicability)
+	// Slice 019: risk register CRUD + 5x5 heatmap. Routes appended per the
+	// parallel-batch convention — chi.Mux rejects two Mounts at "/", and other
+	// batches are also appending here, so order-of-append must not matter.
+	risksH := risksapi.New(risk.NewStore(s.dbPool))
+	root.Post("/v1/risks", risksH.CreateRisk)
+	root.Get("/v1/risks", risksH.ListRisks)
+	root.Get("/v1/risks/heatmap", risksH.Heatmap)
+	root.Get("/v1/risks/{id}", risksH.GetRisk)
+	root.Delete("/v1/risks/{id}", risksH.DeleteRisk)
 	// Slice 024: vendor lite module — CRUD + burndown. The burndown route
 	// is registered before /v1/vendors/{id} so chi's router matches the
 	// literal segment first (chi resolves routes in declaration order

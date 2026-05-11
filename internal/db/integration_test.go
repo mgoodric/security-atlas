@@ -274,9 +274,12 @@ func TestSchema_TenantScopedTablesAcceptInserts(t *testing.T) {
 		}
 
 		// Now exercise every remaining tenant-scoped table.
+		// Slice 019 added treatment-specific CHECK constraints. The slice-002
+		// default treatment='accept' requires accepted_until + accepter; the
+		// simplest survivor is treatment='avoid', which has no extra fields.
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO risks (id, tenant_id, title, category)
-			VALUES ($1, $2, 'Unauthorized access to PHI', 'confidentiality')
+			INSERT INTO risks (id, tenant_id, title, category, treatment)
+			VALUES ($1, $2, 'Unauthorized access to PHI', 'confidentiality', 'avoid')
 		`, uuid.NewString(), tenant); err != nil {
 			t.Fatalf("INSERT risks: %v", err)
 		}
