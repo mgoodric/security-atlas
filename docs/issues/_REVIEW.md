@@ -1,0 +1,192 @@
+# v1 Backlog Readiness Review
+
+**Date:** 2026-05-11
+**Reviewer:** author of the backlog (bias acknowledged below)
+**Inputs read:** CLAUDE.md, `Plans/canvas/10-roadmap.md` §10.1, `Plans/canvas/01-vision.md` §1.5, `docs/issues/_INDEX.md`, `docs/issues/_DEPENDENCY_GRAPH.md`, all 49 issue files
+**Scope of this review:** read-only audit. **No issue files modified.**
+
+---
+
+## Executive summary
+
+**Verdict: PASS-WITH-EDITS.**
+
+The 49-slice backlog cleanly maps to §10.1 v1 scope with no constitutional violations, no anti-pattern shipping, and a coherent critical path threading the binary v1 success test. However, **two P0 findings** and **six P1 findings** need to land before any coding starts — they reflect real architectural inconsistencies and dependency under-specifications that would block slices from being independently mergeable.
+
+The most consequential issue is an inconsistency between slice 013 (push API) and slice 015 (NATS ingestion stage): slice 013 as written ships a push-to-ledger direct write, which violates invariant 2 (ingestion/evaluation separated) until slice 015 lands. This needs reframing so 013 ships the ingestion-stage as a function call invoked synchronously, with 015 swapping in NATS as the queue substrate without changing the logical separation. Without this fix, the platform technically violates a constitutional invariant for the window between slices 013 and 015 landing.
+
+The second P0 is slice 037 (docker-compose) with a wildly under-specified dependency list — it claims to bring up the whole platform from a fresh checkout but only depends on `#002`, `#013`, `#034`. The bundle assembles the frontend, NATS, schema registry, AWS connector, and the seeded SCF + 50 controls — none of those dependencies are listed.
+
+The P1 findings concentrate on missing dependency edges (slices 005, 010, 012, 030, 040 each have at least one dependency the AC implicitly requires but the deps section doesn't list) and one likely under-scoped estimate (slice 010 at 3d for authoring 50 controls + HITL review is realistic at 5–7d).
+
+If all P0 + P1 edits are applied, the **net change to v1 effort is +3 to +5 day-equivalents** (mostly absorbed by re-estimating slice 010), the **critical path length is unchanged** (11 nodes; the 013/015 fix is a reframe, not a re-sequence), and **slice count is unchanged at 49**.
+
+**Author-bias acknowledgment:** I wrote every artifact under review. To counter bias, every finding below has a concrete edit recommendation (vague self-criticism filtered out). I deliberately spot-checked the slices I'd be most likely to gloss over in a non-adversarial read: 013 (push API), 015 (NATS), 030 (OSCAL), 010 (50 controls), 040 (dashboard). Findings reflect what I'd flag if a peer wrote these.
+
+---
+
+## Findings by section
+
+Severity: **P0** = ship-blocker · **P1** = should fix before coding · **P2** = nice-to-have · **info** = noted, no action required.
+
+### A. Scope coverage
+
+| ID | Severity | Finding | Evidence |
+|---|---|---|---|
+| A.1 | info | All 13 rows in §10.1 mapped to ≥1 issue. Connector roster (row 2): 7 connectors required, 7 present (004 AWS, 044 GitHub, 045 Okta, 046 1Password, 047 osquery/Fleet, 048 Jira/Linear, 049 manual-upload). | §10.1 row 2 vs issue files |
+| A.2 | info | Three slices are "extras" not directly in §10.1: 008 (UCF traversal API — implied by canvas §3 + needed by frontend), 018 (FrameworkScope — covers invariant 5 but §10.1 only mentions "scope dimensions"), 021 (exception/waiver — covers canvas §6.3 + dashboard mockup but not §10.1 row 6). All three are constitutionally or persona-justified; not orphans. | §10.1 vs issue list |
+| A.3 | info | §10.1 row 9 says "OSCAL SSP export"; slice 030 also includes POA&M + AP/AR. POA&M is a natural pairing for audit handoff; treating as scope-add not scope-creep. | §10.1 row 9 vs slice 030 narrative |
+| A.4 | info | §10.1 row 12 ("Self-host: One-binary core + NATS + Postgres + S3 + Helm + docker-compose") fully covered by 015 + 036 + 037 + 038 + 039. Server-binary itself isn't a discrete slice — accreted across all server-side slices. Acceptable. | §10.1 row 12 vs spine + infra slices |
+| A.5 | info | §10.1 row 13 lists 5 RBAC roles; slice 035 explicitly enumerates them. ✓ | §10.1 row 13 vs slice 035 |
+
+No orphans. No problematic extras.
+
+### B. Constitutional invariant compliance
+
+Each of the 10 invariants checked across all 49 issues. **No violations found in shipped scope.** One soft violation flagged for the window between two slices landing:
+
+| ID | Severity | Invariant | Finding |
+|---|---|---|---|
+| B.1 | **P0** | 2 (ingestion/eval separated) | **Architectural inconsistency between slices 013 and 015.** Slice 013 narrative says "every accepted record is canonicalized, hashed, schema-validated, checked for idempotency, scope-tagged, **and written to the append-only `evidence_records` table**". Slice 015 then says "Insert NATS JetStream as the durable buffer **between** the push endpoint (slice 013) and the evaluation stage". This means during the window between 013 landing and 015 landing, the push API writes directly to the ledger — collapsing the ingestion-stage separation. The fix is to reframe slice 013 as shipping the ingestion-stage logic as a function call invoked synchronously, with slice 015 swapping in NATS as the queue substrate without changing the logical separation. |
+| B.2 | info | 1, 3, 4, 5, 6, 7, 8, 9, 10 | All other 9 invariants properly honored across all slices. Spot-checks: slice 010 cites #1 + #7 + #9 + anti-pattern; slice 028 cites #10; slice 033 cites #6; slice 018 cites #5; slice 008 cites #1 + #6. |
+
+### C. Anti-pattern compliance
+
+| ID | Severity | Anti-pattern | Finding |
+|---|---|---|---|
+| C.1 | info | Policy template-library theater | Slice 022 bundles **5** stock policies (matching canvas §1.6 commitment), HITL-reviewed, each linked to ≥3 controls. ✓ |
+| C.2 | info | AI-generated audit responses w/o approval | Slices 031, 032, 043 all explicitly templated-only in v1; slice 030 has explicit anti-criterion blocking AI auto-generation of SSP narrative; slice 011 explicit anti-criterion against AI auto-attestation; slice 027 walkthrough recording explicit anti-criterion. ✓ |
+| C.3 | info | Proprietary collector agents | Slice 047 (osquery/Fleet) explicitly cites the anti-pattern; uses open-source agents only. Slices 004, 044, 045, 046, 048, 049 all use read-only vendor APIs. ✓ |
+| C.4 | info | Vanity trust centers | No trust-center slice in v1 (deferred per canvas §10.3). ✓ |
+| C.5 | info | Fake-continuous monitoring | All connectors declare pull-or-event schedule explicitly; slice 015 narrative honors "event-driven where APIs allow" framing. ✓ |
+| C.6 | info | Per-framework duplicated controls | Slice 010 explicitly cites invariant 1; SOC 2 satisfaction is derived via slice 008 traversal, not duplicated rows. ✓ |
+| C.7 | info | Audit-period evidence pollution | Slice 028 explicit; slice 026 (sample-pull) explicitly honors frozen horizon. ✓ |
+| C.8 | info | Closed proprietary connectors | All 7 connectors are OSS in-tree; SDK contract via slice 003 is open gRPC. ✓ |
+
+### D. AI-assist boundary
+
+| ID | Severity | Finding |
+|---|---|---|
+| D.1 | info | No slice auto-publishes audit-binding artifacts. Slices 030, 031, 032, 043 all require explicit per-section human approval before publish. Slice 011 manual control attestation is human-only. Slice 027 walkthrough is human-authored. ✓ |
+| D.2 | info | Slice 043 board pack preview view explicitly says "'AI-drafted' badge replaced with 'Templated v1' (no LLM in v1)" — visual aligns with v1 scope decision. ✓ |
+
+### E. Acceptance criteria quality (5 named slices, scored 1–5)
+
+| Issue | Score | Notes |
+|---|---|---|
+| **001** monorepo skeleton | **4/5** | AC are integration-test-shaped (`just build`, PR triggers CI green, pre-commit blocks bad commit). Anti-criteria specific and P0. Skill mix realistic. **Why not 5:** AC-1 ("under 5 minutes") is reasonable but unverifiable until first dev clones; would be stronger as "from cold cache on a CI runner with no pre-warmed caches." Minor. |
+| **002** schema migrations | **5/5** | AC are concretely integration-test-shaped (apply, reverse, cross-tenant SELECT returns zero rows under different `current_tenant` GUC). RLS-deny test is the killer AC — the most important guarantee in the slice. Anti-criteria block specific failure modes. |
+| **013** push API | **4/5** | AC enumerate the rejection paths (missing field, idempotency replay, content drift, rate limit, payload >1MB redirect, audit log, replay protection). Strong. **Why not 5:** see B.1 — the AC sequence implies synchronous ledger write, which conflicts with slice 015's later ingestion-stage insertion. Either AC-1 should say "returns 201 after stream commit" (forward-compat with 015) or the narrative should explicitly note "ingestion stage is invoked synchronously in 013; 015 swaps in NATS." |
+| **030** OSCAL SSP+POA&M | **3/5** | Substantial AC coverage (8 ACs spanning SSP, AP/AR, POA&M, signing, round-trip validation, HITL gate). **Why not 4–5:** AC-2 lists "linked policies (from slice 022)" but slice 022 is NOT in dependencies (P1 finding H.4). AC-3 references "audit comments (slice 029)" — 029 IS in deps. AC-8 says "audit-pack PDF available via UI" but no UI binding in the deps. The slice is asking 3 days to do SSP + AP/AR + POA&M + cosign + HITL auditor partner validation — that's the load-bearing 40% of audit workflow in one slice. Realistic estimate is 4–5 days. |
+| **010** 50 controls | **3/5** | AC are reasonable (50 bundles validated, ≥50% automated, ≥80% TSC coverage, attestation_schema for manual, HITL log). **Why not 4–5:** estimate at 3d for *authoring 50 controls + HITL review* is materially under-scoped. Realistic: 5–7d. Also, automated evidence queries (~25-30 controls) target AWS/GitHub/Okta/1Password/osquery/Jira data, but deps only include `#009, #007` — the actual connector slices that provide that data are missing from the dep chain. AC-2 ("≥50% have automated query") can't be tested if the connectors haven't landed. |
+
+### F. Critical-path architectural sanity
+
+| ID | Severity | Finding |
+|---|---|---|
+| F.1 | info | Critical path `001 → 002 → 006 → 007 → 010 → 012 → 016 → 028 → 030 → 032 → 043` threads the binary v1 success test: skeleton → schema → SCF spine → SOC 2 crosswalk → 50 SOC 2 controls authored → evaluation engine computing state → freshness/drift signals → audit-period freezing → OSCAL export → board pack → user-facing board view. The chain correctly maps to "Matt runs his SOC 2 audit + generates the board pack from this tool." ✓ |
+| F.2 | P2 | The 016 → 028 edge is defensible but not strict. Slice 028 (audit-period freeze) uses raw `observed_at` from the ledger, not the freshness window. Freshness (016) is a *read-model* — useful for "stale" surfacing but not load-bearing for freezing logic. Could remove 016 from 028's deps without breaking 028. Not blocking; documenting for reviewer awareness. |
+
+### G. HITL marker validation
+
+| ID | Severity | Finding |
+|---|---|---|
+| G.1 | info | All 5 HITL markers are correctly applied: 007 (mapping spot-check) ✓, 010 (control accuracy + evidence query correctness) ✓, 022 (stock policy text needs compliance practitioner review) ✓, 030 (auditor partner validates SSP imports) ✓, 035 (role+Rego policy review) ✓. |
+| G.2 | P2 | **Slice 037 docker-compose could be HITL.** AC-7 "4-hour to first evidence walkthrough documented" requires human validation against a fresh VM. A peer might mark this HITL. Currently AFK; downgrade to info if the validation can be scripted (e.g., a CI workflow against a fresh container). |
+
+### H. Dependency graph integrity (5 spot-checks + additional findings)
+
+| ID | Severity | Finding |
+|---|---|---|
+| H.1 | info | Spot-check 1: slice 030 lists deps `#008, #012, #017, #018, #026, #028`. Graph mermaid shows all 6 edges present. ✓ |
+| H.2 | info | Spot-check 2: slice 012 lists deps `#010, #013, #017`. Graph confirms. ✓ |
+| H.3 | info | Spot-check 3: slice 038 lists dep `#037`. Graph confirms. ✓ |
+| H.4 | **P1** | **Slice 030 missing dep `#022`.** AC-2 says "SSP includes ... linked policies (from slice 022)." Adding edge `#022 → #030` is required. |
+| H.5 | **P1** | **Slice 040 missing deps `#015`, `#021`, `#023`.** AC-5 reads from "exception expiration + policy ack + vendor review"; AC-6 says "backed by NATS-driven event stream archive." Currently deps = `#005, #012, #016, #020, #024`. Missing 015 (NATS), 021 (exceptions), 023 (policy ack). Vendor (024) is present. |
+| H.6 | **P1** | **Slice 012 missing dep `#015`.** AC-2 says "Background job runs evaluation on every new evidence ingest (NATS consumer from slice 015)." Currently deps = `#010, #013, #017`. Add #015. |
+| H.7 | **P1** | **Slice 005 missing dep `#034`.** AC-2 says "Sign-in page accepts a local user." Local user auth comes from slice 034. Narrative acknowledges "full OIDC routes from slice 034" but doesn't gate the slice on 034 being available. Either add dep #034 or explicitly mark AC-2 as "stub auth in 005; full auth requires 034 to be downstream." |
+| H.8 | **P0** | **Slice 037 dependencies wildly under-specified.** Brings up the full platform (server + frontend + NATS + MinIO + schema registry + AWS connector + seeded SCF + 50 controls) from a fresh checkout. Currently deps = `#002, #013, #034`. Missing: #004 (AWS connector — required by AC-5), #005 (frontend — required by AC-3), #006 (SCF importer — required by AC-4 "SCF catalog already seeded"), #010 (50 controls — required by AC-4), #014 (schema registry — required by ingestion path), #015 (NATS — required by docker-compose contents), #036 (S3 artifact store — MinIO bundled). Without these deps, slice 037 cannot land. |
+
+### I. Out-of-order risks (Layer 1 → 7 walk per `_INDEX.md`)
+
+| ID | Severity | Finding |
+|---|---|---|
+| I.1 | **P2** | **Layer assignment error in `_INDEX.md` "Cluster boundaries summary."** Layer 1 lists "002, 003, 034, 039" as depending only on 001. But **slice 039 (CLI release pipeline) explicitly depends on both #001 AND #003** (per its deps section). 039 should be Layer 2, not Layer 1. |
+| I.2 | **P2** | **Layer 5 lists slice 037, but 037's true layer is Layer 4** (max dep is #013 which is Layer 3; #034 is Layer 1). Once H.8 is fixed and 037 gains deps on 005, 015, etc., 037 moves to Layer 6 (because 005 is Layer 5). Layer assignment must be recomputed after H.8 edit. |
+| I.3 | info | Layers 1–4 are otherwise consistent with declared dependencies. |
+| I.4 | info | Layer 5 (005, 012, 026, 027, 028, 029, 037, 044-049) and Layer 6 (030, 031, 038, 040, 041, 042) are consistent assuming H.4–H.8 fixes don't perturb layer. After fixes: 040 moves to layer 7 (waiting on 015/021/023); 030 moves to layer 6+ (waiting on 022). |
+| I.5 | info | Layer 7 (032, 043) consistent. |
+
+### J. Open-questions blockers wired to slices
+
+| ID | Severity | Finding |
+|---|---|---|
+| J.1 | info | #01 SCF licensing → slice 006: correctly wired. ✓ |
+| J.2 | info | #13 Solo-operator vs multi-tenant tension → slices 033, 034, 037: correctly wired. ✓ |
+| J.3 | info | #19 FrameworkScope ownership workflow → slice 018: correctly wired. ✓ |
+| J.4 | info | #17 Schema-registry governance → slice 014: correctly wired. ✓ |
+| J.5 | **P1** | **#18 Push credential issuance UX → slice 035: partial wiring.** Slice 035 implements RBAC + ABAC + OPA but does NOT ship a credential-issuance UX (issuing API keys, rotating, revoking, scoping per-tenant × per-evidence-kind × TTL). The open question expects rotation/scoping/revocation UX before any push credentials are issued — this is missing from v1 backlog. Either: (a) add a new slice "API key management UX" (~1.5d), or (b) explicitly defer OQ #18 to v1.x and document credential issuance via CLI-only in v1, or (c) absorb minimal API key issuance UX into slice 035 with an extra AC. |
+| J.6 | info | OQ #15 (CSA/Shared Assessments licensing) not wired to any v1 slice — correct, because v1 does not ship questionnaire features (deferred to phase 2 per §10.1). |
+
+---
+
+## Specific edits recommended
+
+| # | Issue | Current state | Suggested change |
+|---|---|---|---|
+| 1 | **013** | Narrative says writes directly to ledger | Reframe narrative: "The API canonicalizes / hashes / validates / scope-tags and invokes the ingestion stage (a function path in 013, decoupled via NATS in slice 015). The ingestion stage writes to the ledger." Add an AC: "Ingestion logic lives in a separate function path (`internal/evidence/ingest`) — slice 015 will swap the synchronous invocation for a NATS publish without changing the ingestion function." |
+| 2 | **037** | Deps `#002, #013, #034` | Add deps: `#004, #005, #006, #010, #014, #015, #036` |
+| 3 | **030** | Deps `#008, #012, #017, #018, #026, #028` | Add dep: `#022` (AC-2 references policies) |
+| 4 | **030** | Estimate 3d | Bump to 4–5d (loaded slice: SSP + AP/AR + POA&M + cosign + HITL). Or split into 030a (SSP+POA&M) and 030b (AP/AR + cosign signing). |
+| 5 | **010** | Estimate 3d | Bump to 5–7d (50 controls authored + HITL review is materially more than 3 days). Optionally add dep on schema-registry slice `#014` if evidence_kind schemas are needed at author time. |
+| 6 | **012** | Deps `#010, #013, #017` | Add dep: `#015` (NATS consumer per AC-2) |
+| 7 | **040** | Deps `#005, #012, #016, #020, #024` | Add deps: `#015, #021, #023` |
+| 8 | **005** | Deps `#001, #008` | Add dep: `#034`, OR rewrite AC-2 to "stub local-auth in 005 with explicit TODO marker resolved by slice 034." Stronger fix: add dep. |
+| 9 | **039** in `_INDEX.md` Cluster boundaries | Listed under Layer 1 | Move to Layer 2 (depends on 003) |
+| 10 | **037** in `_INDEX.md` Cluster boundaries | Listed under Layer 5 | Recompute after edit #2 — likely Layer 6 |
+| 11 | **#18 Open Question** | Wired only to slice 035 | Add a new slice "API key issuance + rotation UX" (~1.5d, depends on 034 + 035) OR explicitly defer in `_INDEX.md` Open Questions section noting "v1 ships CLI-only credential issuance; full UX in v1.x." |
+| 12 | **028** | Dep on `#016` listed | Optional: drop dep on 016 (freezing uses ledger horizon directly, not freshness window). P2 — defensible either way. |
+| 13 | **037** | Marker AFK | Optional: mark HITL if 4h walkthrough validation can't be automated. P2. |
+| 14 | **005, 030, 001** | Constitutional invariants thin | Optional: 005 could cite invariant 7 (renders SCF); 030 could cite invariant 7 (SSP includes SCF-anchored controls); 001 could cite the planned-layout commitment. P2. |
+
+---
+
+## Net change if all edits applied
+
+| Metric | Before | After | Δ |
+|---|---|---|---|
+| Slice count | 49 | 50 (if J.5 resolved by new slice) OR 49 (if deferred) | 0 or +1 |
+| Total estimate | ~90d | ~93–95d (+2–3d from 010, +1–2d from 030, +1.5d from optional new slice) | +3 to +6.5d |
+| Critical path nodes | 11 | 11 (unchanged — fixes are reframes + dep edges, not re-sequences) | 0 |
+| Critical path days | ~24d | ~26–28d (slice 010 estimate bump propagates) | +2 to +4d |
+| Max parallelism | ~10 streams | ~10 streams (unchanged) | 0 |
+| HITL count | 5 | 5 or 6 (if 037 becomes HITL) | 0 or +1 |
+
+---
+
+## Decisions needed from you before any file changes
+
+1. **D1 — Confirm reframe of slice 013 vs 015 (P0).** I recommend keeping both slices as-is but reframing 013's narrative + adding one AC making the ingestion-stage-as-function path explicit. Alternative: merge 013 + 015 into one larger slice (~4d). **Pick one.**
+2. **D2 — Confirm dep additions (P0 + P1).** Edits #2–#8 add missing dependency edges. These should be uncontroversial — they reflect what the AC already implies. **Approve all, or call out exceptions.**
+3. **D3 — Confirm estimate bumps for slices 010 and 030 (P1).** Slice 010: 3d → 5–7d. Slice 030: 3d → 4–5d. Alternative for 030: split into two slices. **Pick: bump-in-place OR split.**
+4. **D4 — Resolve OQ #18 wiring (P1).** Options: (a) add new slice ~1.5d for credential issuance UX, (b) defer OQ #18 with CLI-only credential issuance in v1, (c) absorb minimal UX into slice 035 with one extra AC. **Pick a, b, or c.**
+5. **D5 — Layer assignment corrections in `_INDEX.md` (P2).** Edits #9–#10 fix existing errors. Approve to apply.
+6. **D6 — Optional P2 edits #12, #13, #14.** Take, leave, or defer.
+
+Once decisions land, the follow-up step is a focused edit pass touching only the issue files identified above plus `_INDEX.md` and `_DEPENDENCY_GRAPH.md`. No new content beyond the edit list.
+
+---
+
+## Reading-order check
+
+I read in this order: CLAUDE.md (refresh of invariants + anti-patterns + AI-assist boundary + tech stack) → `Plans/canvas/10-roadmap.md` §10.1 (v1 scope table) → `Plans/canvas/01-vision.md` §1.5 (8 acceptance criteria) → `docs/issues/_INDEX.md` → `docs/issues/_DEPENDENCY_GRAPH.md` → 49 issue files (pass 1: skim all; pass 2: deep-read 001, 002, 010, 013, 030, plus spot-checks on 005, 015, 037, 040, 012, 004). ✓
+
+## Author-bias mitigation
+
+- Every finding required a concrete edit recommendation; vague self-criticism was filtered out.
+- Spot-checked the slices I'd be most likely to gloss over: 013/015 (architectural inconsistency), 030 (load-bearing slice with HITL gate), 037 (deps under-specified — easy to miss as "infrastructure stuff").
+- Findings reflect what I'd flag if a peer wrote these issues. Two P0 findings on my own work is the calibration check that the review wasn't a rubber-stamp.
+
+---
+
+[← back to `docs/issues/_INDEX.md`](./_INDEX.md)
