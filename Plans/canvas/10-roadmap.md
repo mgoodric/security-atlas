@@ -10,21 +10,21 @@
 
 **Scope (deliberately tight):**
 
-| Area | v1 contents | Notes |
-|---|---|---|
-| Catalog | SCF ingested + SOC 2 v2017 (TSC) crosswalked | One framework crosswalked is enough to prove the graph works; the spine is in place for phase 2. |
-| Connectors | 7 high-leverage: AWS, GitHub, Okta or Google Workspace, 1Password, osquery/Fleet, Jira/Linear, manual-upload/CSV | These cover ~70% of evidence demand at a SaaS startup. Ship deeply, not broadly. |
-| Control-as-code | Authoring kit + ~50 SOC 2 controls bundled | Stock controls usable as-is or forkable. |
-| Evidence engine | Append-only ledger, ingestion + evaluation separation, freshness model | Hybrid event-driven (where APIs allow) + query-driven snapshots. |
-| Scope | Dimensions defined (BU, env, cloud, data class) but a default single-cell org works | Don't force scope modeling on day one. |
-| Risk register | NIST 800-30 default, 5x5 qualitative + dollar-banded impact, FAIR for top-N | Methodology pluggable; default reflects what practitioners actually use. |
-| Policy library | 5 high-signal stock policies (Information Security, Access Control, Vendor Management, Incident Response, Change Management) + acknowledgment workflow | Not 50 placeholder docs. Each owned, dated, version-controlled. |
-| Vendor module | Lite — vendor entity, contract dates, DPA status, review cadence, criticality, last-review-date | The minimum to retire the vendor spreadsheet. |
-| Audit workflow | Auditor role + sample-pull + walkthrough + audit-period freezing + Audit Hub comments + OSCAL SSP export | All five primitives or none — they compose. |
-| Board reporting | Monthly brief + quarterly pack with auto-drafted narrative + investment-vs-coverage manual entry | First-class. Validated by user delivering an actual board pack from the tool. |
-| Multi-tenancy | Postgres RLS from day one (even in single-tenant deployments) | Get the path right early. |
-| Self-host | One-binary core + NATS (single binary) + Postgres (single instance) + S3-compatible artifact store. Helm chart + docker-compose. | Must run on a single mid-size VM. |
-| Auth | OIDC RP for SSO; local users for solo deployments | RBAC roles: admin, grc_engineer, control_owner, auditor, viewer. |
+| Area            | v1 contents                                                                                                                                            | Notes                                                                                            |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| Catalog         | SCF ingested + SOC 2 v2017 (TSC) crosswalked                                                                                                           | One framework crosswalked is enough to prove the graph works; the spine is in place for phase 2. |
+| Connectors      | 7 high-leverage: AWS, GitHub, Okta or Google Workspace, 1Password, osquery/Fleet, Jira/Linear, manual-upload/CSV                                       | These cover ~70% of evidence demand at a SaaS startup. Ship deeply, not broadly.                 |
+| Control-as-code | Authoring kit + ~50 SOC 2 controls bundled                                                                                                             | Stock controls usable as-is or forkable.                                                         |
+| Evidence engine | Append-only ledger, ingestion + evaluation separation, freshness model                                                                                 | Hybrid event-driven (where APIs allow) + query-driven snapshots.                                 |
+| Scope           | Dimensions defined (BU, env, cloud, data class) but a default single-cell org works                                                                    | Don't force scope modeling on day one.                                                           |
+| Risk register   | NIST 800-30 default, 5x5 qualitative + dollar-banded impact, FAIR for top-N                                                                            | Methodology pluggable; default reflects what practitioners actually use.                         |
+| Policy library  | 5 high-signal stock policies (Information Security, Access Control, Vendor Management, Incident Response, Change Management) + acknowledgment workflow | Not 50 placeholder docs. Each owned, dated, version-controlled.                                  |
+| Vendor module   | Lite — vendor entity, contract dates, DPA status, review cadence, criticality, last-review-date                                                        | The minimum to retire the vendor spreadsheet.                                                    |
+| Audit workflow  | Auditor role + sample-pull + walkthrough + audit-period freezing + Audit Hub comments + OSCAL SSP export                                               | All five primitives or none — they compose.                                                      |
+| Board reporting | Monthly brief + quarterly pack with auto-drafted narrative + investment-vs-coverage manual entry                                                       | First-class. Validated by user delivering an actual board pack from the tool.                    |
+| Multi-tenancy   | Postgres RLS from day one (even in single-tenant deployments)                                                                                          | Get the path right early.                                                                        |
+| Self-host       | One-binary core + NATS (single binary) + Postgres (single instance) + S3-compatible artifact store. Helm chart + docker-compose.                       | Must run on a single mid-size VM.                                                                |
+| Auth            | OIDC RP for SSO; local users for solo deployments                                                                                                      | RBAC roles: admin, grc_engineer, control_owner, auditor, viewer.                                 |
 
 **Deliberately deferred from MVP:** trust center, ClickHouse path, per-tenant plugin install, framework versions beyond SOC 2:2017, TPRM workflow beyond the lite module, training/phishing connector (use manual upload), AI assistance on policy text, GDPR-specific privacy module, HIPAA-specific covered-entity workflow.
 
@@ -38,7 +38,7 @@
 - Connector roster grows to ~25–30 (add Azure, GCP, Slack, Datadog, PagerDuty, Rippling/HRIS, Jamf/Intune, Cloudflare, GitLab, Snyk/Dependabot, Crowdstrike/SentinelOne).
 - Vendor TPRM workflow expansion (questionnaire issuance, evidence reuse from vendor's own trust center where machine-readable).
 - Policy redline / version diff (Notion-style, not Word track-changes).
-- AI-assisted *gap explanation* and *evidence summarization* (still no auto-generated policy text or audit responses).
+- AI-assisted _gap explanation_ and _evidence summarization_ (still no auto-generated policy text or audit responses).
 - Security-questionnaire response engine — answer customer questionnaires from existing evidence with one-click human approval per answer.
 
 ## 10.3 Phase 3 — "Audit ecosystem and scale"

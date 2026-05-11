@@ -6,7 +6,7 @@
 
 ## Narrative
 
-Generate the monthly single-page board brief: posture summary per framework, drift in the last 30 days, top-3 risks aging. Output is a pinned snapshot — the board reads what posture *was* at the report date, even if live state has changed afterward. Narrative is templated (Jinja-style) over real metrics — no LLM in v1 (per gate resolution). Output as PDF + Markdown for paste-into-deck. The slice delivers value because the user has a board-ready single-pager at the end of each month without leaving the tool.
+Generate the monthly single-page board brief: posture summary per framework, drift in the last 30 days, top-3 risks aging. Output is a pinned snapshot — the board reads what posture _was_ at the report date, even if live state has changed afterward. Narrative is templated (Jinja-style) over real metrics — no LLM in v1 (per gate resolution). Output as PDF + Markdown for paste-into-deck. The slice delivers value because the user has a board-ready single-pager at the end of each month without leaving the tool.
 
 ## Acceptance criteria
 

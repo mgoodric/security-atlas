@@ -30,11 +30,11 @@ JetStream gives us durable streams, key-value, and object store in one binary, w
 
 Three extension surfaces, narrow on purpose:
 
-| Surface | What you can extend | Mechanism |
-|---------|---------------------|-----------|
-| Connector | New evidence sources | gRPC contract per [§4.1](./04-evidence-engine.md) |
-| Control bundle | New controls / mappings | Versioned bundle uploaded to a registry; signed |
-| Notification sink | Where alerts/digests go | Webhook + a small handful of native sinks |
+| Surface           | What you can extend     | Mechanism                                         |
+| ----------------- | ----------------------- | ------------------------------------------------- |
+| Connector         | New evidence sources    | gRPC contract per [§4.1](./04-evidence-engine.md) |
+| Control bundle    | New controls / mappings | Versioned bundle uploaded to a registry; signed   |
+| Notification sink | Where alerts/digests go | Webhook + a small handful of native sinks         |
 
 That's it for v1. No "plugin everything" surface. Plugins are installed per-deployment, not per-tenant, in v1 — keeps the security model simple. Per-tenant plugin marketplaces are a v3 conversation.
 

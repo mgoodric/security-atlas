@@ -20,6 +20,7 @@ The evaluation engine, given a control and the org's universe of scope cells, co
 ## 5.2 Per-cell evaluation
 
 Each `(control × scope_cell × time)` triplet has its own state. The dashboard rolls up:
+
 - by control across cells (where is it failing?)
 - by cell across controls (what's broken in `prod` × `restricted` × `EU`?)
 - by framework requirement across the SCF graph (what does my SOC 2 look like?)
@@ -38,9 +39,9 @@ Storage tier (object store for large artifacts) uses per-tenant prefixes with te
 
 ## 5.5 Framework scope — the per-framework subset of cells and controls
 
-The single most-misunderstood real-world fact about multi-framework programs is that **scope is per-framework, not global**. PCI's "cardholder data environment" (CDE) is not the same as HIPAA's "covered systems" is not the same as SOC 2's auditor-attested system is not the same as ISO 27001's ISMS scope. A control may be operationally applied across all 50 of an org's scope cells, but its evidence only *counts* for PCI in the 5 cells inside the CDE.
+The single most-misunderstood real-world fact about multi-framework programs is that **scope is per-framework, not global**. PCI's "cardholder data environment" (CDE) is not the same as HIPAA's "covered systems" is not the same as SOC 2's auditor-attested system is not the same as ISO 27001's ISMS scope. A control may be operationally applied across all 50 of an org's scope cells, but its evidence only _counts_ for PCI in the 5 cells inside the CDE.
 
-This intersection — between a control's operational applicability and a framework's audit scope — is how a unified control library produces a *subset* of relevant controls per framework, automatically.
+This intersection — between a control's operational applicability and a framework's audit scope — is how a unified control library produces a _subset_ of relevant controls per framework, automatically.
 
 **The model adds one entity:**
 
@@ -68,14 +69,14 @@ effective_scope(control, framework)   // cells where the control's evidence COUN
 
 **The canonical examples:**
 
-| Framework | Typical FrameworkScope predicate | Lever for scope reduction |
-|---|---|---|
-| **PCI DSS 4.0** (CDE) | `data_classification IN ('cardholder_data') OR connected_to_chd = true OR security_impacting_chd = true` | Network segmentation, tokenization, P2PE — each removes cells from the CDE |
-| **HIPAA Security Rule** (Covered) | `phi_handling = true OR product_line IN ('clinical', 'patient_portal')` | De-identification, BAA-bounded systems boundary |
-| **SOC 2** (System) | Auditor-defined; can be any predicate. Often `product_line = 'core_saas'` excluding `internal_tools` | Carving the system definition tightly with the auditor up front |
-| **ISO 27001** (ISMS) | Org-defined ISMS scope statement, codified as a predicate | The Statement of Applicability is the formal artifact |
-| **NIST CSF / 800-53** (System) | Per-system; for FedRAMP this is the authorization boundary | Boundary scoping is a heavy artifact, often diagrammed |
-| **GDPR** | Different shape — predicate over data records, not infrastructure cells. Special-cased. | Data minimization, anonymization |
+| Framework                         | Typical FrameworkScope predicate                                                                         | Lever for scope reduction                                                  |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| **PCI DSS 4.0** (CDE)             | `data_classification IN ('cardholder_data') OR connected_to_chd = true OR security_impacting_chd = true` | Network segmentation, tokenization, P2PE — each removes cells from the CDE |
+| **HIPAA Security Rule** (Covered) | `phi_handling = true OR product_line IN ('clinical', 'patient_portal')`                                  | De-identification, BAA-bounded systems boundary                            |
+| **SOC 2** (System)                | Auditor-defined; can be any predicate. Often `product_line = 'core_saas'` excluding `internal_tools`     | Carving the system definition tightly with the auditor up front            |
+| **ISO 27001** (ISMS)              | Org-defined ISMS scope statement, codified as a predicate                                                | The Statement of Applicability is the formal artifact                      |
+| **NIST CSF / 800-53** (System)    | Per-system; for FedRAMP this is the authorization boundary                                               | Boundary scoping is a heavy artifact, often diagrammed                     |
+| **GDPR**                          | Different shape — predicate over data records, not infrastructure cells. Special-cased.                  | Data minimization, anonymization                                           |
 
 **How the graph traversal accounts for it:**
 
@@ -94,7 +95,7 @@ The practical consequences the user actually feels:
 
 **Why this is hard for flat-table tools:** they can't intersect "control applicability" with "framework scope" because they don't model framework scope at all — they assume one global scope. Real programs have to maintain the intersection in spreadsheets. The graph model + `FrameworkScope` makes this a query, not a copy-paste exercise.
 
-**FrameworkScope vs. SCF anchor scope mappings:** these are different things. SCF anchors are framework-agnostic concepts. The mapping `FrameworkRequirement → SCF anchor` says "this concept is what the requirement is about." `FrameworkScope` separately says "even though the concept applies broadly, this framework's audit only cares about it in *these* cells." The two intersect at evaluation time.
+**FrameworkScope vs. SCF anchor scope mappings:** these are different things. SCF anchors are framework-agnostic concepts. The mapping `FrameworkRequirement → SCF anchor` says "this concept is what the requirement is about." `FrameworkScope` separately says "even though the concept applies broadly, this framework's audit only cares about it in _these_ cells." The two intersect at evaluation time.
 
 ---
 

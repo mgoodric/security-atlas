@@ -5,7 +5,7 @@
 **Status:** Ready for execution — `_REVIEW.md` decisions applied (commit history).
 **Last updated:** 2026-05-11 after review-finding application (D1–D6 resolved).
 
-> Tracer-bullet slicing: each slice cuts vertically through every layer (schema, API, UI, tests) — *not* horizontally through one layer. A completed slice is demoable on its own.
+> Tracer-bullet slicing: each slice cuts vertically through every layer (schema, API, UI, tests) — _not_ horizontally through one layer. A completed slice is demoable on its own.
 
 ## Reading
 
@@ -15,77 +15,77 @@
 
 ## Topological order
 
-| # | Title | Cluster | Type | Est. (d) | Deps | Status |
-|---|---|---|---|---|---|---|
-| [001](./001-monorepo-skeleton.md) | Monorepo skeleton + CI green build | Spine | AFK | 1.5 | — | Ready |
-| [002](./002-schema-migrations.md) | Schema + migrations (6 primitives + FrameworkScope + tenancy plumbing) | Spine | AFK | 3 | 001 | Ready |
-| [003](./003-evidence-sdk-proto-push-client-cli.md) | Evidence SDK: proto + Go push client + CLI | Spine | AFK | 2.5 | 001 | Ready |
-| [014](./014-schema-registry-service.md) | Schema registry service (in-tree Go) | Evidence pipeline | AFK | 1.5 | 002 | Ready |
-| [006](./006-scf-catalog-importer.md) | SCF catalog importer + Framework/FrameworkVersion API | Catalog | AFK | 2 | 002 | Ready |
-| [009](./009-control-bundle-format.md) | Control bundle format spec + parser + upload | Control-as-code | AFK | 2 | 002 | Ready |
-| [017](./017-scope-dimensions-applicability.md) | Scope dimensions + applicability_expr + default single-cell seed | Scope | AFK | 2 | 002 | Ready |
-| [019](./019-risk-register-crud.md) | Risk CRUD + NIST 800-30 + 5x5 + ALE-band | Risk register | AFK | 2 | 002 | Ready |
-| [022](./022-policy-library.md) | Policy library + 5 stock policies | Policies | HITL | 2 | 002 | Ready |
-| [033](./033-postgres-rls-enforcement.md) | Postgres RLS enforcement everywhere | Multi-tenancy | AFK | 2 | 002 | Ready |
-| [034](./034-oidc-rp-local-users.md) | OIDC RP + local users + api_keys CRUD | Auth | AFK | 2.5 | 001 | Ready |
-| [013](./013-evidence-ledger-write-api.md) | Evidence ledger write API + push endpoint (ingestion-as-function) | Evidence pipeline | AFK | 3 | 002, 003, 014 | Ready |
-| [007](./007-soc2-crosswalk-loader.md) | SOC 2 v2017 (TSC) crosswalk loader | Catalog | HITL | 1.5 | 006 | Ready |
-| [018](./018-framework-scope-intersection.md) | FrameworkScope predicate + intersection compute | Scope | AFK | 1.5 | 017 | Ready |
-| [024](./024-vendor-lite-module.md) | Vendor lite module | Vendor | AFK | 1.5 | 002, 017 | Ready |
-| [015](./015-nats-jetstream-ingestion-stage.md) | NATS JetStream buffer + ingestion stage | Evidence pipeline | AFK | 2 | 013 | Ready |
-| [036](./036-s3-artifact-store.md) | S3 artifact store integration | Infra | AFK | 1 | 013 | Ready |
-| [004](./004-aws-connector-s3-encryption.md) | AWS connector (S3 encryption, end-to-end) | Spine | AFK | 3 | 002, 003, 013, 014 | Ready |
-| [035](./035-rbac-abac-opa.md) | RBAC roles + ABAC via OPA embedded | Auth | HITL | 2 | 033, 034 | Ready |
-| [023](./023-policy-acknowledgment.md) | Policy acknowledgment workflow | Policies | AFK | 1 | 022, 034 | Ready |
-| [044](./044-github-connector.md) | GitHub connector | Connectors | AFK | 1 | 003, 013 | Ready |
-| [045](./045-okta-connector.md) | Okta connector | Connectors | AFK | 1 | 003, 013 | Ready |
-| [046](./046-1password-connector.md) | 1Password connector | Connectors | AFK | 0.5 | 003, 013 | Ready |
-| [047](./047-osquery-fleet-connector.md) | osquery/Fleet endpoint connector | Connectors | AFK | 1 | 003, 013 | Ready |
-| [048](./048-jira-linear-connector.md) | Jira/Linear ticket connector | Connectors | AFK | 1 | 003, 013 | Ready |
-| [049](./049-manual-upload-csv-connector.md) | Manual upload / CSV / S3 / SFTP escape-hatch | Connectors | AFK | 1 | 003, 013 | Ready |
-| [008](./008-ucf-graph-traversal-api.md) | UCF graph traversal query API | Catalog | AFK | 2 | 002, 006, 007 | Ready |
-| [010](./010-soc2-control-kit.md) | SCF-anchored control kit (50 SOC 2 controls) | Control-as-code | HITL | 5–7 | 009, 007, 014 | Ready |
-| [011](./011-manual-control-attestation.md) | Manual control type + attestation flow | Control-as-code | AFK | 1.5 | 009, 013, 036 | Ready |
-| [025](./025-auditor-role-scoped-access.md) | Auditor role + scoped read-only access | Audit | AFK | 1.5 | 033, 035 | Ready |
-| [005](./005-frontend-bootstrap.md) | Frontend bootstrap (Next.js + auth + SCF browser) | Spine | AFK | 2 | 001, 008, 034 | Ready |
-| [012](./012-control-state-evaluation.md) | Control state evaluation engine | Control-as-code | AFK | 2.5 | 010, 013, 015, 017 | Ready |
-| [039](./039-cli-release-pipeline.md) | CLI binary distribution + release pipeline | Infra | AFK | 1 | 001, 003 | Ready |
-| [026](./026-sample-pull-primitives.md) | Sample-pull primitives (Population + Sample) | Audit | AFK | 1.5 | 013, 017 | Ready |
-| [027](./027-walkthrough-recording.md) | Walkthrough recording (annotated + hash/sign) | Audit | AFK | 2 | 025, 036 | Ready |
-| [029](./029-audit-hub-comments.md) | Audit Hub threaded comments | Audit | AFK | 1.5 | 025 | Ready |
-| [016](./016-evidence-freshness-drift.md) | Evidence freshness + drift detection | Evidence pipeline | AFK | 1.5 | 012 | Ready |
-| [020](./020-risk-control-linkage-residual.md) | Risk → control linkage + residual derivation | Risk register | AFK | 2 | 019, 012 | Ready |
-| [021](./021-exception-waiver-workflow.md) | Exception/waiver workflow + auto-expiry | Risk register | AFK | 1.5 | 019, 017 | Ready |
-| [028](./028-audit-period-freezing.md) | AuditPeriod + freezing primitive | Audit | AFK | 2 | 013 | Ready |
-| [030](./030-oscal-ssp-poam-export.md) | OSCAL SSP + POA&M export pipeline | Audit | HITL | 4–5 | 008, 012, 017, 018, 022, 026, 028 | Ready |
-| [031](./031-monthly-board-brief.md) | Monthly board brief (templated, no LLM) | Board | AFK | 1.5 | 012, 016, 020 | Ready |
-| [037](./037-docker-compose-self-host.md) | docker-compose self-host bundle | Infra | AFK | 1.5 | 002, 004, 005, 006, 010, 013, 014, 015, 034, 036 | Ready |
-| [038](./038-helm-chart.md) | Helm chart for K8s | Infra | AFK | 2 | 037 | Ready |
-| [040](./040-program-dashboard-view.md) | Program dashboard view | Frontend | AFK | 2.5 | 005, 012, 015, 016, 020, 021, 023, 024 | Ready |
-| [041](./041-control-detail-view.md) | Control detail view + UCF mini-viz | Frontend | AFK | 3 | 005, 008, 012 | Ready |
-| [042](./042-audit-workspace-view.md) | Audit workspace view (sample + walkthrough + comments) | Frontend | AFK | 2.5 | 025, 026, 027, 029 | Ready |
-| [032](./032-quarterly-board-pack.md) | Quarterly board pack + investment-vs-coverage | Board | AFK | 2.5 | 031, 030 | Ready |
-| [043](./043-board-pack-preview-view.md) | Board pack preview/export view | Frontend | AFK | 2 | 005, 032 | Ready |
+| #                                                  | Title                                                                  | Cluster           | Type | Est. (d) | Deps                                             | Status |
+| -------------------------------------------------- | ---------------------------------------------------------------------- | ----------------- | ---- | -------- | ------------------------------------------------ | ------ |
+| [001](./001-monorepo-skeleton.md)                  | Monorepo skeleton + CI green build                                     | Spine             | AFK  | 1.5      | —                                                | Ready  |
+| [002](./002-schema-migrations.md)                  | Schema + migrations (6 primitives + FrameworkScope + tenancy plumbing) | Spine             | AFK  | 3        | 001                                              | Ready  |
+| [003](./003-evidence-sdk-proto-push-client-cli.md) | Evidence SDK: proto + Go push client + CLI                             | Spine             | AFK  | 2.5      | 001                                              | Ready  |
+| [014](./014-schema-registry-service.md)            | Schema registry service (in-tree Go)                                   | Evidence pipeline | AFK  | 1.5      | 002                                              | Ready  |
+| [006](./006-scf-catalog-importer.md)               | SCF catalog importer + Framework/FrameworkVersion API                  | Catalog           | AFK  | 2        | 002                                              | Ready  |
+| [009](./009-control-bundle-format.md)              | Control bundle format spec + parser + upload                           | Control-as-code   | AFK  | 2        | 002                                              | Ready  |
+| [017](./017-scope-dimensions-applicability.md)     | Scope dimensions + applicability_expr + default single-cell seed       | Scope             | AFK  | 2        | 002                                              | Ready  |
+| [019](./019-risk-register-crud.md)                 | Risk CRUD + NIST 800-30 + 5x5 + ALE-band                               | Risk register     | AFK  | 2        | 002                                              | Ready  |
+| [022](./022-policy-library.md)                     | Policy library + 5 stock policies                                      | Policies          | HITL | 2        | 002                                              | Ready  |
+| [033](./033-postgres-rls-enforcement.md)           | Postgres RLS enforcement everywhere                                    | Multi-tenancy     | AFK  | 2        | 002                                              | Ready  |
+| [034](./034-oidc-rp-local-users.md)                | OIDC RP + local users + api_keys CRUD                                  | Auth              | AFK  | 2.5      | 001                                              | Ready  |
+| [013](./013-evidence-ledger-write-api.md)          | Evidence ledger write API + push endpoint (ingestion-as-function)      | Evidence pipeline | AFK  | 3        | 002, 003, 014                                    | Ready  |
+| [007](./007-soc2-crosswalk-loader.md)              | SOC 2 v2017 (TSC) crosswalk loader                                     | Catalog           | HITL | 1.5      | 006                                              | Ready  |
+| [018](./018-framework-scope-intersection.md)       | FrameworkScope predicate + intersection compute                        | Scope             | AFK  | 1.5      | 017                                              | Ready  |
+| [024](./024-vendor-lite-module.md)                 | Vendor lite module                                                     | Vendor            | AFK  | 1.5      | 002, 017                                         | Ready  |
+| [015](./015-nats-jetstream-ingestion-stage.md)     | NATS JetStream buffer + ingestion stage                                | Evidence pipeline | AFK  | 2        | 013                                              | Ready  |
+| [036](./036-s3-artifact-store.md)                  | S3 artifact store integration                                          | Infra             | AFK  | 1        | 013                                              | Ready  |
+| [004](./004-aws-connector-s3-encryption.md)        | AWS connector (S3 encryption, end-to-end)                              | Spine             | AFK  | 3        | 002, 003, 013, 014                               | Ready  |
+| [035](./035-rbac-abac-opa.md)                      | RBAC roles + ABAC via OPA embedded                                     | Auth              | HITL | 2        | 033, 034                                         | Ready  |
+| [023](./023-policy-acknowledgment.md)              | Policy acknowledgment workflow                                         | Policies          | AFK  | 1        | 022, 034                                         | Ready  |
+| [044](./044-github-connector.md)                   | GitHub connector                                                       | Connectors        | AFK  | 1        | 003, 013                                         | Ready  |
+| [045](./045-okta-connector.md)                     | Okta connector                                                         | Connectors        | AFK  | 1        | 003, 013                                         | Ready  |
+| [046](./046-1password-connector.md)                | 1Password connector                                                    | Connectors        | AFK  | 0.5      | 003, 013                                         | Ready  |
+| [047](./047-osquery-fleet-connector.md)            | osquery/Fleet endpoint connector                                       | Connectors        | AFK  | 1        | 003, 013                                         | Ready  |
+| [048](./048-jira-linear-connector.md)              | Jira/Linear ticket connector                                           | Connectors        | AFK  | 1        | 003, 013                                         | Ready  |
+| [049](./049-manual-upload-csv-connector.md)        | Manual upload / CSV / S3 / SFTP escape-hatch                           | Connectors        | AFK  | 1        | 003, 013                                         | Ready  |
+| [008](./008-ucf-graph-traversal-api.md)            | UCF graph traversal query API                                          | Catalog           | AFK  | 2        | 002, 006, 007                                    | Ready  |
+| [010](./010-soc2-control-kit.md)                   | SCF-anchored control kit (50 SOC 2 controls)                           | Control-as-code   | HITL | 5–7      | 009, 007, 014                                    | Ready  |
+| [011](./011-manual-control-attestation.md)         | Manual control type + attestation flow                                 | Control-as-code   | AFK  | 1.5      | 009, 013, 036                                    | Ready  |
+| [025](./025-auditor-role-scoped-access.md)         | Auditor role + scoped read-only access                                 | Audit             | AFK  | 1.5      | 033, 035                                         | Ready  |
+| [005](./005-frontend-bootstrap.md)                 | Frontend bootstrap (Next.js + auth + SCF browser)                      | Spine             | AFK  | 2        | 001, 008, 034                                    | Ready  |
+| [012](./012-control-state-evaluation.md)           | Control state evaluation engine                                        | Control-as-code   | AFK  | 2.5      | 010, 013, 015, 017                               | Ready  |
+| [039](./039-cli-release-pipeline.md)               | CLI binary distribution + release pipeline                             | Infra             | AFK  | 1        | 001, 003                                         | Ready  |
+| [026](./026-sample-pull-primitives.md)             | Sample-pull primitives (Population + Sample)                           | Audit             | AFK  | 1.5      | 013, 017                                         | Ready  |
+| [027](./027-walkthrough-recording.md)              | Walkthrough recording (annotated + hash/sign)                          | Audit             | AFK  | 2        | 025, 036                                         | Ready  |
+| [029](./029-audit-hub-comments.md)                 | Audit Hub threaded comments                                            | Audit             | AFK  | 1.5      | 025                                              | Ready  |
+| [016](./016-evidence-freshness-drift.md)           | Evidence freshness + drift detection                                   | Evidence pipeline | AFK  | 1.5      | 012                                              | Ready  |
+| [020](./020-risk-control-linkage-residual.md)      | Risk → control linkage + residual derivation                           | Risk register     | AFK  | 2        | 019, 012                                         | Ready  |
+| [021](./021-exception-waiver-workflow.md)          | Exception/waiver workflow + auto-expiry                                | Risk register     | AFK  | 1.5      | 019, 017                                         | Ready  |
+| [028](./028-audit-period-freezing.md)              | AuditPeriod + freezing primitive                                       | Audit             | AFK  | 2        | 013                                              | Ready  |
+| [030](./030-oscal-ssp-poam-export.md)              | OSCAL SSP + POA&M export pipeline                                      | Audit             | HITL | 4–5      | 008, 012, 017, 018, 022, 026, 028                | Ready  |
+| [031](./031-monthly-board-brief.md)                | Monthly board brief (templated, no LLM)                                | Board             | AFK  | 1.5      | 012, 016, 020                                    | Ready  |
+| [037](./037-docker-compose-self-host.md)           | docker-compose self-host bundle                                        | Infra             | AFK  | 1.5      | 002, 004, 005, 006, 010, 013, 014, 015, 034, 036 | Ready  |
+| [038](./038-helm-chart.md)                         | Helm chart for K8s                                                     | Infra             | AFK  | 2        | 037                                              | Ready  |
+| [040](./040-program-dashboard-view.md)             | Program dashboard view                                                 | Frontend          | AFK  | 2.5      | 005, 012, 015, 016, 020, 021, 023, 024           | Ready  |
+| [041](./041-control-detail-view.md)                | Control detail view + UCF mini-viz                                     | Frontend          | AFK  | 3        | 005, 008, 012                                    | Ready  |
+| [042](./042-audit-workspace-view.md)               | Audit workspace view (sample + walkthrough + comments)                 | Frontend          | AFK  | 2.5      | 025, 026, 027, 029                               | Ready  |
+| [032](./032-quarterly-board-pack.md)               | Quarterly board pack + investment-vs-coverage                          | Board             | AFK  | 2.5      | 031, 030                                         | Ready  |
+| [043](./043-board-pack-preview-view.md)            | Board pack preview/export view                                         | Frontend          | AFK  | 2        | 005, 032                                         | Ready  |
 
 ## Effort by cluster
 
-| Cluster | Slices | Days | Change |
-|---|---|---|---|
-| Spine | 5 | 12 | — |
-| Catalog & UCF graph | 3 | 5.5 | — |
-| Control-as-code | 4 | 11–13 | +2–4 (slice 010 bump) |
-| Evidence pipeline | 4 | 8 | — |
-| Scope + FrameworkScope | 2 | 3.5 | — |
-| Risk register | 3 | 5.5 | — |
-| Policies | 2 | 3 | — |
-| Vendor lite | 1 | 1.5 | — |
-| Audit workflow | 6 | 12.5–13.5 | +1–2 (slice 030 bump) |
-| Board reporting | 2 | 4 | — |
-| Multi-tenancy / auth | 3 | 6.5 | +1 (slice 034 absorbs api_keys CRUD) |
-| Infra / deploy | 4 | 5.5 | — |
-| Frontend views | 4 | 10 | — |
-| Remaining connectors | 6 | 5.5 | — |
-| **Total** | **49** | **~94–95** | **+4–7d vs initial** |
+| Cluster                | Slices | Days       | Change                               |
+| ---------------------- | ------ | ---------- | ------------------------------------ |
+| Spine                  | 5      | 12         | —                                    |
+| Catalog & UCF graph    | 3      | 5.5        | —                                    |
+| Control-as-code        | 4      | 11–13      | +2–4 (slice 010 bump)                |
+| Evidence pipeline      | 4      | 8          | —                                    |
+| Scope + FrameworkScope | 2      | 3.5        | —                                    |
+| Risk register          | 3      | 5.5        | —                                    |
+| Policies               | 2      | 3          | —                                    |
+| Vendor lite            | 1      | 1.5        | —                                    |
+| Audit workflow         | 6      | 12.5–13.5  | +1–2 (slice 030 bump)                |
+| Board reporting        | 2      | 4          | —                                    |
+| Multi-tenancy / auth   | 3      | 6.5        | +1 (slice 034 absorbs api_keys CRUD) |
+| Infra / deploy         | 4      | 5.5        | —                                    |
+| Frontend views         | 4      | 10         | —                                    |
+| Remaining connectors   | 6      | 5.5        | —                                    |
+| **Total**              | **49** | **~94–95** | **+4–7d vs initial**                 |
 
 ## Critical path (longest dependency chain)
 
@@ -142,6 +142,7 @@ See `Plans/canvas/11-open-questions.md` for the full list. Items most likely to 
 ## What's not in v1 (explicitly deferred to phase 2/3)
 
 Per `Plans/canvas/10-roadmap.md` §10.2–10.3:
+
 - Framework versions beyond SOC 2:2017 (ISO 27001:2022, NIST CSF 2.0, PCI DSS v4.0, HIPAA, GDPR) → phase 2
 - AI-assisted drafting (questionnaire answers, board narrative LLM polish, policy text) → phase 2
 - Trust center → phase 3

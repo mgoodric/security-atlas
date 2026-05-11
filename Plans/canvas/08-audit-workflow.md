@@ -7,6 +7,7 @@
 ## 8.1 Auditor role
 
 A dedicated `auditor` role with:
+
 - Read-only access to evidence, controls, scopes, exceptions, policies.
 - Sample-pull tools (random N from population, deterministic seed for reproducibility).
 - Walkthrough recording (annotated screen captures + transcript stored alongside evidence).
@@ -17,12 +18,12 @@ This role is **first-class**, not an afterthought. Auditors who can do their wor
 
 ## 8.2 OSCAL SSP / POA&M export
 
-| Artifact | Generated from |
-|----------|----------------|
+| Artifact                     | Generated from                                                                                        |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------- |
 | SSP (`system-security-plan`) | Org profile + scope cells + applicable controls + control implementation narratives + linked policies |
-| Assessment Plan | Auditor's selected sample population + planned procedures |
-| Assessment Results | Sampled evidence records + auditor pass/fail/finding annotations |
-| POA&M | Open findings with milestones, owners, due dates |
+| Assessment Plan              | Auditor's selected sample population + planned procedures                                             |
+| Assessment Results           | Sampled evidence records + auditor pass/fail/finding annotations                                      |
+| POA&M                        | Open findings with milestones, owners, due dates                                                      |
 
 We commit to OSCAL JSON v1.1.x compatibility and ship an `oscal-export` CLI alongside the UI export.
 
@@ -42,6 +43,7 @@ These primitives compose. An audit cycle is a graph of populations, samples, wal
 A recurring practitioner complaint about Vanta/Drata is **post-window evidence pollution** — a control is failing on the day of the auditor walkthrough but passes the next morning, and the sample population shifts under the auditor's feet. We solve this with explicit freezing.
 
 When an `AuditPeriod` is created, the user (or auditor) calls `freeze(period_id, frozen_at)`. From that moment:
+
 - Sample populations for that period draw only from evidence with `observed_at ≤ frozen_at`.
 - Control state for the period is computed against frozen evidence; live state continues independently.
 - New evidence after `frozen_at` does not retroactively change the auditor's view.

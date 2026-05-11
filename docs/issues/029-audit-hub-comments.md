@@ -6,7 +6,7 @@
 
 ## Narrative
 
-Implement threaded comments on first-class audit objects (Control, Finding, Sample, Walkthrough). Auditor leaves a comment; auditee receives a notification, replies in-product, attaches additional evidence. The comment thread is retained as an audit artifact, exported to OSCAL assessment-results `observation` annotations (slice 030). This is *not* a separate messaging product — it's annotations on existing objects. Practitioner research showed this is the single most-valued feature when migrating between GRC tools (Drata's audit hub pattern). The slice delivers value because audit conversations leave email/Drive/Slack and become part of the audit record.
+Implement threaded comments on first-class audit objects (Control, Finding, Sample, Walkthrough). Auditor leaves a comment; auditee receives a notification, replies in-product, attaches additional evidence. The comment thread is retained as an audit artifact, exported to OSCAL assessment-results `observation` annotations (slice 030). This is _not_ a separate messaging product — it's annotations on existing objects. Practitioner research showed this is the single most-valued feature when migrating between GRC tools (Drata's audit hub pattern). The slice delivers value because audit conversations leave email/Drive/Slack and become part of the audit record.
 
 ## Acceptance criteria
 
