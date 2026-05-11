@@ -62,6 +62,14 @@ func (s *Server) IssueBootstrapAdminCredential(tenantID string) (credstore.Crede
 	return s.credStore.IssueAdmin(tenantID, 0)
 }
 
+// IssueBootstrapApproverCredential mints an approver-flagged credential for
+// the supplied tenant. Tests use it to drive the slice-018 FrameworkScope
+// approval flow (approver-only). Production deployments will graduate to
+// OPA-driven RBAC in slice 035.
+func (s *Server) IssueBootstrapApproverCredential(tenantID string) (credstore.Credential, string, error) {
+	return s.credStore.IssueApprover(tenantID, 0)
+}
+
 // Config groups the wiring inputs. Zero values yield a sane local setup.
 type Config struct {
 	RotationGrace time.Duration

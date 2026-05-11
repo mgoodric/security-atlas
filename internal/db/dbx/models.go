@@ -190,50 +190,6 @@ func (ns NullEvidenceResult) Value() (driver.Value, error) {
 	return string(ns.EvidenceResult), nil
 }
 
-type FrameworkScopeStatus string
-
-const (
-	FrameworkScopeStatusDraft    FrameworkScopeStatus = "draft"
-	FrameworkScopeStatusApproved FrameworkScopeStatus = "approved"
-	FrameworkScopeStatusActive   FrameworkScopeStatus = "active"
-	FrameworkScopeStatusRetired  FrameworkScopeStatus = "retired"
-)
-
-func (e *FrameworkScopeStatus) Scan(src interface{}) error {
-	switch s := src.(type) {
-	case []byte:
-		*e = FrameworkScopeStatus(s)
-	case string:
-		*e = FrameworkScopeStatus(s)
-	default:
-		return fmt.Errorf("unsupported scan type for FrameworkScopeStatus: %T", src)
-	}
-	return nil
-}
-
-type NullFrameworkScopeStatus struct {
-	FrameworkScopeStatus FrameworkScopeStatus `json:"framework_scope_status"`
-	Valid                bool                 `json:"valid"` // Valid is true if FrameworkScopeStatus is not NULL
-}
-
-// Scan implements the Scanner interface.
-func (ns *NullFrameworkScopeStatus) Scan(value interface{}) error {
-	if value == nil {
-		ns.FrameworkScopeStatus, ns.Valid = "", false
-		return nil
-	}
-	ns.Valid = true
-	return ns.FrameworkScopeStatus.Scan(value)
-}
-
-// Value implements the driver Valuer interface.
-func (ns NullFrameworkScopeStatus) Value() (driver.Value, error) {
-	if !ns.Valid {
-		return nil, nil
-	}
-	return string(ns.FrameworkScopeStatus), nil
-}
-
 type FrameworkVersionStatus string
 
 const (
@@ -717,18 +673,23 @@ type Framework struct {
 }
 
 type FrameworkScope struct {
-	ID                 pgtype.UUID          `json:"id"`
-	TenantID           pgtype.UUID          `json:"tenant_id"`
-	FrameworkVersionID pgtype.UUID          `json:"framework_version_id"`
-	Name               string               `json:"name"`
-	Predicate          string               `json:"predicate"`
-	EffectiveFrom      pgtype.Date          `json:"effective_from"`
-	EffectiveTo        pgtype.Date          `json:"effective_to"`
-	Status             FrameworkScopeStatus `json:"status"`
-	ApprovedBy         *string              `json:"approved_by"`
-	ApprovalEvidence   *string              `json:"approval_evidence"`
-	CreatedAt          pgtype.Timestamptz   `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz   `json:"updated_at"`
+	ID                       pgtype.UUID        `json:"id"`
+	TenantID                 pgtype.UUID        `json:"tenant_id"`
+	FrameworkVersionID       pgtype.UUID        `json:"framework_version_id"`
+	Name                     string             `json:"name"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	State                    string             `json:"state"`
+	Predicate                []byte             `json:"predicate"`
+	PredicateHash            string             `json:"predicate_hash"`
+	ApproverUserID           pgtype.UUID        `json:"approver_user_id"`
+	ApprovedAt               pgtype.Timestamptz `json:"approved_at"`
+	PredicateHashAtApproval  *string            `json:"predicate_hash_at_approval"`
+	ApprovalEvidenceFileUrl  *string            `json:"approval_evidence_file_url"`
+	ApprovalEvidenceFileHash *string            `json:"approval_evidence_file_hash"`
+	EffectiveFrom            pgtype.Timestamptz `json:"effective_from"`
+	SupersededBy             pgtype.UUID        `json:"superseded_by"`
+	SupersededAt             pgtype.Timestamptz `json:"superseded_at"`
 }
 
 type FrameworkVersion struct {

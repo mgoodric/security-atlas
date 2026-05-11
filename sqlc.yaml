@@ -12,6 +12,7 @@ sql:
       - "migrations/sql/20260511000004_evidence_ledger.sql"
       - "migrations/sql/20260511000005_risk_register.sql"
       - "migrations/sql/20260511000006_vendor_lite.sql"
+      - "migrations/sql/20260511000007_framework_scopes_workflow.sql"
     queries: "internal/db/queries"
     gen:
       go:
