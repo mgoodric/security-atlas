@@ -1,0 +1,217 @@
+# GoReleaser config — security-atlas
+#
+# Schema reference: https://goreleaser.com/customization/
+# Validated locally with:  goreleaser check
+# Snapshot build locally:  goreleaser release --snapshot --clean --skip=publish,sign
+#
+# Constitutional invariants honored:
+# - All published binaries are signed (cosign keyless via GitHub OIDC).
+#   See `signs:` block. No private key material is stored in the repo or
+#   in GitHub secrets — Sigstore Fulcio issues short-lived certificates
+#   bound to the workflow's OIDC token.
+# - Five OS/arch targets exactly: darwin/{amd64,arm64}, linux/{amd64,arm64},
+#   windows/amd64. AC-1 of slice 039.
+# - Conventional Commit filter feeds release notes (AC-6).
+# - No coupling to non-permissive package channels. Homebrew tap is
+#   self-hosted at github.com/mgoodric/homebrew-tap (anti-criterion).
+version: 2
+
+project_name: security-atlas
+
+before:
+  hooks:
+    - go mod tidy
+    # `go generate` is intentionally NOT in the release hook — proto
+    # generation is a CI step, not a release-time step. Keeps releases
+    # reproducible from the tagged tree.
+
+builds:
+  - id: atlas
+    main: ./cmd/atlas
+    binary: security-atlas
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.CommitDate}}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      # Windows arm64 is not in the support matrix (AC-1 lists windows/x86_64
+      # only). Listing it here keeps the matrix explicit.
+      - goos: windows
+        goarch: arm64
+
+  - id: atlas-cli
+    main: ./cmd/atlas-cli
+    binary: security-atlas-cli
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.CommitDate}}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  # Two archives: one bundles BOTH binaries (server + CLI) for users who
+  # self-host; the cli-only archive feeds the Homebrew formula and keeps
+  # the brew install small. Naming pattern matches what scripts/install.sh
+  # and the Homebrew formula expect.
+  - id: bundle
+    ids: [atlas, atlas-cli]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE*
+      - README*
+      - CHANGELOG*
+  - id: cli-only
+    ids: [atlas-cli]
+    name_template: >-
+      {{ .ProjectName }}-cli_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE*
+      - README*
+
+checksum:
+  # SHA-256 over every released artifact. cosign signs THIS file; the install
+  # script verifies the checksum and (optionally) cosign-verifies the file.
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+signs:
+  # Keyless OIDC signing via Sigstore/Fulcio. No private key in secrets.
+  # The workflow grants id-token: write so cosign can mint a short-lived
+  # certificate. Verifiers use cosign verify-blob with:
+  #   --certificate-identity-regexp 'https://github.com/mgoodric/security-atlas/.github/workflows/release.yml@.*'
+  #   --certificate-oidc-issuer https://token.actions.githubusercontent.com
+  - id: checksums
+    cmd: cosign
+    args:
+      - sign-blob
+      - "--yes"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+    artifacts: checksum
+    output: true
+    certificate: "${artifact}.pem"
+    signature: "${artifact}.sig"
+
+release:
+  github:
+    owner: mgoodric
+    name: security-atlas
+  draft: false
+  prerelease: auto
+  # The header is rendered above the changelog. Keep verification instructions
+  # close to the artifacts so security-conscious users can paste-and-go.
+  header: |
+    ## security-atlas {{ .Version }}
+
+    Signed binaries for macOS (Intel + Apple Silicon), Linux (x86_64 + arm64),
+    and Windows (x86_64). Each archive is checksummed in
+    `{{ .ProjectName }}_{{ .Version }}_checksums.txt` and that checksum file
+    is cosign-signed (Sigstore keyless OIDC).
+
+    ### Verify (recommended)
+
+    ```sh
+    cosign verify-blob \
+      --certificate-identity-regexp 'https://github.com/mgoodric/security-atlas/\.github/workflows/release\.yml@.*' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      --certificate {{ .ProjectName }}_{{ .Version }}_checksums.txt.pem \
+      --signature  {{ .ProjectName }}_{{ .Version }}_checksums.txt.sig \
+      {{ .ProjectName }}_{{ .Version }}_checksums.txt
+
+    sha256sum -c {{ .ProjectName }}_{{ .Version }}_checksums.txt
+    ```
+  footer: |
+    ---
+    Full changelog: https://github.com/mgoodric/security-atlas/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+changelog:
+  # Conventional-Commits driven release notes (AC-6). Commits not matching
+  # the configured groups land in "Other work" — surfaces drift in style.
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^chore: bump"
+      - "^Merge pull request"
+      - "^Merge branch"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\(.+\))?:.+$'
+      order: 1
+    - title: Performance
+      regexp: '^.*?perf(\(.+\))?:.+$'
+      order: 2
+    - title: Refactors
+      regexp: '^.*?refactor(\(.+\))?:.+$'
+      order: 3
+    - title: Documentation
+      regexp: '^.*?docs(\(.+\))?:.+$'
+      order: 4
+    - title: Other work
+      order: 999
+
+brews:
+  # NOTE: `brews:` is deprecated in favor of `homebrew_casks:` in GoReleaser
+  # v2.10+. Both still work in v2.x; we stay on `brews:` for v1 because the
+  # formula model (vs cask) is correct for a CLI binary. Migrate when the
+  # warning becomes an error (tracked: follow-up slice).
+  # Homebrew formula auto-pushed to mgoodric/homebrew-tap on tag.
+  # The tap repository must exist and the workflow's GH_PAT secret must
+  # have write access. Until the tap exists, skip_upload: auto means the
+  # snapshot build doesn't fail on a missing tap repo.
+  - name: security-atlas-cli
+    # Pin the brew block to the cli-only archive (which only contains
+    # darwin + linux × amd64/arm64 — Homebrew never installs on Windows
+    # anyway, so this is also a quiet way to drop the windows zip).
+    ids: [cli-only]
+    repository:
+      owner: mgoodric
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/mgoodric/security-atlas"
+    description: "Open-source replacement-grade GRC platform — CLI for the evidence push API"
+    license: "Apache-2.0"
+    # On a missing HOMEBREW_TAP_TOKEN, skip the upload instead of erroring.
+    # This lets the pipeline succeed on the first tag before the tap repo
+    # is provisioned. Operator removes this once the tap is live.
+    skip_upload: auto
+    commit_author:
+      name: security-atlas-bot
+      email: bot@security-atlas.io
+    test: |
+      assert_match "security-atlas-cli", shell_output("#{bin}/security-atlas-cli --version")
+    install: |
+      bin.install "security-atlas-cli"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"

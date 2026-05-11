@@ -26,6 +26,16 @@ const (
 )
 
 func main() {
+	// Honor --version / -v before any other startup work. Keeps the server
+	// quiet when invoked by a package manager probing for the version (e.g.
+	// `apt-get --version` style smoke tests, install-script self-tests).
+	for _, a := range os.Args[1:] {
+		if a == "--version" || a == "-v" || a == "version" {
+			fmt.Println(versionInfo())
+			return
+		}
+	}
+
 	grpcAddr := envOr("ATLAS_GRPC_ADDR", defaultGRPCAddr)
 	httpAddr := envOr("ATLAS_HTTP_ADDR", defaultHTTPAddr)
 	dbURL := os.Getenv("DATABASE_URL_APP")
