@@ -1,18 +1,25 @@
 -- name: UpsertFramework :one
--- Insert or update a framework row (idempotent by tenant_id + slug).
+-- Insert or update a framework row. The (tenant_id, slug) UNIQUE constraint
+-- in slice 002's schema treats NULLs as distinct, so a partial unique index
+-- on slug-when-tenant-is-null would be needed to catch global-catalog dupes
+-- via the natural key. To avoid a follow-on migration, the importer uses a
+-- deterministic id derived from the slug; ON CONFLICT (id) DO UPDATE then
+-- handles re-imports cleanly.
 INSERT INTO frameworks (id, tenant_id, name, slug, issuer, description, latest_version_id)
 VALUES ($1, NULL, $2, $3, $4, $5, NULL)
-ON CONFLICT (tenant_id, slug) DO UPDATE
+ON CONFLICT (id) DO UPDATE
 SET name        = EXCLUDED.name,
     issuer      = EXCLUDED.issuer,
     description = EXCLUDED.description
 RETURNING *;
 
 -- name: UpsertFrameworkVersion :one
--- Insert or update a framework_versions row (idempotent by framework_id + version).
+-- Insert or update a framework_versions row. Same deterministic-id pattern
+-- as UpsertFramework above (avoids the NULLs-distinct gotcha on natural-key
+-- ON CONFLICT targets).
 INSERT INTO framework_versions (id, tenant_id, framework_id, version, effective_from, effective_to, status, requirement_count, oscal_catalog_uri)
 VALUES ($1, NULL, $2, $3, $4, $5, $6, 0, NULL)
-ON CONFLICT (framework_id, version) DO UPDATE
+ON CONFLICT (id) DO UPDATE
 SET status         = EXCLUDED.status,
     effective_from = EXCLUDED.effective_from,
     effective_to   = EXCLUDED.effective_to
@@ -45,10 +52,10 @@ WHERE f.slug = $1 AND fv.tenant_id IS NULL
 ORDER BY fv.effective_from DESC NULLS LAST, fv.version DESC;
 
 -- name: UpsertSCFAnchor :one
--- Idempotent insert: same (framework_version_id, scf_id) updates the
--- record in place; new pair inserts. Returns the resulting row plus an
--- indication of whether the row was an insert (xmax = 0 on insert,
--- non-zero on update).
+-- Idempotent insert keyed on (framework_version_id, scf_id) — both columns
+-- are NOT NULL so the NULLs-distinct gotcha doesn't apply here. Returns
+-- the resulting row plus an indication of whether the row was an insert
+-- (xmax = 0 on insert, non-zero on update).
 INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description, subtopics)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (framework_version_id, scf_id) DO UPDATE

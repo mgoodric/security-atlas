@@ -29,14 +29,21 @@ type Querier interface {
 	ListSCFAnchorsLatest(ctx context.Context, arg ListSCFAnchorsLatestParams) ([]ScfAnchor, error)
 	// Point a framework at its current version.
 	SetLatestVersion(ctx context.Context, arg SetLatestVersionParams) error
-	// Insert or update a framework row (idempotent by tenant_id + slug).
+	// Insert or update a framework row. The (tenant_id, slug) UNIQUE constraint
+	// in slice 002's schema treats NULLs as distinct, so a partial unique index
+	// on slug-when-tenant-is-null would be needed to catch global-catalog dupes
+	// via the natural key. To avoid a follow-on migration, the importer uses a
+	// deterministic id derived from the slug; ON CONFLICT (id) DO UPDATE then
+	// handles re-imports cleanly.
 	UpsertFramework(ctx context.Context, arg UpsertFrameworkParams) (Framework, error)
-	// Insert or update a framework_versions row (idempotent by framework_id + version).
+	// Insert or update a framework_versions row. Same deterministic-id pattern
+	// as UpsertFramework above (avoids the NULLs-distinct gotcha on natural-key
+	// ON CONFLICT targets).
 	UpsertFrameworkVersion(ctx context.Context, arg UpsertFrameworkVersionParams) (FrameworkVersion, error)
-	// Idempotent insert: same (framework_version_id, scf_id) updates the
-	// record in place; new pair inserts. Returns the resulting row plus an
-	// indication of whether the row was an insert (xmax = 0 on insert,
-	// non-zero on update).
+	// Idempotent insert keyed on (framework_version_id, scf_id) — both columns
+	// are NOT NULL so the NULLs-distinct gotcha doesn't apply here. Returns
+	// the resulting row plus an indication of whether the row was an insert
+	// (xmax = 0 on insert, non-zero on update).
 	UpsertSCFAnchor(ctx context.Context, arg UpsertSCFAnchorParams) (UpsertSCFAnchorRow, error)
 }
 
