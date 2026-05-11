@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/github.scim_user/1.0.0.json",
+  "x-evidence-kind": "github.scim_user.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IAC-22", "IAC-09"],
+  "title": "GitHub SCIM-provisioned user state",
+  "description": "Per-user lifecycle state from a GitHub Enterprise organization SCIM endpoint. Reconciled on a schedule; one record per user per run.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["scim_user_id", "user_name", "active", "org"],
+  "properties": {
+    "scim_user_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "SCIM-assigned stable user id (the SCIM 2.0 id attribute)."
+    },
+    "user_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "SCIM userName attribute — typically the IdP-canonical username."
+    },
+    "active": {
+      "type": "boolean",
+      "description": "SCIM active flag. false indicates deprovisioned."
+    },
+    "org": {
+      "type": "string",
+      "minLength": 1
+    },
+    "external_id": {
+      "type": "string",
+      "description": "Optional SCIM externalId (the IdP user identifier mirrored into GitHub)."
+    },
+    "primary_email": {
+      "type": "string",
+      "format": "email",
+      "description": "Primary email if exposed by the SCIM provider."
+    }
+  }
+}

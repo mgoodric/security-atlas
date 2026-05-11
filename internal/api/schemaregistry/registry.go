@@ -66,9 +66,9 @@ func New(seed []KindVersion) *InMemory {
 
 // DefaultSeed returns the starter set of evidence kinds the platform knows
 // about at boot when no DB-backed Service is available. Slice 014 ships
-// the same kinds plus six more via embedded JSON Schemas; this slim
-// fallback exists for unit tests that don't want to spin up the file
-// loader.
+// the same kinds plus the slice-044 GitHub kinds via embedded JSON
+// Schemas; this slim fallback exists for unit tests that don't want to
+// spin up the file loader.
 func DefaultSeed() []KindVersion {
 	return []KindVersion{
 		{Kind: "sast.scan_result.v1", Version: "1.0.0"},
@@ -76,6 +76,8 @@ func DefaultSeed() []KindVersion {
 		{Kind: "manual.attestation.v1", Version: "1.0.0"},
 		{Kind: "aws.s3.bucket_encryption_state.v1", Version: "1.0.0"},
 		{Kind: "github.repo_protection.v1", Version: "1.0.0"},
+		{Kind: "github.audit_event.v1", Version: "1.0.0"},
+		{Kind: "github.scim_user.v1", Version: "1.0.0"},
 		{Kind: "okta.mfa_policy.v1", Version: "1.0.0"},
 		{Kind: "1password.org_policy.v1", Version: "1.0.0"},
 		{Kind: "osquery.host_posture.v1", Version: "1.0.0"},

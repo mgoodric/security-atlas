@@ -163,8 +163,11 @@ func TestImport_TenPlatformSchemas(t *testing.T) {
 		"SELECT count(*) FROM evidence_kind_schemas WHERE tenant_id IS NULL").Scan(&count); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if count != 10 {
-		t.Fatalf("expected 10 bundled schemas, got %d", count)
+	// The slice-014 platform bundle ships >=10 schemas. Later slices (044, ...)
+	// add more under the same embedded directory. Assert a floor and let the
+	// presence checks below catch any specific kind that was dropped.
+	if count < 10 {
+		t.Fatalf("expected at least 10 bundled schemas, got %d", count)
 	}
 	// Spot-check expected kinds.
 	expectKinds := []string{
