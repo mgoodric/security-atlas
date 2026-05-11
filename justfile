@@ -124,6 +124,28 @@ db-down:
 sqlc-generate:
     sqlc generate
 
+# ----- Connectors -----
+
+# Build all connector binaries
+connector-build:
+    go build -o ./bin/aws-connector ./connectors/aws/cmd/aws-connector
+
+# Trigger a connector run. Args: <vendor> <kind>. Required env vars:
+#   SECURITY_ATLAS_ENDPOINT  platform gRPC endpoint
+#   SECURITY_ATLAS_TOKEN     bearer token (issued via `atlas-cli credentials issue`)
+#   AWS_ROLE_ARN             IAM role to assume in the target account
+#   AWS_REGION               primary AWS region
+#   AWS_ENVIRONMENT          environment tag fallback when Organizations is unavailable
+connector-run vendor kind:
+    just connector-build
+    ./bin/{{vendor}}-connector run \
+        --endpoint="$SECURITY_ATLAS_ENDPOINT" \
+        --token="$SECURITY_ATLAS_TOKEN" \
+        --kind="{{kind}}" \
+        --role-arn="$AWS_ROLE_ARN" \
+        --region="$AWS_REGION" \
+        --environment="$AWS_ENVIRONMENT"
+
 # ----- Protobuf / gRPC -----
 
 # Lint the proto sources (buf STANDARD ruleset)

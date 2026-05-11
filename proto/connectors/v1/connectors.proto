@@ -1,0 +1,68 @@
+// security-atlas Connector Registry — slice 004 surface.
+//
+// Connectors register themselves with the platform on startup; the platform
+// holds the registry so List can answer "what's running where". Slice 004
+// ships in-memory state; slice 034 replaces with the DB-backed `connectors`
+// table + RLS-scoped queries. The wire contract here is the v1 commitment.
+
+syntax = "proto3";
+
+package connectors.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/mgoodric/security-atlas/gen/proto/connectors/v1;connectorsv1";
+
+// ConnectorRegistryService is called by each connector binary at startup
+// and by humans / scheduling jobs to introspect the live connector set.
+service ConnectorRegistryService {
+  // Register adds a connector instance to the registry. The platform sets
+  // registered_at server-side and returns it. Duplicate calls with the same
+  // (tenant, name, version, instance_id) return AlreadyExists.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // List returns connectors registered for the caller's tenant (filtered
+  // server-side from the auth-context credential — the request does not
+  // accept a tenant_id field). Sorted by registered_at descending.
+  rpc List(ListRequest) returns (ListResponse);
+}
+
+message RegisterRequest {
+  // Logical connector name (e.g., "aws-connector", "github-connector").
+  string name = 1;
+  // Semver of the connector binary build.
+  string version = 2;
+  // Per-process unique identifier (a fresh UUID per binary invocation).
+  // Distinguishes a re-register-after-restart from a duplicate register
+  // attempt.
+  string instance_id = 3;
+  // Evidence-kind identifiers this connector can emit.
+  repeated string supported_kinds = 4;
+  // Which SDK profiles this connector implements: "pull", "subscribe",
+  // "push". Slice 004 connectors emit ["push"]; a future server-hosted
+  // connector emits ["pull", "subscribe"].
+  repeated string profiles_supported = 5;
+}
+
+message RegisterResponse {
+  ConnectorHandle handle = 1;
+}
+
+message ListRequest {}
+
+message ListResponse {
+  // Ordered by registered_at descending.
+  repeated ConnectorHandle handles = 1;
+}
+
+message ConnectorHandle {
+  string id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  string version = 4;
+  string instance_id = 5;
+  repeated string supported_kinds = 6;
+  repeated string profiles_supported = 7;
+  // Server-set on Register; not client-supplied.
+  google.protobuf.Timestamp registered_at = 8;
+}
