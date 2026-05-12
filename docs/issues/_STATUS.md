@@ -3,7 +3,20 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-11 (parallel batch 6 merged — 047, 048, 049 → merged · v1 connector roster complete)
+**Last reconciled:** 2026-05-11 (parallel batch 7 claim-stake — 021, 034 → in-progress)
+
+## Drift detected — 2026-05-11 (parallel batch 7 claim-stake)
+
+Two slices flipped `ready` → `in-progress`. **N=2 batch** (not 3) — the remaining ready set is split between HITL (007, 022), universal-conflict (033), and open-q-gated (050), leaving 021 + 034 as the only AFK-clean pair.
+
+| Row | Transition              | Branch                                |
+| --- | ----------------------- | ------------------------------------- |
+| 021 | `ready` → `in-progress` | `risk/021-exception-waiver-workflow`  |
+| 034 | `ready` → `in-progress` | `auth/034-oidc-rp-local-users`        |
+
+Migration slots: 021 → `20260511000011_exceptions`, 034 → `20260511000012_users_sessions_api_keys` (may consume `_012`–`_015` if agent splits per-table). Spine touch: 034 only (OIDC libs into `go.mod` — `coreos/go-oidc/v3` + `golang.org/x/oauth2`). Shared touches all known-safe pattern: `httpserver.go` Mount-append · sqlc regen · CHANGELOG manual merge.
+
+**Counts delta:** ready −2 · in-progress +2.
 
 ## Drift detected — 2026-05-11 (parallel batch 6 merged)
 
@@ -199,8 +212,8 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 | ------------- | ------ |
 | `merged`      | 24     |
 | `in-review`   | 0      |
-| `in-progress` | 0      |
-| `ready`       | 6      |
+| `in-progress` | 2      |
+| `ready`       | 4      |
 | `blocked`     | 0      |
 | `not-ready`   | 20     |
 | **Total**     | **50** |
@@ -241,7 +254,7 @@ Legal values (use exactly these strings):
 | 018 | FrameworkScope predicate + intersection compute        | `merged`    | scope/018-framework-scope-intersection               | gh#13 | 2026-05-11 | 2026-05-11 | implements ADR-0001                   |
 | 019 | Risk CRUD + NIST 800-30 + 5x5 + ALE-band               | `merged`    | risk/019-risk-register-crud                          | gh#10 | 2026-05-11 | 2026-05-11 | open-q #4 resolved at merge           |
 | 020 | Risk → control linkage + residual derivation           | `not-ready` | —                                                    | —     | —          | —          | waits on 019, 012                     |
-| 021 | Exception/waiver workflow + auto-expiry                | `ready`     | —                                                    | —     | —          | —          | deps 019, 017 merged                  |
+| 021 | Exception/waiver workflow + auto-expiry                | `in-progress` | risk/021-exception-waiver-workflow                 | —     | 2026-05-11 | —          | deps 019, 017 merged                  |
 | 022 | Policy library + 5 stock policies                      | `ready`     | —                                                    | —     | —          | —          | HITL on policy text                   |
 | 023 | Policy acknowledgment workflow                         | `not-ready` | —                                                    | —     | —          | —          | waits on 022, 034                     |
 | 024 | Vendor lite module                                     | `merged`    | vendor/024-vendor-lite-module                        | gh#11 | 2026-05-11 | 2026-05-11 | —                                     |
@@ -254,7 +267,7 @@ Legal values (use exactly these strings):
 | 031 | Monthly board brief (templated, no LLM)                | `not-ready` | —                                                    | —     | —          | —          | waits on 012, 016, 020                |
 | 032 | Quarterly board pack + investment-vs-coverage          | `not-ready` | —                                                    | —     | —          | —          | waits on 031, 030                     |
 | 033 | Postgres RLS enforcement everywhere                    | `ready`     | —                                                    | —     | —          | —          | open-q #13 resolved (multi-tenant v1) |
-| 034 | OIDC RP + local users                                  | `ready`     | —                                                    | —     | —          | —          | open-q #13 resolved (multi-tenant v1) |
+| 034 | OIDC RP + local users                                  | `in-progress` | auth/034-oidc-rp-local-users                       | —     | 2026-05-11 | —          | open-q #13 resolved (multi-tenant v1) |
 | 035 | RBAC roles + ABAC via OPA embedded                     | `not-ready` | —                                                    | —     | —          | —          | waits on 033, 034 · HITL on roles     |
 | 036 | S3 artifact store integration                          | `merged`    | infra/036-s3-artifact-store                          | gh#15 | 2026-05-11 | 2026-05-11 | closes 013 AC-6 PARTIAL gap           |
 | 037 | docker-compose self-host bundle                        | `not-ready` | —                                                    | —     | —          | —          | waits on 034; open-q #13 resolved     |
@@ -285,11 +298,14 @@ Legal values (use exactly these strings):
 
 **Six slices ready** (007, 021, 022, 033, 034, 050). With the v1 connector roster done, the next batch shape changes — no more conflict-safe 3-connector swarms available. Suggested next parallel-batch trio (AFK, conflict-safe): **021 + 022 + 050** — three pure-app-layer slices with disjoint file surfaces (risk module · policy seeds · `.github/` release pipeline). 007 is the critical-path bottleneck but is gated on HITL spot-check, not orchestratable AFK. 033/034 are foundational auth and best run solo to avoid RLS rewrites colliding with the rest of the codebase.
 
-## In-flight (0 worktrees building)
+## In-flight (2 worktrees building)
 
-None. All batch-6 worktrees merged.
+- **021** — `risk/021-exception-waiver-workflow` · `in-progress` since 2026-05-11
+- **034** — `auth/034-oidc-rp-local-users` · `in-progress` since 2026-05-11
 
-Stale worktrees still on disk from batches 1–6: `-009`, `-011`, `-013`, `-014`, `-015`, `-017`, `-018`, `-019`, `-024`, `-026`, `-036`, `-039`, `-044`, `-045`, `-046`, `-047`, `-048`, `-049`. Safe to `git worktree remove` whenever ready.
+Migration slots: 021 → `20260511000011`, 034 → `20260511000012` (may consume `_012`–`_015` range).
+
+Stale worktrees still on disk from batches 1–6: `-009`, `-011`, `-013`, `-014`, `-015`, `-017`, `-018`, `-019`, `-024`, `-026`, `-036`, `-039`, `-044`, `-045`, `-046`, `-047`, `-048`, `-049`. Safe to `git worktree remove` whenever ready. Batch-7 worktrees `-021` and `-034` are live.
 
 ## Notes
 
