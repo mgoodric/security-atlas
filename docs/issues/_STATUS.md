@@ -3,9 +3,23 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-11 (slice 034 → in-review)
+**Last reconciled:** 2026-05-11 (parallel batch 7 merged — 021, 034 → merged · 26/50 slices on main · slice 037 newly unblocked)
 
-## Drift detected — 2026-05-11 (slice 034 → in-review)
+## Drift detected — 2026-05-11 (parallel batch 7 merged)
+
+Two slices flipped to `merged`. Slice 034 unlocks **slice 037 (docker-compose self-host bundle)** — the last dep was 034 (OIDC RP + local users). The other two consumers of 034 (slices 023 + 035) still wait on additional deps (022 and 033 respectively).
+
+| Row | Transition             | Evidence                                                                                                                                                                                                                                   |
+| --- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 021 | `in-review` → `merged` | commit `858f52b` on main (gh#25 squashed 2026-05-11)                                                                                                                                                                                       |
+| 034 | `in-review` → `merged` | commit `ee0a333` on main (gh#26 squashed 2026-05-11; orchestrator rebased branch against post-021 main, cleaned 4 conflicts via canonical recipes — sqlc.yaml merge, CHANGELOG manual, httpserver Mount-append, sqlc regen for querier.go) |
+| 037 | `not-ready` → `ready`  | dep 034 `merged`                                                                                                                                                                                                                           |
+
+**Pre-existing CHANGELOG.md merge-marker artifacts** from slice 049's earlier squash (`||||||| parent of dd95004` + bare `=======`) were carried forward through batch-6 merges. Cleaned up as part of slice 034's rebase resolution. No more conflict-marker residue in CHANGELOG.
+
+**Counts delta:** merged +2 · in-review −2 · ready +1 · not-ready −1.
+
+## Drift detected — 2026-05-11 (slice 034 → in-review, archived)
 
 Slice 034 (OIDC RP + local users + `api_keys` admin) flipped `in-progress` → `in-review`. PR gh#26 opened against main. The slice ships the auth machinery consumed by every existing connector — OIDC code+PKCE flow, local password login, opaque server-side sessions, and the DB-backed `api_keys` table for bearer credentials. Introduces ADR-0002 (bearer-token storage: HMAC-SHA256 keyed with `BEARER_HASH_KEY`, distinct from argon2id for local passwords). Migration slot `20260511000012` consumed (single migration, five tables: users / local_credentials / sessions / oidc_idp_configs / api_keys).
 
@@ -15,7 +29,7 @@ Slice 034 (OIDC RP + local users + `api_keys` admin) flipped `in-progress` → `
 
 **Counts delta:** in-progress −1 · in-review +1.
 
-## Drift detected — 2026-05-11 (slice 021 → in-review)
+## Drift detected — 2026-05-11 (slice 021 → in-review, archived)
 
 Slice 021 (exception/waiver workflow + auto-expiry + calendar API) flipped `in-progress` → `in-review`. PR gh#25 opened against main.
 
@@ -230,12 +244,12 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 
 | Status        | Count  |
 | ------------- | ------ |
-| `merged`      | 24     |
-| `in-review`   | 1      |
-| `in-progress` | 1      |
-| `ready`       | 4      |
+| `merged`      | 26     |
+| `in-review`   | 0      |
+| `in-progress` | 0      |
+| `ready`       | 5      |
 | `blocked`     | 0      |
-| `not-ready`   | 20     |
+| `not-ready`   | 19     |
 | **Total**     | **50** |
 
 ## Status enum
@@ -252,80 +266,80 @@ Legal values (use exactly these strings):
 
 ## Status table
 
-| #   | Title                                                  | Status      | Branch                                               | PR    | Started    | Merged     | Notes                                 |
-| --- | ------------------------------------------------------ | ----------- | ---------------------------------------------------- | ----- | ---------- | ---------- | ------------------------------------- |
-| 001 | Monorepo skeleton + CI green build                     | `merged`    | spine/001-monorepo-skeleton                          | gh#1  | 2026-05-10 | 2026-05-11 | —                                     |
-| 002 | Schema + migrations (6 primitives + FrameworkScope)    | `merged`    | spine/002-schema-migrations                          | gh#2  | 2026-05-10 | 2026-05-11 | —                                     |
-| 003 | Evidence SDK: proto + Go push client + CLI             | `merged`    | spine/003-evidence-sdk-proto-push-client-cli         | gh#3  | 2026-05-10 | 2026-05-11 | —                                     |
-| 004 | AWS connector (S3 encryption, end-to-end)              | `merged`    | spine/004-aws-connector-s3-encryption                | gh#4  | 2026-05-11 | 2026-05-11 | —                                     |
-| 005 | Frontend bootstrap (Next.js + auth + SCF browser)      | `merged`    | spine/005-frontend-bootstrap                         | gh#5  | 2026-05-11 | 2026-05-11 | —                                     |
-| 006 | SCF catalog importer + Framework/FrameworkVersion API  | `merged`    | catalog/006-scf-catalog-importer                     | gh#6  | 2026-05-11 | 2026-05-11 | open-q #01 cleared at merge           |
-| 007 | SOC 2 v2017 (TSC) crosswalk loader                     | `ready`     | —                                                    | —     | —          | —          | HITL on mapping spot-check            |
-| 008 | UCF graph traversal query API                          | `not-ready` | —                                                    | —     | —          | —          | waits on 007                          |
-| 009 | Control bundle format spec + parser + upload           | `merged`    | control-as-code/009-control-bundle-format            | gh#16 | 2026-05-11 | 2026-05-11 | unlocks 010, 011 critical path        |
-| 010 | SCF-anchored control kit (50 SOC 2 controls)           | `not-ready` | —                                                    | —     | —          | —          | waits on 009, 007 · HITL on accuracy  |
-| 011 | Manual control type + attestation flow                 | `merged`    | control-as-code/011-manual-control-attestation       | gh#20 | 2026-05-11 | 2026-05-11 | deps 009, 013, 036 all merged         |
-| 012 | Control state evaluation engine                        | `not-ready` | —                                                    | —     | —          | —          | waits on 010, 013, 017                |
-| 013 | Evidence ledger write API + push endpoint              | `merged`    | evidence-pipeline/013-evidence-ledger-write-api      | gh#12 | 2026-05-11 | 2026-05-11 | AC-6 PARTIAL — S3 redirect awaits 036 |
-| 014 | Schema registry service (in-tree Go)                   | `merged`    | evidence-pipeline/014-schema-registry-service        | gh#8  | 2026-05-11 | 2026-05-11 | —                                     |
-| 015 | NATS JetStream buffer + ingestion stage                | `merged`    | evidence-pipeline/015-nats-jetstream-ingestion-stage | gh#19 | 2026-05-11 | 2026-05-11 | dep 013 merged                        |
-| 016 | Evidence freshness + drift detection                   | `not-ready` | —                                                    | —     | —          | —          | waits on 012                          |
-| 017 | Scope dimensions + applicability_expr + single-cell    | `merged`    | scope/017-scope-dimensions-applicability             | gh#9  | 2026-05-11 | 2026-05-11 | —                                     |
-| 018 | FrameworkScope predicate + intersection compute        | `merged`    | scope/018-framework-scope-intersection               | gh#13 | 2026-05-11 | 2026-05-11 | implements ADR-0001                   |
-| 019 | Risk CRUD + NIST 800-30 + 5x5 + ALE-band               | `merged`    | risk/019-risk-register-crud                          | gh#10 | 2026-05-11 | 2026-05-11 | open-q #4 resolved at merge           |
-| 020 | Risk → control linkage + residual derivation           | `not-ready` | —                                                    | —     | —          | —          | waits on 019, 012                     |
-| 021 | Exception/waiver workflow + auto-expiry                | `in-review` | risk/021-exception-waiver-workflow                   | gh#25 | 2026-05-11 | —          | deps 019, 017 merged                  |
-| 022 | Policy library + 5 stock policies                      | `ready`     | —                                                    | —     | —          | —          | HITL on policy text                   |
-| 023 | Policy acknowledgment workflow                         | `not-ready` | —                                                    | —     | —          | —          | waits on 022, 034                     |
-| 024 | Vendor lite module                                     | `merged`    | vendor/024-vendor-lite-module                        | gh#11 | 2026-05-11 | 2026-05-11 | —                                     |
-| 025 | Auditor role + scoped read-only access                 | `not-ready` | —                                                    | —     | —          | —          | waits on 033, 035                     |
-| 026 | Sample-pull primitives (Population + Sample)           | `merged`    | audit/026-sample-pull-primitives                     | gh#21 | 2026-05-11 | 2026-05-11 | deps 013, 017 merged                  |
-| 027 | Walkthrough recording (annotated + hash/sign)          | `not-ready` | —                                                    | —     | —          | —          | waits on 025, 036                     |
-| 028 | AuditPeriod + freezing primitive                       | `not-ready` | —                                                    | —     | —          | —          | waits on 013, 016                     |
-| 029 | Audit Hub threaded comments                            | `not-ready` | —                                                    | —     | —          | —          | waits on 025                          |
-| 030 | OSCAL SSP + POA&M export pipeline                      | `not-ready` | —                                                    | —     | —          | —          | waits on 008, 012, 017, 018, 026, 028 |
-| 031 | Monthly board brief (templated, no LLM)                | `not-ready` | —                                                    | —     | —          | —          | waits on 012, 016, 020                |
-| 032 | Quarterly board pack + investment-vs-coverage          | `not-ready` | —                                                    | —     | —          | —          | waits on 031, 030                     |
-| 033 | Postgres RLS enforcement everywhere                    | `ready`     | —                                                    | —     | —          | —          | open-q #13 resolved (multi-tenant v1) |
-| 034 | OIDC RP + local users                                  | `in-review` | auth/034-oidc-rp-local-users                         | gh#26 | 2026-05-11 | —          | open-q #13 resolved (multi-tenant v1) |
-| 035 | RBAC roles + ABAC via OPA embedded                     | `not-ready` | —                                                    | —     | —          | —          | waits on 033, 034 · HITL on roles     |
-| 036 | S3 artifact store integration                          | `merged`    | infra/036-s3-artifact-store                          | gh#15 | 2026-05-11 | 2026-05-11 | closes 013 AC-6 PARTIAL gap           |
-| 037 | docker-compose self-host bundle                        | `not-ready` | —                                                    | —     | —          | —          | waits on 034; open-q #13 resolved     |
-| 038 | Helm chart for K8s                                     | `not-ready` | —                                                    | —     | —          | —          | waits on 037                          |
-| 039 | CLI binary distribution + release pipeline             | `merged`    | infra/039-cli-release-pipeline                       | gh#7  | 2026-05-11 | 2026-05-11 | —                                     |
-| 040 | Program dashboard view                                 | `not-ready` | —                                                    | —     | —          | —          | waits on 005, 012, 016, 020, 024      |
-| 041 | Control detail view + UCF mini-viz                     | `not-ready` | —                                                    | —     | —          | —          | waits on 005, 008, 012                |
-| 042 | Audit workspace view (sample + walkthrough + comments) | `not-ready` | —                                                    | —     | —          | —          | waits on 025, 026, 027, 029           |
-| 043 | Board pack preview/export view                         | `not-ready` | —                                                    | —     | —          | —          | waits on 005, 032                     |
-| 044 | GitHub connector                                       | `merged`    | connectors/044-github-connector                      | gh#14 | 2026-05-11 | 2026-05-11 | first post-013 connector              |
-| 045 | Okta connector                                         | `merged`    | connectors/045-okta-connector                        | gh#17 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                  |
-| 046 | 1Password connector                                    | `merged`    | connectors/046-1password-connector                   | gh#18 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                  |
-| 047 | osquery/Fleet endpoint connector                       | `merged`    | connectors/047-osquery-fleet-connector               | gh#23 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                  |
-| 048 | Jira/Linear ticket connector                           | `merged`    | connectors/048-jira-linear-connector                 | gh#22 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                  |
-| 049 | Manual upload / CSV / S3 / SFTP escape-hatch           | `merged`    | connectors/049-manual-upload-csv-connector           | gh#24 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                  |
-| 050 | Public release readiness + release automation          | `ready`     | —                                                    | —     | —          | —          | HITL · dep 039 merged · open-q gates  |
+| #   | Title                                                  | Status      | Branch                                               | PR    | Started    | Merged     | Notes                                                |
+| --- | ------------------------------------------------------ | ----------- | ---------------------------------------------------- | ----- | ---------- | ---------- | ---------------------------------------------------- |
+| 001 | Monorepo skeleton + CI green build                     | `merged`    | spine/001-monorepo-skeleton                          | gh#1  | 2026-05-10 | 2026-05-11 | —                                                    |
+| 002 | Schema + migrations (6 primitives + FrameworkScope)    | `merged`    | spine/002-schema-migrations                          | gh#2  | 2026-05-10 | 2026-05-11 | —                                                    |
+| 003 | Evidence SDK: proto + Go push client + CLI             | `merged`    | spine/003-evidence-sdk-proto-push-client-cli         | gh#3  | 2026-05-10 | 2026-05-11 | —                                                    |
+| 004 | AWS connector (S3 encryption, end-to-end)              | `merged`    | spine/004-aws-connector-s3-encryption                | gh#4  | 2026-05-11 | 2026-05-11 | —                                                    |
+| 005 | Frontend bootstrap (Next.js + auth + SCF browser)      | `merged`    | spine/005-frontend-bootstrap                         | gh#5  | 2026-05-11 | 2026-05-11 | —                                                    |
+| 006 | SCF catalog importer + Framework/FrameworkVersion API  | `merged`    | catalog/006-scf-catalog-importer                     | gh#6  | 2026-05-11 | 2026-05-11 | open-q #01 cleared at merge                          |
+| 007 | SOC 2 v2017 (TSC) crosswalk loader                     | `ready`     | —                                                    | —     | —          | —          | HITL on mapping spot-check                           |
+| 008 | UCF graph traversal query API                          | `not-ready` | —                                                    | —     | —          | —          | waits on 007                                         |
+| 009 | Control bundle format spec + parser + upload           | `merged`    | control-as-code/009-control-bundle-format            | gh#16 | 2026-05-11 | 2026-05-11 | unlocks 010, 011 critical path                       |
+| 010 | SCF-anchored control kit (50 SOC 2 controls)           | `not-ready` | —                                                    | —     | —          | —          | waits on 009, 007 · HITL on accuracy                 |
+| 011 | Manual control type + attestation flow                 | `merged`    | control-as-code/011-manual-control-attestation       | gh#20 | 2026-05-11 | 2026-05-11 | deps 009, 013, 036 all merged                        |
+| 012 | Control state evaluation engine                        | `not-ready` | —                                                    | —     | —          | —          | waits on 010, 013, 017                               |
+| 013 | Evidence ledger write API + push endpoint              | `merged`    | evidence-pipeline/013-evidence-ledger-write-api      | gh#12 | 2026-05-11 | 2026-05-11 | AC-6 PARTIAL — S3 redirect awaits 036                |
+| 014 | Schema registry service (in-tree Go)                   | `merged`    | evidence-pipeline/014-schema-registry-service        | gh#8  | 2026-05-11 | 2026-05-11 | —                                                    |
+| 015 | NATS JetStream buffer + ingestion stage                | `merged`    | evidence-pipeline/015-nats-jetstream-ingestion-stage | gh#19 | 2026-05-11 | 2026-05-11 | dep 013 merged                                       |
+| 016 | Evidence freshness + drift detection                   | `not-ready` | —                                                    | —     | —          | —          | waits on 012                                         |
+| 017 | Scope dimensions + applicability_expr + single-cell    | `merged`    | scope/017-scope-dimensions-applicability             | gh#9  | 2026-05-11 | 2026-05-11 | —                                                    |
+| 018 | FrameworkScope predicate + intersection compute        | `merged`    | scope/018-framework-scope-intersection               | gh#13 | 2026-05-11 | 2026-05-11 | implements ADR-0001                                  |
+| 019 | Risk CRUD + NIST 800-30 + 5x5 + ALE-band               | `merged`    | risk/019-risk-register-crud                          | gh#10 | 2026-05-11 | 2026-05-11 | open-q #4 resolved at merge                          |
+| 020 | Risk → control linkage + residual derivation           | `not-ready` | —                                                    | —     | —          | —          | waits on 019, 012                                    |
+| 021 | Exception/waiver workflow + auto-expiry                | `merged`    | risk/021-exception-waiver-workflow                   | gh#25 | 2026-05-11 | 2026-05-11 | AC-4 PARTIAL — eval-engine consumer is slice 020/012 |
+| 022 | Policy library + 5 stock policies                      | `ready`     | —                                                    | —     | —          | —          | HITL on policy text                                  |
+| 023 | Policy acknowledgment workflow                         | `not-ready` | —                                                    | —     | —          | —          | waits on 022, 034                                    |
+| 024 | Vendor lite module                                     | `merged`    | vendor/024-vendor-lite-module                        | gh#11 | 2026-05-11 | 2026-05-11 | —                                                    |
+| 025 | Auditor role + scoped read-only access                 | `not-ready` | —                                                    | —     | —          | —          | waits on 033, 035                                    |
+| 026 | Sample-pull primitives (Population + Sample)           | `merged`    | audit/026-sample-pull-primitives                     | gh#21 | 2026-05-11 | 2026-05-11 | deps 013, 017 merged                                 |
+| 027 | Walkthrough recording (annotated + hash/sign)          | `not-ready` | —                                                    | —     | —          | —          | waits on 025, 036                                    |
+| 028 | AuditPeriod + freezing primitive                       | `not-ready` | —                                                    | —     | —          | —          | waits on 013, 016                                    |
+| 029 | Audit Hub threaded comments                            | `not-ready` | —                                                    | —     | —          | —          | waits on 025                                         |
+| 030 | OSCAL SSP + POA&M export pipeline                      | `not-ready` | —                                                    | —     | —          | —          | waits on 008, 012, 017, 018, 026, 028                |
+| 031 | Monthly board brief (templated, no LLM)                | `not-ready` | —                                                    | —     | —          | —          | waits on 012, 016, 020                               |
+| 032 | Quarterly board pack + investment-vs-coverage          | `not-ready` | —                                                    | —     | —          | —          | waits on 031, 030                                    |
+| 033 | Postgres RLS enforcement everywhere                    | `ready`     | —                                                    | —     | —          | —          | open-q #13 resolved (multi-tenant v1)                |
+| 034 | OIDC RP + local users                                  | `merged`    | auth/034-oidc-rp-local-users                         | gh#26 | 2026-05-11 | 2026-05-11 | unlocks 037 · ADR-0002 published                     |
+| 035 | RBAC roles + ABAC via OPA embedded                     | `not-ready` | —                                                    | —     | —          | —          | waits on 033, 034 · HITL on roles                    |
+| 036 | S3 artifact store integration                          | `merged`    | infra/036-s3-artifact-store                          | gh#15 | 2026-05-11 | 2026-05-11 | closes 013 AC-6 PARTIAL gap                          |
+| 037 | docker-compose self-host bundle                        | `ready`     | —                                                    | —     | —          | —          | dep 034 merged                                       |
+| 038 | Helm chart for K8s                                     | `not-ready` | —                                                    | —     | —          | —          | waits on 037                                         |
+| 039 | CLI binary distribution + release pipeline             | `merged`    | infra/039-cli-release-pipeline                       | gh#7  | 2026-05-11 | 2026-05-11 | —                                                    |
+| 040 | Program dashboard view                                 | `not-ready` | —                                                    | —     | —          | —          | waits on 005, 012, 016, 020, 024                     |
+| 041 | Control detail view + UCF mini-viz                     | `not-ready` | —                                                    | —     | —          | —          | waits on 005, 008, 012                               |
+| 042 | Audit workspace view (sample + walkthrough + comments) | `not-ready` | —                                                    | —     | —          | —          | waits on 025, 026, 027, 029                          |
+| 043 | Board pack preview/export view                         | `not-ready` | —                                                    | —     | —          | —          | waits on 005, 032                                    |
+| 044 | GitHub connector                                       | `merged`    | connectors/044-github-connector                      | gh#14 | 2026-05-11 | 2026-05-11 | first post-013 connector                             |
+| 045 | Okta connector                                         | `merged`    | connectors/045-okta-connector                        | gh#17 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                                 |
+| 046 | 1Password connector                                    | `merged`    | connectors/046-1password-connector                   | gh#18 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                                 |
+| 047 | osquery/Fleet endpoint connector                       | `merged`    | connectors/047-osquery-fleet-connector               | gh#23 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                                 |
+| 048 | Jira/Linear ticket connector                           | `merged`    | connectors/048-jira-linear-connector                 | gh#22 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                                 |
+| 049 | Manual upload / CSV / S3 / SFTP escape-hatch           | `merged`    | connectors/049-manual-upload-csv-connector           | gh#24 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                                 |
+| 050 | Public release readiness + release automation          | `ready`     | —                                                    | —     | —          | —          | HITL · dep 039 merged · open-q gates                 |
 
 ## Ready set right now
 
-| #   | Title                                         | Cluster  | Est (d) | Notes                                                         |
-| --- | --------------------------------------------- | -------- | ------- | ------------------------------------------------------------- |
-| 007 | SOC 2 v2017 (TSC) crosswalk loader            | catalog  | 1.5     | HITL · critical path · unlocks 008, 010                       |
-| 021 | Exception/waiver workflow + auto-expiry       | risk     | 1.5     | dep 019 merged                                                |
-| 022 | Policy library + 5 stock policies             | policies | 2       | HITL                                                          |
-| 033 | Postgres RLS enforcement everywhere           | auth     | 2       | open-q #13 resolved; universal-conflict — solo run            |
-| 034 | OIDC RP + local users                         | auth     | 1.5     | open-q #13 resolved (multi-tenant v1) · unlocks 023, 035, 037 |
-| 050 | Public release readiness + release automation | infra    | 3       | HITL · safe to batch (only touches .github/, docs/, deploy/)  |
+| #   | Title                                         | Cluster  | Est (d) | Notes                                                                          |
+| --- | --------------------------------------------- | -------- | ------- | ------------------------------------------------------------------------------ |
+| 007 | SOC 2 v2017 (TSC) crosswalk loader            | catalog  | 1.5     | HITL · critical path · unlocks 008, 010                                        |
+| 022 | Policy library + 5 stock policies             | policies | 2       | HITL · unlocks 023 (with 034 now merged)                                       |
+| 033 | Postgres RLS enforcement everywhere           | auth     | 2       | open-q #13 resolved; universal-conflict — solo run · unlocks 035 (with 034)    |
+| 037 | docker-compose self-host bundle               | infra    | 2       | dep 034 merged · unlocks 038 (Helm) · open-q #13 resolved                      |
+| 050 | Public release readiness + release automation | infra    | 3       | HITL · gated on open-q #1 (SCF), #3 (license), #15 (CSA); ships .github/+docs/ |
 
-**Six slices ready** (007, 021, 022, 033, 034, 050). With the v1 connector roster done, the next batch shape changes — no more conflict-safe 3-connector swarms available. Suggested next parallel-batch trio (AFK, conflict-safe): **021 + 022 + 050** — three pure-app-layer slices with disjoint file surfaces (risk module · policy seeds · `.github/` release pipeline). 007 is the critical-path bottleneck but is gated on HITL spot-check, not orchestratable AFK. 033/034 are foundational auth and best run solo to avoid RLS rewrites colliding with the rest of the codebase.
+**Five slices ready** (007, 022, 033, 037, 050). After batch 7 the remaining AFK-clean ready set is even thinner — 007 + 022 + 050 are all HITL-gated; 033 is universal-conflict solo; 037 is now the only non-HITL standalone option but it's pure infra. Suggested next parallel-batch options:
 
-## In-flight (2 worktrees building)
+1. **Solo 037 + HITL 022** — single AFK slice on 037 (docker-compose) while the HITL on 022 (policy text) waits for human review session. Lowest blast radius.
+2. **Solo 033** — finally run the universal-conflict RLS-everywhere slice on its own, blocking all other work. Worth doing soon — it gates slice 035 (RBAC + ABAC via OPA) which is on the audit-flow critical path.
+3. **HITL 007** — bring the SOC 2 crosswalk to a human spot-check session; this is the single biggest critical-path unlock (chain: 010 → 012 → 016 → 020 + 042).
 
-- **021** — `risk/021-exception-waiver-workflow` · `in-progress` since 2026-05-11
-- **034** — `auth/034-oidc-rp-local-users` · `in-progress` since 2026-05-11
+## In-flight (0 worktrees building)
 
-Migration slots: 021 → `20260511000011`, 034 → `20260511000012` (may consume `_012`–`_015` range).
+None. Batch 7 merged.
 
-Stale worktrees still on disk from batches 1–6: `-009`, `-011`, `-013`, `-014`, `-015`, `-017`, `-018`, `-019`, `-024`, `-026`, `-036`, `-039`, `-044`, `-045`, `-046`, `-047`, `-048`, `-049`. Safe to `git worktree remove` whenever ready. Batch-7 worktrees `-021` and `-034` are live.
+Stale worktrees still on disk from batches 1–7: `-009`, `-011`, `-013`, `-014`, `-015`, `-017`, `-018`, `-019`, `-021`, `-024`, `-026`, `-034`, `-036`, `-039`, `-044`, `-045`, `-046`, `-047`, `-048`, `-049`. Safe to `git worktree remove` whenever ready.
 
 ## Notes
 
