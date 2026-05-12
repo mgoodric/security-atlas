@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/okta.user_lifecycle/1.0.0.json",
+  "x-evidence-kind": "okta.user_lifecycle.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IAC-22", "IAC-09", "HRS-04"],
+  "title": "Okta user lifecycle state",
+  "description": "Per-user lifecycle + MFA-enrolment state from /api/v1/users. Reconciled on a schedule; one record per user per run. Feeds SCIM-compliance evidence for account provisioning + deprovisioning controls (joiner/mover/leaver) plus MFA-enrolment coverage.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["user_id", "login", "status"],
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Okta-assigned stable user id."
+    },
+    "login": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Okta `profile.login` value — typically the IdP-canonical username/email."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "STAGED",
+        "PROVISIONED",
+        "ACTIVE",
+        "RECOVERY",
+        "LOCKED_OUT",
+        "PASSWORD_EXPIRED",
+        "SUSPENDED",
+        "DEPROVISIONED"
+      ],
+      "description": "Okta user status. The evaluator distinguishes ACTIVE (good) from DEPROVISIONED/SUSPENDED (must be off entitlements)."
+    },
+    "mfa_enrolled": {
+      "type": "boolean",
+      "description": "True if the user has at least one active non-recovery MFA factor enrolled."
+    },
+    "primary_email": {
+      "type": "string",
+      "format": "email"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "activated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_login_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "deactivated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

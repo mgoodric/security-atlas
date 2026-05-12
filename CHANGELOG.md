@@ -51,6 +51,40 @@ auto-generated notes.
   cover parser, tarball safety, and HTTP request-shape validation
   without a DB. Fixtures live under
   `internal/control/testdata/{minimal,aws-mfa,manual,no-anchor,bad-applicability}-bundle/`.
+- **Slice 045 — Okta connector.** New stateless connector binary
+  `connectors/okta/cmd/atlas-okta` emitting three evidence kinds:
+  `okta.mfa_policy.v1` (existing slice-014 platform schema; per-policy
+  factor enforcement + group scoping), `okta.app_assignment.v1` (NEW
+  schema; per-app group assignment lists and individual user
+  assignments for SCIM compliance evidence), and `okta.user_lifecycle.v1`
+  (NEW schema; user lifecycle state + MFA enrolment for SCIM/SOC 2
+  CC6.1 control). Two new platform schemas added under
+  `internal/api/schemaregistry/schemas/<kind>/1.0.0.json` with
+  `x-evidence-kind` / `x-semver` / `x-owner` / `x-default-scf-anchors`
+  extension keys; `internal/api/schemaregistry.DefaultSeed` extended
+  with the two new kinds so unit-only servers accept records without
+  bespoke seeding. Subcommands match slice 044's pattern: `register`
+  (declares three `SupportedKinds` + `["pull"]` profile via
+  `ConnectorRegistryService.Register`), `run` (pulls policies, app
+  assignments, user lifecycle on a schedule), `scopes` (prints
+  canonical least-privilege Okta admin API token scopes).
+  Auth: API token via `OKTA_API_TOKEN` env (preferred) or `--token`
+  flag (hidden in CLI help so tokens stay out of shell history).
+  `oktaauth.Credential.String()` returns `<redacted N bytes>` so
+  accidental log lines never leak the token; unit tests pin `%s` and
+  `%v` formatting paths. Idempotency keys follow slice 044's pattern:
+  `sha256("okta.<kind>" + resource_id + "<hour>")` truncates to the
+  hour for pull-emitted records. Anti-criteria honored: documented
+  scopes are read-only on `okta.users.read`, `okta.groups.read`,
+  `okta.apps.read`, `okta.policies.read`; `DocumentedScopes` unit
+  test rejects future widening to `write`, `delete`, `admin`, `super`,
+  `org admin`, `.manage` keywords in Name or Access fields; URL paths
+  composed via `url.PathEscape` on `appID` + `userID` parameters
+  (no SSRF / path traversal risk). Tests use `httptest.NewServer` to
+  replay realistic Okta REST payloads (no mock-out of JSON contract);
+  platform-side bufconn integration tests verify register/list, push
+  of all three kinds, scope dimensions, actor_id format
+  `connector:okta:<service>@<version>`, and dedup by idempotency key.
 - **Slice 018 — FrameworkScope predicate + four-state workflow +
   intersection compute.** New `framework_scopes` workflow gates the
   audit-binding scope predicate behind

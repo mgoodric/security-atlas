@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/okta.app_assignment/1.0.0.json",
+  "x-evidence-kind": "okta.app_assignment.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IAC-21", "IAC-22"],
+  "title": "Okta application assignment state",
+  "description": "One record per Okta-registered application capturing which groups are entitled to access it. Pulled on a schedule from /api/v1/apps and /api/v1/apps/{id}/groups. The platform evaluator decides pass/fail per (control, assignment) pair; the connector emits descriptive (INCONCLUSIVE) records.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["app_id", "app_name", "status", "assigned_group_ids"],
+  "properties": {
+    "app_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Okta application id (the OKTA assigned UUID-like identifier)."
+    },
+    "app_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable application name (Okta `label` or `name`)."
+    },
+    "sign_on_mode": {
+      "type": "string",
+      "description": "Okta sign-on mode (SAML_2_0, OPENID_CONNECT, BOOKMARK, SECURE_PASSWORD_STORE, AUTO_LOGIN, etc.)."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ACTIVE", "INACTIVE", "DELETED"],
+      "description": "Lifecycle status of the application."
+    },
+    "assigned_group_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Group ids that are entitled to access the application."
+    },
+    "assigned_group_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Cardinality of assigned_group_ids (denormalized for evaluator convenience)."
+    }
+  }
+}

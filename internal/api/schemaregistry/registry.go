@@ -79,6 +79,8 @@ func DefaultSeed() []KindVersion {
 		{Kind: "github.audit_event.v1", Version: "1.0.0"},
 		{Kind: "github.scim_user.v1", Version: "1.0.0"},
 		{Kind: "okta.mfa_policy.v1", Version: "1.0.0"},
+		{Kind: "okta.app_assignment.v1", Version: "1.0.0"},
+		{Kind: "okta.user_lifecycle.v1", Version: "1.0.0"},
 		{Kind: "1password.org_policy.v1", Version: "1.0.0"},
 		{Kind: "osquery.host_posture.v1", Version: "1.0.0"},
 		{Kind: "jira.ticket_evidence.v1", Version: "1.0.0"},
