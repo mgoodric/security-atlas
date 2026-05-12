@@ -3,9 +3,21 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-11 (parallel batch 5 claim-stake — 011, 015, 026 → in-progress)
+**Last reconciled:** 2026-05-11 (parallel batch 5 merged — 011, 015, 026 → merged)
 
-## Drift detected — 2026-05-11 (parallel batch 5 claim-stake)
+## Drift detected — 2026-05-11 (parallel batch 5 merged)
+
+Three slices flipped to `merged`. First batch driven end-to-end by the new full-merge-cycle prompt.
+
+| Row | Transition             | Evidence                                                                                                                                                                             |
+| --- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 011 | `in-review` → `merged` | commit `15c89bb` on main (gh#20 squashed 2026-05-11; orchestrator closed out the agent's work + applied gofmt + prettier nits)                                                       |
+| 026 | `in-review` → `merged` | commit `d6c8a5c` on main (gh#21 squashed 2026-05-11; orchestrator closed out the agent's work + patched slice 013's ingest test helper to TRUNCATE … CASCADE for new FK)             |
+| 015 | `in-review` → `merged` | commit `24fe35e` on main (gh#19 squashed 2026-05-11; AC-6 TestAC6_RedactionAtIngestion was design-shaped failure — surfaced to human, then bounced to agent which diagnosed + fixed) |
+
+**Counts delta:** merged +3 · in-review −3. No new ready-set unblocks (011 + 015 + 026 are all leaves of their clusters).
+
+## Drift detected — 2026-05-11 (parallel batch 5 claim-stake, archived)
 
 Three slices flipped `ready` → `in-progress` with worktrees + branches assigned:
 
@@ -159,9 +171,9 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 
 | Status        | Count  |
 | ------------- | ------ |
-| `merged`      | 18     |
+| `merged`      | 21     |
 | `in-review`   | 0      |
-| `in-progress` | 3      |
+| `in-progress` | 0      |
 | `ready`       | 9      |
 | `blocked`     | 0      |
 | `not-ready`   | 20     |
@@ -193,11 +205,11 @@ Legal values (use exactly these strings):
 | 008 | UCF graph traversal query API                          | `not-ready` | —                                                    | —     | —          | —          | waits on 007                          |
 | 009 | Control bundle format spec + parser + upload           | `merged`    | control-as-code/009-control-bundle-format            | gh#16 | 2026-05-11 | 2026-05-11 | unlocks 010, 011 critical path        |
 | 010 | SCF-anchored control kit (50 SOC 2 controls)           | `not-ready` | —                                                    | —     | —          | —          | waits on 009, 007 · HITL on accuracy  |
-| 011 | Manual control type + attestation flow                 | `in-review` | control-as-code/011-manual-control-attestation       | gh#20 | 2026-05-11 | —          | deps 009, 013, 036 all merged         |
+| 011 | Manual control type + attestation flow                 | `merged`    | control-as-code/011-manual-control-attestation       | gh#20 | 2026-05-11 | 2026-05-11 | deps 009, 013, 036 all merged         |
 | 012 | Control state evaluation engine                        | `not-ready` | —                                                    | —     | —          | —          | waits on 010, 013, 017                |
 | 013 | Evidence ledger write API + push endpoint              | `merged`    | evidence-pipeline/013-evidence-ledger-write-api      | gh#12 | 2026-05-11 | 2026-05-11 | AC-6 PARTIAL — S3 redirect awaits 036 |
 | 014 | Schema registry service (in-tree Go)                   | `merged`    | evidence-pipeline/014-schema-registry-service        | gh#8  | 2026-05-11 | 2026-05-11 | —                                     |
-| 015 | NATS JetStream buffer + ingestion stage                | `in-review` | evidence-pipeline/015-nats-jetstream-ingestion-stage | gh#19 | 2026-05-11 | —          | dep 013 merged                        |
+| 015 | NATS JetStream buffer + ingestion stage                | `merged`    | evidence-pipeline/015-nats-jetstream-ingestion-stage | gh#19 | 2026-05-11 | 2026-05-11 | dep 013 merged                        |
 | 016 | Evidence freshness + drift detection                   | `not-ready` | —                                                    | —     | —          | —          | waits on 012                          |
 | 017 | Scope dimensions + applicability_expr + single-cell    | `merged`    | scope/017-scope-dimensions-applicability             | gh#9  | 2026-05-11 | 2026-05-11 | —                                     |
 | 018 | FrameworkScope predicate + intersection compute        | `merged`    | scope/018-framework-scope-intersection               | gh#13 | 2026-05-11 | 2026-05-11 | implements ADR-0001                   |
@@ -208,7 +220,7 @@ Legal values (use exactly these strings):
 | 023 | Policy acknowledgment workflow                         | `not-ready` | —                                                    | —     | —          | —          | waits on 022, 034                     |
 | 024 | Vendor lite module                                     | `merged`    | vendor/024-vendor-lite-module                        | gh#11 | 2026-05-11 | 2026-05-11 | —                                     |
 | 025 | Auditor role + scoped read-only access                 | `not-ready` | —                                                    | —     | —          | —          | waits on 033, 035                     |
-| 026 | Sample-pull primitives (Population + Sample)           | `in-review` | audit/026-sample-pull-primitives                     | gh#21 | 2026-05-11 | —          | deps 013, 017 merged                  |
+| 026 | Sample-pull primitives (Population + Sample)           | `merged`    | audit/026-sample-pull-primitives                     | gh#21 | 2026-05-11 | 2026-05-11 | deps 013, 017 merged                  |
 | 027 | Walkthrough recording (annotated + hash/sign)          | `not-ready` | —                                                    | —     | —          | —          | waits on 025, 036                     |
 | 028 | AuditPeriod + freezing primitive                       | `not-ready` | —                                                    | —     | —          | —          | waits on 013, 016                     |
 | 029 | Audit Hub threaded comments                            | `not-ready` | —                                                    | —     | —          | —          | waits on 025                          |
