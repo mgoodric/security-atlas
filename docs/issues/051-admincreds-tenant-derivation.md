@@ -10,18 +10,18 @@ P0 authorization fix surfaced by slice 033 (`feat(auth): Postgres RLS enforcemen
 
 The handler is internally consistent: it sets the GUC and writes the row under the same attacker-supplied tenant id. RLS therefore does NOT catch this — it sees a tenant-B GUC writing a tenant-B row and waves it through. The result is that a Tenant-A admin can mint an admin credential into Tenant B (Issue) and enumerate credentials in Tenant B (List).
 
-This contradicts slice-033's ratified design decision D1 — *"tenancy.Middleware sets app.current_tenant strictly from cred.TenantID; no handler-level overrides"* — and constitutional invariant 6 (canvas §5.4, tenant isolation enforced at the DB layer; application code is not the trust boundary).
+This contradicts slice-033's ratified design decision D1 — _"tenancy.Middleware sets app.current_tenant strictly from cred.TenantID; no handler-level overrides"_ — and constitutional invariant 6 (canvas §5.4, tenant isolation enforced at the DB layer; application code is not the trust boundary).
 
 `admincreds.Rotate` and `admincreds.Revoke` already derive tenant from `cred.TenantID` and trust the middleware-set GUC; slice 033 fixed them as part of the cleanup pass and explicitly left Issue + List flagged as a separate authz follow-up. This slice closes that follow-up.
 
 ## Threat model
 
-| Actor | Pre-fix capability | Post-fix capability |
-| --- | --- | --- |
-| Tenant-A admin holding a valid admin bearer | Mint an admin credential into ANY tenant by setting `tenant_id` in the JSON body | Mint an admin credential into Tenant A only — the value of any caller-supplied `tenant_id` is rejected with HTTP 400 |
-| Tenant-A admin holding a valid admin bearer | Enumerate any tenant's admin credentials by setting `?tenant_id=` on `GET /v1/admin/credentials` | List Tenant A's admin credentials only |
-| Non-admin bearer | 403 (unchanged) | 403 (unchanged) |
-| Unauthenticated request | 401 (unchanged) | 401 (unchanged) |
+| Actor                                       | Pre-fix capability                                                                               | Post-fix capability                                                                                                  |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| Tenant-A admin holding a valid admin bearer | Mint an admin credential into ANY tenant by setting `tenant_id` in the JSON body                 | Mint an admin credential into Tenant A only — the value of any caller-supplied `tenant_id` is rejected with HTTP 400 |
+| Tenant-A admin holding a valid admin bearer | Enumerate any tenant's admin credentials by setting `?tenant_id=` on `GET /v1/admin/credentials` | List Tenant A's admin credentials only                                                                               |
+| Non-admin bearer                            | 403 (unchanged)                                                                                  | 403 (unchanged)                                                                                                      |
+| Unauthenticated request                     | 401 (unchanged)                                                                                  | 401 (unchanged)                                                                                                      |
 
 The exploit only requires possession of any admin bearer, not super-admin status. No production tenant has ever had cross-tenant admin issuance enabled; the bug is theoretical for v1 self-host but is a real vulnerability under the multi-tenant SaaS shape called out in canvas §5.4.
 
