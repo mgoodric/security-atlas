@@ -60,6 +60,69 @@ auto-generated notes.
   appear in the package, and the `register`-time profile list is
   `pull` only.
 
+- **Slice 047 — osquery / Fleet endpoint connector.** New stateless
+  connector binary `connectors/osquery/cmd/atlas-osquery` emitting one
+  evidence kind: `osquery.host_posture.v1` (existing slice-014 platform
+  schema; per-host posture — `host_uuid`, `hostname`, `platform`,
+  `os_version`, `disk_encryption_enabled`, `screen_lock_enabled`,
+  `firewall_enabled`, `mdm_enrolled`). No new schemas required (reuses
+  slice-014's bundled schema unchanged; the `additionalProperties:false`
+  constraint means the slice issue's `edr_running` / `os_patch_level`
+  fields are deferred to a future additive 1.1.0 minor bump). Subcommands
+  match slice 044's pattern: `register` (declares one `SupportedKinds`
+  entry + `["pull"]` profile via `ConnectorRegistryService.Register`),
+  `run` (pulls host posture on a schedule, one record per host), `scopes`
+  (prints canonical least-privilege Fleet roles). The `run` subcommand
+  selects upstream via `--mode`: `fleet` (default — Fleet REST API,
+  two-call pull GET `/api/v1/fleet/hosts` + GET
+  `/api/v1/fleet/hosts/{id}` so the per-host boolean policy fields the
+  schema declares are populated from the detail call) or `local` (local
+  osqueryd extension Unix socket; slice 047 wires the configuration
+  surface — flag, scope tagging, posture model — and returns
+  `ErrLocalSocketNotWired` from the in-process transport so the user
+  gets a clear "use --mode=fleet" rather than a silent fallthrough,
+  mirroring slice 044's `ErrAppNotWired` pattern; the live socket
+  transport lands in a follow-up slice). Auth (fleet mode): Fleet API
+  token via `FLEET_API_TOKEN` env (preferred) or hidden `--token` flag
+  (CLI help text never describes a visible token flag so the secret
+  stays out of shell history). `Authorization: Bearer <token>` header
+  is the only call shape against Fleet. Local mode uses no token; the
+  root-owned Unix socket's filesystem permission is the security
+  boundary. `osqueryauth.Credential.String()` returns
+  `osqueryauth.Credential{Mode: …, token: <redacted N bytes>}`; unit
+  tests pin `%s`, `%v`, and `%+v` formatting paths so accidental log
+  lines never leak the token. Idempotency keys follow slice 044/045/046:
+  `sha256("osquery.host_posture|<host_uuid>|<RFC3339 hour-truncated
+observed_at>")` via `idem.HostPostureKey`; empty `host_uuid` returns
+  the empty string and `buildHostPostureRecord` rejects so no record
+  ever ships with a fabricated key. Scope tagging emits four
+  dimensions per record: `org` + `environment` (operator-provided),
+  `cloud_account=workforce` (constant — distinguishes endpoint posture
+  from server/cloud-account scoping used by AWS/GCP/Azure), and
+  `data_classification` inferred per host (MDM-enrolled →
+  `restricted`, un-enrolled → `unknown` so downstream evaluators can
+  surface BYOD/transient devices). Result computed from a shallow
+  pass/fail baseline (`disk_encryption_enabled` AND
+  `screen_lock_enabled` → PASS, either off → FAIL); the evaluator
+  owns the policy ladder. Anti-criteria (P0) honored: documented Fleet
+  roles are read-only `observer` (global) and `observer_plus`
+  (per-team); `DocumentedScopes` unit test rejects future widening to
+  `write`, `delete`, `admin`, `maintainer` keywords in Name or Access
+  fields; connector has zero `POST` / `PATCH` / `DELETE` code paths
+  against the Fleet API (read-only by construction); Fleet 429
+  responses surface `Retry-After` verbatim through `APIError` so the
+  operator's cron schedule owns back-off (no auto-retry, no
+  rate-limit DoS amplification); local mode reads only — never
+  binds, listens to, or proxies the osqueryd socket. Tests use
+  `httptest.NewServer` to replay realistic Fleet REST payloads;
+  platform-side bufconn integration tests against `internal/api`
+  verify register/list, push, schema validation against the frozen
+  slice-014 schema, scope dimensions, actor_id format
+  `connector:osquery:posture@<version>`, idempotency dedup within the
+  hour, missing-host_uuid rejection, and the `--mode=local`
+  ErrLocalSocketNotWired sentinel. Test fixtures use neutral token
+  strings (no Fleet/Okta/GitHub prefix shapes) so GitGuardian does
+  not flag the commit.
 - **Slice 011 — Manual control type + attestation/upload flow.** New
   `POST /v1/controls/{id}/attestations` endpoint pushes a
   `manual.attestation.v1` evidence record through slice 013's ingestion
