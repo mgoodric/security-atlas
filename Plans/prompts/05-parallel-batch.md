@@ -6,7 +6,7 @@ This prompt has been evolved across four batches (014/017/039, 013/019/024, 018/
 
 ## Prompt
 
-```
+````
 Run a parallel batch of slices from docs/issues/. Use the per-slice template in Plans/prompts/04-per-slice-template.md verbatim for each.
 
 Step 1 — Conflict-safe selection (report-back BEFORE acting):
@@ -120,7 +120,7 @@ GitGuardian re-scans against the single clean commit → flag clears.
 - **Merge conflicts on rebase against new main**: resolve `sqlc.yaml` by hand (append-only schema list), run `sqlc generate` to resolve `dbx/{models,querier}.go`, resolve `CHANGELOG.md` by integrating both bullets into `[Unreleased] / Added`, resolve `internal/api/httpserver.go` by keeping both Mount/Get/Post route registrations.
 
 Use Algorithm mode in the orchestrator. Initialize a PRD (id: parallel-batch-<timestamp>).
-```
+````
 
 ## What to expect back
 
