@@ -1,0 +1,5 @@
+bundle_schema_version: "1"
+bundle_id: minimal_test_control
+title: "Minimal test control"
+scf_anchor_id: IAC-06
+implementation_type: automated

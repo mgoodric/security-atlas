@@ -610,19 +610,30 @@ type ArtifactAccessLog struct {
 }
 
 type Control struct {
-	ID                 pgtype.UUID               `json:"id"`
-	TenantID           pgtype.UUID               `json:"tenant_id"`
-	ScfID              *string                   `json:"scf_id"`
-	Title              string                    `json:"title"`
-	Description        string                    `json:"description"`
-	ControlFamily      string                    `json:"control_family"`
-	ImplementationType ControlImplementationType `json:"implementation_type"`
-	OwnerRole          string                    `json:"owner_role"`
-	LifecycleState     ControlLifecycleState     `json:"lifecycle_state"`
-	ApplicabilityExpr  string                    `json:"applicability_expr"`
-	Version            int32                     `json:"version"`
-	CreatedAt          pgtype.Timestamptz        `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz        `json:"updated_at"`
+	ID                   pgtype.UUID               `json:"id"`
+	TenantID             pgtype.UUID               `json:"tenant_id"`
+	ScfID                *string                   `json:"scf_id"`
+	Title                string                    `json:"title"`
+	Description          string                    `json:"description"`
+	ControlFamily        string                    `json:"control_family"`
+	ImplementationType   ControlImplementationType `json:"implementation_type"`
+	OwnerRole            string                    `json:"owner_role"`
+	LifecycleState       ControlLifecycleState     `json:"lifecycle_state"`
+	ApplicabilityExpr    string                    `json:"applicability_expr"`
+	Version              int32                     `json:"version"`
+	CreatedAt            pgtype.Timestamptz        `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz        `json:"updated_at"`
+	BundleID             string                    `json:"bundle_id"`
+	SupersededBy         pgtype.UUID               `json:"superseded_by"`
+	BundleManifestYaml   string                    `json:"bundle_manifest_yaml"`
+	BundleManifestHash   string                    `json:"bundle_manifest_hash"`
+	ScfAnchorID          pgtype.UUID               `json:"scf_anchor_id"`
+	EvidenceQueries      []byte                    `json:"evidence_queries"`
+	ManualEvidenceSchema []byte                    `json:"manual_evidence_schema"`
+	LinkedPolicyIds      []string                  `json:"linked_policy_ids"`
+	FreshnessClass       *string                   `json:"freshness_class"`
+	BundleUploadedAt     pgtype.Timestamptz        `json:"bundle_uploaded_at"`
+	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
 }
 
 type EvidenceAuditLog struct {

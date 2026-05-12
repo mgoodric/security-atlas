@@ -1,0 +1,13 @@
+bundle_schema_version: "1"
+bundle_id: annual_access_review_test
+title: "Annual access review completed"
+scf_anchor_id: IAC-15
+implementation_type: manual_periodic
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required: [reviewed_at, reviewer]
+  properties:
+    reviewed_at: { type: string, format: date }
+    reviewer: { type: string, minLength: 1 }

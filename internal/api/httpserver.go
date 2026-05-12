@@ -14,6 +14,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/anchorseed"
 	artifactsapi "github.com/mgoodric/security-atlas/internal/api/artifacts"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
 	fwscopesapi "github.com/mgoodric/security-atlas/internal/api/frameworkscopes"
@@ -21,6 +22,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
 	"github.com/mgoodric/security-atlas/internal/api/vendors"
+	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/risk"
@@ -126,6 +128,16 @@ func (s *Server) httpHandler() http.Handler {
 		root.Post("/v1/artifacts:upload", artifactsH.Upload)
 		root.Get("/v1/artifacts/{id}", artifactsH.Get)
 	}
+	// Slice 009: control-as-code bundle upload. Admin-only — same auth gate
+	// as the schema registry's POST /v1/schemas. The handler reads either
+	// multipart (a .tar.gz bundle) or JSON (inline manifest YAML) per
+	// docs/spec/control-bundle.md §4.
+	var controlsRegistry control.SchemaRegistry
+	if dbSvc, ok := s.registry.(*schemaregistry.Service); ok && dbSvc != nil {
+		controlsRegistry = dbSvc
+	}
+	controlsH := controlsapi.New(control.NewStore(s.dbPool), controlsRegistry)
+	root.Post("/v1/controls:upload-bundle", controlsH.UploadBundle)
 	return root
 }
 

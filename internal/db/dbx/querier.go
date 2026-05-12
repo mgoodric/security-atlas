@@ -90,6 +90,11 @@ type Querier interface {
 	// i.e. the (at most one) row in state `activated` for that (tenant, fv) pair.
 	// AC-3: a partial UNIQUE index guarantees at most one row matches.
 	GetActivatedFrameworkScope(ctx context.Context, arg GetActivatedFrameworkScopeParams) (FrameworkScope, error)
+	// Slice 009: control bundle queries. The active version per (tenant_id,
+	// bundle_id) is the row with superseded_by IS NULL (partial unique index
+	// enforces uniqueness). Re-upload supersedes by first UPDATE-ing the prior
+	// row's superseded_by, then INSERTing the new row — both in the same tx.
+	GetActiveControlByBundleID(ctx context.Context, arg GetActiveControlByBundleIDParams) (GetActiveControlByBundleIDRow, error)
 	// Look up an artifact by id. RLS USING current_tenant_matches(tenant_id)
 	// means the row is invisible to other tenants — handler interprets
 	// pgx.ErrNoRows as 404 (no existence leak).
@@ -97,6 +102,7 @@ type Querier interface {
 	// Returns the JSON-encoded applicability_expr for a single control. The column
 	// is TEXT (slice 002); slice 017 stores JSON in that text.
 	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)
+	GetControlByID(ctx context.Context, arg GetControlByIDParams) (GetControlByIDRow, error)
 	// Look up one schema visible to the tenant. Prefers the tenant's private
 	// row when one exists for the same (kind, semver); otherwise returns the
 	// global row. The ORDER BY puts the non-null tenant_id first.
@@ -142,6 +148,9 @@ type Querier interface {
 	// The CAST chain (jsonb -> text -> int) is necessary because pgx cannot
 	// read jsonb-number values directly as int4 without an explicit cast.
 	HeatmapBuckets(ctx context.Context, tenantID pgtype.UUID) ([]HeatmapBucketsRow, error)
+	// Insert a new control row (initial upload or supersession). Caller is
+	// responsible for UPDATE-ing the predecessor's superseded_by in the same tx.
+	InsertControlVersion(ctx context.Context, arg InsertControlVersionParams) (Control, error)
 	// AC-7: every push attempt — accepted or rejected — lands in the audit
 	// log keyed by credential id. The platform layer writes one row per
 	// decision; rejections include reason_code (validation, idempotency
@@ -167,6 +176,8 @@ type Querier interface {
 	// Idempotent: ON CONFLICT DO NOTHING so re-running a "link these controls"
 	// request does not 23505 on a re-link.
 	LinkRiskControl(ctx context.Context, arg LinkRiskControlParams) error
+	// Every active (non-superseded) control for the active tenant.
+	ListActiveControls(ctx context.Context, tenantID pgtype.UUID) ([]ListActiveControlsRow, error)
 	// Bypass-RLS path used at boot by the platform-schema importer running as
 	// atlas_migrate. Returns every row regardless of tenant. Never reachable
 	// through the app role under RLS.
@@ -174,6 +185,8 @@ type Querier interface {
 	// Per-artifact recent history. Used by the admin view (slice 040) and
 	// the audit-export bundler (slice 029). Cap at 100 rows.
 	ListArtifactAccessLog(ctx context.Context, arg ListArtifactAccessLogParams) ([]ArtifactAccessLog, error)
+	// Newest first. Includes superseded rows so callers see the supersession chain.
+	ListControlVersionsByBundle(ctx context.Context, arg ListControlVersionsByBundleParams) ([]ListControlVersionsByBundleRow, error)
 	ListEvidenceAuditEntriesByCredential(ctx context.Context, arg ListEvidenceAuditEntriesByCredentialParams) ([]EvidenceAuditLog, error)
 	// Returns every registered semver for a kind, visible to the tenant.
 	// Slice 014 uses this for AC-5 semver enforcement (a POST must check the
@@ -234,6 +247,8 @@ type Querier interface {
 	// Append a row to the access log. Action is enforced by CHECK
 	// ('upload' | 'download'). Caller passes tenant_id + artifact_id + actor.
 	LogArtifactAccess(ctx context.Context, arg LogArtifactAccessParams) error
+	// Flip a predecessor row to superseded. Idempotent: no-op if already set.
+	MarkControlSuperseded(ctx context.Context, arg MarkControlSupersededParams) error
 	// Point a framework at its current version.
 	SetLatestVersion(ctx context.Context, arg SetLatestVersionParams) error
 	// AC-6: draft -> review. Guarded so callers can never re-submit an already
