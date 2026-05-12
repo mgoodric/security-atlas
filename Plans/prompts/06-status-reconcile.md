@@ -55,13 +55,13 @@ Use Algorithm mode. Initialize a PRD (id: status-reconcile-<timestamp>).
 
 ## When to run
 
-| Trigger | Cadence |
-|---|---|
-| Out-of-band PR merge (manual `gh pr merge`) | Within 24h |
-| Open question resolved or newly raised | Same day |
-| Worktree abandoned without status update | Same week |
-| Routine hygiene + date backfill | Weekly |
-| Before kicking off a new parallel batch | If `_STATUS.md` hasn't been touched in 3+ days |
+| Trigger                                     | Cadence                                        |
+| ------------------------------------------- | ---------------------------------------------- |
+| Out-of-band PR merge (manual `gh pr merge`) | Within 24h                                     |
+| Open question resolved or newly raised      | Same day                                       |
+| Worktree abandoned without status update    | Same week                                      |
+| Routine hygiene + date backfill             | Weekly                                         |
+| Before kicking off a new parallel batch     | If `_STATUS.md` hasn't been touched in 3+ days |
 
 ## What it does NOT do
 

@@ -26,28 +26,28 @@ Final step is a pre-flight checklist confirming readiness. The actual `gh repo e
 - [ ] AC-5: `LICENSE` file present at repo root with finalized license text (Apache 2.0 or AGPL — open question resolved before merge per `RELEASE_READINESS.md`).
 - [ ] AC-6: `README.md` rewritten for a public audience: project description, status, install, quickstart, links to docs / contributing / security. Internal dev-setup notes moved to `CONTRIBUTING.md`.
 - [ ] AC-6a: README displays a tasteful 4-badge row at the top, each badge linking to its source:
-    - **License** — shields.io · reflects `LICENSE` file content · links to the LICENSE file
-    - **Build status** — GitHub Actions native badge for the CI workflow · links to the workflow runs page
-    - **Test coverage** — Codecov badge · links to the Codecov project page · requires CI to upload coverage reports for Go (`go test -coverprofile`), TypeScript (jest/vitest coverage), and Python (`pytest --cov`) via the `codecov/codecov-action` step in each language's CI job · Codecov is free for public OSS projects
-    - **Latest release** — shields.io · hooks into release-please-generated GitHub release tags (AC-12) · links to the latest release page
+  - **License** — shields.io · reflects `LICENSE` file content · links to the LICENSE file
+  - **Build status** — GitHub Actions native badge for the CI workflow · links to the workflow runs page
+  - **Test coverage** — Codecov badge · links to the Codecov project page · requires CI to upload coverage reports for Go (`go test -coverprofile`), TypeScript (jest/vitest coverage), and Python (`pytest --cov`) via the `codecov/codecov-action` step in each language's CI job · Codecov is free for public OSS projects
+  - **Latest release** — shields.io · hooks into release-please-generated GitHub release tags (AC-12) · links to the latest release page
 - [ ] AC-6b: Badge row renders correctly on GitHub web view + raw README; no broken images, no auth-walled URLs, all badges resolve within a couple of seconds on first page load.
 - [ ] AC-7: `CODE_OF_CONDUCT.md` present (Contributor Covenant v2.1 standard text); `CONTRIBUTING.md` present (dev setup + Conventional Commits + DCO/CLA decision); `SECURITY.md` present (vulnerability-disclosure policy + private reporting contact).
 - [ ] AC-8: `.github/ISSUE_TEMPLATE/bug.yml`, `.github/ISSUE_TEMPLATE/feature.yml`, and `.github/PULL_REQUEST_TEMPLATE.md` present with sensible fields.
 - [ ] AC-9: `.github/dependabot.yml` configured to scan Go modules, npm workspaces, Python (uv), Docker, and GitHub Actions on a reasonable cadence.
 - [ ] AC-10: CodeQL workflow at `.github/workflows/codeql.yml` runs on push + PR + scheduled; languages covered: Go, TypeScript, Python.
 - [ ] AC-11: Branch protection on `main` enforces:
-    - **Require PR review** — ≥1 approval before merge
-    - **Require passing CI status checks** — named explicitly: build, lint, test, codeql, codecov (coverage), container-publish (skipped on non-release commits is fine)
-    - **Require linear history** — no merge commits; squash- or rebase-only
-    - **Require conversation resolution** — all PR review threads resolved before merge
-    - **Dismiss stale PR approvals** — when new commits are pushed after approval, the approval auto-invalidates
-    - **Block force-push** on `main` — no exceptions, including admins
-    - **Block direct push** to `main` — PR-only
-    - **Block branch deletion** for `main`
-    - **Restrict who can push to `main`** to the maintainer + the `release-please` GitHub App bot (so release PRs can be merged by the bot but no human bypasses review)
-    - **(Optional, document the call)** Require signed commits — trust signal vs. friction for community contributors; if disabled, capture the rationale in `RELEASE_READINESS.md`
-    - Configuration committed as `.github/branch-protection.json` (preferred — reviewable in PRs) OR applied via the GitHub MCP and documented in `RELEASE_READINESS.md` with the exact API call
-    - **Verification:** a test PR with a failing CI check cannot be merged; an attempt to force-push from a clone is rejected; a manual push directly to `main` is rejected.
+  - **Require PR review** — ≥1 approval before merge
+  - **Require passing CI status checks** — named explicitly: build, lint, test, codeql, codecov (coverage), container-publish (skipped on non-release commits is fine)
+  - **Require linear history** — no merge commits; squash- or rebase-only
+  - **Require conversation resolution** — all PR review threads resolved before merge
+  - **Dismiss stale PR approvals** — when new commits are pushed after approval, the approval auto-invalidates
+  - **Block force-push** on `main` — no exceptions, including admins
+  - **Block direct push** to `main` — PR-only
+  - **Block branch deletion** for `main`
+  - **Restrict who can push to `main`** to the maintainer + the `release-please` GitHub App bot (so release PRs can be merged by the bot but no human bypasses review)
+  - **(Optional, document the call)** Require signed commits — trust signal vs. friction for community contributors; if disabled, capture the rationale in `RELEASE_READINESS.md`
+  - Configuration committed as `.github/branch-protection.json` (preferred — reviewable in PRs) OR applied via the GitHub MCP and documented in `RELEASE_READINESS.md` with the exact API call
+  - **Verification:** a test PR with a failing CI check cannot be merged; an attempt to force-push from a clone is rejected; a manual push directly to `main` is rejected.
 - [ ] AC-12: `.github/workflows/release-please.yml` configured; a Conventional Commit pushed to `main` opens (or updates) a release PR with auto-incremented semver + populated changelog entry. Release PRs are NOT auto-merged.
 - [ ] AC-13: `.github/workflows/container-publish.yml` builds + publishes multi-arch (`linux/amd64` + `linux/arm64`) images to `ghcr.io/<owner>/security-atlas:<tag>` on every release tag. `docker manifest inspect` shows both architectures.
 - [ ] AC-14: `deploy/watchtower/` contains a documented Watchtower compose/labels example demonstrating opt-in (`com.centurylinklabs.watchtower.enable=true`) auto-update from GHCR; `docs/SELF_HOSTING.md` references it with a worked example for Unraid.
