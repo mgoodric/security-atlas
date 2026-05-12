@@ -66,6 +66,55 @@ population_id)` enforce the slice-002 D3 cross-tenant blocker.
   enforced both at the sqlc query-set level and slice 013's
   append-only RLS); samples drawn from post-frozen evidence rejected
   once slice 028 lands (forward-compatible gate).
+- **Slice 015 — NATS JetStream evidence buffer + ingestion stage.** Push
+  pipeline now flows through a durable JetStream buffer: `POST
+/v1/evidence:push` publishes to the `EVIDENCE_INGEST` stream (subject
+  `evidence.ingest`) and acks at stream-commit time, not at ledger
+  write (canvas §4.3, EVIDENCE_SDK §4.6). A pull-consumer
+  (`internal/evidence/streambuf.Consumer`) reads from the stream and
+  invokes the existing slice-013 `ingest.Service.Process` —
+  preserving the slice-013 contract verbatim. At-least-once delivery
+  is collapsed to exactly-once on the ledger via the existing
+  `evidence_records.idempotency_key` UNIQUE index plus JetStream's
+  built-in `Nats-Msg-Id` dedup window (2 min). Stream configured with
+  `Retention=Limits`, `Storage=File`, `MaxAge=7d` (AC-5) so the
+  consumer can replay records after a restart. The consumer Acks only
+  after `Process` returns success; transient errors Nak with backoff,
+  poison records (validation / observed_at_skew / scope / unknown
+  kind) are Term'd so they do not redeliver forever.
+
+  New package `internal/evidence/redact/` adds AC-6 redaction: each
+  bundled or tenant-private schema may declare an `x-redaction-rules`
+  array of JSONPath-subset expressions (`$.secret`, `$.user.api_key`,
+  `$.findings[*].token`). The schema registry parses the extension
+  at load time (no migration; the extension is additive to slice
+  014's `schema_json` JSONB column), and `Service.Process` applies
+  the rules to the payload BEFORE hashing. The ledger therefore
+  never stores the unredacted form; the canonical hash is the hash
+  of the redacted record so idempotency dedup stays deterministic.
+
+  The push HTTP handler now accepts an optional `Publisher`
+  (`internal/api/evidence.Publisher`). When wired (production), it
+  routes through `streambuf.JetStreamPublisher`; when nil (unit
+  servers, dev mode without NATS), it falls back to direct
+  `Service.Process` — slice 013's path is preserved for unit tests
+  and developer ergonomics. `cmd/atlas/main.go` opens the
+  JetStream connection and starts the consumer when `NATS_URL` is
+  set in the environment.
+
+  Substrate additions: NATS Go SDK `github.com/nats-io/nats.go
+v1.52.0` in `go.mod`; NATS 2.10 service in
+  `deploy/docker/docker-compose.yml` (JetStream enabled, `-js -sd
+/data`, healthcheck on the monitoring port); CI workflow starts
+  NATS via `docker run` (matching slice 036's MinIO pattern, not
+  the `services:` block because the official image requires `-js`
+  to be passed explicitly). Anti-criteria enforced: the push
+  endpoint never writes to the ledger directly when the publisher
+  is wired; payload bytes are never logged in any code path (audit
+  reasons truncate to 1 KiB and reference rule names or sub-error
+  strings, not record contents); NATS credentials are redacted out
+  of any logged URL via `url.User("REDACTED")`.
+
 - **Slice 009 — Control bundle format spec + parser + upload API.** New
   control-as-code authoring path: a YAML manifest (`control.yaml`)
   declaring `bundle_id`, `scf_anchor_id`, `title`, `implementation_type`,

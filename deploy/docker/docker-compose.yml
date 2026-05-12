@@ -2,11 +2,14 @@
 #
 # - postgres: the platform's primary store
 # - minio:    S3-compatible object store for slice 036 artifacts
+# - nats:     JetStream evidence-ingest buffer (slice 015)
 #
 # Production self-host swaps minio for any S3-compatible backend (AWS S3,
 # Cloudflare R2, Wasabi, Ceph RadosGW). The platform binary reads
 # `ARTIFACTS_BUCKET`, `ARTIFACTS_S3_ENDPOINT`, and the standard AWS
-# credential env vars from its environment.
+# credential env vars from its environment. NATS_URL points the platform
+# at the JetStream-enabled NATS instance; without it the push path
+# falls back to direct Service.Process (slice 013 behavior).
 #
 # Run: `docker compose -f deploy/docker/docker-compose.yml up -d`
 # Stop: `docker compose -f deploy/docker/docker-compose.yml down`
@@ -60,5 +63,33 @@ services:
       echo 'bucket atlas-artifacts ready'
       "
 
+  nats:
+    # Slice 015: NATS JetStream evidence-ingest buffer. Single binary,
+    # ~14 MB image. `-js` enables JetStream; `-sd /data` stores stream
+    # state on disk so a container restart preserves the buffer (AC-4
+    # replay capability).
+    #
+    # Self-host production typically points NATS_URL at this service and
+    # rotates the lack-of-auth defaults via a NATS-native auth config
+    # (tokens, NKeys, JWT) when exposing the broker beyond localhost.
+    image: nats:2.10-alpine
+    command:
+      - "-js"
+      - "-sd"
+      - "/data"
+      - "--http_port"
+      - "8222"
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   minio-data:
+  nats-data:
