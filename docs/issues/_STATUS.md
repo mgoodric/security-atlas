@@ -13,6 +13,7 @@ Three slices flipped `ready` → `in-progress` with worktrees + branches assigne
 | --- | ----------------------- | ------------------------------------------------------ |
 | 011 | `ready` → `in-progress` | `control-as-code/011-manual-control-attestation`       |
 | 015 | `ready` → `in-progress` | `evidence-pipeline/015-nats-jetstream-ingestion-stage` |
+| 015 | `in-progress` → `in-review` | gh#19 opened 2026-05-11                            |
 | 026 | `ready` → `in-progress` | `audit/026-sample-pull-primitives`                     |
 
 Migration slots: 011 → none (reuses slice-014 schema), 015 → none (substrate swap), 026 → `20260511000010_audit_samples`. Spine touch: 015 only (NATS Go SDK in go.mod/go.sum). First batch driven by the full-merge-cycle prompt — orchestrator runs Step 5 merge queue + Step 6 final reconcile.
@@ -196,7 +197,7 @@ Legal values (use exactly these strings):
 | 012 | Control state evaluation engine                        | `not-ready`   | —                                                    | —     | —          | —          | waits on 010, 013, 017                |
 | 013 | Evidence ledger write API + push endpoint              | `merged`      | evidence-pipeline/013-evidence-ledger-write-api      | gh#12 | 2026-05-11 | 2026-05-11 | AC-6 PARTIAL — S3 redirect awaits 036 |
 | 014 | Schema registry service (in-tree Go)                   | `merged`      | evidence-pipeline/014-schema-registry-service        | gh#8  | 2026-05-11 | 2026-05-11 | —                                     |
-| 015 | NATS JetStream buffer + ingestion stage                | `in-progress` | evidence-pipeline/015-nats-jetstream-ingestion-stage | —     | 2026-05-11 | —          | dep 013 merged                        |
+| 015 | NATS JetStream buffer + ingestion stage                | `in-review`   | evidence-pipeline/015-nats-jetstream-ingestion-stage | gh#19 | 2026-05-11 | —          | dep 013 merged                        |
 | 016 | Evidence freshness + drift detection                   | `not-ready`   | —                                                    | —     | —          | —          | waits on 012                          |
 | 017 | Scope dimensions + applicability_expr + single-cell    | `merged`      | scope/017-scope-dimensions-applicability             | gh#9  | 2026-05-11 | 2026-05-11 | —                                     |
 | 018 | FrameworkScope predicate + intersection compute        | `merged`      | scope/018-framework-scope-intersection               | gh#13 | 2026-05-11 | 2026-05-11 | implements ADR-0001                   |
