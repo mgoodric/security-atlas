@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -35,7 +36,7 @@ func New(q *dbx.Queries, mappings anchorseed.Store) *Handler {
 	return &Handler{q: q, mappings: mappings, defaultLimit: 100, maxLimit: 500}
 }
 
-// Routes returns a chi router with the slice-005 + slice-006 endpoints.
+// Routes returns a chi router with the slice-005 + slice-006 + slice-007 endpoints.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Get("/v1/anchors", h.listAnchors)
@@ -43,6 +44,12 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/v1/anchors/{id}/requirements", h.requirementsForAnchor)
 	r.Get("/v1/frameworks", h.listFrameworks)
 	r.Get("/v1/frameworks/scf/versions", h.listSCFVersions)
+	// Slice 007: reverse traversal — given a framework_requirements row
+	// (by UUID or by `{slug}:{version}:{code}` form), list every SCF
+	// anchor it maps to with relationship_type + strength + source
+	// attribution + rationale. This is the daily-use "what evidence
+	// satisfies SOC 2 CC6.6" query (canvas §7.2).
+	r.Get("/v1/requirements/{id}/anchors", h.anchorsForRequirement)
 	return r
 }
 
@@ -157,6 +164,102 @@ func (h *Handler) listSCFVersions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"versions": out})
 }
 
+// anchorsForRequirement returns one framework_requirements row plus every
+// fw_to_scf_edges row that originates from it, joined to the scf_anchors
+// table for the anchor metadata. The path segment accepts:
+//
+//   - a UUID — direct framework_requirements.id lookup
+//   - `{framework_slug}:{version}:{code}` — natural-key form, e.g.,
+//     `soc2:2017:CC6.6`
+//   - `{framework_slug}::{code}` — convenience form that resolves
+//     {code} against the framework's "current" version, e.g.,
+//     `soc2::CC6.6`
+//
+// Returns 404 when no requirement matches.
+func (h *Handler) anchorsForRequirement(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	req, ok, err := h.lookupRequirement(r.Context(), id)
+	if err != nil {
+		writeServerErr(w, "lookup requirement", err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "requirement not found")
+		return
+	}
+
+	rows, err := h.q.ListFwToScfEdgesForRequirement(r.Context(), req.ID)
+	if err != nil {
+		writeServerErr(w, "list edges for requirement", err)
+		return
+	}
+	out := make([]requirementEdgeWire, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, requirementEdgeWire{
+			EdgeID:            uuidStr(row.ID),
+			SCFAnchorID:       uuidStr(row.ScfAnchorID),
+			SCFID:             row.ScfID,
+			Family:            row.Family,
+			AnchorTitle:       row.AnchorTitle,
+			RelationshipType:  string(row.RelationshipType),
+			Strength:          row.Strength,
+			SourceAttribution: string(row.SourceAttribution),
+			Rationale:         row.Rationale,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"requirement": requirementWire{
+			ID:    uuidStr(req.ID),
+			Code:  req.Code,
+			Title: req.Title,
+			Body:  req.Body,
+		},
+		"anchors": out,
+	})
+}
+
+// lookupRequirement resolves the {id} path segment to a framework_requirement
+// row, supporting all three forms documented on anchorsForRequirement.
+func (h *Handler) lookupRequirement(ctx context.Context, idOrCode string) (dbx.FrameworkRequirement, bool, error) {
+	if uid, err := uuid.Parse(idOrCode); err == nil {
+		row, err := h.q.GetFrameworkRequirementByID(ctx, pgtype.UUID{Bytes: uid, Valid: true})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dbx.FrameworkRequirement{}, false, nil
+		}
+		if err != nil {
+			return dbx.FrameworkRequirement{}, false, err
+		}
+		return row, true, nil
+	}
+
+	// Natural-key form: slug:version:code (version may be empty —
+	// `soc2::CC6.6` resolves against the framework's current version).
+	parts := strings.SplitN(idOrCode, ":", 3)
+	if len(parts) != 3 {
+		return dbx.FrameworkRequirement{}, false, nil
+	}
+	slug, version, code := parts[0], parts[1], parts[2]
+	if version == "" {
+		row, err := h.q.GetFrameworkRequirementByCurrentVersion(ctx, dbx.GetFrameworkRequirementByCurrentVersionParams{
+			Slug: slug,
+			Code: code,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dbx.FrameworkRequirement{}, false, nil
+		}
+		return row, err == nil, err
+	}
+	row, err := h.q.GetFrameworkRequirementByFrameworkSlugVersionCode(ctx, dbx.GetFrameworkRequirementByFrameworkSlugVersionCodeParams{
+		Slug:    slug,
+		Version: version,
+		Code:    code,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return dbx.FrameworkRequirement{}, false, nil
+	}
+	return row, err == nil, err
+}
+
 func (h *Handler) lookupAnchor(ctx context.Context, idOrSCFID string) (anchorWire, bool, error) {
 	if uid, err := uuid.Parse(idOrSCFID); err == nil {
 		row, err := h.q.GetSCFAnchorByID(ctx, pgtype.UUID{Bytes: uid, Valid: true})
@@ -220,6 +323,29 @@ type frameworkVersionWire struct {
 	Version       string `json:"version"`
 	Status        string `json:"status"`
 	EffectiveFrom string `json:"effective_from,omitempty"`
+}
+
+// requirementWire is the public shape of a framework_requirement.
+type requirementWire struct {
+	ID    string `json:"id"`
+	Code  string `json:"code"`
+	Title string `json:"title"`
+	Body  string `json:"body,omitempty"`
+}
+
+// requirementEdgeWire is one row of "anchors for a requirement" — the
+// STRM edge metadata plus the anchor's identifying fields. Joined view
+// so callers don't need a second round trip per anchor.
+type requirementEdgeWire struct {
+	EdgeID            string  `json:"edge_id"`
+	SCFAnchorID       string  `json:"scf_anchor_id"`
+	SCFID             string  `json:"scf_id"`
+	Family            string  `json:"family"`
+	AnchorTitle       string  `json:"anchor_title"`
+	RelationshipType  string  `json:"relationship_type"`
+	Strength          float64 `json:"strength"`
+	SourceAttribution string  `json:"source_attribution"`
+	Rationale         string  `json:"rationale,omitempty"`
 }
 
 func rowsToWire[R anchorRow](rows []R) []anchorWire {
