@@ -123,6 +123,39 @@ observed_at>")` via `idem.HostPostureKey`; empty `host_uuid` returns
   ErrLocalSocketNotWired sentinel. Test fixtures use neutral token
   strings (no Fleet/Okta/GitHub prefix shapes) so GitGuardian does
   not flag the commit.
+||||||| parent of dd95004 (feat(connectors): Manual upload / CSV / S3 / SFTP escape-hatch (#049))
+=======
+- **Slice 049 — Manual upload / CSV / S3 / SFTP escape-hatch connector.**
+  New stateless connector binary `connectors/manual/cmd/atlas-manual`
+  emits `manual.upload.v1` records via three subcommand modes:
+  - `local --file <path>` — parses a local CSV file, emits one record
+    per row. Idempotency: `sha256("manual.upload" + file_path + row_index + hour)`.
+  - `s3 --bucket <b> --prefix <p>` — lists S3 objects under prefix,
+    emits one record per object. Auth via standard AWS credential
+    chain (env / shared config / IRSA / IMDS — no flag accepts a
+    literal access key, so AKIA\* literals never appear in code or
+    logs). Empty prefix is rejected (defense-in-depth against
+    full-bucket scan). Idempotency:
+    `sha256("manual.upload" + bucket + key + etag)`.
+  - `sftp --host <h> --user <u> --path <p> --key-file <kf>` — pulls
+    files via SFTP, emits one record per file. SSH private key loaded
+    from `--key-file` (file path is operator-supplied; per project
+    precedent CLI flags are trusted). `ssh.InsecureIgnoreHostKey` is
+    explicitly REJECTED at config-build time (closure-name substring
+    inspection in `manualsftp.BuildSSHConfig`); a known_hosts file is
+    required. Idempotency:
+    `sha256("manual.upload" + host + path + mtime)`.
+    Reuses slice-014 platform schema `manual.upload.v1` unchanged.
+    Subcommands match slice 044's pattern: `register` / `run` (with
+    per-mode flags) / `scopes` (prints documented auth posture per
+    mode). Anti-criteria honored: no AWS credentials in logs (verified
+    by integration test); no SSH key material in errors
+    (`TestSFTPKeyMaterial_NeverEchoedInError` pins the redaction);
+    `InsecureIgnoreHostKey` rejected; CSV parser caps row count + per-
+    field length (DoS surface closed). Adds `github.com/pkg/sftp
+v1.13.10` + transitive `github.com/kr/fs v0.1.0` to `go.mod`. Read-
+    only by construction in all three modes (no `PUT`/`upload`/`write`
+    code paths against S3 or SFTP).
 - **Slice 011 — Manual control type + attestation/upload flow.** New
   `POST /v1/controls/{id}/attestations` endpoint pushes a
   `manual.attestation.v1` evidence record through slice 013's ingestion
