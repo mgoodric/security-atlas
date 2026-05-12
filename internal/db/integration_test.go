@@ -364,12 +364,16 @@ func TestSchema_TenantScopedTablesAcceptInserts(t *testing.T) {
 // Slice 009 added a NOT NULL `bundle_id` column; this helper synthesises a
 // `legacy_<uuid>` value matching the slice-009 migration's backfill pattern
 // so slice-002's existing tests continue to pass after the schema change.
+// The bundle_id is computed in Go (not via SQL concat) because pgx's prepare
+// phase cannot deduce a single type for `$1` when it appears both as a UUID
+// (in `id`) and as text input to a concat (SQLSTATE 42P08).
 func mustInsertControl(ctx context.Context, t *testing.T, tx pgx.Tx, tenant, controlID, scfID string) {
 	t.Helper()
+	bundleID := "legacy_" + controlID
 	_, err := tx.Exec(ctx, `
 		INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, bundle_id)
-		VALUES ($1, $2, $3, 'test control', 'IAC', 'automated', 'legacy_' || $1::text)
-	`, controlID, tenant, scfID)
+		VALUES ($1, $2, $3, 'test control', 'IAC', 'automated', $4)
+	`, controlID, tenant, scfID, bundleID)
 	if err != nil {
 		t.Fatalf("INSERT controls: %v", err)
 	}
