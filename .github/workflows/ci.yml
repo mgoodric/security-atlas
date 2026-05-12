@@ -54,6 +54,10 @@ jobs:
       # support a `command` / args override, and the official
       # `minio/minio` image needs `server /data` passed explicitly. Started
       # via `docker run` in the `Start MinIO` step.
+      #
+      # Slice 015 NATS JetStream follows the same pattern (the `nats`
+      # image needs `-js -sd /data` passed explicitly). Started via
+      # `docker run` in the `Start NATS JetStream` step.
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable
       # The app role's password is set by a step below from a workflow-scoped
@@ -64,6 +68,8 @@ jobs:
       MINIO_BUCKET: atlas-artifacts-test
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
+      # Slice 015 — NATS JetStream endpoint reachable from the runner.
+      NATS_URL: nats://localhost:4222
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -93,6 +99,19 @@ jobs:
           docker run --rm --network host \
             -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
             minio/mc mb -p local/atlas-artifacts-test
+      - name: Start NATS JetStream
+        run: |
+          docker run -d --name nats \
+            -p 4222:4222 \
+            -p 8222:8222 \
+            nats:2.10-alpine -js -sd /data --http_port 8222
+          # Wait for readiness via the monitoring endpoint (up to ~60s).
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8222/healthz; then
+              echo "nats ready"; break
+            fi
+            sleep 2
+          done
       - name: Bootstrap roles
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
       - name: Set role passwords (CI-scoped)
@@ -123,6 +142,7 @@ jobs:
             ./internal/api/anchors/... \
             ./internal/api/schemaregistry/... \
             ./internal/evidence/ingest/... \
+            ./internal/evidence/streambuf/... \
             ./internal/artifact/... \
             ./internal/api/artifacts/...
       - name: Migration round-trip — down then up

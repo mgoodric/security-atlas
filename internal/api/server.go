@@ -46,6 +46,10 @@ type Server struct {
 	ingestService     *ingest.Service
 	evidencePushRate  float64
 	artifactStore     *artifact.Store
+	// evidencePublisher is the slice-015 substrate. When non-nil the
+	// push HTTP handler routes through JetStream; nil falls back to
+	// direct Service.Process.
+	evidencePublisher evidence.Publisher
 }
 
 // IssueBootstrapCredential mints a credential for the supplied tenant and
@@ -107,6 +111,13 @@ type Config struct {
 	// the Store with an S3 client and presigner pointed at the
 	// configured bucket (MinIO locally, S3 in prod).
 	ArtifactStore *artifact.Store
+	// EvidencePublisher is the slice-015 JetStream substrate. When
+	// non-nil the push HTTP handler routes pushes through the stream
+	// and the platform binary runs a consumer that drains the stream
+	// into the ledger. When nil, push falls back to direct
+	// Service.Process — backwards compat for unit servers and for the
+	// dev mode without NATS.
+	EvidencePublisher evidence.Publisher
 }
 
 // New constructs the Server with its services and interceptors mounted.
@@ -147,7 +158,16 @@ func New(cfg Config) *Server {
 		ingestService:     cfg.IngestService,
 		evidencePushRate:  cfg.EvidencePushRate,
 		artifactStore:     cfg.ArtifactStore,
+		evidencePublisher: cfg.EvidencePublisher,
 	}
+}
+
+// AttachEvidencePublisher wires the slice-015 substrate after Server
+// construction. The platform binary builds the JetStreamPublisher with
+// its Conn and calls this once at startup. Unit servers don't need to
+// call it.
+func (s *Server) AttachEvidencePublisher(pub evidence.Publisher) {
+	s.evidencePublisher = pub
 }
 
 // AttachArtifactStore wires the slice-036 artifact store after Server

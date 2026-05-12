@@ -1,6 +1,7 @@
 package evidence
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
 
@@ -25,7 +27,14 @@ import (
 // Auth is enforced upstream by httpAuthMiddleware; the handler additionally
 // reads the credential from context for ingestion-side scope checks.
 type HTTPHandler struct {
-	svc     *ingest.Service
+	// pub is the slice-015 substrate. When set, the push handler
+	// publishes to the NATS JetStream buffer and acks at stream-commit
+	// time (AC-2). When nil, the handler falls back to the slice-013
+	// direct path via svc.Process — used by unit-only servers and by
+	// dev mode without a NATS dependency.
+	pub Publisher
+	svc *ingest.Service
+
 	limiter *tokenBucketRegistry
 	// maxBatch caps the batch size at 100 per EVIDENCE_SDK §4.1.
 	maxBatch int
@@ -37,9 +46,22 @@ type HTTPHandler struct {
 	maxBodyBytes int64
 }
 
+// Publisher abstracts the slice-015 JetStream publish path. Defined on
+// the package boundary so this package does not import streambuf
+// (which imports back into ingest). The concrete implementations live
+// in internal/evidence/streambuf; tests can swap their own.
+type Publisher interface {
+	Publish(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential) (ingest.Receipt, ingest.Decision, error)
+}
+
 // NewHTTPHandler constructs the handler. limiterPerSecond is the default
 // rate-limit token-bucket replenish rate per credential; pass 0 to
 // disable rate limiting (used by unit tests).
+//
+// When pub is non-nil the handler routes pushes through the JetStream
+// substrate (slice 015). When pub is nil it falls back to svc.Process.
+// Production wiring passes a JetStreamPublisher; unit tests pass nil
+// + an *ingest.Service.
 func NewHTTPHandler(svc *ingest.Service, limiterPerSecond float64) *HTTPHandler {
 	return &HTTPHandler{
 		svc:          svc,
@@ -47,6 +69,13 @@ func NewHTTPHandler(svc *ingest.Service, limiterPerSecond float64) *HTTPHandler 
 		maxBatch:     100,
 		maxBodyBytes: 100 << 20, // 100 MiB
 	}
+}
+
+// WithPublisher returns the handler with `pub` installed as the
+// push-substrate. Returns the receiver for chaining.
+func (h *HTTPHandler) WithPublisher(pub Publisher) *HTTPHandler {
+	h.pub = pub
+	return h
 }
 
 // pushRequest is the wire body for POST /v1/evidence:push. Accepts either
@@ -159,7 +188,7 @@ func (h *HTTPHandler) PushHTTP(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, errorBody{Error: fmt.Sprintf("record[%d]: %s", i, perr.Error())})
 			return
 		}
-		receipt, decision, err := h.svc.Process(r.Context(), proto, cred)
+		receipt, decision, err := h.dispatch(r.Context(), proto, cred)
 		if err != nil {
 			writeBatchError(w, i, decision, err)
 			return
@@ -183,6 +212,20 @@ func (h *HTTPHandler) PushHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, pushResponse{Receipts: receipts})
+}
+
+// dispatch routes a single record through either the slice-015
+// JetStream publisher (when wired) or the slice-013 direct
+// Service.Process path (backwards compat / unit tests).
+//
+// Anti-criterion P0 (slice 015): when h.pub is non-nil the push API
+// MUST NOT write to the ledger directly. The publisher is the only
+// path to the ledger, and it routes through the stream.
+func (h *HTTPHandler) dispatch(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential) (ingest.Receipt, ingest.Decision, error) {
+	if h.pub != nil {
+		return h.pub.Publish(ctx, rec, cred)
+	}
+	return h.svc.Process(ctx, rec, cred)
 }
 
 // writeBatchError maps an ingest decision to an HTTP status code and

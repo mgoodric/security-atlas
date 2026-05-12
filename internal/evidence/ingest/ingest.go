@@ -37,6 +37,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/canonjson"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/redact"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -63,6 +64,15 @@ const MaxPayloadBytes = 1 << 20 // 1 MiB
 type SchemaValidator interface {
 	ValidatePayload(ctx context.Context, tenantID, kind, version string, payload []byte) error
 	IsRegistered(kind, version string) bool
+}
+
+// RedactionLookup is the optional slice-015 hook into the schema
+// registry: given a (kind, semver), return the JSONPath rules declared
+// under the schema's `x-redaction-rules` extension key. A validator
+// that does not implement this interface is treated as "no rules"
+// (the slice-014 InMemory registry, for example).
+type RedactionLookup interface {
+	RedactionRulesFor(ctx context.Context, tenantID, kind, version string) ([]string, error)
 }
 
 // Decision enumerates the outcome of Service.Process. Every value maps to
@@ -258,6 +268,44 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	if err := s.valid.ValidatePayload(ctx, cred.TenantID, rec.EvidenceKind, rec.SchemaVersion, payloadJSON); err != nil {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedValidation, err.Error(), pgtype.UUID{})
 		return Receipt{}, DecisionRejectedValidation, fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+
+	// AC-6 (slice 015): apply per-kind redaction rules BEFORE hashing so
+	// the ledger never stores the unredacted payload and idempotency
+	// dedup compares hashes of redacted forms (deterministic given the
+	// same rules). When the validator does not implement RedactionLookup,
+	// we treat it as "no rules" — this keeps the slice-013 InMemory
+	// fallback unchanged.
+	//
+	// Anti-criterion (P0): we never log the raw payloadJSON here. The
+	// only error path through this block surfaces the rule string or
+	// the redactor's own error, not the payload.
+	if lookup, ok := s.valid.(RedactionLookup); ok {
+		rules, rerr := lookup.RedactionRulesFor(ctx, cred.TenantID, rec.EvidenceKind, rec.SchemaVersion)
+		if rerr != nil {
+			s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError,
+				"redaction lookup: "+rerr.Error(), pgtype.UUID{})
+			return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: redaction lookup: %w", rerr)
+		}
+		if len(rules) > 0 {
+			redacted, aerr := redact.Apply(rec.Payload, rules)
+			if aerr != nil {
+				s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError,
+					"redaction apply: "+aerr.Error(), pgtype.UUID{})
+				return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: redaction apply: %w", aerr)
+			}
+			rec.Payload = redacted
+			// Re-marshal so payloadJSON (used below for the DB write) is
+			// the redacted form. Hashing happens below — it will hash
+			// the redacted record. The unredacted form is GC'd here.
+			redactedJSON, merr := protojson.Marshal(redacted)
+			if merr != nil {
+				s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError,
+					"payload re-marshal after redact", pgtype.UUID{})
+				return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: redacted re-marshal: %w", merr)
+			}
+			payloadJSON = redactedJSON
+		}
 	}
 
 	// Credential scope enforcement: AC anti-criterion "no cross-credential

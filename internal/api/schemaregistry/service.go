@@ -16,6 +16,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/redact"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -31,6 +32,11 @@ type Service struct {
 	compiled  map[string]*jsonschema.Schema    // kind|semver -> compiled validator (global rows)
 	byKey     map[string]storedSchema          // kind|semver -> last-known stored schema (global rows)
 	tenantSch map[string]map[string]*tenantRow // tenantID -> kind|semver -> compiled+stored
+	// Slice 015: per-(kind|semver) redaction rules extracted from each
+	// schema's x-redaction-rules extension key at load time. Empty when
+	// the schema declares no rules. Read on the push hot path so we
+	// avoid re-parsing the schema body per record.
+	redaction map[string][]string
 }
 
 type storedSchema struct {
@@ -43,8 +49,9 @@ type storedSchema struct {
 }
 
 type tenantRow struct {
-	compiled *jsonschema.Schema
-	stored   storedSchema
+	compiled  *jsonschema.Schema
+	stored    storedSchema
+	redaction []string
 }
 
 // NewService constructs a DB-backed Service. The pool is the app-role
@@ -58,6 +65,7 @@ func NewService(pool *pgxpool.Pool) *Service {
 		compiled:  map[string]*jsonschema.Schema{},
 		byKey:     map[string]storedSchema{},
 		tenantSch: map[string]map[string]*tenantRow{},
+		redaction: map[string][]string{},
 	}
 }
 
@@ -149,6 +157,7 @@ func (s *Service) LoadFromDB(ctx context.Context) error {
 	defer s.mu.Unlock()
 	s.compiled = map[string]*jsonschema.Schema{}
 	s.byKey = map[string]storedSchema{}
+	s.redaction = map[string][]string{}
 	s.cache = New(nil)
 	for _, r := range rows {
 		compiled, err := compileSchema(r.SchemaJson)
@@ -165,9 +174,58 @@ func (s *Service) LoadFromDB(ctx context.Context) error {
 			owner:             r.Owner,
 			defaultSCFAnchors: r.DefaultScfAnchors,
 		}
+		// Slice 015: extract x-redaction-rules. A malformed list is
+		// fatal at load — we'd rather refuse to start than silently
+		// fail-open on secret redaction.
+		rules, rerr := redact.ExtractRulesFromSchema(r.SchemaJson)
+		if rerr != nil {
+			return fmt.Errorf("redaction rules %s/%s: %w", r.Kind, r.Semver, rerr)
+		}
+		if len(rules) > 0 {
+			s.redaction[key] = rules
+		}
 		s.cache.Register(r.Kind, r.Semver)
 	}
 	return nil
+}
+
+// RedactionRulesFor implements ingest.RedactionLookup (slice 015). Returns
+// the JSONPath rule list for (tenantID, kind, semver) — tenant-private
+// rows shadow global rows. Empty slice + nil error means "no rules".
+func (s *Service) RedactionRulesFor(ctx context.Context, tenantID, kind, version string) ([]string, error) {
+	if tenantID != "" {
+		s.mu.RLock()
+		if m, ok := s.tenantSch[tenantID]; ok {
+			if row, ok := m[cacheKey(kind, version)]; ok {
+				out := append([]string(nil), row.redaction...)
+				s.mu.RUnlock()
+				return out, nil
+			}
+		}
+		s.mu.RUnlock()
+	}
+	s.mu.RLock()
+	rules, ok := s.redaction[cacheKey(kind, version)]
+	s.mu.RUnlock()
+	if !ok {
+		// Tenant-private kinds might exist that haven't been hydrated
+		// into the tenant cache yet. Defer to lookupCompiled to load
+		// the row, then re-check the tenant cache. We re-use the
+		// existing slow path rather than duplicating it.
+		if tenantID != "" {
+			if _, err := s.lookupCompiled(ctx, tenantID, kind, version); err == nil {
+				s.mu.RLock()
+				defer s.mu.RUnlock()
+				if m, ok := s.tenantSch[tenantID]; ok {
+					if row, ok := m[cacheKey(kind, version)]; ok {
+						return append([]string(nil), row.redaction...), nil
+					}
+				}
+			}
+		}
+		return nil, nil
+	}
+	return append([]string(nil), rules...), nil
 }
 
 // ValidatePayload checks `payload` (the raw JSON bytes of an evidence
@@ -490,6 +548,11 @@ func (s *Service) lookupCompiled(ctx context.Context, tenantID, kind, version st
 			if s.tenantSch[tenantID] == nil {
 				s.tenantSch[tenantID] = map[string]*tenantRow{}
 			}
+			rules, rerr := redact.ExtractRulesFromSchema(row.SchemaJSON)
+			if rerr != nil {
+				s.mu.Unlock()
+				return nil, fmt.Errorf("tenant redaction rules: %w", rerr)
+			}
 			s.tenantSch[tenantID][cacheKey(kind, version)] = &tenantRow{
 				compiled: compiled,
 				stored: storedSchema{
@@ -499,6 +562,7 @@ func (s *Service) lookupCompiled(ctx context.Context, tenantID, kind, version st
 					owner:             row.Owner,
 					defaultSCFAnchors: row.DefaultSCFAnchors,
 				},
+				redaction: rules,
 			}
 			s.mu.Unlock()
 			return compiled, nil

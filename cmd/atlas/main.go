@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
+	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
 )
 
 const (
@@ -73,11 +75,43 @@ func main() {
 		ingestSvc = ingest.New(pool, schemaSvc)
 	}
 
-	srv := api.New(api.Config{
+	// Slice 015: if NATS_URL is set, open a JetStream connection and wire
+	// the substrate. The push handler then publishes to the stream and
+	// the consumer drains it into the ledger via ingestSvc. Without
+	// NATS_URL, the platform runs in dev mode where push goes
+	// straight to Service.Process (slice 013's path).
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	var streamConn *streambuf.Conn
+	var streamPub *streambuf.JetStreamPublisher
+	var streamConsumer *streambuf.Consumer
+	if natsURL := os.Getenv("NATS_URL"); natsURL != "" && ingestSvc != nil {
+		bootCtx, bootCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		conn, err := streambuf.Open(bootCtx, streambuf.Config{
+			URL:    natsURL,
+			Logger: logger,
+		})
+		bootCancel()
+		if err != nil {
+			// Streaming substrate must not silently fail. AC-2 / AC-3
+			// require this path when operators have configured NATS.
+			fmt.Fprintf(os.Stderr, "atlas: streambuf.Open: %v\n", err)
+			os.Exit(1)
+		}
+		streamConn = conn
+		streamPub = streambuf.NewJetStreamPublisher(conn)
+		streamConsumer = streambuf.NewConsumer(conn, ingestSvc)
+		fmt.Fprintf(os.Stderr, "atlas: NATS JetStream substrate ready (slice 015)\n")
+	}
+
+	cfg := api.Config{
 		SchemaRegistry:   schemaSvc,
 		IngestService:    ingestSvc,
 		EvidencePushRate: 100, // 100 records/sec default per EVIDENCE_SDK §4.6
-	})
+	}
+	if streamPub != nil {
+		cfg.EvidencePublisher = streamPub
+	}
+	srv := api.New(cfg)
 
 	if bootstrapTenant := os.Getenv("ATLAS_BOOTSTRAP_TENANT"); bootstrapTenant != "" {
 		cred, bearer, err := srv.IssueBootstrapCredential(bootstrapTenant)
@@ -151,13 +185,33 @@ func main() {
 		}()
 	}
 
+	// Slice 015: drive the consumer alongside the gRPC + HTTP servers.
+	// It shares the same stop signal so SIGTERM tears all three down
+	// together.
+	if streamConsumer != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fmt.Fprintf(os.Stderr, "atlas: NATS consumer draining %s\n", streambufSubject())
+			if err := streamConsumer.Start(ctx); err != nil {
+				errCh <- fmt.Errorf("streambuf consumer: %w", err)
+			}
+		}()
+	}
+
 	wg.Wait()
 	close(errCh)
+	if streamConn != nil {
+		streamConn.Close()
+	}
 	for err := range errCh {
 		fmt.Fprintf(os.Stderr, "atlas: %v\n", err)
 		os.Exit(1)
 	}
 }
+
+// streambufSubject surfaces the default subject for the boot log line.
+func streambufSubject() string { return streambuf.DefaultSubject }
 
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {

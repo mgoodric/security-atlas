@@ -80,8 +80,17 @@ func (s *Server) httpHandler() http.Handler {
 	// Slice 013: evidence ledger write API. Only mounted when an ingest
 	// service has been wired in (DB-backed). Unit-only servers leave it
 	// nil and exclusively use the slice-003 gRPC fallback path.
+	//
+	// Slice 015: when the JetStream Publisher is wired
+	// (s.evidencePublisher), the handler routes pushes through the
+	// stream and acks at stream-commit time (AC-2). When nil, the
+	// handler falls back to direct Service.Process — the slice-013
+	// path — for unit tests and dev mode without NATS.
 	if s.ingestService != nil {
 		evidenceH := apievidence.NewHTTPHandler(s.ingestService, s.evidencePushRate)
+		if s.evidencePublisher != nil {
+			evidenceH = evidenceH.WithPublisher(s.evidencePublisher)
+		}
 		root.Post("/v1/evidence:push", evidenceH.PushHTTP)
 	}
 	// Slice 019: risk register CRUD + 5x5 heatmap. Routes appended per the
