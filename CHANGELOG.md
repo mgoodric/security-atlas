@@ -13,7 +13,6 @@ auto-generated notes.
 
 ### Added
 
-<<<<<<< HEAD
 - **Slice 011 — Manual control type + attestation/upload flow.** New
   `POST /v1/controls/{id}/attestations` endpoint pushes a
   `manual.attestation.v1` evidence record through slice 013's ingestion
@@ -69,7 +68,7 @@ population_id)` enforce the slice-002 D3 cross-tenant blocker.
   once slice 028 lands (forward-compatible gate).
 - **Slice 015 — NATS JetStream evidence buffer + ingestion stage.** Push
   pipeline now flows through a durable JetStream buffer: `POST
-  /v1/evidence:push` publishes to the `EVIDENCE_INGEST` stream (subject
+/v1/evidence:push` publishes to the `EVIDENCE_INGEST` stream (subject
   `evidence.ingest`) and acks at stream-commit time, not at ledger
   write (canvas §4.3, EVIDENCE_SDK §4.6). A pull-consumer
   (`internal/evidence/streambuf.Consumer`) reads from the stream and
@@ -104,9 +103,9 @@ population_id)` enforce the slice-002 D3 cross-tenant blocker.
   set in the environment.
 
   Substrate additions: NATS Go SDK `github.com/nats-io/nats.go
-  v1.52.0` in `go.mod`; NATS 2.10 service in
+v1.52.0` in `go.mod`; NATS 2.10 service in
   `deploy/docker/docker-compose.yml` (JetStream enabled, `-js -sd
-  /data`, healthcheck on the monitoring port); CI workflow starts
+/data`, healthcheck on the monitoring port); CI workflow starts
   NATS via `docker run` (matching slice 036's MinIO pattern, not
   the `services:` block because the official image requires `-js`
   to be passed explicitly). Anti-criteria enforced: the push

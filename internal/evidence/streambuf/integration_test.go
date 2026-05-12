@@ -271,7 +271,17 @@ func TestAC2_PublishAckBeforeLedgerWrite(t *testing.T) {
 	consumer := streambuf.NewConsumer(f.conn, f.svc)
 	consumerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	go func() { _ = consumer.Start(consumerCtx) }()
+	consumerErr := make(chan error, 1)
+	go func() { consumerErr <- consumer.Start(consumerCtx) }()
+	t.Cleanup(func() {
+		select {
+		case e := <-consumerErr:
+			if e != nil {
+				t.Logf("consumer exited with error: %v", e)
+			}
+		default:
+		}
+	})
 	waitFor(t, 10*time.Second, func() bool {
 		return countEvidence(t, f.pool, f.tenant) == 1
 	})

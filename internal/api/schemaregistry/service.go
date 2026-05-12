@@ -189,6 +189,40 @@ func (s *Service) LoadFromDB(ctx context.Context) error {
 	return nil
 }
 
+// IsRegisteredForTenant implements ingest.TenantAwareRegistry (slice 015).
+// Returns true if (kind, semver) is registered globally OR as a private
+// kind under tenantID. The global cache is hot; tenant-private kinds
+// fall through to the lookupCompiled slow path which hits the DB once
+// per (tenant, kind, semver) then memoizes.
+//
+// AC-6 / TestAC6_RedactionAtIngestion depends on this: the test
+// registers `secret.scan.v1` as a tenant-private kind, so a
+// global-only IsRegistered probe would reject the push as unknown
+// and the consumer would Term it as poison.
+func (s *Service) IsRegisteredForTenant(ctx context.Context, tenantID, kind, version string) bool {
+	if s.cache.IsRegistered(kind, version) {
+		return true
+	}
+	if tenantID == "" {
+		return false
+	}
+	s.mu.RLock()
+	if m, ok := s.tenantSch[tenantID]; ok {
+		if _, ok := m[cacheKey(kind, version)]; ok {
+			s.mu.RUnlock()
+			return true
+		}
+	}
+	s.mu.RUnlock()
+	// Slow path: hydrate the tenant cache from the DB. lookupCompiled
+	// returns ErrUnknownKind when the row is absent for both tenant
+	// and global namespace, which we map to false.
+	if _, err := s.lookupCompiled(ctx, tenantID, kind, version); err == nil {
+		return true
+	}
+	return false
+}
+
 // RedactionRulesFor implements ingest.RedactionLookup (slice 015). Returns
 // the JSONPath rule list for (tenantID, kind, semver) — tenant-private
 // rows shadow global rows. Empty slice + nil error means "no rules".

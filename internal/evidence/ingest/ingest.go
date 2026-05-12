@@ -66,6 +66,22 @@ type SchemaValidator interface {
 	IsRegistered(kind, version string) bool
 }
 
+// TenantAwareRegistry is the optional slice-015 hook into the schema
+// registry: report whether a (kind, semver) is registered for the
+// given tenant (tenant-private kinds shadow global kinds). When the
+// validator does not implement this interface, Service.Process falls
+// back to the global-only IsRegistered check — that's the slice-013
+// InMemory path and is correct for unit tests with no tenant kinds.
+//
+// Why this exists: slice 015 introduced tenant-private kinds for
+// per-kind redaction tests (`secret.scan.v1` under tenant A). The
+// global-only IsRegistered cache would reject such pushes as
+// "unknown kind" before reaching the redaction step. With the
+// tenant-aware probe, ingest correctly accepts tenant-private kinds.
+type TenantAwareRegistry interface {
+	IsRegisteredForTenant(ctx context.Context, tenantID, kind, version string) bool
+}
+
 // RedactionLookup is the optional slice-015 hook into the schema
 // registry: given a (kind, semver), return the JSONPath rules declared
 // under the schema's `x-redaction-rules` extension key. A validator
@@ -260,7 +276,17 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	}
 
 	// AC-1 + anti-criterion: schemaless push rejected via slice-014 hook.
-	if !s.valid.IsRegistered(rec.EvidenceKind, rec.SchemaVersion) {
+	// Slice 015 adds the tenant-aware probe: tenant-private kinds
+	// (used by AC-6 redaction tests, and by any operator who registers
+	// a private kind via POST /v1/schemas) are honored here. The
+	// global-only IsRegistered cache would reject them as unknown.
+	registered := false
+	if probe, ok := s.valid.(TenantAwareRegistry); ok {
+		registered = probe.IsRegisteredForTenant(ctx, cred.TenantID, rec.EvidenceKind, rec.SchemaVersion)
+	} else {
+		registered = s.valid.IsRegistered(rec.EvidenceKind, rec.SchemaVersion)
+	}
+	if !registered {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedUnknownKind,
 			fmt.Sprintf("kind=%s version=%s", rec.EvidenceKind, rec.SchemaVersion), pgtype.UUID{})
 		return Receipt{}, DecisionRejectedUnknownKind, fmt.Errorf("%w: %s/%s", ErrUnknownKind, rec.EvidenceKind, rec.SchemaVersion)
