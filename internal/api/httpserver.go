@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/admincreds"
 	"github.com/mgoodric/security-atlas/internal/api/anchors"
 	"github.com/mgoodric/security-atlas/internal/api/anchorseed"
 	artifactsapi "github.com/mgoodric/security-atlas/internal/api/artifacts"
@@ -27,6 +28,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/vendors"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/audit"
+	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/exception"
@@ -57,7 +59,11 @@ func (s *Server) HTTPHandlerForTests() http.Handler {
 func (s *Server) httpHandler() http.Handler {
 	root := chi.NewRouter()
 	root.Use(corsMiddleware)
-	root.Use(httpAuthMiddleware(s.credStore))
+	// Slice 034: /auth/* (login/callback/logout) is bearer-exempt — users
+	// don't have a bearer yet at the moment they sign in. The middleware
+	// must skip the prefix. Note: /v1/admin/credentials* DOES go through
+	// bearer auth (admin endpoints require an admin credential).
+	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/"))
 
 	mappings := anchorseed.New()
 	queries := dbx.New(s.dbPool)
@@ -188,6 +194,24 @@ func (s *Server) httpHandler() http.Handler {
 	root.Patch("/v1/exceptions/{id}/approve", exceptionsH.Approve)
 	root.Patch("/v1/exceptions/{id}/deny", exceptionsH.Deny)
 	root.Patch("/v1/exceptions/{id}/activate", exceptionsH.Activate)
+	// Slice 034: admin credentials HTTP API + auth routes. Routes append
+	// per the parallel-batch convention. Admin-credential routes require
+	// the bearer auth middleware (admin gate inside the handler). The
+	// /auth/* routes are exempted from bearer auth in the middleware
+	// (httpAuthMiddlewareWithExemptions above).
+	if s.apikeyStore != nil {
+		admincredsH := admincreds.New(s.apikeyStore)
+		root.Post("/v1/admin/credentials", admincredsH.Issue)
+		root.Get("/v1/admin/credentials", admincredsH.List)
+		root.Post("/v1/admin/credentials/{id}/rotate", admincredsH.Rotate)
+		root.Post("/v1/admin/credentials/{id}/revoke", admincredsH.Revoke)
+	}
+	if s.authHandler != nil {
+		root.Get("/auth/oidc/login", s.authHandler.OIDCLogin)
+		root.Get("/auth/oidc/callback", s.authHandler.OIDCCallback)
+		root.Post("/auth/local/login", s.authHandler.LocalLogin)
+		root.Post("/auth/logout", s.authHandler.Logout)
+	}
 	return root
 }
 
@@ -271,8 +295,25 @@ func corsMiddleware(next http.Handler) http.Handler {
 // from the Authorization header, resolve via credstore, attach the
 // credential to context.
 func httpAuthMiddleware(store *credstore.Store) func(http.Handler) http.Handler {
+	return httpAuthMiddlewareWithExemptions(store, nil)
+}
+
+// httpAuthMiddlewareWithExemptions is the slice-034 variant that:
+//  1. Skips bearer auth for request paths whose prefix matches any exempt.
+//     The /auth/* routes need this because the user has no bearer yet at
+//     the moment of sign-in.
+//  2. Stacks a DB-backed apikeystore.Store as a fallback for tokens that
+//     the in-memory credstore does not know about. Connector pushes use
+//     DB-backed keys; bootstrap admin credentials use in-memory.
+func httpAuthMiddlewareWithExemptions(store *credstore.Store, apikeys *apikeystore.Store, exempt ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			for _, p := range exempt {
+				if p != "" && strings.HasPrefix(r.URL.Path, p) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
 			token, ok := extractBearerFromHTTP(r)
 			if !ok {
 				writeAuthError(w, "authorization must be `Bearer <token>`")
@@ -280,6 +321,18 @@ func httpAuthMiddleware(store *credstore.Store) func(http.Handler) http.Handler 
 			}
 			cred, err := store.Authenticate(token)
 			if err != nil {
+				// Fall through to the DB-backed apikeystore for slice-034
+				// keys that were issued via /v1/admin/credentials.
+				if errors.Is(err, credstore.ErrUnknownKey) && apikeys != nil {
+					dbCred, dbErr := apikeys.Authenticate(r.Context(), token)
+					if dbErr == nil {
+						ctx := authctx.WithCredential(r.Context(), dbCred)
+						next.ServeHTTP(w, r.WithContext(ctx))
+						return
+					}
+					writeAuthError(w, "invalid or revoked bearer token")
+					return
+				}
 				if errors.Is(err, credstore.ErrUnknownKey) {
 					writeAuthError(w, "invalid or revoked bearer token")
 					return

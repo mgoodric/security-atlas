@@ -81,6 +81,44 @@ auto-generated notes.
   idempotence, and audit-log append-only invariant. 22 integration
   tests pass.
 
+- **Slice 034 — OIDC RP + local users + `api_keys` admin.** Ships the
+  authentication primitives that make security-atlas reachable: OIDC
+  Relying Party flow (authorization-code + PKCE) for SSO, local-mode
+  username/password login for solo deployments, server-side opaque
+  sessions, and a DB-backed `api_keys` table for machine bearer
+  credentials (used by every existing connector). Five new tables under
+  one migration (`20260511000012_users_sessions_api_keys.sql`): `users`,
+  `local_credentials`, `sessions`, `oidc_idp_configs`, `api_keys` —
+  each with the four-policy RLS pattern under FORCE ROW LEVEL SECURITY.
+  Three new internal packages: `internal/auth/bearer` (generate +
+  HMAC-SHA256-keyed hash for bearer tokens; refuse-to-boot if
+  `BEARER_HASH_KEY` is unset), `internal/auth/password` (argon2id
+  hash/verify per RFC 9106), `internal/auth/oidc` (RP-only — we never
+  issue identity tokens; CSRF protection via state cookie + PKCE
+  verifier cookie under `/auth/oidc` path), `internal/auth/sessions`
+  (256-bit opaque cookie id, HttpOnly + Secure + SameSite=Lax, sliding-
+  window refresh), `internal/auth/users` (local + OIDC user
+  provisioning), `internal/auth/apikeystore` (DB-backed credstore —
+  issue / list / rotate / revoke / authenticate). Four new HTTP
+  endpoints under `/v1/admin/credentials` (Issue / List / Rotate /
+  Revoke; bearer plaintext returned exactly once at issue/rotate, never
+  retrievable again) and four user-facing routes under `/auth/*`
+  (OIDC login + callback, local login, logout). Bearer-token format is
+  `atlas_<32-char-base32>` for production / `atlas_test_<32-char-
+base32>` for tests (neutral prefix, secret-scanner-safe). Hot-path
+  auth uses HMAC-SHA256 keyed lookup (constant-time, no slow KDF on
+  every push); local passwords use argon2id (RFC 9106 defaults). Choice
+  rationale + threat-model trade-off recorded in
+  `docs/adr/0002-bearer-token-storage.md`. Library: `github.com/coreos/
+go-oidc/v3` + `golang.org/x/oauth2`. Existing in-memory `credstore`
+  retained for bootstrap-credential paths (slices 014 / 018 / 011 — no
+  surface changes); the HTTP auth middleware stacks the DB-backed store
+  as a fallback so connector pushes can use API keys issued through
+  `/v1/admin/credentials`. Anti-criteria honored: NOT an IdP (RP only);
+  passwords NEVER stored unhashed (argon2id mandatory); CSRF guard on
+  state parameter (callback rejects mismatch / missing state cookie
+  with 400). 13/13 ACs PASS.
+
 - **Slice 048 — Jira / Linear ticket connector.** New stateless connector
   binary `connectors/jira/cmd/atlas-jira` emitting one evidence kind —
   `jira.ticket_evidence.v1` — across two ticketing platforms:
@@ -191,8 +229,6 @@ observed_at>")` via `idem.HostPostureKey`; empty `host_uuid` returns
   ErrLocalSocketNotWired sentinel. Test fixtures use neutral token
   strings (no Fleet/Okta/GitHub prefix shapes) so GitGuardian does
   not flag the commit.
-  ||||||| parent of dd95004 (feat(connectors): Manual upload / CSV / S3 / SFTP escape-hatch (#049))
-  =======
 - **Slice 049 — Manual upload / CSV / S3 / SFTP escape-hatch connector.**
   New stateless connector binary `connectors/manual/cmd/atlas-manual`
   emits `manual.upload.v1` records via three subcommand modes:

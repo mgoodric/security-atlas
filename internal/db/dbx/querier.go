@@ -87,6 +87,7 @@ type Querier interface {
 	// the same JSON (the application computes and passes both to keep the DB
 	// trigger comparison cheap).
 	CreateFrameworkScope(ctx context.Context, arg CreateFrameworkScopeParams) (FrameworkScope, error)
+	CreateOidcIdpConfig(ctx context.Context, arg CreateOidcIdpConfigParams) (OidcIdpConfig, error)
 	// Slice 026 — sample-pull primitives.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -111,6 +112,13 @@ type Querier interface {
 	// (is_builtin=true) and by admins adding custom dimensions (is_builtin=false).
 	// tenant_id is captured directly so RLS evaluates the policy on insert.
 	CreateScopeDimension(ctx context.Context, arg CreateScopeDimensionParams) (ScopeDimension, error)
+	// Persist a new session row. The id is generated server-side by the caller as
+	// a 32-byte crypto/rand string; we pass it in so the cookie and the row share
+	// exact bytes.
+	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	// Insert a new user (local-mode). For OIDC-provisioned users use UpsertUserByIdpSubject
+	// which also handles tenant_id, display_name, and the idp_* fields.
+	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// Insert a vendor. tenant_id is captured directly so RLS evaluates the
 	// INSERT WITH CHECK policy. dpa_signed_at is required by CHECK constraint
 	// whenever dpa_signed=true.
@@ -140,6 +148,11 @@ type Querier interface {
 	// (tenant_id, content_hash) WHERE content_hash IS NOT NULL keeps the
 	// result single-row.
 	FindArtifactByHash(ctx context.Context, arg FindArtifactByHashParams) (Artifact, error)
+	// Constant-time lookup by HMAC hash. Returns the row whether revoked, retired,
+	// or expired — the caller (credstore.Authenticate) is responsible for the
+	// state-check tree.
+	GetAPIKeyByHash(ctx context.Context, tokenHash []byte) (ApiKey, error)
+	GetAPIKeyByID(ctx context.Context, arg GetAPIKeyByIDParams) (ApiKey, error)
 	// Returns the currently-active framework scope for a given framework version,
 	// i.e. the (at most one) row in state `activated` for that (tenant, fv) pair.
 	// AC-3: a partial UNIQUE index guarantees at most one row matches.
@@ -177,6 +190,8 @@ type Querier interface {
 	// ORDER BY effective_from DESC LIMIT 1 picks the most-recent applicable row.
 	GetFrameworkScopeAsOf(ctx context.Context, arg GetFrameworkScopeAsOfParams) (FrameworkScope, error)
 	GetFrameworkScopeByID(ctx context.Context, arg GetFrameworkScopeByIDParams) (FrameworkScope, error)
+	GetLocalCredentialByUserID(ctx context.Context, arg GetLocalCredentialByUserIDParams) (LocalCredential, error)
+	GetOidcIdpConfigByName(ctx context.Context, arg GetOidcIdpConfigByNameParams) (OidcIdpConfig, error)
 	GetPopulationByID(ctx context.Context, arg GetPopulationByIDParams) (Population, error)
 	GetRiskByID(ctx context.Context, arg GetRiskByIDParams) (Risk, error)
 	GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnchor, error)
@@ -195,6 +210,12 @@ type Querier interface {
 	GetScopeCellByID(ctx context.Context, arg GetScopeCellByIDParams) (ScopeCell, error)
 	// Resolve a dimension by name within the current tenant context.
 	GetScopeDimensionByName(ctx context.Context, arg GetScopeDimensionByNameParams) (ScopeDimension, error)
+	// Read a session by cookie id. Returns the row whether revoked or expired;
+	// the caller checks `revoked_at IS NULL` and `expires_at > now()`.
+	GetSessionByID(ctx context.Context, arg GetSessionByIDParams) (Session, error)
+	// Lookup by case-insensitive email within a tenant. Used by /auth/local/login.
+	GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) (User, error)
+	GetUserByID(ctx context.Context, arg GetUserByIDParams) (User, error)
 	GetVendor(ctx context.Context, arg GetVendorParams) (Vendor, error)
 	// Returns risk counts grouped by (likelihood, impact) for risks whose
 	// methodology shares the 5x5 (likelihood, impact 1..5) shape. nist_800_30
@@ -205,6 +226,10 @@ type Querier interface {
 	// The CAST chain (jsonb -> text -> int) is necessary because pgx cannot
 	// read jsonb-number values directly as int4 without an explicit cast.
 	HeatmapBuckets(ctx context.Context, tenantID pgtype.UUID) ([]HeatmapBucketsRow, error)
+	// Persist a new API key. token_hash is HMAC-SHA256(plaintext, BEARER_HASH_KEY)
+	// per ADR 0002 — computed by the application layer before this call. last4 is
+	// the last four characters of the plaintext bearer (safe to surface).
+	InsertAPIKey(ctx context.Context, arg InsertAPIKeyParams) (ApiKey, error)
 	// Insert a new control row (initial upload or supersession). Caller is
 	// responsible for UPDATE-ing the predecessor's superseded_by in the same tx.
 	InsertControlVersion(ctx context.Context, arg InsertControlVersionParams) (Control, error)
@@ -234,6 +259,9 @@ type Querier interface {
 	// Idempotent: ON CONFLICT DO NOTHING so re-running a "link these controls"
 	// request does not 23505 on a re-link.
 	LinkRiskControl(ctx context.Context, arg LinkRiskControlParams) error
+	// Active keys for a tenant. Excludes revoked rows; includes retired-but-not-yet-
+	// past-grace predecessors so the admin UI can show "rotating out — valid until X."
+	ListAPIKeysByTenant(ctx context.Context, tenantID pgtype.UUID) ([]ApiKey, error)
 	// Every active (non-superseded) control for the active tenant.
 	ListActiveControls(ctx context.Context, tenantID pgtype.UUID) ([]ListActiveControlsRow, error)
 	// Bypass-RLS path used at boot by the platform-schema importer running as
@@ -285,6 +313,7 @@ type Querier interface {
 	ListFrameworkScopesByFrameworkVersion(ctx context.Context, arg ListFrameworkScopesByFrameworkVersionParams) ([]FrameworkScope, error)
 	ListFrameworkVersionsBySlug(ctx context.Context, slug string) ([]FrameworkVersion, error)
 	ListFrameworks(ctx context.Context) ([]Framework, error)
+	ListOidcIdpConfigsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]OidcIdpConfig, error)
 	// AC-4 overdue calc — vendors whose last_review_date + cadence is older than
 	// the cutoff date. NULL last_review_date means "never reviewed" which always
 	// counts as overdue (a vendor with no review on file is by definition past
@@ -338,6 +367,11 @@ type Querier interface {
 	LogArtifactAccess(ctx context.Context, arg LogArtifactAccessParams) error
 	// Flip a predecessor row to superseded. Idempotent: no-op if already set.
 	MarkControlSuperseded(ctx context.Context, arg MarkControlSupersededParams) error
+	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
+	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
+	// Set the predecessor's retirement deadline on rotation. After retires_at the
+	// predecessor's bearer no longer authenticates (credstore.Authenticate enforces).
+	SetAPIKeyRetiresAt(ctx context.Context, arg SetAPIKeyRetiresAtParams) error
 	// Point a framework at its current version.
 	SetLatestVersion(ctx context.Context, arg SetLatestVersionParams) error
 	// AC-6: draft -> review. Guarded so callers can never re-submit an already
@@ -348,6 +382,12 @@ type Querier interface {
 	// superseded_by at the new row, stamp superseded_at = now(). Skips the
 	// new row itself (id <> @new_id) so a re-running activation is idempotent.
 	SupersedePreviousActivated(ctx context.Context, arg SupersedePreviousActivatedParams) error
+	// Best-effort timestamp bump. Failure here is logged but never blocks the
+	// authenticated request.
+	TouchAPIKeyLastUsed(ctx context.Context, tokenHash []byte) error
+	// Update last_seen_at and (when given) bump expires_at. Caller computes the
+	// new expires_at — sliding-window logic lives in the sessions package.
+	TouchSession(ctx context.Context, arg TouchSessionParams) error
 	UnlinkRiskControl(ctx context.Context, arg UnlinkRiskControlParams) error
 	// Patch the predicate. The BEFORE UPDATE trigger
 	// (framework_scopes_bounce_on_predicate_change_trg) ensures that if this row
@@ -377,10 +417,18 @@ type Querier interface {
 	// as UpsertFramework above (avoids the NULLs-distinct gotcha on natural-key
 	// ON CONFLICT targets).
 	UpsertFrameworkVersion(ctx context.Context, arg UpsertFrameworkVersionParams) (FrameworkVersion, error)
+	// Set or overwrite the argon2id hash for a user. Idempotent so password-change
+	// and initial-provisioning go through the same path.
+	UpsertLocalCredential(ctx context.Context, arg UpsertLocalCredentialParams) error
 	// One annotation per (sample, evidence_record). Re-annotating overwrites
 	// result + notes (the audit log still captures every attempt via
 	// WriteSampleAuditLog).
 	UpsertSampleAnnotation(ctx context.Context, arg UpsertSampleAnnotationParams) (SampleAnnotation, error)
+	// Used by the OIDC callback: provision-on-first-sign-in by (idp_issuer, idp_subject).
+	// The composite UNIQUE index on (idp_issuer, idp_subject) WHERE both non-empty
+	// is the conflict target. On conflict we update display_name + email (the IdP
+	// is canonical) and updated_at.
+	UpsertUserByIdpSubject(ctx context.Context, arg UpsertUserByIdpSubjectParams) (User, error)
 	// Append-only. Every lifecycle transition writes one row (including
 	// system-driven auto-expiry). The exception_audit_log table has
 	// SELECT+INSERT policies only under FORCE RLS so no UPDATE/DELETE path

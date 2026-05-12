@@ -20,6 +20,8 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
+	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
+	"github.com/mgoodric/security-atlas/internal/auth/bearer"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
 	"github.com/mgoodric/security-atlas/internal/exception"
@@ -46,6 +48,15 @@ func main() {
 	dbURL := os.Getenv("DATABASE_URL_APP")
 	if dbURL == "" {
 		dbURL = os.Getenv("DATABASE_URL")
+	}
+
+	// Slice 034: BEARER_HASH_KEY is mandatory. Without it the server cannot
+	// authenticate DB-backed API keys (api_keys.token_hash is HMAC-SHA256
+	// keyed with this secret). Refuse-to-boot per docs/adr/0002.
+	bearerHashKey, err := bearer.LoadHashKey()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "atlas: %v\n", err)
+		os.Exit(1)
 	}
 
 	// The schema registry needs a pool to back its DB store. Construct
@@ -131,6 +142,31 @@ func main() {
 		defer pool.Close()
 		srv.AttachDB(pool)
 		fmt.Fprintf(os.Stderr, "atlas: pgx pool ready\n")
+
+		// Slice 034: wire the DB-backed apikey store. The auth pool
+		// (DATABASE_URL = BYPASSRLS migrate role) is used for the
+		// lookup-by-hash on the auth hot path; the app pool (RLS-enforced)
+		// is used for issue/list/rotate/revoke under a tenant context.
+		hasher, hErr := bearer.NewHasher(bearerHashKey)
+		if hErr != nil {
+			fmt.Fprintf(os.Stderr, "atlas: bearer.NewHasher: %v\n", hErr)
+			os.Exit(1)
+		}
+		var authPool *pgxpool.Pool
+		if migURL := os.Getenv("DATABASE_URL"); migURL != "" {
+			apCtx, apCancel := context.WithTimeout(ctx, 10*time.Second)
+			ap, err := pgxpool.New(apCtx, migURL)
+			apCancel()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "atlas: api-key auth pool: %v\n", err)
+			} else {
+				authPool = ap
+				defer ap.Close()
+			}
+		}
+		apikeySvc := apikeystore.NewStore(pool, authPool, hasher, 0)
+		srv.AttachAPIKeyStore(apikeySvc)
+		fmt.Fprintf(os.Stderr, "atlas: api_keys store wired (BEARER_HASH_KEY ok)\n")
 
 		// Import bundled platform schemas at boot. Idempotent — no-op when
 		// every kind is already present in the DB. Requires the connection
