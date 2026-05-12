@@ -3,7 +3,17 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-12 (parallel batch 8 claim-stake — 033 → in-progress; corrects batch-7 037 drift)
+**Last reconciled:** 2026-05-12 (slice 033 → in-review)
+
+## Drift detected — 2026-05-12 (slice 033 → in-review)
+
+Slice 033 (Postgres RLS enforcement on every tenant-scoped table + `tenancy.Middleware` + `just audit-rls` CI gate) flipped `in-progress` → `in-review`. PR gh#27 opened against main. The slice ships the runtime half of constitutional invariant 6 (canvas §5.4): chi middleware that lifts `cred.TenantID` onto every request context, deletes the redundant `tenancy.WithTenant(ctx, cred.TenantID)` boilerplate across 10 handler packages, adds the `atlas_service_account` BYPASSRLS role (NOLOGIN NOINHERIT, GRANT'd to atlas_app for `SET LOCAL ROLE` — no v1 production caller), and wires the `just audit-rls` script (pg_class + pg_policy join, fails CI on any uncovered tenant_id table) between migrate-up and the integration-test slate. **Zero new versioned migrations** — every existing tenant-scoped table already carried the right policy + FORCE shape; the slice ships only the bootstrap delta + middleware + audit machinery. Surfaces one pre-existing authorization bug for a P0 follow-up: admincreds Issue/List handlers source tenant from request body/query rather than the calling credential (RLS does NOT catch this because the handler is internally consistent — writes tenant B's row under tenant B's GUC). Unlocks slice 035 (RBAC + ABAC via OPA embedded; 034 already merged).
+
+| Row | Transition                  | Evidence                |
+| --- | --------------------------- | ----------------------- |
+| 033 | `in-progress` → `in-review` | gh#27 opened 2026-05-12 |
+
+**Counts delta:** in-progress −1 · in-review +1.
 
 ## Drift detected — 2026-05-12 (parallel batch 8 claim-stake)
 
@@ -315,7 +325,7 @@ Legal values (use exactly these strings):
 | 030 | OSCAL SSP + POA&M export pipeline                      | `not-ready`   | —                                                    | —     | —          | —          | waits on 008, 012, 017, 018, 026, 028                                    |
 | 031 | Monthly board brief (templated, no LLM)                | `not-ready`   | —                                                    | —     | —          | —          | waits on 012, 016, 020                                                   |
 | 032 | Quarterly board pack + investment-vs-coverage          | `not-ready`   | —                                                    | —     | —          | —          | waits on 031, 030                                                        |
-| 033 | Postgres RLS enforcement everywhere                    | `in-progress` | auth/033-postgres-rls-enforcement                    | —     | 2026-05-12 | —          | open-q #13 resolved · universal-conflict solo run                        |
+| 033 | Postgres RLS enforcement everywhere                    | `in-review`   | auth/033-postgres-rls-enforcement                    | gh#27 | 2026-05-12 | —          | open-q #13 resolved · universal-conflict solo run · unlocks 035 (with 034 merged) |
 | 034 | OIDC RP + local users                                  | `merged`      | auth/034-oidc-rp-local-users                         | gh#26 | 2026-05-11 | 2026-05-11 | unlocks 037 · ADR-0002 published                                         |
 | 035 | RBAC roles + ABAC via OPA embedded                     | `not-ready`   | —                                                    | —     | —          | —          | waits on 033, 034 · HITL on roles                                        |
 | 036 | S3 artifact store integration                          | `merged`      | infra/036-s3-artifact-store                          | gh#15 | 2026-05-11 | 2026-05-11 | closes 013 AC-6 PARTIAL gap                                              |
