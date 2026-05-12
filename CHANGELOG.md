@@ -85,6 +85,34 @@ auto-generated notes.
   platform-side bufconn integration tests verify register/list, push
   of all three kinds, scope dimensions, actor_id format
   `connector:okta:<service>@<version>`, and dedup by idempotency key.
+- **Slice 046 — 1Password connector.** New stateless connector binary
+  `connectors/1password/cmd/atlas-1password` emitting one evidence
+  kind: `1password.org_policy.v1` (existing slice-014 platform schema;
+  org-level posture — SCIM-provisioned user count, vault access
+  counts, MFA enforcement, group membership). No new schemas required
+  (reuses slice-014's bundled schema). Subcommands match slice 044's
+  pattern: `register` (declares one `SupportedKinds` + `["pull"]`
+  profile), `run` (pulls org policy state on a schedule), `scopes`
+  (prints canonical least-privilege Service Account scopes).
+  Auth: 1Password **Service Account** token via
+  `ONEPASSWORD_SERVICE_ACCOUNT_TOKEN` env (preferred) or `--token`
+  flag with help text recommending the env var to keep tokens out of
+  shell history. `opauth.Credential.String()` returns
+  `bearer: <redacted N bytes>`; tests pin both `%s` and `%v` paths.
+  Idempotency: `sha256("1password.org_policy" + org_id + hour)` via
+  `idem.OrgPolicyKey`; integration test verifies non-empty 64-char
+  key and dedup across two pushes within the same hour. Anti-criteria
+  honored: documented Service Account scopes are vault-scoped
+  `read_items` (NOT `write_items`); `DocumentedScopes` unit test
+  rejects `write`, `manage`, `admin`, `delete` keywords in Name or
+  Access fields; connector has zero `POST`/`PATCH`/`DELETE` code
+  paths against the 1Password API (read-only by construction);
+  `--insecure` flag refuses non-loopback platform endpoints (inherits
+  slice 003 SDK behaviour). Tests use `httptest.NewServer` to replay
+  realistic 1Password Connect API responses; platform-side bufconn
+  integration test verifies register/list, push, actor_id format
+  `connector:1password:<service>@<version>`, and dedup by idempotency
+  key.
 - **Slice 018 — FrameworkScope predicate + four-state workflow +
   intersection compute.** New `framework_scopes` workflow gates the
   audit-binding scope predicate behind
