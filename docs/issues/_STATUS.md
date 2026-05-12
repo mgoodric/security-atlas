@@ -9,12 +9,12 @@
 
 Three slices flipped `ready` → `in-progress` with worktrees + branches assigned:
 
-| Row | Transition              | Branch                                                 |
-| --- | ----------------------- | ------------------------------------------------------ |
-| 011 | `ready` → `in-progress` | `control-as-code/011-manual-control-attestation`       |
-| 015 | `ready` → `in-progress` | `evidence-pipeline/015-nats-jetstream-ingestion-stage` |
-| 015 | `in-progress` → `in-review` | gh#19 opened 2026-05-11                            |
-| 026 | `ready` → `in-progress` | `audit/026-sample-pull-primitives`                     |
+| Row | Transition                  | Branch                                                 |
+| --- | --------------------------- | ------------------------------------------------------ |
+| 011 | `ready` → `in-progress`     | `control-as-code/011-manual-control-attestation`       |
+| 015 | `ready` → `in-progress`     | `evidence-pipeline/015-nats-jetstream-ingestion-stage` |
+| 015 | `in-progress` → `in-review` | gh#19 opened 2026-05-11                                |
+| 026 | `ready` → `in-progress`     | `audit/026-sample-pull-primitives`                     |
 
 Migration slots: 011 → none (reuses slice-014 schema), 015 → none (substrate swap), 026 → `20260511000010_audit_samples`. Spine touch: 015 only (NATS Go SDK in go.mod/go.sum). First batch driven by the full-merge-cycle prompt — orchestrator runs Step 5 merge queue + Step 6 final reconcile.
 
