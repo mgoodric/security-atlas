@@ -3,9 +3,21 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-11 (parallel batch 4 claim-stake — 009, 045, 046 → in-progress)
+**Last reconciled:** 2026-05-11 (parallel batch 4 merged — 009, 045, 046 → merged)
 
-## Drift detected — 2026-05-11 (parallel batch 4 claim-stake)
+## Drift detected — 2026-05-11 (parallel batch 4 merged)
+
+Three slices flipped to `merged`. Slice 009 unblocks slices 010 + 011 on the critical path.
+
+| Row | Transition             | Evidence                                                                                                                                                                          |
+| --- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 009 | `in-review` → `merged` | commit `8eeb184` on main (gh#16 squashed 2026-05-11; required orchestrator pgx-typing fix to slice-002's mustInsertControl test helper after bundle_id NOT NULL column was added) |
+| 045 | `in-review` → `merged` | commit `998ac71` on main (gh#17 squashed 2026-05-11; orchestrator squashed branch history to clear GitGuardian flags from historical okta_secret_token literals)                  |
+| 046 | `in-review` → `merged` | commit `7c07b9f` on main (gh#18 squashed 2026-05-11; orchestrator squashed branch history to clear GitGuardian flags from historical ops\_-prefixed test literals)                |
+
+**Counts delta:** merged +3 · in-review −3 · ready +1 · not-ready −1. Slice 011 (manual control attestation) now has all deps satisfied (009 + 013 + 036) and transitions to `ready`. Slice 010 still waits on 007 (HITL SOC 2 crosswalk).
+
+## Drift detected — 2026-05-11 (parallel batch 4 claim-stake, archived)
 
 Three slices flipped `ready` → `in-progress` with worktrees + branches assigned:
 
@@ -132,12 +144,12 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 
 | Status        | Count  |
 | ------------- | ------ |
-| `merged`      | 15     |
+| `merged`      | 18     |
 | `in-review`   | 0      |
-| `in-progress` | 3      |
-| `ready`       | 11     |
+| `in-progress` | 0      |
+| `ready`       | 12     |
 | `blocked`     | 0      |
-| `not-ready`   | 21     |
+| `not-ready`   | 20     |
 | **Total**     | **50** |
 
 ## Status enum
@@ -164,9 +176,9 @@ Legal values (use exactly these strings):
 | 006 | SCF catalog importer + Framework/FrameworkVersion API  | `merged`    | catalog/006-scf-catalog-importer                | gh#6  | 2026-05-11 | 2026-05-11 | open-q #01 cleared at merge           |
 | 007 | SOC 2 v2017 (TSC) crosswalk loader                     | `ready`     | —                                               | —     | —          | —          | HITL on mapping spot-check            |
 | 008 | UCF graph traversal query API                          | `not-ready` | —                                               | —     | —          | —          | waits on 007                          |
-| 009 | Control bundle format spec + parser + upload           | `in-review` | control-as-code/009-control-bundle-format       | gh#16 | 2026-05-11 | —          | unlocks 010, 011 critical path        |
+| 009 | Control bundle format spec + parser + upload           | `merged`    | control-as-code/009-control-bundle-format       | gh#16 | 2026-05-11 | 2026-05-11 | unlocks 010, 011 critical path        |
 | 010 | SCF-anchored control kit (50 SOC 2 controls)           | `not-ready` | —                                               | —     | —          | —          | waits on 009, 007 · HITL on accuracy  |
-| 011 | Manual control type + attestation flow                 | `not-ready` | —                                               | —     | —          | —          | waits on 009, 013, 036                |
+| 011 | Manual control type + attestation flow                 | `ready`     | —                                               | —     | —          | —          | deps 009, 013, 036 all merged         |
 | 012 | Control state evaluation engine                        | `not-ready` | —                                               | —     | —          | —          | waits on 010, 013, 017                |
 | 013 | Evidence ledger write API + push endpoint              | `merged`    | evidence-pipeline/013-evidence-ledger-write-api | gh#12 | 2026-05-11 | 2026-05-11 | AC-6 PARTIAL — S3 redirect awaits 036 |
 | 014 | Schema registry service (in-tree Go)                   | `merged`    | evidence-pipeline/014-schema-registry-service   | gh#8  | 2026-05-11 | 2026-05-11 | —                                     |
@@ -200,8 +212,8 @@ Legal values (use exactly these strings):
 | 042 | Audit workspace view (sample + walkthrough + comments) | `not-ready` | —                                               | —     | —          | —          | waits on 025, 026, 027, 029           |
 | 043 | Board pack preview/export view                         | `not-ready` | —                                               | —     | —          | —          | waits on 005, 032                     |
 | 044 | GitHub connector                                       | `merged`    | connectors/044-github-connector                 | gh#14 | 2026-05-11 | 2026-05-11 | first post-013 connector              |
-| 045 | Okta connector                                         | `in-review` | connectors/045-okta-connector                   | gh#17 | 2026-05-11 | —          | deps 003, 013 merged                  |
-| 046 | 1Password connector                                    | `in-review` | connectors/046-1password-connector              | gh#18 | 2026-05-11 | —          | deps 003, 013 merged                  |
+| 045 | Okta connector                                         | `merged`    | connectors/045-okta-connector                   | gh#17 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                  |
+| 046 | 1Password connector                                    | `merged`    | connectors/046-1password-connector              | gh#18 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                  |
 | 047 | osquery/Fleet endpoint connector                       | `ready`     | —                                               | —     | —          | —          | deps 003, 013 merged                  |
 | 048 | Jira/Linear ticket connector                           | `ready`     | —                                               | —     | —          | —          | deps 003, 013 merged                  |
 | 049 | Manual upload / CSV / S3 / SFTP escape-hatch           | `ready`     | —                                               | —     | —          | —          | deps 003, 013 merged                  |
