@@ -38,6 +38,34 @@ auto-generated notes.
   gate); attestation without owner-role returns 403; every Decision
   flows through `ingest.Service.writeAudit` so the audit log records
   who attested + when (AC-6).
+- **Slice 026 — Sample-pull primitives (Population + Sample with
+  deterministic seed).** New audit primitives let auditors pull
+  reproducible evidence samples instead of doing it in Excel.
+  `POST /v1/populations` materialises a Population(control_id,
+  scope_predicate, time_window) — the scope predicate reuses slice
+  017's JSON-encoded boolean engine via `scope.Evaluate`. `POST /v1/samples`
+  takes (population_id, n, seed) and returns N records selected by
+  ChaCha8 PRNG seeded with `sha256(seed) → [32]byte` (math/rand/v2)
+  — re-running with the same seed returns identical N members
+  (AC-2). New tables under `migrations/sql/20260511000010_audit_samples.sql`:
+  `populations`, `samples`, `sample_evidence` (the chosen records),
+  `sample_annotations` (per-record `result ∈ {passed, failed,
+not-applicable}` + notes), and `sample_audit_log` (append-only:
+  SELECT + INSERT policies only under FORCE ROW LEVEL SECURITY,
+  matching slice 013's `evidence_audit_log` pattern). All five
+  tables use the four-policy RLS pattern from slices 014/017/018/036.
+  Composite FKs `(tenant_id, control_id)` and `(tenant_id,
+population_id)` enforce the slice-002 D3 cross-tenant blocker.
+  AC-5 audit-period freezing: `populations.frozen_at` column is
+  populated by slice 028 when it lands; until then the query treats
+  it as a no-op. New HTTP routes: `POST /v1/populations`,
+  `GET /v1/populations/{id}`, `POST /v1/samples`, `GET /v1/samples/{id}`,
+  `POST /v1/samples/{id}/annotations`. Anti-criteria honored:
+  deterministic sampling proven by `TestSampler_SameSeedSameResult`;
+  no UPDATE/DELETE against `evidence_records` (sampling is read-only,
+  enforced both at the sqlc query-set level and slice 013's
+  append-only RLS); samples drawn from post-frozen evidence rejected
+  once slice 028 lands (forward-compatible gate).
 - **Slice 009 — Control bundle format spec + parser + upload API.** New
   control-as-code authoring path: a YAML manifest (`control.yaml`)
   declaring `bundle_id`, `scf_anchor_id`, `title`, `implementation_type`,

@@ -751,6 +751,19 @@ type Policy struct {
 	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type Population struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	ControlID       pgtype.UUID        `json:"control_id"`
+	ScopePredicate  []byte             `json:"scope_predicate"`
+	TimeWindowStart pgtype.Timestamptz `json:"time_window_start"`
+	TimeWindowEnd   pgtype.Timestamptz `json:"time_window_end"`
+	FrozenAt        pgtype.Timestamptz `json:"frozen_at"`
+	RowCount        int64              `json:"row_count"`
+	CreatedBy       string             `json:"created_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
 type Risk struct {
 	ID                  pgtype.UUID        `json:"id"`
 	TenantID            pgtype.UUID        `json:"tenant_id"`
@@ -775,6 +788,48 @@ type RiskControlLink struct {
 	ControlID pgtype.UUID        `json:"control_id"`
 	TenantID  pgtype.UUID        `json:"tenant_id"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type Sample struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	PopulationID pgtype.UUID        `json:"population_id"`
+	N            int32              `json:"n"`
+	Seed         string             `json:"seed"`
+	CreatedBy    string             `json:"created_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type SampleAnnotation struct {
+	ID               pgtype.UUID        `json:"id"`
+	TenantID         pgtype.UUID        `json:"tenant_id"`
+	SampleID         pgtype.UUID        `json:"sample_id"`
+	EvidenceRecordID pgtype.UUID        `json:"evidence_record_id"`
+	Result           string             `json:"result"`
+	AnnotatedBy      string             `json:"annotated_by"`
+	AnnotatedAt      pgtype.Timestamptz `json:"annotated_at"`
+	Notes            string             `json:"notes"`
+}
+
+type SampleAuditLog struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	Action       string             `json:"action"`
+	Actor        string             `json:"actor"`
+	PopulationID pgtype.UUID        `json:"population_id"`
+	SampleID     pgtype.UUID        `json:"sample_id"`
+	Seed         *string            `json:"seed"`
+	NRequested   *int32             `json:"n_requested"`
+	NReturned    *int32             `json:"n_returned"`
+	ReasonCode   string             `json:"reason_code"`
+	OccurredAt   pgtype.Timestamptz `json:"occurred_at"`
+}
+
+type SampleEvidence struct {
+	SampleID         pgtype.UUID `json:"sample_id"`
+	TenantID         pgtype.UUID `json:"tenant_id"`
+	EvidenceRecordID pgtype.UUID `json:"evidence_record_id"`
+	Ordinal          int32       `json:"ordinal"`
 }
 
 type ScfAnchor struct {
