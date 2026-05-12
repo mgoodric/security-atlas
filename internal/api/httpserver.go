@@ -19,6 +19,7 @@ import (
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
+	exceptionsapi "github.com/mgoodric/security-atlas/internal/api/exceptions"
 	fwscopesapi "github.com/mgoodric/security-atlas/internal/api/frameworkscopes"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
@@ -28,6 +29,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/scope"
@@ -171,6 +173,21 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/samples/{id}", auditH.GetSample)
 	root.Post("/v1/samples/{id}/annotations", auditH.Annotate)
 	root.Get("/v1/samples/{id}/annotations", auditH.ListAnnotations)
+	// Slice 021: exception / waiver workflow. Routes appended per the
+	// parallel-batch convention -- chi.Mux rejects two Mounts at "/", so
+	// individual routes are registered onto the root. Literal-segment
+	// routes (/expiring) are declared before /{id} so chi's
+	// declaration-order match keeps the calendar route ahead of the
+	// generic UUID-id route.
+	exceptionsH := exceptionsapi.New(exception.NewStore(s.dbPool))
+	root.Post("/v1/exceptions", exceptionsH.CreateException)
+	root.Get("/v1/exceptions", exceptionsH.ListExceptions)
+	root.Get("/v1/exceptions/expiring", exceptionsH.Expiring)
+	root.Get("/v1/exceptions/{id}", exceptionsH.GetException)
+	root.Get("/v1/exceptions/{id}/audit-log", exceptionsH.AuditLog)
+	root.Patch("/v1/exceptions/{id}/approve", exceptionsH.Approve)
+	root.Patch("/v1/exceptions/{id}/deny", exceptionsH.Deny)
+	root.Patch("/v1/exceptions/{id}/activate", exceptionsH.Activate)
 	return root
 }
 

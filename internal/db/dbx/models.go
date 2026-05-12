@@ -692,6 +692,41 @@ type EvidenceRecord struct {
 	ControlRef        string                 `json:"control_ref"`
 }
 
+type Exception struct {
+	ID                   pgtype.UUID        `json:"id"`
+	TenantID             pgtype.UUID        `json:"tenant_id"`
+	ControlID            pgtype.UUID        `json:"control_id"`
+	ScopeCellPredicate   []byte             `json:"scope_cell_predicate"`
+	Justification        string             `json:"justification"`
+	CompensatingControls []string           `json:"compensating_controls"`
+	RequestedBy          string             `json:"requested_by"`
+	RequestedAt          pgtype.Timestamptz `json:"requested_at"`
+	ApprovedBy           *string            `json:"approved_by"`
+	ApprovedAt           pgtype.Timestamptz `json:"approved_at"`
+	DeniedBy             *string            `json:"denied_by"`
+	DeniedAt             pgtype.Timestamptz `json:"denied_at"`
+	ActivatedBy          *string            `json:"activated_by"`
+	ActivatedAt          pgtype.Timestamptz `json:"activated_at"`
+	EffectiveFrom        pgtype.Timestamptz `json:"effective_from"`
+	ExpiresAt            pgtype.Timestamptz `json:"expires_at"`
+	ExpiredAt            pgtype.Timestamptz `json:"expired_at"`
+	Status               string             `json:"status"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ExceptionAuditLog struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	ExceptionID pgtype.UUID        `json:"exception_id"`
+	Action      string             `json:"action"`
+	Actor       string             `json:"actor"`
+	FromState   *string            `json:"from_state"`
+	ToState     string             `json:"to_state"`
+	Reason      string             `json:"reason"`
+	OccurredAt  pgtype.Timestamptz `json:"occurred_at"`
+}
+
 type Framework struct {
 	ID              pgtype.UUID        `json:"id"`
 	TenantID        pgtype.UUID        `json:"tenant_id"`
