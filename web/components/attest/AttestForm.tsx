@@ -44,7 +44,9 @@ function extractProperties(
   if (!props || typeof props !== "object") return [];
   const reqList = ((schema as { required?: unknown[] }).required ??
     []) as unknown[];
-  const required = new Set(reqList.filter((v): v is string => typeof v === "string"));
+  const required = new Set(
+    reqList.filter((v): v is string => typeof v === "string"),
+  );
   return Object.keys(props)
     .sort()
     .map((name) => {
@@ -118,7 +120,8 @@ export function AttestForm({
     setValues((v) => ({ ...v, [name]: raw }));
 
   const targetSubmit =
-    submitEndpoint ?? `/api/controls/${encodeURIComponent(form.control_id)}/attestations`;
+    submitEndpoint ??
+    `/api/controls/${encodeURIComponent(form.control_id)}/attestations`;
 
   async function uploadIfNeeded(): Promise<string | undefined> {
     if (!file) return undefined;
@@ -223,7 +226,8 @@ export function AttestForm({
                 className="block text-sm font-medium"
                 htmlFor={`f-${prop.name}`}
               >
-                {label} {prop.required ? <span className="text-red-600">*</span> : null}
+                {label}{" "}
+                {prop.required ? <span className="text-red-600">*</span> : null}
               </label>
               <select
                 id={`f-${prop.name}`}
@@ -273,7 +277,8 @@ export function AttestForm({
                 className="block text-sm font-medium"
                 htmlFor={`f-${prop.name}`}
               >
-                {label} {prop.required ? <span className="text-red-600">*</span> : null}
+                {label}{" "}
+                {prop.required ? <span className="text-red-600">*</span> : null}
               </label>
               <textarea
                 id={`f-${prop.name}`}
@@ -298,7 +303,8 @@ export function AttestForm({
               className="block text-sm font-medium"
               htmlFor={`f-${prop.name}`}
             >
-              {label} {prop.required ? <span className="text-red-600">*</span> : null}
+              {label}{" "}
+              {prop.required ? <span className="text-red-600">*</span> : null}
             </label>
             <Input
               id={`f-${prop.name}`}

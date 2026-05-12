@@ -262,14 +262,14 @@ func optionalArtifactStore(t *testing.T, app *pgxpool.Pool) *artifact.Store {
 // ----- server harness -----
 
 type setupResult struct {
-	server     *httptest.Server
-	adminBear  string
-	ownerBear  string
-	plainBear  string
-	tenant     string
-	registry   *schemaregistry.Service
-	hasMinIO   bool
-	bucket     string
+	server    *httptest.Server
+	adminBear string
+	ownerBear string
+	plainBear string
+	tenant    string
+	registry  *schemaregistry.Service
+	hasMinIO  bool
+	bucket    string
 }
 
 const ownerRole = "control_owner"
@@ -735,7 +735,7 @@ func TestAttest_Rejects_MissingRequiredAttestationData(t *testing.T) {
 	s := setupHTTP(t)
 	controlID := uploadBundle(t, s, "attest_missing_req")
 	body := map[string]any{
-		"statement":        "Missing reviewer field.",
+		"statement": "Missing reviewer field.",
 		"attestation_data": map[string]any{
 			// reviewer omitted on purpose
 			"notes": "I forgot the reviewer.",

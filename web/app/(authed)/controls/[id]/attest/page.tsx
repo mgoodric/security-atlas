@@ -37,7 +37,7 @@ export default async function AttestPage({
             <p className="text-sm text-muted-foreground">
               {e.status === 404
                 ? "Control not found, or your tenant cannot see it."
-                : (e.message ?? "Failed to load attestation form.")}
+                : e.message ?? "Failed to load attestation form."}
             </p>
           </CardContent>
         </Card>

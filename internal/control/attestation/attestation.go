@@ -75,12 +75,12 @@ func ValidateAttestationData(controlSchema map[string]any, data map[string]any) 
 // input per property without parsing JSON Schema itself.
 type FormProperty struct {
 	Name        string `json:"name"`
-	Type        string `json:"type"`         // string | integer | number | boolean | array | object
-	Title       string `json:"title"`        // schema-author-facing label
-	Description string `json:"description"`  // help text
-	Required    bool   `json:"required"`     // present in schema.required
-	Format      string `json:"format"`       // optional JSON Schema format (uri, date-time, etc.)
-	Enum        []any  `json:"enum"`         // optional enum constraint
+	Type        string `json:"type"`        // string | integer | number | boolean | array | object
+	Title       string `json:"title"`       // schema-author-facing label
+	Description string `json:"description"` // help text
+	Required    bool   `json:"required"`    // present in schema.required
+	Format      string `json:"format"`      // optional JSON Schema format (uri, date-time, etc.)
+	Enum        []any  `json:"enum"`        // optional enum constraint
 	MinLength   *int   `json:"min_length,omitempty"`
 	MaxLength   *int   `json:"max_length,omitempty"`
 }
