@@ -241,8 +241,10 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "approver role required")
 		return
 	}
-	ctx, terr := tenancy.WithTenant(r.Context(), cred.TenantID)
-	if terr != nil {
+	// Slice 033: tenancy.Middleware already set app.current_tenant from
+	// cred.TenantID. Confirm; bail if absent (would mean misconfig).
+	ctx := r.Context()
+	if _, terr := tenancy.TenantFromContext(ctx); terr != nil {
 		writeError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
@@ -497,15 +499,17 @@ func (h *Handler) EffectiveScope(w http.ResponseWriter, r *http.Request) {
 // ----- helpers -----
 
 func (h *Handler) tenantContext(r *http.Request) (context.Context, bool) {
+	// Slice 033: tenancy.Middleware (httpserver.go) lifted cred.TenantID
+	// onto r.Context() via tenancy.WithTenant. Confirm; bail if absent
+	// (would mean no credential or misconfig).
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok || cred.TenantID == "" {
 		return nil, false
 	}
-	ctx, err := tenancy.WithTenant(r.Context(), cred.TenantID)
-	if err != nil {
+	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
 		return nil, false
 	}
-	return ctx, true
+	return r.Context(), true
 }
 
 func parseID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {

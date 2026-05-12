@@ -23,7 +23,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -266,15 +265,15 @@ func (h *Handler) Heatmap(w http.ResponseWriter, r *http.Request) {
 // ----- helpers -----
 
 func (h *Handler) tenantContext(r *http.Request) (context.Context, bool) {
-	cred, ok := authctx.CredentialFromContext(r.Context())
-	if !ok || cred.TenantID == "" {
+	// Slice 033: the tenancy.Middleware (mounted in httpserver.go after
+	// the bearer-auth middleware) already lifted cred.TenantID onto
+	// r.Context() via tenancy.WithTenant. We confirm a tenant is set
+	// (which doubles as a "credential is present" check on the
+	// bearer-auth'd path: no credential → no tenant → 401-shaped path).
+	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
 		return nil, false
 	}
-	ctx, err := tenancy.WithTenant(r.Context(), cred.TenantID)
-	if err != nil {
-		return nil, false
-	}
-	return ctx, true
+	return r.Context(), true
 }
 
 func riskWireFrom(r risk.Risk) riskWire {

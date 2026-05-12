@@ -124,6 +124,14 @@ db-down:
 sqlc-generate:
     sqlc generate
 
+# Audit every public-schema table with a `tenant_id` column. Fails if any
+# such table lacks an RLS policy or FORCE ROW LEVEL SECURITY. Constitutional
+# invariant 6 enforcement — see docs/architecture/rls.md. Requires
+# DATABASE_URL to point at a role with full pg_catalog visibility
+# (atlas_migrate is the canonical choice).
+audit-rls:
+    ./scripts/audit-rls.sh
+
 # Import an SCF catalog JSON release into Postgres. DATABASE_URL must point
 # at a role with INSERT on scf_anchors (atlas_migrate by default).
 import-scf path:

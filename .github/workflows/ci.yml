@@ -127,6 +127,12 @@ jobs:
               *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
             esac
           done
+      - name: Audit RLS coverage (slice 033)
+        # Constitutional invariant 6: every tenant-scoped table must carry
+        # an RLS policy + FORCE. Audit runs against atlas_migrate (DATABASE_URL)
+        # so pg_catalog reads are not RLS-filtered. See scripts/audit-rls.sh
+        # and docs/architecture/rls.md.
+        run: ./scripts/audit-rls.sh
       - name: Run integration tests
         # `-p 1` serializes test packages so multiple binaries do not
         # race on the shared Postgres test database. The db,

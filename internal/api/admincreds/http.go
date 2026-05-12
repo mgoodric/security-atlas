@@ -184,8 +184,10 @@ func (h *Handler) Rotate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid credential id")
 		return
 	}
-	ctx, err := tenancy.WithTenant(r.Context(), cred.TenantID)
-	if err != nil {
+	// Slice 033: tenancy.Middleware already set app.current_tenant from
+	// cred.TenantID. Confirm; bail if absent (would mean misconfig).
+	ctx := r.Context()
+	if _, terr := tenancy.TenantFromContext(ctx); terr != nil {
 		writeError(w, http.StatusBadRequest, "invalid tenant in credential")
 		return
 	}
@@ -219,8 +221,10 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid credential id")
 		return
 	}
-	ctx, err := tenancy.WithTenant(r.Context(), cred.TenantID)
-	if err != nil {
+	// Slice 033: tenancy.Middleware already set app.current_tenant from
+	// cred.TenantID. Confirm; bail if absent (would mean misconfig).
+	ctx := r.Context()
+	if _, terr := tenancy.TenantFromContext(ctx); terr != nil {
 		writeError(w, http.StatusBadRequest, "invalid tenant in credential")
 		return
 	}

@@ -25,6 +25,7 @@ import (
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
+	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	"github.com/mgoodric/security-atlas/internal/api/vendors"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/audit"
@@ -64,6 +65,13 @@ func (s *Server) httpHandler() http.Handler {
 	// must skip the prefix. Note: /v1/admin/credentials* DOES go through
 	// bearer auth (admin endpoints require an admin credential).
 	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/"))
+	// Slice 033: lift the authenticated credential's tenant id onto the
+	// request context so every downstream handler — and every database
+	// transaction it opens — runs under the right `app.current_tenant`
+	// GUC. Constitutional invariant 6 enforcement. The middleware is a
+	// no-op when no credential is in context (bearer-exempt paths like
+	// /auth/* keep their own request-supplied tenant resolution).
+	root.Use(tenancymw.Middleware)
 
 	mappings := anchorseed.New()
 	queries := dbx.New(s.dbPool)

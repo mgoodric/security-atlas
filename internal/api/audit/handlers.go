@@ -314,20 +314,20 @@ func (h *Handler) ListAnnotations(w http.ResponseWriter, r *http.Request) {
 
 // ----- helpers -----
 
-// tenantContext returns the request context with the tenant GUC set, plus
-// the credential identifier the audit log uses as `actor`. The credential
-// id (slice 003's `key_<32hex>`) is the most stable per-request identity
-// surface available pre-OIDC (slice 034).
+// tenantContext returns the request context (tenant GUC already set by
+// slice-033's tenancy.Middleware) plus the credential identifier the
+// audit log uses as `actor`. The credential id (slice 003's
+// `key_<32hex>`) is the most stable per-request identity surface
+// available pre-OIDC (slice 034).
 func (h *Handler) tenantContext(r *http.Request) (context.Context, string, bool) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok || cred.TenantID == "" {
 		return nil, "", false
 	}
-	ctx, err := tenancy.WithTenant(r.Context(), cred.TenantID)
-	if err != nil {
+	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
 		return nil, "", false
 	}
-	return ctx, cred.ID, true
+	return r.Context(), cred.ID, true
 }
 
 func populationWireFrom(p audit.Population) populationWire {
