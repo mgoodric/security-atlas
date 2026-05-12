@@ -3,7 +3,17 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-11 (parallel batch 7 claim-stake — 021, 034 → in-progress)
+**Last reconciled:** 2026-05-11 (slice 021 → in-review)
+
+## Drift detected — 2026-05-11 (slice 021 → in-review)
+
+Slice 021 (exception/waiver workflow + auto-expiry + calendar API) flipped `in-progress` → `in-review`. PR gh#25 opened against main.
+
+| Row | Transition                  | Evidence              |
+| --- | --------------------------- | --------------------- |
+| 021 | `in-progress` → `in-review` | gh#25 opened 2026-05-11 |
+
+**Counts delta:** in-progress −1 · in-review +1.
 
 ## Drift detected — 2026-05-11 (parallel batch 7 claim-stake)
 
@@ -211,8 +221,8 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 | Status        | Count  |
 | ------------- | ------ |
 | `merged`      | 24     |
-| `in-review`   | 0      |
-| `in-progress` | 2      |
+| `in-review`   | 1      |
+| `in-progress` | 1      |
 | `ready`       | 4      |
 | `blocked`     | 0      |
 | `not-ready`   | 20     |
@@ -254,7 +264,7 @@ Legal values (use exactly these strings):
 | 018 | FrameworkScope predicate + intersection compute        | `merged`    | scope/018-framework-scope-intersection               | gh#13 | 2026-05-11 | 2026-05-11 | implements ADR-0001                   |
 | 019 | Risk CRUD + NIST 800-30 + 5x5 + ALE-band               | `merged`    | risk/019-risk-register-crud                          | gh#10 | 2026-05-11 | 2026-05-11 | open-q #4 resolved at merge           |
 | 020 | Risk → control linkage + residual derivation           | `not-ready` | —                                                    | —     | —          | —          | waits on 019, 012                     |
-| 021 | Exception/waiver workflow + auto-expiry                | `in-progress` | risk/021-exception-waiver-workflow                 | —     | 2026-05-11 | —          | deps 019, 017 merged                  |
+| 021 | Exception/waiver workflow + auto-expiry                | `in-review` | risk/021-exception-waiver-workflow                   | gh#25 | 2026-05-11 | —          | deps 019, 017 merged                  |
 | 022 | Policy library + 5 stock policies                      | `ready`     | —                                                    | —     | —          | —          | HITL on policy text                   |
 | 023 | Policy acknowledgment workflow                         | `not-ready` | —                                                    | —     | —          | —          | waits on 022, 034                     |
 | 024 | Vendor lite module                                     | `merged`    | vendor/024-vendor-lite-module                        | gh#11 | 2026-05-11 | 2026-05-11 | —                                     |
