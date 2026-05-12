@@ -14,6 +14,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/anchors"
 	"github.com/mgoodric/security-atlas/internal/api/anchorseed"
 	artifactsapi "github.com/mgoodric/security-atlas/internal/api/artifacts"
+	auditapi "github.com/mgoodric/security-atlas/internal/api/audit"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
@@ -24,6 +25,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
 	"github.com/mgoodric/security-atlas/internal/api/vendors"
 	"github.com/mgoodric/security-atlas/internal/artifact"
+	"github.com/mgoodric/security-atlas/internal/audit"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
@@ -149,6 +151,17 @@ func (s *Server) httpHandler() http.Handler {
 		root.Get("/v1/controls/{id}/attest-form", attestH.AttestForm)
 		root.Post("/v1/controls/{id}/attestations", attestH.Submit)
 	}
+	// Slice 026: sample-pull primitives. Routes appended per the parallel-batch
+	// convention (chi rejects two Mounts at "/"). The annotation sub-resource
+	// route is declared after the literal /v1/samples/{id} so chi's
+	// declaration-order match keeps the literal-segment first.
+	auditH := auditapi.New(audit.NewStore(s.dbPool))
+	root.Post("/v1/populations", auditH.CreatePopulation)
+	root.Get("/v1/populations/{id}", auditH.GetPopulation)
+	root.Post("/v1/samples", auditH.DrawSample)
+	root.Get("/v1/samples/{id}", auditH.GetSample)
+	root.Post("/v1/samples/{id}/annotations", auditH.Annotate)
+	root.Get("/v1/samples/{id}/annotations", auditH.ListAnnotations)
 	return root
 }
 

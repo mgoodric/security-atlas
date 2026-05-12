@@ -28,6 +28,16 @@ type Querier interface {
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
 	CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	// AC-1 + AC-5: count evidence records that match the population's filter.
+	// AC-5 forward-compat: `observed_at <= COALESCE(frozen_at, 'infinity')`
+	// is a no-op until slice 028 sets frozen_at. The COALESCE-to-infinity is
+	// the explicit "no horizon" semantic.
+	//
+	// Scope predicate filtering happens AFTER this count -- the application
+	// evaluates the JSON-AST against scope cells in memory and intersects with
+	// evidence_records.scope_id. v1 keeps the SQL simple; future slices can
+	// push the predicate down into a JSONB index.
+	CountPopulationEvidence(ctx context.Context, arg CountPopulationEvidenceParams) (int64, error)
 	CountRiskControlLinks(ctx context.Context, arg CountRiskControlLinksParams) (int64, error)
 	CountSCFAnchorsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
 	CountScopeCells(ctx context.Context, tenantID pgtype.UUID) (int64, error)
@@ -55,11 +65,23 @@ type Querier interface {
 	// the same JSON (the application computes and passes both to keep the DB
 	// trigger comparison cheap).
 	CreateFrameworkScope(ctx context.Context, arg CreateFrameworkScopeParams) (FrameworkScope, error)
+	// Slice 026 — sample-pull primitives.
+	//
+	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
+	// defense-in-depth layer and the WHERE clauses are the primary correctness
+	// guarantee. None of these queries mutate evidence_records — the ledger
+	// stays read-only on this path (anti-criterion P0).
+	// Insert the population row. row_count is set by the application AFTER it
+	// has resolved the population via CountPopulationEvidence below; doing it
+	// in two statements keeps the SQL static (sqlc-friendly) and lets the
+	// handler validate the count before persisting.
+	CreatePopulation(ctx context.Context, arg CreatePopulationParams) (Population, error)
 	// Insert a new risk. The application validates methodology-specific
 	// inherent_score and per-treatment required fields BEFORE calling this.
 	// DB-side CHECK constraints (slice 019) are defense-in-depth, not the
 	// primary validation path.
 	CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, error)
+	CreateSample(ctx context.Context, arg CreateSampleParams) (Sample, error)
 	// Insert a scope cell. dimensions_hash is the application-computed canonical
 	// hash; the UNIQUE (tenant_id, dimensions_hash) constraint rejects duplicates.
 	CreateScopeCell(ctx context.Context, arg CreateScopeCellParams) (ScopeCell, error)
@@ -122,6 +144,7 @@ type Querier interface {
 	// ORDER BY effective_from DESC LIMIT 1 picks the most-recent applicable row.
 	GetFrameworkScopeAsOf(ctx context.Context, arg GetFrameworkScopeAsOfParams) (FrameworkScope, error)
 	GetFrameworkScopeByID(ctx context.Context, arg GetFrameworkScopeByIDParams) (FrameworkScope, error)
+	GetPopulationByID(ctx context.Context, arg GetPopulationByIDParams) (Population, error)
 	GetRiskByID(ctx context.Context, arg GetRiskByIDParams) (Risk, error)
 	GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnchor, error)
 	// Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
@@ -132,6 +155,7 @@ type Querier interface {
 	// Updated / Unchanged (xmax-based detection inside ON CONFLICT can't
 	// distinguish "updated to the same content" from "actually updated").
 	GetSCFAnchorByVersionAndSCFID(ctx context.Context, arg GetSCFAnchorByVersionAndSCFIDParams) (ScfAnchor, error)
+	GetSampleByID(ctx context.Context, arg GetSampleByIDParams) (Sample, error)
 	// Look up a cell by its dimensions hash. Used by the "create or get" path so
 	// a re-seed call does not 409 on the existing default cell.
 	GetScopeCellByHash(ctx context.Context, arg GetScopeCellByHashParams) (ScopeCell, error)
@@ -173,6 +197,7 @@ type Querier interface {
 	// Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
 	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
+	InsertSampleEvidence(ctx context.Context, arg InsertSampleEvidenceParams) error
 	// Idempotent: ON CONFLICT DO NOTHING so re-running a "link these controls"
 	// request does not 23505 on a re-link.
 	LinkRiskControl(ctx context.Context, arg LinkRiskControlParams) error
@@ -221,6 +246,15 @@ type Querier interface {
 	// (testability) and timezone semantics (vendor reviews are date-granular,
 	// not timestamp-granular).
 	ListOverdueVendors(ctx context.Context, arg ListOverdueVendorsParams) ([]Vendor, error)
+	// The deterministic ordering by id is load-bearing for AC-2: the sampler
+	// runs Fisher-Yates over THIS ordered slice, so the order must be stable
+	// across calls. id is the primary key (UUID); the tie-breaker is unused
+	// because ids are unique.
+	//
+	// Returns just the evidence_record_id (and observed_at for scope intersection)
+	// to keep the round-trip small; the handler hydrates after the shuffle.
+	ListPopulationEvidenceIDs(ctx context.Context, arg ListPopulationEvidenceIDsParams) ([]ListPopulationEvidenceIDsRow, error)
+	ListPopulationsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]Population, error)
 	// Returns all control links for a single risk.
 	ListRiskControlLinks(ctx context.Context, arg ListRiskControlLinksParams) ([]ListRiskControlLinksRow, error)
 	// Enumerate all risks for the tenant, newest first. Filters are applied
@@ -232,6 +266,9 @@ type Querier interface {
 	ListSCFAnchorsForVersion(ctx context.Context, arg ListSCFAnchorsForVersionParams) ([]ScfAnchor, error)
 	// Paginated anchor list for the latest current SCF framework_version.
 	ListSCFAnchorsLatest(ctx context.Context, arg ListSCFAnchorsLatestParams) ([]ScfAnchor, error)
+	ListSampleAnnotations(ctx context.Context, arg ListSampleAnnotationsParams) ([]SampleAnnotation, error)
+	ListSampleAuditLog(ctx context.Context, arg ListSampleAuditLogParams) ([]SampleAuditLog, error)
+	ListSampleEvidence(ctx context.Context, arg ListSampleEvidenceParams) ([]ListSampleEvidenceRow, error)
 	// Enumerate the active tenant's scope cells. Newest first.
 	ListScopeCells(ctx context.Context, tenantID pgtype.UUID) ([]ScopeCell, error)
 	// Enumerate the active tenant's declared dimensions. Ordering: builtins first
@@ -288,6 +325,13 @@ type Querier interface {
 	// as UpsertFramework above (avoids the NULLs-distinct gotcha on natural-key
 	// ON CONFLICT targets).
 	UpsertFrameworkVersion(ctx context.Context, arg UpsertFrameworkVersionParams) (FrameworkVersion, error)
+	// One annotation per (sample, evidence_record). Re-annotating overwrites
+	// result + notes (the audit log still captures every attempt via
+	// WriteSampleAuditLog).
+	UpsertSampleAnnotation(ctx context.Context, arg UpsertSampleAnnotationParams) (SampleAnnotation, error)
+	// Every sample pull writes one row here. The seed -> sample_id mapping
+	// captured in (seed, sample_id) is the re-audit trail (AC-6).
+	WriteSampleAuditLog(ctx context.Context, arg WriteSampleAuditLogParams) (SampleAuditLog, error)
 }
 
 var _ Querier = (*Queries)(nil)
