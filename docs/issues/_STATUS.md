@@ -3,9 +3,21 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-11 (parallel batch 6 claim-stake — 047, 048, 049 → in-progress)
+**Last reconciled:** 2026-05-11 (parallel batch 6 merged — 047, 048, 049 → merged · v1 connector roster complete)
 
-## Drift detected — 2026-05-11 (parallel batch 6 claim-stake)
+## Drift detected — 2026-05-11 (parallel batch 6 merged)
+
+Three connector slices flipped to `merged`. **V1 connector roster is now complete** — 044 (GitHub) · 045 (Okta) · 046 (1Password) · 047 (osquery/Fleet) · 048 (Jira/Linear) · 049 (Manual/CSV/S3/SFTP) are all on main. No critical-path unlock — 007 (SOC 2 crosswalk · HITL) remains the bottleneck for the 010 → 012 → 016 → 020 chain.
+
+| Row | Transition             | Evidence                                                                                                                                                                                              |
+| --- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 048 | `in-review` → `merged` | commit `78d916d` on main (gh#22 squashed 2026-05-11)                                                                                                                                                  |
+| 047 | `in-review` → `merged` | commit `104a090` on main (gh#23 squashed 2026-05-11)                                                                                                                                                  |
+| 049 | `in-review` → `merged` | commit `dd68fa2` on main (gh#24 squashed 2026-05-11; orchestrator closed out after agent stalled post-security-review · ed25519 runtime-key generation to satisfy both GitGuardian + detect-private-key) |
+
+**Counts delta:** merged +3 · in-review −3. No new ready-set unblocks (047/048/049 are connector leaves).
+
+## Drift detected — 2026-05-11 (parallel batch 6 claim-stake, archived)
 
 Three connector slices flipped `ready` → `in-progress`. Final v1 connector roster — after this batch all 6 connectors (044/045/046/047/048/049) are on main.
 
@@ -185,9 +197,9 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 
 | Status        | Count  |
 | ------------- | ------ |
-| `merged`      | 21     |
+| `merged`      | 24     |
 | `in-review`   | 0      |
-| `in-progress` | 3      |
+| `in-progress` | 0      |
 | `ready`       | 6      |
 | `blocked`     | 0      |
 | `not-ready`   | 20     |
@@ -255,41 +267,29 @@ Legal values (use exactly these strings):
 | 044 | GitHub connector                                       | `merged`    | connectors/044-github-connector                      | gh#14 | 2026-05-11 | 2026-05-11 | first post-013 connector              |
 | 045 | Okta connector                                         | `merged`    | connectors/045-okta-connector                        | gh#17 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                  |
 | 046 | 1Password connector                                    | `merged`    | connectors/046-1password-connector                   | gh#18 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                  |
-| 047 | osquery/Fleet endpoint connector                       | `in-review` | connectors/047-osquery-fleet-connector               | gh#23 | 2026-05-11 | —          | deps 003, 013 merged                  |
-| 048 | Jira/Linear ticket connector                           | `in-review` | connectors/048-jira-linear-connector                 | gh#22 | 2026-05-11 | —          | deps 003, 013 merged                  |
-| 049 | Manual upload / CSV / S3 / SFTP escape-hatch           | `in-review` | connectors/049-manual-upload-csv-connector           | gh#24 | 2026-05-11 | —          | deps 003, 013 merged                  |
+| 047 | osquery/Fleet endpoint connector                       | `merged`    | connectors/047-osquery-fleet-connector               | gh#23 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                  |
+| 048 | Jira/Linear ticket connector                           | `merged`    | connectors/048-jira-linear-connector                 | gh#22 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                  |
+| 049 | Manual upload / CSV / S3 / SFTP escape-hatch           | `merged`    | connectors/049-manual-upload-csv-connector           | gh#24 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                  |
 | 050 | Public release readiness + release automation          | `ready`     | —                                                    | —     | —          | —          | HITL · dep 039 merged · open-q gates  |
 
 ## Ready set right now
 
-| #   | Title                                         | Cluster           | Est (d) | Notes                                                        |
-| --- | --------------------------------------------- | ----------------- | ------- | ------------------------------------------------------------ |
-| 007 | SOC 2 v2017 (TSC) crosswalk loader            | catalog           | 1.5     | HITL · critical path                                         |
-| 009 | Control bundle format spec + parser + upload  | control-as-code   | 2       | unlocks 010, 011                                             |
-| 015 | NATS JetStream buffer + ingestion stage       | evidence-pipeline | 1.5     | preserves slice 013's ingestion-stage boundary               |
-| 021 | Exception/waiver workflow + auto-expiry       | risk              | 1.5     | dep 019 merged                                               |
-| 022 | Policy library + 5 stock policies             | policies          | 2       | HITL                                                         |
-| 026 | Sample-pull primitives (Population + Sample)  | audit             | 1.5     | deps 013, 017 merged                                         |
-| 033 | Postgres RLS enforcement everywhere           | auth              | 2       | open-q #13 resolved; universal-conflict — solo run           |
-| 034 | OIDC RP + local users                         | auth              | 1.5     | open-q #13 resolved (multi-tenant v1)                        |
-| 045 | Okta connector                                | connectors        | 1       | deps 003, 013 merged                                         |
-| 046 | 1Password connector                           | connectors        | 0.5     | deps 003, 013 merged                                         |
-| 047 | osquery/Fleet endpoint connector              | connectors        | 1       | deps 003, 013 merged                                         |
-| 048 | Jira/Linear ticket connector                  | connectors        | 1       | deps 003, 013 merged                                         |
-| 049 | Manual upload / CSV / S3 / SFTP escape-hatch  | connectors        | 1       | deps 003, 013 merged                                         |
-| 050 | Public release readiness + release automation | infra             | 3       | HITL · safe to batch (only touches .github/, docs/, deploy/) |
+| #   | Title                                         | Cluster  | Est (d) | Notes                                                        |
+| --- | --------------------------------------------- | -------- | ------- | ------------------------------------------------------------ |
+| 007 | SOC 2 v2017 (TSC) crosswalk loader            | catalog  | 1.5     | HITL · critical path · unlocks 008, 010                      |
+| 021 | Exception/waiver workflow + auto-expiry       | risk     | 1.5     | dep 019 merged                                               |
+| 022 | Policy library + 5 stock policies             | policies | 2       | HITL                                                         |
+| 033 | Postgres RLS enforcement everywhere           | auth     | 2       | open-q #13 resolved; universal-conflict — solo run           |
+| 034 | OIDC RP + local users                         | auth     | 1.5     | open-q #13 resolved (multi-tenant v1) · unlocks 023, 035, 037 |
+| 050 | Public release readiness + release automation | infra    | 3       | HITL · safe to batch (only touches .github/, docs/, deploy/) |
 
-**Eleven slices ready** (007, 009, 015, 021, 022, 026, 033, 034, 045–049, 050). Suggested next parallel-batch trio (AFK, conflict-safe): **015 + 021 + 045** (or another 3-connector swarm `045 + 046 + 047`). Note: connector slices add zero migrations and only new files under `connectors/<name>/` + 2 new schemas each — so a 3-connector batch is conflict-free by design.
+**Six slices ready** (007, 021, 022, 033, 034, 050). With the v1 connector roster done, the next batch shape changes — no more conflict-safe 3-connector swarms available. Suggested next parallel-batch trio (AFK, conflict-safe): **021 + 022 + 050** — three pure-app-layer slices with disjoint file surfaces (risk module · policy seeds · `.github/` release pipeline). 007 is the critical-path bottleneck but is gated on HITL spot-check, not orchestratable AFK. 033/034 are foundational auth and best run solo to avoid RLS rewrites colliding with the rest of the codebase.
 
-## In-flight (3 worktrees building)
+## In-flight (0 worktrees building)
 
-- **009** — `control-as-code/009-control-bundle-format` · `in-progress` since 2026-05-11
-- **045** — `connectors/045-okta-connector` · `in-progress` since 2026-05-11
-- **046** — `connectors/046-1password-connector` · `in-progress` since 2026-05-11
+None. All batch-6 worktrees merged.
 
-Migration slots: 009 → `20260511000009`, 045 → none, 046 → none.
-
-Stale worktrees still on disk from batches 1, 2, 3: `-013`, `-014`, `-017`, `-018`, `-019`, `-024`, `-036`, `-039`, `-044`. Safe to `git worktree remove` whenever ready.
+Stale worktrees still on disk from batches 1–6: `-009`, `-011`, `-013`, `-014`, `-015`, `-017`, `-018`, `-019`, `-024`, `-026`, `-036`, `-039`, `-044`, `-045`, `-046`, `-047`, `-048`, `-049`. Safe to `git worktree remove` whenever ready.
 
 ## Notes
 
