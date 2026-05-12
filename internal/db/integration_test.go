@@ -361,11 +361,14 @@ func TestSchema_TenantScopedTablesAcceptInserts(t *testing.T) {
 
 // mustInsertControl seeds a single control under the active tenant. Used by
 // multiple tests; failure is fatal because subsequent assertions depend on it.
+// Slice 009 added a NOT NULL `bundle_id` column; this helper synthesises a
+// `legacy_<uuid>` value matching the slice-009 migration's backfill pattern
+// so slice-002's existing tests continue to pass after the schema change.
 func mustInsertControl(ctx context.Context, t *testing.T, tx pgx.Tx, tenant, controlID, scfID string) {
 	t.Helper()
 	_, err := tx.Exec(ctx, `
-		INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type)
-		VALUES ($1, $2, $3, 'test control', 'IAC', 'automated')
+		INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, bundle_id)
+		VALUES ($1, $2, $3, 'test control', 'IAC', 'automated', 'legacy_' || $1::text)
 	`, controlID, tenant, scfID)
 	if err != nil {
 		t.Fatalf("INSERT controls: %v", err)
