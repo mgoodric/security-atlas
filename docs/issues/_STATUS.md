@@ -256,7 +256,7 @@ Legal values (use exactly these strings):
 | 045 | Okta connector                                         | `merged`      | connectors/045-okta-connector                        | gh#17 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                  |
 | 046 | 1Password connector                                    | `merged`      | connectors/046-1password-connector                   | gh#18 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                  |
 | 047 | osquery/Fleet endpoint connector                       | `in-progress` | connectors/047-osquery-fleet-connector               | —     | 2026-05-11 | —          | deps 003, 013 merged                  |
-| 048 | Jira/Linear ticket connector                           | `in-progress` | connectors/048-jira-linear-connector                 | —     | 2026-05-11 | —          | deps 003, 013 merged                  |
+| 048 | Jira/Linear ticket connector                           | `in-review`   | connectors/048-jira-linear-connector                 | gh#22 | 2026-05-11 | —          | deps 003, 013 merged                  |
 | 049 | Manual upload / CSV / S3 / SFTP escape-hatch           | `in-progress` | connectors/049-manual-upload-csv-connector           | —     | 2026-05-11 | —          | deps 003, 013 merged                  |
 | 050 | Public release readiness + release automation          | `ready`       | —                                                    | —     | —          | —          | HITL · dep 039 merged · open-q gates  |
 
