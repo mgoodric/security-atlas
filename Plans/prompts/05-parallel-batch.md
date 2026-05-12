@@ -1,6 +1,6 @@
 # 05 — Parallel Batch Execution
 
-Run N slices from a single orchestrator prompt while preserving per-slice rigor. Spawns one Engineer subagent per slice, each working in its own git worktree. **Use after slices 001 + 002 have merged** — that's when the dependency graph unlocks ≥ 10 parallel-safe streams.
+Run N slices from a single orchestrator prompt while preserving per-slice rigor. Spawns one Engineer subagent per slice, each working in its own git worktree, **and drives the full PR / merge cycle**. A slice is "done" when its merge commit is on `main` — not when the PR is open. The orchestrator fixes CI failures encountered along the way and rebases the merge queue automatically.
 
 This prompt has been evolved across four batches (014/017/039, 013/019/024, 018/036/044, 009/045/046). The current form bakes in those lessons. See `~/.claude/projects/-Users-gmoney-Development-security-atlas/memory/feedback_parallel_batch_patterns.md` for the full lesson set.
 
@@ -59,13 +59,33 @@ STATUS TRANSITION (this is Step 9 of the subagent's own per-slice workflow, afte
 - From the MAIN worktree (`/Users/gmoney/Development/security-atlas`), pull --rebase, then flip the picked slice's row in `docs/issues/_STATUS.md` from `in-progress` to `in-review`, fill the `PR` column with `gh#<N>`. Commit `chore(status): <NNN> -> in-review`. Push.
 - If another agent has updated _STATUS.md in the meantime, re-apply just your one row.
 
-Step 4 — Collect and summarize (after all N return):
+Step 4 — Collect and choose a merge order (after all N return):
 
-- Table: slice # · PR URL · AC pass/fail · ship-gate status · merge-ready (Y/N)
+- Table: slice # · PR URL · AC pass/fail · ship-gate status · CI status (green / failing / pending)
 - Conflicts detected between PRs (file overlap, migration collision, schema drift)
-- Recommended merge order (deps + any post-hoc dependency surfaced during build)
-- Suggested next batch (the new ready set after these merge)
+- Recommended merge order — typically `cleanest CI` → `smallest diff` → `largest diff`; deps + any post-hoc dependency surfaced during build override this.
 - Update docs/issues/_STATUS.md: confirm each picked slice transitioned to `in-review`; fill `PR` column from each subagent's final report if not already populated. Commit on main: `chore(status): batch <NNN1, NNN2, NNN3> → in-review`.
+
+Step 5 — Merge each PR in the chosen order, fixing CI failures along the way:
+
+For each PR in merge order:
+
+1. Verify CI status (`gh pr view <N> --json mergeStateStatus,statusCheckRollup`). If CLEAN → merge. If UNSTABLE/DIRTY → diagnose + fix per the failure-mode playbook below.
+2. Squash-merge with a Conventional Commit subject (`feat(<cluster>): <title> (#<NNN>)`) and a body that includes the AC pass-rate, the CI clean-run reference, and the Co-Authored-By trailer.
+3. Fetch + reset local `main` to the new tip (`git -C <main-worktree> pull --rebase origin main`).
+4. For the next PR in the queue: rebase its branch against the new `main`. Resolve conflicts via the known-safe recipes (sqlc regenerate, CHANGELOG merge, httpserver Mount append). Force-push `--force-with-lease`.
+5. Wait for the rebased PR's CI to re-run. If it fails, return to step 1 of this loop (diagnose + fix).
+6. Repeat until every picked slice's PR is merged.
+
+The orchestrator may stash and restore unrelated working-directory changes in the main worktree (user WIP under `Plans/prompts/`, `_DEPENDENCY_GRAPH.md`, untracked files) as needed for the rebase-against-main step.
+
+Step 6 — Final reconcile + summary:
+
+- For each merged slice: flip its row in `docs/issues/_STATUS.md` from `in-review` to `merged`, fill the `Merged` column.
+- For every slice newly unblocked by these merges (deps now all `merged`): flip from `not-ready` to `ready`.
+- Update the `## Counts` table and add a `## Drift detected — <date> (parallel batch <N> merged)` section recording the transitions.
+- Commit on main: `chore(status): batch <NNN1, NNN2, NNN3> -> merged (M/50 slices on main)`. Push.
+- Deliver the final summary: merge commits, files touched per slice, critical-path advancement, the new ready set, and a suggested next batch.
 
 Hard rules:
 - N ≤ 3 unless I override
@@ -73,8 +93,10 @@ Hard rules:
 - One subagent failing does NOT abort the others
 - Quality gates apply per slice — do NOT relax any step "because it's a batch"
 - If any picked slice surfaces an open question from Plans/canvas/11-open-questions.md, STOP that subagent; do not ship a guess
+- The orchestrator squash-merges to `main`. NEVER force-push to `main`. NEVER bypass branch protection. Use `--force-with-lease` only on the feature branches the orchestrator owns.
+- If a PR's CI failure surfaces a question I (the human) should weigh in on (e.g. a design decision masquerading as a bug, a non-trivial DOWN-migration semantics call, an architectural drift), STOP and ask before fixing. Don't ship a guess.
 
-Subagent failure-mode playbook (orchestrator behavior):
+Failure-mode playbook (orchestrator behavior):
 
 - **Stall after security-review or ship-gate** (subagent returns its review block instead of opening the PR): resume the agent once with explicit "commit + push + open PR + flip status" instructions. If the second attempt also stalls, the orchestrator closes out the work directly: `git status` the worktree, write the CHANGELOG entry from the agent's drafted bullet, `pre-commit run --all-files`, stage by name, commit with Conventional Commit + Co-Authored-By, push, `gh pr create` from the worktree, then flip _STATUS.md in the main worktree. This is the dominant failure mode across batches 2-4 (slices 017, 036, 044, 045, 046).
 
@@ -107,8 +129,11 @@ Use Algorithm mode in the orchestrator. Initialize a PRD (id: parallel-batch-<ti
 - N git worktrees at `../security-atlas-<NNN>/`, each on its own feature branch
 - A claim-stake commit on main marking the picks as `in-progress` (prevents racing)
 - N parallel Engineer subagents, each running the per-slice template verbatim
-- Summary at completion: PR URLs, AC pass/fail, ship-gate status, merge-ready flags
-- `docs/issues/_STATUS.md` updated to `in-review` for each picked slice (per-slice transition commit + orchestrator confirmation commit)
+- N pull requests opened against `main`
+- **All N PRs squash-merged to `main`** — the orchestrator runs the merge queue, fixing CI failures along the way and rebasing the queue as each PR lands
+- `docs/issues/_STATUS.md` reflecting the final state: all N picks `merged`, any newly-unblocked downstream slices flipped to `ready`, counts table updated
+- Final summary: merge commits, critical-path advancement, suggested next batch
+- The orchestrator only pauses for human judgement when (a) a picked slice surfaces an unresolved open question in `Plans/canvas/11-open-questions.md`, or (b) a CI failure surfaces a design decision rather than a mechanical fix
 
 ## How fidelity stays high
 
@@ -122,7 +147,9 @@ Use Algorithm mode in the orchestrator. Initialize a PRD (id: parallel-batch-<ti
 | One slice's failure cascades                     | Subagents independent; failure isolated to its PR                                                                                                                      |
 | Subagent stalls before opening PR                | HARD RULE preamble + orchestrator close-out playbook after 2 failed resumes                                                                                            |
 | Slice ALTERs a slice-002 table → existing breaks | Subagent prompt explicitly directs the slice-002 test helper patch                                                                                                     |
-| CI catches a regression the agent missed         | Failure-mode playbook covers the four recurring shapes (prettier, GitGuardian, sqlc, NOT NULL fixture)                                                                 |
+| CI catches a regression the agent missed         | Failure-mode playbook covers the four recurring shapes (prettier, GitGuardian, sqlc, NOT NULL fixture). Orchestrator fixes mechanically; escalates design calls.       |
+| Rebase queue introduces fresh conflicts          | Known-safe rebase recipes: `sqlc generate` for dbx files, append-only for httpserver routes + sqlc.yaml + CHANGELOG, partial CHANGELOG merge into `[Unreleased]/Added` |
+| Orchestrator merges something that should wait   | Hard rule pauses for any design-decision-shaped CI failure or unresolved open question. Mechanical fixes (prettier nit, GitGuardian-on-test-literal) proceed.          |
 
 ## Timing
 
@@ -131,7 +158,15 @@ Use Algorithm mode in the orchestrator. Initialize a PRD (id: parallel-batch-<ti
 | Serial (one at a time) | ~5 days                                               |
 | Parallel batch (N=3)   | ~2 days (max of estimates, not sum)                   |
 
-The orchestrator stays interactive during the wait — Engineer subagents run in the background.
+Wall-clock breakdown:
+
+- ~5 min: selection + report-back gate (waiting on your "go")
+- ~1 min: worktree setup + claim-stake commit
+- bulk of the time: subagents building in parallel (max of estimates, not sum)
+- ~5–30 min per merged PR: CI re-run on rebase, conflict resolution, CI fix iterations
+- ~2 min: final reconcile commit
+
+The orchestrator stays interactive during the subagent wait — Engineer subagents run in the background. The merge queue is sequential by design (squash + rebase + CI wait per slice).
 
 ## When to use which N
 
@@ -165,7 +200,8 @@ These slices touch surfaces that conflict with every concurrent slice. Run them 
 
 - The Step 1 conflict-check is the most important part of this prompt. Spine-touching files (`go.work`, top-level `package.json`, `justfile`) are the most common collision source — only one slice per batch may touch them.
 - If two slices both need a migration, the orchestrator allocates explicit sequence numbers in the report-back. Don't let parallel agents pick their own — they'll collide.
-- This prompt does NOT auto-merge PRs. Review each one, then merge in dependency order (the orchestrator's final summary recommends one).
-- For the next batch after this one completes, just re-run the prompt — it'll compute the new ready set automatically from `_STATUS.md`.
+- **This prompt auto-merges PRs to `main`** in the orchestrator-chosen order. Mechanical CI failures (prettier nits, GitGuardian on test literals, sqlc out-of-sync, slice-002 fixture NOT-NULL breaks) are fixed by the orchestrator inline. The orchestrator pauses only when a CI failure surfaces a design decision (e.g. a DOWN-migration semantics call) or when a picked slice has an unresolved open question.
+- The orchestrator NEVER force-pushes to `main`. Squash-merge to `main` is the only `main`-touching write. `--force-with-lease` is used only on the feature branches the orchestrator owns (rebase + push after CI fix).
+- For the next batch after this one completes, just re-run the prompt — it'll compute the new ready set automatically from `_STATUS.md` (which now reflects everything this batch merged).
 - If a subagent's slice surfaces an architectural decision worth an ADR (`docs/adr/NNNN-title.md`), the subagent writes the ADR as part of its slice (per CLAUDE.md documentation discipline). ADR-0001 (FrameworkScope workflow) is the existing reference.
-- The orchestrator should be prepared to close out subagent work directly when an agent stalls. See "Subagent failure-mode playbook" in the prompt.
+- The orchestrator should be prepared to close out subagent work directly when an agent stalls. See "Failure-mode playbook" in the prompt.
