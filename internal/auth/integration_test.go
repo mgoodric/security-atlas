@@ -92,19 +92,6 @@ func withTenant(t *testing.T, tenantID uuid.UUID) context.Context {
 	return c
 }
 
-// cleanupRows removes test rows via the admin (BYPASSRLS) pool.
-func cleanupRows(t *testing.T, table string, ids []uuid.UUID) {
-	t.Helper()
-	if adminPool == nil || len(ids) == 0 {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	for _, id := range ids {
-		_, _ = adminPool.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", table), id)
-	}
-}
-
 // === ISC-45: cross-tenant api_keys lookup under RLS returns zero rows ===
 
 func TestAPIKeys_CrossTenantRLS(t *testing.T) {

@@ -291,14 +291,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// httpAuthMiddleware mirrors the gRPC auth interceptor: extract bearer
-// from the Authorization header, resolve via credstore, attach the
-// credential to context.
-func httpAuthMiddleware(store *credstore.Store) func(http.Handler) http.Handler {
-	return httpAuthMiddlewareWithExemptions(store, nil)
-}
-
-// httpAuthMiddlewareWithExemptions is the slice-034 variant that:
+// httpAuthMiddlewareWithExemptions is the HTTP auth middleware that:
 //  1. Skips bearer auth for request paths whose prefix matches any exempt.
 //     The /auth/* routes need this because the user has no bearer yet at
 //     the moment of sign-in.
