@@ -57,6 +57,33 @@ type Credential struct {
 	// it onto the approver_user_id column. Slice 034 (OIDC RP + local
 	// users) will replace this with a real user id from the IdP claims.
 	UserID string
+	// OwnerRoles is the list of control-owner roles this credential
+	// holds. Slice 011 introduces this as the gate for
+	// POST /v1/controls/{id}/attestations — the caller's OwnerRoles must
+	// include the control's `owner_role` (declared in the slice-009
+	// bundle manifest). IsAdmin acts as a wildcard: an admin holds every
+	// owner role implicitly. Slice 035 graduates this to OPA-driven RBAC.
+	OwnerRoles []string
+}
+
+// HasOwnerRole reports whether c can attest a control whose `owner_role`
+// equals role. Admin is a wildcard; otherwise c must list the role
+// verbatim in OwnerRoles. Empty role argument returns false so a control
+// bundle that forgot to declare an owner_role cannot be attested by
+// anyone but an admin.
+func (c Credential) HasOwnerRole(role string) bool {
+	if role == "" {
+		return c.IsAdmin
+	}
+	if c.IsAdmin {
+		return true
+	}
+	for _, r := range c.OwnerRoles {
+		if r == role {
+			return true
+		}
+	}
+	return false
 }
 
 type state int
@@ -98,7 +125,7 @@ func New(rotationGrace time.Duration) *Store {
 func (s *Store) Issue(tenantID, scope string, kinds []string, ttl time.Duration) (Credential, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.issueLocked(tenantID, scope, kinds, ttl, "", false, false)
+	return s.issueLocked(tenantID, scope, kinds, ttl, "", false, false, nil)
 }
 
 // IssueAdmin mints an admin-flagged credential for tenantID. Admin
@@ -109,7 +136,7 @@ func (s *Store) Issue(tenantID, scope string, kinds []string, ttl time.Duration)
 func (s *Store) IssueAdmin(tenantID string, ttl time.Duration) (Credential, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.issueLocked(tenantID, "", nil, ttl, "", true, true)
+	return s.issueLocked(tenantID, "", nil, ttl, "", true, true, nil)
 }
 
 // IssueApprover mints an approver-flagged credential for tenantID. The
@@ -124,7 +151,19 @@ func (s *Store) IssueAdmin(tenantID string, ttl time.Duration) (Credential, stri
 func (s *Store) IssueApprover(tenantID string, ttl time.Duration) (Credential, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.issueLocked(tenantID, "", nil, ttl, "", false, true)
+	return s.issueLocked(tenantID, "", nil, ttl, "", false, true, nil)
+}
+
+// IssueOwner mints a credential carrying the supplied OwnerRoles for
+// tenantID. Slice 011 uses this to gate the manual-control attestation
+// endpoint: the bearer must hold the control's `owner_role` to attest.
+// Admin and approver flags are off — an owner cannot register schemas
+// or approve framework scopes. Tenant-scoped like every other issuer:
+// an owner for tenant A cannot attest controls for tenant B.
+func (s *Store) IssueOwner(tenantID string, roles []string, ttl time.Duration) (Credential, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.issueLocked(tenantID, "", nil, ttl, "", false, false, roles)
 }
 
 // Rotate issues a successor credential. The predecessor remains valid until
@@ -145,7 +184,7 @@ func (s *Store) Rotate(id string) (successor Credential, bearer string, predeces
 		return
 	}
 
-	successor, bearer, err = s.issueLocked(pred.cred.TenantID, pred.cred.ScopePredicate, pred.cred.Kinds, pred.cred.TTL, id, pred.cred.IsAdmin, pred.cred.IsApprover)
+	successor, bearer, err = s.issueLocked(pred.cred.TenantID, pred.cred.ScopePredicate, pred.cred.Kinds, pred.cred.TTL, id, pred.cred.IsAdmin, pred.cred.IsApprover, pred.cred.OwnerRoles)
 	if err != nil {
 		return
 	}
@@ -202,7 +241,7 @@ func (s *Store) Authenticate(token string) (Credential, error) {
 }
 
 // issueLocked inserts a new credential. Caller must hold s.mu.
-func (s *Store) issueLocked(tenantID, scope string, kinds []string, ttl time.Duration, rotatedFrom string, isAdmin, isApprover bool) (Credential, string, error) {
+func (s *Store) issueLocked(tenantID, scope string, kinds []string, ttl time.Duration, rotatedFrom string, isAdmin, isApprover bool, ownerRoles []string) (Credential, string, error) {
 	id, err := randomHex(16)
 	if err != nil {
 		return Credential{}, "", err
@@ -225,6 +264,7 @@ func (s *Store) issueLocked(tenantID, scope string, kinds []string, ttl time.Dur
 		IsAdmin:        isAdmin,
 		IsApprover:     isApprover,
 		UserID:         credID,
+		OwnerRoles:     append([]string(nil), ownerRoles...),
 	}
 	r := &record{cred: cred, tokenHash: hashToken(token), state: stateActive}
 	s.byID[cred.ID] = r
