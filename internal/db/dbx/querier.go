@@ -11,6 +11,12 @@ import (
 )
 
 type Querier interface {
+	// AC-4 enable: approved -> active. effective_from is the operator-supplied
+	// moment when the waiver effect begins. The DB does not gate on
+	// (effective_from > now); slice scope keeps that to the application layer
+	// so future slices can introduce scheduled-activation tooling without a
+	// schema change.
+	ActivateException(ctx context.Context, arg ActivateExceptionParams) (Exception, error)
 	// AC-8: approved -> activated. The caller must supply effective_from
 	// (timestamptz). The application supersedes the prior `activated` row in
 	// the same transaction by calling SupersedePreviousActivated below; both
@@ -20,6 +26,13 @@ type Querier interface {
 	// Idempotent: ON CONFLICT DO NOTHING because the PK already enforces no
 	// duplicates, so re-adding is a no-op.
 	AddVendorScopeCell(ctx context.Context, arg AddVendorScopeCellParams) error
+	// AC-3 transition: requested -> approved. The application MUST verify the
+	// caller has IsApprover before invoking this query AND that approved_by
+	// differs from requested_by (segregation of duties). The WHERE
+	// status='requested' clause guards against double-approval / out-of-order
+	// transitions; zero rows returned indicates either a missing row or a wrong
+	// prior state -- the application probes after to disambiguate.
+	ApproveException(ctx context.Context, arg ApproveExceptionParams) (Exception, error)
 	// AC-7: review -> approved. Records approver_user_id, approved_at, and the
 	// predicate_hash captured at this moment so a later predicate edit can prove
 	// "the approval was for THIS text, not the current text" (ADR-0001 §positive).
@@ -50,6 +63,15 @@ type Querier interface {
 	// evaluates the INSERT WITH CHECK against current_tenant. content_hash
 	// may be NULL today but every code path in slice 036 supplies it.
 	CreateArtifact(ctx context.Context, arg CreateArtifactParams) (Artifact, error)
+	// Slice 021 — exception / waiver workflow queries.
+	//
+	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
+	// defense-in-depth layer and the WHERE clauses are the primary correctness
+	// guarantee. No update path mutates expires_at (anti-criterion P0: no
+	// auto-renewal). Every state transition has a paired application call to
+	// WriteExceptionAuditLog so the audit trail is complete (anti-criterion P0:
+	// no silent expiry).
+	CreateException(ctx context.Context, arg CreateExceptionParams) (Exception, error)
 	// Slice 018: FrameworkScope predicate + four-state workflow queries.
 	//
 	// Conventions match slice 014/017/019:
@@ -103,6 +125,16 @@ type Querier interface {
 	// so a new release can take over without violating the at-most-one-current
 	// invariant. Caller scopes the transaction.
 	DemoteCurrentFrameworkVersions(ctx context.Context, frameworkID pgtype.UUID) error
+	// AC-3 transition: requested -> denied (terminal). Same guards as Approve.
+	DenyException(ctx context.Context, arg DenyExceptionParams) (Exception, error)
+	// AC-5 auto-expiry: marks active rows whose expires_at < threshold as
+	// expired. Returns the affected rows so the cron can write one
+	// exception_audit_log row per expired exception (anti-criterion P0: no
+	// silent expiry). The handler executes this inside a tenant-tx and pairs
+	// each returned row with WriteExceptionAuditLog. Idempotent: a second
+	// run on the same threshold finds zero active rows that have already
+	// expired, so it is a no-op.
+	ExpireActiveExceptionsBefore(ctx context.Context, arg ExpireActiveExceptionsBeforeParams) ([]Exception, error)
 	// Dedup lookup: returns an existing artifact id when the same content
 	// has already been uploaded by this tenant. Partial unique index
 	// (tenant_id, content_hash) WHERE content_hash IS NOT NULL keeps the
@@ -138,6 +170,7 @@ type Querier interface {
 	// (tenant_id, idempotency_key)?". Returns at most one row because the
 	// partial UNIQUE index `evidence_records_tenant_idem_uniq` enforces it.
 	GetEvidenceRecordByIdempotency(ctx context.Context, arg GetEvidenceRecordByIdempotencyParams) (EvidenceRecord, error)
+	GetExceptionByID(ctx context.Context, arg GetExceptionByIDParams) (Exception, error)
 	// AC-13: historical query — return the row that was the active scope at the
 	// supplied timestamp. The row whose effective_from <= as_of AND (the row was
 	// not yet superseded at as_of OR was never superseded).
@@ -230,6 +263,20 @@ type Querier interface {
 	// on observed_at lets the evaluator stream historical state without
 	// worrying about UPDATEs since slice 002.
 	ListEvidenceRecordsByControl(ctx context.Context, arg ListEvidenceRecordsByControlParams) ([]EvidenceRecord, error)
+	ListExceptionAuditLog(ctx context.Context, arg ListExceptionAuditLogParams) ([]ExceptionAuditLog, error)
+	// Returns every exception for the tenant, newest first. The handler applies
+	// status filter in-memory because the cardinality is small (canvas §1.4
+	// solo lead, ~30-80 vendors gives a sense of scale; exception count is
+	// bounded similarly).
+	ListExceptions(ctx context.Context, tenantID pgtype.UUID) ([]Exception, error)
+	// AC-4 read accessor: every active row for a given control. Downstream
+	// evaluation engine (slice 020/012) intersects scope_cell_predicate with
+	// the cell under evaluation.
+	ListExceptionsByControl(ctx context.Context, arg ListExceptionsByControlParams) ([]Exception, error)
+	// AC-6 calendar surface. Returns active exceptions whose expires_at is
+	// within the supplied window. Window upper bound is computed in Go from
+	// the request param to keep the SQL static.
+	ListExpiringExceptions(ctx context.Context, arg ListExpiringExceptionsParams) ([]Exception, error)
 	// Newest first. Caller filters by framework_version + state in the
 	// application layer because sqlc-static optional WHERE is noisy; the row
 	// count per tenant is bounded by (#frameworks × scope-versions) which stays
@@ -274,6 +321,11 @@ type Querier interface {
 	// Enumerate the active tenant's declared dimensions. Ordering: builtins first
 	// (stable presentation in the admin UI), then alphabetical by name.
 	ListScopeDimensions(ctx context.Context, tenantID pgtype.UUID) ([]ScopeDimension, error)
+	// The auto-expiry cron walks tenants that currently hold any active
+	// exception. Returns the distinct tenant_ids so the cron can apply each
+	// tenant's GUC before running ExpireActiveExceptionsBefore. Runs as the
+	// migrator role (BYPASSRLS) so it sees every tenant.
+	ListTenantsWithActiveExceptions(ctx context.Context) ([]pgtype.UUID, error)
 	// Cells attached to one vendor.
 	ListVendorScopeCells(ctx context.Context, arg ListVendorScopeCellsParams) ([]pgtype.UUID, error)
 	// AC-2 filter by criticality. NULL criticality_filter means "all" — the
@@ -329,6 +381,11 @@ type Querier interface {
 	// result + notes (the audit log still captures every attempt via
 	// WriteSampleAuditLog).
 	UpsertSampleAnnotation(ctx context.Context, arg UpsertSampleAnnotationParams) (SampleAnnotation, error)
+	// Append-only. Every lifecycle transition writes one row (including
+	// system-driven auto-expiry). The exception_audit_log table has
+	// SELECT+INSERT policies only under FORCE RLS so no UPDATE/DELETE path
+	// exists.
+	WriteExceptionAuditLog(ctx context.Context, arg WriteExceptionAuditLogParams) (ExceptionAuditLog, error)
 	// Every sample pull writes one row here. The seed -> sample_id mapping
 	// captured in (seed, sample_id) is the re-audit trail (AC-6).
 	WriteSampleAuditLog(ctx context.Context, arg WriteSampleAuditLogParams) (SampleAuditLog, error)

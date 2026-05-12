@@ -13,6 +13,74 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 021 — Exception / waiver workflow with auto-expiry + calendar API.**
+  Implements the canvas §6.3 exception primitive: time-bounded, scope-bounded
+  waivers of a control's normal evaluation. New migration
+  `20260511000011_exceptions.sql` adds two tables — `exceptions` (mutable
+  state) and `exception_audit_log` (append-only state-transition log).
+  `exceptions` carries the canvas-§6.3 fields verbatim: `control_id`,
+  `scope_cell_predicate` (slice-017 JSON-AST shape), `justification`,
+  `compensating_controls TEXT[]` (free-form narrative mitigations, not FK
+  to controls — see `CONTEXT.md` for the canonical definition),
+  `requested_by` / `requested_at`, `approved_by` / `approved_at`,
+  `denied_by` / `denied_at`, `activated_by` / `activated_at`,
+  `effective_from`, `expires_at`, `expired_at`, and `status` (CHECK enum
+  `{requested,approved,denied,active,expired}`). State machine has five
+  distinct states; `requested → approved → active → expired` is the happy
+  path; `requested → denied` and `active → expired` are terminal. The
+  approval step is governance ratification; activation is when the effect
+  takes hold (slice 020's eval engine consumer flips control × scope cell
+  evaluation to `excepted`). New `internal/exception.Store` exposes the
+  Active(controlID) read accessor for that downstream consumer; the eval
+  engine integration itself is slice 020/012's responsibility, so AC-4 is
+  honored as a PARTIAL shipment in this slice (read accessor + dashboard
+  calendar surface only). RLS uses the four-policy split established by
+  slices 014/017/018/036 on `exceptions`; the audit log uses SELECT +
+  INSERT policies only under FORCE ROW LEVEL SECURITY, mirroring slice
+  013's `evidence_audit_log`, slice 026's `sample_audit_log`, and slice
+  036's `artifact_access_log` — append-only by construction. Composite
+  FK on `(tenant_id, control_id) → controls(tenant_id, id)` blocks
+  cross-tenant control references (slice 002 D3 invariant). Anti-criterion
+  P0 — auto-renewal forbidden — enforced by the absence of any UPDATE
+  path that mutates `expires_at`; the DB CHECK `exceptions_max_365d`
+  caps `expires_at <= requested_at + INTERVAL '365 days'` as
+  defense-in-depth (the application also rejects at request time with a
+  friendly error). Anti-criterion P0 — no silent expiry — enforced by the
+  Expirer cron writing one `exception_audit_log` row per expired
+  exception with `actor='system:exception-expiry'`; the SystemActor
+  constant lets audit-trail review segregate system-driven from
+  human-driven transitions. Anti-criterion P0 — 365-day cap — covered
+  by both the application validator and the DB CHECK. Segregation of
+  duties: `approved_by` MUST differ from `requested_by` (application
+  returns 403, DB CHECK `exceptions_sod` is defense-in-depth); the same
+  invariant applies to `denied_by` via `exceptions_denied_by_sod`. New
+  REST surface: `POST /v1/exceptions`, `GET /v1/exceptions`,
+  `GET /v1/exceptions/expiring?within=30d` (AC-6 calendar; default 30d,
+  max 365d; accepts `30d`/`12h`/`45m` duration shapes since Go's
+  `time.ParseDuration` does not accept `d`), `GET /v1/exceptions/{id}`,
+  `GET /v1/exceptions/{id}/audit-log`, and the workflow transitions
+  `PATCH /v1/exceptions/{id}/{approve,deny,activate}` — all approver-gated
+  by `Credential.IsApprover` (with `IsAdmin` implying it, matching slice
+  018's pattern; no new auth abstraction). Auto-expiry tick loop lives in
+  `internal/exception.Expirer`, launched from `cmd/atlas/main.go`
+  alongside the gRPC, HTTP, and JetStream consumer goroutines. Runs as
+  the migrator role (BYPASSRLS) because the sweep crosses tenants;
+  per-tenant state changes happen inside a tenant-scoped transaction
+  that applies the GUC, so writes are RLS-honest. Default cadence is
+  24h; `ATLAS_EXCEPTION_EXPIRY_INTERVAL` overrides for dev loops. First
+  sweep runs immediately at startup so a fresh deploy doesn't sit silent
+  for 24h. Sweep is idempotent: a second run on an already-swept set is
+  a no-op. New `CONTEXT.md` at the repo root canonizes the "Exception"
+  domain term (state machine, allowed transitions, SoD, calendar
+  surface); this is the first time the repo gets a `CONTEXT.md` —
+  exceptions are the first domain primitive that needs precise glossary
+  definition beyond what the canvas covers. Integration test suite
+  covers every AC against real Postgres including SoD enforcement on
+  approve + deny, wrong-state transition rejection, cross-tenant
+  control FK rejection, RLS cross-tenant invisibility, expirer
+  idempotence, and audit-log append-only invariant. 22 integration
+  tests pass.
+
 - **Slice 048 — Jira / Linear ticket connector.** New stateless connector
   binary `connectors/jira/cmd/atlas-jira` emitting one evidence kind —
   `jira.ticket_evidence.v1` — across two ticketing platforms:
@@ -123,8 +191,8 @@ observed_at>")` via `idem.HostPostureKey`; empty `host_uuid` returns
   ErrLocalSocketNotWired sentinel. Test fixtures use neutral token
   strings (no Fleet/Okta/GitHub prefix shapes) so GitGuardian does
   not flag the commit.
-||||||| parent of dd95004 (feat(connectors): Manual upload / CSV / S3 / SFTP escape-hatch (#049))
-=======
+  ||||||| parent of dd95004 (feat(connectors): Manual upload / CSV / S3 / SFTP escape-hatch (#049))
+  =======
 - **Slice 049 — Manual upload / CSV / S3 / SFTP escape-hatch connector.**
   New stateless connector binary `connectors/manual/cmd/atlas-manual`
   emits `manual.upload.v1` records via three subcommand modes:

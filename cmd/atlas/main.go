@@ -22,6 +22,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
+	"github.com/mgoodric/security-atlas/internal/exception"
 )
 
 const (
@@ -197,6 +198,41 @@ func main() {
 				errCh <- fmt.Errorf("streambuf consumer: %w", err)
 			}
 		}()
+	}
+
+	// Slice 021: exception auto-expiry tick loop. Runs as the migrator
+	// role (BYPASSRLS) so the sweep can cross tenants -- the per-tenant
+	// transaction inside applies the GUC for RLS-honest writes. Default
+	// cadence is 24h; ATLAS_EXCEPTION_EXPIRY_INTERVAL overrides for dev
+	// loops. Only mounts when the migrator URL is available (the same
+	// guard the schema importer uses); otherwise the platform runs
+	// without auto-expiry and the operator must sweep manually.
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" {
+		expiryCtx, expiryCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		expiryPool, err := pgxpool.New(expiryCtx, migratorURL)
+		expiryCancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: exception expiry pool: %v\n", err)
+		} else {
+			interval := exception.DefaultExpiryInterval
+			if raw := os.Getenv("ATLAS_EXCEPTION_EXPIRY_INTERVAL"); raw != "" {
+				if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+					interval = d
+				} else {
+					fmt.Fprintf(os.Stderr, "atlas: ATLAS_EXCEPTION_EXPIRY_INTERVAL=%q invalid: %v\n", raw, perr)
+				}
+			}
+			expirer := exception.NewExpirer(expiryPool, logger)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer expiryPool.Close()
+				fmt.Fprintf(os.Stderr, "atlas: exception expirer ticking every %s\n", interval.String())
+				if err := expirer.Run(ctx, interval); err != nil {
+					errCh <- fmt.Errorf("exception expirer: %w", err)
+				}
+			}()
+		}
 	}
 
 	wg.Wait()

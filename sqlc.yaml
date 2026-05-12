@@ -16,6 +16,7 @@ sql:
       - "migrations/sql/20260511000008_artifacts.sql"
       - "migrations/sql/20260511000009_control_bundle.sql"
       - "migrations/sql/20260511000010_audit_samples.sql"
+      - "migrations/sql/20260511000011_exceptions.sql"
     queries: "internal/db/queries"
     gen:
       go:
