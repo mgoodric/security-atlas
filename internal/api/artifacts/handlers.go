@@ -243,15 +243,13 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 // ----- helpers -----
 
 func (h *Handler) tenantContext(r *http.Request) (context.Context, bool) {
-	cred, ok := authctx.CredentialFromContext(r.Context())
-	if !ok || cred.TenantID == "" {
+	// Slice 033: tenancy.Middleware (httpserver.go) lifted cred.TenantID
+	// onto r.Context() via tenancy.WithTenant. Confirm the tenant is set
+	// — its absence means no credential (the 401-shaped path).
+	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
 		return nil, false
 	}
-	ctx, err := tenancy.WithTenant(r.Context(), cred.TenantID)
-	if err != nil {
-		return nil, false
-	}
-	return ctx, true
+	return r.Context(), true
 }
 
 func (h *Handler) toWire(a artifact.Artifact) artifactWire {

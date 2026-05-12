@@ -20,7 +20,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -167,15 +166,13 @@ func (h *Handler) ControlApplicability(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) tenantContext(r *http.Request) (context.Context, bool) {
-	cred, ok := authctx.CredentialFromContext(r.Context())
-	if !ok || cred.TenantID == "" {
+	// Slice 033: tenancy.Middleware (httpserver.go) lifted cred.TenantID
+	// onto r.Context() via tenancy.WithTenant. Confirm; bail if absent
+	// (would mean no credential or misconfig).
+	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
 		return nil, false
 	}
-	ctx, err := tenancy.WithTenant(r.Context(), cred.TenantID)
-	if err != nil {
-		return nil, false
-	}
-	return ctx, true
+	return r.Context(), true
 }
 
 func cellWireFrom(c scope.Cell) cellWire {

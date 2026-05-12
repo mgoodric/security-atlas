@@ -391,19 +391,21 @@ func (h *Handler) writeTransitionErr(w http.ResponseWriter, err error) {
 	}
 }
 
-// tenantCredContext returns the request context with the tenant GUC
-// applied PLUS the resolved credential (so handlers can gate on IsApprover
-// / IsAdmin and use cred.ID as the actor).
+// tenantCredContext returns the request context (with the tenant GUC
+// already applied by slice-033's tenancy.Middleware) plus the resolved
+// credential, so handlers can gate on IsApprover / IsAdmin and use
+// cred.ID as the actor.
 func (h *Handler) tenantCredContext(r *http.Request) (context.Context, credstore.Credential, bool) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok || cred.TenantID == "" {
 		return nil, credstore.Credential{}, false
 	}
-	ctx, err := tenancy.WithTenant(r.Context(), cred.TenantID)
-	if err != nil {
+	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
+		// Middleware should have set this; bail loudly rather than
+		// silently re-WithTenant (would mask a misconfig).
 		return nil, credstore.Credential{}, false
 	}
-	return ctx, cred, true
+	return r.Context(), cred, true
 }
 
 func exceptionWireFrom(e exception.Exception) exceptionWire {

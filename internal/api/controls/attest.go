@@ -180,8 +180,10 @@ func (h *AttestHandler) AttestForm(w http.ResponseWriter, r *http.Request) {
 		writeAttestError(w, http.StatusServiceUnavailable, "control store not configured")
 		return
 	}
-	ctx, terr := tenancy.WithTenant(r.Context(), cred.TenantID)
-	if terr != nil {
+	// Slice 033: tenancy.Middleware already set app.current_tenant from
+	// cred.TenantID. Confirm; bail if absent (would mean misconfig).
+	ctx := r.Context()
+	if _, terr := tenancy.TenantFromContext(ctx); terr != nil {
 		writeAttestError(w, http.StatusInternalServerError, "tenant context: "+terr.Error())
 		return
 	}
@@ -256,8 +258,10 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, terr := tenancy.WithTenant(r.Context(), cred.TenantID)
-	if terr != nil {
+	// Slice 033: tenancy.Middleware already set app.current_tenant from
+	// cred.TenantID. Confirm; bail if absent (would mean misconfig).
+	ctx := r.Context()
+	if _, terr := tenancy.TenantFromContext(ctx); terr != nil {
 		writeAttestError(w, http.StatusInternalServerError, "tenant context: "+terr.Error())
 		return
 	}

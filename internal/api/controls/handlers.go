@@ -78,8 +78,10 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 	// limit is exceeded — wrap r.Body up front before any read.
 	r.Body = http.MaxBytesReader(w, r.Body, h.maxRequestBytes)
 
-	ctx, err := tenancy.WithTenant(r.Context(), cred.TenantID)
-	if err != nil {
+	// Slice 033: tenancy.Middleware already set app.current_tenant from
+	// cred.TenantID. Confirm; bail if absent (would mean misconfig).
+	ctx := r.Context()
+	if _, err := tenancy.TenantFromContext(ctx); err != nil {
 		writeError(w, http.StatusInternalServerError, "tenant context: "+err.Error())
 		return
 	}

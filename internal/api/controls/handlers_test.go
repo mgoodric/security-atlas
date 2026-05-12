@@ -2,6 +2,7 @@ package controls
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -12,7 +13,21 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
+
+// withAuthAndTenant mirrors what slice-033's tenancy.Middleware does in
+// production: it attaches the credential AND sets the tenant GUC on the
+// context. Unit tests that drive a handler directly (no chi router, so
+// no middleware) need this manual wiring.
+func withAuthAndTenant(ctx context.Context, cred credstore.Credential) context.Context {
+	ctx = authctx.WithCredential(ctx, cred)
+	out, err := tenancy.WithTenant(ctx, cred.TenantID)
+	if err != nil {
+		panic("test fixture: WithTenant: " + err.Error())
+	}
+	return out
+}
 
 // These tests exercise the request-shape branches that do NOT require a
 // Postgres connection: missing auth, missing admin flag, malformed JSON
@@ -54,7 +69,7 @@ func TestUpload_RejectsBadContentType(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/controls:upload-bundle", strings.NewReader(""))
 	req.Header.Set("Content-Type", "text/plain")
-	ctx := authctx.WithCredential(req.Context(), adminCred())
+	ctx := withAuthAndTenant(req.Context(), adminCred())
 	h.UploadBundle(rr, req.WithContext(ctx))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400; got %d (body=%s)", rr.Code, rr.Body.String())
@@ -71,7 +86,7 @@ func TestUpload_RejectsMissingManifestYAML(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"manifest_yaml": ""})
 	req := httptest.NewRequest(http.MethodPost, "/v1/controls:upload-bundle", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	ctx := authctx.WithCredential(req.Context(), adminCred())
+	ctx := withAuthAndTenant(req.Context(), adminCred())
 	h.UploadBundle(rr, req.WithContext(ctx))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400; got %d", rr.Code)
@@ -91,7 +106,7 @@ implementation_type: automated
 	body, _ := json.Marshal(map[string]string{"manifest_yaml": yaml})
 	req := httptest.NewRequest(http.MethodPost, "/v1/controls:upload-bundle", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	ctx := authctx.WithCredential(req.Context(), adminCred())
+	ctx := withAuthAndTenant(req.Context(), adminCred())
 	h.UploadBundle(rr, req.WithContext(ctx))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400; got %d body=%s", rr.Code, rr.Body.String())
@@ -113,7 +128,7 @@ func TestUpload_RejectsMultipartWithoutBundle(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/controls:upload-bundle", &buf)
 	req.Header.Set("Content-Type", mp.FormDataContentType())
-	ctx := authctx.WithCredential(req.Context(), adminCred())
+	ctx := withAuthAndTenant(req.Context(), adminCred())
 	h.UploadBundle(rr, req.WithContext(ctx))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400; got %d body=%s", rr.Code, rr.Body.String())

@@ -13,6 +13,71 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 033 — Postgres RLS enforcement on every tenant-scoped table +
+  `tenancy.Middleware` + `just audit-rls` CI gate.** Lands the runtime
+  half of constitutional invariant 6 (canvas §5.4): every bearer-auth'd
+  HTTP request now flows through a new `tenancymw.Middleware`
+  (`internal/api/tenancymw/`) that lifts `cred.TenantID` onto the
+  request context via `tenancy.WithTenant`. Mounted in
+  `internal/api/httpserver.go` immediately after the bearer-auth
+  middleware, the new layer becomes the single source of truth for
+  `app.current_tenant`. Handlers that previously open-coded the
+  pattern (`cred := authctx.CredentialFromContext; ctx :=
+tenancy.WithTenant(...)`) simplify to a `tenancy.TenantFromContext`
+  presence check — wide mechanical edit across `risks`, `vendors`,
+  `artifacts`, `exceptions`, `controls` (CRUD + attest), `audit` (samples),
+  `frameworkscopes`, `scopes`, and the two `admincreds` Rotate/Revoke
+  paths. The middleware no-ops when no credential is in context, which
+  preserves the bearer-exempt `/auth/*` paths (they keep their own
+  request-supplied `WithTenant` calls; `context.WithValue` shadowing
+  makes the handler's value win). New `scripts/audit-rls.sh` plus
+  `just audit-rls` target queries `pg_class` + `pg_policy` for every
+  public-schema table with a `tenant_id` column and asserts at least
+  one RLS policy is attached AND `relforcerowsecurity = true`; exits
+  non-zero with a tab-separated list of offenders on failure. Wired
+  into `.github/workflows/ci.yml` between "Apply forward migrations"
+  and the integration-test slate so schema drift fails the build
+  before any behavioural test runs. Integration tests in
+  `internal/db/rls_integration_test.go` add three load-bearing checks:
+  (1) `TestRLS_ForgottenWhereClause_StillIsolates` — the AC-4 "what
+  if a developer forgets `WHERE tenant_id = ?`" negative; inserts a
+  `risks` row under tenant A, switches to tenant B, runs `SELECT
+count(*) FROM risks WHERE id = $1` (id-only, no tenant predicate),
+  asserts zero rows. (2) `TestRLS_CrossTenant_SweepPerTable` —
+  parameterised over `risks`, `scopes`, `policies`, `framework_scopes`,
+  `vendors`, `exceptions`; per case it seeds tenant A, switches to
+  tenant B, asserts zero rows in a tenant-predicate-free SELECT, then
+  switches back to tenant A and asserts the row is still visible (so
+  RLS over-denial would also fail). (3)
+  `TestRLS_ServiceAccountRolePresent` — proves the slice-033 bootstrap
+  landed the `atlas_service_account` role and that `SET LOCAL ROLE
+atlas_service_account` succeeds from an `atlas_app` session, which
+  is the canonical seam for future cross-tenant reads. The role
+  itself is added in `migrations/bootstrap/01-roles.sql` as
+  `BYPASSRLS NOLOGIN NOINHERIT` with `GRANT atlas_service_account TO
+atlas_app`; no production caller in v1, the seam exists so the
+  first such feature has a clean path. **Zero new versioned
+  migrations:** every existing tenant-scoped table from slices 002
+  onward already carries the right policy + FORCE shape (audited and
+  confirmed by `just audit-rls` against a freshly migrated database).
+  Contributor reference: `docs/architecture/rls.md` documents the
+  three valid policy patterns (single `tenant_isolation`, four-policy
+  `tenant_read`/`tenant_write`/`tenant_update`/`tenant_delete`,
+  append-only `tenant_read`+`tenant_insert`), the
+  `tenant_or_catalog` exception for shared catalogs
+  (`frameworks`, `framework_versions`, `evidence_kind_schemas`), the
+  GUC plumbing flow (middleware → `tenancy.WithTenant` →
+  `tenancy.ApplyTenant(ctx, tx)` → `SELECT set_config('app.current_tenant',
+..., true)`), the BYPASSRLS service-account pattern with `SET LOCAL
+ROLE`, and the per-table checklist for adding a new tenant-scoped
+  table. AC-1 through AC-6 all green. Surfaces one pre-existing
+  finding for a P0 follow-up issue: `POST /v1/admin/credentials` and
+  `GET /v1/admin/credentials` source `tenant_id` from the request
+  body / query rather than the calling credential, which RLS does
+  NOT catch (the handler is internally consistent — writes tenant
+  B's row under tenant B's GUC). Recommendation in PR body to file
+  the fix as a separate issue.
+
 - **Slice 021 — Exception / waiver workflow with auto-expiry + calendar API.**
   Implements the canvas §6.3 exception primitive: time-bounded, scope-bounded
   waivers of a control's normal evaluation. New migration
