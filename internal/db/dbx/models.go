@@ -589,6 +589,26 @@ func (ns NullVendorReviewCadence) Value() (driver.Value, error) {
 	return string(ns.VendorReviewCadence), nil
 }
 
+type ApiKey struct {
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	TokenHash      []byte             `json:"token_hash"`
+	ScopePredicate []byte             `json:"scope_predicate"`
+	AllowedKinds   []string           `json:"allowed_kinds"`
+	IssuedBy       pgtype.UUID        `json:"issued_by"`
+	IssuedAt       pgtype.Timestamptz `json:"issued_at"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	LastUsedAt     pgtype.Timestamptz `json:"last_used_at"`
+	RevokedAt      pgtype.Timestamptz `json:"revoked_at"`
+	RotatedFrom    pgtype.UUID        `json:"rotated_from"`
+	RetiresAt      pgtype.Timestamptz `json:"retires_at"`
+	IsAdmin        bool               `json:"is_admin"`
+	IsApprover     bool               `json:"is_approver"`
+	OwnerRoles     []string           `json:"owner_roles"`
+	Last4          string             `json:"last4"`
+	TtlSeconds     int64              `json:"ttl_seconds"`
+}
+
 type Artifact struct {
 	ID          pgtype.UUID        `json:"id"`
 	TenantID    pgtype.UUID        `json:"tenant_id"`
@@ -771,6 +791,29 @@ type FrameworkVersion struct {
 	CreatedAt        pgtype.Timestamptz     `json:"created_at"`
 }
 
+type LocalCredential struct {
+	UserID       pgtype.UUID        `json:"user_id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	PasswordHash string             `json:"password_hash"`
+	Algo         string             `json:"algo"`
+	Params       []byte             `json:"params"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OidcIdpConfig struct {
+	ID                  pgtype.UUID        `json:"id"`
+	TenantID            pgtype.UUID        `json:"tenant_id"`
+	Name                string             `json:"name"`
+	IssuerUrl           string             `json:"issuer_url"`
+	ClientID            string             `json:"client_id"`
+	ClientSecretEnc     []byte             `json:"client_secret_enc"`
+	RedirectUrl         string             `json:"redirect_url"`
+	AllowedEmailDomains []string           `json:"allowed_email_domains"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Policy struct {
 	ID                         pgtype.UUID        `json:"id"`
 	TenantID                   pgtype.UUID        `json:"tenant_id"`
@@ -912,6 +955,30 @@ type ScopeDimension struct {
 	IsBuiltin     bool               `json:"is_builtin"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Session struct {
+	ID         string             `json:"id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	UserID     pgtype.UUID        `json:"user_id"`
+	IdpIssuer  string             `json:"idp_issuer"`
+	IdpSubject string             `json:"idp_subject"`
+	IssuedAt   pgtype.Timestamptz `json:"issued_at"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
+	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
+}
+
+type User struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	Email       string             `json:"email"`
+	DisplayName string             `json:"display_name"`
+	Status      string             `json:"status"`
+	IdpIssuer   string             `json:"idp_issuer"`
+	IdpSubject  string             `json:"idp_subject"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Vendor struct {

@@ -21,6 +21,7 @@ import (
 	connectorsv1 "github.com/mgoodric/security-atlas/gen/proto/connectors/v1"
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	"github.com/mgoodric/security-atlas/internal/api/admin"
+	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/connectorregistry"
 	"github.com/mgoodric/security-atlas/internal/api/connectors"
@@ -29,6 +30,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/idemstore"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/artifact"
+	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 )
@@ -50,6 +52,14 @@ type Server struct {
 	// push HTTP handler routes through JetStream; nil falls back to
 	// direct Service.Process.
 	evidencePublisher evidence.Publisher
+	// Slice 034: DB-backed bearer-credential store. When wired, the HTTP
+	// auth middleware falls through to it for tokens not known by the
+	// in-memory credstore. Admin-credential HTTP routes (POST/GET/rotate/
+	// revoke under /v1/admin/credentials) only mount when this is set.
+	apikeyStore *apikeystore.Store
+	// Slice 034: user-facing auth routes (OIDC login/callback, local
+	// login, logout). Only mounted when set.
+	authHandler *authapi.Handler
 }
 
 // IssueBootstrapCredential mints a credential for the supplied tenant and
@@ -176,6 +186,24 @@ func (s *Server) AttachEvidencePublisher(pub evidence.Publisher) {
 // don't need to call it.
 func (s *Server) AttachArtifactStore(store *artifact.Store) {
 	s.artifactStore = store
+}
+
+// AttachAPIKeyStore wires the slice-034 DB-backed bearer credential store.
+// The HTTP auth middleware uses it as a fallback for tokens not known by
+// the in-memory credstore; the admin-credential HTTP routes
+// (POST/GET/rotate/revoke under /v1/admin/credentials) only mount when
+// this is set. cmd/atlas wires it once at startup with a BEARER_HASH_KEY-
+// backed bearer.Hasher.
+func (s *Server) AttachAPIKeyStore(store *apikeystore.Store) {
+	s.apikeyStore = store
+}
+
+// AttachAuthHandler wires the slice-034 user-facing auth routes. The
+// /auth/* routes (OIDC login/callback, local login, logout) only mount
+// when this is set. cmd/atlas wires it once at startup with the OIDC
+// authenticator, users store, and sessions store.
+func (s *Server) AttachAuthHandler(h *authapi.Handler) {
+	s.authHandler = h
 }
 
 // Run starts the gRPC server on addr (e.g., ":50051") and blocks until ctx
