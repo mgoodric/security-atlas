@@ -107,10 +107,12 @@ func boot(t *testing.T) (*ingest.Service, *pgxpool.Pool, *schemaregistry.Service
 	// bypasses RLS WITH CHECK and is atomic at the table level,
 	// avoiding the SELECT-then-INSERT visibility races that DELETE +
 	// re-INSERT have exhibited in this multi-package test step.
-	// CASCADE is intentionally omitted: these tables have no
-	// inbound FKs from other tables in the current schema set.
+	// CASCADE so downstream FK references (slice 026's
+	// sample_evidence.evidence_record_id) don't block the truncate.
+	// Each test seeds the state it needs; cross-table cascade is fine
+	// because there's no production data in the test DB to preserve.
 	if _, err := conn.Exec(ctx,
-		`TRUNCATE evidence_audit_log, evidence_records, evidence_kind_schemas`,
+		`TRUNCATE evidence_audit_log, evidence_records, evidence_kind_schemas CASCADE`,
 	); err != nil {
 		t.Fatalf("truncate ledger+registry: %v", err)
 	}
