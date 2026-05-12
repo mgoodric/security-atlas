@@ -3,7 +3,17 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-11 (slice 021 → in-review)
+**Last reconciled:** 2026-05-11 (slice 034 → in-review)
+
+## Drift detected — 2026-05-11 (slice 034 → in-review)
+
+Slice 034 (OIDC RP + local users + `api_keys` admin) flipped `in-progress` → `in-review`. PR gh#26 opened against main. The slice ships the auth machinery consumed by every existing connector — OIDC code+PKCE flow, local password login, opaque server-side sessions, and the DB-backed `api_keys` table for bearer credentials. Introduces ADR-0002 (bearer-token storage: HMAC-SHA256 keyed with `BEARER_HASH_KEY`, distinct from argon2id for local passwords). Migration slot `20260511000012` consumed (single migration, five tables: users / local_credentials / sessions / oidc_idp_configs / api_keys).
+
+| Row | Transition                  | Evidence                |
+| --- | --------------------------- | ----------------------- |
+| 034 | `in-progress` → `in-review` | gh#26 opened 2026-05-11 |
+
+**Counts delta:** in-progress −1 · in-review +1.
 
 ## Drift detected — 2026-05-11 (slice 021 → in-review)
 
@@ -277,7 +287,7 @@ Legal values (use exactly these strings):
 | 031 | Monthly board brief (templated, no LLM)                | `not-ready`   | —                                                    | —     | —          | —          | waits on 012, 016, 020                |
 | 032 | Quarterly board pack + investment-vs-coverage          | `not-ready`   | —                                                    | —     | —          | —          | waits on 031, 030                     |
 | 033 | Postgres RLS enforcement everywhere                    | `ready`       | —                                                    | —     | —          | —          | open-q #13 resolved (multi-tenant v1) |
-| 034 | OIDC RP + local users                                  | `in-progress` | auth/034-oidc-rp-local-users                         | —     | 2026-05-11 | —          | open-q #13 resolved (multi-tenant v1) |
+| 034 | OIDC RP + local users                                  | `in-review`   | auth/034-oidc-rp-local-users                         | gh#26 | 2026-05-11 | —          | open-q #13 resolved (multi-tenant v1) |
 | 035 | RBAC roles + ABAC via OPA embedded                     | `not-ready`   | —                                                    | —     | —          | —          | waits on 033, 034 · HITL on roles     |
 | 036 | S3 artifact store integration                          | `merged`      | infra/036-s3-artifact-store                          | gh#15 | 2026-05-11 | 2026-05-11 | closes 013 AC-6 PARTIAL gap           |
 | 037 | docker-compose self-host bundle                        | `not-ready`   | —                                                    | —     | —          | —          | waits on 034; open-q #13 resolved     |
