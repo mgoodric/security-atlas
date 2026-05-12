@@ -72,6 +72,15 @@ func (s *Server) IssueBootstrapApproverCredential(tenantID string) (credstore.Cr
 	return s.credStore.IssueApprover(tenantID, 0)
 }
 
+// IssueBootstrapOwnerCredential mints a credential carrying the supplied
+// owner roles for tenantID. Slice 011 uses it to drive the manual-control
+// attestation endpoint: the bearer must hold the control's `owner_role`
+// to attest. Tests and (until slice 035) production owner-credential
+// issuance go through here.
+func (s *Server) IssueBootstrapOwnerCredential(tenantID string, roles []string) (credstore.Credential, string, error) {
+	return s.credStore.IssueOwner(tenantID, roles, 0)
+}
+
 // Config groups the wiring inputs. Zero values yield a sane local setup.
 type Config struct {
 	RotationGrace time.Duration

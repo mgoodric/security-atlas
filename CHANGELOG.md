@@ -13,6 +13,31 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 011 — Manual control type + attestation/upload flow.** New
+  `POST /v1/controls/{id}/attestations` endpoint pushes a
+  `manual.attestation.v1` evidence record through slice 013's ingestion
+  stage with full provenance: `actor_type="human"`, `actor_id=<userId>`,
+  optional `payload_uri` pointing at slice 036's S3 artifact store
+  (≤10 MiB). Frontend at `/controls/[id]/attest` renders a JSON-Schema-
+  driven form from the control's `manual_evidence_schema` (slice 009's
+  bundle field); the optional file attachment goes through
+  `/api/artifacts/upload` (Next.js proxy) before the attestation
+  submission. Owner-role gate via new `Credential.HasOwnerRole`
+  (`credstore.HasOwnerRole`): a user lacking the control's
+  `owner_role` gets 403. The submission's `idempotency_key` is a
+  sha256 mix of `user_id ‖ control_id ‖ body` so dedup is per-user-
+  per-control-per-content. New schema file
+  `internal/api/schemaregistry/schemas/manual.attestation/1.1.0.json`
+  is an additive minor bump (new optional `statement` field for the
+  free-text justification) over slice 014's 1.0.0; AC-5 semver
+  enforcement permits this. NO new database tables — the attestation
+  flows through the same `evidence_records` ledger as automated
+  connector pushes. Anti-criteria honored: no AI auto-attest
+  (`actor_type` is a server-side constant, not readable from request
+  body); cross-tenant artifact access returns 404 (slice 036 RLS
+  gate); attestation without owner-role returns 403; every Decision
+  flows through `ingest.Service.writeAudit` so the audit log records
+  who attested + when (AC-6).
 - **Slice 009 — Control bundle format spec + parser + upload API.** New
   control-as-code authoring path: a YAML manifest (`control.yaml`)
   declaring `bundle_id`, `scf_anchor_id`, `title`, `implementation_type`,

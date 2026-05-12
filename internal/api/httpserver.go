@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/anchors"
@@ -22,6 +23,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
 	"github.com/mgoodric/security-atlas/internal/api/vendors"
+	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
@@ -138,7 +140,43 @@ func (s *Server) httpHandler() http.Handler {
 	}
 	controlsH := controlsapi.New(control.NewStore(s.dbPool), controlsRegistry)
 	root.Post("/v1/controls:upload-bundle", controlsH.UploadBundle)
+	// Slice 011: manual control attestation endpoint. Wired only when
+	// the slice-013 ingest service is wired in (this slice writes
+	// evidence records via that service). When the artifact store is
+	// also wired, attestations may cite an uploaded artifact_id.
+	if s.ingestService != nil {
+		attestH := controlsapi.NewAttestHandler(s.dbPool, s.ingestService, attestUploader(s.artifactStore))
+		root.Get("/v1/controls/{id}/attest-form", attestH.AttestForm)
+		root.Post("/v1/controls/{id}/attestations", attestH.Submit)
+	}
 	return root
+}
+
+// attestUploader returns the slice-011 ArtifactUploader adapter over the
+// slice-036 *artifact.Store, or nil when no artifact store has been
+// wired. The slice-011 handler tolerates a nil uploader — it just
+// rejects requests that cite an artifact_id with 503.
+func attestUploader(store *artifact.Store) controlsapi.ArtifactUploader {
+	if store == nil {
+		return nil
+	}
+	return &storeArtifactAdapter{store: store}
+}
+
+type storeArtifactAdapter struct {
+	store *artifact.Store
+}
+
+// PayloadURIFor resolves artifactID through artifact.Store.Get (which
+// enforces RLS via the tenant context) and returns the canonical s3://
+// URI for the artifact. Cross-tenant lookups return ErrNotFound, which
+// the handler surfaces as 404.
+func (a *storeArtifactAdapter) PayloadURIFor(ctx context.Context, artifactID uuid.UUID) (string, error) {
+	art, err := a.store.Get(ctx, artifactID)
+	if err != nil {
+		return "", err
+	}
+	return art.PayloadURI(a.store.Bucket()), nil
 }
 
 // RunHTTP starts the HTTP server on addr (e.g., ":8080") and blocks until
