@@ -3,9 +3,19 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-12 (slice 051 → in-review · PR gh#28 opened)
+**Last reconciled:** 2026-05-12 (slice 051 merged — admincreds P0 fix · 28/51 slices on main)
 
-## Drift detected — 2026-05-12 (slice 051 → in-review)
+## Drift detected — 2026-05-12 (slice 051 P0 fix merged)
+
+Slice 051 flipped `in-review` → `merged`. **Cross-tenant escalation vulnerability closed.** No new ready-set unblocks (051 is a leaf fix). Orchestrator note: PR #28's initial CI workflow run was silently suppressed by an add/add merge conflict on the issue file (orchestrator-written stub at claim-stake vs agent's richer threat-model version). Rebase against post-claim-stake main resolved the conflict AND restored the `pull_request` workflow trigger immediately. **Useful learning:** a merge-conflict-state PR receives no `pull_request` event from GitHub — diagnostic signature for "CI is silent but main pushes still run" → rebase first.
+
+| Row | Transition             | Evidence                                                                                                                                                                                                                                                                                        |
+| --- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 051 | `in-review` → `merged` | commit `81a9a76` on main (gh#28 squashed 2026-05-12; 7/7 ACs PASS · zero migrations · 218+/30- across 4 files · post-rebase prettier-format on issue file resolved final CI hook gap. Rotate/Revoke handler bodies byte-unchanged verified at merge — anti-criterion preserved through rebase.) |
+
+**Counts delta:** merged +1 · in-review −1.
+
+## Drift detected — 2026-05-12 (slice 051 → in-review, archived)
 
 Slice 051 (admincreds Issue/List derive tenant from credential, not request body) flipped `in-progress` → `in-review`. PR gh#28 opened against main. The slice closes the P0 follow-up surfaced at the bottom of slice 033's PR body: pre-fix, an admin in tenant A could mint an admin credential into tenant B by supplying `{"tenant_id":"<B>"}` in the Issue body, and enumerate tenant B's credentials by passing `?tenant_id=<B>` to List — RLS did not catch this because the handler explicitly called `tenancy.WithTenant(ctx, req.TenantID)`, overriding slice-033's middleware GUC; the handler was internally consistent so it both set the GUC and wrote the row under the attacker-supplied tenant. The fix removes both `tenancy.WithTenant` override calls and reads the tenant strictly from `authctx.CredentialFromContext(r.Context()).TenantID`, matching the pattern Rotate + Revoke already use (those two handlers byte-unchanged by this slice — verified via `git diff` produces zero hunks inside their function bodies). API contract changes (BREAKING) announced in CHANGELOG under `## [Unreleased] / Changed`: `IssueRequest.tenant_id` JSON field rejected with HTTP 400 if non-empty, `?tenant_id=` query parameter on List rejected with HTTP 400 if non-empty; `IssueRequest.TenantID` Go struct field retained (with `omitempty`) so legacy callers get a descriptive 400 instead of a JSON decode failure or silent acceptance. Zero migrations, zero new dependencies, zero environment variables. Net diff: 4 files (`internal/api/admincreds/http.go` + `http_integration_test.go` + new `docs/issues/051-...md` + `CHANGELOG.md`), 218 insertions / 30 deletions. Constitutional invariant 6 (canvas §5.4) and slice-033 design decision D1 ("`tenancy.Middleware` sets `app.current_tenant` strictly from `cred.TenantID`; no handler-level overrides") now enforced uniformly across all four admincreds handlers.
 
@@ -304,9 +314,9 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 
 | Status        | Count  |
 | ------------- | ------ |
-| `merged`      | 27     |
+| `merged`      | 28     |
 | `in-review`   | 0      |
-| `in-progress` | 1      |
+| `in-progress` | 0      |
 | `ready`       | 4      |
 | `blocked`     | 0      |
 | `not-ready`   | 19     |
@@ -378,7 +388,7 @@ Legal values (use exactly these strings):
 | 048 | Jira/Linear ticket connector                           | `merged`    | connectors/048-jira-linear-connector                 | gh#22 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                                                     |
 | 049 | Manual upload / CSV / S3 / SFTP escape-hatch           | `merged`    | connectors/049-manual-upload-csv-connector           | gh#24 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                                                     |
 | 050 | Public release readiness + release automation          | `ready`     | —                                                    | —     | —          | —          | HITL · dep 039 merged · open-q gates                                     |
-| 051 | admincreds tenant derivation fix (P0 from slice 033)   | `in-review` | fix/051-admincreds-tenant-derivation                 | gh#28 | 2026-05-12 | 2026-05-12 | P0 cross-tenant escalation surfaced by slice 033                         |
+| 051 | admincreds tenant derivation fix (P0 from slice 033)   | `merged`    | fix/051-admincreds-tenant-derivation                 | gh#28 | 2026-05-12 | 2026-05-12 | cross-tenant escalation closed · zero migrations · breaking API change   |
 
 ## Ready set right now
 
@@ -400,11 +410,11 @@ Next-batch options:
 
 After 007 lands, 010 → 037 unblock in sequence — but the chain through 037 is the longest single path to a "self-host bundle ready" state.
 
-## In-flight (1 worktree building)
+## In-flight (0 worktrees building)
 
-- **051** — `fix/051-admincreds-tenant-derivation` · `in-progress` since 2026-05-12 · P0 patch (admincreds cross-tenant escalation surfaced by slice 033)
+None. Slice 051 merged.
 
-Stale worktrees still on disk from batches 1–8: `-009`, `-011`, `-013`, `-014`, `-015`, `-017`, `-018`, `-019`, `-021`, `-024`, `-026`, `-033`, `-034`, `-036`, `-039`, `-044`, `-045`, `-046`, `-047`, `-048`, `-049`. Safe to `git worktree remove` whenever ready.
+Stale worktrees still on disk: `-009`, `-011`, `-013`, `-014`, `-015`, `-017`, `-018`, `-019`, `-021`, `-024`, `-026`, `-033`, `-034`, `-036`, `-039`, `-044`, `-045`, `-046`, `-047`, `-048`, `-049`, `-051`. Safe to `git worktree remove` whenever ready.
 
 ## Notes
 
