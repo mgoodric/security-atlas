@@ -13,6 +13,53 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 048 — Jira / Linear ticket connector.** New stateless connector
+  binary `connectors/jira/cmd/atlas-jira` emitting one evidence kind —
+  `jira.ticket_evidence.v1` — across two ticketing platforms:
+  Atlassian Jira Cloud (REST `GET /rest/api/3/search`) and linear.app
+  (GraphQL `issues` query). Both platforms produce the same canonical
+  payload (`ticket_key`, `project_key`, `summary`, `status`,
+  `resolution`, `assignee`, `url`) because the slice-014-shipped schema
+  is locked at `additionalProperties: false`; per-record platform
+  identity rides on the scope cell (`platform`, `project`,
+  `environment`) and on the `source_attribution.actor_id`
+  (`connector:jira:tickets@<v>` or `connector:linear:tickets@<v>`).
+  NO new schemas — `internal/api/schemaregistry/DefaultSeed` is
+  untouched. NO new migrations. Subcommands: `register` (announces the
+  connector with one `SupportedKind` and `["pull"]` profile via
+  `ConnectorRegistryService.Register`), `run` (selects Jira or Linear
+  via `--platform jira|linear`; Jira mode requires `--jql`, Linear mode
+  requires `--team-key`), `scopes` (prints documented least-privilege
+  scopes for both platforms in a single table). Auth: Jira Cloud takes
+  email + API token via `JIRA_EMAIL` + `JIRA_API_TOKEN` env (or
+  `--jira-email` / `--jira-token` flags), encoded as HTTP Basic; Linear
+  takes an API key via `LINEAR_API_KEY` env (or `--linear-key`), sent
+  as the Authorization header with no Bearer prefix per Linear API
+  docs. Env vars are the recommended path so secrets never appear in
+  shell history. Idempotency keys derive as
+  `sha256("jira.ticket_evidence" + ticket_id + hour-rfc3339)` (the
+  orchestrator-pinned shape; the test suite pins the verbatim hash
+  `73e14bf42f4498da6259ab2eb15d552fa4c1f8f86c0f8b8d26aa57e37f90bffa`
+  for `PROJ-123` at `2026-05-11T14:00:00Z` so future refactors can't
+  silently drift). Hour-granularity dedup means a periodic `run` loop
+  is the equivalent of low-frequency event-stream pushes. Pagination
+  is followed transparently up to a hard cap of 10 pages (1,000
+  tickets per run) to bound a malicious / runaway JQL or filter.
+  Webhook receivers, OAuth, state-transition history, and Jira Server
+  / Data Center are deferred — slice 049+ work. Anti-criteria (P0)
+  honored: documented scopes are read-only on Jira's "Browse projects"
+  project permission and Linear's "Read-only access" API-key flavor
+  (the `DocumentedScopes` unit test rejects any future widening to
+  `write`/`admin`/`delete`/`manage` keywords on both `Access` and
+  `Name` fields); both credential types redact secret bytes and the
+  Jira credential additionally redacts email width on `String()` and
+  `%v` formatting (`TestCredential_StringRedacts_*` pins this);
+  `TestHelpText_NoSecretLeakage` scans every `--help` output for
+  literal token prefixes; the connector is strictly read-only — only
+  Jira's `GET /rest/api/3/search` and Linear's `issues` GraphQL query
+  appear in the package, and the `register`-time profile list is
+  `pull` only.
+
 - **Slice 011 — Manual control type + attestation/upload flow.** New
   `POST /v1/controls/{id}/attestations` endpoint pushes a
   `manual.attestation.v1` evidence record through slice 013's ingestion
