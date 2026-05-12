@@ -1,55 +1,68 @@
-# 051 — admincreds tenant derivation fix (P0 follow-up from slice 033)
+# 051 — admincreds Issue/List derive tenant from credential, not request body
 
 **Cluster:** Multi-tenancy / auth
 **Estimate:** 0.5d
-**Type:** AFK
-**Severity:** P0 (cross-tenant escalation)
+**Type:** AFK (P0 follow-up to slice 033)
 
 ## Narrative
 
-Fix the pre-existing authorization bug surfaced by slice 033: `admincreds.Issue` and `admincreds.List` read `tenant_id` from request body / query rather than from the calling credential. A tenant-A admin can mint a tenant-B credential today. RLS does NOT catch this because the handler explicitly calls `tenancy.WithTenant(ctx, req.TenantID)` (line 70 of `internal/api/admincreds/http.go`), overriding 033's `tenancy.Middleware` — the row gets inserted under tenant B's GUC because the handler set it there.
+P0 authorization fix surfaced by slice 033 (`feat(auth): Postgres RLS enforcement on every tenant-scoped table + tenancy middleware (#033)`, gh#27, merged 2026-05-12 as `c534c85`). The handlers `admincreds.Issue` and `admincreds.List` in `internal/api/admincreds/http.go` source the tenant id from caller-supplied input (`IssueRequest.TenantID` body field, `?tenant_id` query parameter) and then explicitly call `tenancy.WithTenant(ctx, requestTenantID)` — overriding the `app.current_tenant` GUC that slice-033's `tenancymw.Middleware` already lifted from `cred.TenantID`.
 
-After this fix, tenant is derived strictly from `cred.TenantID` (the credential `requireAdmin` already extracts at line 245). Slice 033's middleware shape becomes load-bearing: the calling credential is the single source of truth for tenant context. Symmetric with the already-correct `Rotate` (line 180) and `Revoke` (line 217) handlers which both use `authctx.CredentialFromContext` + `cred.TenantID`.
+The handler is internally consistent: it sets the GUC and writes the row under the same attacker-supplied tenant id. RLS therefore does NOT catch this — it sees a tenant-B GUC writing a tenant-B row and waves it through. The result is that a Tenant-A admin can mint an admin credential into Tenant B (Issue) and enumerate credentials in Tenant B (List).
 
-The slice delivers value because the multi-tenant guarantee — the entire premise of slice 033 — is restored to genuinely-enforced. Until this lands, the platform's multi-tenancy is on paper only at the admin-credentials boundary.
+This contradicts slice-033's ratified design decision D1 — _"tenancy.Middleware sets app.current_tenant strictly from cred.TenantID; no handler-level overrides"_ — and constitutional invariant 6 (canvas §5.4, tenant isolation enforced at the DB layer; application code is not the trust boundary).
+
+`admincreds.Rotate` and `admincreds.Revoke` already derive tenant from `cred.TenantID` and trust the middleware-set GUC; slice 033 fixed them as part of the cleanup pass and explicitly left Issue + List flagged as a separate authz follow-up. This slice closes that follow-up.
+
+## Threat model
+
+| Actor                                       | Pre-fix capability                                                                               | Post-fix capability                                                                                                  |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| Tenant-A admin holding a valid admin bearer | Mint an admin credential into ANY tenant by setting `tenant_id` in the JSON body                 | Mint an admin credential into Tenant A only — the value of any caller-supplied `tenant_id` is rejected with HTTP 400 |
+| Tenant-A admin holding a valid admin bearer | Enumerate any tenant's admin credentials by setting `?tenant_id=` on `GET /v1/admin/credentials` | List Tenant A's admin credentials only                                                                               |
+| Non-admin bearer                            | 403 (unchanged)                                                                                  | 403 (unchanged)                                                                                                      |
+| Unauthenticated request                     | 401 (unchanged)                                                                                  | 401 (unchanged)                                                                                                      |
+
+The exploit only requires possession of any admin bearer, not super-admin status. No production tenant has ever had cross-tenant admin issuance enabled; the bug is theoretical for v1 self-host but is a real vulnerability under the multi-tenant SaaS shape called out in canvas §5.4.
 
 ## Acceptance criteria
 
-- [ ] AC-1: `IssueRequest.TenantID` field removed from the JSON shape; clients that supply it get `400 Bad Request: tenant_id is not accepted; tenant is derived from credential`
-- [ ] AC-2: `admincreds.Issue` calls `h.store.Issue(ctx, cred.TenantID, ...)` instead of `req.TenantID`
-- [ ] AC-3: `admincreds.List` rejects the `?tenant_id=` query parameter the same way (`400` if supplied)
-- [ ] AC-4: `admincreds.List` returns only credentials belonging to `cred.TenantID`
-- [ ] AC-5: New integration test `TestIssue_RejectsCrossTenantInRequestBody` proves that an admin credential for tenant A who attempts to issue a credential with `req.TenantID == "<tenant-B-uuid>"` gets a 400 (not a 201 + cross-tenant row)
-- [ ] AC-6: New integration test `TestList_DoesNotPermitCrossTenantQuery` proves that an admin credential for tenant A calling `?tenant_id=<tenant-B-uuid>` gets a 400 (not a row dump from tenant B)
-- [ ] AC-7: Existing tests for `Rotate`, `Revoke`, the happy-path `Issue` (with no `tenant_id` in body), and the happy-path `List` (with no `tenant_id` query) all continue to pass
+- [ ] AC-1: `Issue` rejects any non-empty `IssueRequest.tenant_id` with HTTP 400 and a descriptive error message
+- [ ] AC-2: `Issue` derives the tenant strictly from `authctx.CredentialFromContext(r.Context()).TenantID` and passes that to `apikeystore.Store.Issue`
+- [ ] AC-3: `List` rejects any non-empty `?tenant_id` query parameter with HTTP 400 and a descriptive error message
+- [ ] AC-4: `List` derives the tenant strictly from the calling credential
+- [ ] AC-5: `Rotate` and `Revoke` handler bodies are byte-identical to their pre-slice-051 state (verified via `git diff` produces no hunks inside their function bodies)
+- [ ] AC-6: New integration tests `TestIssue_RejectsCrossTenantInRequestBody` and `TestList_DoesNotPermitCrossTenantQuery` assert the 400 + message on both paths
+- [ ] AC-7: CHANGELOG announces the breaking API contract change under `## [Unreleased]` so OSS clients discover it on upgrade
 
 ## Constitutional invariants honored
 
-- **Invariant 6 (RLS at DB layer enforced by tenant_id GUC):** the bug undermined this; the fix restores it
-- **Anti-pattern rejected:** application code is not the trust boundary; the calling credential is the single source of tenant context
+- **Invariant 6 (RLS at DB layer):** the fix removes the only application-code path that could escape RLS in admincreds. The middleware is now the sole writer of `app.current_tenant`.
+- **Slice 033 design decision D1:** "no handler-level overrides" — enforced.
+- **Anti-pattern rejected:** "application code is not the trust boundary" — Issue/List no longer trust caller-supplied tenant ids.
 
 ## Canvas references
 
 - `Plans/canvas/05-scopes.md` §5.4 (Postgres RLS named explicitly)
-- `CLAUDE.md` (Invariant 6 + tenancy-context plumbing rules)
-- Slice 033 PR body (`gh#27`) — surfaces this as P0 follow-up
-- Slice 034 PR body (`gh#26`) — introduced the buggy handlers
+- `CLAUDE.md` Invariant 6
+- `internal/api/tenancymw/middleware.go` (docstring: "every other handler MUST inherit from this middleware")
 
 ## Dependencies
 
-- #033 (tenancy.Middleware live on main as `c534c85`)
-- #034 (admincreds handlers exist on main as `ee0a333`)
+- #033 (merged) — `tenancymw.Middleware` is the GUC setter the fix depends on
+- #034 (merged) — `apikeystore.Store` is what Issue/List call into
 
-## Anti-criteria (P0)
+## Anti-criteria (P0 — block merge)
 
-- Does NOT alter the `Rotate` or `Revoke` handlers (those already derive tenant from credential correctly)
-- Does NOT bypass slice 033's middleware by adding a new `tenancy.WithTenant` call on the buggy paths
-- Does NOT introduce a "super-admin can cross tenants" code path (out of scope; cross-tenant admin operations are a separate slice if ever needed)
-- Does NOT silently swallow the breaking API change — clients that supply `tenant_id` get an explicit 400 with a message pointing them to the new contract
+- Does NOT touch `Rotate` or `Revoke` handler bodies — they are already correct
+- Does NOT add a new `tenancy.WithTenant(ctx, …)` call on the Issue or List paths — the middleware is the sole writer
+- Does NOT introduce a "super-admin can cross tenants" code path — there is no `IsSuperAdmin` flag and tenant comes solely from `cred.TenantID`
+- Does NOT silently drop the `IssueRequest.TenantID` JSON field — it stays (with `omitempty`) so legacy callers receive a clear 400 instead of a JSON-decode failure or, worse, silent acceptance
+- Does NOT use vendor-prefixed tokens in test fixtures (neutral `test-*` only)
 
 ## Skill mix (3–5)
 
-- Go HTTP handler refactor (delete one field, swap one variable)
-- Integration test discipline (negative tests must prove the fix)
-- API-contract change announcement (CHANGELOG entry must surface the breaking change for OSS users)
-- Security-review (confirm the diff doesn't leave any req.TenantID/query-tenant_id path in admincreds)
+- HTTP handler refactor (Go, chi)
+- Negative-test discipline (assert a 400 BEFORE any DB call)
+- Conventional Commits + breaking-change CHANGELOG hygiene
+- Context-derived authorization (`authctx.CredentialFromContext`)

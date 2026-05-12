@@ -838,6 +838,54 @@ LEVEL SECURITY` with no policy for a command denies that command,
   self-verifies its own published checksums), no coupling to a
   non-permissive package channel.
 
+### Changed
+
+- **BREAKING — Slice 051: `admincreds.Issue` (`POST /v1/admin/credentials`)
+  and `admincreds.List` (`GET /v1/admin/credentials`) now derive the
+  tenant strictly from the calling admin credential.** Closes the P0
+  follow-up surfaced by slice 033 (gh#27, merged 2026-05-12 as
+  `c534c85`): pre-fix, an admin in tenant A could mint an admin
+  credential into tenant B by supplying `{"tenant_id":"<B>"}` in the
+  Issue body, and enumerate tenant B's credentials by passing
+  `?tenant_id=<B>` to List. The handlers explicitly called
+  `tenancy.WithTenant(ctx, req.TenantID)`, overriding the
+  `app.current_tenant` GUC that slice-033's `tenancymw.Middleware`
+  already lifted from `cred.TenantID`; RLS did NOT catch this because
+  the handler was internally consistent (it both set the GUC and
+  wrote the row under the attacker-supplied tenant). The fix removes
+  both `tenancy.WithTenant` override calls and reads the tenant from
+  `authctx.CredentialFromContext` so `cred.TenantID` is the single
+  source of truth, matching the pattern already used by the Rotate
+  and Revoke handlers in the same file (those two handlers are
+  byte-unchanged by this slice — confirmed via `git diff` produces
+  zero hunks inside their function bodies). **API contract changes:**
+  (1) the `tenant_id` field in the JSON body of `POST
+/v1/admin/credentials` is no longer accepted — clients that supply
+  it receive `HTTP 400` with body `{"error":"tenant_id is not
+accepted; tenant is derived from the calling credential"}`; (2) the
+  `?tenant_id=` query parameter on `GET /v1/admin/credentials` is no
+  longer accepted — clients that supply it receive `HTTP 400` with
+  body `{"error":"tenant_id query parameter is not accepted; tenant
+is derived from the calling credential"}`. The
+  `IssueRequest.TenantID` Go struct field is retained (with
+  `json:"tenant_id,omitempty"`) so the rejection path can emit the
+  descriptive 400 instead of a JSON decode failure or, worse, silent
+  acceptance. **Client migration:** drop `tenant_id` from any code
+  that calls `POST /v1/admin/credentials` and drop the `?tenant_id=`
+  query string from any call to `GET /v1/admin/credentials` — both
+  endpoints now operate on the calling credential's tenant
+  automatically. Constitutional invariant 6 (canvas §5.4) and
+  slice-033 design decision D1 ("`tenancy.Middleware` sets
+  `app.current_tenant` strictly from `cred.TenantID`; no handler-level
+  overrides") are now enforced uniformly across all four admincreds
+  handlers. Two new integration tests prove the rejection paths
+  (`TestIssue_RejectsCrossTenantInRequestBody`,
+  `TestList_DoesNotPermitCrossTenantQuery`); five existing
+  integration tests had their fixtures updated to omit the now-rejected
+  fields. Net diff: 60 / 30 LOC across handler + tests, zero
+  migrations, zero new dependencies, zero environment variables, no
+  changes to `Rotate` or `Revoke`.
+
 ### Open questions
 
 - Plans/canvas/11-open-questions.md #17 (schema-registry governance)

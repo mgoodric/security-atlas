@@ -102,7 +102,9 @@ func TestIssueReturnsBearerExactlyOnce(t *testing.T) {
 	_, _, handler := newHandler(t, tenantID)
 	defer cleanupTenant(tenantID)
 
-	body, _ := json.Marshal(admincreds.IssueRequest{TenantID: tenantID.String()})
+	// Slice 051: tenant_id is no longer accepted in the request body —
+	// it derives from the calling credential set by newHandler.
+	body, _ := json.Marshal(admincreds.IssueRequest{})
 	req := httptest.NewRequest(http.MethodPost, "/v1/admin/credentials", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -132,7 +134,9 @@ func TestListExcludesBearerToken(t *testing.T) {
 	_, _, handler := newHandler(t, tenantID)
 	defer cleanupTenant(tenantID)
 
-	body, _ := json.Marshal(admincreds.IssueRequest{TenantID: tenantID.String()})
+	// Slice 051: tenant_id is no longer accepted in the Issue body nor in
+	// the List query string — both derive from the calling credential.
+	body, _ := json.Marshal(admincreds.IssueRequest{})
 	req := httptest.NewRequest(http.MethodPost, "/v1/admin/credentials", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -140,7 +144,7 @@ func TestListExcludesBearerToken(t *testing.T) {
 		t.Fatalf("Issue: want 201, got %d", w.Code)
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/admin/credentials?tenant_id="+tenantID.String(), nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/admin/credentials", nil)
 	listW := httptest.NewRecorder()
 	handler.ServeHTTP(listW, listReq)
 	if listW.Code != http.StatusOK {
@@ -158,7 +162,8 @@ func TestRevokeInvalidates(t *testing.T) {
 	_, store, handler := newHandler(t, tenantID)
 	defer cleanupTenant(tenantID)
 
-	body, _ := json.Marshal(admincreds.IssueRequest{TenantID: tenantID.String()})
+	// Slice 051: tenant derives from the calling credential.
+	body, _ := json.Marshal(admincreds.IssueRequest{})
 	req := httptest.NewRequest(http.MethodPost, "/v1/admin/credentials", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -186,7 +191,8 @@ func TestRotateGivesSuccessor(t *testing.T) {
 	_, _, handler := newHandler(t, tenantID)
 	defer cleanupTenant(tenantID)
 
-	body, _ := json.Marshal(admincreds.IssueRequest{TenantID: tenantID.String()})
+	// Slice 051: tenant derives from the calling credential.
+	body, _ := json.Marshal(admincreds.IssueRequest{})
 	req := httptest.NewRequest(http.MethodPost, "/v1/admin/credentials", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -216,6 +222,59 @@ func TestRotateGivesSuccessor(t *testing.T) {
 	}
 }
 
+// === Slice 051: tenant must derive from credential, not request ===
+
+// TestIssue_RejectsCrossTenantInRequestBody asserts the Issue handler refuses
+// any caller-supplied tenant_id in the JSON body. Tenant is derived strictly
+// from the calling credential (slice 033 D1: "tenancy.Middleware sets
+// app.current_tenant strictly from cred.TenantID; no handler-level overrides").
+//
+// The fixture injects an admin credential bound to tenantA. The request body
+// names a different tenantB. Pre-fix: handler honored req.TenantID and wrote
+// a tenant-B row under a tenant-B GUC — RLS could not catch this because the
+// handler was internally consistent. Post-fix: handler returns 400 before any
+// store call.
+func TestIssue_RejectsCrossTenantInRequestBody(t *testing.T) {
+	tenantA := uuid.New()
+	tenantB := uuid.New() // attacker target — must NEVER reach the store
+	_, _, handler := newHandler(t, tenantA)
+	defer cleanupTenant(tenantA)
+	defer cleanupTenant(tenantB)
+
+	body, _ := json.Marshal(admincreds.IssueRequest{TenantID: tenantB.String()})
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/credentials", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("Issue(cross-tenant body): want 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "tenant_id is not accepted") {
+		t.Fatalf("Issue(cross-tenant body): expected rejection message, got %s", w.Body.String())
+	}
+}
+
+// TestList_DoesNotPermitCrossTenantQuery asserts the List handler refuses any
+// caller-supplied ?tenant_id query parameter. Same threat model as
+// TestIssue_RejectsCrossTenantInRequestBody but on the read path.
+func TestList_DoesNotPermitCrossTenantQuery(t *testing.T) {
+	tenantA := uuid.New()
+	tenantB := uuid.New()
+	_, _, handler := newHandler(t, tenantA)
+	defer cleanupTenant(tenantA)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/admin/credentials?tenant_id="+tenantB.String(), nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("List(cross-tenant query): want 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "tenant_id query parameter is not accepted") {
+		t.Fatalf("List(cross-tenant query): expected rejection message, got %s", w.Body.String())
+	}
+}
+
 // === ISC-9 (proxy): non-admin caller gets 403 from Issue ===
 
 func TestIssueRequiresAdmin(t *testing.T) {
@@ -237,7 +296,8 @@ func TestIssueRequiresAdmin(t *testing.T) {
 	})
 	r.Post("/v1/admin/credentials", h.Issue)
 
-	body, _ := json.Marshal(admincreds.IssueRequest{TenantID: tenantID.String()})
+	// Slice 051: tenant derives from the calling credential.
+	body, _ := json.Marshal(admincreds.IssueRequest{})
 	req := httptest.NewRequest(http.MethodPost, "/v1/admin/credentials", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

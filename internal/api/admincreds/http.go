@@ -33,8 +33,16 @@ type Handler struct {
 func New(store *apikeystore.Store) *Handler { return &Handler{store: store} }
 
 // IssueRequest is the JSON body for POST /v1/admin/credentials.
+//
+// Slice 051: the TenantID field is retained for back-compat error
+// messaging only. Tenant is derived strictly from the calling credential
+// (slice 033 D1 — "tenancy.Middleware sets app.current_tenant strictly
+// from cred.TenantID; no handler-level overrides"). Any non-empty value
+// supplied in this field causes Issue to return HTTP 400 with a
+// descriptive error so legacy clients discover the contract change
+// instead of seeing a JSON-decode failure or, worse, silent acceptance.
 type IssueRequest struct {
-	TenantID       string   `json:"tenant_id"`
+	TenantID       string   `json:"tenant_id,omitempty"`
 	ScopePredicate string   `json:"scope_predicate"`
 	AllowedKinds   []string `json:"allowed_kinds"`
 	TTLSeconds     int64    `json:"ttl_seconds"`
@@ -54,6 +62,13 @@ type IssueResponse struct {
 }
 
 // Issue handles POST /v1/admin/credentials.
+//
+// Slice 051: tenant is derived strictly from the calling credential.
+// slice-033's tenancymw.Middleware already set app.current_tenant from
+// cred.TenantID before this handler runs; we trust that GUC and pass
+// cred.TenantID through to the store. The IssueRequest.TenantID field
+// is rejected with a 400 if supplied, surfacing the contract change to
+// legacy callers.
 func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 	if !requireAdmin(w, r) {
 		return
@@ -63,16 +78,13 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.TenantID == "" {
-		writeError(w, http.StatusBadRequest, "tenant_id is required")
+	if req.TenantID != "" {
+		writeError(w, http.StatusBadRequest, "tenant_id is not accepted; tenant is derived from the calling credential")
 		return
 	}
-	ctx, err := tenancy.WithTenant(r.Context(), req.TenantID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid tenant_id")
-		return
-	}
-	cred, plain, err := h.store.Issue(ctx, req.TenantID, apikeystore.IssueInput{
+	// requireAdmin returning true guarantees the credential is in context.
+	cred, _ := authctx.CredentialFromContext(r.Context())
+	issued, plain, err := h.store.Issue(r.Context(), cred.TenantID, apikeystore.IssueInput{
 		ScopePredicate: req.ScopePredicate,
 		AllowedKinds:   req.AllowedKinds,
 		TTL:            time.Duration(req.TTLSeconds) * time.Second,
@@ -85,14 +97,14 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := IssueResponse{
-		ID:          cred.ID,
-		TenantID:    cred.TenantID,
+		ID:          issued.ID,
+		TenantID:    issued.TenantID,
 		BearerToken: plain,
-		Last4:       cred.Last4,
-		IssuedAt:    cred.IssuedAt,
+		Last4:       issued.Last4,
+		IssuedAt:    issued.IssuedAt,
 	}
-	if !cred.IssuedAt.IsZero() && cred.TTL > 0 {
-		resp.ExpiresAt = cred.IssuedAt.Add(cred.TTL).Format(time.RFC3339)
+	if !issued.IssuedAt.IsZero() && issued.TTL > 0 {
+		resp.ExpiresAt = issued.IssuedAt.Add(issued.TTL).Format(time.RFC3339)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -120,21 +132,21 @@ type ListResponse struct {
 }
 
 // List handles GET /v1/admin/credentials.
+//
+// Slice 051: tenant is derived strictly from the calling credential.
+// The previously-accepted ?tenant_id query parameter is rejected with
+// 400 — see the Issue docstring for the rationale.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if !requireAdmin(w, r) {
 		return
 	}
-	tenantID := r.URL.Query().Get("tenant_id")
-	if tenantID == "" {
-		writeError(w, http.StatusBadRequest, "tenant_id query parameter is required")
+	if r.URL.Query().Get("tenant_id") != "" {
+		writeError(w, http.StatusBadRequest, "tenant_id query parameter is not accepted; tenant is derived from the calling credential")
 		return
 	}
-	ctx, err := tenancy.WithTenant(r.Context(), tenantID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid tenant_id")
-		return
-	}
-	creds, err := h.store.List(ctx, tenantID)
+	// requireAdmin returning true guarantees the credential is in context.
+	cred, _ := authctx.CredentialFromContext(r.Context())
+	creds, err := h.store.List(r.Context(), cred.TenantID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list failed: "+err.Error())
 		return
