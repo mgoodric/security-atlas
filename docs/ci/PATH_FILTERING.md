@@ -83,12 +83,12 @@ Anything else is `code: false`. The big buckets are `*.md`,
 
 Three categories never gate on `code`:
 
-| Job                           | Why                                                           |
-| ----------------------------- | ------------------------------------------------------------- |
-| `pre-commit · all hooks`      | Auto-formats markdown + yaml; we want it on docs PRs too      |
-| `Analyze (go)` (CodeQL)       | Security scan; never skipped, even on docs PRs                |
-| `Analyze (javascript-…)`      | Same                                                          |
-| `GitGuardian Security Checks` | Secret scan; runs as a GitHub App, not a workflow file        |
+| Job                           | Why                                                      |
+| ----------------------------- | -------------------------------------------------------- |
+| `pre-commit · all hooks`      | Auto-formats markdown + yaml; we want it on docs PRs too |
+| `Analyze (go)` (CodeQL)       | Security scan; never skipped, even on docs PRs           |
+| `Analyze (javascript-…)`      | Same                                                     |
+| `GitGuardian Security Checks` | Secret scan; runs as a GitHub App, not a workflow file   |
 
 Cost optimization is fine for build/test/lint. Security scans and
 the auto-formatter are not on the optimization budget.
@@ -116,8 +116,8 @@ When a new job becomes required:
 2. Update `.github/branch-protection.json` `required_status_checks.contexts`
    with the new name.
 3. Apply via `gh api -X PUT
-   repos/mgoodric/security-atlas/branches/main/protection
-   --input .github/branch-protection.json`.
+repos/mgoodric/security-atlas/branches/main/protection
+--input .github/branch-protection.json`.
 
 If the new check is always-on (security/format/etc.), no stub is
 needed.
