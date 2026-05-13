@@ -609,6 +609,11 @@ func TestPendingForUser_SupersededVersion_AC4(t *testing.T) {
 func (s *setupResult) forkAndPublishV2(t *testing.T, v1ID, newVersion string) string {
 	t.Helper()
 	v2ID := uuid.New().String()
+	// Insert the new approved row carrying the PREDECESSOR's version
+	// initially. The publish handler reads the row's version and
+	// rejects publish when in.NewVersion == approved.Version
+	// (store.go line 373). By keeping the v1 version on the inserted
+	// row and bumping via the publish call, the rule passes.
 	_, err := s.admin.Exec(context.Background(), `
 		INSERT INTO policies (
 			id, tenant_id, predecessor_id, title, version, body_md,
@@ -616,12 +621,12 @@ func (s *setupResult) forkAndPublishV2(t *testing.T, v1ID, newVersion string) st
 			acknowledgment_required_roles, status,
 			source_attribution, created_by, approved_at, approved_by
 		)
-		SELECT $1, tenant_id, $2, title, $3, body_md,
+		SELECT $1, tenant_id, $2, title, version, body_md,
 		       owner_role, approver_role, linked_control_ids,
 		       acknowledgment_required_roles, 'approved',
 		       source_attribution, created_by, now(), 'test-approver'
-		FROM policies WHERE id = $2 AND tenant_id = $4
-	`, v2ID, v1ID, newVersion, s.tenant)
+		FROM policies WHERE id = $2 AND tenant_id = $3
+	`, v2ID, v1ID, s.tenant)
 	if err != nil {
 		t.Fatalf("fork v2: %v", err)
 	}
