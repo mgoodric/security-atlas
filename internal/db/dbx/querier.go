@@ -205,6 +205,11 @@ type Querier interface {
 	// ORDER BY effective_from DESC LIMIT 1 picks the most-recent applicable row.
 	GetFrameworkScopeAsOf(ctx context.Context, arg GetFrameworkScopeAsOfParams) (FrameworkScope, error)
 	GetFrameworkScopeByID(ctx context.Context, arg GetFrameworkScopeByIDParams) (FrameworkScope, error)
+	// Resolves "?framework_version=slug:version" into a framework_versions
+	// row. Used by both the anchor->requirements and control->coverage
+	// handlers to translate the URL param into a stable id for the pinned
+	// traversal. NULL tenant_id constraint scopes to the global catalog.
+	GetFrameworkVersionBySlugAndVersion(ctx context.Context, arg GetFrameworkVersionBySlugAndVersionParams) (FrameworkVersion, error)
 	// Look up one edge by (requirement, anchor). Returns ErrNoRows when the
 	// edge doesn't exist yet. Importer calls this first to classify
 	// Created/Updated/Unchanged.
@@ -288,11 +293,50 @@ type Querier interface {
 	// atlas_migrate. Returns every row regardless of tenant. Never reachable
 	// through the app role under RLS.
 	ListAllEvidenceKindSchemas(ctx context.Context) ([]EvidenceKindSchema, error)
+	// Slice 008: UCF graph traversal queries.
+	//
+	// All traversals go through the SCF anchor spine (constitutional invariant 1
+	// per CLAUDE.md / canvas §3.1). The path is two index-backed JOINs, not a
+	// recursive CTE — see Plans/UCF_GRAPH_MODEL.md §7. Fan-out is bounded
+	// (typical requirement maps to 1-6 anchors; typical anchor maps to 1-8
+	// requirements) so the queries return in milliseconds at production
+	// cardinality.
+	//
+	// `no_relationship` STRM edges are filtered out of coverage responses
+	// (canvas §3.2 stores them as data to suppress false suggestions; they
+	// shouldn't appear in coverage views).
+	//
+	// Tenant scoping: queries that touch the `controls` table run inside the
+	// request's `app.current_tenant` GUC set by tenancy.Middleware; RLS does
+	// the filtering. Catalog tables (`framework_requirements`,
+	// `fw_to_scf_edges`, `scf_anchors`, `framework_versions`) have no
+	// tenant_id and no RLS — global, platform-bundled. No app-level
+	// `WHERE tenant_id = ?` clause is permitted on the controls reads
+	// (constitutional invariant 6 per CLAUDE.md / canvas §5.4).
+	// AC-1 (anchors arm). Given a framework_requirement id, return every
+	// non-`no_relationship` STRM edge to an SCF anchor, joined to scf_anchors
+	// so callers get scf_id + family + title in one round-trip. Sorted by
+	// strength DESC (strongest matches first) then scf_id (stable order).
+	ListAnchorsForRequirementWithEdges(ctx context.Context, frameworkRequirementID pgtype.UUID) ([]ListAnchorsForRequirementWithEdgesRow, error)
+	// AC-1 + AC-4 (historical pinning arm). Same as
+	// ListAnchorsForRequirementWithEdges, but additionally filtered by the
+	// SCF framework_version_id so callers can pin to a specific SCF
+	// release. When no SCF release is pinned, callers use the unfiltered
+	// variant above.
+	ListAnchorsForRequirementWithEdgesByFrameworkVersion(ctx context.Context, arg ListAnchorsForRequirementWithEdgesByFrameworkVersionParams) ([]ListAnchorsForRequirementWithEdgesByFrameworkVersionRow, error)
 	// Per-artifact recent history. Used by the admin view (slice 040) and
 	// the audit-export bundler (slice 029). Cap at 100 rows.
 	ListArtifactAccessLog(ctx context.Context, arg ListArtifactAccessLogParams) ([]ArtifactAccessLog, error)
 	// Newest first. Includes superseded rows so callers see the supersession chain.
 	ListControlVersionsByBundle(ctx context.Context, arg ListControlVersionsByBundleParams) ([]ListControlVersionsByBundleRow, error)
+	// AC-1 (controls arm). Given a list of SCF anchor ids, return every
+	// active control anchored on any of them. Runs inside the tenant GUC so
+	// RLS filters to the caller's tenant. Supersededs are excluded —
+	// coverage only counts the currently active control versions.
+	//
+	// NO `WHERE tenant_id = ?` clause: invariant 6 — RLS does the tenant
+	// filtering. Adding such a clause would be a constitutional violation.
+	ListControlsForAnchors(ctx context.Context, dollar_1 []pgtype.UUID) ([]ListControlsForAnchorsRow, error)
 	ListEvidenceAuditEntriesByCredential(ctx context.Context, arg ListEvidenceAuditEntriesByCredentialParams) ([]EvidenceAuditLog, error)
 	// Returns every registered semver for a kind, visible to the tenant.
 	// Slice 014 uses this for AC-5 semver enforcement (a POST must check the
@@ -356,6 +400,16 @@ type Querier interface {
 	// to keep the round-trip small; the handler hydrates after the shuffle.
 	ListPopulationEvidenceIDs(ctx context.Context, arg ListPopulationEvidenceIDsParams) ([]ListPopulationEvidenceIDsRow, error)
 	ListPopulationsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]Population, error)
+	// AC-2. Reverse traversal — given an SCF anchor, return every framework
+	// requirement it satisfies, joined to framework_versions + frameworks so
+	// callers see the full natural key (slug + version + code) in one
+	// round-trip. Sorted by framework slug + version + code for stable
+	// output. `no_relationship` edges excluded.
+	ListRequirementsForAnchor(ctx context.Context, scfAnchorID pgtype.UUID) ([]ListRequirementsForAnchorRow, error)
+	// AC-2 + AC-4 (framework_version pinning). Same as
+	// ListRequirementsForAnchor but filtered to a specific framework
+	// version id. Used when the caller passes ?framework_version=slug:version.
+	ListRequirementsForAnchorByFrameworkVersion(ctx context.Context, arg ListRequirementsForAnchorByFrameworkVersionParams) ([]ListRequirementsForAnchorByFrameworkVersionRow, error)
 	// Returns all control links for a single risk.
 	ListRiskControlLinks(ctx context.Context, arg ListRiskControlLinksParams) ([]ListRiskControlLinksRow, error)
 	// Enumerate all risks for the tenant, newest first. Filters are applied
