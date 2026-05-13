@@ -34,6 +34,65 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 025 — Auditor role + scoped read-only access.** Activates the
+  `auditor` RBAC role that slice 035 stubbed. Two new tables under
+  migration `20260511000021_audit_notes.sql`:
+
+  - `auditor_assignments (tenant_id, user_id, audit_period_id, granted_at,
+granted_by)` — composite PK, four-policy RLS under FORCE, composite FK
+    to `audit_periods(tenant_id, id)`. Drives the OPA ABAC attribute
+    `input.user.attrs.audit_period_ids` via a new
+    `internal/audit/auditor.DBAttrsResolver` hooked into
+    `authz.Engine.WithAttrsResolver`.
+  - `audit_notes (id, tenant_id, audit_period_id, author_user_id,
+scope_type, scope_id, body, visibility='auditor_only', created_at,
+updated_at)` — four-policy RLS under FORCE, CHECK on `scope_type ∈
+{control, finding, sample, period}`, CHECK on `visibility =
+'auditor_only'` (the §8.5 shared auditor-auditee thread is deferred).
+    The query layer enforces `author_user_id = caller.UserID` so an
+    auditor cannot read another auditor's notes.
+
+  HTTP surface:
+
+  - `POST /v1/audit-notes` — auditor-only write; OPA gates on the
+    request's `audit_period_id` matching one of the caller's
+    assignments (P0-3 / AC-4). Returns 201 + created note.
+  - `GET /v1/audit-notes?audit_period_id=<UUID>` — caller's own notes
+    in a period; auditees who hit the endpoint get an empty list
+    because their UserID never satisfies `author_user_id =` (P0-2).
+  - `GET /v1/me/audit-period` — AC-5: the caller's most-recently-started
+    assignment; 404 when none.
+  - `GET /v1/me/audit-periods` — AC-6: full assignment list for
+    engagements that span multiple historical periods.
+
+  OPA Rego (`policies/authz/auditor.rego` mirrored to
+  `internal/authz/rego_bundle/`):
+
+  - Adds `audit-periods` to `auditor_readable_resources`.
+  - Adds `/v1/me` read allow for auditor self-info endpoints.
+  - Adds `audit-notes` read + write allows; the write rule requires
+    `auditor_period_matches` (cross-period writes default-deny → 403).
+  - The grc_writable_resources set deliberately omits `audit-notes`;
+    grc_engineer write requests default-deny.
+
+  Authorization plumbing:
+
+  - New `authz.AttrsResolver` interface + `Engine.WithAttrsResolver`
+    setter (backwards-compatible — `NewEngine` signature unchanged).
+    The resolver hot path is auditor-only: a non-auditor request scans
+    the roles slice once and skips the DB hit.
+  - `cmd/atlas/main.go` wires `auditor.NewDBAttrsResolver(pool)` onto
+    the engine at startup.
+
+  Tests: 13 new tests (4 unit on the AttrsResolver hook, 9 rego-level on
+  the new policy rules) + 8 integration tests under
+  `internal/audit/notes/integration_test.go` covering AC-4, AC-5, AC-6,
+  P0-2, P0-3, idempotent assignment, and the AttrsResolver wire shape.
+
+  Constitutional invariants honored: #6 (RLS at the DB layer on both new
+  tables); #10 (notes pin to audit_period_id, auditor reads flow through
+  the existing slice-026/028 frozen-horizon predicate).
+
 - **Slice 028 — AuditPeriod + freezing primitive.** Ships the
   `audit_periods` table (four-policy RLS under FORCE; status `open` →
   `frozen` two-state lifecycle; composite uniqueness on

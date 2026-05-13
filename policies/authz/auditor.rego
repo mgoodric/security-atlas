@@ -1,16 +1,33 @@
 # security-atlas — auditor role policy.
 #
-# Source attribution: community_draft (slice 035).
+# Source attribution: community_draft (slice 035) + slice 025
+# (activation: audit-notes write surface + audit-period read).
 #
 # auditor is the external assessor role. Canvas §9.5 example:
 # "auditor X can only see scope cells within audit_period Y for
-# client Z." Read-only by default, with one write surface: sample
-# annotations (slice 026) — the auditor's findings recorded against a
-# pulled sample.
+# client Z." Read-only across audit-relevant resources, with two
+# write surfaces (slice 025 + slice 026):
+#
+#   - audit-notes (slice 025): the auditor's private testing-notes
+#     workspace. Period-scoped via audit_period_id; the rego ABAC
+#     check below enforces that the note's audit_period_id is one of
+#     the auditor's assigned period ids.
+#
+#   - sample annotations (slice 026): the auditor's findings against
+#     a pulled sample. Period-scoped via the samples resource's
+#     audit_period_id attribute; rule lives further down + in
+#     audit_periods.rego.
 #
 # ABAC: the audit_period scope check lives in audit_periods.rego so the
 # attribute check can be reused for scope_cells. This file establishes
-# the role-level allow; audit_periods.rego adds the attribute guard.
+# the role-level allow rules; audit_periods.rego adds the attribute
+# guard for the period-scoped resources.
+#
+# Default-deny is the implicit contract: no `allow if has_role("auditor")
+# and action == "write"` exists for any resource OTHER than audit-notes
+# (and sample annotations, gated by audit_periods.rego). Mutating
+# requests on policies/risks/exceptions/etc fall through default-deny
+# and the middleware returns 403 (P0-1 / AC-3).
 
 package authz
 
@@ -27,9 +44,42 @@ allow if {
     auditor_readable_resources[input.resource.type]
 }
 
-# One write action: annotating a sample with audit findings
-# (slice 026: POST /v1/samples/{id}/annotations). Period-scoped --
-# the audit_periods.rego ABAC predicate gates it.
+# /v1/me/audit-period(s) -- auditor's self-info endpoints (slice 025
+# AC-5 + AC-6). The handler reads from auditor_assignments scoped to
+# the caller's UserID, so there's no period filter to apply at the
+# rego layer -- a row only exists when the caller has an assignment.
+allow if {
+    has_role("auditor")
+    is_read
+    input.resource.type == "me"
+}
+
+# audit-notes read: the handler enforces author_user_id = caller, so
+# cross-author reads return empty. This rego rule only governs whether
+# the auditor role can touch the /v1/audit-notes endpoint AT ALL --
+# the row-level visibility is enforced at the query layer.
+allow if {
+    has_role("auditor")
+    is_read
+    input.resource.type == "audit-notes"
+}
+
+# audit-notes write: gated by the period assignment match. The
+# request body's audit_period_id is surfaced on
+# input.resource.attrs.audit_period_id by the handler before calling
+# Decide (slice 025 wiring); the rule denies cross-period writes
+# (P0-3 / AC-4).
+allow if {
+    has_role("auditor")
+    input.action == "write"
+    input.resource.type == "audit-notes"
+    auditor_period_matches
+}
+
+# One write action carried over from the slice-035 stub: annotating
+# a sample with audit findings (slice 026:
+# POST /v1/samples/{id}/annotations). Period-scoped via
+# audit_periods.rego's ABAC predicate.
 allow if {
     has_role("auditor")
     input.action == "write"
@@ -42,6 +92,15 @@ auditor_period_matches if {
     assigned == input.resource.attrs.audit_period_id
 }
 
+# Resources the auditor can read without an audit_period predicate.
+# audit-periods is included so the auditor can list periods (the
+# handler-level filter in slice 028 is admin-only -- auditors hit
+# /v1/me/audit-period(s) instead, which renders only the assignment-
+# scoped view).
+#
+# Note: scopes is the canvas §5 scope-cell catalog. Slice 035's
+# scope_cells.rego adds the cross-cutting ABAC check that auditor
+# reads of scope cells must be inside an assigned audit_period.
 auditor_readable_resources := {
     "controls",
     "policies",
@@ -49,4 +108,5 @@ auditor_readable_resources := {
     "exceptions",
     "artifacts",
     "scopes",
+    "audit-periods",
 }
