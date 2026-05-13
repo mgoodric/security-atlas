@@ -5,6 +5,18 @@
 
 **Last reconciled:** 2026-05-13 (slices 059 + 060 added to backlog — feature flags + admin UI)
 
+## Drift detected — 2026-05-13 (slice 035 → in-review · HITL pending)
+
+Slice 035 (RBAC roles (5) + ABAC via OPA embedded + decision audit log) implementation complete; PR opened. Status flip rides this PR branch per the post-batch-13 branch-protection-via-PR pattern (main is protected, status flips do NOT push direct to main).
+
+| Row | Transition                  | Evidence                                                                                                                                              |
+| --- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 035 | `in-progress` → `in-review` | gh#47 opened 2026-05-13 · 6/7 ACs PASS · AC-7 PENDING-HITL (pair-review 5 roles + 10 Rego pre-merge per `docs/audit-log/authz-review.md`) · slot \_018 |
+
+HITL gate: orchestrator + user pair-review the 5-role enum + 10 seed Rego policies before squash-merge. Reviewer walks the role × endpoint × expected-outcome matrix in the PR body and signs `docs/audit-log/authz-review.md`.
+
+**Counts delta:** in-progress −1 · in-review +1.
+
 ## Drift detected — 2026-05-13 (slices 059 + 060 added to backlog)
 
 Two new slices added per maintainer request: per-tenant feature flags + capability toggles (059) and an in-app admin settings UI (060). Rationale: adopters often have existing tools that cover some capability areas (OneTrust for vendor, Jira for risk, etc.); forcing every capability on is a false-binary that drives them off. Feature flags let operators turn whole capability areas (risk / vendor / policy / OSCAL export / board / etc.) on or off per-tenant; admin UI surfaces SSO config, user role assignment, API keys, feature toggles, and unified audit log views without requiring CLI access.
@@ -609,7 +621,7 @@ Legal values (use exactly these strings):
 | 032 | Quarterly board pack + investment-vs-coverage          | `not-ready`   | —                                                    | —     | —          | —          | waits on 031, 030                                                                       |
 | 033 | Postgres RLS enforcement everywhere                    | `merged`      | auth/033-postgres-rls-enforcement                    | gh#27 | 2026-05-12 | 2026-05-12 | zero new migrations · P0 admincreds follow-up needed                                    |
 | 034 | OIDC RP + local users                                  | `merged`      | auth/034-oidc-rp-local-users                         | gh#26 | 2026-05-11 | 2026-05-11 | unlocks 037 · ADR-0002 published                                                        |
-| 035 | RBAC roles + ABAC via OPA embedded                     | `in-progress` | auth/035-rbac-abac-opa                               | —     | 2026-05-13 | —          | HITL · 2d · pair-review 5 roles + ~10 Rego · slot \_018 · go.mod (OPA SDK)              |
+| 035 | RBAC roles + ABAC via OPA embedded                     | `in-review`   | auth/035-rbac-abac-opa                               | gh#47 | 2026-05-13 | —          | HITL gate pending pre-merge · 5 roles + 10 Rego · slot \_018 · OPA v1.16.2              |
 | 036 | S3 artifact store integration                          | `merged`      | infra/036-s3-artifact-store                          | gh#15 | 2026-05-11 | 2026-05-11 | closes 013 AC-6 PARTIAL gap                                                             |
 | 037 | docker-compose self-host bundle                        | `not-ready`   | —                                                    | —     | —          | —          | waits on 010 (per slice file deps) · 034 merged but 010 still gates AC-4                |
 | 038 | Helm chart for K8s                                     | `not-ready`   | —                                                    | —     | —          | —          | waits on 037                                                                            |
