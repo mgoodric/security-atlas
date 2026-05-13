@@ -114,7 +114,14 @@ jobs:
       - name: Build all packages
         run: go build ./...
       - name: Run unit tests
-        run: go test -race ./...
+        run: go test -race -covermode=atomic -coverprofile=coverage.txt ./...
+      - name: Upload unit coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.txt
+          flags: unittests
+          fail_ci_if_error: false
 
   # Slice 061 stub: posts pass under the SAME required-check name
   # (`Go · build + test`) when the PR touches no code. Mutually exclusive
@@ -240,6 +247,9 @@ jobs:
         #   go test -tags=integration -race -p 1 ./internal/...
         run: |
           go test -tags=integration -race -p 1 -v \
+            -covermode=atomic \
+            -coverprofile=coverage.txt \
+            -coverpkg=./... \
             ./internal/db/... \
             ./internal/api/scfimport/... \
             ./internal/api/anchors/... \
@@ -251,6 +261,13 @@ jobs:
             ./internal/api/policyacks/... \
             ./internal/featureflag/... \
             ./internal/api/features/...
+      - name: Upload integration coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.txt
+          flags: integration
+          fail_ci_if_error: false
       - name: Migration round-trip — down then up
         run: |
           # Walk down migrations in reverse-alphabetical order (latest down first).
