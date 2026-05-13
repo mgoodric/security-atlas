@@ -13,6 +13,68 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 008 — UCF graph traversal HTTP API.** Three new read-only
+  endpoints expose the requirement-anchor-control graph defined in
+  canvas §3 + `Plans/UCF_GRAPH_MODEL.md` over plain HTTP:
+  `GET /v1/requirements/{id}/coverage` (forward traversal — requirement
+  → anchors → tenant controls), `GET /v1/anchors/{id}/requirements`
+  (reverse traversal — anchor → satisfied requirements; DB-backed),
+  and `GET /v1/controls/{id}/coverage` (control-centric — given a
+  tenant control, return the framework requirements its SCF anchor
+  satisfies). Path forms accepted on requirement and anchor routes
+  match slice 007: UUID, `slug:version:code`, or `slug::code` for
+  requirements; UUID or bare `scf_id` for anchors. Each route
+  optionally accepts `?framework_version=slug:version` to pin
+  historical mappings; `?as-of=<RFC3339>` and `?scf_release=<version>`
+  are accepted-and-no-op in v1 (slice 012 / future SCF-release imports
+  will activate them). New SQL queries live in
+  `internal/db/queries/ucf_traversal.sql` (six queries — anchors for
+  requirement with edges, anchors-for-requirement pinned, controls for
+  anchors, requirements for anchor, requirements-for-anchor pinned,
+  framework_version lookup by slug:version); zero new migrations
+  consumed — the slice reuses the slice-002 `controls`, slice-006
+  `scf_anchors` + `framework_versions` + `frameworks`, and slice-007
+  `framework_requirements` + `fw_to_scf_edges` tables as-is. Existing
+  indexes (`idx_fw_to_scf_edges_requirement`, `idx_fw_to_scf_edges_anchor`,
+  `idx_controls_scf_anchor`) hold up at the AC-5 latency budget: mean
+  per-call 5.89 ms / p50 5.88 ms / p95 6.91 ms against a seeded fixture
+  of 1,400 SCF anchors + 60 SOC 2 requirements + 10,000 STRM edges +
+  5,000 tenant controls — 34× under the 200 ms target. Traversal is a
+  two-hop JOIN, not a recursive CTE (fan-out is bounded per
+  `UCF_GRAPH_MODEL.md` §7 so recursion is over-spec). Constitutional
+  invariant 1 honored: every query joins through the SCF anchor spine;
+  no requirement→requirement table or query exists, asserted at
+  `information_schema` level by
+  `TestNoFrameworkToFrameworkEdgeTable`. Constitutional invariant 6
+  honored: the only tenant-scoped read (`ListControlsForAnchors`
+  against `controls`) runs inside an `inTenantTx` that calls
+  `tenancy.ApplyTenant`; no `WHERE tenant_id = ?` clause is present in
+  any traversal SQL. Cross-tenant integration tests
+  (`TestRequirementCoverage_RLSHidesForeignTenantControls`,
+  `TestControlCoverage_RLSHidesForeignControl`) verify tenant B
+  traversing tenant A's requirement sees the global catalog rows
+  (correct — canvas §3.5) but an empty controls list, and tenant B
+  looking up tenant A's control id returns 404 (RLS makes the foreign
+  row invisible at the DB layer, not the application). Effectiveness
+  scores (canvas §3.3) are deferred to slice 012 — the `controls`
+  array omits the field rather than emitting null so slice 012 can
+  add it without a breaking change. `no_relationship` STRM edges are
+  filtered out of coverage responses (they're stored as data per
+  canvas §3.2 to suppress false suggestions; surfacing them in
+  coverage views would be wrong). New `CONTEXT.md` entry "Coverage"
+  documents the domain shape. Files touched: new
+  `internal/api/ucfcoverage/` package (handlers + integration tests +
+  benchmark), new `internal/db/queries/ucf_traversal.sql` +
+  regenerated `internal/db/dbx/ucf_traversal.sql.go` + regenerated
+  `internal/db/dbx/querier.go`, `internal/api/httpserver.go` (route
+  registration via `root.Get` Mount-append pattern — no second
+  `Mount("/", ...)`), `internal/api/anchors/handlers.go` (the slice-006
+  in-memory `/v1/anchors/{id}/requirements` route + the now-unused
+  `requirementsForAnchor` method + the `mappings` field + the
+  `anchorseed.Store` constructor parameter were removed; `golangci-lint`
+  blocked the dead-code shape), `CONTEXT.md`. No new dependencies. The
+  `internal/api/anchorseed` package is now unreferenced; a future
+  cleanup slice removes the directory and the associated unit tests.
 - **Slice 007 — SOC 2 v2017 (TSC) crosswalk loader + DRAFT mapping data
   pending HITL spot-check.** Lands the second half of the UCF graph
   (canvas §3): the `framework_requirements` adjacency table (one row per
@@ -917,6 +979,19 @@ LEVEL SECURITY` with no policy for a command denies that command,
 
 ### Changed
 
+- **Slice 008: `GET /v1/anchors/{id}/requirements` is now DB-backed.**
+  The slice-006 in-memory `anchorseed` placeholder that previously
+  served this route was a stub pending the slice-008 traversal API.
+  The response key (`requirements`) is unchanged; the row shape is a
+  strict superset of the in-memory one — it adds STRM edge metadata
+  (`relationship_type`, `strength`, `source_attribution`, `rationale`)
+  and full framework natural-key fields (`framework_slug`,
+  `framework_name`, `framework_version`, `framework_version_id`,
+  `framework_version_status`). Existing clients that only consumed
+  `code` / `title` continue to work. The constructor signature
+  `anchors.New(q *dbx.Queries)` drops its second `anchorseed.Store`
+  parameter — internal-package signature change with one in-tree
+  caller in `internal/api/httpserver.go`, no public API impact.
 - **BREAKING — Slice 051: `admincreds.Issue` (`POST /v1/admin/credentials`)
   and `admincreds.List` (`GET /v1/admin/credentials`) now derive the
   tenant strictly from the calling admin credential.** Closes the P0

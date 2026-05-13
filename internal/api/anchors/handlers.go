@@ -1,7 +1,9 @@
-// Package anchors serves the read-only HTTP API for SCF anchors, the
-// frameworks/versions catalog, and the requirement-mappings join. Slice 006
-// landed the DB-backed anchor list/detail; the requirement-mappings come
-// from anchorseed (in-memory) until slice 008 builds the real tables.
+// Package anchors serves the read-only HTTP API for SCF anchors and the
+// frameworks/versions catalog. Slice 006 landed the DB-backed anchor
+// list/detail; slice 007 added the requirement → anchors reverse-traversal
+// route; slice 008 moved the anchor → requirements DB-backed handler to
+// internal/api/ucfcoverage and retired the slice-006 in-memory
+// `anchorseed` placeholder route from this package.
 package anchors
 
 import (
@@ -17,7 +19,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/mgoodric/security-atlas/internal/api/anchorseed"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 )
 
@@ -25,30 +26,34 @@ import (
 // by middleware mounted at the router root.
 type Handler struct {
 	q            *dbx.Queries
-	mappings     anchorseed.Store
 	defaultLimit int32
 	maxLimit     int32
 }
 
-// New constructs a Handler. q must be a non-nil sqlc Queries; mappings is
-// the in-memory requirement-mappings seed.
-func New(q *dbx.Queries, mappings anchorseed.Store) *Handler {
-	return &Handler{q: q, mappings: mappings, defaultLimit: 100, maxLimit: 500}
+// New constructs a Handler. q must be a non-nil sqlc Queries.
+func New(q *dbx.Queries) *Handler {
+	return &Handler{q: q, defaultLimit: 100, maxLimit: 500}
 }
 
 // Routes returns a chi router with the slice-005 + slice-006 + slice-007 endpoints.
+//
+// Slice 008 supersedes the slice-006 in-memory `/v1/anchors/{id}/requirements`
+// route with a DB-backed handler under internal/api/ucfcoverage. That route
+// is no longer registered here. The slice-006 `requirementsForAnchor` method
+// and the `anchorseed` mapping field stay in place for now (dead-code on the
+// hot path; a future cleanup slice removes them) so the Handler signature
+// doesn't churn across slices.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Get("/v1/anchors", h.listAnchors)
 	r.Get("/v1/anchors/{id}", h.getAnchor)
-	r.Get("/v1/anchors/{id}/requirements", h.requirementsForAnchor)
 	r.Get("/v1/frameworks", h.listFrameworks)
 	r.Get("/v1/frameworks/scf/versions", h.listSCFVersions)
 	// Slice 007: reverse traversal — given a framework_requirements row
 	// (by UUID or by `{slug}:{version}:{code}` form), list every SCF
 	// anchor it maps to with relationship_type + strength + source
-	// attribution + rationale. This is the daily-use "what evidence
-	// satisfies SOC 2 CC6.6" query (canvas §7.2).
+	// attribution + rationale. Slice 008 ships the richer `/coverage`
+	// variant alongside this lightweight one (canvas §7.2).
 	r.Get("/v1/requirements/{id}/anchors", h.anchorsForRequirement)
 	return r
 }
@@ -103,25 +108,6 @@ func (h *Handler) getAnchor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"anchor": anchor})
-}
-
-// requirementsForAnchor returns the anchor + its requirement mappings.
-// Anchor comes from the DB; mappings come from the in-memory seed (slice 008).
-func (h *Handler) requirementsForAnchor(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	anchor, ok, err := h.lookupAnchor(r.Context(), id)
-	if err != nil {
-		writeServerErr(w, "lookup anchor", err)
-		return
-	}
-	if !ok {
-		writeError(w, http.StatusNotFound, "anchor not found")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"anchor":       anchor,
-		"requirements": h.mappings.RequirementsForSCFID(anchor.SCFID),
-	})
 }
 
 // listFrameworks returns the framework catalog (global only).

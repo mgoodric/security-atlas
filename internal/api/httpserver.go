@@ -13,7 +13,6 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
 	"github.com/mgoodric/security-atlas/internal/api/anchors"
-	"github.com/mgoodric/security-atlas/internal/api/anchorseed"
 	artifactsapi "github.com/mgoodric/security-atlas/internal/api/artifacts"
 	auditapi "github.com/mgoodric/security-atlas/internal/api/audit"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
@@ -26,6 +25,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
+	"github.com/mgoodric/security-atlas/internal/api/ucfcoverage"
 	"github.com/mgoodric/security-atlas/internal/api/vendors"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/audit"
@@ -73,9 +73,20 @@ func (s *Server) httpHandler() http.Handler {
 	// /auth/* keep their own request-supplied tenant resolution).
 	root.Use(tenancymw.Middleware)
 
-	mappings := anchorseed.New()
 	queries := dbx.New(s.dbPool)
-	root.Mount("/", anchors.New(queries, mappings).Routes())
+	root.Mount("/", anchors.New(queries).Routes())
+	// Slice 008: UCF graph traversal HTTP API. Three read endpoints
+	// query the requirement-anchor-control graph through the SCF spine
+	// (canvas §3 / Plans/UCF_GRAPH_MODEL.md). Routes are appended
+	// directly to the root chi router — adding a second
+	// chi.NewRouter().Mount("/", ...) would panic. The
+	// /v1/anchors/{id}/requirements route under this handler supersedes
+	// the slice-006 in-memory placeholder (which was removed from
+	// anchors.Routes()); the response shape is a superset of the
+	// in-memory one so slice-007's TestRequirementsForAnchor still
+	// passes.
+	ucfH := ucfcoverage.New(s.dbPool)
+	ucfH.RegisterRoutes(root)
 	if dbSvc, ok := s.registry.(*schemaregistry.Service); ok && dbSvc != nil {
 		// chi forbids two Mounts on the same path. Attach each schema
 		// route directly to the root router so they live alongside the
