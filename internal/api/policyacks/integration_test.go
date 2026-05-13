@@ -246,6 +246,9 @@ func seedUser(t *testing.T, admin *pgxpool.Pool, tenant, email string) uuid.UUID
 // otherwise blocks the second seed call.
 func seedAPIKeyForUser(t *testing.T, admin *pgxpool.Pool, tenant string, userID uuid.UUID, isAdmin, isApprover bool, ownerRoles []string) {
 	t.Helper()
+	if ownerRoles == nil {
+		ownerRoles = []string{}
+	}
 	hash := uuid.New().String() // 36 bytes, but we sha256 below for the 32-byte length
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO api_keys (id, tenant_id, token_hash, issued_by, is_admin, is_approver, owner_roles, last4)
