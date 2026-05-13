@@ -50,6 +50,12 @@ type Risk struct {
 	Accepter            string
 	InstrumentReference string
 	LinkedControlIDs    []uuid.UUID
+	// Slice 052 schema additions, surfaced for slice 053 callers (theme
+	// tagging, aggregation, org-unit binding). Existing slice-019 risks
+	// have `Level=team`, `OrgUnitID=nil`, `Themes=nil`.
+	Level     dbx.RiskLevel
+	OrgUnitID *uuid.UUID
+	Themes    []string
 }
 
 // CreateInput is the API-shape for POST /v1/risks. The store re-validates
@@ -310,6 +316,14 @@ func riskFromRow(r dbx.Risk) Risk {
 		t := r.AcceptedUntil.Time
 		risk.AcceptedUntil = &t
 	}
+	// Slice 052 columns: level NOT NULL DEFAULT 'team', org_unit_id nullable,
+	// themes NOT NULL DEFAULT '{}'.
+	risk.Level = r.Level
+	if r.OrgUnitID.Valid {
+		ou := uuid.UUID(r.OrgUnitID.Bytes)
+		risk.OrgUnitID = &ou
+	}
+	risk.Themes = append([]string(nil), r.Themes...)
 	return risk
 }
 

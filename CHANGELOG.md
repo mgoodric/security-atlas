@@ -13,6 +13,77 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 053 — Risk theme tagging + manual aggregation API + org_units
+  CRUD.** Wires the HTTP + Go surface on top of slice 052's freshly-merged
+  schema (canvas §6.4–§6.6). **No new migration** — pure Go + sqlc on
+  existing tables. Three endpoint groups land under `/v1/`:
+  (1) **Themes** — `GET /v1/themes` returns the 10 defaults plus tenant-
+  private themes sorted alphabetically; `POST /v1/risks/{id}/themes`
+  merges + assigns themes after validating every entry against the
+  visible vocabulary (unknown themes → 400, listing the offenders);
+  `DELETE /v1/risks/{id}/themes/{theme}` is idempotent — removing an
+  absent theme returns 204 without error. (2) **Manual aggregation** —
+  `POST /v1/risks/aggregate` creates a parent risk linked to N children
+  with a chosen `severity_function`; populates `risk_aggregations` rows
+  with `rule_id = NULL` (manual peer to slice 054's rule-driven path,
+  invariant #9). `GET /v1/risks/{id}/aggregation` recomputes severity
+  live from the current children — AC-8/AC-9: closing a child via
+  `DELETE /v1/risks/{id}` cascades the agg row (slice 052 ON DELETE
+  CASCADE on `child_risk_id`); the next live call returns the recomputed
+  severity while the parent stays alive (canvas §6.4 explicit
+  no-auto-close). (3) **Org units** — full CRUD on `/v1/org_units` with
+  cycle detection on `parent_id` via a recursive CTE walking the
+  proposed parent chain (rejects self-parent + any cycle through
+  arbitrary chain length). **Severity functions** (canvas §6.6, capped
+  at scale-max 25): `max` returns the highest child severity;
+  `weighted_max` returns `max × (1 + log10(child_count))` (worked
+  example: three children at severities 15 / 12 / 9 → `max = 15`,
+  `weighted_max = ⌈15·(1 + log10(3))⌉ = 23`); `sum` is literal sum
+  capped at 25 (worked example: child severities 20 + 9 → `sum = 25`).
+  Severity is the scalar `likelihood × impact` on the 5×5 grid. Three
+  design decisions worth documenting: **(a) `severity_function` lives
+  in the parent's `inherent_score` JSONB**, not in a top-level column —
+  slice 052's `risk_aggregations` deliberately has no
+  `severity_function` column (it is a per-rule concept in §6.6, and
+  slice 054 owns rules), so slice 053 carries it as JSONB metadata
+  alongside the computed `severity`, derived `likelihood`/`impact`, and
+  the AC-7 idempotency `aggregation_key`. Future SQL filters on
+  `severity_function` would need a functional index — bounded per-tenant
+  risk count makes this acceptable for v1. **(b) Children must use an
+  aggregable methodology** (`nist_800_30` or `qualitative_5x5` — the
+  two methodologies that share the 5×5 `likelihood × impact` scalar).
+  Mixed-methodology aggregations (FAIR LEF/LM combined with the 5×5
+  grid) return 400 with `ErrIncompatibleMethodology`. Cross-methodology
+  normalisation is deferred to slice 054's rule engine where per-scale
+  normalisers can land cleanly. **(c) (likelihood, impact) on the
+  parent is derived from severity for display**, not load-bearing. The
+  math is `L = min(5, ⌈√severity⌉)`, `I = min(5, ⌈severity / L⌉)` —
+  picks the smallest-likelihood cell that contains the severity. The
+  raw `severity` field is the truth; (L, I) exists so the slice-019
+  qualitative_5x5 schema validates the parent and the slice-019
+  heatmap query groups it sensibly. Examples: severity 25 → (5, 5),
+  18 → (5, 4), 15 → (4, 4), 12 → (4, 3), 9 → (3, 3). **AC-7
+  idempotency** key is
+  `sha256_hex(parent_title + "|" + sorted_child_uuids_joined_by_pipe)`
+  stored in `inherent_score.aggregation_key`; same `(title, child_set)`
+  → existing parent returned (re-ordering children does not duplicate).
+  **AC-10 cross-tenant denial** uses RLS as the primary fence: a
+  `ListRisksByIDs` inside the tenant tx returns only visible children;
+  `len(returned) < len(requested)` → `ErrChildrenNotFound` → HTTP 404
+  with the non-enumerating message `"one or more child risks not
+found"` (existence-leak prevention — never says which id was foreign
+  or missing). Themes auto-union from children at create time; parent
+  treatment defaults to `avoid` (no `mitigate`-required linked-controls
+  validation) and methodology to `qualitative_5x5`. Cycle detection on
+  org_units uses `ParentChainIDs :many` recursive CTE — application
+  checks whether the new node id appears in the returned ancestor list.
+  Constitutional invariants honoured: **#6** (every handler inherits
+  `app.current_tenant` via `tenancymw.Middleware`; store calls go
+  through `inTx` → `tenancy.ApplyTenant`; no app-level
+  `WHERE tenant_id = $X` outside the sqlc parameterised pattern) and
+  **#9** (manual aggregation is a peer of rule-driven, distinguished
+  only by `rule_id IS NULL`).
+
 - **Slice 052 — Schema + migrations for risk hierarchy, theme taxonomy,
   and Decision Log.** Pure-schema slice that lays foundations for slices
   053 (theme tagging + manual aggregation API), 054 (aggregation-rules

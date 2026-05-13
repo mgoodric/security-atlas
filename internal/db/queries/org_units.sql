@@ -44,3 +44,28 @@ RETURNING *;
 -- independent of parent).
 DELETE FROM org_units
 WHERE tenant_id = $1 AND id = $2;
+
+-- name: ParentChainIDs :many
+-- Slice 053 cycle detection (AC-4). Returns every node id in the parent_id
+-- chain starting at $2 ("the proposed parent"), tenant-scoped to $1. The
+-- application checks whether $3 ("the node whose parent we're setting")
+-- appears in the returned list — if it does, setting parent_id = $2 would
+-- create a cycle.
+--
+-- Self-parent (parent_id = self_id) is the trivial cycle and is also caught
+-- in the application: when $2 == $3, the seed row of the CTE matches and
+-- $3 appears in the returned list.
+--
+-- The CTE is bounded by the tenant_id predicate on every row, so it can
+-- never walk into another tenant's chain even with RLS off.
+WITH RECURSIVE chain AS (
+    SELECT o.id AS node_id, o.parent_id AS up_id
+    FROM org_units o
+    WHERE o.tenant_id = $1 AND o.id = $2
+    UNION ALL
+    SELECT u.id AS node_id, u.parent_id AS up_id
+    FROM org_units u
+    JOIN chain ON u.id = chain.up_id
+    WHERE u.tenant_id = $1
+)
+SELECT node_id FROM chain;
