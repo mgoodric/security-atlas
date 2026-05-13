@@ -120,6 +120,34 @@ No other transitions. `superseded` is terminal for that row; revisions continue 
 
 Exactly 5 — never 6, never 4 (constitutional anti-pattern: "policy template libraries dressed as a feature"). The CLI `atlas-cli policy seed-stock --tenant-id=...` loads these markdown files, resolves the SCF anchor codes to UUIDs via `scf_anchors`, and INSERTs them as `draft` rows with `source_attribution = 'community_draft'`. Missing anchors warn + drop the link (the warning surfaces under AC-7 if all links resolve empty).
 
+## AuditPeriod (slice 028)
+
+A tenant-scoped, framework-scoped time window over which an auditor evaluates compliance, with a freezing primitive that pins the evidence-universe horizon. Always:
+
+- **Per-(tenant × framework_version)** — the FK targets `framework_versions(tenant_id, id)` so a SOC 2 Q2 freeze and an ISO 27001 Q2 freeze are independent rows. Composite FK blocks cross-tenant linkage (slice 002 D3).
+- **Two-state lifecycle** — `open` (default on create) → `frozen` (terminal-for-content; metadata edits still rejected). There is no `closed` or `archived` state in v1; canvas §8 promises one frozen state and we keep it minimal.
+- **`name`** is the human-facing handle (`"SOC 2 2026 Q2"`); UNIQUE per `(tenant_id, name)` NULLS DISTINCT. This stands in for the canvas-§8.3-mentioned `audit_id` until an `Audit` parent primitive ships (likely the OSCAL Assessment Plan slice).
+- **`frozen_at`** is set on the freeze call; until then it is `NULL`. The append-only evidence ledger makes freezing cheap — we shift the read horizon (`observed_at <= frozen_at`), no snapshot tables (canvas §8.4 verbatim; constitutional anti-criterion P0).
+- **`frozen_hash`** is the content commitment computed at freeze time. Inputs and canonical form are pinned in [ADR 0003](../adr/0003-audit-period-freeze-hash-inputs.md): `sha256(canonical_json({audit_period_id, period_start, period_end, framework_version_id, evidence_record_ids_sorted, control_ids_sorted}))`. `frozen_at` is NOT in the hash inputs — that lets AC-7 ("freezing the same content twice produces the same hash") hold.
+- **`frozen_by`** records the actor (slice 003 `key_<32hex>` for now; slice 034 OIDC subject post-graduation).
+- **Live evaluation isolation** — control-state queries that are NOT period-bounded (i.e., the future slice 012 path) do NOT join `audit_periods`. Period-bounded vs live is determined by _which endpoint the caller hits_. `GET /v1/audit-periods/:id/control-state` is the period-bounded entrypoint; `GET /v1/controls/:id/state` (slice 012 future) is the live entrypoint. AC-5 holds because the two paths share no SQL.
+- **Population attachment (AC-4)** — slice 026 already added `populations.frozen_at` and uses `observed_at <= COALESCE(frozen_at, 'infinity')`. Slice 028 adds `populations.audit_period_id` (NULLABLE composite FK to `audit_periods(tenant_id, id)`) and, on freeze, stamps `populations.frozen_at = period.frozen_at` for all populations whose `audit_period_id = period.id`. This is a write-once stamp: once a population's `frozen_at` is set, slice 026's existing query path enforces the horizon.
+- **Mutation rejection (AC-6)** — `Store.Freeze` is the only path that mutates `audit_periods` after creation, and it is guarded by `WHERE status='open'` in the SQL. Re-freezing returns `ErrAlreadyFrozen` (HTTP 409). No update path exists for frozen rows.
+- **Audit log** — `audit_period_audit_log` is append-only (SELECT + INSERT policies only under FORCE ROW LEVEL SECURITY; slice 011 / 013 / 026 / 035 / 036 pattern). Captures `period_created`, `period_frozen`, `freeze_rejected_already_frozen`, `population_attached`.
+
+Routes:
+
+```
+POST   /v1/audit-periods                            create (status=open)
+GET    /v1/audit-periods                            list for current tenant
+GET    /v1/audit-periods/{id}                       get one
+POST   /v1/audit-periods/{id}:freeze                AC-2; 409 on re-freeze (AC-6)
+GET    /v1/audit-periods/{id}/control-state?control=...   AC-3 frozen-horizon read
+POST   /v1/audit-periods/{id}/populations/{popID}   AC-4 attach + stamp frozen_at if period is frozen
+```
+
+P0 anti-criteria: no `evidence_records` snapshot table; no retroactive mutation of frozen rows (UPDATE guard); content-derived hash with no random salt (re-hash idempotence).
+
 ## Policy acknowledgment (slice 023)
 
 An affirmative, per-user attestation that a published policy version has been read and accepted. Always:

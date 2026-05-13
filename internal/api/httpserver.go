@@ -15,6 +15,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/anchors"
 	artifactsapi "github.com/mgoodric/security-atlas/internal/api/artifacts"
 	auditapi "github.com/mgoodric/security-atlas/internal/api/audit"
+	auditperiodsapi "github.com/mgoodric/security-atlas/internal/api/auditperiods"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
@@ -35,6 +36,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/vendors"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/audit"
+	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -239,6 +241,18 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/samples/{id}", auditH.GetSample)
 	root.Post("/v1/samples/{id}/annotations", auditH.Annotate)
 	root.Get("/v1/samples/{id}/annotations", auditH.ListAnnotations)
+	// Slice 028: AuditPeriod + freezing primitive. Routes appended per the
+	// parallel-batch convention (chi rejects two Mounts at "/"). The
+	// literal-segment routes (/freeze, /control-state, /populations/{popID})
+	// are declared BEFORE the bare /{id} so chi's declaration-order match
+	// keeps them ahead of the generic UUID-id route.
+	periodsH := auditperiodsapi.New(auditperiod.NewStore(s.dbPool))
+	root.Post("/v1/audit-periods", periodsH.Create)
+	root.Get("/v1/audit-periods", periodsH.List)
+	root.Post("/v1/audit-periods/{id}/freeze", periodsH.Freeze)
+	root.Get("/v1/audit-periods/{id}/control-state", periodsH.ControlState)
+	root.Post("/v1/audit-periods/{id}/populations/{popID}", periodsH.AttachPopulation)
+	root.Get("/v1/audit-periods/{id}", periodsH.Get)
 	// Slice 021: exception / waiver workflow. Routes appended per the
 	// parallel-batch convention -- chi.Mux rejects two Mounts at "/", so
 	// individual routes are registered onto the root. Literal-segment
