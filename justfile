@@ -137,6 +137,13 @@ audit-rls:
 import-scf path:
     go run ./cmd/atlas-cli catalog import-scf "{{path}}"
 
+# Import a SOC 2 v2017 TSC crosswalk YAML into Postgres (slice 007).
+# DATABASE_URL must point at atlas_migrate. The shipped DRAFT mapping file
+# is at data/crosswalks/soc2-tsc-2017.yaml — every row is community_draft
+# attribution pending HITL spot-check.
+import-soc2 path:
+    go run ./cmd/atlas-cli catalog import-soc2 "{{path}}"
+
 # ----- Connectors -----
 
 # Build all connector binaries

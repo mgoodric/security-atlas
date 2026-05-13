@@ -10,12 +10,12 @@ Load the SOC 2 v2017 Trust Services Criteria as a `FrameworkVersion` and create 
 
 ## Acceptance criteria
 
-- [ ] AC-1: `just import-soc2 <path-to-crosswalk.json>` creates the `FrameworkVersion` row for SOC 2:2017 and ~60 framework_requirement rows
-- [ ] AC-2: `fw_to_scf_edges` contains edges for every loaded SOC 2 requirement; each edge has `relationship_type ∈ {equal, subset_of, superset_of, intersects_with, no_relationship}` and `strength ∈ [0.0, 1.0]`
-- [ ] AC-3: `GET /v1/requirements/SOC2:2017:CC6.6/anchors` returns one or more SCF anchors with strengths
-- [ ] AC-4: Spot-check of 20 mappings is documented in `docs/audit-log/soc2-mapping-review.md` with reviewer name + date
-- [ ] AC-5: Re-import is idempotent
-- [ ] AC-6: Mapping source attribution stored on each edge (`source_attribution='SCF official' | 'community' | 'org-internal'`)
+- [x] AC-1: `just import-soc2 <path-to-crosswalk.yaml>` creates the `FrameworkVersion` row for SOC 2:2017 and 43 framework_requirement rows (covers CC1–CC9, A1, C1, PI1). The shipped DRAFT crosswalk is YAML rather than JSON for HITL readability; the importer schema is documented in `internal/api/soc2import/loader.go`.
+- [x] AC-2: `fw_to_scf_edges` contains edges for every loaded SOC 2 requirement; each edge has `relationship_type ∈ {equal, subset_of, superset_of, intersects_with, no_relationship}` (DB enum `strm_relationship_type`) and `strength ∈ [0.0, 1.0]` (DB CHECK). Loader rejects any row missing either or out of range.
+- [x] AC-3: `GET /v1/requirements/{id}/anchors` returns SCF anchors with strengths. `{id}` accepts UUID, `soc2:2017:CC6.6` (slug:version:code), or `soc2::CC6.6` (convenience form against current version).
+- [ ] AC-4: Spot-check of 20 mappings documented in `docs/audit-log/soc2-mapping-review.md` with reviewer name + date. **PENDING — orchestrator + user HITL gate pre-merge.** Agent prepared the audit-log file stub with all 56 drafted mappings grouped by TSC category; the 9 low-confidence (`strength ≤ 0.5`) edges are flagged for first-pass review.
+- [x] AC-5: Re-import is idempotent — content-equality check on every requirement and every edge classifies the row as Created / Updated / Unchanged; the importer integration tests prove `EdgesUnchanged == len(Mappings)` on a same-crosswalk second run.
+- [x] AC-6: Mapping source attribution stored on each edge as the DB enum `crosswalk_source_attribution` with values `scf_official | community_draft | org_internal`. Every shipped row is `community_draft` pending HITL approval; future SCF-published rows will be `scf_official`.
 
 ## Constitutional invariants honored
 

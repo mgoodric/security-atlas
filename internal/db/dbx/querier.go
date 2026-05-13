@@ -41,6 +41,9 @@ type Querier interface {
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
 	CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	CountFrameworkRequirementsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
+	// Audit query — exposed for integration tests + the audit log.
+	CountFwToScfEdgesBySourceAttribution(ctx context.Context, sourceAttribution CrosswalkSourceAttribution) (int64, error)
 	// AC-1 + AC-5: count evidence records that match the population's filter.
 	// AC-5 forward-compat: `observed_at <= COALESCE(frozen_at, 'infinity')`
 	// is a no-op until slice 028 sets frozen_at. The COALESCE-to-infinity is
@@ -184,12 +187,28 @@ type Querier interface {
 	// partial UNIQUE index `evidence_records_tenant_idem_uniq` enforces it.
 	GetEvidenceRecordByIdempotency(ctx context.Context, arg GetEvidenceRecordByIdempotencyParams) (EvidenceRecord, error)
 	GetExceptionByID(ctx context.Context, arg GetExceptionByIDParams) (Exception, error)
+	// Same as above but uses the framework's "current" version. Convenience
+	// query so callers can omit the version (e.g., "soc2::CC6.6").
+	GetFrameworkRequirementByCurrentVersion(ctx context.Context, arg GetFrameworkRequirementByCurrentVersionParams) (FrameworkRequirement, error)
+	// Resolve a colon-delimited requirement id like "soc2:2017:CC6.6" by
+	// joining the framework + framework_version. tenant_id IS NULL constraint
+	// restricts to the global catalog.
+	GetFrameworkRequirementByFrameworkSlugVersionCode(ctx context.Context, arg GetFrameworkRequirementByFrameworkSlugVersionCodeParams) (FrameworkRequirement, error)
+	GetFrameworkRequirementByID(ctx context.Context, id pgtype.UUID) (FrameworkRequirement, error)
+	// Lookup by natural key. Used by the importer to classify
+	// Created/Updated/Unchanged and by the traversal handler for the
+	// code-form path (e.g., resolve "CC6.6" against the current SOC 2 version).
+	GetFrameworkRequirementByVersionAndCode(ctx context.Context, arg GetFrameworkRequirementByVersionAndCodeParams) (FrameworkRequirement, error)
 	// AC-13: historical query — return the row that was the active scope at the
 	// supplied timestamp. The row whose effective_from <= as_of AND (the row was
 	// not yet superseded at as_of OR was never superseded).
 	// ORDER BY effective_from DESC LIMIT 1 picks the most-recent applicable row.
 	GetFrameworkScopeAsOf(ctx context.Context, arg GetFrameworkScopeAsOfParams) (FrameworkScope, error)
 	GetFrameworkScopeByID(ctx context.Context, arg GetFrameworkScopeByIDParams) (FrameworkScope, error)
+	// Look up one edge by (requirement, anchor). Returns ErrNoRows when the
+	// edge doesn't exist yet. Importer calls this first to classify
+	// Created/Updated/Unchanged.
+	GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) (FwToScfEdge, error)
 	GetLocalCredentialByUserID(ctx context.Context, arg GetLocalCredentialByUserIDParams) (LocalCredential, error)
 	GetOidcIdpConfigByName(ctx context.Context, arg GetOidcIdpConfigByNameParams) (OidcIdpConfig, error)
 	GetPopulationByID(ctx context.Context, arg GetPopulationByIDParams) (Population, error)
@@ -252,6 +271,7 @@ type Querier interface {
 	// DELETE policy on the table); these queries enforce it at the sqlc
 	// surface (no UpdateEvidenceRecord, no DeleteEvidenceRecord exists).
 	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
+	InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error)
 	// Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
 	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
@@ -305,6 +325,7 @@ type Querier interface {
 	// within the supplied window. Window upper bound is computed in Go from
 	// the request param to keep the SQL static.
 	ListExpiringExceptions(ctx context.Context, arg ListExpiringExceptionsParams) ([]Exception, error)
+	ListFrameworkRequirementsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) ([]FrameworkRequirement, error)
 	// Newest first. Caller filters by framework_version + state in the
 	// application layer because sqlc-static optional WHERE is noisy; the row
 	// count per tenant is bounded by (#frameworks × scope-versions) which stays
@@ -313,6 +334,10 @@ type Querier interface {
 	ListFrameworkScopesByFrameworkVersion(ctx context.Context, arg ListFrameworkScopesByFrameworkVersionParams) ([]FrameworkScope, error)
 	ListFrameworkVersionsBySlug(ctx context.Context, slug string) ([]FrameworkVersion, error)
 	ListFrameworks(ctx context.Context) ([]Framework, error)
+	// Reverse traversal — given a requirement, return all SCF anchors it maps
+	// to with relationship type and strength. Joins through scf_anchors so the
+	// caller gets the scf_id + family + title in one round trip.
+	ListFwToScfEdgesForRequirement(ctx context.Context, frameworkRequirementID pgtype.UUID) ([]ListFwToScfEdgesForRequirementRow, error)
 	ListOidcIdpConfigsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]OidcIdpConfig, error)
 	// AC-4 overdue calc — vendors whose last_review_date + cadence is older than
 	// the cutoff date. NULL last_review_date means "never reviewed" which always
@@ -395,6 +420,12 @@ type Querier interface {
 	// approval columns are nulled. Application code reads back the row state to
 	// surface the `approval_invalidated` banner per AC-9.
 	UpdateFrameworkScopePredicate(ctx context.Context, arg UpdateFrameworkScopePredicateParams) (FrameworkScope, error)
+	// Tally — the importer keeps framework_versions.requirement_count in sync
+	// so dashboards can show "60 controls" without a count(*).
+	UpdateFrameworkVersionRequirementCount(ctx context.Context, arg UpdateFrameworkVersionRequirementCountParams) error
+	// Update an existing edge in place. Importer decides whether to call this
+	// based on a content-equality check.
+	UpdateFwToScfEdge(ctx context.Context, arg UpdateFwToScfEdgeParams) (FwToScfEdge, error)
 	// Full-update path (PATCH handler reads existing, mutates fields, writes).
 	// updated_at is set explicitly so the schema's per-row default doesn't
 	// silently keep stale values.
@@ -413,6 +444,10 @@ type Querier interface {
 	// deterministic id derived from the slug; ON CONFLICT (id) DO UPDATE then
 	// handles re-imports cleanly.
 	UpsertFramework(ctx context.Context, arg UpsertFrameworkParams) (Framework, error)
+	// Insert or update a framework_requirements row. Deterministic id derived
+	// from (framework_version_id, code) so re-imports are idempotent without
+	// relying on NULLs-distinct gotchas on the UNIQUE constraint.
+	UpsertFrameworkRequirement(ctx context.Context, arg UpsertFrameworkRequirementParams) (FrameworkRequirement, error)
 	// Insert or update a framework_versions row. Same deterministic-id pattern
 	// as UpsertFramework above (avoids the NULLs-distinct gotcha on natural-key
 	// ON CONFLICT targets).

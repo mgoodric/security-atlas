@@ -100,6 +100,49 @@ func (ns NullControlLifecycleState) Value() (driver.Value, error) {
 	return string(ns.ControlLifecycleState), nil
 }
 
+type CrosswalkSourceAttribution string
+
+const (
+	CrosswalkSourceAttributionScfOfficial    CrosswalkSourceAttribution = "scf_official"
+	CrosswalkSourceAttributionCommunityDraft CrosswalkSourceAttribution = "community_draft"
+	CrosswalkSourceAttributionOrgInternal    CrosswalkSourceAttribution = "org_internal"
+)
+
+func (e *CrosswalkSourceAttribution) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CrosswalkSourceAttribution(s)
+	case string:
+		*e = CrosswalkSourceAttribution(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CrosswalkSourceAttribution: %T", src)
+	}
+	return nil
+}
+
+type NullCrosswalkSourceAttribution struct {
+	CrosswalkSourceAttribution CrosswalkSourceAttribution `json:"crosswalk_source_attribution"`
+	Valid                      bool                       `json:"valid"` // Valid is true if CrosswalkSourceAttribution is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCrosswalkSourceAttribution) Scan(value interface{}) error {
+	if value == nil {
+		ns.CrosswalkSourceAttribution, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CrosswalkSourceAttribution.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCrosswalkSourceAttribution) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CrosswalkSourceAttribution), nil
+}
+
 type EvidenceFreshnessClass string
 
 const (
@@ -502,6 +545,51 @@ func (ns NullScopeEnvironment) Value() (driver.Value, error) {
 	return string(ns.ScopeEnvironment), nil
 }
 
+type StrmRelationshipType string
+
+const (
+	StrmRelationshipTypeEqual          StrmRelationshipType = "equal"
+	StrmRelationshipTypeSubsetOf       StrmRelationshipType = "subset_of"
+	StrmRelationshipTypeSupersetOf     StrmRelationshipType = "superset_of"
+	StrmRelationshipTypeIntersectsWith StrmRelationshipType = "intersects_with"
+	StrmRelationshipTypeNoRelationship StrmRelationshipType = "no_relationship"
+)
+
+func (e *StrmRelationshipType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = StrmRelationshipType(s)
+	case string:
+		*e = StrmRelationshipType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for StrmRelationshipType: %T", src)
+	}
+	return nil
+}
+
+type NullStrmRelationshipType struct {
+	StrmRelationshipType StrmRelationshipType `json:"strm_relationship_type"`
+	Valid                bool                 `json:"valid"` // Valid is true if StrmRelationshipType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullStrmRelationshipType) Scan(value interface{}) error {
+	if value == nil {
+		ns.StrmRelationshipType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.StrmRelationshipType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullStrmRelationshipType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.StrmRelationshipType), nil
+}
+
 type VendorCriticality string
 
 const (
@@ -758,6 +846,16 @@ type Framework struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
+type FrameworkRequirement struct {
+	ID                 pgtype.UUID        `json:"id"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	Code               string             `json:"code"`
+	Title              string             `json:"title"`
+	Body               string             `json:"body"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
 type FrameworkScope struct {
 	ID                       pgtype.UUID        `json:"id"`
 	TenantID                 pgtype.UUID        `json:"tenant_id"`
@@ -789,6 +887,18 @@ type FrameworkVersion struct {
 	RequirementCount int32                  `json:"requirement_count"`
 	OscalCatalogUri  *string                `json:"oscal_catalog_uri"`
 	CreatedAt        pgtype.Timestamptz     `json:"created_at"`
+}
+
+type FwToScfEdge struct {
+	ID                     pgtype.UUID                `json:"id"`
+	FrameworkRequirementID pgtype.UUID                `json:"framework_requirement_id"`
+	ScfAnchorID            pgtype.UUID                `json:"scf_anchor_id"`
+	RelationshipType       StrmRelationshipType       `json:"relationship_type"`
+	Strength               float64                    `json:"strength"`
+	SourceAttribution      CrosswalkSourceAttribution `json:"source_attribution"`
+	Rationale              string                     `json:"rationale"`
+	CreatedAt              pgtype.Timestamptz         `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz         `json:"updated_at"`
 }
 
 type LocalCredential struct {

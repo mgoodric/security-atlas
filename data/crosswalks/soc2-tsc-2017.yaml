@@ -1,0 +1,514 @@
+# SOC 2 v2017 (Trust Services Criteria) → SCF crosswalk
+#
+# DRAFT — community_draft attribution. Authored by the agent for slice 007;
+# every row requires HITL spot-check before merge per the slice's pre-merge
+# gate. Rows flagged "strength: 0.5" or lower are explicitly low-confidence
+# and should be reviewed first.
+#
+# Source basis: the agent-authored mapping is informed by:
+#   - AICPA TSC 2017 (with 2022 points-of-focus revisions) control text
+#   - SCF anchor families published in the platform's slice-006 fixture
+#   - NIST IR 8477 STRM methodology (canvas §3.2; UCF_GRAPH_MODEL.md §4)
+#
+# This file is NOT SCF's published crosswalk. When SCF publishes a
+# machine-readable SOC 2 STRM crosswalk in JSON/CSV, the importer should
+# ingest it with source_attribution=scf_official, superseding these rows.
+#
+# Strength scoring rubric used here:
+#   1.0  — STRM equal: source and target describe the same control concept
+#   0.9  — STRM equal with minor scope difference
+#   0.7-0.8 — subset_of: SCF anchor fully covers the TSC concept and is broader
+#   0.6-0.8 — intersects_with high overlap: most of the TSC concept is covered
+#   0.4-0.6 — intersects_with partial overlap: explicit gap remains, supplement needed (LOW CONFIDENCE)
+#   <=0.5  — flagged for HITL spot-check priority
+
+schema_version: "1.0"
+framework_slug: "soc2"
+framework_name: "SOC 2 (System and Organization Controls 2)"
+framework_issuer: "AICPA"
+framework_version: "2017"
+release_date: "2017-04-01"
+source_attribution: "community_draft"
+
+requirements:
+  # Common Criteria — Control Environment (CC1)
+  - code: CC1.1
+    title: "COSO Principle 1: Commitment to integrity and ethical values"
+    body: "The entity demonstrates a commitment to integrity and ethical values."
+  - code: CC1.2
+    title: "COSO Principle 2: Board independence and oversight"
+    body: "The board of directors demonstrates independence from management and exercises oversight of the development and performance of internal control."
+  - code: CC1.3
+    title: "COSO Principle 3: Management establishes structure, authority, responsibility"
+    body: "Management establishes, with board oversight, structures, reporting lines, and appropriate authorities and responsibilities."
+  - code: CC1.4
+    title: "COSO Principle 4: Commitment to competence"
+    body: "The entity demonstrates a commitment to attract, develop, and retain competent individuals."
+  - code: CC1.5
+    title: "COSO Principle 5: Accountability"
+    body: "The entity holds individuals accountable for their internal control responsibilities."
+
+  # Common Criteria — Communication & Information (CC2)
+  - code: CC2.1
+    title: "Information for internal control"
+    body: "The entity obtains or generates and uses relevant, quality information to support the functioning of internal control."
+  - code: CC2.2
+    title: "Internal communication"
+    body: "The entity internally communicates information necessary to support the functioning of internal control."
+  - code: CC2.3
+    title: "External communication"
+    body: "The entity communicates with external parties regarding matters affecting the functioning of internal control."
+
+  # Common Criteria — Risk Assessment (CC3)
+  - code: CC3.1
+    title: "Specifies suitable objectives"
+    body: "The entity specifies objectives with sufficient clarity to enable the identification and assessment of risks."
+  - code: CC3.2
+    title: "Identifies and analyzes risk"
+    body: "The entity identifies risks to the achievement of its objectives and analyzes risks as a basis for determining how the risks should be managed."
+  - code: CC3.3
+    title: "Considers fraud risk"
+    body: "The entity considers the potential for fraud in assessing risks to the achievement of objectives."
+  - code: CC3.4
+    title: "Identifies and assesses changes"
+    body: "The entity identifies and assesses changes that could significantly impact the system of internal control."
+
+  # Common Criteria — Monitoring (CC4)
+  - code: CC4.1
+    title: "Ongoing and separate evaluations"
+    body: "The entity selects, develops, and performs ongoing and separate evaluations to ascertain whether the components of internal control are present and functioning."
+  - code: CC4.2
+    title: "Evaluates and communicates deficiencies"
+    body: "The entity evaluates and communicates internal control deficiencies in a timely manner to those parties responsible for taking corrective action."
+
+  # Common Criteria — Control Activities (CC5)
+  - code: CC5.1
+    title: "Selects and develops control activities"
+    body: "The entity selects and develops control activities that contribute to the mitigation of risks to the achievement of objectives to acceptable levels."
+  - code: CC5.2
+    title: "Selects and develops general technology controls"
+    body: "The entity selects and develops general control activities over technology to support the achievement of objectives."
+  - code: CC5.3
+    title: "Deploys through policies and procedures"
+    body: "The entity deploys control activities through policies that establish what is expected and procedures that put policies into action."
+
+  # Common Criteria — Logical & Physical Access (CC6)
+  - code: CC6.1
+    title: "Logical access security software and infrastructure"
+    body: "The entity implements logical access security software, infrastructure, and architectures over protected information assets."
+  - code: CC6.2
+    title: "Registers and authorizes new users prior to issuance of credentials"
+    body: "Prior to issuing system credentials, the entity registers and authorizes new internal and external users."
+  - code: CC6.3
+    title: "Authorizes, modifies, or removes access"
+    body: "The entity authorizes, modifies, or removes access to data, software, functions, and other protected information assets."
+  - code: CC6.4
+    title: "Restricts physical access"
+    body: "The entity restricts physical access to facilities and protected information assets."
+  - code: CC6.5
+    title: "Discontinues logical and physical protections over physical assets only after the ability to read or recover data and software has been diminished"
+    body: "The entity discontinues logical and physical protections over physical assets only after the ability to read or recover data has been diminished."
+  - code: CC6.6
+    title: "Logical access security measures against threats from outside"
+    body: "The entity implements logical access security measures to protect against threats from sources outside its system boundaries."
+  - code: CC6.7
+    title: "Restricts the transmission, movement, and removal of information"
+    body: "The entity restricts the transmission, movement, and removal of information to authorized internal and external users and processes."
+  - code: CC6.8
+    title: "Prevents or detects and acts upon the introduction of unauthorized or malicious software"
+    body: "The entity implements controls to prevent or detect and act upon the introduction of unauthorized or malicious software."
+
+  # Common Criteria — System Operations (CC7)
+  - code: CC7.1
+    title: "Detection and monitoring procedures for new vulnerabilities"
+    body: "The entity uses detection and monitoring procedures to identify changes to configurations that result in the introduction of new vulnerabilities."
+  - code: CC7.2
+    title: "Monitors system components for anomalies"
+    body: "The entity monitors system components and the operation of those components for anomalies indicative of malicious acts, natural disasters, and errors."
+  - code: CC7.3
+    title: "Evaluates security events"
+    body: "The entity evaluates security events to determine whether they could or have resulted in a failure of the entity to meet its objectives."
+  - code: CC7.4
+    title: "Responds to identified security incidents"
+    body: "The entity responds to identified security incidents by executing a defined incident response program."
+  - code: CC7.5
+    title: "Recovery from identified security incidents"
+    body: "The entity identifies, develops, and implements activities to recover from identified security incidents."
+
+  # Common Criteria — Change Management (CC8)
+  - code: CC8.1
+    title: "Authorizes, designs, develops or acquires, configures, documents, tests, approves, and implements changes"
+    body: "The entity authorizes, designs, develops or acquires, configures, documents, tests, approves, and implements changes to infrastructure, data, software, and procedures."
+
+  # Common Criteria — Risk Mitigation (CC9)
+  - code: CC9.1
+    title: "Identifies, selects, and develops risk mitigation activities"
+    body: "The entity identifies, selects, and develops risk mitigation activities for risks arising from potential business disruptions."
+  - code: CC9.2
+    title: "Vendor and business partner risk management"
+    body: "The entity assesses and manages risks associated with vendors and business partners."
+
+  # Availability (A1)
+  - code: A1.1
+    title: "Maintains, monitors, and evaluates current processing capacity"
+    body: "The entity maintains, monitors, and evaluates current processing capacity and use of system components to manage capacity demand and to enable the implementation of additional capacity."
+  - code: A1.2
+    title: "Authorizes, designs, develops, implements, operates, approves, maintains, and monitors environmental protections, software, data backup processes, and recovery infrastructure"
+    body: "The entity authorizes, designs, develops or acquires, implements, operates, approves, maintains, and monitors environmental protections, software, data backup processes, and recovery infrastructure to meet its objectives."
+  - code: A1.3
+    title: "Tests recovery plan procedures"
+    body: "The entity tests recovery plan procedures supporting system recovery to meet its objectives."
+
+  # Confidentiality (C1)
+  - code: C1.1
+    title: "Identifies and maintains confidential information"
+    body: "The entity identifies and maintains confidential information to meet the entity's objectives related to confidentiality."
+  - code: C1.2
+    title: "Disposes of confidential information"
+    body: "The entity disposes of confidential information to meet the entity's objectives related to confidentiality."
+
+  # Processing Integrity (PI1)
+  - code: PI1.1
+    title: "Obtains or generates, uses, and communicates relevant, quality information regarding processing objectives"
+    body: "The entity obtains or generates, uses, and communicates relevant, quality information regarding the objectives related to processing, including definitions of data processed and product and service specifications, to support the use of products and services."
+  - code: PI1.2
+    title: "System inputs are complete and accurate"
+    body: "The entity implements policies and procedures over system inputs, including controls over completeness and accuracy, to result in products, services, and reporting to meet the entity's objectives."
+  - code: PI1.3
+    title: "System processing is complete, valid, accurate, timely, and authorized"
+    body: "The entity implements policies and procedures over system processing to result in products, services, and reporting to meet the entity's objectives."
+  - code: PI1.4
+    title: "System output is complete, accurate, distributed to meet objectives"
+    body: "The entity implements policies and procedures to make available or deliver output completely, accurately, and timely in accordance with specifications to meet the entity's objectives."
+  - code: PI1.5
+    title: "Stores inputs, items in processing, and outputs completely, accurately, and timely"
+    body: "The entity implements policies and procedures to store inputs, items in processing, and outputs completely, accurately, and timely in accordance with system specifications to meet the entity's objectives."
+
+mappings:
+  # =====================================================================
+  # CC1 — Control Environment — anchors mostly to GOV-* + HRS-* families
+  # =====================================================================
+  - tsc_code: CC1.1
+    scf_anchor: GOV-01
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "GOV-01 covers governance program; integrity/ethical values is a subset focus area."
+  - tsc_code: CC1.2
+    scf_anchor: GOV-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Board oversight is implicit in security governance; SCF anchor is broader."
+  - tsc_code: CC1.3
+    scf_anchor: GOV-04
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Both establish roles, authorities, responsibilities."
+  - tsc_code: CC1.4
+    scf_anchor: HRS-04
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Security awareness training covers part of competence; broader HR competence is out of scope. LOW CONFIDENCE — review."
+  - tsc_code: CC1.5
+    scf_anchor: HRS-01
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "HR security covers accountability mechanisms; broader internal-control accountability is out of scope. LOW CONFIDENCE — review."
+
+  # =====================================================================
+  # CC2 — Communication & Information — mostly governance + monitoring
+  # =====================================================================
+  - tsc_code: CC2.1
+    scf_anchor: GOV-01
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Information quality for internal control overlaps governance but is broader. LOW CONFIDENCE — review."
+  - tsc_code: CC2.2
+    scf_anchor: GOV-04
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Roles + responsibilities define internal communication flows."
+  - tsc_code: CC2.3
+    scf_anchor: IRO-09
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "External incident reporting is one example; broader external communication is out of scope."
+
+  # =====================================================================
+  # CC3 — Risk Assessment — anchors to RSK-* family
+  # =====================================================================
+  - tsc_code: CC3.1
+    scf_anchor: RSK-01
+    relationship_type: subset_of
+    strength: 0.8
+    rationale: "RSK-01 (Risk Management Program) fully includes objective-setting for risk assessment."
+  - tsc_code: CC3.2
+    scf_anchor: RSK-04
+    relationship_type: equal
+    strength: 1.0
+    rationale: "RSK-04 (Risk Assessment) is the direct STRM equivalent of CC3.2."
+  - tsc_code: CC3.3
+    scf_anchor: RSK-04
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Fraud risk is one type of risk RSK-04 covers; full fraud-risk concept is broader (incl. fraud-specific controls)."
+  - tsc_code: CC3.4
+    scf_anchor: RSK-04
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Change-based risk reassessment is part of RSK-04; also overlaps CFG-04 change control."
+  - tsc_code: CC3.4
+    scf_anchor: CFG-04
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Configuration change control assesses change-related risk. LOW CONFIDENCE — overlap is partial."
+
+  # =====================================================================
+  # CC4 — Monitoring — anchors to MON-* + CPL-* families
+  # =====================================================================
+  - tsc_code: CC4.1
+    scf_anchor: MON-01
+    relationship_type: subset_of
+    strength: 0.8
+    rationale: "MON-01 (Continuous Monitoring) is the broader anchor; CC4.1 ongoing+separate eval is a subset."
+  - tsc_code: CC4.1
+    scf_anchor: CPL-03
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Internal Audit Function carries the 'separate evaluation' half of CC4.1."
+  - tsc_code: CC4.2
+    scf_anchor: AAA-12
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Audit Log Review surfaces deficiencies for communication."
+
+  # =====================================================================
+  # CC5 — Control Activities — broad; multiple anchors
+  # =====================================================================
+  - tsc_code: CC5.1
+    scf_anchor: RSK-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Selecting controls to mitigate risk overlaps Risk Management Program."
+  - tsc_code: CC5.2
+    scf_anchor: SEA-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Secure engineering principles deploy general tech controls."
+  - tsc_code: CC5.3
+    scf_anchor: GOV-01
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Policies + procedures live in the governance program."
+
+  # =====================================================================
+  # CC6 — Logical & Physical Access — anchors to IAC-*, NET-*, PES-*, DCH-*, END-*
+  # =====================================================================
+  - tsc_code: CC6.1
+    scf_anchor: IAC-01
+    relationship_type: subset_of
+    strength: 0.9
+    rationale: "IAC-01 (I&A Policy) fully covers logical access security software/infrastructure."
+  - tsc_code: CC6.2
+    scf_anchor: IAC-07
+    relationship_type: equal
+    strength: 1.0
+    rationale: "User Provisioning & Lifecycle is the direct STRM equivalent."
+  - tsc_code: CC6.3
+    scf_anchor: IAC-07
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Authorize/modify/remove access is the user lifecycle."
+  - tsc_code: CC6.3
+    scf_anchor: IAC-15
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Account Review enforces the 'remove access' half of CC6.3."
+  - tsc_code: CC6.4
+    scf_anchor: PES-04
+    relationship_type: equal
+    strength: 1.0
+    rationale: "Physical Access Control is the direct STRM equivalent of CC6.4."
+  - tsc_code: CC6.5
+    scf_anchor: AST-09
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Asset Disposal covers data sanitization before discontinuing protections."
+  - tsc_code: CC6.6
+    scf_anchor: NET-04
+    relationship_type: subset_of
+    strength: 0.8
+    rationale: "Boundary Protection fully covers external-threat logical access measures."
+  - tsc_code: CC6.6
+    scf_anchor: IAC-06
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "MFA is the canonical external-threat authentication control."
+  - tsc_code: CC6.7
+    scf_anchor: DCH-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Data classification governs transmission/movement restrictions."
+  - tsc_code: CC6.7
+    scf_anchor: CRY-08
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Encryption in transit is the canonical control for protected transmission."
+  - tsc_code: CC6.8
+    scf_anchor: END-07
+    relationship_type: equal
+    strength: 1.0
+    rationale: "Malicious Code Protection is the direct STRM equivalent of CC6.8."
+
+  # =====================================================================
+  # CC7 — System Operations — anchors to VPM-*, MON-*, AAA-*, IRO-*
+  # =====================================================================
+  - tsc_code: CC7.1
+    scf_anchor: VPM-01
+    relationship_type: subset_of
+    strength: 0.8
+    rationale: "Vulnerability & Patch Management Policy covers new-vulnerability detection."
+  - tsc_code: CC7.1
+    scf_anchor: VPM-04
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Vulnerability Remediation Process is the operational half of CC7.1."
+  - tsc_code: CC7.2
+    scf_anchor: MON-01
+    relationship_type: subset_of
+    strength: 0.9
+    rationale: "Continuous Monitoring fully covers anomaly detection across system components."
+  - tsc_code: CC7.2
+    scf_anchor: MON-08
+    relationship_type: equal
+    strength: 1.0
+    rationale: "Anomalous Behavior Detection is the direct STRM equivalent of CC7.2's anomaly-detection language."
+  - tsc_code: CC7.3
+    scf_anchor: AAA-01
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Auditing & Accountability supports event evaluation."
+  - tsc_code: CC7.3
+    scf_anchor: IRO-04
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Incident Response Plan defines event-evaluation procedures."
+  - tsc_code: CC7.4
+    scf_anchor: IRO-04
+    relationship_type: equal
+    strength: 1.0
+    rationale: "Incident Response Plan is the direct STRM equivalent of CC7.4 incident response."
+  - tsc_code: CC7.5
+    scf_anchor: IRO-04
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "Recovery activities are part of the IR Plan; BCD anchors also intersect."
+  - tsc_code: CC7.5
+    scf_anchor: BCD-02
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Business Continuity Plan covers recovery infrastructure."
+
+  # =====================================================================
+  # CC8 — Change Management — anchors to CHG-* + CFG-*
+  # =====================================================================
+  - tsc_code: CC8.1
+    scf_anchor: CHG-02
+    relationship_type: equal
+    strength: 1.0
+    rationale: "Change Control Process is the direct STRM equivalent of CC8.1."
+  - tsc_code: CC8.1
+    scf_anchor: CFG-04
+    relationship_type: intersects_with
+    strength: 0.8
+    rationale: "Configuration Change Control is the technical half of CC8.1."
+
+  # =====================================================================
+  # CC9 — Risk Mitigation — anchors to BCD-*, TPM-*
+  # =====================================================================
+  - tsc_code: CC9.1
+    scf_anchor: BCD-02
+    relationship_type: subset_of
+    strength: 0.8
+    rationale: "Business Continuity Plan addresses risks arising from disruptions."
+  - tsc_code: CC9.2
+    scf_anchor: TPM-01
+    relationship_type: equal
+    strength: 1.0
+    rationale: "Third-Party Management is the direct STRM equivalent of CC9.2."
+  - tsc_code: CC9.2
+    scf_anchor: TPM-04
+    relationship_type: intersects_with
+    strength: 0.8
+    rationale: "Third-Party Risk Assessments are the operational half of CC9.2."
+
+  # =====================================================================
+  # A1 — Availability — anchors to BCD-* + capacity management
+  # =====================================================================
+  - tsc_code: A1.1
+    scf_anchor: MON-01
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Capacity monitoring is a special case of continuous monitoring. LOW CONFIDENCE — review."
+  - tsc_code: A1.2
+    scf_anchor: BCD-09
+    relationship_type: subset_of
+    strength: 0.9
+    rationale: "Backups fully cover the data backup half of A1.2."
+  - tsc_code: A1.2
+    scf_anchor: BCD-02
+    relationship_type: subset_of
+    strength: 0.8
+    rationale: "BCP covers environmental protections + recovery infrastructure."
+  - tsc_code: A1.3
+    scf_anchor: BCD-11
+    relationship_type: equal
+    strength: 1.0
+    rationale: "Backup Testing is the direct STRM equivalent of A1.3 recovery testing."
+
+  # =====================================================================
+  # C1 — Confidentiality — anchors to DCH-* + AST-*
+  # =====================================================================
+  - tsc_code: C1.1
+    scf_anchor: DCH-01
+    relationship_type: equal
+    strength: 1.0
+    rationale: "Data Classification & Handling is the direct STRM equivalent of C1.1."
+  - tsc_code: C1.2
+    scf_anchor: AST-09
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Asset Disposal covers secure disposal of confidential information."
+  - tsc_code: C1.2
+    scf_anchor: DCH-03
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Data Retention defines when confidential info should be disposed."
+
+  # =====================================================================
+  # PI1 — Processing Integrity — anchors to SEA-* + governance
+  # =====================================================================
+  - tsc_code: PI1.1
+    scf_anchor: GOV-01
+    relationship_type: intersects_with
+    strength: 0.4
+    rationale: "Processing-objective information quality is governance-adjacent. LOW CONFIDENCE — review (PI is weak in SCF coverage)."
+  - tsc_code: PI1.2
+    scf_anchor: SEA-05
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Secure Software Development addresses input validation. LOW CONFIDENCE — partial fit."
+  - tsc_code: PI1.3
+    scf_anchor: SEA-05
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Secure development addresses processing integrity. LOW CONFIDENCE — partial fit."
+  - tsc_code: PI1.4
+    scf_anchor: SEA-05
+    relationship_type: intersects_with
+    strength: 0.4
+    rationale: "Output integrity is software-development-adjacent. LOW CONFIDENCE — review."
+  - tsc_code: PI1.5
+    scf_anchor: DCH-03
+    relationship_type: intersects_with
+    strength: 0.4
+    rationale: "Storage integrity overlaps data retention; partial fit. LOW CONFIDENCE — review."

@@ -39,10 +39,16 @@ func openPool(t *testing.T) *pgxpool.Pool {
 // truncateCatalog wipes any prior SCF rows so each test starts clean. The
 // fixture sample uses a deterministic release_version, so reruns would
 // otherwise stack with previous test runs in the same DB.
+//
+// Slice 007 added fw_to_scf_edges + framework_requirements, both of which
+// depend on scf_anchors / framework_versions. Wipe them first so the FK
+// cascade order is correct.
 func truncateCatalog(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
 	for _, stmt := range []string{
+		"DELETE FROM fw_to_scf_edges",
+		"DELETE FROM framework_requirements",
 		"DELETE FROM scf_anchors",
 		"DELETE FROM framework_versions WHERE tenant_id IS NULL",
 		"DELETE FROM frameworks WHERE tenant_id IS NULL",

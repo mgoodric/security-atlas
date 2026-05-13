@@ -13,6 +13,83 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 007 — SOC 2 v2017 (TSC) crosswalk loader + DRAFT mapping data
+  pending HITL spot-check.** Lands the second half of the UCF graph
+  (canvas §3): the `framework_requirements` adjacency table (one row per
+  TSC criterion inside a `FrameworkVersion`) and the `fw_to_scf_edges`
+  STRM-typed edge table (one row per requirement → SCF anchor mapping)
+  via new migration `20260511000013_framework_requirements_and_edges.sql`.
+  Two new enums — `strm_relationship_type` (`equal | subset_of |
+superset_of | intersects_with | no_relationship` per NIST IR 8477) and
+  `crosswalk_source_attribution` (`scf_official | community_draft |
+org_internal`) — encode the canvas §3.2 STRM semantics directly in the
+  DDL; `fw_to_scf_edges.strength` carries a `CHECK (strength >= 0.0 AND
+strength <= 1.0)` constraint and a `UNIQUE (framework_requirement_id,
+scf_anchor_id)` so STRM's one-edge-per-pair invariant is enforced at
+  the DB level. Both tables are catalog data (no `tenant_id`, no RLS,
+  `GRANT SELECT` to `atlas_app`); writes go via `atlas_migrate` through
+  the importer. Constitutional invariant 1 ("one control, N framework
+  satisfactions; never requirement-to-requirement directly") is enforced
+  at DDL: there is no `fw_to_fw_edges` table and there never will be —
+  framework-to-framework relationships derive through SCF anchors. A
+  new `internal/api/soc2import/` Go package adds `Load(path)` +
+  `Import(ctx, db, cw)` that idempotently apply a YAML crosswalk inside
+  a single pgx transaction; the importer reuses slice 006's two-query
+  upsert pattern (lookup-first → INSERT / UPDATE-if-content-changed /
+  skip-if-unchanged) so re-imports produce accurate Created / Updated /
+  Unchanged counts and do not flip approval state. The HITL guardrail
+  lives in three places: (1) the YAML schema REQUIRES
+  `relationship_type` + `strength` on every row — the loader rejects
+  any row that omits either with a precise error, so there is no
+  silent default to `equal/1.0` for ambiguous mappings; (2) every
+  drafted row carries `source_attribution: community_draft` so an
+  auditor scanning the DB knows which rows still need human
+  spot-check vs which came from SCF's published crosswalk (future
+  `scf_official` rows bypass HITL); (3) the importer is
+  content-equality-aware, so once a row is HITL-approved in a later
+  slice, re-running with the same crosswalk does not silently revert.
+  A new HTTP route `GET /v1/requirements/{id}/anchors` (registered on
+  `internal/api/anchors/` via the established route-append pattern)
+  performs the reverse graph traversal (canvas §7.2 — "what evidence
+  satisfies SOC 2 CC6.6"): the `{id}` segment accepts a UUID, a
+  `{slug}:{version}:{code}` natural key (e.g. `soc2:2017:CC6.6`), or
+  the convenience form `{slug}::{code}` (resolves against the
+  framework's current version). Response is
+  `{requirement, anchors:[{scf_id, family, anchor_title,
+relationship_type, strength, source_attribution, rationale}, …]}` —
+  the join is server-side so dashboards get the full row in one round
+  trip. A new CLI subcommand `atlas-cli catalog import-soc2 <path>`
+  and a matching `just import-soc2 path` recipe ship the operational
+  surface. The agent-authored DRAFT mapping file at
+  `data/crosswalks/soc2-tsc-2017.yaml` covers 43 SOC 2 TSC criteria
+  (CC1.1–CC9.2 + A1.1–A1.3 + C1.1–C1.2 + PI1.1–PI1.5) with 56 drafted
+  edges; 9 edges are explicitly flagged as low-confidence
+  (`strength ≤ 0.5`) for HITL spot-check priority — these cluster
+  around the COSO-flavored CC1.x criteria and the Processing Integrity
+  (PI1.x) family where SCF anchor coverage is intentionally narrow.
+  Every edge is `community_draft` attribution; **none of this is
+  audit-binding until the orchestrator + user spot-check completes
+  pre-merge** (the slice opens its PR for human review and does NOT
+  self-merge). Integration tests prove (a) first-run creates +
+  idempotent re-import, (b) every drafted edge stored is
+  `community_draft`, (c) every edge's `relationship_type` is one of
+  the five canvas-spec STRM literals and every `strength` is in
+  `[0.0, 1.0]`, (d) the DDL-level invariant-1 guarantee —
+  `information_schema` reports zero req-to-req tables and exactly one
+  FK from any table pointing at `framework_requirements`, (e) the
+  `fw_to_scf_edges_strength_range` CHECK constraint refuses
+  `strength = 1.4` even when bypassing the loader. Loader unit tests
+  add six negative cases (missing `relationship_type`, out-of-range
+  `strength`, legacy `intersects` spelling without `_with`, ambiguous
+  `community` source_attribution, unknown `tsc_code` reference,
+  malformed `schema_version`). Patches slice-006 `truncateCatalog`
+  helper to also wipe `fw_to_scf_edges` and `framework_requirements`
+  before `scf_anchors` (FK cascade order); `fw_to_scf_edges.scf_anchor_id`
+  uses `ON DELETE CASCADE` so a future SCF release wipe-and-reimport
+  drops stale edges automatically. Deps: slice 006 (SCF catalog).
+  Unlocks: slice 008 (UCF graph traversal API), slice 010 (50-control
+  SOC 2 kit). Migration slot consumed: `20260511000013`. New direct
+  Go dependency: `gopkg.in/yaml.v3` (previously indirect).
 - **Slice 033 — Postgres RLS enforcement on every tenant-scoped table +
   `tenancy.Middleware` + `just audit-rls` CI gate.** Lands the runtime
   half of constitutional invariant 6 (canvas §5.4): every bearer-auth'd

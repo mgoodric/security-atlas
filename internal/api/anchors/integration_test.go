@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/scfimport"
+	"github.com/mgoodric/security-atlas/internal/api/soc2import"
 )
 
 const tenantA = "11111111-1111-1111-1111-111111111111"
@@ -41,24 +43,49 @@ func adminDSN(t *testing.T) string {
 func setupHTTPServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
 
-	// Wipe + import via admin pool.
+	// Wipe + import via admin pool. Slice 007 added fw_to_scf_edges +
+	// framework_requirements. We wipe only slice-007 + slice-006 owned
+	// rows; controls or other tenant-scoped data that other packages
+	// might leave behind is NOT in our cleanup scope (and would block
+	// scf_anchors deletes via FK from controls.scf_anchor_id under the
+	// full integration suite).
 	adminPool := openPoolDSN(t, adminDSN(t))
 	defer adminPool.Close()
 	for _, stmt := range []string{
-		"DELETE FROM scf_anchors",
-		"DELETE FROM framework_versions WHERE tenant_id IS NULL",
-		"DELETE FROM frameworks WHERE tenant_id IS NULL",
+		"DELETE FROM fw_to_scf_edges",
+		"DELETE FROM framework_requirements",
+		"DELETE FROM framework_versions WHERE framework_id IN (SELECT id FROM frameworks WHERE slug = 'soc2' AND tenant_id IS NULL)",
+		"DELETE FROM frameworks WHERE slug = 'soc2' AND tenant_id IS NULL",
 	} {
 		if _, err := adminPool.Exec(context.Background(), stmt); err != nil {
 			t.Fatalf("cleanup %q: %v", stmt, err)
 		}
 	}
-	cat, err := scfimport.Load("../../../migrations/fixtures/scf-sample.json")
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+	// SCF anchors: load idempotently — only wipe + reimport if zero rows.
+	// The slice-006 importer is content-equality-aware so re-importing a
+	// loaded catalog is a no-op anyway, but skipping when fully loaded
+	// keeps test runtime bounded under the full integration suite.
+	var anchorCount int
+	if err := adminPool.QueryRow(context.Background(), `SELECT count(*) FROM scf_anchors`).Scan(&anchorCount); err != nil {
+		t.Fatalf("count scf_anchors: %v", err)
 	}
-	if _, err := scfimport.Import(context.Background(), adminPool, cat); err != nil {
-		t.Fatalf("Import: %v", err)
+	if anchorCount == 0 {
+		cat, err := scfimport.Load("../../../migrations/fixtures/scf-sample.json")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if _, err := scfimport.Import(context.Background(), adminPool, cat); err != nil {
+			t.Fatalf("Import: %v", err)
+		}
+	}
+	// Slice 007: load the SOC 2 crosswalk so the requirement-traversal
+	// route has data to return.
+	cw, err := soc2import.Load(filepath.Join("..", "..", "..", "data", "crosswalks", "soc2-tsc-2017.yaml"))
+	if err != nil {
+		t.Fatalf("soc2import.Load: %v", err)
+	}
+	if _, err := soc2import.Import(context.Background(), adminPool, cw); err != nil {
+		t.Fatalf("soc2import.Import: %v", err)
 	}
 
 	// Boot the server with the app role.
@@ -263,6 +290,85 @@ func TestListSCFVersions_HasCurrent(t *testing.T) {
 func TestListAnchors_RejectsMissingBearer(t *testing.T) {
 	ts, _ := setupHTTPServer(t)
 	resp, _ := get(t, ts, "/v1/anchors", "")
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d; want 401", resp.StatusCode)
+	}
+}
+
+// Slice 007 — AC-3: the reverse-traversal endpoint returns SCF anchors
+// for a SOC 2 requirement with relationship_type + strength + attribution.
+// Path form: `soc2:2017:CC6.6` (slug:version:code).
+func TestAnchorsForRequirement_ResolvesSOC2CC66BySlugVersionCode(t *testing.T) {
+	ts, bearer := setupHTTPServer(t)
+	resp, body := get(t, ts, "/v1/requirements/soc2:2017:CC6.6/anchors", bearer)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
+	}
+	var got struct {
+		Requirement map[string]string `json:"requirement"`
+		Anchors     []struct {
+			SCFID             string  `json:"scf_id"`
+			RelationshipType  string  `json:"relationship_type"`
+			Strength          float64 `json:"strength"`
+			SourceAttribution string  `json:"source_attribution"`
+		} `json:"anchors"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\nbody=%s", err, body)
+	}
+	if got.Requirement["code"] != "CC6.6" {
+		t.Fatalf("requirement.code = %q; want CC6.6", got.Requirement["code"])
+	}
+	if len(got.Anchors) == 0 {
+		t.Fatal("expected at least one anchor for CC6.6 (NET-04, IAC-06 per crosswalk)")
+	}
+	for _, a := range got.Anchors {
+		if a.SCFID == "" {
+			t.Fatalf("anchor missing scf_id: %+v", a)
+		}
+		if a.RelationshipType == "" {
+			t.Fatalf("anchor missing relationship_type: %+v", a)
+		}
+		if a.SourceAttribution != "community_draft" {
+			t.Fatalf("anchor source_attribution = %q; want community_draft", a.SourceAttribution)
+		}
+		if a.Strength < 0.0 || a.Strength > 1.0 {
+			t.Fatalf("anchor strength %v out of [0,1]", a.Strength)
+		}
+	}
+}
+
+// Convenience form: omit the version → resolve against the framework's
+// current version. `soc2::CC6.6` should match the same row as
+// `soc2:2017:CC6.6`.
+func TestAnchorsForRequirement_ConvenienceFormCurrentVersion(t *testing.T) {
+	ts, bearer := setupHTTPServer(t)
+	resp, body := get(t, ts, "/v1/requirements/soc2::CC6.6/anchors", bearer)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
+	}
+	var got struct {
+		Requirement map[string]string `json:"requirement"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Requirement["code"] != "CC6.6" {
+		t.Fatalf("requirement.code = %q", got.Requirement["code"])
+	}
+}
+
+func TestAnchorsForRequirement_404OnUnknownCode(t *testing.T) {
+	ts, bearer := setupHTTPServer(t)
+	resp, _ := get(t, ts, "/v1/requirements/soc2:2017:CC99.99/anchors", bearer)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d; want 404", resp.StatusCode)
+	}
+}
+
+func TestAnchorsForRequirement_RejectsMissingBearer(t *testing.T) {
+	ts, _ := setupHTTPServer(t)
+	resp, _ := get(t, ts, "/v1/requirements/soc2:2017:CC6.6/anchors", "")
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d; want 401", resp.StatusCode)
 	}
