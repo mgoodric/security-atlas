@@ -3,9 +3,29 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-13 (slice 022 → in-review · gh#33)
+**Last reconciled:** 2026-05-13 (slice 050 claim-stake — public release readiness · Apache 2.0 ratified)
 
-## Drift detected — 2026-05-13 (slice 022 → in-review · HITL pending)
+## Drift detected — 2026-05-13 (slice 050 claim-stake — public release readiness)
+
+Slice 050 (public release readiness + release automation) flipped `ready` → `in-progress`. **User pivot:** rather than wait ~19 days for GitHub Actions free-tier private-repo minutes to reset (exhausted ~03:42Z UTC), ship slice 050 → manually flip repo to public → public repos get unlimited Actions minutes → unblock PR #33 (slice 022) merge.
+
+**Open-q resolutions** (3 of slice 050's pre-merge gates resolved this turn):
+
+- **#1 SCF redistribution** — resolved by policy: don't bundle pre-built SCF data; users import their own (consistent with slice 006's pattern)
+- **#3 Project license** — **Apache 2.0** (user ratified 2026-05-13)
+- **#5 Hosted offering vs OSS governance** — defer; ship public OSS now, hosted offering is a future commercial call. Agent surfaces this in `RELEASE_READINESS.md`.
+
+| Row | Transition              | Branch                               |
+| --- | ----------------------- | ------------------------------------ |
+| 050 | `ready` → `in-progress` | `infra/050-public-release-readiness` |
+
+Slice ships 15 ACs: repo content sanitization (remove personally-identifying refs), public docs (README/LICENSE/CoC/CONTRIBUTING/SECURITY), GitHub security features (CodeQL, Dependabot, branch protection, signed-commits decision), release automation (release-please semver + multi-arch GHCR + Watchtower auto-deploy for Unraid), and a pre-flight `RELEASE_READINESS.md` checklist. **Final `gh repo edit --visibility public` flip is NOT in scope** — that's the maintainer's manual action post-merge.
+
+**CI quota constraint:** agent runs local-only verification; PR's CI will be quota-blocked at open time. Sequence: (1) agent ships PR with full content + local gates green; (2) user manually flips repo public; (3) CI re-runs unlimited; (4) merge slice 050; (5) re-run + merge PR #33.
+
+**Counts delta:** ready −1 · in-progress +1.
+
+## Drift detected — 2026-05-13 (slice 022 → in-review · HITL pending, archived)
 
 Slice 022 (policy library + version chain + 5 stock policies + chromedp PDF render) flipped `in-progress` → `in-review`. PR gh#33 opened against main. **HITL gate pending pre-merge** — agent shipped machinery + 5 drafted stock policies (Information Security · Access Control · Vendor Management · Incident Response · Change Management), all attributed `community_draft`. Orchestrator + user pair-review the policy bodies before squash-merge (same shape as batch 9's slice-007 SOC 2 mapping pair-review). **6/7 ACs PASS · AC-6 marked PENDING-HITL** (the per-policy approval rows + sign-off block in `docs/audit-log/stock-policies-review.md` are intentionally left for the reviewer). The slice graduates the slice-002 placeholder `policies` table to its v1 shape via `_016_policies` ALTER migration: adds `predecessor_id` self-FK composite `(tenant_id, predecessor_id) → (tenant_id, id)` so version chains cannot span tenants, `owner_role`/`approver_role` (replacing the unused slice-002 `owner`/`approver`), `linked_control_ids UUID[]`, `source_attribution` enum (`community_draft` | `tenant_authored` | `vendor_provided`), 7 workflow timestamp+actor columns, `created_by`; reshapes `version` INTEGER → TEXT (operator-supplied semver) and `status` enum → TEXT + CHECK; replaces the single `tenant_isolation` policy with the four-policy RLS split (verified via `pg_policies`: `tenant_read SELECT + tenant_write INSERT WITH CHECK + tenant_update UPDATE USING+WITH CHECK + tenant_delete DELETE`); partial UNIQUE `policies_predecessor_unique_when_set` enforces linear version chains. **Publish is two-step atomic** for second-and-later versions: supersede prior + insert new with `predecessor_id` set, single tx. First-publish is single-UPDATE in place. **Approver-role gate** on `under_review → approved` AND `approved → published` (defense in depth — publish is audit-binding). **Orphan-policy warning** (`warning: orphan_policy`) surfaces on every read response when `len(linked_control_ids) == 0`; orphan publish returns 409 (`ErrOrphanPublish`) per anti-criterion P0. **PDF render is real** — `internal/policy/pdf` uses chromedp + `page.PrintToPDF` against a `data:text/html` URL; integration test asserts leading `%PDF-` magic bytes against `chromedp/headless-shell:latest`. When Chrome is unavailable on the host the renderer returns `ErrChromeUnavailable` and the handler responds 503 so the platform runs without Chrome installed (test skips gracefully). **CHROME_DEBUG_URL** env override lets CI point at a sidecar headless-shell container instead of launching Chrome locally. **Spine touch:** `go.mod` adds `github.com/chromedp/chromedp` + `cdproto` (the slice's one allowed touch — Go-native, headless-Chrome-driven; preferred over wkhtmltopdf which would add a runtime binary dependency for docker-compose). **5 stock policies** ship under `policies/stock/*.md` with YAML frontmatter (title, version, owner_role, approver_role, linked_control_ids as SCF anchor codes, acknowledgment_required_roles, source_attribution: community_draft); loader rejects any directory whose count ≠ 5 (constitutional anti-pattern 1.6 enforced at code level — unit tests cover 4/6/0). **CLI `atlas-cli policy seed-stock --tenant-id=...`** loads + INSERTs as draft rows (mirrors slice 007's `catalog import-soc2` pattern); resolves SCF anchor codes to `controls.scf_id` UUIDs via DISTINCT ON lookup; missing anchors surface in the seed Report (the resulting policy may surface orphan_policy warning until slice 010 SOC 2 control kit lands). **HITL audit-log stub** at `docs/audit-log/stock-policies-review.md` pre-populated with per-policy review priority order + SCF-anchor verification rubric + sign-off block (reviewer name + per-policy decisions + signature/commit SHA left unfilled). **CONTEXT.md** got a full "Policy (slice 022)" entry canonicalising the state-machine vocabulary, orphan-policy semantics, approver-role gate, stock bundle table, and source_attribution values. **Tests:** 8 policy integration tests (create happy path · orphan warning · state-machine transitions · publish first version · orphan publish rejected · approve-from-draft rejected · cross-tenant boundary · ErrNotFound · validation table) + 2 PDF integration tests (real PDF magic bytes against headless-shell · cancelled-context fast return) + 5 seed unit tests (real-bundle parse · count-guard cases 4/6/0 · missing frontmatter · NoopAnchorResolver). **Migration round-trip verified** clean (up applied against `sa-022-pg` end-to-end). **Constitutional invariants honoured:** #6 (FORCE RLS + four-policy split verified via runtime pg_catalog), #7 (linked_control_ids references controls anchored at SCF), D3 (cross-tenant FK leakage blocked by composite self-FK), slice 033 invariant (handlers do NOT call `tenancy.WithTenant`; every endpoint inherits `app.current_tenant` via `tenancymw.Middleware`). **pre-commit run --all-files PASS** (prettier auto-fixed CONTEXT.md + CHANGELOG.md inline). **Time spent:** ~75 min end-to-end (PRD + grill + tests + Go code + handlers + httpserver wire + 5 policy markdown bodies + seed CLI + ship-gate + CHANGELOG + commit + PR + status flip).
 
@@ -472,10 +492,10 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 
 | Status        | Count  |
 | ------------- | ------ |
-| `merged`      | 31     |
-| `in-review`   | 0      |
-| `in-progress` | 2      |
-| `ready`       | 3      |
+| `merged`      | 32     |
+| `in-review`   | 1      |
+| `in-progress` | 1      |
+| `ready`       | 2      |
 | `blocked`     | 0      |
 | `not-ready`   | 22     |
 | **Total**     | **58** |
@@ -545,10 +565,10 @@ Legal values (use exactly these strings):
 | 047 | osquery/Fleet endpoint connector                       | `merged`      | connectors/047-osquery-fleet-connector               | gh#23 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                                                                    |
 | 048 | Jira/Linear ticket connector                           | `merged`      | connectors/048-jira-linear-connector                 | gh#22 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                                                                    |
 | 049 | Manual upload / CSV / S3 / SFTP escape-hatch           | `merged`      | connectors/049-manual-upload-csv-connector           | gh#24 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                                                                    |
-| 050 | Public release readiness + release automation          | `ready`       | —                                                    | —     | —          | —          | HITL · dep 039 merged · open-q gates                                                    |
+| 050 | Public release readiness + release automation          | `in-progress` | infra/050-public-release-readiness                   | —     | 2026-05-13 | —          | Apache 2.0 ratified · unblocks repo public-flip · CI quota-paused until repo public     |
 | 051 | admincreds tenant derivation fix (P0 from slice 033)   | `merged`      | fix/051-admincreds-tenant-derivation                 | gh#28 | 2026-05-12 | 2026-05-12 | cross-tenant escalation closed · zero migrations · breaking API change                  |
 | 052 | Schema + migrations for risk hierarchy + themes + DL   | `merged`      | risk/052-risk-hierarchy-schema                       | gh#31 | 2026-05-13 | 2026-05-13 | 10/10 ACs · 8 new tables + ALTER risks · 4-policy RLS · slots \_014+\_015 · unlocks 053 |
-| 053 | Risk theme tagging + manual aggregation API            | `in-review`   | risk/053-risk-theme-tagging                          | gh#32 | 2026-05-13 | 2026-05-13 | 10/10 ACs PASS · 14 integration + 12 unit tests · severity max/wmax/sum · no migration  |
+| 053 | Risk theme tagging + manual aggregation API            | `merged`      | risk/053-risk-theme-tagging                          | gh#32 | 2026-05-13 | 2026-05-13 | 10/10 ACs · 17 files · severity max/wmax/sum · no migration · commit 25658dd            |
 | 054 | Declarative aggregation rules engine                   | `not-ready`   | —                                                    | —     | —          | —          | waits on 053 · HITL on rule activation                                                  |
 | 055 | Decision Log CRUD + linkage                            | `not-ready`   | —                                                    | —     | —          | —          | waits on 052, 020, 021                                                                  |
 | 056 | Hierarchical risk dashboard view                       | `not-ready`   | —                                                    | —     | —          | —          | waits on 005, 053, 054, 055                                                             |
@@ -574,12 +594,12 @@ Next-batch options:
 3. **HITL 035 / 022 sessions** — modest content review.
 4. **Resolve open-q #1/#3/#15** for 050.
 
-## In-flight (2 worktrees building)
+## In-flight (1 worktree building · 1 in-review)
 
-- **053** — `risk/053-risk-theme-tagging` · `in-progress` since 2026-05-13 · AFK-clean
-- **022** — `policies/022-policy-library` · `in-progress` since 2026-05-13 · HITL (pair-review 5 policy bodies pre-merge)
+- **050** — `infra/050-public-release-readiness` · `in-progress` since 2026-05-13 · public-release-prep slice (Apache 2.0)
+- **022** — `policies/022-policy-library` · `in-review` since 2026-05-13 · gh#33 · awaiting CI quota unblock via repo public-flip
 
-Stale worktrees still on disk: `-007`, `-008`, `-009`, `-011`, `-013`, `-014`, `-015`, `-017`, `-018`, `-019`, `-021`, `-024`, `-026`, `-033`, `-034`, `-036`, `-039`, `-044`, `-045`, `-046`, `-047`, `-048`, `-049`, `-051`, `-052`. Safe to `git worktree remove` whenever ready.
+Stale worktrees still on disk: `-007`, `-008`, `-009`, `-011`, `-013`, `-014`, `-015`, `-017`, `-018`, `-019`, `-021`, `-024`, `-026`, `-033`, `-034`, `-036`, `-039`, `-044`, `-045`, `-046`, `-047`, `-048`, `-049`, `-051`, `-052`, `-053`. Safe to `git worktree remove` whenever ready.
 
 ## Notes
 
