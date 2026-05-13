@@ -44,8 +44,8 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           # `code: true` if ANY of these patterns match the PR diff (or the
@@ -101,8 +101,8 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.25"
           cache: true
@@ -125,7 +125,7 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   tests-integration:
     name: Go · integration (Postgres RLS)
@@ -168,8 +168,8 @@ jobs:
       # Slice 015 — NATS JetStream endpoint reachable from the runner.
       NATS_URL: nats://localhost:4222
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.25"
           cache: true
@@ -278,7 +278,7 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   lint-go:
     name: Go · lint
@@ -286,12 +286,12 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.25"
           cache: true
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: latest
 
@@ -301,7 +301,7 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   proto:
     name: Proto · lint + generate diff
@@ -309,7 +309,7 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: bufbuild/buf-action@v1
         with:
           setup_only: true
@@ -326,7 +326,7 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   build-frontend:
     name: Frontend · install + build
@@ -334,8 +334,8 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: "npm"
@@ -352,7 +352,7 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   lint-python:
     name: Python · ruff
@@ -360,8 +360,8 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - run: pip install ruff==0.7.0
@@ -374,7 +374,7 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   # Slice 061: pre-commit is INTENTIONALLY unconditional. It auto-formats
   # markdown (prettier) and YAML; we want it to run on docs-only PRs so
@@ -383,14 +383,14 @@ jobs:
     name: pre-commit · all hooks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.25"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
       - run: pip install pre-commit==3.8.0
