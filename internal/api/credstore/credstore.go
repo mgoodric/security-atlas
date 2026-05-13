@@ -224,6 +224,28 @@ func (s *Store) List(tenantID string) []Credential {
 	return out
 }
 
+// RebindUserIDForTests overrides the UserID field on the credential
+// keyed by the supplied bearer plaintext. Test-only helper for slice
+// 023's integration tests, which need cred.UserID to equal a real
+// users(id) UUID so the policy_acknowledgments composite FK passes.
+//
+// In production, slice 034's OIDC-callback path sets UserID at issue
+// time from the IdP's `sub` claim. Until that path is exercised in
+// integration tests, this hook bridges bootstrap creds (which default
+// UserID to their own credential id) to seeded users rows.
+//
+// Returns ErrUnknownKey if the bearer doesn't authenticate.
+func (s *Store) RebindUserIDForTests(token, userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.byTokenHash[hashToken(token)]
+	if !ok || r.state == stateRevoked {
+		return ErrUnknownKey
+	}
+	r.cred.UserID = userID
+	return nil
+}
+
 // Authenticate resolves a plaintext bearer to its credential. Updates
 // LastUsedAt on success.
 func (s *Store) Authenticate(token string) (Credential, error) {

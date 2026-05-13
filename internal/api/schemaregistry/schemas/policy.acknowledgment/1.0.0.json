@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/policy.acknowledgment/1.0.0.json",
+  "x-evidence-kind": "policy.acknowledgment.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["GOV-04"],
+  "title": "Policy acknowledgment",
+  "description": "An affirmative, per-user attestation that a published policy version has been read and accepted. Emitted to the evidence ledger by POST /v1/policies/{id}/acknowledge (slice 023). Annual recurrence is enforced at the handler (365-day freshness window); each policy publish creates a new policies row id so an ack of the prior version cannot satisfy the new version.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["policy_id", "policy_version_id", "user_id", "acknowledged_at"],
+  "properties": {
+    "policy_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Policy logical id. For v1 this equals policy_version_id (each version is its own row); kept separate for slice-035 logical-id graduation."
+    },
+    "policy_version_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The specific policies row id being acknowledged. FK target of policy_acknowledgments.policy_version_id."
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The user that performed the acknowledgment. Set by the handler from cred.UserID; never accepted from the wire."
+    },
+    "acknowledged_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Wall-clock time the acknowledgment was recorded. RFC 3339 / ISO 8601."
+    },
+    "policy_title": {
+      "type": "string",
+      "description": "Optional. The policy title at acknowledgment time. Snapshotted for audit lineage (the policy row may rename after; the ack record preserves what the user attested to)."
+    },
+    "policy_version": {
+      "type": "string",
+      "description": "Optional. The semver string at acknowledgment time."
+    },
+    "required_roles": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional. The acknowledgment_required_roles in force at acknowledgment time. Snapshotted for audit lineage."
+    }
+  }
+}

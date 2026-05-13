@@ -24,6 +24,7 @@ import (
 	fwscopesapi "github.com/mgoodric/security-atlas/internal/api/frameworkscopes"
 	orgunitsapi "github.com/mgoodric/security-atlas/internal/api/orgunits"
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
+	policyacksapi "github.com/mgoodric/security-atlas/internal/api/policyacks"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
@@ -259,6 +260,22 @@ func (s *Server) httpHandler() http.Handler {
 	root.Post("/v1/policies/{id}/publish", policiesH.Publish)
 	root.Get("/v1/policies/{id}/pdf", policiesH.PDF)
 	root.Get("/v1/policies/{id}", policiesH.GetPolicy)
+	// Slice 023: policy acknowledgment workflow. Three routes appended
+	// per the parallel-batch convention (chi rejects two Mounts at "/").
+	// The literal-segment route /v1/policies/{id}/acknowledgment-rate is
+	// declared before /v1/policies/{id} above would have shadowed it --
+	// but slice 022 only added literal sub-resources (/submit, /approve,
+	// /publish, /pdf) and the bare /{id}, so there is no shadowing risk
+	// because chi resolves declaration order within the same method.
+	// POST /v1/policies/{id}/acknowledge mounts only when the ingest
+	// service is wired (the ack writes an evidence record); without it
+	// the handler 503s. GET routes always mount because they only read.
+	policyAcksH := policyacksapi.New(policy.NewAckStore(s.dbPool), s.ingestService)
+	root.Get("/v1/me/acknowledgments", policyAcksH.MyAcknowledgments)
+	root.Get("/v1/policies/{id}/acknowledgment-rate", policyAcksH.AcknowledgmentRate)
+	if s.ingestService != nil {
+		root.Post("/v1/policies/{id}/acknowledge", policyAcksH.Acknowledge)
+	}
 	// Slice 034: admin credentials HTTP API + auth routes. Routes append
 	// per the parallel-batch convention. Admin-credential routes require
 	// the bearer auth middleware (admin gate inside the handler). The
