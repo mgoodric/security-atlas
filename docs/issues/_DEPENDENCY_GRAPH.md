@@ -1,6 +1,6 @@
 # v1 Issue Dependency Graph
 
-Visualizes the 49 slices and their dependencies. Companion to [`_INDEX.md`](./_INDEX.md).
+Visualizes the 57 slices and their dependencies. Companion to [`_INDEX.md`](./_INDEX.md).
 
 > **Reading:** arrows point **from** a prerequisite **to** a dependent. Layer = topological depth from the root.
 > **Last updated:** post-review (commit applying `_REVIEW.md` D1–D6 findings). New edges: 005→034, 010→014, 012→015, 030→022, 037 deps expanded, 040→015/021/023. Removed: 028→016.
@@ -41,10 +41,14 @@ graph TD
         I018[018 FrameworkScope]
     end
 
-    subgraph risk [Risk register]
+    subgraph risk [Risk register + Decision Log]
         I019[019 risk CRUD]
         I020[020 risk-control linkage]
         I021[021 exceptions]
+        I052[052 hierarchy + themes + DL schema]
+        I053[053 theme tagging + manual aggregation]
+        I054[054 aggregation rules engine]
+        I055[055 Decision Log CRUD]
     end
 
     subgraph policies [Policies]
@@ -74,6 +78,7 @@ graph TD
         I033[033 RLS enforcement]
         I034[034 OIDC + local users]
         I035[035 RBAC + ABAC OPA]
+        I051[051 admincreds hotfix · merged]
     end
 
     subgraph infra [Infra / deploy]
@@ -81,6 +86,9 @@ graph TD
         I037[037 docker-compose]
         I038[038 Helm chart]
         I039[039 CLI release pipeline]
+        I050[050 public release readiness]
+        I057[057 README screenshots]
+        I058[058 user docs scaffold]
     end
 
     subgraph fe [Frontend views]
@@ -88,6 +96,7 @@ graph TD
         I041[041 control detail]
         I042[042 audit workspace]
         I043[043 board pack preview]
+        I056[056 hierarchical risk dashboard]
     end
 
     subgraph connectors [Remaining connectors]
@@ -242,6 +251,33 @@ graph TD
 
     I032 --> I043
 
+    %% Slice 050 release readiness depends on CLI release pipeline
+    I039 --> I050
+
+    %% Slice 051 admincreds hotfix (already merged) addressed P0 from slice 033
+    I033 --> I051
+
+    %% Risk hierarchy + Decision Log chain (slices 051-055)
+    I002 --> I052
+    I052 --> I053
+    I019 --> I053
+    I053 --> I054
+    I052 --> I055
+    I020 --> I055
+    I021 --> I055
+    I005 --> I056
+    I053 --> I056
+    I054 --> I056
+    I055 --> I056
+
+    %% README screenshots + docs site (slices 056-057)
+    I040 --> I057
+    I041 --> I057
+    I042 --> I057
+    I043 --> I057
+    I005 --> I058
+    I050 --> I058
+
     %% Removed per D6 review decision: I016 --> I028 (freezing uses raw observed_at; doesn't need freshness read-model)
 
     %% Styling
@@ -249,7 +285,7 @@ graph TD
     class I001,I002,I003,I004,I005 spineClass
 
     classDef hitlClass fill:#fef3c7,stroke:#92400e,stroke-width:2px
-    class I007,I010,I022,I030,I035 hitlClass
+    class I007,I010,I022,I030,I035,I050,I054,I058 hitlClass
 ```
 
 ## Critical path highlighted

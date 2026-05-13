@@ -3,7 +3,25 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-13 (batch 10 claim-stake — slice 008 → in-progress · AFK-clean)
+**Last reconciled:** 2026-05-12 (7 new slices added — multi-level risk + Decision Log + screenshots + docs site)
+
+## Drift detected — 2026-05-12 (new slices 052–058 added to backlog)
+
+Canvas §6.4–6.7 extended with risk hierarchy + theme taxonomy + aggregation rules + Decision Log. 7 new slices added to the backlog (no transitions on existing rows; only additions):
+
+| Row | Transition       | Why                                                                                   |
+| --- | ---------------- | ------------------------------------------------------------------------------------- |
+| 052 | (new) → `ready`  | Schema + migrations for risk hierarchy + themes + DL · dep 002 merged                |
+| 053 | (new) → `not-ready` | Theme tagging + manual aggregation API · waits on 052                              |
+| 054 | (new) → `not-ready` | Aggregation rules engine · waits on 053                                            |
+| 055 | (new) → `not-ready` | Decision Log CRUD + linkage · waits on 052 + 020 + 021                             |
+| 056 | (new) → `not-ready` | Hierarchical risk dashboard view · waits on 005 + 053 + 054 + 055                  |
+| 057 | (new) → `not-ready` | README screenshots · waits on 040 + 041 + 042 + 043                                |
+| 058 | (new) → `not-ready` | User docs scaffold · waits on 005 + 050                                            |
+
+Note: my originally-numbered slices 051–057 collided with the already-merged `051-admincreds-tenant-derivation` hotfix; renumbered to 052–058 to preserve the merged slice's number.
+
+**Counts delta:** total +7 · ready +1 · not-ready +6.
 
 ## Drift detected — 2026-05-13 (batch 10 claim-stake — slice 008 UCF graph traversal)
 
@@ -365,10 +383,10 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 | `merged`      | 29     |
 | `in-review`   | 0      |
 | `in-progress` | 1      |
-| `ready`       | 4      |
+| `ready`       | 5      |
 | `blocked`     | 0      |
-| `not-ready`   | 17     |
-| **Total**     | **51** |
+| `not-ready`   | 23     |
+| **Total**     | **58** |
 
 ## Status enum
 
@@ -437,6 +455,13 @@ Legal values (use exactly these strings):
 | 049 | Manual upload / CSV / S3 / SFTP escape-hatch           | `merged`      | connectors/049-manual-upload-csv-connector           | gh#24 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                                                     |
 | 050 | Public release readiness + release automation          | `ready`       | —                                                    | —     | —          | —          | HITL · dep 039 merged · open-q gates                                     |
 | 051 | admincreds tenant derivation fix (P0 from slice 033)   | `merged`      | fix/051-admincreds-tenant-derivation                 | gh#28 | 2026-05-12 | 2026-05-12 | cross-tenant escalation closed · zero migrations · breaking API change   |
+| 052 | Schema + migrations for risk hierarchy + themes + DL   | `ready`       | —                                                    | —     | —          | —          | dep 002 merged · base for 053–055                                        |
+| 053 | Risk theme tagging + manual aggregation API            | `not-ready`   | —                                                    | —     | —          | —          | waits on 052                                                             |
+| 054 | Declarative aggregation rules engine                   | `not-ready`   | —                                                    | —     | —          | —          | waits on 053 · HITL on rule activation                                   |
+| 055 | Decision Log CRUD + linkage                            | `not-ready`   | —                                                    | —     | —          | —          | waits on 052, 020, 021                                                   |
+| 056 | Hierarchical risk dashboard view                       | `not-ready`   | —                                                    | —     | —          | —          | waits on 005, 053, 054, 055                                              |
+| 057 | README screenshots + animated GIFs of core flows       | `not-ready`   | —                                                    | —     | —          | —          | waits on frontend views (040–043)                                        |
+| 058 | User docs scaffold + 5 core pages                      | `not-ready`   | —                                                    | —     | —          | —          | waits on 005, 050 · HITL on docs authorship                              |
 
 ## Ready set right now
 

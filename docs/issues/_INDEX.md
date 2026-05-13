@@ -1,9 +1,9 @@
 # v1 Issue Index — Tracer-Bullet Vertical Slices
 
-**Total:** 50 slices · **~97–98 day-equivalents** · **Critical path:** 11 slices (~28 days)
+**Total:** 58 slices · **~110.5–111.5 day-equivalents** · **Critical path:** 11 slices (~28 days)
 **Spine:** 001–005 honor CLAUDE.md "When code begins" ordering.
 **Status:** Ready for execution — `_REVIEW.md` decisions applied (commit history).
-**Last updated:** 2026-05-11 — slice 050 (public release readiness) added after parallel batch 2 launch.
+**Last updated:** 2026-05-12 — slices 052–058 added (multi-level risk + Decision Log + screenshots + docs site). Canvas §6.4–6.7 extended. Slice 051 (admincreds hotfix from slice 033) registered retroactively.
 
 > Tracer-bullet slicing: each slice cuts vertically through every layer (schema, API, UI, tests) — _not_ horizontally through one layer. A completed slice is demoable on its own.
 
@@ -67,6 +67,14 @@
 | [032](./032-quarterly-board-pack.md)               | Quarterly board pack + investment-vs-coverage                                                            | Board             | AFK  | 2.5      | 031, 030                                         | Ready                                                                   |
 | [043](./043-board-pack-preview-view.md)            | Board pack preview/export view                                                                           | Frontend          | AFK  | 2        | 005, 032                                         | Ready                                                                   |
 | [050](./050-public-release-readiness.md)           | Public release readiness + release automation (release-please + Watchtower + GH security + sanitization) | Infra             | HITL | 3        | 039                                              | Ready                                                                   |
+| [051](./051-admincreds-tenant-derivation.md)       | admincreds tenant derivation fix (P0 from slice 033)                                                     | Auth (hotfix)     | AFK  | 0.5      | 033                                              | Done · gh#28 merged                                                     |
+| [052](./052-risk-hierarchy-schema.md)              | Schema + migrations for risk hierarchy + themes + Decision Log                                           | Risk register     | AFK  | 2        | 002                                              | Ready                                                                   |
+| [053](./053-risk-theme-tagging.md)                 | Risk theme tagging + manual aggregation API                                                              | Risk register     | AFK  | 2.5      | 052, 019                                         | Ready                                                                   |
+| [054](./054-aggregation-rules-engine.md)           | Declarative aggregation rules engine                                                                     | Risk register     | HITL | 3        | 053                                              | Ready                                                                   |
+| [055](./055-decision-log.md)                       | Decision Log CRUD + linkage                                                                              | Risk register     | AFK  | 2        | 052, 020, 021                                    | Ready                                                                   |
+| [056](./056-hierarchical-risk-dashboard.md)        | Hierarchical risk dashboard view                                                                         | Frontend          | AFK  | 3        | 005, 053, 054, 055                               | Ready                                                                   |
+| [057](./057-readme-screenshots.md)                 | README screenshots + animated GIFs of core flows                                                         | Infra             | AFK  | 0.5      | 040, 041, 042, 043                               | Ready                                                                   |
+| [058](./058-user-docs-scaffold.md)                 | User docs scaffold (mkdocs Material) + 5 core pages                                                      | Infra             | HITL | 3        | 005, 050                                         | Ready                                                                   |
 
 ## Effort by cluster
 
@@ -77,16 +85,17 @@
 | Control-as-code        | 4      | 11–13      | +2–4 (slice 010 bump)                |
 | Evidence pipeline      | 4      | 8          | —                                    |
 | Scope + FrameworkScope | 2      | 3.5        | —                                    |
-| Risk register          | 3      | 5.5        | —                                    |
+| Risk register          | 7      | 15         | +9.5 (slices 052–055 hierarchy + Decision Log) |
 | Policies               | 2      | 3          | —                                    |
 | Vendor lite            | 1      | 1.5        | —                                    |
 | Audit workflow         | 6      | 12.5–13.5  | +1–2 (slice 030 bump)                |
 | Board reporting        | 2      | 4          | —                                    |
 | Multi-tenancy / auth   | 3      | 6.5        | +1 (slice 034 absorbs api_keys CRUD) |
-| Infra / deploy         | 5      | 8.5        | +3 (slice 050 release prep)          |
-| Frontend views         | 4      | 10         | —                                    |
+| Infra / deploy         | 7      | 12         | +6.5 (slices 050 + 057 + 058)        |
+| Frontend views         | 5      | 13         | +3 (slice 056 hierarchical risk view) |
 | Remaining connectors   | 6      | 5.5        | —                                    |
-| **Total**              | **50** | **~97–98** | **+7–10d vs initial**                |
+| Auth (hotfix)          | 1      | 0.5        | +0.5 (slice 051 admincreds — merged) |
+| **Total**              | **58** | **~110.5–111.5** | **+20–23d vs initial**           |
 
 ## Critical path (longest dependency chain)
 
@@ -137,8 +146,8 @@ See `Plans/canvas/11-open-questions.md` for the full list. Items most likely to 
 
 ## Mode markers
 
-- 6 slices are **HITL** (require human review): 007 (mapping spot-check), 010 (control accuracy), 022 (stock policy text), 035 (role+policy review), 030 (auditor partner SSP validation), 050 (license + persona rewrite + public-fitness sweep)
-- 44 slices are **AFK**
+- 8 slices are **HITL** (require human review): 007 (mapping spot-check), 010 (control accuracy), 022 (stock policy text), 035 (role+policy review), 030 (auditor partner SSP validation), 050 (license + persona rewrite + public-fitness sweep), 054 (aggregation rule activation; new rules ship `staged` and require human flip to `active`), 058 (docs page authorship review)
+- 50 slices are **AFK** (includes slice 051 admincreds hotfix, already merged)
 
 ## What's not in v1 (explicitly deferred to phase 2/3)
 
