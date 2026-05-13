@@ -17,6 +17,7 @@ package me
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -97,7 +98,12 @@ func (h *NotificationsHandler) List(w http.ResponseWriter, r *http.Request) {
 		if n > 200 {
 			n = 200
 		}
-		limit = int32(n)
+		// CodeQL: explicit upper-bound check before narrowing int -> int32.
+		// 200 ceiling above already guarantees fit, but be explicit.
+		if n > math.MaxInt32 {
+			n = math.MaxInt32
+		}
+		limit = int32(n) //nolint:gosec // upper-bounded by 200 ceiling above
 	}
 	offset := int32(0)
 	if v := r.URL.Query().Get("offset"); v != "" {
@@ -106,7 +112,13 @@ func (h *NotificationsHandler) List(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "offset must be a non-negative integer")
 			return
 		}
-		offset = int32(n)
+		// CodeQL: explicit upper-bound check before narrowing int -> int32.
+		// Cap offset at MaxInt32; past that the user has bigger problems.
+		if n > math.MaxInt32 {
+			writeError(w, http.StatusBadRequest, "offset exceeds maximum")
+			return
+		}
+		offset = int32(n) //nolint:gosec // upper-bounded by MaxInt32 check above
 	}
 
 	rows, unread, err := h.store.ListForRecipient(ctx, cred.UserID, limit, offset)
