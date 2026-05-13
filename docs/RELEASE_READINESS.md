@@ -236,3 +236,73 @@ docs/issues/_STATUS.md                           (slice 050 in-review drift entr
 - **Sign commits.** `required_signatures: false`; rationale in §4.
 - **Trust center.** Canvas §1.6 explicitly defers trust centers to v3.
 - **`gh repo edit --visibility public`** — P0 anti-criterion of slice 050. The flip is a maintainer action AFTER this slice merges and AFTER §7 step 1 lands.
+
+---
+
+## 10. Outstanding follow-ups (maintainer external action required)
+
+Tracked here because each requires steps the orchestrator can't do alone — wiring an external service, installing a GitHub App, or making a brand decision. Each item is a discrete, durable maintainer-todo; check off when done and leave the entry in place for audit history.
+
+### 10.1 Codecov integration (AC-6a coverage badge)
+
+**Status:** badge in `README.md` shows "unknown" — Codecov is not yet wired.
+**Why orchestrator can't:** requires the maintainer to sign in to https://codecov.io with the GitHub account, link the `security-atlas` repo, copy the upload token, and add it as a repo secret (`CODECOV_TOKEN`). External service setup.
+**What's needed:**
+
+1. Sign in at https://codecov.io with the GitHub account; add `mgoodric/security-atlas`.
+2. Copy the repo upload token. Add as repo secret: `gh secret set CODECOV_TOKEN`.
+3. Open a follow-up PR that:
+   - Adds `-coverprofile=coverage.out` to the Go test commands in `.github/workflows/ci.yml` (build+test job and integration job)
+   - Adds frontend coverage collection via `npx vitest --coverage` (or `jest --coverage`) in the Frontend job
+   - Skips Python coverage until oscal-bridge ships
+   - Adds `codecov/codecov-action@v4` upload steps to each language's job
+4. Re-add `codecov/project` to `required_status_checks.contexts` in `.github/branch-protection.json` and re-apply via `gh api -X PUT`.
+
+**Spec reference:** slice 050 AC-6a. Tracked here because the badge ships dead until this lands.
+
+### 10.2 DCO bot (AC-11 contributor sign-off enforcement)
+
+**Status:** the `DCO` check is referenced in slice 050 spec but is not running. CONTRIBUTING.md says contributors must sign off (`git commit -s`), but nothing enforces it server-side.
+**Why orchestrator can't:** requires the maintainer to install the DCO GitHub App via the marketplace (or wire an equivalent action). External app installation.
+**What's needed:**
+
+1. Install the DCO App: https://github.com/apps/dco (free for public repos), enable for `mgoodric/security-atlas`.
+2. Confirm the check appears as `DCO` on a test PR with no `Signed-off-by:` trailer (should fail) and a test PR with one (should pass).
+3. Re-add `DCO` to `required_status_checks.contexts` in `.github/branch-protection.json` and re-apply via `gh api -X PUT`.
+
+**Spec reference:** slice 050 AC-11. CONTRIBUTING.md already documents the DCO requirement; the App enforces it.
+
+### 10.3 Re-evaluate `required_approving_review_count` when contributors arrive
+
+**Status:** dropped to 0 (`required_pull_request_reviews: null`) post-batch-13. Solo-maintainer reality.
+**Why orchestrator can't:** trigger is a project-state change (first non-maintainer contributor merges a PR), and the call about when to flip the rule back on is a maintainer judgment.
+**What's needed:** when 2+ non-maintainer contributors have merged PRs, re-enable required reviews:
+
+```sh
+gh api -X PATCH repos/mgoodric/security-atlas/branches/main/protection/required_pull_request_reviews \
+  -f required_approving_review_count=1 \
+  -F dismiss_stale_reviews=true \
+  -F require_last_push_approval=true
+```
+
+Update `.github/branch-protection.json` to match and remove the deviation note from `$deviations_from_slice_050_AC11`. Spec reference: slice 050 AC-11.
+
+### 10.4 Re-add Python to CodeQL matrix when oscal-bridge lands
+
+**Status:** Python language removed from `.github/workflows/codeql.yml` matrix in the same PR as this section's introduction. CodeQL was failing because the repo has zero Python source.
+**Why orchestrator can't:** trigger is the merge of a future slice that lands `oscal-bridge/` (planned per `CLAUDE.md` tech stack table — Python service wrapping `compliance-trestle`).
+**What's needed:** in the PR that lands `oscal-bridge/*.py`, add back to the matrix:
+
+```yaml
+- language: python
+  build-mode: none
+```
+
+Re-add `Analyze (python)` to `required_status_checks.contexts` in `.github/branch-protection.json` and re-apply. Spec reference: slice 050 AC-10 (CodeQL languages).
+
+### 10.5 Move from `mgoodric/security-atlas` to a GitHub org
+
+**Status:** non-goal of slice 050 §9. Tracked here so it doesn't fall out of memory.
+**Why orchestrator can't:** owner-namespace move is a project-direction call.
+**Trigger to revisit:** first commercial or community signal that the personal-account owner-string `mgoodric/security-atlas` is friction (e.g., an enterprise asks where the contributor-org is, or the project gains 3+ regular committers and an org-level access model becomes useful).
+**What's needed:** create a GitHub organization, `gh repo transfer` the repo, update all the hard-coded `mgoodric/` references that were whitelisted in §3.
