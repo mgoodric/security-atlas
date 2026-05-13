@@ -1077,18 +1077,29 @@ type OrgUnit struct {
 }
 
 type Policy struct {
-	ID                         pgtype.UUID        `json:"id"`
-	TenantID                   pgtype.UUID        `json:"tenant_id"`
-	Title                      string             `json:"title"`
-	Version                    int32              `json:"version"`
-	EffectiveDate              pgtype.Date        `json:"effective_date"`
-	BodyMd                     string             `json:"body_md"`
-	Owner                      string             `json:"owner"`
-	Approver                   string             `json:"approver"`
-	AcknowledgmentRequiredRole []string           `json:"acknowledgment_required_role"`
-	Status                     PolicyStatus       `json:"status"`
-	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
+	ID                          pgtype.UUID        `json:"id"`
+	TenantID                    pgtype.UUID        `json:"tenant_id"`
+	Title                       string             `json:"title"`
+	Version                     string             `json:"version"`
+	EffectiveDate               pgtype.Date        `json:"effective_date"`
+	BodyMd                      string             `json:"body_md"`
+	AcknowledgmentRequiredRoles []string           `json:"acknowledgment_required_roles"`
+	Status                      string             `json:"status"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                   pgtype.Timestamptz `json:"updated_at"`
+	PredecessorID               pgtype.UUID        `json:"predecessor_id"`
+	OwnerRole                   string             `json:"owner_role"`
+	ApproverRole                string             `json:"approver_role"`
+	LinkedControlIds            []pgtype.UUID      `json:"linked_control_ids"`
+	SourceAttribution           string             `json:"source_attribution"`
+	CreatedBy                   string             `json:"created_by"`
+	SubmittedAt                 pgtype.Timestamptz `json:"submitted_at"`
+	SubmittedBy                 *string            `json:"submitted_by"`
+	ApprovedAt                  pgtype.Timestamptz `json:"approved_at"`
+	ApprovedBy                  *string            `json:"approved_by"`
+	PublishedAt                 pgtype.Timestamptz `json:"published_at"`
+	PublishedBy                 *string            `json:"published_by"`
+	SupersededAt                pgtype.Timestamptz `json:"superseded_at"`
 }
 
 type Population struct {

@@ -66,3 +66,56 @@ Bundling posture for third-party catalogs (CLAUDE.md "Licensing constraints"):
 - **CCM / CAIQ / SIG** — never bundled; opt-in import only. The platform ships the machinery, the operator provides the file.
 - **HECVAT** — free; bundleable when a slice has a reason to.
 - **OpenGRC code** — never copied; CC BY-NC-SA is incompatible with our license. Concepts and patterns may inform our own implementation.
+
+## Policy (slice 022)
+
+A governance document — title, version, body_md, owner_role, approver_role, linked_control_ids — that references the controls it governs (canvas §2.6). The inverse of "controls implement policies"; a policy without a linked control is a Word doc, and a control without a linked policy is engineer cargo culting.
+
+States (canvas §2.6):
+
+- `draft` — initial state. Set by `POST /v1/policies`. May be orphan (no linked controls); a warning surfaces on read but no transition is blocked.
+- `under_review` — submitted for governance approval. Set by `PATCH /v1/policies/{id}/submit`.
+- `approved` — governance approval recorded. `approved_by` + `approved_at` populated. Set by `PATCH /v1/policies/{id}/approve`. **Approval is not the same as publication** — the effective_date is set on publish, not approve.
+- `published` — the policy is in force. Each call to `POST /v1/policies/{id}/publish` creates a **new versioned row** with `predecessor_id` pointing at the prior version; the prior version simultaneously transitions to `superseded` (single transaction). The first publish has `predecessor_id = NULL`.
+- `superseded` — replaced by a newer version. Terminal for that row. The version chain (read via `GET /v1/policies/{id}?versions=true`) walks `predecessor_id` to surface the full history.
+
+Allowed transitions:
+
+```
+draft        → under_review   (operator action)
+under_review → approved       (approver-role required; cred.IsApprover || cred.IsAdmin)
+approved     → published      (approver-role required; orphan-publish blocked; creates new row + supersedes prior)
+published    → superseded     (system; happens atomically when a newer version publishes)
+```
+
+No other transitions. `superseded` is terminal for that row; revisions continue on the newer row.
+
+**Versioning** — every publish creates a NEW row referencing its predecessor via the self-FK `(tenant_id, predecessor_id) → (tenant_id, id)`. The chain stays within tenant (composite FK enforces it). The `version` column is operator-supplied semver text (e.g. `1.0.0` → `1.1.0`); the application does not auto-bump.
+
+**Orphan policy** — a policy whose `linked_control_ids` is empty is an "orphan". The API:
+
+- Surfaces a `warning: orphan_policy` flag on every read response (AC-7).
+- **Blocks publication** of an orphan policy — `POST /v1/policies/{id}/publish` returns 409 if `len(linked_control_ids) == 0`. Anti-criterion P0 ("Does NOT permit publish without linked controls").
+- Allows `draft` and `under_review` to remain orphan (the warning is the signal; the user resolves it before requesting approval).
+
+**`linked_control_ids[]`** is a `UUID[]` column. Postgres does not natively enforce per-element array foreign keys, so the application validates the IDs against `controls` at write time (cross-tenant IDs return 400). The column shape matches canvas §2.6 verbatim.
+
+**`source_attribution`** — `community_draft` (agent-authored, ships with the platform; see the 5 stock policies under `policies/stock/`), `tenant_authored` (user-written), or `vendor_provided` (future — third-party policy library imports). Mirrors slice 007's `crosswalk.source_attribution` pattern.
+
+**`effective_date`** — `DATE NULL`. Set on publish (operator-supplied; defaults to the publish-day UTC date when omitted). Null in `draft`, `under_review`, `approved`.
+
+**Approver role gate** — `under_review → approved` and `approved → published` BOTH require `cred.IsApprover || cred.IsAdmin` (slice 034 credential flag). Publish is gated because it creates an audit-binding artifact; defense-in-depth.
+
+**PDF render** — `GET /v1/policies/{id}/pdf` returns a real PDF (not a stub) rendered via chromedp from the markdown body. Magic-byte test (`%PDF-` at offset 0) is the assertion shape.
+
+**Stock policy bundle** — exactly 5 policies under `policies/stock/`:
+
+| File                             | Title                       | Linked SCF anchors           |
+| -------------------------------- | --------------------------- | ---------------------------- |
+| `information-security-policy.md` | Information Security Policy | `GOV-01`, `GOV-04`, `RSK-01` |
+| `access-control-policy.md`       | Access Control Policy       | `IAC-01`, `IAC-07`, `IAC-22` |
+| `vendor-management-policy.md`    | Vendor Management Policy    | `TPM-01`, `TPM-03`, `TPM-04` |
+| `incident-response-plan.md`      | Incident Response Plan      | `IRO-04`, `IRO-01`, `IRO-02` |
+| `change-management-policy.md`    | Change Management Policy    | `CHG-02`, `CFG-02`, `CHG-04` |
+
+Exactly 5 — never 6, never 4 (constitutional anti-pattern: "policy template libraries dressed as a feature"). The CLI `atlas-cli policy seed-stock --tenant-id=...` loads these markdown files, resolves the SCF anchor codes to UUIDs via `scf_anchors`, and INSERTs them as `draft` rows with `source_attribution = 'community_draft'`. Missing anchors warn + drop the link (the warning surfaces under AC-7 if all links resolve empty).
