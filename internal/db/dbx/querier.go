@@ -41,6 +41,17 @@ type Querier interface {
 	// Transition: under_review -> approved. Requires IsApprover at handler
 	// (AC-4). The DB only guards the prior-state.
 	ApprovePolicy(ctx context.Context, arg ApprovePolicyParams) (Policy, error)
+	// Slice 025 — auditor assignments + audit notes.
+	//
+	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
+	// defense-in-depth layer. The author-only-read guarantee is enforced at the
+	// query layer (`AND author_user_id = $...`) so an auditor cannot read
+	// another auditor's notes within the same tenant.
+	// ===== auditor_assignments =====
+	// Insert an (tenant, user, period) assignment. ON CONFLICT DO NOTHING makes
+	// repeated calls idempotent -- granting the same auditor to the same period
+	// twice is a no-op rather than an error.
+	AssignAuditor(ctx context.Context, arg AssignAuditorParams) error
 	// AC-4: stamp populations.audit_period_id with the period id. The
 	// populations.frozen_at column gets stamped in a sibling statement
 	// (SetPopulationFrozenAt) when the period is frozen at the time of
@@ -97,6 +108,8 @@ type Querier interface {
 	// evaluates the INSERT WITH CHECK against current_tenant. content_hash
 	// may be NULL today but every code path in slice 036 supplies it.
 	CreateArtifact(ctx context.Context, arg CreateArtifactParams) (Artifact, error)
+	// ===== audit_notes =====
+	CreateAuditNote(ctx context.Context, arg CreateAuditNoteParams) (AuditNote, error)
 	// Slice 028 — AuditPeriod + freezing primitive.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -250,7 +263,15 @@ type Querier interface {
 	// means the row is invisible to other tenants — handler interprets
 	// pgx.ErrNoRows as 404 (no existence leak).
 	GetArtifact(ctx context.Context, arg GetArtifactParams) (Artifact, error)
+	// Author-scoped get. A cross-author lookup (auditor B trying to read
+	// auditor A's note) returns zero rows -> ErrNotFound at the application
+	// layer. This is the second-auditor-cannot-read guarantee (P0-2 / AC-4).
+	GetAuditNoteByID(ctx context.Context, arg GetAuditNoteByIDParams) (AuditNote, error)
 	GetAuditPeriodByID(ctx context.Context, arg GetAuditPeriodByIDParams) (AuditPeriod, error)
+	// AttrsResolver hot path -- runs once per auditor request from the OPA
+	// middleware. Returns just the period UUIDs so the resolver can stuff
+	// them into input.user.attrs.audit_period_ids without joining anything.
+	GetAuditPeriodIDsForUser(ctx context.Context, arg GetAuditPeriodIDsForUserParams) ([]pgtype.UUID, error)
 	// Returns the JSON-encoded applicability_expr for a single control. The column
 	// is TEXT (slice 002); slice 017 stores JSON in that text.
 	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)
@@ -478,10 +499,18 @@ type Querier interface {
 	// Per-artifact recent history. Used by the admin view (slice 040) and
 	// the audit-export bundler (slice 029). Cap at 100 rows.
 	ListArtifactAccessLog(ctx context.Context, arg ListArtifactAccessLogParams) ([]ArtifactAccessLog, error)
+	// Author-scoped list. Same author-only guarantee as GetAuditNoteByID --
+	// the WHERE clause pins author_user_id so cross-author reads return
+	// empty.
+	ListAuditNotesForAuthorAndPeriod(ctx context.Context, arg ListAuditNotesForAuthorAndPeriodParams) ([]AuditNote, error)
 	// Used by the audit-trail re-audit flow and by the integration test
 	// (verifies that period_created + period_frozen rows landed).
 	ListAuditPeriodLog(ctx context.Context, arg ListAuditPeriodLogParams) ([]AuditPeriodAuditLog, error)
 	ListAuditPeriodsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]AuditPeriod, error)
+	// Returns every assignment the user holds in the current tenant, joined with
+	// the period metadata so the /v1/me/audit-period(s) endpoint can render the
+	// full picture in one round trip.
+	ListAuditorAssignmentsForUser(ctx context.Context, arg ListAuditorAssignmentsForUserParams) ([]ListAuditorAssignmentsForUserRow, error)
 	// Hash-input ingredient #2 (ADR 0003): the sorted UUIDs of controls in the
 	// tenant's catalog. v1 takes the full tenant catalog; a future slice may
 	// narrow to controls satisfied by the period's framework_version_id once

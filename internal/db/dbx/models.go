@@ -804,6 +804,19 @@ type ArtifactAccessLog struct {
 	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
 }
 
+type AuditNote struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID        `json:"audit_period_id"`
+	AuthorUserID  string             `json:"author_user_id"`
+	ScopeType     string             `json:"scope_type"`
+	ScopeID       *string            `json:"scope_id"`
+	Body          string             `json:"body"`
+	Visibility    string             `json:"visibility"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type AuditPeriod struct {
 	ID                 pgtype.UUID        `json:"id"`
 	TenantID           pgtype.UUID        `json:"tenant_id"`
@@ -828,6 +841,14 @@ type AuditPeriodAuditLog struct {
 	Actor         string             `json:"actor"`
 	Detail        []byte             `json:"detail"`
 	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+}
+
+type AuditorAssignment struct {
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	UserID        string             `json:"user_id"`
+	AuditPeriodID pgtype.UUID        `json:"audit_period_id"`
+	GrantedAt     pgtype.Timestamptz `json:"granted_at"`
+	GrantedBy     string             `json:"granted_by"`
 }
 
 type Control struct {

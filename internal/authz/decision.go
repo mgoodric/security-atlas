@@ -28,11 +28,20 @@ type Decision struct {
 type Engine struct {
 	query    rego.PreparedEvalQuery
 	resolver RolesResolver
+	// attrsResolver hydrates per-user ABAC attributes (slice 025). nil
+	// is treated as NoopAttrsResolver; production callers wire a
+	// DB-backed implementation via WithAttrsResolver after NewEngine.
+	attrsResolver AttrsResolver
 }
 
 // NewEngine constructs an Engine from the embedded policies/authz/*.rego
 // bundle. resolver is the optional DB-backed role lookup; pass
 // NoopRolesResolver{} when DB lookup is not required.
+//
+// The attribute resolver (slice 025) is set separately via
+// WithAttrsResolver so this signature stays stable for existing
+// callers. NewEngine leaves attrsResolver at its zero value, which
+// Engine.Decide treats as NoopAttrsResolver.
 func NewEngine(ctx context.Context, resolver RolesResolver) (*Engine, error) {
 	if resolver == nil {
 		resolver = NoopRolesResolver{}
@@ -55,6 +64,14 @@ func NewEngine(ctx context.Context, resolver RolesResolver) (*Engine, error) {
 	return &Engine{query: q, resolver: resolver}, nil
 }
 
+// WithAttrsResolver wires the slice-025 attribute resolver. Returns the
+// receiver so callers can chain. Safe to call before Decide is ever
+// invoked; not safe to call concurrently with Decide.
+func (e *Engine) WithAttrsResolver(r AttrsResolver) *Engine {
+	e.attrsResolver = r
+	return e
+}
+
 // Decide evaluates the input against the loaded policies. Default-deny
 // applies: if no rule fires `allow := true`, the Decision has
 // Allow=false with a default-deny reason.
@@ -73,6 +90,29 @@ func (e *Engine) Decide(ctx context.Context, in Input) (Decision, error) {
 		}
 		if len(dbRoles) > 0 {
 			in.User.Roles = mergeRoles(in.User.Roles, dbRoles)
+		}
+	}
+
+	// Slice 025: hydrate auditor ABAC attributes (audit_period_ids)
+	// when the request is from an auditor AND the attrs map doesn't
+	// already carry them (tests can pre-populate to skip this hop).
+	if e.attrsResolver != nil &&
+		in.TenantID != "" && in.User.ID != "" &&
+		hasAuditorRole(in.User.Roles) &&
+		!hasAuditPeriodIDsAttr(in.User.Attrs) {
+		extra, err := e.attrsResolver.AttrsFor(ctx, in.TenantID, in.User.ID, in.User.Roles)
+		if err != nil {
+			return Decision{}, fmt.Errorf("authz: resolve attrs: %w", err)
+		}
+		if len(extra) > 0 {
+			if in.User.Attrs == nil {
+				in.User.Attrs = map[string]interface{}{}
+			}
+			for k, v := range extra {
+				if _, exists := in.User.Attrs[k]; !exists {
+					in.User.Attrs[k] = v
+				}
+			}
 		}
 	}
 
@@ -103,6 +143,18 @@ func (e *Engine) Decide(ctx context.Context, in Input) (Decision, error) {
 		Allow:  true,
 		Reason: "allowed",
 	}, nil
+}
+
+// hasAuditPeriodIDsAttr reports whether attrs already carries the
+// `audit_period_ids` key. Used by Decide to skip the AttrsResolver hop
+// when the caller (typically a unit test) has pre-populated the
+// attribute map.
+func hasAuditPeriodIDsAttr(attrs map[string]interface{}) bool {
+	if attrs == nil {
+		return false
+	}
+	_, ok := attrs["audit_period_ids"]
+	return ok
 }
 
 // mergeRoles unions two role slices, dropping non-canonical roles.

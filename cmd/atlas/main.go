@@ -20,6 +20,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
+	"github.com/mgoodric/security-atlas/internal/audit/auditor"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
 	"github.com/mgoodric/security-atlas/internal/authz"
@@ -181,9 +182,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "atlas: authz engine: %v\n", err)
 			os.Exit(1)
 		}
+		// Slice 025: hydrate auditor ABAC attrs (audit_period_ids)
+		// from auditor_assignments on every auditor-role request.
+		azEngine = azEngine.WithAttrsResolver(auditor.NewDBAttrsResolver(pool))
 		azAudit := authz.NewAuditWriter(pool)
 		srv.AttachAuthz(azEngine, azAudit)
-		fmt.Fprintf(os.Stderr, "atlas: authz OPA engine wired (5 roles + decision audit)\n")
+		fmt.Fprintf(os.Stderr, "atlas: authz OPA engine wired (5 roles + decision audit + auditor attrs)\n")
 
 		// Import bundled platform schemas at boot. Idempotent — no-op when
 		// every kind is already present in the DB. Requires the connection
