@@ -59,7 +59,7 @@ INSERT INTO populations (
     row_count, created_by
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, tenant_id, control_id, scope_predicate, time_window_start, time_window_end, frozen_at, row_count, created_by, created_at
+RETURNING id, tenant_id, control_id, scope_predicate, time_window_start, time_window_end, frozen_at, row_count, created_by, created_at, audit_period_id
 `
 
 type CreatePopulationParams struct {
@@ -108,6 +108,7 @@ func (q *Queries) CreatePopulation(ctx context.Context, arg CreatePopulationPara
 		&i.RowCount,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.AuditPeriodID,
 	)
 	return i, err
 }
@@ -152,7 +153,7 @@ func (q *Queries) CreateSample(ctx context.Context, arg CreateSampleParams) (Sam
 }
 
 const getPopulationByID = `-- name: GetPopulationByID :one
-SELECT id, tenant_id, control_id, scope_predicate, time_window_start, time_window_end, frozen_at, row_count, created_by, created_at FROM populations
+SELECT id, tenant_id, control_id, scope_predicate, time_window_start, time_window_end, frozen_at, row_count, created_by, created_at, audit_period_id FROM populations
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -175,6 +176,7 @@ func (q *Queries) GetPopulationByID(ctx context.Context, arg GetPopulationByIDPa
 		&i.RowCount,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.AuditPeriodID,
 	)
 	return i, err
 }
@@ -286,7 +288,7 @@ func (q *Queries) ListPopulationEvidenceIDs(ctx context.Context, arg ListPopulat
 }
 
 const listPopulationsByTenant = `-- name: ListPopulationsByTenant :many
-SELECT id, tenant_id, control_id, scope_predicate, time_window_start, time_window_end, frozen_at, row_count, created_by, created_at FROM populations
+SELECT id, tenant_id, control_id, scope_predicate, time_window_start, time_window_end, frozen_at, row_count, created_by, created_at, audit_period_id FROM populations
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC
 `
@@ -311,6 +313,7 @@ func (q *Queries) ListPopulationsByTenant(ctx context.Context, tenantID pgtype.U
 			&i.RowCount,
 			&i.CreatedBy,
 			&i.CreatedAt,
+			&i.AuditPeriodID,
 		); err != nil {
 			return nil, err
 		}

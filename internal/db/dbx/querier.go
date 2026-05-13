@@ -41,6 +41,12 @@ type Querier interface {
 	// Transition: under_review -> approved. Requires IsApprover at handler
 	// (AC-4). The DB only guards the prior-state.
 	ApprovePolicy(ctx context.Context, arg ApprovePolicyParams) (Policy, error)
+	// AC-4: stamp populations.audit_period_id with the period id. The
+	// populations.frozen_at column gets stamped in a sibling statement
+	// (SetPopulationFrozenAt) when the period is frozen at the time of
+	// attachment; if the period is still open, frozen_at remains NULL and the
+	// slice-026 query path keeps the population live until the period freezes.
+	AttachPopulationToPeriod(ctx context.Context, arg AttachPopulationToPeriodParams) error
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
 	CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
@@ -91,6 +97,15 @@ type Querier interface {
 	// evaluates the INSERT WITH CHECK against current_tenant. content_hash
 	// may be NULL today but every code path in slice 036 supplies it.
 	CreateArtifact(ctx context.Context, arg CreateArtifactParams) (Artifact, error)
+	// Slice 028 — AuditPeriod + freezing primitive.
+	//
+	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
+	// defense-in-depth layer. The freeze path is guarded by `status='open'` so
+	// a re-freeze UPDATE matches zero rows (anti-criterion P0: no retroactive
+	// mutation of frozen periods).
+	// Insert a period with status='open'. frozen_at / frozen_hash / frozen_by
+	// are NULL on create (enforced by audit_periods_frozen_coherent CHECK).
+	CreateAuditPeriod(ctx context.Context, arg CreateAuditPeriodParams) (AuditPeriod, error)
 	// Insert a new Decision Log entry (canvas §6.7). Slice 052 ships the table
 	// + queries; slice 055 adds the HTTP CRUD surface. decision_id is the
 	// tenant-visible identifier ("DL-2026-04-12"); the application generates it.
@@ -209,6 +224,12 @@ type Querier interface {
 	// (tenant_id, content_hash) WHERE content_hash IS NOT NULL keeps the
 	// result single-row.
 	FindArtifactByHash(ctx context.Context, arg FindArtifactByHashParams) (Artifact, error)
+	// AC-2 + AC-6: flip status open->frozen, stamp the freeze metadata. The
+	// `WHERE status='open'` guard means re-freezing a frozen row matches zero
+	// rows (RETURNING returns nothing) and the application surfaces 409
+	// Conflict. The CHECK constraint audit_periods_frozen_coherent enforces
+	// that the freeze tuple (frozen_at, frozen_hash, frozen_by) is set together.
+	FreezeAuditPeriod(ctx context.Context, arg FreezeAuditPeriodParams) (AuditPeriod, error)
 	// Constant-time lookup by HMAC hash. Returns the row whether revoked, retired,
 	// or expired — the caller (credstore.Authenticate) is responsible for the
 	// state-check tree.
@@ -229,6 +250,7 @@ type Querier interface {
 	// means the row is invisible to other tenants — handler interprets
 	// pgx.ErrNoRows as 404 (no existence leak).
 	GetArtifact(ctx context.Context, arg GetArtifactParams) (Artifact, error)
+	GetAuditPeriodByID(ctx context.Context, arg GetAuditPeriodByIDParams) (AuditPeriod, error)
 	// Returns the JSON-encoded applicability_expr for a single control. The column
 	// is TEXT (slice 002); slice 017 stores JSON in that text.
 	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)
@@ -456,6 +478,15 @@ type Querier interface {
 	// Per-artifact recent history. Used by the admin view (slice 040) and
 	// the audit-export bundler (slice 029). Cap at 100 rows.
 	ListArtifactAccessLog(ctx context.Context, arg ListArtifactAccessLogParams) ([]ArtifactAccessLog, error)
+	// Used by the audit-trail re-audit flow and by the integration test
+	// (verifies that period_created + period_frozen rows landed).
+	ListAuditPeriodLog(ctx context.Context, arg ListAuditPeriodLogParams) ([]AuditPeriodAuditLog, error)
+	ListAuditPeriodsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]AuditPeriod, error)
+	// Hash-input ingredient #2 (ADR 0003): the sorted UUIDs of controls in the
+	// tenant's catalog. v1 takes the full tenant catalog; a future slice may
+	// narrow to controls satisfied by the period's framework_version_id once
+	// canvas §8 audit-scope-narrowing lands.
+	ListControlIDsForPeriodHash(ctx context.Context, tenantID pgtype.UUID) ([]pgtype.UUID, error)
 	// Newest first. Includes superseded rows so callers see the supersession chain.
 	ListControlVersionsByBundle(ctx context.Context, arg ListControlVersionsByBundleParams) ([]ListControlVersionsByBundleRow, error)
 	// AC-1 (controls arm). Given a list of SCF anchor ids, return every
@@ -482,6 +513,19 @@ type Querier interface {
 	// `tenant_or_catalog_read` policy.
 	ListDefaultThemes(ctx context.Context) ([]OrgTheme, error)
 	ListEvidenceAuditEntriesByCredential(ctx context.Context, arg ListEvidenceAuditEntriesByCredentialParams) ([]EvidenceAuditLog, error)
+	// AC-3: control-state read for a period. Returns evidence records for one
+	// control bounded by the period's frozen_at horizon (or live when the
+	// period is still 'open', in which case the caller passes NULL and the
+	// COALESCE-to-infinity short-circuits to live state). Ordered by
+	// observed_at DESC so the caller can pick the most-recent record as the
+	// pass/fail-driving observation.
+	ListEvidenceForPeriodControl(ctx context.Context, arg ListEvidenceForPeriodControlParams) ([]ListEvidenceForPeriodControlRow, error)
+	// Hash-input ingredient #1 (ADR 0003): the sorted UUIDs of evidence records
+	// visible at the period's horizon. The frozen-at filter is parameterized so
+	// a verifier can replay the hash for any horizon.
+	// Returns evidence_records.id only; the order is ASC by id so the SHA-256
+	// input is canonical without an extra sort pass in Go.
+	ListEvidenceIDsForPeriodHash(ctx context.Context, arg ListEvidenceIDsForPeriodHashParams) ([]pgtype.UUID, error)
 	// Returns every registered semver for a kind, visible to the tenant.
 	// Slice 014 uses this for AC-5 semver enforcement (a POST must check the
 	// prior versions of the same kind before accepting a new one).
@@ -669,6 +713,12 @@ type Querier interface {
 	SetAcknowledgmentEvidenceRecord(ctx context.Context, arg SetAcknowledgmentEvidenceRecordParams) error
 	// Point a framework at its current version.
 	SetLatestVersion(ctx context.Context, arg SetLatestVersionParams) error
+	// Stamp populations.frozen_at from the parent period's frozen_at. Called
+	// both at attach-time (if the period is already frozen) and at freeze-time
+	// (for all populations already attached to this period). The slice-026
+	// query path then enforces `observed_at <= populations.frozen_at` on
+	// subsequent draws.
+	SetPopulationFrozenAt(ctx context.Context, arg SetPopulationFrozenAtParams) error
 	// AC-6: draft -> review. Guarded so callers can never re-submit an already
 	// under-review row by accident (would still be valid but masks bugs).
 	SubmitFrameworkScope(ctx context.Context, arg SubmitFrameworkScopeParams) (FrameworkScope, error)
@@ -760,6 +810,11 @@ type Querier interface {
 	// is the conflict target. On conflict we update display_name + email (the IdP
 	// is canonical) and updated_at.
 	UpsertUserByIdpSubject(ctx context.Context, arg UpsertUserByIdpSubjectParams) (User, error)
+	// Append-only lifecycle log. action is constrained at the DB layer
+	// (period_created | period_frozen | freeze_rejected_already_frozen |
+	// population_attached). detail is a free-form JSONB for action-specific
+	// payload (e.g., the rejected freeze attempt records the offending actor).
+	WriteAuditPeriodLog(ctx context.Context, arg WriteAuditPeriodLogParams) (AuditPeriodAuditLog, error)
 	// Append-only. Every lifecycle transition writes one row (including
 	// system-driven auto-expiry). The exception_audit_log table has
 	// SELECT+INSERT policies only under FORCE RLS so no UPDATE/DELETE path

@@ -804,6 +804,32 @@ type ArtifactAccessLog struct {
 	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
 }
 
+type AuditPeriod struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	Name               string             `json:"name"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	PeriodStart        pgtype.Date        `json:"period_start"`
+	PeriodEnd          pgtype.Date        `json:"period_end"`
+	Status             string             `json:"status"`
+	FrozenAt           pgtype.Timestamptz `json:"frozen_at"`
+	FrozenHash         []byte             `json:"frozen_hash"`
+	FrozenBy           *string            `json:"frozen_by"`
+	CreatedBy          string             `json:"created_by"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AuditPeriodAuditLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID        `json:"audit_period_id"`
+	Action        string             `json:"action"`
+	Actor         string             `json:"actor"`
+	Detail        []byte             `json:"detail"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+}
+
 type Control struct {
 	ID                   pgtype.UUID               `json:"id"`
 	TenantID             pgtype.UUID               `json:"tenant_id"`
@@ -1147,6 +1173,7 @@ type Population struct {
 	RowCount        int64              `json:"row_count"`
 	CreatedBy       string             `json:"created_by"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	AuditPeriodID   pgtype.UUID        `json:"audit_period_id"`
 }
 
 type Risk struct {

@@ -13,6 +13,54 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 028 — AuditPeriod + freezing primitive.** Ships the
+  `audit_periods` table (four-policy RLS under FORCE; status `open` →
+  `frozen` two-state lifecycle; composite uniqueness on
+  `(tenant_id, name)` NULLS DISTINCT; FK to `framework_versions`) plus
+  the append-only `audit_period_audit_log` (SELECT + INSERT policies
+  only under FORCE — slice 011 / 013 / 026 / 035 / 036 / 059 template)
+  and a single-column `populations.audit_period_id` extension (composite
+  FK to `audit_periods(tenant_id, id)`) that lights up the
+  forward-compat freeze horizon hook slice 026 already wired
+  (`populations.frozen_at` with `observed_at <= COALESCE(frozen_at,
+'infinity')`). Six HTTP routes: `POST /v1/audit-periods` (AC-1),
+  `GET /v1/audit-periods` (list), `GET /v1/audit-periods/{id}`,
+  `POST /v1/audit-periods/{id}/freeze` (AC-2 + AC-6 → 409 on
+  re-freeze), `GET /v1/audit-periods/{id}/control-state?control=...`
+  (AC-3 horizon-bounded evidence read), and
+  `POST /v1/audit-periods/{id}/populations/{popID}` (AC-4 attach +
+  stamp `populations.frozen_at` from the period's frozen_at when the
+  period is already frozen, otherwise stamped at freeze time so the
+  slice-026 query path enforces the horizon). Freeze writes a
+  deterministic SHA-256 content commitment over canonical JSON
+  `{audit_period_id, period_start, period_end, framework_version_id,
+evidence_record_ids_sorted, control_ids_sorted}` — `frozen_at` is
+  intentionally NOT in the hash inputs so AC-7 ("freezing the same
+  content twice produces the same hash") holds under the natural
+  reading; see [ADR 0003](docs/adr/0003-audit-period-freeze-hash-inputs.md)
+  for the full justification + alternatives considered. Constitutional
+  anti-criteria honored at the schema + Go layers: no
+  `evidence_records` snapshot table (the ledger horizon shift is
+  sufficient, canvas §8.4 + invariant #2); no retroactive mutation of
+  frozen rows (the `FreezeAuditPeriod` SQL is guarded by
+  `WHERE status='open'` so a re-freeze UPDATE matches zero rows and
+  `Store.Freeze` surfaces `ErrAlreadyFrozen` → HTTP 409; the
+  `audit_periods_frozen_coherent` CHECK constraint is the
+  defense-in-depth at the DB layer); no random salt in the hash
+  inputs (re-hash idempotence is verified by an integration test that
+  rolls a row back to `open` via admin SQL and re-freezes against the
+  same content). Anti-criterion P0 verifier
+  (`TestAntiCriterion_NoEvidenceSnapshotTable`) scans
+  `information_schema.tables` for any `evidence%snapshot%` table so a
+  future slice that violates the invariant fails CI. Live evaluation
+  (slice 012 future) is unaffected by design: the period-bounded read
+  path is `GET /v1/audit-periods/{id}/control-state` and the live read
+  path is the future `GET /v1/controls/{id}/state` — the two share no
+  SQL and the live path never joins `audit_periods`. Resolves slice
+  doc D6's earlier dependency listing on slice 016 (the freshness
+  read-model is not required; freezing uses raw `observed_at` from
+  the ledger). Migration `20260511000020_audit_periods.sql` +
+  `.down.sql` is reversible end-to-end (down → re-apply tested).
 - **Slice 061 — CI path-based filtering for docs-only PRs.** Adds a
   `changes` job to `.github/workflows/ci.yml` using
   `dorny/paths-filter@v3` that classifies each PR as `code: true` /
