@@ -13,6 +13,13 @@ auto-generated notes.
 
 ### Added
 
+- **CI — `setup-go` bumped 1.25 → 1.26 across all workflows.** `go.mod`
+  and `go.work` already declare `go 1.26`, but `actions/setup-go@v5`
+  was pinned to `"1.25"` in `ci.yml` (×4 jobs), `codeql.yml`, and
+  `release.yml`. The drift was silent until coverage instrumentation
+  (this same PR) triggered stdlib re-compile, which surfaced
+  `compile: version "go1.26.0" does not match go tool version
+"go1.25.9"`. Bumping the pin to `"1.26"` resolves it everywhere.
 - **CI — Go test coverage + Codecov upload.** Adds
   `-covermode=atomic -coverprofile=coverage.txt` to both the unit
   (`Go · build + test`) and integration (`Go · integration
