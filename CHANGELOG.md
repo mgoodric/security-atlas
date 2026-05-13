@@ -11,6 +11,19 @@ auto-generated notes.
 
 ## [Unreleased]
 
+### Changed
+
+- **Prompts — anti-stall HARD RULE hoisted to first line of per-slice
+  template.** `Plans/prompts/04-per-slice-template.md` now opens with
+  the `HARD RULE — DO NOT STALL` callout, makes "do NOT return to
+  caller after the grill" an explicit step-2 directive, and adds the
+  status-flip as step 9. The Quality gate failure modes table gains a
+  row for the grill-stall failure mode (observed in slices 061 and
+  028; one explicit resume directive recovers it each time). The
+  parallel-batch prompt (`Plans/prompts/05-parallel-batch.md`)
+  cross-references the new wording so orchestrator briefs and
+  per-slice prompts stay coherent.
+
 ### Added
 
 - **Slice 028 — AuditPeriod + freezing primitive.** Ships the
