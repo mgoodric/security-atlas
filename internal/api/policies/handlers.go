@@ -65,14 +65,14 @@ func (h *Handler) WithRenderer(fn func(ctx context.Context, doc policypdf.Doc) (
 // ----- wire shapes -----
 
 type createReq struct {
-	Title                       string      `json:"title"`
-	Version                     string      `json:"version"`
-	BodyMd                      string      `json:"body_md"`
-	OwnerRole                   string      `json:"owner_role"`
-	ApproverRole                string      `json:"approver_role"`
-	LinkedControlIDs            []string    `json:"linked_control_ids"`
-	AcknowledgmentRequiredRoles []string    `json:"acknowledgment_required_roles"`
-	SourceAttribution           string      `json:"source_attribution,omitempty"`
+	Title                       string   `json:"title"`
+	Version                     string   `json:"version"`
+	BodyMd                      string   `json:"body_md"`
+	OwnerRole                   string   `json:"owner_role"`
+	ApproverRole                string   `json:"approver_role"`
+	LinkedControlIDs            []string `json:"linked_control_ids"`
+	AcknowledgmentRequiredRoles []string `json:"acknowledgment_required_roles"`
+	SourceAttribution           string   `json:"source_attribution,omitempty"`
 }
 
 type publishReq struct {

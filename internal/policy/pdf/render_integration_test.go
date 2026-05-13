@@ -44,7 +44,7 @@ The scope is the test environment only.
 ## Policy
 
 The body is intentionally short so the render completes quickly.
-` ,
+`,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), policypdf.DefaultTimeout)
 	defer cancel()

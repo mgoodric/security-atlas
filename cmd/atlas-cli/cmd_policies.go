@@ -36,9 +36,9 @@ func newPolicyCmd() *cobra.Command {
 
 func newPolicySeedStockCmd() *cobra.Command {
 	var (
-		dsn       string
-		tenantID  string
-		stockDir  string
+		dsn      string
+		tenantID string
+		stockDir string
 	)
 	cmd := &cobra.Command{
 		Use:   "seed-stock",

@@ -58,9 +58,9 @@ type StockPolicy struct {
 
 // Report summarizes a seed run.
 type Report struct {
-	Loaded             []LoadedPolicy
-	MissingAnchors     []string // SCF codes that did not resolve
-	OrphanWarnings     []string // titles whose linked_control_ids ended up empty
+	Loaded         []LoadedPolicy
+	MissingAnchors []string // SCF codes that did not resolve
+	OrphanWarnings []string // titles whose linked_control_ids ended up empty
 }
 
 // LoadedPolicy is one inserted policy plus its resolved link state.

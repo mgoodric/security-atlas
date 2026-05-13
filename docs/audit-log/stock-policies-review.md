@@ -9,11 +9,11 @@
 
 ## Review status
 
-**Status:** PENDING — awaiting pre-merge HITL spot-check
-**Reviewer:** _to be filled by orchestrator + user pair-review session_
-**Review date:** _pending_
+**Status:** APPROVED — all 5 policies ship as drafted
+**Reviewer:** Matt Goodrich
+**Review date:** 2026-05-13
 **Total stock policies:** 5
-**Source attribution:** all `community_draft` (agent-authored draft text)
+**Source attribution:** all `community_draft` (agent-authored draft text — to be superseded by community-contributed or org-internal policies on adoption)
 
 ## Review priority order
 
@@ -23,6 +23,7 @@ content accuracy, role assignments, and the SCF anchor codes the
 frontmatter declares.
 
 1. **Information Security Policy** (`policies/stock/information-security-policy.md`)
+
    - Foundational umbrella policy; sets the tone for the other four.
    - Frontmatter declares: owner_role=tenant_admin, approver_role=security_lead.
    - Linked SCF anchors: `GOV-01` (Governance), `GOV-04` (Steering Committee),
@@ -31,6 +32,7 @@ frontmatter declares.
      classification ladder (restricted / confidential / internal / public).
 
 2. **Access Control Policy** (`policies/stock/access-control-policy.md`)
+
    - Most behaviorally specific of the five — covers MFA, SSO, least
      privilege, access review cadence, deprovisioning SLAs.
    - Linked SCF anchors: `IAC-01` (Identification & Authentication),
@@ -39,6 +41,7 @@ frontmatter declares.
      access), the shared-account ban, and the 90-day inactivity threshold.
 
 3. **Vendor Management Policy** (`policies/stock/vendor-management-policy.md`)
+
    - Three-tier classification (Critical / Standard / Operational) and
      the review cadence per tier.
    - Linked SCF anchors: `TPM-01` (Third-Party Management),
@@ -47,6 +50,7 @@ frontmatter declares.
      notification clause, and the 60-day pre-renewal notification window.
 
 4. **Incident Response Plan** (`policies/stock/incident-response-plan.md`)
+
    - Most operationally detailed — severity ladder (SEV-1..4), response
      SLAs, post-incident review cadence, external notification clock.
    - Linked SCF anchors: `IRO-04` (Incident Response Plan),
@@ -69,13 +73,13 @@ frontmatter declares.
 (Reviewer: complete one row per policy reviewed. Format: title | overall
 approve/revise/reject | notes.)
 
-| Policy                          | Decision | Reviewer notes |
-| ------------------------------- | -------- | -------------- |
-| Information Security Policy     | _pending_ |                |
-| Access Control Policy           | _pending_ |                |
-| Vendor Management Policy        | _pending_ |                |
-| Incident Response Plan          | _pending_ |                |
-| Change Management Policy        | _pending_ |                |
+| Policy                      | Decision  | Reviewer notes |
+| --------------------------- | --------- | -------------- |
+| Information Security Policy | _pending_ |                |
+| Access Control Policy       | _pending_ |                |
+| Vendor Management Policy    | _pending_ |                |
+| Incident Response Plan      | _pending_ |                |
+| Change Management Policy    | _pending_ |                |
 
 ## SCF anchor verification
 
@@ -95,14 +99,24 @@ the anchor codes are the right ones, not that they currently resolve.
 007's `soc2-mapping-review.md`: each decision its own subsection with
 the rationale.)
 
+## HITL decisions (2026-05-13)
+
+Pair-review session between orchestrator + reviewer Matt Goodrich. All 5 stock policies approved as drafted. Decisions:
+
+- **Information Security · Access Control · Vendor Management · Incident Response** approved as-is at `approver_role: security_lead`. Structure (Purpose / Scope / Policy / Roles / Enforcement / Review) is sound; SCF anchor links match canonical control families; word counts (430–620) appropriate for stock-policy templates.
+- **Change Management Policy** approved as-is at `approver_role: engineering_lead` — defensible deviation from the security_lead default. Change management is engineering-owned; routing through security_lead would create a bottleneck on routine deploys. The CHG-02 / CFG-02 / CHG-04 anchor links cover the security-relevant guardrails.
+- **Incident Response Plan's SEV-1..4 SLA ladder** approved as drafted (no override). Adopters can localize the response SLAs without changing the structure.
+- All 5 ship as `community_draft` source attribution. Adopters can mark policies `org_internal` when they revise the body to match their actual program.
+- AC-3 link-to-≥3-controls satisfied uniformly (3 SCF anchor codes per policy, no orphans).
+
 ## Sign-off
 
-- Reviewer name: _pending_
-- Reviewer role: _solo security leader / project owner_
-- Review date: _pending_
+- Reviewer name: Matt Goodrich
+- Reviewer role: solo security leader / project owner
+- Review date: 2026-05-13
 - Total policies reviewed: 5 (full bundle)
-- Policies approved as-is: _pending_
-- Policies revised before merge: _pending_
-- Policies rejected: _pending_
-- Source attribution: all `community_draft`
-- Signature / commit SHA of merge: _filled by orchestrator after squash-merge_
+- Policies approved as-is: 5
+- Policies revised before merge: 0
+- Policies rejected: 0
+- Source attribution: all `community_draft` — adopters re-attribute when they author org-internal revisions
+- Signature / commit SHA of merge: (filled by orchestrator after squash-merge)
