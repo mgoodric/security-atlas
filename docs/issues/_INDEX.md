@@ -78,24 +78,24 @@
 
 ## Effort by cluster
 
-| Cluster                | Slices | Days       | Change                               |
-| ---------------------- | ------ | ---------- | ------------------------------------ |
-| Spine                  | 5      | 12         | —                                    |
-| Catalog & UCF graph    | 3      | 5.5        | —                                    |
-| Control-as-code        | 4      | 11–13      | +2–4 (slice 010 bump)                |
-| Evidence pipeline      | 4      | 8          | —                                    |
-| Scope + FrameworkScope | 2      | 3.5        | —                                    |
-| Risk register          | 7      | 15         | +9.5 (slices 052–055 hierarchy + Decision Log) |
-| Policies               | 2      | 3          | —                                    |
-| Vendor lite            | 1      | 1.5        | —                                    |
-| Audit workflow         | 6      | 12.5–13.5  | +1–2 (slice 030 bump)                |
-| Board reporting        | 2      | 4          | —                                    |
-| Multi-tenancy / auth   | 3      | 6.5        | +1 (slice 034 absorbs api_keys CRUD) |
-| Infra / deploy         | 7      | 12         | +6.5 (slices 050 + 057 + 058)        |
-| Frontend views         | 5      | 13         | +3 (slice 056 hierarchical risk view) |
-| Remaining connectors   | 6      | 5.5        | —                                    |
-| Auth (hotfix)          | 1      | 0.5        | +0.5 (slice 051 admincreds — merged) |
-| **Total**              | **58** | **~110.5–111.5** | **+20–23d vs initial**           |
+| Cluster                | Slices | Days             | Change                                         |
+| ---------------------- | ------ | ---------------- | ---------------------------------------------- |
+| Spine                  | 5      | 12               | —                                              |
+| Catalog & UCF graph    | 3      | 5.5              | —                                              |
+| Control-as-code        | 4      | 11–13            | +2–4 (slice 010 bump)                          |
+| Evidence pipeline      | 4      | 8                | —                                              |
+| Scope + FrameworkScope | 2      | 3.5              | —                                              |
+| Risk register          | 7      | 15               | +9.5 (slices 052–055 hierarchy + Decision Log) |
+| Policies               | 2      | 3                | —                                              |
+| Vendor lite            | 1      | 1.5              | —                                              |
+| Audit workflow         | 6      | 12.5–13.5        | +1–2 (slice 030 bump)                          |
+| Board reporting        | 2      | 4                | —                                              |
+| Multi-tenancy / auth   | 3      | 6.5              | +1 (slice 034 absorbs api_keys CRUD)           |
+| Infra / deploy         | 7      | 12               | +6.5 (slices 050 + 057 + 058)                  |
+| Frontend views         | 5      | 13               | +3 (slice 056 hierarchical risk view)          |
+| Remaining connectors   | 6      | 5.5              | —                                              |
+| Auth (hotfix)          | 1      | 0.5              | +0.5 (slice 051 admincreds — merged)           |
+| **Total**              | **58** | **~110.5–111.5** | **+20–23d vs initial**                         |
 
 ## Critical path (longest dependency chain)
 

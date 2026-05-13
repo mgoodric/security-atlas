@@ -24,9 +24,9 @@ The severity rollup is the meaningful piece. Default function is `max` (conserva
 - [ ] AC-4: `POST /v1/org_units` / `GET` / `PATCH` / `DELETE` — full CRUD; `parent_id` validated against same tenant; cycle detection rejects circular parent chains.
 - [ ] AC-5: `POST /v1/risks/aggregate` accepts `{parent: {title, level, org_unit_id, severity_function}, child_risk_ids: [uuid]}` — creates parent risk, populates `risk_aggregations` rows linking each child, computes initial severity via the chosen function. Returns the parent risk with its `linked_children` field populated.
 - [ ] AC-6: Severity functions implemented and unit-tested:
-    - `max` — straightforward
-    - `weighted_max` — `max × (1 + log10(child_count))`, capped at scale max
-    - `sum` — sum of child severities, capped at scale max
+  - `max` — straightforward
+  - `weighted_max` — `max × (1 + log10(child_count))`, capped at scale max
+  - `sum` — sum of child severities, capped at scale max
 - [ ] AC-7: Re-aggregating with the same `(parent_title, child_set)` does not duplicate; idempotency key derived from sorted child UUIDs.
 - [ ] AC-8: Closing a child risk does NOT auto-close the parent. The parent's severity recomputes (drops a contributor) but stays open until explicitly closed.
 - [ ] AC-9: Integration test: tag 3 risks across 2 org_units with `ownership` theme, manually aggregate into a `org`-level parent risk, verify parent severity matches the chosen function, close one child and verify parent severity drops but parent stays `open`.

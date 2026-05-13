@@ -19,6 +19,8 @@ sql:
       - "migrations/sql/20260511000011_exceptions.sql"
       - "migrations/sql/20260511000012_users_sessions_api_keys.sql"
       - "migrations/sql/20260511000013_framework_requirements_and_edges.sql"
+      - "migrations/sql/20260511000014_risk_hierarchy_decisions.sql"
+      - "migrations/sql/20260511000015_seed_default_themes.sql"
     queries: "internal/db/queries"
     gen:
       go:
