@@ -3,7 +3,17 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-13 (batch 11 claim-stake — slice 052 → in-progress · AFK)
+**Last reconciled:** 2026-05-13 (slice 052 → in-review · PR gh#31 opened)
+
+## Drift detected — 2026-05-13 (slice 052 → in-review)
+
+Slice 052 (risk hierarchy + themes + Decision Log schema) flipped `in-progress` → `in-review`. PR gh#31 opened against main. **Pure-schema slice — 10/10 ACs PASS.** The slice lands eight new tenant-scoped tables (`org_units`, `org_themes`, `risk_aggregations`, `decisions`, four `decision_*` link tables), ALTER on `risks` (`level` enum + `org_unit_id` composite FK + `themes` text[] with GIN index), and migration slot `20260511000014` (main) + `20260511000015` (companion default-theme seed — 10 themes per canvas §6.5, idempotent via `ON CONFLICT (theme_name) WHERE tenant_id IS NULL DO NOTHING`). **RLS coverage universal:** runtime pg_catalog audit confirms 8/8 new tables `force_rls=t, rls_enabled=t, n_policies=4` (slice-014/017/019 four-policy split). **AC-7 role-based write gating** stubbed via `COALESCE(current_setting('app.current_role', true), '*') <> ''` sentinel on `decisions` policies — the `'*'` transitional bypass becomes load-bearing once slice 035 (RBAC) wires real role identifiers. **Four decision-link tables stay separate** (P0 anti-criterion enforced — no polymorphic `(target_kind, target_id)` table). **No auto-close** behavior on `risk_aggregations` (canvas §6.4 + §6.6 explicit — parent risks represent patterns that may persist beyond children). **Themes flat** — no `parent_theme_id` (canvas §6.5 explicit). **Defense-in-depth:** new composite UNIQUE on `framework_scopes (tenant_id, id)` enables cross-tenant-safe composite FK from `decision_scope_predicates` (matches slice 019/006 pattern on `risks`/`vendors`). **sqlc** queries shipped for 053/054/055 starter surface (5 query files: `org_units`, `org_themes`, `risk_aggregations`, `decisions`, `decision_links`); regenerated cleanly with no hand-edits. **Tests pass:** 8 new integration tests (5 cross-tenant RLS negative + positive INSERT smoke + risks-columns round-trip + default-theme seed + partial-unique collision); `ok internal/db 1.517s`. **Migration round-trip verified** clean (up → down → up restores byte-identical state); seed re-apply returns `INSERT 0 0`. **Constitutional invariants honored:** #4 (multidimensional scope — risk hierarchy is its own dimension), #6 (RLS at DB layer — 8 new tables FORCE + four-policy), #9 (manual evidence first-class — manual aggregation has same shape as future automatic, distinguished only by `rule_id IS NULL`). **Drive-by:** prettier auto-fixed pre-existing table-padding whitespace drift in `Plans/canvas/06-risk.md` and `docs/issues/{053,058,_INDEX}.md` introduced by commit 5d08816 (backlog add that did not run through pre-commit). Whitespace-only; rolled into slice 052 PR to unblock CI's `pre-commit run --all-files` step. **Pre-existing failures untouched** (same as slice 008 surprises): `TestSchema_TenantScopedTablesAcceptInserts` slice-013 baseline FK drift on `evidence_records`; `internal/scope` + `internal/risk` slice-009 `bundle_id` NOT NULL fixture drift. Both out of scope. **Time spent:** ~45 min end-to-end (PRD + grill + tests + migration + RLS audit + ship-gate + CHANGELOG + commit + PR). **Surprises:** (1) the in-worktree pre-existing prettier drift was a CI blocker — included whitespace-only fixes in the PR rather than leaving CI red. (2) Local Postgres wasn't running; spun up `sa-052-pg` on port 55452 to exercise the round-trip and integration tests before commit. (3) sqlc regenerated `risks.sql.go` because the underlying `risks` table got new columns; the generated diff is mechanical (struct fields added) and the existing CreateRisk signature is unchanged (still doesn't list the new columns — they default). **Migration slot:** single forward slot `_014` for main schema + companion `_015` for seed. **Slice-002 test helpers NOT patched** — verified existing `mustInsertControl`/`mustInsertRisk` paths only set columns with safe defaults, so adding `level`/`org_unit_id`/`themes` with NOT NULL DEFAULTs requires no helper change. The new `mustInsertOrgUnit`/`mustInsertRisk`/`mustInsertDecision` helpers in `risk_hierarchy_integration_test.go` are slice-052-local.
+
+| Row | Transition                  | Evidence                |
+| --- | --------------------------- | ----------------------- |
+| 052 | `in-progress` → `in-review` | gh#31 opened 2026-05-13 |
+
+**Counts delta:** in-progress −1 · in-review +1.
 
 ## Drift detected — 2026-05-13 (batch 11 claim-stake — slice 052 risk hierarchy schema)
 
@@ -489,7 +499,7 @@ Legal values (use exactly these strings):
 | 049 | Manual upload / CSV / S3 / SFTP escape-hatch           | `merged`      | connectors/049-manual-upload-csv-connector           | gh#24 | 2026-05-11 | 2026-05-11 | deps 003, 013 merged                                                           |
 | 050 | Public release readiness + release automation          | `ready`       | —                                                    | —     | —          | —          | HITL · dep 039 merged · open-q gates                                           |
 | 051 | admincreds tenant derivation fix (P0 from slice 033)   | `merged`      | fix/051-admincreds-tenant-derivation                 | gh#28 | 2026-05-12 | 2026-05-12 | cross-tenant escalation closed · zero migrations · breaking API change         |
-| 052 | Schema + migrations for risk hierarchy + themes + DL   | `in-progress` | risk/052-risk-hierarchy-schema                       | —     | 2026-05-13 | —          | AFK-clean · 2d · migration slot \_014 · base for 053–055                       |
+| 052 | Schema + migrations for risk hierarchy + themes + DL   | `in-review`   | risk/052-risk-hierarchy-schema                       | gh#31 | 2026-05-13 | 2026-05-13 | AFK-clean · 10/10 ACs PASS · 8 new tables + ALTER risks · 4-policy RLS · migration slot \_014+\_015 (seed) · base for 053–055 |
 | 053 | Risk theme tagging + manual aggregation API            | `not-ready`   | —                                                    | —     | —          | —          | waits on 052                                                                   |
 | 054 | Declarative aggregation rules engine                   | `not-ready`   | —                                                    | —     | —          | —          | waits on 053 · HITL on rule activation                                         |
 | 055 | Decision Log CRUD + linkage                            | `not-ready`   | —                                                    | —     | —          | —          | waits on 052, 020, 021                                                         |
@@ -505,9 +515,8 @@ Legal values (use exactly these strings):
 | 022 | Policy library + 5 stock policies             | policies | 2       | HITL · unlocks 023 (with 034 merged) · same pattern as 007                             |
 | 035 | RBAC roles + ABAC via OPA embedded            | auth     | 2       | HITL on role design · unlocks 025, 042 (audit-flow path)                               |
 | 050 | Public release readiness + release automation | infra    | 3       | HITL · gated on open-q #1 (SCF), #3 (license), #15 (CSA); ships .github/+docs/         |
-| 052 | Schema + migrations for risk hierarchy        | risk     | 1.5     | **NEWLY ADDED · AFK-clean** · dep 002 merged · base for 053–055                        |
 
-**Five slices ready** (010, 022, 035, 050, 052). **Slice 052 is the only AFK-clean option** — newly added to the backlog (commit `5d08816`) as the schema layer for multi-level risk + decision log. Pure schema/migration work, no HITL component.
+**Four slices ready** (010, 022, 035, 050). **All four are HITL** — slice 052 (the only recent AFK-clean option) is now `in-review` as gh#31. The ready set returns to its pre-052 HITL-heavy posture; next AFK-clean unlock requires either 052 to merge (unblocks 053) or open-questions #1/#3/#15 to clear for 050.
 
 Next-batch options:
 
@@ -516,9 +525,9 @@ Next-batch options:
 3. **HITL 035 / 022 sessions** — modest content review.
 4. **Resolve open-q #1/#3/#15** for 050.
 
-## In-flight (1 worktree building)
+## In-flight (0 worktrees building)
 
-- **052** — `risk/052-risk-hierarchy-schema` · `in-progress` since 2026-05-13 · AFK-clean (schema + migrations + RLS)
+- _none_ — slice 052 flipped to `in-review` 2026-05-13 (gh#31)
 
 Stale worktrees still on disk: `-007`, `-008`, `-009`, `-011`, `-013`, `-014`, `-015`, `-017`, `-018`, `-019`, `-021`, `-024`, `-026`, `-033`, `-034`, `-036`, `-039`, `-044`, `-045`, `-046`, `-047`, `-048`, `-049`, `-051`. Safe to `git worktree remove` whenever ready.
 
