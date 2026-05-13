@@ -34,6 +34,65 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 062 — Admin BFF backend endpoints (SSO + Users + audit-log).**
+  Ships the three HTTP endpoints that slice 060's admin UI was shipping
+  as binding placeholders: `/v1/admin/sso` (GET sans secret + PATCH
+  upsert + POST preflight against an IdP's `.well-known/openid-configuration`),
+  `/v1/admin/users` (paginated list + per-user GET + role PATCH with
+  self-demotion guard), and `GET /v1/admin/audit-log` (paginated unified
+  read across the seven per-domain audit-log tables).
+
+  New migration `20260511000022_admin_audit_log_view.sql` adds the
+  `admin_audit_log_v` view as a `UNION ALL` across `decision_audit_log`
+  (slice 035), `evidence_audit_log` (slice 013), `exception_audit_log`
+  (slice 021), `feature_flag_audit_log` (slice 059),
+  `artifact_access_log` (slice 036), `sample_audit_log` (slice 026), and
+  `audit_period_audit_log` (slice 028). Each branch projects to a
+  uniform shape `(tenant_id, ts, source_table, event_type, actor,
+resource_type, resource_id, summary jsonb)`. The view is NOT a
+  SECURITY DEFINER object and does NOT bypass RLS — each source table's
+  tenant_read policy fires under the caller's `app.current_tenant` GUC.
+  A non-tenant SELECT on the view returns zero rows (silent RLS filter,
+  not a permission error).
+
+  HTTP handlers live under `internal/api/adminsso/`, `internal/api/adminusers/`,
+  and `internal/api/adminauditlog/`. Each enforces `cred.IsAdmin`
+  defense-in-depth alongside the slice 035 OPA middleware.
+
+  Anti-criteria honored (P0):
+
+  - `client_secret` is NEVER returned in any GET response (slice 034
+    AC-9 write-once contract); `oidc_idp_configs.client_secret_enc` is
+    omitted from the `GetAdminSSO` query's response shape entirely.
+  - PATCH treats an empty `client_secret` field as "leave existing" so
+    the UI cannot accidentally clear the secret by re-submitting a form
+    with an empty password input.
+  - `POST /v1/admin/sso/preflight` is SSRF-hardened: scheme must be
+    https, host cannot be a raw IP, A/AAAA resolution must not yield
+    loopback / link-local / RFC1918 / multicast / unspecified addresses,
+    response body capped at 64 KiB, 5-second total timeout. Tests inject
+    `LookupHost` and `AllowPrivateIPs` overrides to exercise the guard
+    against a local fake IdP.
+  - `PATCH /v1/admin/users/{id}/roles` rejects self-demotion from
+    `admin` without `confirm_self_demotion: true` in the request body.
+    The caller's identity comes from `cred.UserID`; the target comes
+    from the path param. When they match and `admin` is being dropped,
+    the request must opt in explicitly.
+  - Audit-log read uses one UNION query, not seven per-source reads;
+    pagination is a composite cursor over `(ts, source_table, resource_id)`
+    so duplicate timestamps across source tables don't cause page
+    boundary instability.
+
+  Integration tests verify the wire-shape contract that slice 060's
+  PR (`gh#66`) committed: secret-less GET shape, tenant isolation on
+  audit-log reads, source-table coverage across all seven branches,
+  ts-DESC ordering, event-type filtering, and self-demotion guard.
+
+  Unblocks slice 060: after this slice merges, slice 060's PR can
+  rebase and flip AC-2 (SSO config form) + AC-3 (Users list + role
+  PATCH) + AC-6 (unified audit log) from PARTIAL to PASS without any
+  frontend changes — the wire shapes already match.
+
 - **Slice 025 — Auditor role + scoped read-only access.** Activates the
   `auditor` RBAC role that slice 035 stubbed. Two new tables under
   migration `20260511000021_audit_notes.sql`:

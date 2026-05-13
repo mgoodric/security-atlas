@@ -217,6 +217,10 @@ type Querier interface {
 	// Tenant-private themes only — the policy forbids deleting defaults
 	// regardless of what this query asks for.
 	DeleteTenantTheme(ctx context.Context, arg DeleteTenantThemeParams) error
+	// Clears every role assignment for a (tenant, user). Paired with one or
+	// more InsertUserRole calls in the same transaction to implement
+	// "replace the role set" semantics for PATCH .../roles.
+	DeleteUserRoles(ctx context.Context, arg DeleteUserRolesParams) error
 	DeleteVendor(ctx context.Context, arg DeleteVendorParams) error
 	// Flip every "current" framework_version for the given framework to "legacy"
 	// so a new release can take over without violating the at-most-one-current
@@ -259,6 +263,26 @@ type Querier interface {
 	// enforces uniqueness). Re-upload supersedes by first UPDATE-ing the prior
 	// row's superseded_by, then INSERTing the new row — both in the same tx.
 	GetActiveControlByBundleID(ctx context.Context, arg GetActiveControlByBundleIDParams) (GetActiveControlByBundleIDRow, error)
+	// Slice 062 — admin /v1/admin/sso queries.
+	//
+	// The admin SSO endpoint upserts a single oidc_idp_configs row per tenant
+	// keyed by name. The v1 contract surfaces exactly one IdP per tenant — the
+	// "primary" config — by convention using name='primary'. Multi-IdP support
+	// is a v2 conversation (the underlying table already supports many rows
+	// per tenant; the v1 HTTP surface is single-config to keep the UI simple).
+	//
+	// client_secret is NEVER returned in GET (slice 034 AC-9 contract); the
+	// GetAdminSSO query intentionally omits client_secret_enc from the
+	// response. PatchAdminSSO accepts the secret encoded as bytea — empty
+	// means "leave existing"; the application interprets nil/empty as
+	// secret-unchanged.
+	// Returns the tenant's primary OIDC IdP config (by name). Omits the
+	// encrypted client secret from the response shape so a leaked log line
+	// never carries the secret material.
+	GetAdminSSO(ctx context.Context, arg GetAdminSSOParams) (GetAdminSSORow, error)
+	// Returns a single user with their roles and most-recent session timestamp.
+	// 404 (pgx.ErrNoRows) when the id is not in the tenant.
+	GetAdminUser(ctx context.Context, arg GetAdminUserParams) (GetAdminUserRow, error)
 	// Look up an artifact by id. RLS USING current_tenant_matches(tenant_id)
 	// means the row is invisible to other tenants — handler interprets
 	// pgx.ErrNoRows as 404 (no existence leak).
@@ -434,6 +458,10 @@ type Querier interface {
 	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
 	InsertSampleEvidence(ctx context.Context, arg InsertSampleEvidenceParams) error
+	// Adds a single (tenant, user, role) assignment. Idempotent under the
+	// composite PK; conflicts are silently no-op so concurrent admins
+	// granting the same role don't fail.
+	InsertUserRole(ctx context.Context, arg InsertUserRoleParams) error
 	// ===== decision_controls =====
 	LinkDecisionControl(ctx context.Context, arg LinkDecisionControlParams) error
 	// ===== decision_exceptions =====
@@ -457,6 +485,51 @@ type Querier interface {
 	ListAPIKeysByTenant(ctx context.Context, tenantID pgtype.UUID) ([]ApiKey, error)
 	// Every active (non-superseded) control for the active tenant.
 	ListActiveControls(ctx context.Context, tenantID pgtype.UUID) ([]ListActiveControlsRow, error)
+	// Slice 062 — admin /v1/admin/audit-log query.
+	//
+	// One query against the admin_audit_log_v view (migration _022). Filters
+	// are optional and apply on the view's uniform columns. Pagination uses
+	// (ts, source_table, resource_id) as a stable composite cursor — the ts
+	// index on each source table covers the ORDER BY without an external
+	// sort merge.
+	//
+	// RLS-aware: the view inherits each source table's tenant_read policy,
+	// so this SELECT under the tenancy-applied transaction returns only the
+	// caller's tenant rows. No tenant_id filter is needed in the WHERE
+	// clause; including one would be defense-in-depth but also redundant.
+	// We include `tenant_id = $1` explicitly so a future RLS misconfiguration
+	// still filters by tenant — the query is correct under both contexts.
+	// Paginated, filtered union read. NULL filters are treated as "match all"
+	// via the standard COALESCE-with-sentinel pattern. The cursor is
+	// (cursor_ts, cursor_source_table, cursor_resource_id); rows are returned
+	// in (ts DESC, source_table ASC, resource_id ASC) order so the cursor's
+	// next-page condition is a tuple comparison.
+	ListAdminAuditLog(ctx context.Context, arg ListAdminAuditLogParams) ([]AdminAuditLogV, error)
+	// Slice 062 — admin /v1/admin/users queries.
+	//
+	// Three queries:
+	//   - ListAdminUsers      : paginated list with roles aggregated via array_agg
+	//   - GetAdminUser        : single-user detail with roles
+	//   - DeleteUserRoles     : clears all role assignments for a user
+	//   - InsertUserRole      : adds a single role assignment
+	//
+	// Role replacement is a (DELETE + INSERTs) pair under the application's
+	// transaction. The role enum lives in user_roles' CHECK constraint
+	// (slice 035 migration); the application validates the requested role
+	// against authz.IsCanonical before calling InsertUserRole so the DB CHECK
+	// is a backstop, not the primary gate.
+	//
+	// Pagination uses cursor (last user id seen) + limit. The cursor is an
+	// opaque base64 of the last row's id; the application encodes / decodes.
+	//
+	// The session table carries last_seen_at; for the v1 admin/users response
+	// we surface the max(sessions.last_seen_at) per user as last_login_at,
+	// joined LEFT so users who have never logged in still appear.
+	// Paginated list of users with their roles. Joins user_roles via a
+	// correlated subquery so the role array is empty (not null) for
+	// role-less users. last_login_at is the max(sessions.last_seen_at) for
+	// non-revoked sessions; NULL when no session row exists.
+	ListAdminUsers(ctx context.Context, arg ListAdminUsersParams) ([]ListAdminUsersRow, error)
 	// Bypass-RLS path used at boot by the platform-schema importer running as
 	// atlas_migrate. Returns every row regardless of tenant. Never reachable
 	// through the app role under RLS.
@@ -807,6 +880,12 @@ type Querier interface {
 	// updates are not supported in lite (no PATCH semantics merge). updated_at
 	// is application-owned (no trigger).
 	UpdateVendor(ctx context.Context, arg UpdateVendorParams) (Vendor, error)
+	// Insert-or-update the tenant's primary IdP config. The application
+	// supplies the encrypted client_secret_enc; an empty bytea is rejected
+	// at the application layer for INSERT but permitted for UPDATE-only
+	// with secret-unchanged semantics. id is supplied by the caller (UUIDv4)
+	// so the insert path is deterministic in tests.
+	UpsertAdminSSO(ctx context.Context, arg UpsertAdminSSOParams) (UpsertAdminSSORow, error)
 	// Idempotent toggle write. INSERT-on-first-toggle or UPDATE on subsequent
 	// toggles. created_at is set on insert only (excluded from the conflict
 	// update clause). The application supplies last_changed_by + last_changed_at

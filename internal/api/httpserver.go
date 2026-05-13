@@ -11,7 +11,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/adminauditlog"
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
+	"github.com/mgoodric/security-atlas/internal/api/adminsso"
+	"github.com/mgoodric/security-atlas/internal/api/adminusers"
 	"github.com/mgoodric/security-atlas/internal/api/anchors"
 	artifactsapi "github.com/mgoodric/security-atlas/internal/api/artifacts"
 	auditapi "github.com/mgoodric/security-atlas/internal/api/audit"
@@ -346,6 +349,24 @@ func (s *Server) httpHandler() http.Handler {
 	featuresH := featuresapi.New(featureflag.NewStore(s.dbPool))
 	root.Get("/v1/admin/features", featuresH.List)
 	root.Patch("/v1/admin/features/{key}", featuresH.Patch)
+	// Slice 062: admin BFF backend endpoints — SSO config, users + roles,
+	// and unified audit-log read across the seven per-domain audit log
+	// tables (via the admin_audit_log_v view from migration _022). Each
+	// handler enforces cred.IsAdmin defense-in-depth alongside the slice
+	// 035 OPA middleware. Routes appended per the parallel-batch
+	// convention (chi rejects two Mounts at "/"). Unblocks slice 060's
+	// SSO / Users / Audit-log UI pages so they can flip from PARTIAL to
+	// PASS.
+	ssoH := adminsso.New(s.dbPool)
+	root.Get("/v1/admin/sso", ssoH.Get)
+	root.Patch("/v1/admin/sso", ssoH.Patch)
+	root.Post("/v1/admin/sso/preflight", ssoH.Preflight)
+	usersH := adminusers.New(s.dbPool)
+	root.Get("/v1/admin/users", usersH.List)
+	root.Get("/v1/admin/users/{id}", usersH.Get)
+	root.Patch("/v1/admin/users/{id}/roles", usersH.PatchRoles)
+	auditLogH := adminauditlog.New(s.dbPool)
+	root.Get("/v1/admin/audit-log", auditLogH.List)
 	return root
 }
 
