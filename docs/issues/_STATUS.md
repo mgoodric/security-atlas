@@ -671,7 +671,7 @@ Legal values (use exactly these strings):
 | 058 | User docs scaffold + 5 core pages                      | `not-ready`   | —                                                    | —     | —          | —          | waits on 005, 050 · HITL on docs authorship                                                   |
 | 059 | Per-tenant feature flags + capability toggles          | `in-progress` | spine/059-feature-flags                              | —     | 2026-05-13 | —          | batch 15 (AFK N=2) · migration slot \_019 · deps merged · unlocks 060                         |
 | 060 | Admin settings UI (SSO · users · API keys · features)  | `not-ready`   | —                                                    | —     | —          | —          | waits on 005, 034, 035, 059 · HITL on role-permission matrix                                  |
-| 061 | CI path-based filtering (docs-only PR fast-path)       | `in-progress` | ci/061-path-filter                                   | —     | 2026-05-13 | —          | batch 15 (AFK N=2) · zero deps · pure CI yaml + docs                                          |
+| 061 | CI path-based filtering (docs-only PR fast-path)       | `in-review`   | ci/061-path-filter                                   | gh#52 | 2026-05-13 | —          | batch 15 (AFK N=2) · zero deps · pure CI yaml + docs · PR open                                |
 
 ## Ready set right now
 
@@ -693,7 +693,7 @@ Next-batch options:
 ## In-flight (2 worktrees building)
 
 - **059** — `spine/059-feature-flags` · `in-progress` since 2026-05-13 · AFK-clean · migration slot `_019`
-- **061** — `ci/061-path-filter` · `in-progress` since 2026-05-13 · AFK-clean · pure CI yaml + docs
+- **061** — `ci/061-path-filter` · `in-review` since 2026-05-13 · AFK-clean · pure CI yaml + docs · PR gh#52
 
 Stale worktrees still on disk: `-007`, `-008`, `-009`, `-011`, `-013`, `-014`, `-015`, `-017`, `-018`, `-019`, `-021`, `-022`, `-023`, `-024`, `-026`, `-033`, `-034`, `-035`, `-036`, `-039`, `-044`, `-045`, `-046`, `-047`, `-048`, `-049`, `-050`, `-051`, `-052`, `-053`. Safe to `git worktree remove` whenever ready.
 
