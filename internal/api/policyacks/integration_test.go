@@ -212,10 +212,11 @@ func parseSemverParts(s string) (major, minor, patch int, err error) {
 func seedControl(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
 	t.Helper()
 	ctrlID := uuid.New()
+	bundleID := "legacy-" + ctrlID.String()
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO controls (id, tenant_id, title, control_family, implementation_type, bundle_id)
-		VALUES ($1, $2, 'Test control', 'IAC', 'automated', 'legacy-' || $1::text)
-	`, ctrlID, tenant); err != nil {
+		VALUES ($1, $2, 'Test control', 'IAC', 'automated', $3)
+	`, ctrlID, tenant, bundleID); err != nil {
 		t.Fatalf("seed control: %v", err)
 	}
 	return ctrlID
