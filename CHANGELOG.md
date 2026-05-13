@@ -17,13 +17,13 @@ auto-generated notes.
   `changes` job to `.github/workflows/ci.yml` using
   `dorny/paths-filter@v3` that classifies each PR as `code: true` /
   `code: false`. The six expensive jobs (`Go · build + test`, `Go ·
-integration (Postgres RLS)`, `Go · lint`, `Frontend · install +
-build`, `Python · ruff`, `Proto · lint + generate diff`) each gain
+  integration (Postgres RLS)`, `Go · lint`, `Frontend · install +
+  build`, `Python · ruff`, `Proto · lint + generate diff`) each gain
   `needs: changes` + `if: needs.changes.outputs.code == 'true'`,
   paired with a same-named stub sibling gated on the inverted `if:`
   so branch-protection required-check names always resolve. Security
   and secret-scan jobs (`Analyze (go)`, `Analyze
-(javascript-typescript)` via CodeQL, `GitGuardian Security Checks`,
+  (javascript-typescript)` via CodeQL, `GitGuardian Security Checks`,
   `pre-commit · all hooks`) are intentionally unconditional — path
   filtering is a cost optimization for build/test/lint, never a
   security exemption. Refuses the obvious `paths-ignore:`-at-workflow
@@ -33,7 +33,57 @@ build`, `Python · ruff`, `Proto · lint + generate diff`) each gain
   pattern, the gotcha, and the stub-job name-matching rule;
   `Plans/canvas/09-tech-stack.md` gains a new §9.6 CI/CD entry.
   Billable-minute savings on docs-only PRs: ~10 → ~2.
-
+- **Slice 059 — Per-tenant feature flags + capability toggles.**
+  Ships the `feature_flags` table (composite PK `(tenant_id,
+  flag_key)`, four-policy RLS under FORCE — same slice-011 / 017 /
+  018 / 021 / 035 / 036 template) plus the append-only
+  `feature_flag_audit_log` (SELECT + INSERT policies only under FORCE
+  — slice 013 / 011 / 026 / 035 / 036 template) so operators can
+  disable entire capability areas per tenant without restarts. Twelve
+  seed flags cover the v1 capability inventory: `risk.enabled`,
+  `risk.themes`, `risk.hierarchy`, `vendor.enabled`,
+  `policy.enabled`, `policy.acknowledgments`, `controls.bundles`,
+  `exceptions.enabled`, `audit.workflow`, `oscal.export`,
+  `board.reporting`, `decisions.log` (canvas §10.1 MVP scope). Most
+  default `true`; integrations (`oscal.export`, `board.reporting`)
+  default `false`. The `featureflag.Enabled(ctx, key)` Go helper
+  memoizes inside a request via `context.Context` (wired by
+  `featureflag.CacheMiddleware`, attached once on the root router
+  alongside `tenancymw.Middleware`) so a single request never hits
+  the DB twice for the same flag — and the cache dies with the
+  request so an admin toggle is visible to the very next request
+  without a restart. `featureflag.Gate(store, key)` is a chi
+  middleware that responds `404 Not Found` with
+  `X-Feature-Disabled: <key>` header + `{"error":"feature
+  disabled"}` body when the flag is off; the 404 (not 403) is
+  deliberate — a disabled capability is indistinguishable from a
+  non-existent route to an unauthorized caller. Admin API: `GET
+  /v1/admin/features` (lists every flag, override merged with seed
+  defaults) + `PATCH /v1/admin/features/{key}` (toggles `enabled`,
+  writes one `feature_flag_audit_log` row in the same tx with
+  `actor` from `cred.UserID || cred.ID`, `reason` from request body,
+  `from_enabled`/`to_enabled` for full diff). Both endpoints require
+  `cred.IsAdmin` defense-in-depth — the flag state itself signals
+  attack surface so reads are gated too. CLI: `atlas-cli features
+  list` + `atlas-cli features set <key> <on|off> [--reason ...]`
+  drives the HTTP endpoints with `$ATLAS_ADMIN_TOKEN`. Anti-criteria
+  P0 honored: (1) spine namespaces are non-toggleable —
+  `SpineForbiddenPrefixes` enumerates `rls`, `tenancy`, `auth`,
+  `schema.registry`, `scope.{dimensions,cells,applicability}`,
+  `evidence.{ledger,ingest}`,
+  `framework.{crosswalk,requirements,scope}`,
+  `controls.{core,spine}`, and a unit test
+  `TestSeedExcludesSpineNamespaces` asserts no seed key matches; the
+  Store's `Set` path also rejects matching keys with
+  `ErrSpineForbidden`; (2) DB-unreach does NOT fail closed —
+  `Store.Get` / `Store.List` log a warning and return the seed
+  default (RLS is the security boundary, not the feature flag);
+  (3) non-admin role gets 403 on BOTH read and write of admin
+  endpoints; (4) NO cross-request process-level cache — memoization
+  is per-`context.Context` only and dies with the request. Migration
+  slot `_019`. Touches no other tests — no slice-002 fixture patches
+  needed because `feature_flags` is a new table with no FK back to
+  controls / evidence / scope / risk.
 - **Slice 035 — RBAC roles (5) + ABAC via OPA embedded + decision
   audit log.** Graduates the v1 placeholder flag-on-credential
   authorization model (slice 014 `IsAdmin`, slice 011 `OwnerRoles`,

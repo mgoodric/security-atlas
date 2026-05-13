@@ -21,6 +21,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
 	exceptionsapi "github.com/mgoodric/security-atlas/internal/api/exceptions"
+	featuresapi "github.com/mgoodric/security-atlas/internal/api/features"
 	fwscopesapi "github.com/mgoodric/security-atlas/internal/api/frameworkscopes"
 	orgunitsapi "github.com/mgoodric/security-atlas/internal/api/orgunits"
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
@@ -38,6 +39,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/exception"
+	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/risk"
@@ -87,6 +89,12 @@ func (s *Server) httpHandler() http.Handler {
 	if s.authzEngine != nil {
 		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health"))
 	}
+	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
+	// tenancy / authz so the cache lives inside the same request-context
+	// every downstream handler sees. Anti-criterion P0: no cross-request
+	// cache -- the cache is created fresh per request and dies when the
+	// request ends.
+	root.Use(featureflag.CacheMiddleware)
 
 	queries := dbx.New(s.dbPool)
 	root.Mount("/", anchors.New(queries).Routes())
@@ -294,6 +302,14 @@ func (s *Server) httpHandler() http.Handler {
 		root.Post("/auth/local/login", s.authHandler.LocalLogin)
 		root.Post("/auth/logout", s.authHandler.Logout)
 	}
+	// Slice 059: per-tenant feature flags admin API. Two admin-only
+	// routes; the handler enforces cred.IsAdmin defense-in-depth so
+	// non-admin callers see 403 even without the slice-035 OPA
+	// middleware wired. Routes appended per the parallel-batch
+	// convention (chi rejects two Mounts at "/").
+	featuresH := featuresapi.New(featureflag.NewStore(s.dbPool))
+	root.Get("/v1/admin/features", featuresH.List)
+	root.Patch("/v1/admin/features/{key}", featuresH.Patch)
 	return root
 }
 

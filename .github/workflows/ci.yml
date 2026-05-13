@@ -248,7 +248,9 @@ jobs:
             ./internal/evidence/streambuf/... \
             ./internal/artifact/... \
             ./internal/api/artifacts/... \
-            ./internal/api/policyacks/...
+            ./internal/api/policyacks/... \
+            ./internal/featureflag/... \
+            ./internal/api/features/...
       - name: Migration round-trip — down then up
         run: |
           # Walk down migrations in reverse-alphabetical order (latest down first).
