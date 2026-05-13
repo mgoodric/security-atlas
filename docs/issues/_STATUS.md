@@ -3,7 +3,7 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-13 (batch 14 merged — 023 + 035 → merged · 36/60 on main · slice 025 newly unblocked)
+**Last reconciled:** 2026-05-13 (batch 14 merged · 36/61 on main · slice 061 added — CI path-filter for docs-only PRs)
 
 ## Drift detected — 2026-05-13 (batch 14 merged — 023 AFK + 035 HITL)
 
@@ -37,10 +37,13 @@ Two new slices added per maintainer request: per-tenant feature flags + capabili
 | --- | ------------------- | ---------------------------------------------------------------------------------- |
 | 059 | (new) → `ready`     | Per-tenant feature flags · deps 002, 033, 034 all merged · AFK-clean · unlocks 060 |
 | 060 | (new) → `not-ready` | Admin settings UI · waits on 005, 034, 035, 059 · HITL on role-permission matrix   |
+| 061 | (new) → `ready`     | CI path-based filtering (skip Go/Frontend on docs-only PRs) · AFK-clean · no deps  |
 
 Spine flags (RLS, tenancy, auth, schema registry, scope, evidence ledger, framework crosswalks) are deliberately non-toggleable per 059's anti-criterion P0 — the seed flag inventory only includes capability-area flags.
 
-**Counts delta:** total +2 · ready +1 · not-ready +1.
+Slice 061 is a CI cost / DX optimization motivated by PR #49 (batch 14 reconcile) — `.md`-only PR that ran 9 expensive CI jobs for a 1-line edit. Pattern: `dorny/paths-filter@v3` in-workflow, stub jobs preserving required-check names, security scans (CodeQL + GitGuardian) always-on.
+
+**Counts delta:** total +3 · ready +2 · not-ready +1.
 
 ## Drift detected — 2026-05-13 (batch 14 claim-stake — 023 AFK + 035 HITL, archived)
 
@@ -578,10 +581,10 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 | `merged`      | 36     |
 | `in-review`   | 0      |
 | `in-progress` | 0      |
-| `ready`       | 3      |
+| `ready`       | 4      |
 | `blocked`     | 0      |
 | `not-ready`   | 21     |
-| **Total**     | **60** |
+| **Total**     | **61** |
 
 ## Status enum
 
@@ -659,6 +662,7 @@ Legal values (use exactly these strings):
 | 058 | User docs scaffold + 5 core pages                      | `not-ready` | —                                                    | —     | —          | —          | waits on 005, 050 · HITL on docs authorship                                                   |
 | 059 | Per-tenant feature flags + capability toggles          | `ready`     | —                                                    | —     | —          | —          | deps 002, 033, 034 merged · AFK-clean · unlocks 060                                           |
 | 060 | Admin settings UI (SSO · users · API keys · features)  | `not-ready` | —                                                    | —     | —          | —          | waits on 005, 034, 035, 059 · HITL on role-permission matrix                                  |
+| 061 | CI path-based filtering (docs-only PR fast-path)       | `ready`     | —                                                    | —     | —          | —          | AFK-clean · no deps · saves ~80% billable minutes on docs/status PRs                          |
 
 ## Ready set right now
 
@@ -667,6 +671,7 @@ Legal values (use exactly these strings):
 | 010 | SCF-anchored control kit (50 SOC 2 controls)  | controls | 5-7     | HITL · machinery+draft+pair-review pattern proven on 007 · biggest critical-path unlock |
 | 025 | Auditor role + scoped read-only access        | auth     | 1.5     | **NEWLY UNBLOCKED** · deps 033, 035 merged · binds slice 035 auditor role to UI/API     |
 | 059 | Per-tenant feature flags + capability toggles | spine    | 1.5     | AFK-clean · deps 002, 033, 034 all merged · unlocks 060 admin UI                        |
+| 061 | CI path-based filtering (docs-only fast-path) | ci/dx    | 0.5     | AFK-clean · no deps · cuts ~80% billable minutes on docs/status PRs                     |
 
 **Three slices ready** (010, 025, 059). **Slice 059 (feature flags) and 025 (auditor role) are both fresh AFK-clean candidates** — 059 builds on the spine + auth/RLS plumbing; 025 binds slice 035's just-merged auditor role to UI/API surface.
 
