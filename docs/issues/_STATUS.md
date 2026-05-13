@@ -3,7 +3,17 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-12 (7 new slices added — multi-level risk + Decision Log + screenshots + docs site)
+**Last reconciled:** 2026-05-13 (slice 008 → in-review · UCF graph traversal API)
+
+## Drift detected — 2026-05-13 (slice 008 → in-review)
+
+Slice 008 (UCF graph traversal query API) flipped `in-progress` → `in-review`. PR gh#30 opened against main. The slice ships three new read-only HTTP endpoints — `GET /v1/requirements/{id}/coverage` (forward traversal), `GET /v1/anchors/{id}/requirements` (DB-backed reverse traversal, replacing the slice-006 in-memory `anchorseed` placeholder), and `GET /v1/controls/{id}/coverage` (control-centric) — backed by a new `internal/api/ucfcoverage/` Go package and six new sqlc queries in `internal/db/queries/ucf_traversal.sql`. **Zero new migrations consumed.** Traversal is a two-hop JOIN through the SCF anchor spine; recursion isn't needed per `UCF_GRAPH_MODEL.md` §7 (bounded fan-out). **AC-5 benchmark crushes target:** mean **5.89 ms** / p50 **5.88 ms** / p95 **6.91 ms** against 1,400 SCF anchors + 60 SOC 2 reqs + 10,000 STRM edges + 5,000 tenant controls — **34× under the 200 ms gate**. No new index added; existing slice-006/007/009 indexes sufficient. **Constitutional invariant 1 honored:** every traversal joins through `scf_anchors`; `TestNoFrameworkToFrameworkEdgeTable` asserts at `information_schema` level. **Constitutional invariant 6 honored:** only tenant-scoped read (`ListControlsForAnchors` on `controls`) runs inside `inTenantTx` + `tenancy.ApplyTenant`; no app-level `WHERE tenant_id = ?` clause in any traversal SQL. Cross-tenant integration tests confirm: tenant B traversing tenant A's requirement sees global catalog rows but empty controls list (correct per canvas §3.5); tenant B looking up tenant A's control id returns 404 (RLS makes the foreign row invisible). **Behavior shift announced under CHANGELOG `## [Unreleased] / Changed`:** `anchors.New(q *dbx.Queries)` constructor signature drops its second `anchorseed.Store` parameter — internal-package signature change, single in-tree caller (`internal/api/httpserver.go`), no public API impact. The `internal/api/anchorseed` package becomes unreferenced; a future cleanup slice removes the directory + unit tests. Effectiveness field on `controls` array deferred to slice 012 (canvas §3.3) — field omitted rather than null so slice 012 can add it without breaking change. `?as-of=<RFC3339>` and `?scf_release=<version>` query params accepted-and-no-op in v1; slice 012 / future SCF-release-import work will activate them. **Surprises:** (1) inter-package parallel test execution against shared DB races on catalog wipe-and-reimport; CI already uses `-p 1` so non-issue. (2) The grill-with-docs decision to leave `requirementsForAnchor` + `anchorseed.Store` field in place as "dead code" was overridden by `golangci-lint`'s `unused` check, which would have blocked CI — removed entirely with CHANGELOG note. **Pre-existing unrelated failures** in `internal/scope` + `internal/risk` integration tests (bundle_id NOT NULL fixture drift from slice 009) confirmed by stashing slice-008 diff and re-running; out of scope for this slice.
+
+| Row | Transition                  | Evidence                |
+| --- | --------------------------- | ----------------------- |
+| 008 | `in-progress` → `in-review` | gh#30 opened 2026-05-13 |
+
+**Counts delta:** in-progress −1 · in-review +1.
 
 ## Drift detected — 2026-05-12 (new slices 052–058 added to backlog)
 
@@ -381,8 +391,8 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 | Status        | Count  |
 | ------------- | ------ |
 | `merged`      | 29     |
-| `in-review`   | 0      |
-| `in-progress` | 1      |
+| `in-review`   | 1      |
+| `in-progress` | 0      |
 | `ready`       | 5      |
 | `blocked`     | 0      |
 | `not-ready`   | 23     |
@@ -411,7 +421,7 @@ Legal values (use exactly these strings):
 | 005 | Frontend bootstrap (Next.js + auth + SCF browser)      | `merged`      | spine/005-frontend-bootstrap                         | gh#5  | 2026-05-11 | 2026-05-11 | —                                                                        |
 | 006 | SCF catalog importer + Framework/FrameworkVersion API  | `merged`      | catalog/006-scf-catalog-importer                     | gh#6  | 2026-05-11 | 2026-05-11 | open-q #01 cleared at merge                                              |
 | 007 | SOC 2 v2017 (TSC) crosswalk loader                     | `merged`      | catalog/007-soc2-crosswalk-loader                    | gh#29 | 2026-05-12 | 2026-05-12 | HITL approved · 56 community_draft edges · unlocks 008, 010              |
-| 008 | UCF graph traversal query API                          | `in-progress` | catalog/008-ucf-graph-traversal-api                  | —     | 2026-05-13 | —          | dep 007 merged · AFK-clean · 3 endpoints over recursive CTEs             |
+| 008 | UCF graph traversal query API                          | `in-review`   | catalog/008-ucf-graph-traversal-api                  | gh#30 | 2026-05-13 | 2026-05-13 | 3 endpoints · two-hop JOIN · AC-5 mean 5.89ms (34× under 200ms target)   |
 | 009 | Control bundle format spec + parser + upload           | `merged`      | control-as-code/009-control-bundle-format            | gh#16 | 2026-05-11 | 2026-05-11 | unlocks 010, 011 critical path                                           |
 | 010 | SCF-anchored control kit (50 SOC 2 controls)           | `ready`       | —                                                    | —     | —          | —          | deps 009, 007 merged · HITL on 50-control accuracy                       |
 | 011 | Manual control type + attestation flow                 | `merged`      | control-as-code/011-manual-control-attestation       | gh#20 | 2026-05-11 | 2026-05-11 | deps 009, 013, 036 all merged                                            |
@@ -482,9 +492,9 @@ Next-batch options:
 3. **HITL 035 / 022 sessions** — same pattern. Modest content review.
 4. **Resolve open-q #1/#3/#15** for 050 (release readiness).
 
-## In-flight (1 worktree building)
+## In-flight (0 worktrees building · 1 in review)
 
-- **008** — `catalog/008-ucf-graph-traversal-api` · `in-progress` since 2026-05-13 · AFK-clean (recursive CTEs + 3 REST endpoints + benchmark)
+- **008** — `catalog/008-ucf-graph-traversal-api` · `in-review` since 2026-05-13 · gh#30 · 3 endpoints + two-hop JOIN traversal + AC-5 benchmark mean 5.89 ms (34× under 200 ms target)
 
 Stale worktrees still on disk: `-007`, `-009`, `-011`, `-013`, `-014`, `-015`, `-017`, `-018`, `-019`, `-021`, `-024`, `-026`, `-033`, `-034`, `-036`, `-039`, `-044`, `-045`, `-046`, `-047`, `-048`, `-049`, `-051`. Safe to `git worktree remove` whenever ready.
 
