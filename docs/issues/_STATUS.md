@@ -3,9 +3,22 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-13 (batch 14 claim-stake — 023 + 035 → in-progress · first batch under branch-protection-via-PR)
+**Last reconciled:** 2026-05-13 (slices 059 + 060 added to backlog — feature flags + admin UI)
 
-## Drift detected — 2026-05-13 (batch 14 claim-stake — 023 AFK + 035 HITL)
+## Drift detected — 2026-05-13 (slices 059 + 060 added to backlog)
+
+Two new slices added per maintainer request: per-tenant feature flags + capability toggles (059) and an in-app admin settings UI (060). Rationale: adopters often have existing tools that cover some capability areas (OneTrust for vendor, Jira for risk, etc.); forcing every capability on is a false-binary that drives them off. Feature flags let operators turn whole capability areas (risk / vendor / policy / OSCAL export / board / etc.) on or off per-tenant; admin UI surfaces SSO config, user role assignment, API keys, feature toggles, and unified audit log views without requiring CLI access.
+
+| Row | Transition          | Why                                                                                |
+| --- | ------------------- | ---------------------------------------------------------------------------------- |
+| 059 | (new) → `ready`     | Per-tenant feature flags · deps 002, 033, 034 all merged · AFK-clean · unlocks 060 |
+| 060 | (new) → `not-ready` | Admin settings UI · waits on 005, 034, 035, 059 · HITL on role-permission matrix   |
+
+Spine flags (RLS, tenancy, auth, schema registry, scope, evidence ledger, framework crosswalks) are deliberately non-toggleable per 059's anti-criterion P0 — the seed flag inventory only includes capability-area flags.
+
+**Counts delta:** total +2 · ready +1 · not-ready +1.
+
+## Drift detected — 2026-05-13 (batch 14 claim-stake — 023 AFK + 035 HITL, archived)
 
 Two slices flipped `ready` → `in-progress`. **N=2 batch · 1 AFK + 1 HITL** — first batch under the post-batch-13 branch-protection-via-PR pattern. Claim-stake is this PR (status-only); subagent in-review flips ride on their slice PR branches; final reconcile is one more status-only PR. Per-batch overhead from status PRs: ~12 min (was ~3 min when direct push to main was allowed).
 
@@ -541,10 +554,10 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 | `merged`      | 34     |
 | `in-review`   | 0      |
 | `in-progress` | 2      |
-| `ready`       | 1      |
+| `ready`       | 2      |
 | `blocked`     | 0      |
-| `not-ready`   | 21     |
-| **Total**     | **58** |
+| `not-ready`   | 22     |
+| **Total**     | **60** |
 
 ## Status enum
 
@@ -620,6 +633,8 @@ Legal values (use exactly these strings):
 | 056 | Hierarchical risk dashboard view                       | `not-ready`   | —                                                    | —     | —          | —          | waits on 005, 053, 054, 055                                                             |
 | 057 | README screenshots + animated GIFs of core flows       | `not-ready`   | —                                                    | —     | —          | —          | waits on frontend views (040–043)                                                       |
 | 058 | User docs scaffold + 5 core pages                      | `not-ready`   | —                                                    | —     | —          | —          | waits on 005, 050 · HITL on docs authorship                                             |
+| 059 | Per-tenant feature flags + capability toggles          | `ready`       | —                                                    | —     | —          | —          | deps 002, 033, 034 merged · AFK-clean · unlocks 060                                     |
+| 060 | Admin settings UI (SSO · users · API keys · features)  | `not-ready`   | —                                                    | —     | —          | —          | waits on 005, 034, 035, 059 · HITL on role-permission matrix                            |
 
 ## Ready set right now
 
