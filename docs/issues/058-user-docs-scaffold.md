@@ -23,11 +23,11 @@ The slice also adds a **per-PR docs gate** to the ship-gate checklist: any PR to
 - [ ] AC-1: `docs-site/` directory present with mkdocs.yml configured: theme = `material`, palette = light+dark, navigation collapsible, search enabled, edit-on-github links wired.
 - [ ] AC-2: `mkdocs build --strict` succeeds locally and in CI — `--strict` catches broken internal links and missing nav entries.
 - [ ] AC-3: Five core pages present at `docs-site/docs/`:
-    - `index.md` — Intro (what, who, not)
-    - `install.md` — Self-host install (docker-compose quickstart)
-    - `framework-setup.md` — SCF + SOC 2 crosswalk
-    - `first-audit.md` — End-to-end audit workflow walkthrough
-    - `board-reporting.md` — Monthly brief + quarterly pack
+  - `index.md` — Intro (what, who, not)
+  - `install.md` — Self-host install (docker-compose quickstart)
+  - `framework-setup.md` — SCF + SOC 2 crosswalk
+  - `first-audit.md` — End-to-end audit workflow walkthrough
+  - `board-reporting.md` — Monthly brief + quarterly pack
 - [ ] AC-4: Each page includes: a "What you'll learn" summary, body content, "Next steps" link to the related page, and a "Was this helpful?" footer (GitHub Discussions link, no JS analytics).
 - [ ] AC-5: `.github/workflows/docs-publish.yml` builds + deploys to GitHub Pages on every release tag. PR builds run `mkdocs build --strict` and post a preview URL via the GitHub Pages preview action.
 - [ ] AC-6: `.github/PULL_REQUEST_TEMPLATE.md` (created in slice 050 AC-8) gets a new section: "Docs impact" with two options — "Updated docs pages: <list>" or "No doc change needed because: <reason>". Reviewer discipline; not CI-enforced.

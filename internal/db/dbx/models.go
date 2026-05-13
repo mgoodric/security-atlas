@@ -143,6 +143,50 @@ func (ns NullCrosswalkSourceAttribution) Value() (driver.Value, error) {
 	return string(ns.CrosswalkSourceAttribution), nil
 }
 
+type DecisionStatus string
+
+const (
+	DecisionStatusActive     DecisionStatus = "active"
+	DecisionStatusRevisited  DecisionStatus = "revisited"
+	DecisionStatusSuperseded DecisionStatus = "superseded"
+	DecisionStatusExpired    DecisionStatus = "expired"
+)
+
+func (e *DecisionStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DecisionStatus(s)
+	case string:
+		*e = DecisionStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DecisionStatus: %T", src)
+	}
+	return nil
+}
+
+type NullDecisionStatus struct {
+	DecisionStatus DecisionStatus `json:"decision_status"`
+	Valid          bool           `json:"valid"` // Valid is true if DecisionStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDecisionStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.DecisionStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DecisionStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDecisionStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DecisionStatus), nil
+}
+
 type EvidenceFreshnessClass string
 
 const (
@@ -366,6 +410,49 @@ func (ns NullRiskCategory) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.RiskCategory), nil
+}
+
+type RiskLevel string
+
+const (
+	RiskLevelTeam    RiskLevel = "team"
+	RiskLevelOrg     RiskLevel = "org"
+	RiskLevelCompany RiskLevel = "company"
+)
+
+func (e *RiskLevel) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RiskLevel(s)
+	case string:
+		*e = RiskLevel(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RiskLevel: %T", src)
+	}
+	return nil
+}
+
+type NullRiskLevel struct {
+	RiskLevel RiskLevel `json:"risk_level"`
+	Valid     bool      `json:"valid"` // Valid is true if RiskLevel is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRiskLevel) Scan(value interface{}) error {
+	if value == nil {
+		ns.RiskLevel, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RiskLevel.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRiskLevel) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RiskLevel), nil
 }
 
 type RiskMethodology string
@@ -744,6 +831,51 @@ type Control struct {
 	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
 }
 
+type Decision struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	DecisionID    string             `json:"decision_id"`
+	Title         string             `json:"title"`
+	Narrative     string             `json:"narrative"`
+	Constraints   []string           `json:"constraints"`
+	Tradeoffs     string             `json:"tradeoffs"`
+	DecisionMaker string             `json:"decision_maker"`
+	DecidedAt     pgtype.Timestamptz `json:"decided_at"`
+	RevisitBy     pgtype.Date        `json:"revisit_by"`
+	Status        DecisionStatus     `json:"status"`
+	SupersededBy  pgtype.UUID        `json:"superseded_by"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DecisionControl struct {
+	DecisionID pgtype.UUID        `json:"decision_id"`
+	TargetID   pgtype.UUID        `json:"target_id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type DecisionException struct {
+	DecisionID pgtype.UUID        `json:"decision_id"`
+	TargetID   pgtype.UUID        `json:"target_id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type DecisionRisk struct {
+	DecisionID pgtype.UUID        `json:"decision_id"`
+	TargetID   pgtype.UUID        `json:"target_id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type DecisionScopePredicate struct {
+	DecisionID pgtype.UUID        `json:"decision_id"`
+	TargetID   pgtype.UUID        `json:"target_id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
 type EvidenceAuditLog struct {
 	ID             pgtype.UUID        `json:"id"`
 	TenantID       pgtype.UUID        `json:"tenant_id"`
@@ -924,6 +1056,26 @@ type OidcIdpConfig struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
+type OrgTheme struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	ThemeName   string             `json:"theme_name"`
+	Description string             `json:"description"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OrgUnit struct {
+	ID                    pgtype.UUID        `json:"id"`
+	TenantID              pgtype.UUID        `json:"tenant_id"`
+	Name                  string             `json:"name"`
+	ParentID              pgtype.UUID        `json:"parent_id"`
+	Level                 RiskLevel          `json:"level"`
+	AcceptanceAuthorities []byte             `json:"acceptance_authorities"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Policy struct {
 	ID                         pgtype.UUID        `json:"id"`
 	TenantID                   pgtype.UUID        `json:"tenant_id"`
@@ -969,6 +1121,17 @@ type Risk struct {
 	AcceptedUntil       pgtype.Date        `json:"accepted_until"`
 	Accepter            string             `json:"accepter"`
 	InstrumentReference string             `json:"instrument_reference"`
+	Level               RiskLevel          `json:"level"`
+	OrgUnitID           pgtype.UUID        `json:"org_unit_id"`
+	Themes              []string           `json:"themes"`
+}
+
+type RiskAggregation struct {
+	ParentRiskID pgtype.UUID        `json:"parent_risk_id"`
+	ChildRiskID  pgtype.UUID        `json:"child_risk_id"`
+	RuleID       pgtype.UUID        `json:"rule_id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
 type RiskControlLink struct {

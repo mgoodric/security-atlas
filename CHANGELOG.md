@@ -13,6 +13,115 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 052 — Schema + migrations for risk hierarchy, theme taxonomy,
+  and Decision Log.** Pure-schema slice that lays foundations for slices
+  053 (theme tagging + manual aggregation API), 054 (aggregation-rules
+  engine), and 055 (Decision Log CRUD). No business logic, no HTTP
+  routes, no rule evaluation in this slice — explicit P0 anti-criteria
+  per `docs/issues/052-risk-hierarchy-schema.md`. Three shapes land per
+  `Plans/canvas/06-risk.md §6.4–§6.7`: (1) **Risk hierarchy fields on
+  `risks`** — `level` (new `risk_level` enum: `team` / `org` /
+  `company`), `org_unit_id` (composite FK to `org_units` with ON DELETE
+  SET NULL so child-risk lifecycle stays independent of org-unit
+  changes per canvas §6.4), and `themes` (`text[]` with a GIN index for
+  slice-053 containment queries). All three default to safe values
+  (`'team'`, NULL, `'{}'`) so the slice-002/019 fixture INSERTs continue
+  to work without patching. (2) **Theme taxonomy** — new flat
+  `org_themes` table (no `parent_theme_id` — canvas §6.5 explicitly
+  rejects theme hierarchy, aggregation rules carry the logic), with
+  two partial unique indexes: `org_themes_default_name_unique` (UNIQUE
+  on `theme_name` when `tenant_id IS NULL`) and
+  `org_themes_tenant_name_unique` (UNIQUE on `(tenant_id, theme_name)`
+  when `tenant_id IS NOT NULL`) so a tenant can name a private theme
+  `ownership` without colliding with the default of the same name.
+  Defaults live in the same table with `tenant_id = NULL` (analogous
+  to `frameworks` / `framework_versions` global catalog pattern from
+  slice 002); the application role cannot mutate them (policy
+  `tenant_write` requires `tenant_id IS NOT NULL`). The companion
+  migration `20260511000015_seed_default_themes.sql` seeds the ten
+  canonical default themes from canvas §6.5 (`ownership`, `tech-debt`,
+  `access-control`, `key-management`, `data-protection`,
+  `availability`, `monitoring`, `supply-chain`, `vendor-risk`,
+  `human-process`) via `INSERT … ON CONFLICT (theme_name) WHERE
+tenant_id IS NULL DO NOTHING` so re-runs are idempotent (proven
+  empirically: re-applying returned `INSERT 0 0`). (3) **Decision Log
+  primitive** — new `decisions` table per canvas §6.7 with
+  `decision_id` (tenant-visible `DL-2026-…` identifier) constrained
+  `UNIQUE (tenant_id, decision_id)`, plus `constraints text[]`
+  (structured tags per canvas §6.7 — time-pressure, cost,
+  dependency-blocked, risk-accepted, etc., intentionally not an enum
+  so the vocabulary can grow), `decision_status` enum (`active` /
+  `revisited` / `superseded` / `expired`), and a composite-FK
+  `superseded_by` self-ref with CHECK constraints that enforce
+  `status = 'superseded'` implies `superseded_by IS NOT NULL` and
+  forbid self-supersession. **Four separate M:N link tables** —
+  `decision_risks`, `decision_controls`, `decision_exceptions`,
+  `decision_scope_predicates` — explicitly NOT collapsed into a
+  polymorphic `(target_kind, target_id)` table (P0 anti-criterion):
+  per-type tables preserve composite FK D3 safety and let auditors
+  query "every decision linked to risk X" with one straight JOIN.
+  `risk_aggregations` (parent-risk to child-risk M:N) ships alongside
+  with a NULL `rule_id` for manual links (slice 054 populates it from
+  the rules engine); a `CHECK (parent_risk_id <> child_risk_id)`
+  prevents self-aggregation and the table has NO triggers or CASCADE
+  paths that would auto-close a parent when children close — canvas
+  §6.4 + §6.6 explicit that parent risks represent patterns that may
+  persist beyond any individual instance. **RLS coverage is universal:**
+  every new tenant-scoped table (`org_units`, `org_themes`,
+  `risk_aggregations`, `decisions`, all four `decision_*` link tables)
+  gets the slice-014/017/019 four-policy split (`tenant_read` SELECT +
+  `tenant_write` INSERT WITH CHECK + `tenant_update` UPDATE USING +
+  WITH CHECK + `tenant_delete` DELETE) under FORCE ROW LEVEL SECURITY;
+  `org_themes` uses a `tenant_or_catalog_read` SELECT that admits both
+  defaults (tenant_id NULL) and tenant-private rows. **AC-7 role-based
+  write gating** is stubbed at the schema level: `decisions`'s
+  `tenant_write` and `tenant_update` WITH CHECK clauses also require
+  `COALESCE(current_setting('app.current_role', true), '*') <> ''` —
+  unset or `'*'` (the transitional sentinel) admits writes, an
+  explicit empty string blocks them. The sentinel is a no-op until
+  slice 035 (RBAC roles) wires real role identifiers per request;
+  once it does, this clause becomes load-bearing without a schema
+  rewrite. **Defense-in-depth:** new composite UNIQUE on
+  `framework_scopes (tenant_id, id)` lets `decision_scope_predicates`
+  FK target it cross-tenant-safely (same D3 pattern slice 019 added
+  to `risks` and slice 006 to `vendors`). New sqlc query files
+  (`internal/db/queries/org_units.sql`, `org_themes.sql`,
+  `risk_aggregations.sql`, `decisions.sql`, `decision_links.sql`)
+  ship a CRUD + link/unlink/list surface for slices 053/054/055 to
+  build against; `sqlc generate` populates the dbx package cleanly
+  with no hand-edits. Integration tests
+  (`internal/db/risk_hierarchy_integration_test.go`) cover the AC-9
+  cross-tenant RLS negative path on five new tables (`org_units`,
+  `risk_aggregations`, `decisions`, `decision_risks` link rows,
+  `org_themes` tenant-private), positive INSERT smoke on every new
+  table, the AC-1 risks-column round-trip (level + org_unit_id +
+  themes), AC-10 default-theme presence verification, and the
+  partial-unique-index collision check (a tenant CAN create a
+  private theme named `ownership` without colliding with the
+  default; the SAME tenant CANNOT create a second `ownership` — the
+  tenant-side unique fires). Migration is reversible (proven by
+  round-trip: up to down to up restores byte-identical state) and
+  idempotent (re-applying the seed returned `INSERT 0 0` with row
+  count still 10). Constitutional invariants honored: **#4**
+  (multidimensional scope, not tree — risk hierarchy is its own
+  dimension on Risk; org_unit lives separately from scope cells),
+  **#6** (RLS at DB layer — eight new tenant-scoped tables, every
+  one with FORCE + four-policy split, audited at runtime), **#9**
+  (manual evidence is first-class — manual aggregation has the same
+  `risk_aggregations` row shape as future automatic aggregation,
+  distinguished only by `rule_id IS NULL`). Files touched: new
+  `migrations/sql/20260511000014_risk_hierarchy_decisions.sql` (+
+  `.down.sql`), new
+  `migrations/sql/20260511000015_seed_default_themes.sql` (+
+  `.down.sql`), new sqlc query files (5), regenerated
+  `internal/db/dbx/{org_units,org_themes,risk_aggregations,decisions,decision_links}.sql.go`
+  - `models.go` + `querier.go`, new
+    `internal/db/risk_hierarchy_integration_test.go`, `sqlc.yaml`
+    (schema list extended with both new migrations). No new
+    dependencies. No frontend changes. Pre-existing
+    `TestSchema_TenantScopedTablesAcceptInserts` slice-013 baseline
+    drift remains untouched (out of scope; same surprise noted in
+    slice 008).
 - **Slice 008 — UCF graph traversal HTTP API.** Three new read-only
   endpoints expose the requirement-anchor-control graph defined in
   canvas §3 + `Plans/UCF_GRAPH_MODEL.md` over plain HTTP:

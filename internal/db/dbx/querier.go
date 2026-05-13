@@ -66,6 +66,10 @@ type Querier interface {
 	// evaluates the INSERT WITH CHECK against current_tenant. content_hash
 	// may be NULL today but every code path in slice 036 supplies it.
 	CreateArtifact(ctx context.Context, arg CreateArtifactParams) (Artifact, error)
+	// Insert a new Decision Log entry (canvas §6.7). Slice 052 ships the table
+	// + queries; slice 055 adds the HTTP CRUD surface. decision_id is the
+	// tenant-visible identifier ("DL-2026-04-12"); the application generates it.
+	CreateDecision(ctx context.Context, arg CreateDecisionParams) (Decision, error)
 	// Slice 021 — exception / waiver workflow queries.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -91,6 +95,14 @@ type Querier interface {
 	// trigger comparison cheap).
 	CreateFrameworkScope(ctx context.Context, arg CreateFrameworkScopeParams) (FrameworkScope, error)
 	CreateOidcIdpConfig(ctx context.Context, arg CreateOidcIdpConfigParams) (OidcIdpConfig, error)
+	// Create a tenant-private theme. tenant_id is required and must match the
+	// GUC. Default themes (tenant_id IS NULL) are migration-only and not
+	// creatable through this query path — the policy on org_themes forbids it.
+	CreateOrgTheme(ctx context.Context, arg CreateOrgThemeParams) (OrgTheme, error)
+	// Insert a new org_unit. Application enforces parent.level >= child.level
+	// (team rolls up to org rolls up to company); the DB lets any valid level
+	// combination through so partial-load / migration paths still work.
+	CreateOrgUnit(ctx context.Context, arg CreateOrgUnitParams) (OrgUnit, error)
 	// Slice 026 — sample-pull primitives.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -126,11 +138,19 @@ type Querier interface {
 	// INSERT WITH CHECK policy. dpa_signed_at is required by CHECK constraint
 	// whenever dpa_signed=true.
 	CreateVendor(ctx context.Context, arg CreateVendorParams) (Vendor, error)
+	DeleteDecision(ctx context.Context, arg DeleteDecisionParams) error
 	// Used by tests + cleanup paths. Production deployments will rarely delete
 	// a scope (supersession is the lifecycle exit); the row is preserved as
 	// audit trail.
 	DeleteFrameworkScope(ctx context.Context, arg DeleteFrameworkScopeParams) error
+	// ON DELETE SET NULL on risks.org_unit_id keeps risks alive after their
+	// binding org_unit is removed (canvas §6.4: child risk lifecycle is
+	// independent of parent).
+	DeleteOrgUnit(ctx context.Context, arg DeleteOrgUnitParams) error
 	DeleteRisk(ctx context.Context, arg DeleteRiskParams) error
+	// Tenant-private themes only — the policy forbids deleting defaults
+	// regardless of what this query asks for.
+	DeleteTenantTheme(ctx context.Context, arg DeleteTenantThemeParams) error
 	DeleteVendor(ctx context.Context, arg DeleteVendorParams) error
 	// Flip every "current" framework_version for the given framework to "legacy"
 	// so a new release can take over without violating the at-most-one-current
@@ -173,6 +193,10 @@ type Querier interface {
 	// is TEXT (slice 002); slice 017 stores JSON in that text.
 	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)
 	GetControlByID(ctx context.Context, arg GetControlByIDParams) (GetControlByIDRow, error)
+	// Lookup by the human-readable decision_id ("DL-2026-04-12"). Unique within
+	// tenant (UNIQUE (tenant_id, decision_id)).
+	GetDecisionByDecisionID(ctx context.Context, arg GetDecisionByDecisionIDParams) (Decision, error)
+	GetDecisionByID(ctx context.Context, arg GetDecisionByIDParams) (Decision, error)
 	// Look up one schema visible to the tenant. Prefers the tenant's private
 	// row when one exists for the same (kind, semver); otherwise returns the
 	// global row. The ORDER BY puts the non-null tenant_id first.
@@ -216,6 +240,8 @@ type Querier interface {
 	GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) (FwToScfEdge, error)
 	GetLocalCredentialByUserID(ctx context.Context, arg GetLocalCredentialByUserIDParams) (LocalCredential, error)
 	GetOidcIdpConfigByName(ctx context.Context, arg GetOidcIdpConfigByNameParams) (OidcIdpConfig, error)
+	GetOrgThemeByID(ctx context.Context, id pgtype.UUID) (OrgTheme, error)
+	GetOrgUnitByID(ctx context.Context, arg GetOrgUnitByIDParams) (OrgUnit, error)
 	GetPopulationByID(ctx context.Context, arg GetPopulationByIDParams) (Population, error)
 	GetRiskByID(ctx context.Context, arg GetRiskByIDParams) (Risk, error)
 	GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnchor, error)
@@ -281,6 +307,21 @@ type Querier interface {
 	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
 	InsertSampleEvidence(ctx context.Context, arg InsertSampleEvidenceParams) error
+	// ===== decision_controls =====
+	LinkDecisionControl(ctx context.Context, arg LinkDecisionControlParams) error
+	// ===== decision_exceptions =====
+	LinkDecisionException(ctx context.Context, arg LinkDecisionExceptionParams) error
+	// Decision Log link tables — four separate M:N tables for risks, controls,
+	// exceptions, and framework scope predicates (canvas §6.7). Each link is
+	// idempotent (ON CONFLICT DO NOTHING) so re-linking is a no-op.
+	// ===== decision_risks =====
+	LinkDecisionRisk(ctx context.Context, arg LinkDecisionRiskParams) error
+	// ===== decision_scope_predicates =====
+	LinkDecisionScopePredicate(ctx context.Context, arg LinkDecisionScopePredicateParams) error
+	// Link a parent risk to a child risk. rule_id is NULL for manual linkage;
+	// slice 054 sets it when an aggregation rule creates the link automatically.
+	// Idempotent — ON CONFLICT DO NOTHING so re-linking is a no-op.
+	LinkRiskAggregation(ctx context.Context, arg LinkRiskAggregationParams) error
 	// Idempotent: ON CONFLICT DO NOTHING so re-running a "link these controls"
 	// request does not 23505 on a re-link.
 	LinkRiskControl(ctx context.Context, arg LinkRiskControlParams) error
@@ -293,6 +334,10 @@ type Querier interface {
 	// atlas_migrate. Returns every row regardless of tenant. Never reachable
 	// through the app role under RLS.
 	ListAllEvidenceKindSchemas(ctx context.Context) ([]EvidenceKindSchema, error)
+	// Defaults + tenant-private themes in one query. Order: defaults first, then
+	// tenant themes alphabetically. Used by slice 053's "available themes for
+	// this tenant" picker.
+	ListAllVisibleThemes(ctx context.Context, tenantID pgtype.UUID) ([]OrgTheme, error)
 	// Slice 008: UCF graph traversal queries.
 	//
 	// All traversals go through the SCF anchor spine (constitutional invariant 1
@@ -337,6 +382,21 @@ type Querier interface {
 	// NO `WHERE tenant_id = ?` clause: invariant 6 — RLS does the tenant
 	// filtering. Adding such a clause would be a constitutional violation.
 	ListControlsForAnchors(ctx context.Context, dollar_1 []pgtype.UUID) ([]ListControlsForAnchorsRow, error)
+	ListDecisionControls(ctx context.Context, arg ListDecisionControlsParams) ([]ListDecisionControlsRow, error)
+	ListDecisionExceptions(ctx context.Context, arg ListDecisionExceptionsParams) ([]ListDecisionExceptionsRow, error)
+	ListDecisionRisks(ctx context.Context, arg ListDecisionRisksParams) ([]ListDecisionRisksRow, error)
+	ListDecisionScopePredicates(ctx context.Context, arg ListDecisionScopePredicatesParams) ([]ListDecisionScopePredicatesRow, error)
+	ListDecisions(ctx context.Context, tenantID pgtype.UUID) ([]Decision, error)
+	ListDecisionsByStatus(ctx context.Context, arg ListDecisionsByStatusParams) ([]Decision, error)
+	// Decisions with revisit_by ≤ the cutoff. Slice 055's dashboard panel uses
+	// this to surface "decisions due to revisit in the next N days".
+	ListDecisionsDueForRevisit(ctx context.Context, arg ListDecisionsDueForRevisitParams) ([]Decision, error)
+	ListDecisionsForControl(ctx context.Context, arg ListDecisionsForControlParams) ([]ListDecisionsForControlRow, error)
+	ListDecisionsForException(ctx context.Context, arg ListDecisionsForExceptionParams) ([]ListDecisionsForExceptionRow, error)
+	ListDecisionsForRisk(ctx context.Context, arg ListDecisionsForRiskParams) ([]ListDecisionsForRiskRow, error)
+	// The 10 built-in themes (canvas §6.5). Visible to every tenant via the
+	// `tenant_or_catalog_read` policy.
+	ListDefaultThemes(ctx context.Context) ([]OrgTheme, error)
 	ListEvidenceAuditEntriesByCredential(ctx context.Context, arg ListEvidenceAuditEntriesByCredentialParams) ([]EvidenceAuditLog, error)
 	// Returns every registered semver for a kind, visible to the tenant.
 	// Slice 014 uses this for AC-5 semver enforcement (a POST must check the
@@ -383,6 +443,11 @@ type Querier interface {
 	// caller gets the scf_id + family + title in one round trip.
 	ListFwToScfEdgesForRequirement(ctx context.Context, frameworkRequirementID pgtype.UUID) ([]ListFwToScfEdgesForRequirementRow, error)
 	ListOidcIdpConfigsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]OidcIdpConfig, error)
+	// Direct children only (single hop). Recursive descent is the caller's
+	// responsibility; for tree walks the application uses a recursive CTE
+	// generated in code (no static sqlc query yet — see slice 056).
+	ListOrgUnitChildren(ctx context.Context, arg ListOrgUnitChildrenParams) ([]OrgUnit, error)
+	ListOrgUnits(ctx context.Context, tenantID pgtype.UUID) ([]OrgUnit, error)
 	// AC-4 overdue calc — vendors whose last_review_date + cadence is older than
 	// the cutoff date. NULL last_review_date means "never reviewed" which always
 	// counts as overdue (a vendor with no review on file is by definition past
@@ -410,6 +475,12 @@ type Querier interface {
 	// ListRequirementsForAnchor but filtered to a specific framework
 	// version id. Used when the caller passes ?framework_version=slug:version.
 	ListRequirementsForAnchorByFrameworkVersion(ctx context.Context, arg ListRequirementsForAnchorByFrameworkVersionParams) ([]ListRequirementsForAnchorByFrameworkVersionRow, error)
+	// All child risks rolled up under this parent.
+	ListRiskAggregationChildren(ctx context.Context, arg ListRiskAggregationChildrenParams) ([]ListRiskAggregationChildrenRow, error)
+	// All parent risks this child rolls up to. Children can roll up to multiple
+	// parents (e.g., an ownership-themed risk feeds both an org-level ownership
+	// meta-risk and a team-level meta-risk).
+	ListRiskAggregationParents(ctx context.Context, arg ListRiskAggregationParentsParams) ([]ListRiskAggregationParentsRow, error)
 	// Returns all control links for a single risk.
 	ListRiskControlLinks(ctx context.Context, arg ListRiskControlLinksParams) ([]ListRiskControlLinksRow, error)
 	// Enumerate all risks for the tenant, newest first. Filters are applied
@@ -429,6 +500,9 @@ type Querier interface {
 	// Enumerate the active tenant's declared dimensions. Ordering: builtins first
 	// (stable presentation in the admin UI), then alphabetical by name.
 	ListScopeDimensions(ctx context.Context, tenantID pgtype.UUID) ([]ScopeDimension, error)
+	// Tenant-private themes only. Caller composes with ListDefaultThemes when a
+	// full visible vocabulary is needed.
+	ListTenantThemes(ctx context.Context, tenantID pgtype.UUID) ([]OrgTheme, error)
 	// The auto-expiry cron walks tenants that currently hold any active
 	// exception. Returns the distinct tenant_ids so the cron can apply each
 	// tenant's GUC before running ExpireActiveExceptionsBefore. Runs as the
@@ -467,7 +541,13 @@ type Querier interface {
 	// Update last_seen_at and (when given) bump expires_at. Caller computes the
 	// new expires_at — sliding-window logic lives in the sessions package.
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
+	UnlinkDecisionControl(ctx context.Context, arg UnlinkDecisionControlParams) error
+	UnlinkDecisionException(ctx context.Context, arg UnlinkDecisionExceptionParams) error
+	UnlinkDecisionRisk(ctx context.Context, arg UnlinkDecisionRiskParams) error
+	UnlinkDecisionScopePredicate(ctx context.Context, arg UnlinkDecisionScopePredicateParams) error
+	UnlinkRiskAggregation(ctx context.Context, arg UnlinkRiskAggregationParams) error
 	UnlinkRiskControl(ctx context.Context, arg UnlinkRiskControlParams) error
+	UpdateDecision(ctx context.Context, arg UpdateDecisionParams) (Decision, error)
 	// Patch the predicate. The BEFORE UPDATE trigger
 	// (framework_scopes_bounce_on_predicate_change_trg) ensures that if this row
 	// was in `review` or `approved`, NEW.state falls back to `draft` and the
@@ -480,6 +560,7 @@ type Querier interface {
 	// Update an existing edge in place. Importer decides whether to call this
 	// based on a content-equality check.
 	UpdateFwToScfEdge(ctx context.Context, arg UpdateFwToScfEdgeParams) (FwToScfEdge, error)
+	UpdateOrgUnit(ctx context.Context, arg UpdateOrgUnitParams) (OrgUnit, error)
 	// Full-update path (PATCH handler reads existing, mutates fields, writes).
 	// updated_at is set explicitly so the schema's per-row default doesn't
 	// silently keep stale values.
