@@ -68,8 +68,8 @@ func Render(ctx context.Context, doc Doc) ([]byte, error) {
 	// We never load untrusted URLs; only the inline data: URL we
 	// construct ourselves.
 	var browserCtx context.Context
-	var cancelAlloc context.CancelFunc = func() {}
-	var cancelBrowser context.CancelFunc = func() {}
+	var cancelAlloc context.CancelFunc
+	var cancelBrowser context.CancelFunc
 	if remote := os.Getenv("CHROME_DEBUG_URL"); remote != "" {
 		var allocCtx context.Context
 		allocCtx, cancelAlloc = chromedp.NewRemoteAllocator(ctx, remote)
@@ -151,15 +151,15 @@ h3 { font-size: 13pt; margin-top: 20px; }
 	b.WriteString(html.EscapeString(doc.Title))
 	b.WriteString(`</h1>`)
 	b.WriteString(`<table class="metadata"><tbody>`)
-	b.WriteString(fmt.Sprintf(`<tr><th>Version</th><td>%s</td></tr>`, html.EscapeString(doc.Version)))
+	fmt.Fprintf(&b, `<tr><th>Version</th><td>%s</td></tr>`, html.EscapeString(doc.Version))
 	if doc.EffectiveDate != "" {
-		b.WriteString(fmt.Sprintf(`<tr><th>Effective date</th><td>%s</td></tr>`, html.EscapeString(doc.EffectiveDate)))
+		fmt.Fprintf(&b, `<tr><th>Effective date</th><td>%s</td></tr>`, html.EscapeString(doc.EffectiveDate))
 	}
-	b.WriteString(fmt.Sprintf(`<tr><th>Owner role</th><td>%s</td></tr>`, html.EscapeString(doc.OwnerRole)))
-	b.WriteString(fmt.Sprintf(`<tr><th>Approver role</th><td>%s</td></tr>`, html.EscapeString(doc.ApproverRole)))
+	fmt.Fprintf(&b, `<tr><th>Owner role</th><td>%s</td></tr>`, html.EscapeString(doc.OwnerRole))
+	fmt.Fprintf(&b, `<tr><th>Approver role</th><td>%s</td></tr>`, html.EscapeString(doc.ApproverRole))
 	statusClass := "status-" + strings.ReplaceAll(doc.Status, " ", "_")
-	b.WriteString(fmt.Sprintf(`<tr><th>Status</th><td><span class="status %s">%s</span></td></tr>`,
-		html.EscapeString(statusClass), html.EscapeString(doc.Status)))
+	fmt.Fprintf(&b, `<tr><th>Status</th><td><span class="status %s">%s</span></td></tr>`,
+		html.EscapeString(statusClass), html.EscapeString(doc.Status))
 	b.WriteString(`</tbody></table>`)
 	b.WriteString(`<div class="body">`)
 	b.WriteString(renderMarkdown(doc.BodyMd))
@@ -200,7 +200,7 @@ func renderMarkdown(src string) string {
 		if h := headingLevel(trimmed); h > 0 {
 			closeBlocks()
 			text := strings.TrimSpace(trimmed[h:])
-			b.WriteString(fmt.Sprintf("<h%d>%s</h%d>", h, renderInline(text), h))
+			fmt.Fprintf(&b, "<h%d>%s</h%d>", h, renderInline(text), h)
 			continue
 		}
 		// Unordered list

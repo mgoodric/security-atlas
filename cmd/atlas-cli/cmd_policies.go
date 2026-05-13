@@ -90,16 +90,16 @@ P0: 5 high-signal policies, not 50 placeholders).`,
 				return err
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "seeded %d stock policies under tenant %s\n", len(report.Loaded), tenant.String())
+			_, _ = fmt.Fprintf(out, "seeded %d stock policies under tenant %s\n", len(report.Loaded), tenant.String())
 			for _, p := range report.Loaded {
 				marker := ""
 				if p.OrphanWarning {
 					marker = " [orphan_policy warning]"
 				}
-				fmt.Fprintf(out, "  - %s (linked controls: %d)%s\n", p.Title, p.LinkedControlCount, marker)
+				_, _ = fmt.Fprintf(out, "  - %s (linked controls: %d)%s\n", p.Title, p.LinkedControlCount, marker)
 			}
 			if len(report.MissingAnchors) > 0 {
-				fmt.Fprintf(out, "missing SCF anchors (control not yet imported): %v\n", report.MissingAnchors)
+				_, _ = fmt.Fprintf(out, "missing SCF anchors (control not yet imported): %v\n", report.MissingAnchors)
 			}
 			return nil
 		},

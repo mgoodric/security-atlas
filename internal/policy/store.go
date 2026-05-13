@@ -596,33 +596,9 @@ func policyFromRow(r dbx.Policy) Policy {
 // shape (which has the same fields as Policy because the recursive CTE
 // returns the full row).
 func policyFromChainRow(r dbx.ListPolicyVersionChainRow) Policy {
-	// The chain row mirrors dbx.Policy verbatim; reuse the conversion by
-	// reconstructing a dbx.Policy.
-	return policyFromRow(dbx.Policy{
-		ID:                          r.ID,
-		TenantID:                    r.TenantID,
-		Title:                       r.Title,
-		Version:                     r.Version,
-		EffectiveDate:               r.EffectiveDate,
-		BodyMd:                      r.BodyMd,
-		AcknowledgmentRequiredRoles: r.AcknowledgmentRequiredRoles,
-		Status:                      r.Status,
-		CreatedAt:                   r.CreatedAt,
-		UpdatedAt:                   r.UpdatedAt,
-		PredecessorID:               r.PredecessorID,
-		OwnerRole:                   r.OwnerRole,
-		ApproverRole:                r.ApproverRole,
-		LinkedControlIds:            r.LinkedControlIds,
-		SourceAttribution:           r.SourceAttribution,
-		CreatedBy:                   r.CreatedBy,
-		SubmittedAt:                 r.SubmittedAt,
-		SubmittedBy:                 r.SubmittedBy,
-		ApprovedAt:                  r.ApprovedAt,
-		ApprovedBy:                  r.ApprovedBy,
-		PublishedAt:                 r.PublishedAt,
-		PublishedBy:                 r.PublishedBy,
-		SupersededAt:                r.SupersededAt,
-	})
+	// The chain row mirrors dbx.Policy verbatim; conversion is a direct
+	// type cast since the field set is identical.
+	return policyFromRow(dbx.Policy(r))
 }
 
 func uuidsToPg(us []uuid.UUID) []pgtype.UUID {
