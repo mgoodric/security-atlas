@@ -38,6 +38,9 @@ type Querier interface {
 	// "the approval was for THIS text, not the current text" (ADR-0001 §positive).
 	// Optional approval-evidence file URL + hash are passed by the handler.
 	ApproveFrameworkScope(ctx context.Context, arg ApproveFrameworkScopeParams) (FrameworkScope, error)
+	// Transition: under_review -> approved. Requires IsApprover at handler
+	// (AC-4). The DB only guards the prior-state.
+	ApprovePolicy(ctx context.Context, arg ApprovePolicyParams) (Policy, error)
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
 	CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
@@ -109,6 +112,19 @@ type Querier interface {
 	// (team rolls up to org rolls up to company); the DB lets any valid level
 	// combination through so partial-load / migration paths still work.
 	CreateOrgUnit(ctx context.Context, arg CreateOrgUnitParams) (OrgUnit, error)
+	// Slice 022 — policy library queries.
+	//
+	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
+	// defense-in-depth layer and the WHERE clauses are the primary correctness
+	// guarantee. The state machine
+	//   draft -> under_review -> approved -> published -> superseded
+	// is enforced by per-transition UPDATEs that include `WHERE status = '...'`
+	// as the prior-state guard; zero affected rows means the transition was
+	// attempted from the wrong state (the application probes after to
+	// disambiguate ErrNotFound vs ErrWrongState, matching slice 021's pattern).
+	// Publish is a two-step operation (supersede prior + insert new); the
+	// application wraps both queries in a single tx so the chain is atomic.
+	CreatePolicy(ctx context.Context, arg CreatePolicyParams) (Policy, error)
 	// Slice 026 — sample-pull primitives.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -248,6 +264,7 @@ type Querier interface {
 	GetOidcIdpConfigByName(ctx context.Context, arg GetOidcIdpConfigByNameParams) (OidcIdpConfig, error)
 	GetOrgThemeByID(ctx context.Context, id pgtype.UUID) (OrgTheme, error)
 	GetOrgUnitByID(ctx context.Context, arg GetOrgUnitByIDParams) (OrgUnit, error)
+	GetPolicyByID(ctx context.Context, arg GetPolicyByIDParams) (Policy, error)
 	GetPopulationByID(ctx context.Context, arg GetPopulationByIDParams) (Population, error)
 	// Lookup an existing parent risk by the sha256 idempotency key stored on
 	// inherent_score. Used by slice 053's POST /v1/risks/aggregate to satisfy
@@ -318,6 +335,12 @@ type Querier interface {
 	// surface (no UpdateEvidenceRecord, no DeleteEvidenceRecord exists).
 	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
 	InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error)
+	// Part 2 of the two-step Publish for SECOND-and-later versions: clones
+	// the approved row's content into a NEW row with status='published',
+	// predecessor_id pointing at the just-superseded prior. Called inside
+	// the same tx as SupersedePolicyAtPublish so the version chain stays
+	// atomic. The caller supplies the new row's id and version string.
+	InsertPublishedPolicy(ctx context.Context, arg InsertPublishedPolicyParams) (Policy, error)
 	// Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
 	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
@@ -471,6 +494,14 @@ type Querier interface {
 	// (testability) and timezone semantics (vendor reviews are date-granular,
 	// not timestamp-granular).
 	ListOverdueVendors(ctx context.Context, arg ListOverdueVendorsParams) ([]Vendor, error)
+	// Returns every policy for the tenant, newest first. Handler applies
+	// status filter in-memory (cardinality is small per canvas v1 scope).
+	ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Policy, error)
+	// Returns the version chain for a policy id by walking predecessor_id.
+	// Recursive CTE keeps the query inside Postgres rather than client-side
+	// traversal. Returns oldest-first so the chain reads naturally
+	// (predecessor -> successor).
+	ListPolicyVersionChain(ctx context.Context, arg ListPolicyVersionChainParams) ([]ListPolicyVersionChainRow, error)
 	// The deterministic ordering by id is load-bearing for AC-2: the sampler
 	// runs Fisher-Yates over THIS ordered slice, so the order must be stable
 	// across calls. id is the primary key (UUID); the tie-breaker is unused
@@ -552,6 +583,10 @@ type Querier interface {
 	// The CTE is bounded by the tenant_id predicate on every row, so it can
 	// never walk into another tenant's chain even with RLS off.
 	ParentChainIDs(ctx context.Context, arg ParentChainIDsParams) ([]pgtype.UUID, error)
+	// One-shot publish of an approved row that has NO predecessor (the very
+	// first version). Sets status -> published, populates effective_date,
+	// published_at, published_by. Predecessor_id stays NULL.
+	PublishApprovedPolicy(ctx context.Context, arg PublishApprovedPolicyParams) (Policy, error)
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
 	// Set the predecessor's retirement deadline on rotation. After retires_at the
@@ -562,6 +597,15 @@ type Querier interface {
 	// AC-6: draft -> review. Guarded so callers can never re-submit an already
 	// under-review row by accident (would still be valid but masks bugs).
 	SubmitFrameworkScope(ctx context.Context, arg SubmitFrameworkScopeParams) (FrameworkScope, error)
+	// Transition: draft -> under_review. Operator action; no role gate.
+	SubmitPolicyForReview(ctx context.Context, arg SubmitPolicyForReviewParams) (Policy, error)
+	// Part 1 of the two-step Publish: marks the prior 'published' row as
+	// 'superseded'. Used inside the same transaction as InsertPublishedPolicy
+	// so the chain transition is atomic. Returns the updated prior row so the
+	// handler can audit who superseded it. Only matches when the row is
+	// currently 'published' (defense-in-depth -- a chain can't supersede a
+	// draft).
+	SupersedePolicyAtPublish(ctx context.Context, arg SupersedePolicyAtPublishParams) (Policy, error)
 	// AC-8: in the same transaction as ActivateFrameworkScope, transition the
 	// previously-activated row (if any) to `superseded`, point its
 	// superseded_by at the new row, stamp superseded_at = now(). Skips the

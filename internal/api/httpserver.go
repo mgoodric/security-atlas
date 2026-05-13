@@ -22,6 +22,7 @@ import (
 	exceptionsapi "github.com/mgoodric/security-atlas/internal/api/exceptions"
 	fwscopesapi "github.com/mgoodric/security-atlas/internal/api/frameworkscopes"
 	orgunitsapi "github.com/mgoodric/security-atlas/internal/api/orgunits"
+	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
@@ -36,6 +37,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
+	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/vendor"
@@ -233,6 +235,20 @@ func (s *Server) httpHandler() http.Handler {
 	root.Patch("/v1/exceptions/{id}/approve", exceptionsH.Approve)
 	root.Patch("/v1/exceptions/{id}/deny", exceptionsH.Deny)
 	root.Patch("/v1/exceptions/{id}/activate", exceptionsH.Activate)
+	// Slice 022: policy library. Routes appended per the parallel-batch
+	// convention (chi rejects two Mounts at "/"). Sub-resource transitions
+	// (submit/approve/publish) are declared before /{id} so chi's
+	// declaration-order match keeps the literal-segment routes first
+	// within the same method. Approve + Publish enforce IsApprover at the
+	// handler (slice 034 credential flag).
+	policiesH := policiesapi.New(policy.NewStore(s.dbPool))
+	root.Post("/v1/policies", policiesH.CreatePolicy)
+	root.Get("/v1/policies", policiesH.ListPolicies)
+	root.Patch("/v1/policies/{id}/submit", policiesH.Submit)
+	root.Patch("/v1/policies/{id}/approve", policiesH.Approve)
+	root.Post("/v1/policies/{id}/publish", policiesH.Publish)
+	root.Get("/v1/policies/{id}/pdf", policiesH.PDF)
+	root.Get("/v1/policies/{id}", policiesH.GetPolicy)
 	// Slice 034: admin credentials HTTP API + auth routes. Routes append
 	// per the parallel-batch convention. Admin-credential routes require
 	// the bearer auth middleware (admin gate inside the handler). The

@@ -179,6 +179,88 @@ found"` (existence-leak prevention — never says which id was foreign
   **#9** (manual aggregation is a peer of rule-driven, distinguished
   only by `rule_id IS NULL`).
 
+- **Slice 022 — Policy library + version chain + 5 stock policies + PDF
+  render.** Graduates the `policies` placeholder table (slice 002) into
+  its v1 production shape per canvas §2.6 / CONTEXT.md "Policy (slice
+  022)". HITL pre-merge gate: agent ships machinery + drafted 5 stock
+  policies; orchestrator + user spot-check the policy bodies before
+  squash-merge (see `docs/audit-log/stock-policies-review.md`). Six
+  pieces land: (1) **Migration `_016_policies`** — ALTERs the slice-002
+  table to add `predecessor_id` (self-FK composite `(tenant_id,
+predecessor_id) → (tenant_id, id)` so version chains cannot span
+  tenants), `owner_role` / `approver_role` (replacing the unused
+  slice-002 `owner` / `approver` text), `linked_control_ids UUID[]`,
+  `source_attribution` (`community_draft` | `tenant_authored` |
+  `vendor_provided`), `submitted_at` / `submitted_by` / `approved_at` /
+  `approved_by` / `published_at` / `published_by` / `superseded_at`
+  workflow timestamps + actors, `created_by`. Reshapes `version`
+  INTEGER → TEXT (operator-supplied semver, no auto-bump), `status`
+  enum → TEXT + CHECK (room to add states without TYPE ALTER), drops
+  legacy `owner`/`approver`, renames
+  `acknowledgment_required_role` → `acknowledgment_required_roles`.
+  Replaces the single `tenant_isolation` policy with the four-policy
+  RLS split (`tenant_read` SELECT + `tenant_write` INSERT WITH CHECK +
+  `tenant_update` UPDATE USING + WITH CHECK + `tenant_delete` DELETE)
+  established by slices 011/017/018/021/036, all under FORCE ROW LEVEL
+  SECURITY. Composite UNIQUE `(tenant_id, id)` enables the cross-
+  tenant-safe self-FK target. Partial UNIQUE
+  `policies_predecessor_unique_when_set` enforces linear version chains
+  (a `predecessor_id` is referenced by at most one successor). CHECK
+  constraint `policies_effective_date_set_when_published` requires
+  `effective_date` populated for `published` / `superseded` rows and
+  NULL for `draft` / `under_review` / `approved`. (2) **State machine
+  in `internal/policy`** — five states `draft → under_review →
+approved → published → superseded` per canvas §2.6. Every Publish
+  creates a NEW versioned row referencing its predecessor; for
+  second-and-later publishes the operation is two-step within a single
+  tx (supersede prior + insert new with `predecessor_id` set). The
+  approver role gate (`cred.IsApprover || cred.IsAdmin`) is enforced
+  at the handler on both `under_review → approved` AND
+  `approved → published` — publish is gated because it creates an
+  audit-binding artifact (defense in depth). AC-7 orphan-policy
+  warning surfaces on every read response when
+  `len(linked_control_ids) == 0`; orphan-publish is blocked at the
+  handler with 409 (anti-criterion P0: "Does NOT permit publish
+  without linked controls"). (3) **HTTP API** — 7 routes under `/v1/`
+  (`POST /v1/policies`, `GET /v1/policies`, `GET /v1/policies/{id}`
+  with optional `?versions=true` for chain traversal,
+  `PATCH /v1/policies/{id}/submit`, `PATCH /v1/policies/{id}/approve`,
+  `POST /v1/policies/{id}/publish`, `GET /v1/policies/{id}/pdf`).
+  Tenancy via `authctx.CredentialFromContext` (slice 033 invariant —
+  handlers do NOT call `tenancy.WithTenant`). (4) **PDF render via
+  chromedp** — real headless Chrome PrintToPDF (not a stub); the
+  integration test asserts the leading `%PDF-` magic bytes. Markdown
+  → HTML conversion is stdlib-only (no goldmark dependency in v1; the
+  stock policies use simple headings + paragraphs + lists). When
+  Chrome is unavailable on the host the renderer returns
+  `ErrChromeUnavailable` and the handler responds 503 so operators can
+  run the platform without Chrome installed. chromedp is the slice's
+  one allowed spine touch (added to `go.mod`). (5) **5 stock policy
+  markdown files** under `policies/stock/`:
+  `information-security-policy.md`, `access-control-policy.md`,
+  `vendor-management-policy.md`, `incident-response-plan.md`,
+  `change-management-policy.md` — each ships as a DRAFT
+  community_draft body with YAML frontmatter declaring `title`,
+  `version`, `owner_role`, `approver_role`, `linked_control_ids` (≥3
+  SCF anchor codes each), `acknowledgment_required_roles`,
+  `source_attribution: community_draft`. Anti-pattern explicitly
+  rejected (constitutional principle 1.6: "policy template libraries
+  dressed as a feature -- 5 high-signal templates, not 50
+  placeholders"). The CLI seeder validates that the directory contains
+  exactly 5 markdown files and rejects any other count. (6) **CLI
+  `atlas-cli policy seed-stock`** — loads `policies/stock/*.md`,
+  resolves SCF anchor codes to control UUIDs via the slice-006
+  `controls.scf_id` lookup (DISTINCT ON), and INSERTs as draft rows
+  under a supplied tenant. Mirrors slice-007's `catalog import-soc2`
+  shape. Missing anchors are reported in the seed Report; the
+  resulting policy may surface the `orphan_policy` warning on read
+  until slice 010 (SOC 2 control kit) lands. **HITL audit-log stub**
+  at `docs/audit-log/stock-policies-review.md` (AC-6) — same shape as
+  slice 007's `soc2-mapping-review.md`. Pre-populated with the review
+  priority order (one section per policy) and SCF-anchor verification
+  rubric; reviewer name + per-policy decisions + sign-off blocks left
+  unfilled for the pre-merge HITL gate.
+
 - **Slice 052 — Schema + migrations for risk hierarchy, theme taxonomy,
   and Decision Log.** Pure-schema slice that lays foundations for slices
   053 (theme tagging + manual aggregation API), 054 (aggregation-rules
