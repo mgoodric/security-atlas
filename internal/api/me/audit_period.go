@@ -131,7 +131,9 @@ func (h *Handler) AuditPeriods(w http.ResponseWriter, r *http.Request) {
 
 // ----- helpers -----
 
-func (h *Handler) authnContext(r *http.Request) (context.Context, credstore.Credential, bool) {
+// authnContext extracts the credential + tenant from the request
+// context. Shared by every handler in this package.
+func authnContext(r *http.Request) (context.Context, credstore.Credential, bool) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok || cred.TenantID == "" {
 		return nil, credstore.Credential{}, false
@@ -140,6 +142,13 @@ func (h *Handler) authnContext(r *http.Request) (context.Context, credstore.Cred
 		return nil, credstore.Credential{}, false
 	}
 	return r.Context(), cred, true
+}
+
+// methodAuthnContext is kept as a method form for handlers that were
+// originally written against `h.authnContext` (slice 025). Internally
+// it delegates to the package-level authnContext.
+func (h *Handler) authnContext(r *http.Request) (context.Context, credstore.Credential, bool) {
+	return authnContext(r)
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {

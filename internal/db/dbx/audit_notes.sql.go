@@ -52,13 +52,13 @@ const createAuditNote = `-- name: CreateAuditNote :one
 
 INSERT INTO audit_notes (
     id, tenant_id, audit_period_id, author_user_id,
-    scope_type, scope_id, body, visibility, created_at, updated_at
+    scope_type, scope_id, body, visibility, parent_note_id, created_at, updated_at
 )
 VALUES (
     $1, $2, $3, $4,
-    $5, $6, $7, 'auditor_only', now(), now()
+    $5, $6, $7, 'auditor_only', NULL, now(), now()
 )
-RETURNING id, tenant_id, audit_period_id, author_user_id, scope_type, scope_id, body, visibility, created_at, updated_at
+RETURNING id, tenant_id, audit_period_id, author_user_id, scope_type, scope_id, body, visibility, created_at, updated_at, parent_note_id
 `
 
 type CreateAuditNoteParams struct {
@@ -72,6 +72,10 @@ type CreateAuditNoteParams struct {
 }
 
 // ===== audit_notes =====
+// Slice 025 legacy entry point. Pins visibility to 'auditor_only' and
+// parent_note_id to NULL so existing slice-025 callers keep their
+// private-write semantics with zero behavior change. Slice 029 adds the
+// richer CreateAuditNoteV2 below.
 func (q *Queries) CreateAuditNote(ctx context.Context, arg CreateAuditNoteParams) (AuditNote, error) {
 	row := q.db.QueryRow(ctx, createAuditNote,
 		arg.ID,
@@ -94,12 +98,82 @@ func (q *Queries) CreateAuditNote(ctx context.Context, arg CreateAuditNoteParams
 		&i.Visibility,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ParentNoteID,
+	)
+	return i, err
+}
+
+const createAuditNoteV2 = `-- name: CreateAuditNoteV2 :one
+INSERT INTO audit_notes (
+    id, tenant_id, audit_period_id, author_user_id,
+    scope_type, scope_id, body, visibility, parent_note_id, created_at, updated_at
+)
+VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7, $8, $9, now(), now()
+)
+RETURNING id, tenant_id, audit_period_id, author_user_id, scope_type, scope_id, body, visibility, created_at, updated_at, parent_note_id
+`
+
+type CreateAuditNoteV2Params struct {
+	ID            pgtype.UUID `json:"id"`
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID `json:"audit_period_id"`
+	AuthorUserID  string      `json:"author_user_id"`
+	ScopeType     string      `json:"scope_type"`
+	ScopeID       *string     `json:"scope_id"`
+	Body          string      `json:"body"`
+	Visibility    string      `json:"visibility"`
+	ParentNoteID  pgtype.UUID `json:"parent_note_id"`
+}
+
+// Slice 029 entry point. Accepts visibility ('auditor_only'|'shared') and
+// optional parent_note_id (for replies). The application layer validates
+// the parent's scope+period match before calling; this query trusts the
+// caller for that check.
+//
+// OSCAL preservation note (slice 030 contract): every field on this row
+// maps to an OSCAL assessment-results `observation` annotation:
+//   - id            -> observation.uuid
+//   - body          -> observation.description
+//   - author_user_id-> observation.collected
+//   - scope_type/id -> observation.subject (object-reference)
+//   - parent_note_id-> observation.related-observations
+//   - visibility    -> observation.props (custom prop ns="security-atlas")
+//
+// Slice 030 reads via ListThreadForScope; do not change the column set
+// without updating slice 030's mapper.
+func (q *Queries) CreateAuditNoteV2(ctx context.Context, arg CreateAuditNoteV2Params) (AuditNote, error) {
+	row := q.db.QueryRow(ctx, createAuditNoteV2,
+		arg.ID,
+		arg.TenantID,
+		arg.AuditPeriodID,
+		arg.AuthorUserID,
+		arg.ScopeType,
+		arg.ScopeID,
+		arg.Body,
+		arg.Visibility,
+		arg.ParentNoteID,
+	)
+	var i AuditNote
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AuditPeriodID,
+		&i.AuthorUserID,
+		&i.ScopeType,
+		&i.ScopeID,
+		&i.Body,
+		&i.Visibility,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentNoteID,
 	)
 	return i, err
 }
 
 const getAuditNoteByID = `-- name: GetAuditNoteByID :one
-SELECT id, tenant_id, audit_period_id, author_user_id, scope_type, scope_id, body, visibility, created_at, updated_at FROM audit_notes
+SELECT id, tenant_id, audit_period_id, author_user_id, scope_type, scope_id, body, visibility, created_at, updated_at, parent_note_id FROM audit_notes
 WHERE tenant_id = $1
   AND id        = $2
   AND author_user_id = $3
@@ -128,6 +202,44 @@ func (q *Queries) GetAuditNoteByID(ctx context.Context, arg GetAuditNoteByIDPara
 		&i.Visibility,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ParentNoteID,
+	)
+	return i, err
+}
+
+const getAuditNoteByIDForReader = `-- name: GetAuditNoteByIDForReader :one
+SELECT id, tenant_id, audit_period_id, author_user_id, scope_type, scope_id, body, visibility, created_at, updated_at, parent_note_id FROM audit_notes
+WHERE tenant_id = $1
+  AND id        = $2
+  AND (visibility = 'shared' OR author_user_id = $3)
+`
+
+type GetAuditNoteByIDForReaderParams struct {
+	TenantID     pgtype.UUID `json:"tenant_id"`
+	ID           pgtype.UUID `json:"id"`
+	AuthorUserID string      `json:"author_user_id"`
+}
+
+// Slice 029 visibility-aware get. Returns the row when:
+//   - shared visibility (any tenant member can read), OR
+//   - author_user_id = caller (private note belonging to caller)
+//
+// Cross-author auditor_only rows return zero rows -> ErrNotFound.
+func (q *Queries) GetAuditNoteByIDForReader(ctx context.Context, arg GetAuditNoteByIDForReaderParams) (AuditNote, error) {
+	row := q.db.QueryRow(ctx, getAuditNoteByIDForReader, arg.TenantID, arg.ID, arg.AuthorUserID)
+	var i AuditNote
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AuditPeriodID,
+		&i.AuthorUserID,
+		&i.ScopeType,
+		&i.ScopeID,
+		&i.Body,
+		&i.Visibility,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentNoteID,
 	)
 	return i, err
 }
@@ -169,7 +281,7 @@ func (q *Queries) GetAuditPeriodIDsForUser(ctx context.Context, arg GetAuditPeri
 }
 
 const listAuditNotesForAuthorAndPeriod = `-- name: ListAuditNotesForAuthorAndPeriod :many
-SELECT id, tenant_id, audit_period_id, author_user_id, scope_type, scope_id, body, visibility, created_at, updated_at FROM audit_notes
+SELECT id, tenant_id, audit_period_id, author_user_id, scope_type, scope_id, body, visibility, created_at, updated_at, parent_note_id FROM audit_notes
 WHERE tenant_id        = $1
   AND audit_period_id  = $2
   AND author_user_id   = $3
@@ -205,6 +317,7 @@ func (q *Queries) ListAuditNotesForAuthorAndPeriod(ctx context.Context, arg List
 			&i.Visibility,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ParentNoteID,
 		); err != nil {
 			return nil, err
 		}
@@ -281,6 +394,176 @@ func (q *Queries) ListAuditorAssignmentsForUser(ctx context.Context, arg ListAud
 			&i.PeriodCreatedAt,
 			&i.GrantedAt,
 			&i.GrantedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listThreadAuthorsForScope = `-- name: ListThreadAuthorsForScope :many
+SELECT DISTINCT n.author_user_id
+FROM audit_notes n
+WHERE n.tenant_id        = $1
+  AND n.audit_period_id  = $2
+  AND n.scope_type       = $3
+  AND COALESCE(n.scope_id, '') = $4::text
+`
+
+type ListThreadAuthorsForScopeParams struct {
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID `json:"audit_period_id"`
+	ScopeType     string      `json:"scope_type"`
+	Column4       string      `json:"column_4"`
+}
+
+// Slice 029 notification dispatch helper. Returns the distinct authors
+// of every note in the thread (shared OR private, all variants), used
+// to compute who should receive a notification when a new reply lands.
+// The notification dispatch layer filters out the new note's own
+// author to avoid self-notification.
+//
+// Parameters mirror ListThreadForScope: scope_id is passed as text
+// (empty string for "no scope_id"). COALESCE matches NULL to ”.
+func (q *Queries) ListThreadAuthorsForScope(ctx context.Context, arg ListThreadAuthorsForScopeParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listThreadAuthorsForScope,
+		arg.TenantID,
+		arg.AuditPeriodID,
+		arg.ScopeType,
+		arg.Column4,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var author_user_id string
+		if err := rows.Scan(&author_user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, author_user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listThreadForScope = `-- name: ListThreadForScope :many
+WITH RECURSIVE thread AS (
+    -- Root notes for the scope (parent_note_id IS NULL).
+    SELECT
+        n.id, n.tenant_id, n.audit_period_id, n.author_user_id,
+        n.scope_type, n.scope_id, n.body, n.visibility,
+        n.parent_note_id, n.created_at, n.updated_at,
+        0 AS depth,
+        ARRAY[n.created_at] AS sort_path
+    FROM audit_notes n
+    WHERE n.tenant_id        = $1
+      AND n.audit_period_id  = $2
+      AND n.scope_type       = $3
+      AND COALESCE(n.scope_id, '') = $4::text
+      AND n.parent_note_id IS NULL
+    UNION ALL
+    -- Recursive case: children of any included note.
+    SELECT
+        c.id, c.tenant_id, c.audit_period_id, c.author_user_id,
+        c.scope_type, c.scope_id, c.body, c.visibility,
+        c.parent_note_id, c.created_at, c.updated_at,
+        t.depth + 1,
+        t.sort_path || ARRAY[c.created_at]
+    FROM audit_notes c
+    JOIN thread t ON c.parent_note_id = t.id
+    WHERE c.tenant_id = $1
+      AND t.depth < 100
+)
+SELECT
+    id, tenant_id, audit_period_id, author_user_id,
+    scope_type, scope_id, body, visibility,
+    parent_note_id, created_at, updated_at,
+    depth
+FROM thread
+WHERE visibility = 'shared' OR author_user_id = $5::text
+ORDER BY sort_path ASC, id ASC
+`
+
+type ListThreadForScopeParams struct {
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID `json:"audit_period_id"`
+	ScopeType     string      `json:"scope_type"`
+	Column4       string      `json:"column_4"`
+	Column5       string      `json:"column_5"`
+}
+
+type ListThreadForScopeRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID        `json:"audit_period_id"`
+	AuthorUserID  string             `json:"author_user_id"`
+	ScopeType     string             `json:"scope_type"`
+	ScopeID       *string            `json:"scope_id"`
+	Body          string             `json:"body"`
+	Visibility    string             `json:"visibility"`
+	ParentNoteID  pgtype.UUID        `json:"parent_note_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	Depth         int32              `json:"depth"`
+}
+
+// Slice 029 thread retrieval. Returns every note in the scope's thread
+// visible to the caller (visibility filter applies row-by-row):
+//   - 'shared' notes: visible to all tenant members
+//   - 'auditor_only' notes: visible only to the author
+//
+// A recursive CTE walks from the root note(s) down through replies. The
+// depth guard caps recursion at 100 to prevent runaway traversal on a
+// pathological dataset.
+//
+// Parameters:
+//
+//	$1 tenant_id (uuid)
+//	$2 audit_period_id (uuid)
+//	$3 scope_type (text)
+//	$4 scope_id (text, NULL-equivalent passed as empty string '')
+//	$5 caller user_id (text, for visibility filter)
+//
+// The handler MUST pass an empty string for scope_id when the caller
+// meant "no scope_id" -- the WHERE clause coalesces NULL scope_id to
+// ” so the comparison matches. This avoids pgx single-placeholder
+// type-inference issues (SQLSTATE 42P08).
+func (q *Queries) ListThreadForScope(ctx context.Context, arg ListThreadForScopeParams) ([]ListThreadForScopeRow, error) {
+	rows, err := q.db.Query(ctx, listThreadForScope,
+		arg.TenantID,
+		arg.AuditPeriodID,
+		arg.ScopeType,
+		arg.Column4,
+		arg.Column5,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListThreadForScopeRow
+	for rows.Next() {
+		var i ListThreadForScopeRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.AuditPeriodID,
+			&i.AuthorUserID,
+			&i.ScopeType,
+			&i.ScopeID,
+			&i.Body,
+			&i.Visibility,
+			&i.ParentNoteID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Depth,
 		); err != nil {
 			return nil, err
 		}

@@ -43,6 +43,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit"
 	"github.com/mgoodric/security-atlas/internal/audit/auditor"
 	"github.com/mgoodric/security-atlas/internal/audit/notes"
+	"github.com/mgoodric/security-atlas/internal/audit/notifications"
 	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/control"
@@ -271,13 +272,31 @@ func (s *Server) httpHandler() http.Handler {
 	// two Mounts at "/", so individual routes register onto the root. The
 	// upstream OPA middleware (slice 035) is the primary gate; the handler
 	// performs defense-in-depth on UserID / scope_type / body shape.
-	auditNotesH := auditnotesapi.New(notes.NewStore(s.dbPool))
+	// Slice 029: Audit Hub threaded comments + in-app notifications.
+	// auditNotesH gets the notifications.Store so successful POSTs
+	// dispatch notifications to the distinct prior-thread authors on
+	// 'shared' notes. The notifications.Store is also wired into the
+	// /v1/me/notifications endpoints below.
+	notificationsStore := notifications.NewStore(s.dbPool)
+	auditNotesH := auditnotesapi.New(notes.NewStore(s.dbPool), notificationsStore, nil)
 	root.Post("/v1/audit-notes", auditNotesH.Create)
 	root.Get("/v1/audit-notes", auditNotesH.List)
+	// Thread retrieval is a literal sub-route declared BEFORE any
+	// potential /v1/audit-notes/{id} so chi's declaration-order match
+	// keeps it ahead of a bare-id route.
+	root.Get("/v1/audit-notes/thread", auditNotesH.Thread)
 	meAuditorStore := auditor.NewStore(s.dbPool)
 	meH := meapi.New(meAuditorStore)
 	root.Get("/v1/me/audit-period", meH.AuditPeriod)
 	root.Get("/v1/me/audit-periods", meH.AuditPeriods)
+	// Slice 029: /v1/me/notifications. Authenticated caller-scoped read
+	// + mark-read surface. Routes append per the parallel-batch
+	// convention (chi.Mux rejects two Mounts at "/", so individual
+	// routes register onto the root). PATCH path params are resolved
+	// via chi.URLParam in the handler.
+	meNotificationsH := meapi.NewNotifications(notificationsStore)
+	root.Get("/v1/me/notifications", meNotificationsH.List)
+	root.Patch("/v1/me/notifications/{id}/read", meNotificationsH.MarkRead)
 	// Slice 021: exception / waiver workflow. Routes appended per the
 	// parallel-batch convention -- chi.Mux rejects two Mounts at "/", so
 	// individual routes are registered onto the root. Literal-segment

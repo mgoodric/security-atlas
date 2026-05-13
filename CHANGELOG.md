@@ -93,6 +93,111 @@ resource_type, resource_id, summary jsonb)`. The view is NOT a
   PATCH) + AC-6 (unified audit log) from PARTIAL to PASS without any
   frontend changes — the wire shapes already match.
 
+- **Slice 029 — Audit Hub threaded comments + in-app notifications.**
+  Activates the canvas §8.5 auditor↔auditee shared-thread workflow that
+  slice 025 explicitly deferred. Two new migrations:
+
+  - `20260511000023_audit_notes_threading.sql` extends slice 025's
+    `audit_notes` table: adds `parent_note_id` self-FK (composite
+    `(tenant_id, parent_note_id) -> audit_notes(tenant_id, id)`,
+    `ON DELETE RESTRICT`), relaxes `audit_notes_visibility_chk` to
+    `visibility IN ('auditor_only','shared')`, extends
+    `audit_notes_scope_type_chk` with `'walkthrough'` (preserving the
+    slice-025 `period` value), and converts the table to **append-only
+    by construction** -- the slice-025 `tenant_update` + `tenant_delete`
+    RLS policies are dropped and `atlas_app` has `UPDATE, DELETE`
+    revoked. Same pattern as `feature_flag_audit_log` (slice 019),
+    `exception_audit_log` (slice 011), `evidence_audit_log` (slice 013),
+    `sample_audit_log` (slice 026), `decision_audit_log` (slice 035).
+    AC-6 (immutability) is now a schema invariant rather than a
+    convention.
+  - `20260511000024_notifications.sql` introduces the in-app
+    notifications spine: `notifications (id, tenant_id, recipient_user_id,
+type, payload jsonb, created_at, read_at)` with the standard four-policy
+    RLS split under FORCE, an index on
+    `(tenant_id, recipient_user_id, read_at NULLS FIRST, created_at DESC)`
+    that directly serves "unread first" pagination, and CHECK constraints
+    on non-empty recipient + type. Future slices may reuse this spine for
+    evidence-freshness alerts, policy-ack reminders, etc.
+
+  HTTP surface (existing slice-025 routes preserved; new routes appended
+  per the parallel-batch convention -- chi.Mux rejects two Mounts at
+  "/", so individual routes register onto the root):
+
+  - `POST /v1/audit-notes` (extended) -- now accepts `parent_note_id`
+    (UUID, optional) for replies and `visibility`
+    (`auditor_only | shared`, default `shared` per the Audit Hub
+    semantics). Body validation rejects unknown visibility (400) and
+    parent-mismatch (400). On a successful `shared` insert the handler
+    dispatches in-app notifications to the distinct prior-thread
+    authors (excluding self) via a best-effort post-commit call --
+    dispatch failures are logged but do not fail the request.
+  - `GET /v1/audit-notes/thread?audit_period_id=&scope_type=&scope_id=`
+    (new) -- returns the visible thread for a `(scope_type, scope_id,
+period)` anchor. Visibility filter applies row-by-row: `shared` notes
+    are visible to any tenant member; `auditor_only` notes are visible
+    only to their author. A recursive CTE walks roots -> replies with a
+    `depth < 100` guard. Tree shape is preserved via the `Depth` field
+    on each note in the flat ordered response.
+  - `GET /v1/me/notifications?limit=&offset=` (new) -- caller's
+    notifications, unread first then newest, with `unread_count` in the
+    same payload so the UI can render an unread badge without a second
+    roundtrip. Limit defaults to 50, capped at 200.
+  - `PATCH /v1/me/notifications/{id}/read` (new) -- mark-read.
+    Idempotent: re-marking preserves the original `read_at` via
+    `COALESCE`. Cross-recipient / cross-tenant / absent rows 404.
+
+  Visibility terminology decision (documented in PR): slice 029's doc
+  uses `auditor_private | shared`; slice 025 shipped `auditor_only`.
+  This slice keeps `auditor_only` (existing data, Go constants,
+  integration tests, OPA helpers all reference it) and adds `shared` to
+  the CHECK constraint. Renaming an existing column value would break
+  slice 025's tests and migration history; additive is cheaper. The
+  Audit Hub experience is unchanged.
+
+  Notification channel: in-app only via the new `notifications` table.
+  Slice 029 AC-3 ("email or in-app -- at least one channel") floor met;
+  email is deferred to a follow-up slice because it requires a separate
+  cross-cutting infrastructure decision (SMTP/SES, sender domain,
+  bounce handling, unsubscribes) outside the audit-record scope.
+
+  OSCAL preservation for slice 030: the `ListThreadForScope` recursive
+  CTE returns every field needed for the slice-030 `assessment-results`
+  `observation` mapper (uuid, description, collected timestamp,
+  subject as `scope_type/id`, related-observations via `parent_note_id`,
+  custom props for visibility). A comment in `internal/db/queries/audit_notes.sql`
+  pins the contract.
+
+  OPA Rego (mirrored to `internal/authz/rego_bundle/`):
+
+  - `auditor.rego` -- auditor write of `audit-notes` rule unchanged
+    (still period-gated). Adds an allow for `notifications` so the
+    auditor can hit `/v1/me/notifications`.
+  - `grc_engineer.rego` -- `grc_writable_resources` adds `audit-notes`
+    (auditees can now reply on shared threads) and `notifications`
+    (mark-read). The slice-025 `TestSlice025_GRCEngineerWriteAuditNotesDenied`
+    test is replaced with `TestSlice029_GRCEngineerWriteAuditNotesAllowed`,
+    documenting the deliberate policy change.
+
+  Integration tests (`internal/audit/notes/integration_slice029_test.go`,
+  behind the `integration` build tag):
+
+  - AC-1: `TestSlice029_CreateOnEachScope_WithVisibility` (8 cases:
+    control + sample + walkthrough + finding × {auditor_only, shared}),
+    `TestSlice029_RejectsInvalidVisibility`, `TestSlice029_WalkthroughScopeAllowed`.
+  - AC-2: `TestSlice029_RepliesThreadToParent`,
+    `TestSlice029_ReplyToWrongScopeRejected`.
+  - AC-3: `TestSlice029_NotificationDispatchedOnReply`,
+    `TestSlice029_NotificationNotDispatchedForSelfReply`.
+  - AC-4: `TestSlice029_VisibilityRespected`,
+    `TestSlice029_AuditeeCannotReplyToPrivateNote`.
+  - AC-5: `TestSlice029_ListThreadForScope_ProducesOSCALReadShape`.
+  - AC-6: `TestSlice029_AppendOnlyAtDBLayer`,
+    `TestSlice029_DeleteRejectedAtDBLayer`.
+
+  Slice 025's integration-test cleanup is extended to also clean
+  `notifications` before `audit_notes` so reruns don't accumulate.
+
 - **Slice 025 — Auditor role + scoped read-only access.** Activates the
   `auditor` RBAC role that slice 035 stubbed. Two new tables under
   migration `20260511000021_audit_notes.sql`:

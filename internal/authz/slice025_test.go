@@ -190,9 +190,18 @@ func TestSlice025_GRCEngineerReadAuditNotesAllowedButFiltered(t *testing.T) {
 	}
 }
 
-// P0-2: grc_engineer cannot WRITE audit-notes. The grc_writable_resources
-// set does not include "audit-notes"; default-deny on write.
-func TestSlice025_GRCEngineerWriteAuditNotesDenied(t *testing.T) {
+// Slice 029 (supersedes the slice-025 P0-2 denial for grc_engineer):
+// the GRC operator (auditee) is now ALLOWED to write audit-notes so
+// they can reply on the Audit Hub's shared threads. Visibility is
+// enforced at the handler + query layer:
+//   - Auditees should only post 'shared' notes (handler-validated).
+//   - Auditees reading audit-notes get only 'shared' rows + their
+//     own auditor_only rows; auditor_only rows belonging to auditors
+//     are filtered at the query layer (visibility = 'shared' OR
+//     author_user_id = caller).
+//
+// The slice-029 PR documents this deliberate policy change.
+func TestSlice029_GRCEngineerWriteAuditNotesAllowed(t *testing.T) {
 	t.Parallel()
 	in := authz.Input{
 		User: authz.UserInput{
@@ -209,8 +218,8 @@ func TestSlice025_GRCEngineerWriteAuditNotesDenied(t *testing.T) {
 		Request: authz.RequestInput{Method: "POST", Path: "/v1/audit-notes"},
 	}
 	d := decide(t, in)
-	if d.Allow {
-		t.Fatalf("expected deny on grc_engineer write audit-notes, got allow")
+	if !d.Allow {
+		t.Fatalf("expected allow on grc_engineer write audit-notes (slice 029 Audit Hub), got deny: %s", d.Reason)
 	}
 }
 

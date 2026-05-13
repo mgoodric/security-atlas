@@ -36,6 +36,16 @@ grc_writable_resources := {
     "org_units",
     "themes",
     "artifacts",
+    # Slice 029: the GRC operator (auditee) can reply on shared audit-note
+    # threads via POST /v1/audit-notes. Visibility is enforced at the
+    # handler + query layer:
+    #   - Auditees should only post 'shared' notes (handler-validated).
+    #   - Auditees reading 'audit-notes' get only 'shared' rows; the
+    #     auditor_only rows are filtered at the query layer
+    #     (visibility = 'shared' OR author_user_id = caller).
+    "audit-notes",
+    # Slice 029: /v1/me/notifications mark-read (PATCH /v1/me/notifications/{id}/read).
+    "notifications",
 }
 
 grc_actions := {

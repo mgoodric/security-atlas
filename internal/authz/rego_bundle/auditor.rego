@@ -69,11 +69,25 @@ allow if {
 # input.resource.attrs.audit_period_id by the handler before calling
 # Decide (slice 025 wiring); the rule denies cross-period writes
 # (P0-3 / AC-4).
+#
+# Slice 029 note: the auditor can write both 'auditor_only' (private)
+# and 'shared' (Audit Hub) notes. The period gate is the same for
+# both; visibility is enforced at the query layer + handler.
 allow if {
     has_role("auditor")
     input.action == "write"
     input.resource.type == "audit-notes"
     auditor_period_matches
+}
+
+# Slice 029: /v1/me/notifications -- self-info notification surface.
+# Any authenticated role (auditor included) can read their own
+# notifications. The query layer pins recipient_user_id = caller.UserID
+# so cross-recipient leakage is impossible. Mark-read (PATCH) is
+# allowed by the same rule.
+allow if {
+    has_role("auditor")
+    input.resource.type == "notifications"
 }
 
 # One write action carried over from the slice-035 stub: annotating

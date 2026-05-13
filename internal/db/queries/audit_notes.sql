@@ -54,13 +54,43 @@ ORDER BY audit_period_id;
 -- ===== audit_notes =====
 
 -- name: CreateAuditNote :one
+-- Slice 025 legacy entry point. Pins visibility to 'auditor_only' and
+-- parent_note_id to NULL so existing slice-025 callers keep their
+-- private-write semantics with zero behavior change. Slice 029 adds the
+-- richer CreateAuditNoteV2 below.
 INSERT INTO audit_notes (
     id, tenant_id, audit_period_id, author_user_id,
-    scope_type, scope_id, body, visibility, created_at, updated_at
+    scope_type, scope_id, body, visibility, parent_note_id, created_at, updated_at
 )
 VALUES (
     $1, $2, $3, $4,
-    $5, $6, $7, 'auditor_only', now(), now()
+    $5, $6, $7, 'auditor_only', NULL, now(), now()
+)
+RETURNING *;
+
+-- name: CreateAuditNoteV2 :one
+-- Slice 029 entry point. Accepts visibility ('auditor_only'|'shared') and
+-- optional parent_note_id (for replies). The application layer validates
+-- the parent's scope+period match before calling; this query trusts the
+-- caller for that check.
+--
+-- OSCAL preservation note (slice 030 contract): every field on this row
+-- maps to an OSCAL assessment-results `observation` annotation:
+--   - id            -> observation.uuid
+--   - body          -> observation.description
+--   - author_user_id-> observation.collected
+--   - scope_type/id -> observation.subject (object-reference)
+--   - parent_note_id-> observation.related-observations
+--   - visibility    -> observation.props (custom prop ns="security-atlas")
+-- Slice 030 reads via ListThreadForScope; do not change the column set
+-- without updating slice 030's mapper.
+INSERT INTO audit_notes (
+    id, tenant_id, audit_period_id, author_user_id,
+    scope_type, scope_id, body, visibility, parent_note_id, created_at, updated_at
+)
+VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7, $8, $9, now(), now()
 )
 RETURNING *;
 
@@ -73,6 +103,16 @@ WHERE tenant_id = $1
   AND id        = $2
   AND author_user_id = $3;
 
+-- name: GetAuditNoteByIDForReader :one
+-- Slice 029 visibility-aware get. Returns the row when:
+--   - shared visibility (any tenant member can read), OR
+--   - author_user_id = caller (private note belonging to caller)
+-- Cross-author auditor_only rows return zero rows -> ErrNotFound.
+SELECT * FROM audit_notes
+WHERE tenant_id = $1
+  AND id        = $2
+  AND (visibility = 'shared' OR author_user_id = $3);
+
 -- name: ListAuditNotesForAuthorAndPeriod :many
 -- Author-scoped list. Same author-only guarantee as GetAuditNoteByID --
 -- the WHERE clause pins author_user_id so cross-author reads return
@@ -82,3 +122,76 @@ WHERE tenant_id        = $1
   AND audit_period_id  = $2
   AND author_user_id   = $3
 ORDER BY created_at DESC, id ASC;
+
+-- name: ListThreadForScope :many
+-- Slice 029 thread retrieval. Returns every note in the scope's thread
+-- visible to the caller (visibility filter applies row-by-row):
+--   - 'shared' notes: visible to all tenant members
+--   - 'auditor_only' notes: visible only to the author
+--
+-- A recursive CTE walks from the root note(s) down through replies. The
+-- depth guard caps recursion at 100 to prevent runaway traversal on a
+-- pathological dataset.
+--
+-- Parameters:
+--   $1 tenant_id (uuid)
+--   $2 audit_period_id (uuid)
+--   $3 scope_type (text)
+--   $4 scope_id (text, NULL-equivalent passed as empty string '')
+--   $5 caller user_id (text, for visibility filter)
+--
+-- The handler MUST pass an empty string for scope_id when the caller
+-- meant "no scope_id" -- the WHERE clause coalesces NULL scope_id to
+-- '' so the comparison matches. This avoids pgx single-placeholder
+-- type-inference issues (SQLSTATE 42P08).
+WITH RECURSIVE thread AS (
+    -- Root notes for the scope (parent_note_id IS NULL).
+    SELECT
+        n.id, n.tenant_id, n.audit_period_id, n.author_user_id,
+        n.scope_type, n.scope_id, n.body, n.visibility,
+        n.parent_note_id, n.created_at, n.updated_at,
+        0 AS depth,
+        ARRAY[n.created_at] AS sort_path
+    FROM audit_notes n
+    WHERE n.tenant_id        = $1
+      AND n.audit_period_id  = $2
+      AND n.scope_type       = $3
+      AND COALESCE(n.scope_id, '') = $4::text
+      AND n.parent_note_id IS NULL
+    UNION ALL
+    -- Recursive case: children of any included note.
+    SELECT
+        c.id, c.tenant_id, c.audit_period_id, c.author_user_id,
+        c.scope_type, c.scope_id, c.body, c.visibility,
+        c.parent_note_id, c.created_at, c.updated_at,
+        t.depth + 1,
+        t.sort_path || ARRAY[c.created_at]
+    FROM audit_notes c
+    JOIN thread t ON c.parent_note_id = t.id
+    WHERE c.tenant_id = $1
+      AND t.depth < 100
+)
+SELECT
+    id, tenant_id, audit_period_id, author_user_id,
+    scope_type, scope_id, body, visibility,
+    parent_note_id, created_at, updated_at,
+    depth
+FROM thread
+WHERE visibility = 'shared' OR author_user_id = $5::text
+ORDER BY sort_path ASC, id ASC;
+
+-- name: ListThreadAuthorsForScope :many
+-- Slice 029 notification dispatch helper. Returns the distinct authors
+-- of every note in the thread (shared OR private, all variants), used
+-- to compute who should receive a notification when a new reply lands.
+-- The notification dispatch layer filters out the new note's own
+-- author to avoid self-notification.
+--
+-- Parameters mirror ListThreadForScope: scope_id is passed as text
+-- (empty string for "no scope_id"). COALESCE matches NULL to ''.
+SELECT DISTINCT n.author_user_id
+FROM audit_notes n
+WHERE n.tenant_id        = $1
+  AND n.audit_period_id  = $2
+  AND n.scope_type       = $3
+  AND COALESCE(n.scope_id, '') = $4::text;
