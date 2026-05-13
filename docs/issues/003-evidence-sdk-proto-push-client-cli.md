@@ -21,7 +21,7 @@ Define the gRPC contract for the Evidence SDK in `proto/evidence/v1/`: `IngestEv
 - [ ] AC-9: `security-atlas-cli credentials revoke --id=<key-id>` invalidates the key immediately; subsequent push attempts with the revoked key return 401
 - [ ] AC-10: `security-atlas-cli credentials list --tenant=<id>` lists active keys with id, scope, kinds, ttl, last-used-at (never returns the bearer token)
 
-**Note on AC-7–10:** these subcommands wrap admin endpoints implemented in slice 034 (which owns the `api_keys` table + CRUD). Per the D4 review decision, GUI for credential issuance is deferred to v1.x; CLI is the v1 surface (sufficient for solo Matt and CI pipelines).
+**Note on AC-7–10:** these subcommands wrap admin endpoints implemented in slice 034 (which owns the `api_keys` table + CRUD). Per the D4 review decision, GUI for credential issuance is deferred to v1.x; CLI is the v1 surface (sufficient for a solo operator and CI pipelines).
 
 ## Constitutional invariants honored
 

@@ -25,7 +25,7 @@ func TestValidateAttestationData_AcceptsConforming(t *testing.T) {
 			"count":    map[string]any{"type": "integer", "minimum": 0.0},
 		},
 	}
-	data := map[string]any{"reviewer": "matt", "count": float64(7)}
+	data := map[string]any{"reviewer": "sample-user", "count": float64(7)}
 	if err := ValidateAttestationData(schema, data); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

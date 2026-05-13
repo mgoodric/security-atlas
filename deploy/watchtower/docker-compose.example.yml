@@ -1,0 +1,99 @@
+# deploy/watchtower/docker-compose.example.yml
+#
+# Opt-in auto-update via Watchtower for security-atlas containers.
+#
+# Pattern: Watchtower runs alongside the platform and polls GHCR every
+# 24 hours. By default it touches NOTHING — only containers carrying the
+# explicit `com.centurylinklabs.watchtower.enable=true` label are
+# eligible for auto-update. This is the inverse of Watchtower's other
+# default mode (update-everything-unless-disabled), and we recommend it
+# because:
+#
+#   1. A new release of `atlas` may include a database migration; you
+#      want the option to run `atlas migrate up` manually before the
+#      container restarts.
+#   2. Connector containers can stay on a pinned tag while the platform
+#      itself auto-updates.
+#   3. Other containers on the same Docker host (your homelab Plex,
+#      whatever) are not collateral.
+#
+# How to verify an auto-update worked:
+#
+#   # before
+#   docker inspect security-atlas | jq '.[0].Image'
+#
+#   # ... wait for the next release tag + ~24h poll cycle ...
+#
+#   # after
+#   docker inspect security-atlas | jq '.[0].Image'
+#
+# Different SHA = update applied. Watchtower also logs each restart to
+# its own container logs (`docker logs watchtower`).
+#
+# This file is an example. Copy it to your deployment root, edit image
+# tags / mounts / env to match your environment, and `docker compose up
+# -d`.
+
+version: "3.8"
+
+services:
+  atlas:
+    # Pinning to `:latest` here means Watchtower will pull the latest
+    # tagged release every poll cycle. Pin to a specific minor (e.g.
+    # `:0.3`) if you want auto-updates within a minor but explicit
+    # opt-in for new minors.
+    image: ghcr.io/mgoodric/security-atlas:latest
+    container_name: security-atlas
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgres://atlas_app:CHANGE_ME@postgres:5432/security_atlas?sslmode=disable
+      ATLAS_LISTEN_ADDR: 0.0.0.0:8080
+    ports:
+      - "8080:8080"
+    labels:
+      # Opt this container IN to Watchtower auto-update.
+      com.centurylinklabs.watchtower.enable: "true"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: security-atlas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: CHANGE_ME
+      POSTGRES_DB: security_atlas
+    volumes:
+      - atlas-pg-data:/var/lib/postgresql/data
+    # NOTE: deliberately NOT labelled for Watchtower. Postgres major
+    # upgrades require a manual dump+restore; auto-update is wrong here.
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # --label-enable mode: only act on containers carrying the
+      # `com.centurylinklabs.watchtower.enable=true` label. Everything
+      # else is invisible to Watchtower.
+      WATCHTOWER_LABEL_ENABLE: "true"
+      # Poll every 86400s (24h). Override per your tolerance — shorter
+      # intervals trade bandwidth for responsiveness.
+      WATCHTOWER_POLL_INTERVAL: "86400"
+      # Clean up old image versions after a successful upgrade.
+      WATCHTOWER_CLEANUP: "true"
+      # Restart strategy: rolling restart so the platform isn't down
+      # for more than one container's startup time. Important for the
+      # solo-operator self-host story.
+      WATCHTOWER_ROLLING_RESTART: "true"
+      # Auth for private GHCR pulls. The platform repo is public, so
+      # this is optional — set if you also mirror private connector
+      # images to your own GHCR namespace.
+      # REPO_USER: ghcr-username
+      # REPO_PASS: ghcr-readonly-pat
+
+volumes:
+  atlas-pg-data:

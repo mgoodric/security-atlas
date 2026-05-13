@@ -6,7 +6,7 @@
 
 ## 10.1 MVP (Phase 1) — "Solo operator, one framework, real audit, board-ready"
 
-**Goal:** Matt — solo security leader at a 70-person security-product startup — installs security-atlas, runs his entire SOC 2 program from it, generates the quarterly board pack from it, and survives the audit. Setup-to-first-evidence in under 4 hours. No consulting hours. The single test of the v1 hypothesis.
+**Goal:** a solo security leader at a 50–150-person security-product startup installs security-atlas, runs their entire SOC 2 program from it, generates the quarterly board pack from it, and survives the audit. Setup-to-first-evidence in under 4 hours. No consulting hours. The single test of the v1 hypothesis.
 
 **Scope (deliberately tight):**
 
@@ -28,11 +28,11 @@
 
 **Deliberately deferred from MVP:** trust center, ClickHouse path, per-tenant plugin install, framework versions beyond SOC 2:2017, TPRM workflow beyond the lite module, training/phishing connector (use manual upload), AI assistance on policy text, GDPR-specific privacy module, HIPAA-specific covered-entity workflow.
 
-**The v1 success test is binary:** does Matt run his next SOC 2 audit out of security-atlas, generate his next board pack from it, and not reach for Vanta or a Google Sheet to fill a gap? If yes, v1 is done.
+**The v1 success test is binary:** can a solo security leader at a 50–150-person security-product startup run their next SOC 2 audit out of security-atlas, generate the next board pack from it, and not reach for Vanta or a Google Sheet to fill a gap? If yes, v1 is done.
 
 ## 10.2 Phase 2 — "The mapping engine pays off"
 
-- Add framework versions: ISO 27001:2022 (ISO 27001 is most likely Matt's next audit, prospect-driven), NIST CSF 2.0, PCI DSS v4.0, HIPAA Security Rule.
+- Add framework versions: ISO 27001:2022 (the typical next audit after SOC 2, prospect-driven), NIST CSF 2.0, PCI DSS v4.0, HIPAA Security Rule.
 - Crosswalk validation tooling (UI for reviewing STRM mappings, surfacing conflicts).
 - Coverage-strength visualization across frameworks.
 - Connector roster grows to ~25–30 (add Azure, GCP, Slack, Datadog, PagerDuty, Rippling/HRIS, Jamf/Intune, Cloudflare, GitLab, Snyk/Dependabot, Crowdstrike/SentinelOne).

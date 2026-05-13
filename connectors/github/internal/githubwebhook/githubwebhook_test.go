@@ -108,7 +108,7 @@ func TestHandler_AcceptsValidDelivery(t *testing.T) {
 	}
 	body := []byte(`{
 		"action": "edited",
-		"sender": {"login": "matt"},
+		"sender": {"login": "sample-user"},
 		"organization": {"login": "example"},
 		"repository": {"full_name": "example/web"}
 	}`)
@@ -141,7 +141,7 @@ func TestHandler_AcceptsValidDelivery(t *testing.T) {
 	if got[0].Action != "edited" {
 		t.Errorf("action = %q", got[0].Action)
 	}
-	if got[0].Actor != "matt" {
+	if got[0].Actor != "sample-user" {
 		t.Errorf("actor = %q", got[0].Actor)
 	}
 	if got[0].Org != "example" {

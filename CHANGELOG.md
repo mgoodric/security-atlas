@@ -13,6 +13,101 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 050 — Public release readiness + release automation.** Final
+  pre-flight slice before the maintainer flips the repository to public
+  visibility. **`gh repo edit --visibility public` is NOT executed by
+  this slice** (P0 anti-criterion) — the flip is a documented
+  maintainer-only action after merge. Touches the spine in four
+  concerns: (1) **License finalised** — `LICENSE` carries the full
+  Apache License Version 2.0 text with `Copyright 2026 Matt Goodrich
+and security-atlas contributors`, resolving open-question #3 (Apache
+  2.0 vs AGPL → Apache 2.0; permissive licensing is the canonical
+  instance of the "license that lets the platform be embedded in
+  commercial deployments" requirement from canvas §1.2, the same
+  requirement that disqualifies OpenGRC's CC BY-NC-SA). (2) **Public
+  docs landed** — `README.md` rewritten for a public audience with the
+  4-badge row at the top (License via shields.io · Build via GitHub
+  Actions · Coverage via Codecov · Latest release via shields.io); dev
+  setup moved to new `CONTRIBUTING.md` (Conventional Commits + DCO
+  sign-off requirement, no separate CLA); new `SECURITY.md` documents
+  the GitHub private-vulnerability-reporting disclosure channel;
+  `CODE_OF_CONDUCT.md` ships as a placeholder pointing at the
+  canonical Contributor Covenant v2.1 URL — see §8 for the AC-7
+  PARTIAL note. (3) **GitHub repo hardening** — Dependabot
+  (`gomod` / `npm` / `pip` / `docker` / `github-actions`, weekly,
+  grouped), CodeQL workflow (Go + TypeScript + Python; push + PR +
+  weekly), branch-protection ruleset committed as
+  `.github/branch-protection.json` (≥1 review · all CI checks required ·
+  linear history · conversation resolution · stale-approval dismissal ·
+  force-push blocked · direct-push blocked · branch-deletion blocked ·
+  push restricted to maintainer + release-please bot; signed-commit
+  enforcement deliberately OFF with rationale captured in the JSON's
+  `$rationale_required_signatures_off` field), issue templates
+  (`bug.yml` + `feature.yml`) and PR template. (4) **Release
+  automation** — `release-please` workflow (manifest mode; opens /
+  updates release PRs on every Conventional-Commit push to `main`;
+  **NEVER auto-merges** — every release requires human approval per
+  the AI-assist boundary in `CLAUDE.md`) plus a multi-arch container
+  publish workflow (`linux/amd64` + `linux/arm64` via QEMU +
+  `docker/build-push-action@v5`; pushes to
+  `ghcr.io/mgoodric/security-atlas` on release tag; SBOM + provenance
+  attestation included; `docker manifest inspect` asserts both
+  architectures present). **Watchtower self-host** — opt-in
+  label-based pattern at `deploy/watchtower/docker-compose.example.yml`
+  with the platform container labelled
+  `com.centurylinklabs.watchtower.enable=true` and Postgres
+  deliberately NOT labelled (major upgrades need dump+restore);
+  Unraid worked example in `docs/SELF_HOSTING.md`. **Open-question
+  resolutions ratified by maintainer 2026-05-13:** OQ #1 SCF
+  redistribution → do NOT bundle pre-built SCF data (users import
+  their own, consistent with slice 006); OQ #3 project license →
+  Apache 2.0; OQ #5 hosted offering vs OSS governance → defer the
+  call, ship public OSS now. **Sanitization sweep** verified — the
+  primary persona in `Plans/canvas/01-vision.md §1.4` and the v1
+  success test in `Plans/canvas/10-roadmap.md §10.1` use the generic
+  "solo security leader at a 50–150-person security-product startup"
+  phrasing; every remaining `grep -rIi "matt|mgoodric"` hit is
+  whitelisted with justification in `docs/RELEASE_READINESS.md §3`
+  (LICENSE author field · Go module path · buf module name ·
+  goreleaser Homebrew tap owner · `docs/audit-log/` reviewer
+  attribution · `docs/issues/_STATUS.md` append-only drift entries ·
+  CHANGELOG historical entries). **AC-7 PARTIAL** — the full
+  Contributor Covenant v2.1 text reliably trips the API
+  content-moderation filter on agent output; the placeholder satisfies
+  the spirit of AC-7 (project HAS a CoC, declared, with the canonical
+  reference) and the maintainer inlines the full text post-merge via
+  one curl command documented in `docs/RELEASE_READINESS.md §7`.
+  **CI quota constraint** known at PR-open time: GitHub Actions
+  private-repo minutes are exhausted, so the slice-050 PR's CI checks
+  fail with workflow-level "no runner" errors. The maintainer merges
+  with red CI (admin bypass, single-PR exception — same pattern as
+  bootstrap), then flips the repo to public, which immediately
+  enables unlimited Actions minutes; branch protection enforcement
+  begins on the NEXT PR. **Constitutional invariants honoured:**
+  AI-assist boundary unchanged (release-please opens PRs but never
+  auto-merges; container-publish runs only on `release: published`
+  events triggered by human-merged release PRs); licensing
+  constraints unchanged (no CCM / CAIQ / SIG / OpenGRC content
+  bundled; SCF bundling deferred per OQ #1 resolution). Files
+  touched (22): `LICENSE` (unchanged — already finalized by
+  prior agent's surviving commit), `README.md`, `CONTRIBUTING.md` (NEW),
+  `SECURITY.md` (NEW), `CODE_OF_CONDUCT.md` (NEW — placeholder),
+  `CHANGELOG.md`, `CONTEXT.md` (unchanged — license-posture entry already
+  on branch from prior agent), `Plans/canvas/01-vision.md` (§1.4 anchor
+  note added), `Plans/canvas/10-roadmap.md` (§10.1 persona phrasing
+  reinforced), `.github/ISSUE_TEMPLATE/bug.yml` (NEW),
+  `.github/ISSUE_TEMPLATE/feature.yml` (NEW),
+  `.github/PULL_REQUEST_TEMPLATE.md` (NEW), `.github/dependabot.yml`
+  (NEW), `.github/branch-protection.json` (NEW),
+  `.github/workflows/codeql.yml` (NEW),
+  `.github/workflows/release-please.yml` (NEW),
+  `.github/workflows/container-publish.yml` (NEW),
+  `release-please-config.json` (NEW),
+  `.release-please-manifest.json` (NEW),
+  `deploy/watchtower/docker-compose.example.yml` (NEW),
+  `docs/SELF_HOSTING.md` (NEW), `docs/RELEASE_READINESS.md` (NEW),
+  `docs/issues/_STATUS.md` (in-review drift entry).
+
 - **Slice 053 — Risk theme tagging + manual aggregation API + org_units
   CRUD.** Wires the HTTP + Go surface on top of slice 052's freshly-merged
   schema (canvas §6.4–§6.6). **No new migration** — pure Go + sqlc on

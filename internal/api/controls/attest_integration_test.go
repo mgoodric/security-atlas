@@ -457,7 +457,7 @@ func TestAttest_HappyPath_NoArtifact(t *testing.T) {
 	body := map[string]any{
 		"statement": "I attest the quarterly access review was completed on time.",
 		"attestation_data": map[string]any{
-			"reviewer": "matt@example.com",
+			"reviewer": "sample-user@example.com",
 			"notes":    "no exceptions found",
 		},
 	}
@@ -557,7 +557,7 @@ func TestAttest_HappyPath_WithArtifact(t *testing.T) {
 		"statement":   "I attest with attached signed PDF.",
 		"artifact_id": artifactID,
 		"attestation_data": map[string]any{
-			"reviewer": "matt@example.com",
+			"reviewer": "sample-user@example.com",
 		},
 	}
 	status, raw := httpJSON(t, s, http.MethodPost,
@@ -582,7 +582,7 @@ func TestAttest_Rejects_WhenCallerLacksOwnerRole(t *testing.T) {
 	body := map[string]any{
 		"statement": "I shouldn't be allowed to do this.",
 		"attestation_data": map[string]any{
-			"reviewer": "matt@example.com",
+			"reviewer": "sample-user@example.com",
 		},
 	}
 	status, raw := httpJSON(t, s, http.MethodPost,
@@ -624,7 +624,7 @@ func TestAttest_Idempotency_Dedup(t *testing.T) {
 		"idempotency_key": "manual-test-" + uuid.NewString()[:8],
 		"observed_at":     time.Now().UTC().Add(-2 * time.Minute).Format(time.RFC3339Nano),
 		"attestation_data": map[string]any{
-			"reviewer": "matt@example.com",
+			"reviewer": "sample-user@example.com",
 		},
 	}
 	status1, raw1 := httpJSON(t, s, http.MethodPost,

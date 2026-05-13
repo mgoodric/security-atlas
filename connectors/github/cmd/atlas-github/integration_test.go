@@ -242,7 +242,7 @@ func TestWebhook_AcceptsSignedDeliveryAndPushesAuditEvent(t *testing.T) {
 
 	body := []byte(`{
 		"action": "edited",
-		"sender": {"login": "matt"},
+		"sender": {"login": "sample-user"},
 		"organization": {"login": "example"},
 		"repository": {"full_name": "example/web"}
 	}`)
@@ -270,7 +270,7 @@ func TestWebhook_DedupesByDeliveryID(t *testing.T) {
 		IdempotencyKey: "72d3162e-cc78-11e3-81ab-4c9367dc0958",
 		EventType:      "repository",
 		Action:         "edited",
-		Actor:          "matt",
+		Actor:          "sample-user",
 		Org:            "example",
 		Repo:           "example/web",
 		DeliveryID:     "72d3162e-cc78-11e3-81ab-4c9367dc0958",

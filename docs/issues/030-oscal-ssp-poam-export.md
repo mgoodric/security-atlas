@@ -6,7 +6,7 @@
 
 ## Narrative
 
-Implement the OSCAL export pipeline that produces the audit-handoff bundle: System Security Plan (SSP), Assessment Plan + Assessment Results (AP/AR), and Plan of Action and Milestones (POA&M). The data comes from across the platform: org profile + scope cells + applicable controls + control implementations + linked policies + sample populations + walkthroughs + audit comments + findings. Use IBM `compliance-trestle` (Python, bridged via gRPC) for OSCAL JSON v1.1.x serialization. Export bundles are cosign-signed for tamper detection at handoff. HITL: an auditor partner should validate the first generated SSP before merge to confirm it imports cleanly into their tooling. The slice delivers value because Matt's SOC 2 audit handoff is now a single signed bundle — the binary v1 success test depends on this.
+Implement the OSCAL export pipeline that produces the audit-handoff bundle: System Security Plan (SSP), Assessment Plan + Assessment Results (AP/AR), and Plan of Action and Milestones (POA&M). The data comes from across the platform: org profile + scope cells + applicable controls + control implementations + linked policies + sample populations + walkthroughs + audit comments + findings. Use IBM `compliance-trestle` (Python, bridged via gRPC) for OSCAL JSON v1.1.x serialization. Export bundles are cosign-signed for tamper detection at handoff. HITL: an auditor partner should validate the first generated SSP before merge to confirm it imports cleanly into their tooling. The slice delivers value because the primary persona's SOC 2 audit handoff is now a single signed bundle — the binary v1 success test depends on this.
 
 ## Acceptance criteria
 

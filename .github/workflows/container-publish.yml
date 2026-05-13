@@ -1,0 +1,102 @@
+name: container-publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to publish (defaults to release tag on release events)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: container-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-publish:
+    name: Build + publish multi-arch image (${{ matrix.image.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: atlas
+            dockerfile: deploy/docker/atlas.Dockerfile
+            target: ghcr.io/mgoodric/security-atlas
+          - name: atlas-cli
+            dockerfile: deploy/docker/atlas-cli.Dockerfile
+            target: ghcr.io/mgoodric/security-atlas-cli
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (multi-arch emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.image.target }}
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.image.name }}
+            org.opencontainers.image.source=https://github.com/mgoodric/security-atlas
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.description=security-atlas ${{ matrix.image.name }} — open-source GRC platform
+
+      - name: Build + push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.image.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+          provenance: true
+          sbom: true
+
+      - name: Verify multi-arch manifest
+        run: |
+          PRIMARY_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
+          echo "Inspecting ${PRIMARY_TAG}"
+          docker manifest inspect "${PRIMARY_TAG}" | tee /tmp/manifest.json
+          # AC-13: confirm both linux/amd64 and linux/arm64 are present.
+          jq -e '
+            [.manifests[].platform | "\(.os)/\(.architecture)"]
+            | (contains(["linux/amd64"]) and contains(["linux/arm64"]))
+          ' /tmp/manifest.json
+
+      - name: Attest provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ matrix.image.target }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
