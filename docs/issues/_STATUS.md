@@ -9,8 +9,8 @@
 
 Slice 035 (RBAC roles (5) + ABAC via OPA embedded + decision audit log) implementation complete; PR opened. Status flip rides this PR branch per the post-batch-13 branch-protection-via-PR pattern (main is protected, status flips do NOT push direct to main).
 
-| Row | Transition                  | Evidence                                                                                                                                              |
-| --- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Row | Transition                  | Evidence                                                                                                                                               |
+| --- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 035 | `in-progress` → `in-review` | gh#47 opened 2026-05-13 · 6/7 ACs PASS · AC-7 PENDING-HITL (pair-review 5 roles + 10 Rego pre-merge per `docs/audit-log/authz-review.md`) · slot \_018 |
 
 HITL gate: orchestrator + user pair-review the 5-role enum + 10 seed Rego policies before squash-merge. Reviewer walks the role × endpoint × expected-outcome matrix in the PR body and signs `docs/audit-log/authz-review.md`.
