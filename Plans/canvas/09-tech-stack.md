@@ -44,6 +44,12 @@ That's it for v1. No "plugin everything" surface. Plugins are installed per-depl
 
 OIDC because every credible IdP speaks it; we ship as a relying party only, never as an IdP. RBAC for coarse roles (`admin`, `grc_engineer`, `control_owner`, `auditor`, `viewer`). ABAC for the fine cuts that matter (`auditor X can only see scope cells within audit_period Y for client Z`). Authorization decisions live in OPA — same engine that evaluates control policies, so the security model is auditable in the same substrate as the controls.
 
+## 9.6 CI/CD
+
+**GitHub Actions; `dorny/paths-filter@v3` is the in-workflow gate for docs-only PRs (slice 061).**
+
+A `changes` job runs first in `ci.yml`, sets a `code` boolean, and each expensive job (Go build+test, Go integration RLS, Go lint, Frontend, Python ruff, Proto) is paired with a same-named stub sibling so branch-protection required-check names always resolve. Security and secret-scan jobs (CodeQL, GitGuardian, pre-commit) are always-on and never gated by paths. See [`docs/ci/PATH_FILTERING.md`](../../docs/ci/PATH_FILTERING.md) for the rationale and the `paths-ignore:`-at-workflow-level gotcha.
+
 ---
 
 [← Canvas index](../ARCHITECTURE_CANVAS.md) · [← 8. Audit Workflow](./08-audit-workflow.md) · **Next:** [10. Roadmap →](./10-roadmap.md)

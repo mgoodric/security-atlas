@@ -13,6 +13,27 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 061 — CI path-based filtering for docs-only PRs.** Adds a
+  `changes` job to `.github/workflows/ci.yml` using
+  `dorny/paths-filter@v3` that classifies each PR as `code: true` /
+  `code: false`. The six expensive jobs (`Go · build + test`, `Go ·
+integration (Postgres RLS)`, `Go · lint`, `Frontend · install +
+build`, `Python · ruff`, `Proto · lint + generate diff`) each gain
+  `needs: changes` + `if: needs.changes.outputs.code == 'true'`,
+  paired with a same-named stub sibling gated on the inverted `if:`
+  so branch-protection required-check names always resolve. Security
+  and secret-scan jobs (`Analyze (go)`, `Analyze
+(javascript-typescript)` via CodeQL, `GitGuardian Security Checks`,
+  `pre-commit · all hooks`) are intentionally unconditional — path
+  filtering is a cost optimization for build/test/lint, never a
+  security exemption. Refuses the obvious `paths-ignore:`-at-workflow
+  approach because it leaves required-check names stuck on
+  `Expected — waiting for status to be reported` and deadlocks the
+  merge button. Documentation: `docs/ci/PATH_FILTERING.md` covers the
+  pattern, the gotcha, and the stub-job name-matching rule;
+  `Plans/canvas/09-tech-stack.md` gains a new §9.6 CI/CD entry.
+  Billable-minute savings on docs-only PRs: ~10 → ~2.
+
 - **Slice 035 — RBAC roles (5) + ABAC via OPA embedded + decision
   audit log.** Graduates the v1 placeholder flag-on-credential
   authorization model (slice 014 `IsAdmin`, slice 011 `OwnerRoles`,
