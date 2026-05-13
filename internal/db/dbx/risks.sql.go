@@ -29,6 +29,86 @@ func (q *Queries) CountRiskControlLinks(ctx context.Context, arg CountRiskContro
 	return column_1, err
 }
 
+const createAggregateRisk = `-- name: CreateAggregateRisk :one
+INSERT INTO risks (
+    id, tenant_id, title, description, category, methodology,
+    inherent_score, treatment, treatment_owner, residual_score,
+    accepter, instrument_reference, level, org_unit_id, themes
+)
+VALUES (
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, $10,
+    $11, $12, $13, $14, $15::text[]
+)
+RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+`
+
+type CreateAggregateRiskParams struct {
+	ID                  pgtype.UUID     `json:"id"`
+	TenantID            pgtype.UUID     `json:"tenant_id"`
+	Title               string          `json:"title"`
+	Description         string          `json:"description"`
+	Category            RiskCategory    `json:"category"`
+	Methodology         RiskMethodology `json:"methodology"`
+	InherentScore       []byte          `json:"inherent_score"`
+	Treatment           RiskTreatment   `json:"treatment"`
+	TreatmentOwner      string          `json:"treatment_owner"`
+	ResidualScore       []byte          `json:"residual_score"`
+	Accepter            string          `json:"accepter"`
+	InstrumentReference string          `json:"instrument_reference"`
+	Level               RiskLevel       `json:"level"`
+	OrgUnitID           pgtype.UUID     `json:"org_unit_id"`
+	Column15            []string        `json:"column_15"`
+}
+
+// Insert a parent risk for slice 053 manual aggregation. The shape mirrors
+// CreateRisk but with `level`, `org_unit_id`, and `themes` plumbed through —
+// those columns exist on `risks` per slice 052's ALTER. The aggregated
+// severity, severity_function, child_count, and aggregation_key live inside
+// the `inherent_score` JSONB.
+func (q *Queries) CreateAggregateRisk(ctx context.Context, arg CreateAggregateRiskParams) (Risk, error) {
+	row := q.db.QueryRow(ctx, createAggregateRisk,
+		arg.ID,
+		arg.TenantID,
+		arg.Title,
+		arg.Description,
+		arg.Category,
+		arg.Methodology,
+		arg.InherentScore,
+		arg.Treatment,
+		arg.TreatmentOwner,
+		arg.ResidualScore,
+		arg.Accepter,
+		arg.InstrumentReference,
+		arg.Level,
+		arg.OrgUnitID,
+		arg.Column15,
+	)
+	var i Risk
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Description,
+		&i.Category,
+		&i.Methodology,
+		&i.InherentScore,
+		&i.Treatment,
+		&i.TreatmentOwner,
+		&i.ResidualScore,
+		&i.ReviewDueAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AcceptedUntil,
+		&i.Accepter,
+		&i.InstrumentReference,
+		&i.Level,
+		&i.OrgUnitID,
+		&i.Themes,
+	)
+	return i, err
+}
+
 const createRisk = `-- name: CreateRisk :one
 INSERT INTO risks (
     id, tenant_id, title, description, category, methodology,
@@ -119,6 +199,54 @@ type DeleteRiskParams struct {
 func (q *Queries) DeleteRisk(ctx context.Context, arg DeleteRiskParams) error {
 	_, err := q.db.Exec(ctx, deleteRisk, arg.TenantID, arg.ID)
 	return err
+}
+
+const getRiskByAggregationKey = `-- name: GetRiskByAggregationKey :one
+SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+FROM risks
+WHERE tenant_id = $1
+  AND inherent_score->>'aggregation_key' = $2::text
+LIMIT 1
+`
+
+type GetRiskByAggregationKeyParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Column2  string      `json:"column_2"`
+}
+
+// Lookup an existing parent risk by the sha256 idempotency key stored on
+// inherent_score. Used by slice 053's POST /v1/risks/aggregate to satisfy
+// AC-7: same (parent_title, child_set) returns the existing parent
+// rather than creating a duplicate.
+//
+// The $2::text cast pins the parameter type to text (sqlc's inference
+// otherwise borrows the type of `inherent_score`, which is bytea via JSONB
+// and would force the caller to pass []byte).
+func (q *Queries) GetRiskByAggregationKey(ctx context.Context, arg GetRiskByAggregationKeyParams) (Risk, error) {
+	row := q.db.QueryRow(ctx, getRiskByAggregationKey, arg.TenantID, arg.Column2)
+	var i Risk
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Description,
+		&i.Category,
+		&i.Methodology,
+		&i.InherentScore,
+		&i.Treatment,
+		&i.TreatmentOwner,
+		&i.ResidualScore,
+		&i.ReviewDueAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AcceptedUntil,
+		&i.Accepter,
+		&i.InstrumentReference,
+		&i.Level,
+		&i.OrgUnitID,
+		&i.Themes,
+	)
+	return i, err
 }
 
 const getRiskByID = `-- name: GetRiskByID :one
@@ -316,6 +444,61 @@ func (q *Queries) ListRisks(ctx context.Context, tenantID pgtype.UUID) ([]Risk, 
 	return items, nil
 }
 
+const listRisksByIDs = `-- name: ListRisksByIDs :many
+SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+FROM risks
+WHERE tenant_id = $1 AND id = ANY($2::uuid[])
+ORDER BY id ASC
+`
+
+type ListRisksByIDsParams struct {
+	TenantID pgtype.UUID   `json:"tenant_id"`
+	Column2  []pgtype.UUID `json:"column_2"`
+}
+
+// Reads a set of risks by id for the active tenant. RLS makes cross-tenant
+// rows invisible; the caller compares len(returned)==len(requested) for the
+// existence check.
+func (q *Queries) ListRisksByIDs(ctx context.Context, arg ListRisksByIDsParams) ([]Risk, error) {
+	rows, err := q.db.Query(ctx, listRisksByIDs, arg.TenantID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Risk
+	for rows.Next() {
+		var i Risk
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Title,
+			&i.Description,
+			&i.Category,
+			&i.Methodology,
+			&i.InherentScore,
+			&i.Treatment,
+			&i.TreatmentOwner,
+			&i.ResidualScore,
+			&i.ReviewDueAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AcceptedUntil,
+			&i.Accepter,
+			&i.InstrumentReference,
+			&i.Level,
+			&i.OrgUnitID,
+			&i.Themes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const unlinkRiskControl = `-- name: UnlinkRiskControl :exec
 DELETE FROM risk_control_links
 WHERE tenant_id = $1 AND risk_id = $2 AND control_id = $3
@@ -388,6 +571,51 @@ func (q *Queries) UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, e
 		arg.Accepter,
 		arg.InstrumentReference,
 	)
+	var i Risk
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Description,
+		&i.Category,
+		&i.Methodology,
+		&i.InherentScore,
+		&i.Treatment,
+		&i.TreatmentOwner,
+		&i.ResidualScore,
+		&i.ReviewDueAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AcceptedUntil,
+		&i.Accepter,
+		&i.InstrumentReference,
+		&i.Level,
+		&i.OrgUnitID,
+		&i.Themes,
+	)
+	return i, err
+}
+
+const updateRiskThemes = `-- name: UpdateRiskThemes :one
+UPDATE risks
+SET themes = $3::text[],
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+`
+
+type UpdateRiskThemesParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+	Column3  []string    `json:"column_3"`
+}
+
+// Replaces the themes array on a risk. The application validates that every
+// supplied theme is in the visible vocabulary (defaults + tenant-private)
+// BEFORE calling. Returns the updated row. Slice 053 (POST/DELETE
+// /v1/risks/{id}/themes).
+func (q *Queries) UpdateRiskThemes(ctx context.Context, arg UpdateRiskThemesParams) (Risk, error) {
+	row := q.db.QueryRow(ctx, updateRiskThemes, arg.TenantID, arg.ID, arg.Column3)
 	var i Risk
 	err := row.Scan(
 		&i.ID,

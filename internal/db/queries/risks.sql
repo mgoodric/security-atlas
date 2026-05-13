@@ -77,6 +77,59 @@ SELECT COUNT(*)::bigint
 FROM risk_control_links
 WHERE tenant_id = $1 AND risk_id = $2;
 
+-- name: UpdateRiskThemes :one
+-- Replaces the themes array on a risk. The application validates that every
+-- supplied theme is in the visible vocabulary (defaults + tenant-private)
+-- BEFORE calling. Returns the updated row. Slice 053 (POST/DELETE
+-- /v1/risks/{id}/themes).
+UPDATE risks
+SET themes = $3::text[],
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
+-- name: GetRiskByAggregationKey :one
+-- Lookup an existing parent risk by the sha256 idempotency key stored on
+-- inherent_score. Used by slice 053's POST /v1/risks/aggregate to satisfy
+-- AC-7: same (parent_title, child_set) returns the existing parent
+-- rather than creating a duplicate.
+--
+-- The $2::text cast pins the parameter type to text (sqlc's inference
+-- otherwise borrows the type of `inherent_score`, which is bytea via JSONB
+-- and would force the caller to pass []byte).
+SELECT *
+FROM risks
+WHERE tenant_id = $1
+  AND inherent_score->>'aggregation_key' = $2::text
+LIMIT 1;
+
+-- name: ListRisksByIDs :many
+-- Reads a set of risks by id for the active tenant. RLS makes cross-tenant
+-- rows invisible; the caller compares len(returned)==len(requested) for the
+-- existence check.
+SELECT *
+FROM risks
+WHERE tenant_id = $1 AND id = ANY($2::uuid[])
+ORDER BY id ASC;
+
+-- name: CreateAggregateRisk :one
+-- Insert a parent risk for slice 053 manual aggregation. The shape mirrors
+-- CreateRisk but with `level`, `org_unit_id`, and `themes` plumbed through —
+-- those columns exist on `risks` per slice 052's ALTER. The aggregated
+-- severity, severity_function, child_count, and aggregation_key live inside
+-- the `inherent_score` JSONB.
+INSERT INTO risks (
+    id, tenant_id, title, description, category, methodology,
+    inherent_score, treatment, treatment_owner, residual_score,
+    accepter, instrument_reference, level, org_unit_id, themes
+)
+VALUES (
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, $10,
+    $11, $12, $13, $14, $15::text[]
+)
+RETURNING *;
+
 -- name: HeatmapBuckets :many
 -- Returns risk counts grouped by (likelihood, impact) for risks whose
 -- methodology shares the 5x5 (likelihood, impact 1..5) shape. nist_800_30

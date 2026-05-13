@@ -62,6 +62,12 @@ type Querier interface {
 	// Returns one row per criticality present in the result set; empty bands are
 	// not included (callers fill in zero where needed).
 	CountVendorsForBurndown(ctx context.Context, arg CountVendorsForBurndownParams) ([]CountVendorsForBurndownRow, error)
+	// Insert a parent risk for slice 053 manual aggregation. The shape mirrors
+	// CreateRisk but with `level`, `org_unit_id`, and `themes` plumbed through —
+	// those columns exist on `risks` per slice 052's ALTER. The aggregated
+	// severity, severity_function, child_count, and aggregation_key live inside
+	// the `inherent_score` JSONB.
+	CreateAggregateRisk(ctx context.Context, arg CreateAggregateRiskParams) (Risk, error)
 	// Insert an artifact row after the blob has been written to S3. RLS
 	// evaluates the INSERT WITH CHECK against current_tenant. content_hash
 	// may be NULL today but every code path in slice 036 supplies it.
@@ -243,6 +249,15 @@ type Querier interface {
 	GetOrgThemeByID(ctx context.Context, id pgtype.UUID) (OrgTheme, error)
 	GetOrgUnitByID(ctx context.Context, arg GetOrgUnitByIDParams) (OrgUnit, error)
 	GetPopulationByID(ctx context.Context, arg GetPopulationByIDParams) (Population, error)
+	// Lookup an existing parent risk by the sha256 idempotency key stored on
+	// inherent_score. Used by slice 053's POST /v1/risks/aggregate to satisfy
+	// AC-7: same (parent_title, child_set) returns the existing parent
+	// rather than creating a duplicate.
+	//
+	// The $2::text cast pins the parameter type to text (sqlc's inference
+	// otherwise borrows the type of `inherent_score`, which is bytea via JSONB
+	// and would force the caller to pass []byte).
+	GetRiskByAggregationKey(ctx context.Context, arg GetRiskByAggregationKeyParams) (Risk, error)
 	GetRiskByID(ctx context.Context, arg GetRiskByIDParams) (Risk, error)
 	GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnchor, error)
 	// Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
@@ -487,6 +502,10 @@ type Querier interface {
 	// in the application layer because sqlc's static typing makes optional
 	// WHERE clauses noisy; the row count is bounded by tenant-size anyway.
 	ListRisks(ctx context.Context, tenantID pgtype.UUID) ([]Risk, error)
+	// Reads a set of risks by id for the active tenant. RLS makes cross-tenant
+	// rows invisible; the caller compares len(returned)==len(requested) for the
+	// existence check.
+	ListRisksByIDs(ctx context.Context, arg ListRisksByIDsParams) ([]Risk, error)
 	// Paginated anchor list for a specific framework_version. Caller supplies
 	// limit + offset; default at the call site.
 	ListSCFAnchorsForVersion(ctx context.Context, arg ListSCFAnchorsForVersionParams) ([]ScfAnchor, error)
@@ -520,6 +539,19 @@ type Querier interface {
 	LogArtifactAccess(ctx context.Context, arg LogArtifactAccessParams) error
 	// Flip a predecessor row to superseded. Idempotent: no-op if already set.
 	MarkControlSuperseded(ctx context.Context, arg MarkControlSupersededParams) error
+	// Slice 053 cycle detection (AC-4). Returns every node id in the parent_id
+	// chain starting at $2 ("the proposed parent"), tenant-scoped to $1. The
+	// application checks whether $3 ("the node whose parent we're setting")
+	// appears in the returned list — if it does, setting parent_id = $2 would
+	// create a cycle.
+	//
+	// Self-parent (parent_id = self_id) is the trivial cycle and is also caught
+	// in the application: when $2 == $3, the seed row of the CTE matches and
+	// $3 appears in the returned list.
+	//
+	// The CTE is bounded by the tenant_id predicate on every row, so it can
+	// never walk into another tenant's chain even with RLS off.
+	ParentChainIDs(ctx context.Context, arg ParentChainIDsParams) ([]pgtype.UUID, error)
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
 	// Set the predecessor's retirement deadline on rotation. After retires_at the
@@ -565,6 +597,11 @@ type Querier interface {
 	// updated_at is set explicitly so the schema's per-row default doesn't
 	// silently keep stale values.
 	UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, error)
+	// Replaces the themes array on a risk. The application validates that every
+	// supplied theme is in the visible vocabulary (defaults + tenant-private)
+	// BEFORE calling. Returns the updated row. Slice 053 (POST/DELETE
+	// /v1/risks/{id}/themes).
+	UpdateRiskThemes(ctx context.Context, arg UpdateRiskThemesParams) (Risk, error)
 	// Update an existing anchor in place. Touches updated_at; the caller
 	// decides whether to call this based on a content-equality check.
 	UpdateSCFAnchor(ctx context.Context, arg UpdateSCFAnchorParams) (ScfAnchor, error)

@@ -21,10 +21,12 @@ import (
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
 	exceptionsapi "github.com/mgoodric/security-atlas/internal/api/exceptions"
 	fwscopesapi "github.com/mgoodric/security-atlas/internal/api/frameworkscopes"
+	orgunitsapi "github.com/mgoodric/security-atlas/internal/api/orgunits"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
+	themesapi "github.com/mgoodric/security-atlas/internal/api/themes"
 	"github.com/mgoodric/security-atlas/internal/api/ucfcoverage"
 	"github.com/mgoodric/security-atlas/internal/api/vendors"
 	"github.com/mgoodric/security-atlas/internal/artifact"
@@ -123,12 +125,30 @@ func (s *Server) httpHandler() http.Handler {
 	// Slice 019: risk register CRUD + 5x5 heatmap. Routes appended per the
 	// parallel-batch convention — chi.Mux rejects two Mounts at "/", and other
 	// batches are also appending here, so order-of-append must not matter.
-	risksH := risksapi.New(risk.NewStore(s.dbPool))
+	risksStore := risk.NewStore(s.dbPool)
+	risksH := risksapi.New(risksStore)
 	root.Post("/v1/risks", risksH.CreateRisk)
 	root.Get("/v1/risks", risksH.ListRisks)
 	root.Get("/v1/risks/heatmap", risksH.Heatmap)
+	// Slice 053: manual aggregation + live recompute. Literal-segment
+	// routes (/aggregate, /{id}/aggregation) declared before the generic
+	// /v1/risks/{id} so chi's declaration-order match keeps them ahead.
+	root.Post("/v1/risks/aggregate", risksH.Aggregate)
+	root.Get("/v1/risks/{id}/aggregation", risksH.LiveAggregation)
 	root.Get("/v1/risks/{id}", risksH.GetRisk)
 	root.Delete("/v1/risks/{id}", risksH.DeleteRisk)
+	// Slice 053: theme catalog + per-risk theme tagging.
+	themesH := themesapi.New(risksStore)
+	root.Get("/v1/themes", themesH.ListVisible)
+	root.Post("/v1/risks/{id}/themes", themesH.AssignThemes)
+	root.Delete("/v1/risks/{id}/themes/{theme}", themesH.RemoveTheme)
+	// Slice 053: org_unit CRUD (canvas §6.4 hierarchy).
+	orgunitsH := orgunitsapi.New(risksStore)
+	root.Post("/v1/org_units", orgunitsH.Create)
+	root.Get("/v1/org_units", orgunitsH.List)
+	root.Get("/v1/org_units/{id}", orgunitsH.Get)
+	root.Patch("/v1/org_units/{id}", orgunitsH.Patch)
+	root.Delete("/v1/org_units/{id}", orgunitsH.Delete)
 	// Slice 024: vendor lite module — CRUD + burndown. The burndown route
 	// is registered before /v1/vendors/{id} so chi's router matches the
 	// literal segment first (chi resolves routes in declaration order
