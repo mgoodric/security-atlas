@@ -27,12 +27,23 @@ Step 1 — Conflict-safe selection (report-back BEFORE acting):
    - Cap recommendation (3 default; lower if review burden seems high)
    - Open-questions check: explicitly state that no picked slice has an unresolved open question in Plans/canvas/11-open-questions.md
 
-Step 2 — On approval, set up worktrees AND flip status atomically:
+Step 2 — On approval, set up worktrees AND flip status atomically (via status-only PR):
 
 For each picked slice, run from the main worktree:
   git worktree add ../security-atlas-<NNN> -b <cluster>/<NNN>-<slug> main
 
-Then update docs/issues/_STATUS.md: flip each picked slice from `ready` to `in-progress`, fill `Branch` + `Started` columns. Commit directly to main: `chore(status): batch <NNN1, NNN2, NNN3> → in-progress`. This claim-stake prevents another batch (or solo session) from racing on the same slice.
+**Branch protection on `main` is enforced** (post-batch-13). Direct push to `main` is blocked. ALL status-flip commits go through the status-only-PR pattern:
+
+  1. Create a tiny branch from main: `git switch -c chore/status-batch-<NNN1,NNN2>-claim-stake`
+  2. Edit `docs/issues/_STATUS.md`: flip each picked slice `ready` → `in-progress`, fill `Branch` + `Started`. Add a `## Drift detected — <date> (parallel batch N claim-stake)` section.
+  3. Commit `chore(status): batch <NNN1, NNN2, NNN3> → in-progress` (DCO sign-off required: `git commit -s`).
+  4. Push the branch + open PR: `gh pr create --base main --title "chore(status): batch <NNN1, NNN2, NNN3> → in-progress" --body "Claim-stake. Docs-only — _STATUS.md flip. Required-check matrix runs but all gates are no-op on docs paths."`
+  5. The status PR's CI runs through the 10 required checks (~5 min). The Go jobs are no-op-on-docs-only; the lint + pre-commit checks verify the YAML/Markdown.
+  6. Squash-merge the status PR via `gh pr merge --squash` once CI is green. This claim-stake prevents another batch (or solo session) from racing on the same slice.
+
+This adds ~5 min of latency per status flip. The trade-off is auditability: every main-touching change goes through PR + CI, including docs.
+
+**Hard rule reminder:** NEVER use admin-bypass / `gh api ... -X PUT` to push directly to main, even for docs-only changes. The branch protection rules from slice 050 AC-11 are non-negotiable. If you find yourself wanting to bypass, surface the friction back to the maintainer for a process update — don't paper over it.
 
 Step 3 — Spawn parallel Engineer subagents in ONE message:
 
@@ -56,15 +67,25 @@ PLUS these explicit pattern-reuse directives (drawn from prior batches' learning
 - `pre-commit run --all-files` locally before push. Prettier reformatting of CHANGELOG.md has been caught by CI four times across batches — this single step prevents it.
 
 STATUS TRANSITION (this is Step 9 of the subagent's own per-slice workflow, after the PR is open):
-- From the MAIN worktree (`/Users/gmoney/Development/security-atlas`), pull --rebase, then flip the picked slice's row in `docs/issues/_STATUS.md` from `in-progress` to `in-review`, fill the `PR` column with `gh#<N>`. Commit `chore(status): <NNN> -> in-review`. Push.
-- If another agent has updated _STATUS.md in the meantime, re-apply just your one row.
+
+Branch protection on `main` blocks direct push (post-batch-13). The subagent rides the in-review status flip on **the slice's own PR branch**, not via a separate main push:
+
+1. On the slice's worktree branch (already pushed for the PR), add a final commit that flips `docs/issues/_STATUS.md` row `<NNN>` from `in-progress` to `in-review`, fills `PR=gh#<N>`. Commit `chore(status): <NNN> -> in-review`.
+2. Push the additional commit to the existing PR branch (no force-push needed for an append). The PR diff now includes the status flip.
+3. The squash-merge at Step 5 lands the implementation + the in-review flip in one commit on main.
+4. The orchestrator's Step 6 final reconcile flips `in-review` → `merged` via the batch-final status PR.
+
+This means the `in-review` state is **fleeting on main** — it exists only between squash-merge and final reconcile, possibly < 1 min. If you need pre-merge state visibility, use the GitHub PR list (`gh pr list --state open`) — that's authoritative for in-flight work.
+
+Do NOT push to main directly. Do NOT open a separate per-slice status PR — fold the in-review flip into the slice's existing PR.
 
 Step 4 — Collect and choose a merge order (after all N return):
 
 - Table: slice # · PR URL · AC pass/fail · ship-gate status · CI status (green / failing / pending)
 - Conflicts detected between PRs (file overlap, migration collision, schema drift)
 - Recommended merge order — typically `cleanest CI` → `smallest diff` → `largest diff`; deps + any post-hoc dependency surfaced during build override this.
-- Update docs/issues/_STATUS.md: confirm each picked slice transitioned to `in-review`; fill `PR` column from each subagent's final report if not already populated. Commit on main: `chore(status): batch <NNN1, NNN2, NNN3> → in-review`.
+- Verify each picked slice's PR has its in-review status flip committed on the slice branch (per Step 9 above). If any subagent skipped that, push the missing commit to the slice's PR branch.
+- No separate "Step 4 status PR" needed — each slice's in-review flip rides on its own PR. Skip directly to Step 5.
 
 Step 5 — Merge each PR in the chosen order, fixing CI failures along the way:
 
@@ -79,13 +100,20 @@ For each PR in merge order:
 
 The orchestrator may stash and restore unrelated working-directory changes in the main worktree (user WIP under `Plans/prompts/`, `_DEPENDENCY_GRAPH.md`, untracked files) as needed for the rebase-against-main step.
 
-Step 6 — Final reconcile + summary:
+Step 6 — Final reconcile + summary (via batch-final status PR):
 
-- For each merged slice: flip its row in `docs/issues/_STATUS.md` from `in-review` to `merged`, fill the `Merged` column.
-- For every slice newly unblocked by these merges (deps now all `merged`): flip from `not-ready` to `ready`.
-- Update the `## Counts` table and add a `## Drift detected — <date> (parallel batch <N> merged)` section recording the transitions.
-- Commit on main: `chore(status): batch <NNN1, NNN2, NNN3> -> merged (M/50 slices on main)`. Push.
-- Deliver the final summary: merge commits, files touched per slice, critical-path advancement, the new ready set, and a suggested next batch.
+Branch protection blocks direct push. The final reconcile happens via one status-only PR:
+
+1. Create branch: `git switch -c chore/status-batch-<NNN1,NNN2>-merged`
+2. For each merged slice: flip its row in `docs/issues/_STATUS.md` from `in-review` to `merged`, fill the `Merged` column.
+3. For every slice newly unblocked by these merges (deps now all `merged`): flip from `not-ready` to `ready`.
+4. Update the `## Counts` table and add a `## Drift detected — <date> (parallel batch <N> merged)` section recording the transitions.
+5. Update the `## In-flight` and `## Ready set right now` sections.
+6. Commit `chore(status): batch <NNN1, NNN2, NNN3> -> merged (M/58 slices on main)` with DCO sign-off.
+7. Push + `gh pr create` + wait for CI green + `gh pr merge --squash`.
+8. Deliver the final summary: merge commits, files touched per slice, critical-path advancement, the new ready set, and a suggested next batch.
+
+Total status-PR count per batch: 2 (claim-stake + final-reconcile). Each adds ~5 min of CI latency. Plan accordingly.
 
 Hard rules:
 - N ≤ 3 unless I override
@@ -93,8 +121,9 @@ Hard rules:
 - One subagent failing does NOT abort the others
 - Quality gates apply per slice — do NOT relax any step "because it's a batch"
 - If any picked slice surfaces an open question from Plans/canvas/11-open-questions.md, STOP that subagent; do not ship a guess
-- The orchestrator squash-merges to `main`. NEVER force-push to `main`. NEVER bypass branch protection. Use `--force-with-lease` only on the feature branches the orchestrator owns.
+- The orchestrator squash-merges to `main` via `gh pr merge --squash`. NEVER force-push to `main`. NEVER bypass branch protection — including for docs-only / status-flip commits (post-batch-13: `main` is protected per slice 050 AC-11; admin enforcement is ON; even the maintainer cannot bypass without explicit out-of-band approval). All main-touching changes go through PR + CI + squash-merge. Use `--force-with-lease` only on the feature branches the orchestrator owns.
 - If a PR's CI failure surfaces a question I (the human) should weigh in on (e.g. a design decision masquerading as a bug, a non-trivial DOWN-migration semantics call, an architectural drift), STOP and ask before fixing. Don't ship a guess.
+- Status-only PRs (claim-stake, final-reconcile) require DCO sign-off (`git commit -s`) like all other PRs. The DCO check is one of the 10 required status checks per `.github/branch-protection.json`.
 
 Failure-mode playbook (orchestrator behavior):
 
@@ -127,11 +156,11 @@ Use Algorithm mode in the orchestrator. Initialize a PRD (id: parallel-batch-<ti
 - A conflict-safe batch of N picked slices (N ≤ 3 by default)
 - Report-back gate BEFORE any worktrees or PRs are created — you confirm or redirect
 - N git worktrees at `../security-atlas-<NNN>/`, each on its own feature branch
-- A claim-stake commit on main marking the picks as `in-progress` (prevents racing)
+- **A status-only claim-stake PR** marking the picks as `in-progress` on main (post-batch-13: branch protection blocks direct push; the orchestrator uses a status-only PR + squash-merge instead)
 - N parallel Engineer subagents, each running the per-slice template verbatim
-- N pull requests opened against `main`
-- **All N PRs squash-merged to `main`** — the orchestrator runs the merge queue, fixing CI failures along the way and rebasing the queue as each PR lands
-- `docs/issues/_STATUS.md` reflecting the final state: all N picks `merged`, any newly-unblocked downstream slices flipped to `ready`, counts table updated
+- N pull requests opened against `main`, each carrying its own in-review status flip as the final commit on the slice branch (no separate per-slice status PR)
+- **All N slice PRs squash-merged to `main`** — the orchestrator runs the merge queue, fixing CI failures along the way and rebasing the queue as each PR lands
+- **A status-only final-reconcile PR** flipping all N picks to `merged`, opening newly-unblocked downstream slices to `ready`, updating Counts + Drift section
 - Final summary: merge commits, critical-path advancement, suggested next batch
 - The orchestrator only pauses for human judgement when (a) a picked slice surfaces an unresolved open question in `Plans/canvas/11-open-questions.md`, or (b) a CI failure surfaces a design decision rather than a mechanical fix
 
@@ -161,10 +190,12 @@ Use Algorithm mode in the orchestrator. Initialize a PRD (id: parallel-batch-<ti
 Wall-clock breakdown:
 
 - ~5 min: selection + report-back gate (waiting on your "go")
-- ~1 min: worktree setup + claim-stake commit
+- ~6 min: worktree setup + status-only claim-stake PR + CI cycle + squash-merge (~5 min CI + 1 min orchestration)
 - bulk of the time: subagents building in parallel (max of estimates, not sum)
-- ~5–30 min per merged PR: CI re-run on rebase, conflict resolution, CI fix iterations
-- ~2 min: final reconcile commit
+- ~5–30 min per merged slice PR: CI re-run on rebase, conflict resolution, CI fix iterations
+- ~6 min: status-only final-reconcile PR + CI cycle + squash-merge
+
+Total per-batch overhead from the two status PRs: ~12 min (was ~3 min when direct push to main was allowed). Trade-off accepted for full audit trail on every main-touching change.
 
 The orchestrator stays interactive during the subagent wait — Engineer subagents run in the background. The merge queue is sequential by design (squash + rebase + CI wait per slice).
 
