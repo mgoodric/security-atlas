@@ -495,7 +495,7 @@ func countAckRows(t *testing.T, admin *pgxpool.Pool, tenant string) int {
 
 func TestPendingForUser_AC1(t *testing.T) {
 	s := setup(t)
-	policyID := createAndPublishPolicy(t, s, "AC-1 Policy", "1.0.0", []string{s.requiredRole}, s.controlID)
+	policyID := createAndPublishPolicy(t, s, "AC-1 Policy", "1", []string{s.requiredRole}, s.controlID)
 
 	_, bearer := s.makeUserAndBearer(t, "user1@test", []string{s.requiredRole}, false)
 	raw := s.getJSON(t, "/v1/me/acknowledgments", bearer, http.StatusOK)
@@ -525,7 +525,7 @@ func TestPendingForUser_AC1(t *testing.T) {
 
 func TestAcknowledge_AC2(t *testing.T) {
 	s := setup(t)
-	policyID := createAndPublishPolicy(t, s, "AC-2 Policy", "1.0.0", []string{s.requiredRole}, s.controlID)
+	policyID := createAndPublishPolicy(t, s, "AC-2 Policy", "1", []string{s.requiredRole}, s.controlID)
 	_, bearer := s.makeUserAndBearer(t, "user2@test", []string{s.requiredRole}, false)
 
 	beforeAcks := countAckRows(t, s.admin, s.tenant)
@@ -549,7 +549,7 @@ func TestAcknowledge_AC2(t *testing.T) {
 
 func TestPendingForUser_NoRoleMatch_AC3(t *testing.T) {
 	s := setup(t)
-	createAndPublishPolicy(t, s, "AC-3 Policy", "1.0.0", []string{s.requiredRole}, s.controlID)
+	createAndPublishPolicy(t, s, "AC-3 Policy", "1", []string{s.requiredRole}, s.controlID)
 
 	_, bearer := s.makeUserAndBearer(t, "user3@test", []string{"some_other_role"}, false)
 	raw := s.getJSON(t, "/v1/me/acknowledgments", bearer, http.StatusOK)
@@ -566,7 +566,7 @@ func TestPendingForUser_NoRoleMatch_AC3(t *testing.T) {
 
 func TestPendingForUser_SupersededVersion_AC4(t *testing.T) {
 	s := setup(t)
-	policyV1 := createAndPublishPolicy(t, s, "AC-4 Policy", "1.0.0", []string{s.requiredRole}, s.controlID)
+	policyV1 := createAndPublishPolicy(t, s, "AC-4 Policy", "1", []string{s.requiredRole}, s.controlID)
 
 	// User acks v1.
 	_, bearer := s.makeUserAndBearer(t, "user4@test", []string{s.requiredRole}, false)
@@ -577,7 +577,7 @@ func TestPendingForUser_SupersededVersion_AC4(t *testing.T) {
 	// slice-022 InsertPublishedPolicy path handles that when an already-
 	// published row is the chain tip. We emulate by creating a fresh
 	// approved row with predecessor_id set to policyV1, then publishing.
-	policyV2 := s.forkAndPublishV2(t, policyV1, "1.1.0")
+	policyV2 := s.forkAndPublishV2(t, policyV1, "2")
 
 	// Pending should now list v2 (because the ack of v1 doesn't carry
 	// across).
@@ -653,7 +653,7 @@ func (s *setupResult) forkAndPublishV2(t *testing.T, v1ID, newVersion string) st
 
 func TestPendingForUser_StaleAck_AC5(t *testing.T) {
 	s := setup(t)
-	policyID := createAndPublishPolicy(t, s, "AC-5 Policy", "1.0.0", []string{s.requiredRole}, s.controlID)
+	policyID := createAndPublishPolicy(t, s, "AC-5 Policy", "1", []string{s.requiredRole}, s.controlID)
 	user, _ := s.makeUserAndBearer(t, "user5@test", []string{s.requiredRole}, false)
 
 	// Seed a stale ack directly (366 days ago) via the admin pool.
@@ -731,7 +731,7 @@ func (s *setupResult) makeUserAndBearerWithUser(t *testing.T, email string, role
 
 func TestAcknowledgmentRate_AC6(t *testing.T) {
 	s := setup(t)
-	policyID := createAndPublishPolicy(t, s, "AC-6 Policy", "1.0.0", []string{s.requiredRole}, s.controlID)
+	policyID := createAndPublishPolicy(t, s, "AC-6 Policy", "1", []string{s.requiredRole}, s.controlID)
 
 	// Make 3 required-role users; admin user is also in denominator
 	// (is_admin=true wildcard counts).
@@ -771,7 +771,7 @@ func TestAcknowledgmentRate_AC6(t *testing.T) {
 
 func TestAcknowledge_AntiCriterion_RequiresAuth(t *testing.T) {
 	s := setup(t)
-	policyID := createAndPublishPolicy(t, s, "Anti-1 Policy", "1.0.0", []string{s.requiredRole}, s.controlID)
+	policyID := createAndPublishPolicy(t, s, "Anti-1 Policy", "1", []string{s.requiredRole}, s.controlID)
 	beforeAcks := countAckRows(t, s.admin, s.tenant)
 	beforeEvidence := countEvidenceRecords(t, s.admin, s.tenant, "policy.acknowledgment.v1")
 	// No bearer.
@@ -802,7 +802,7 @@ func TestAcknowledge_AntiCriterion_RequiresAuth(t *testing.T) {
 
 func TestAcknowledgmentRate_AntiCriterion_StaleNotCounted(t *testing.T) {
 	s := setup(t)
-	policyID := createAndPublishPolicy(t, s, "Anti-2 Policy", "1.0.0", []string{s.requiredRole}, s.controlID)
+	policyID := createAndPublishPolicy(t, s, "Anti-2 Policy", "1", []string{s.requiredRole}, s.controlID)
 	user, _ := s.makeUserAndBearer(t, "anti2@test", []string{s.requiredRole}, false)
 	staleAt := time.Now().UTC().Add(-366 * 24 * time.Hour)
 	_, err := s.admin.Exec(context.Background(), `
@@ -826,9 +826,9 @@ func TestAcknowledgmentRate_AntiCriterion_StaleNotCounted(t *testing.T) {
 
 func TestAcknowledge_AntiCriterion_SupersededRejected(t *testing.T) {
 	s := setup(t)
-	policyV1 := createAndPublishPolicy(t, s, "Anti-3 Policy", "1.0.0", []string{s.requiredRole}, s.controlID)
+	policyV1 := createAndPublishPolicy(t, s, "Anti-3 Policy", "1", []string{s.requiredRole}, s.controlID)
 	// Publish v2; v1 becomes superseded.
-	s.forkAndPublishV2(t, policyV1, "1.1.0")
+	s.forkAndPublishV2(t, policyV1, "2")
 	_, bearer := s.makeUserAndBearer(t, "anti3@test", []string{s.requiredRole}, false)
 	// POST against v1 must 409 (status now 'superseded').
 	req, _ := http.NewRequestWithContext(context.Background(),
