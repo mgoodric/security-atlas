@@ -17,13 +17,13 @@ auto-generated notes.
   `changes` job to `.github/workflows/ci.yml` using
   `dorny/paths-filter@v3` that classifies each PR as `code: true` /
   `code: false`. The six expensive jobs (`Go · build + test`, `Go ·
-  integration (Postgres RLS)`, `Go · lint`, `Frontend · install +
-  build`, `Python · ruff`, `Proto · lint + generate diff`) each gain
+integration (Postgres RLS)`, `Go · lint`, `Frontend · install +
+build`, `Python · ruff`, `Proto · lint + generate diff`) each gain
   `needs: changes` + `if: needs.changes.outputs.code == 'true'`,
   paired with a same-named stub sibling gated on the inverted `if:`
   so branch-protection required-check names always resolve. Security
   and secret-scan jobs (`Analyze (go)`, `Analyze
-  (javascript-typescript)` via CodeQL, `GitGuardian Security Checks`,
+(javascript-typescript)` via CodeQL, `GitGuardian Security Checks`,
   `pre-commit · all hooks`) are intentionally unconditional — path
   filtering is a cost optimization for build/test/lint, never a
   security exemption. Refuses the obvious `paths-ignore:`-at-workflow
@@ -35,7 +35,7 @@ auto-generated notes.
   Billable-minute savings on docs-only PRs: ~10 → ~2.
 - **Slice 059 — Per-tenant feature flags + capability toggles.**
   Ships the `feature_flags` table (composite PK `(tenant_id,
-  flag_key)`, four-policy RLS under FORCE — same slice-011 / 017 /
+flag_key)`, four-policy RLS under FORCE — same slice-011 / 017 /
   018 / 021 / 035 / 036 template) plus the append-only
   `feature_flag_audit_log` (SELECT + INSERT policies only under FORCE
   — slice 013 / 011 / 026 / 035 / 036 template) so operators can
@@ -55,17 +55,17 @@ auto-generated notes.
   without a restart. `featureflag.Gate(store, key)` is a chi
   middleware that responds `404 Not Found` with
   `X-Feature-Disabled: <key>` header + `{"error":"feature
-  disabled"}` body when the flag is off; the 404 (not 403) is
+disabled"}` body when the flag is off; the 404 (not 403) is
   deliberate — a disabled capability is indistinguishable from a
   non-existent route to an unauthorized caller. Admin API: `GET
-  /v1/admin/features` (lists every flag, override merged with seed
+/v1/admin/features` (lists every flag, override merged with seed
   defaults) + `PATCH /v1/admin/features/{key}` (toggles `enabled`,
   writes one `feature_flag_audit_log` row in the same tx with
   `actor` from `cred.UserID || cred.ID`, `reason` from request body,
   `from_enabled`/`to_enabled` for full diff). Both endpoints require
   `cred.IsAdmin` defense-in-depth — the flag state itself signals
   attack surface so reads are gated too. CLI: `atlas-cli features
-  list` + `atlas-cli features set <key> <on|off> [--reason ...]`
+list` + `atlas-cli features set <key> <on|off> [--reason ...]`
   drives the HTTP endpoints with `$ATLAS_ADMIN_TOKEN`. Anti-criteria
   P0 honored: (1) spine namespaces are non-toggleable —
   `SpineForbiddenPrefixes` enumerates `rls`, `tenancy`, `auth`,
