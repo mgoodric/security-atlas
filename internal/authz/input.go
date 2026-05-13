@@ -46,15 +46,15 @@ type RequestInput struct {
 // (e.g. action="approve"). Matches the policies/authz/helpers.rego
 // transition_actions set.
 var transitionActions = map[string]bool{
-	"submit":         true,
-	"approve":        true,
-	"activate":       true,
-	"publish":        true,
-	"deny":           true,
-	"rotate":         true,
-	"revoke":         true,
-	"aggregate":      true,
-	"upload-bundle":  true,
+	"submit":        true,
+	"approve":       true,
+	"activate":      true,
+	"publish":       true,
+	"deny":          true,
+	"rotate":        true,
+	"revoke":        true,
+	"aggregate":     true,
+	"upload-bundle": true,
 }
 
 // BuildInput constructs the canonical Input from an http.Request and
@@ -71,10 +71,8 @@ func BuildInput(r *http.Request, attrs map[string]interface{}) Input {
 	userAttrs := map[string]interface{}{
 		"is_machine_actor": cred.UserID == "" || strings.HasPrefix(cred.UserID, "key_"),
 	}
-	if attrs != nil {
-		for k, v := range attrs {
-			userAttrs[k] = v
-		}
+	for k, v := range attrs {
+		userAttrs[k] = v
 	}
 
 	return Input{

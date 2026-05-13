@@ -14,23 +14,11 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
-// fakeAudit is an in-memory AuditWriter substitute used to assert that
-// every decision -- allow OR deny -- writes one audit row. Mirrors the
-// production *authz.AuditWriter shape but skips the DB. Tests that
-// need real DB-backed audit rows use the integration suite.
-type fakeAudit struct {
-	rows []authz.AuditRecord
-}
-
-// Implement an inline Write method as a func value on the middleware
-// via a thin adapter -- we wrap the engine's middleware factory
-// directly. Because authz.AuditWriter is a concrete struct, we drive
-// the audit assertion via a test-only middleware that mirrors
-// production behavior.
-//
 // The production middleware in authzmw is the surface we trust; this
 // unit test asserts default-deny + exempt-path behavior via a thin
 // wrapper that swaps the audit writer for an in-memory recorder.
+// Audit-row assertions on DB-backed writes live in the integration
+// suite — the unit test focuses on the middleware contract.
 
 func buildEngine(t *testing.T) *authz.Engine {
 	t.Helper()

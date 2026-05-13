@@ -168,7 +168,7 @@ var embeddedRegoFS embed.FS
 
 // embeddedPolicies parses every .rego file under the embedded bundle.
 // The bundle is populated by `just authz-sync` (or at build time by a
-// go:generate directive); the source of truth lives at policies/authz/*.
+// code-generation step); the source of truth lives at policies/authz/*.
 // We use an embedded FS so the binary is self-contained and operators
 // don't need to ship the policies directory alongside the binary.
 func embeddedPolicies() (map[string]*ast.Module, error) {

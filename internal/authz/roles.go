@@ -16,10 +16,10 @@
 //
 // Constitutional invariants honored:
 //
-//   #6 Tenant isolation. The authz layer reads tenant_id from the
-//      authenticated credential's context (slice 033 tenancymw) -- it
-//      does NOT trust the request body. RLS in Postgres is the second
-//      leg of defense in depth.
+//	#6 Tenant isolation. The authz layer reads tenant_id from the
+//	   authenticated credential's context (slice 033 tenancymw) -- it
+//	   does NOT trust the request body. RLS in Postgres is the second
+//	   leg of defense in depth.
 //
 // Anti-criteria honored (P0):
 //
@@ -37,11 +37,11 @@ package authz
 type Role string
 
 const (
-	RoleAdmin         Role = "admin"
-	RoleGRCEngineer   Role = "grc_engineer"
-	RoleControlOwner  Role = "control_owner"
-	RoleAuditor       Role = "auditor"
-	RoleViewer        Role = "viewer"
+	RoleAdmin        Role = "admin"
+	RoleGRCEngineer  Role = "grc_engineer"
+	RoleControlOwner Role = "control_owner"
+	RoleAuditor      Role = "auditor"
+	RoleViewer       Role = "viewer"
 )
 
 // CanonicalRoles returns the 5 canonical roles in canvas order. Used by
