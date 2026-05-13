@@ -251,6 +251,20 @@ type Querier interface {
 	// partial UNIQUE index `evidence_records_tenant_idem_uniq` enforces it.
 	GetEvidenceRecordByIdempotency(ctx context.Context, arg GetEvidenceRecordByIdempotencyParams) (EvidenceRecord, error)
 	GetExceptionByID(ctx context.Context, arg GetExceptionByIDParams) (Exception, error)
+	// Slice 059 — per-tenant feature flags + capability toggles queries.
+	//
+	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
+	// defense-in-depth layer and the WHERE clauses are the primary correctness
+	// guarantee. The flag_key is application-validated (snake_case namespaced)
+	// before reaching the DB; the schema only enforces non-empty.
+	//
+	// Every toggle through SetFeatureFlag is paired with one WriteFeatureFlagAuditLog
+	// call in the application -- the audit-log table has SELECT + INSERT policies
+	// ONLY under FORCE RLS so there is no UPDATE / DELETE path. The pairing is
+	// application-enforced via a single transaction in the Store.
+	// Returns the row for (tenant, flag_key). pgx.ErrNoRows when absent; the
+	// application falls back to the seed default in that case.
+	GetFeatureFlag(ctx context.Context, arg GetFeatureFlagParams) (FeatureFlag, error)
 	// Same as above but uses the framework's "current" version. Convenience
 	// query so callers can omit the version (e.g., "soc2::CC6.6").
 	GetFrameworkRequirementByCurrentVersion(ctx context.Context, arg GetFrameworkRequirementByCurrentVersionParams) (FrameworkRequirement, error)
@@ -499,6 +513,16 @@ type Querier interface {
 	// within the supplied window. Window upper bound is computed in Go from
 	// the request param to keep the SQL static.
 	ListExpiringExceptions(ctx context.Context, arg ListExpiringExceptionsParams) ([]Exception, error)
+	// AC-10 read accessor. Returns every audit-log row for the tenant, newest
+	// first. The application paginates in-memory when needed (audit-log
+	// cardinality is small -- 12 flags, low toggle frequency).
+	ListFeatureFlagAuditLog(ctx context.Context, tenantID pgtype.UUID) ([]FeatureFlagAuditLog, error)
+	// Per-flag audit history. Powers the "who toggled this and when" view.
+	ListFeatureFlagAuditLogForKey(ctx context.Context, arg ListFeatureFlagAuditLogForKeyParams) ([]FeatureFlagAuditLog, error)
+	// Returns every flag row for the tenant, ordered by flag_key. The
+	// application merges this against the seed defaults so the response
+	// shape includes never-toggled flags too.
+	ListFeatureFlags(ctx context.Context, tenantID pgtype.UUID) ([]FeatureFlag, error)
 	ListFrameworkRequirementsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) ([]FrameworkRequirement, error)
 	// Newest first. Caller filters by framework_version + state in the
 	// application layer because sqlc-static optional WHERE is noisy; the row
@@ -704,6 +728,11 @@ type Querier interface {
 	// updates are not supported in lite (no PATCH semantics merge). updated_at
 	// is application-owned (no trigger).
 	UpdateVendor(ctx context.Context, arg UpdateVendorParams) (Vendor, error)
+	// Idempotent toggle write. INSERT-on-first-toggle or UPDATE on subsequent
+	// toggles. created_at is set on insert only (excluded from the conflict
+	// update clause). The application supplies last_changed_by + last_changed_at
+	// so the audit-log row written in the same tx carries matching values.
+	UpsertFeatureFlag(ctx context.Context, arg UpsertFeatureFlagParams) (FeatureFlag, error)
 	// Insert or update a framework row. The (tenant_id, slug) UNIQUE constraint
 	// in slice 002's schema treats NULLs as distinct, so a partial unique index
 	// on slug-when-tenant-is-null would be needed to catch global-catalog dupes
@@ -736,6 +765,9 @@ type Querier interface {
 	// SELECT+INSERT policies only under FORCE RLS so no UPDATE/DELETE path
 	// exists.
 	WriteExceptionAuditLog(ctx context.Context, arg WriteExceptionAuditLogParams) (ExceptionAuditLog, error)
+	// Append-only. Every toggle writes one row. The audit-log table is
+	// append-only by construction (SELECT + INSERT RLS only under FORCE).
+	WriteFeatureFlagAuditLog(ctx context.Context, arg WriteFeatureFlagAuditLogParams) (FeatureFlagAuditLog, error)
 	// Every sample pull writes one row here. The seed -> sample_id mapping
 	// captured in (seed, sample_id) is the re-audit trail (AC-6).
 	WriteSampleAuditLog(ctx context.Context, arg WriteSampleAuditLogParams) (SampleAuditLog, error)

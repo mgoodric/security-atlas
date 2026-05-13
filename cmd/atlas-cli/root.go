@@ -126,6 +126,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newCatalogCmd())
 	root.AddCommand(newControlsCmd())
 	root.AddCommand(newPolicyCmd())
+	root.AddCommand(newFeaturesCmd())
 	root.AddCommand(newVersionCmd())
 	return root
 }

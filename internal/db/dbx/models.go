@@ -967,6 +967,28 @@ type ExceptionAuditLog struct {
 	OccurredAt  pgtype.Timestamptz `json:"occurred_at"`
 }
 
+type FeatureFlag struct {
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	FlagKey       string             `json:"flag_key"`
+	Enabled       bool               `json:"enabled"`
+	Description   string             `json:"description"`
+	Category      string             `json:"category"`
+	LastChangedBy *string            `json:"last_changed_by"`
+	LastChangedAt pgtype.Timestamptz `json:"last_changed_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type FeatureFlagAuditLog struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	FlagKey     string             `json:"flag_key"`
+	FromEnabled bool               `json:"from_enabled"`
+	ToEnabled   bool               `json:"to_enabled"`
+	Actor       string             `json:"actor"`
+	Reason      string             `json:"reason"`
+	OccurredAt  pgtype.Timestamptz `json:"occurred_at"`
+}
+
 type Framework struct {
 	ID              pgtype.UUID        `json:"id"`
 	TenantID        pgtype.UUID        `json:"tenant_id"`
