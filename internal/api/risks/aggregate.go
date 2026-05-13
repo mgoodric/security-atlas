@@ -34,17 +34,17 @@ type aggregateReq struct {
 }
 
 type aggregationWire struct {
-	ParentID         string    `json:"parent_id"`
-	ParentTitle      string    `json:"parent_title"`
-	ParentLevel      string    `json:"parent_level"`
-	SeverityFunction string    `json:"severity_function"`
-	Severity         int       `json:"severity"`
-	Likelihood       int       `json:"likelihood"`
-	Impact           int       `json:"impact"`
-	ChildCount       int       `json:"child_count"`
-	LinkedChildren   []string  `json:"linked_children"`
-	AggregationKey   string    `json:"aggregation_key"`
-	Themes           []string  `json:"themes"`
+	ParentID         string   `json:"parent_id"`
+	ParentTitle      string   `json:"parent_title"`
+	ParentLevel      string   `json:"parent_level"`
+	SeverityFunction string   `json:"severity_function"`
+	Severity         int      `json:"severity"`
+	Likelihood       int      `json:"likelihood"`
+	Impact           int      `json:"impact"`
+	ChildCount       int      `json:"child_count"`
+	LinkedChildren   []string `json:"linked_children"`
+	AggregationKey   string   `json:"aggregation_key"`
+	Themes           []string `json:"themes"`
 }
 
 // Aggregate handles POST /v1/risks/aggregate (AC-5, AC-6, AC-7, AC-10).

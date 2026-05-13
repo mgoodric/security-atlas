@@ -58,24 +58,24 @@ var ErrChildrenNotFound = errors.New("risk: one or more child risks not found")
 
 // AggregateInput is the request shape for POST /v1/risks/aggregate.
 type AggregateInput struct {
-	ParentTitle       string
-	ParentLevel       dbx.RiskLevel
-	ParentOrgUnitID   *uuid.UUID
-	SeverityFunction  SeverityFunction
-	ChildRiskIDs      []uuid.UUID
+	ParentTitle      string
+	ParentLevel      dbx.RiskLevel
+	ParentOrgUnitID  *uuid.UUID
+	SeverityFunction SeverityFunction
+	ChildRiskIDs     []uuid.UUID
 }
 
 // AggregateResult bundles the persisted parent and the list of children
 // linked. Returned by Aggregate(); the HTTP handler shapes it into JSON.
 type AggregateResult struct {
-	Parent          Risk
-	LinkedChildren  []uuid.UUID
-	Severity        int
-	Likelihood      int
-	Impact          int
-	ChildCount      int
+	Parent           Risk
+	LinkedChildren   []uuid.UUID
+	Severity         int
+	Likelihood       int
+	Impact           int
+	ChildCount       int
 	SeverityFunction SeverityFunction
-	AggregationKey  string
+	AggregationKey   string
 }
 
 // Aggregate runs the slice 053 manual aggregation pipeline end-to-end.
