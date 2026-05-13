@@ -12,6 +12,7 @@ const NAV = [
   { href: "/vendors", label: "Vendors" },
   { href: "/audits", label: "Audits" },
   { href: "/settings", label: "Settings" },
+  { href: "/admin", label: "Admin" },
 ];
 
 export function Sidebar({ active }: { active?: string }) {

@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Slice 060: Playwright spec authored ahead of @playwright/test
+    // install. The file is a stub-shape contract today.
+    "e2e/**",
   ]),
 ]);
 
