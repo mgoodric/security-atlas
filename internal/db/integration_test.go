@@ -333,8 +333,8 @@ func TestSchema_TenantScopedTablesAcceptInserts(t *testing.T) {
 		}
 
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO policies (id, tenant_id, title, version, body_md, owner_role, approver_role, status)
-			VALUES ($1, $2, 'Access Control Policy', '1.0.0', '# Access Control Policy', 'tenant_admin', 'security_lead', 'draft')
+			INSERT INTO policies (id, tenant_id, title, version, body_md, owner_role, approver_role, status, created_by)
+			VALUES ($1, $2, 'Access Control Policy', '1.0.0', '# Access Control Policy', 'tenant_admin', 'security_lead', 'draft', 'test-fixture')
 		`, uuid.NewString(), tenant); err != nil {
 			t.Fatalf("INSERT policies: %v", err)
 		}

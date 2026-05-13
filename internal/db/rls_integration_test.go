@@ -135,8 +135,8 @@ func TestRLS_CrossTenant_SweepPerTable(t *testing.T) {
 			table: "policies",
 			seed: func(ctx context.Context, t *testing.T, tx pgx.Tx, tenant, id string) {
 				_, err := tx.Exec(ctx, `
-					INSERT INTO policies (id, tenant_id, title, version, body_md, owner_role, approver_role, status)
-					VALUES ($1, $2, 'sweep policy', '1.0.0', '# sweep', 'tenant_admin', 'security_lead', 'draft')
+					INSERT INTO policies (id, tenant_id, title, version, body_md, owner_role, approver_role, status, created_by)
+					VALUES ($1, $2, 'sweep policy', '1.0.0', '# sweep', 'tenant_admin', 'security_lead', 'draft', 'test-fixture')
 				`, id, tenant)
 				if err != nil {
 					t.Fatalf("seed policies: %v", err)
