@@ -1,0 +1,37 @@
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Open / update release PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run release-please
+        uses: googleapis/release-please-action@v4
+        with:
+          # Manifest mode — release-please tracks current version in
+          # .release-please-manifest.json and reads release-config from
+          # release-please-config.json. Both files live at repo root.
+          manifest-file: .release-please-manifest.json
+          config-file: release-please-config.json
+          # NEVER auto-merge release PRs. Anti-criterion P0 of slice 050:
+          # every release requires explicit human approval. release-please
+          # opens / updates the PR and that's it.
+          skip-github-release: false
+          # Release-please needs to be able to push to a branch named
+          # release-please--... and to open a PR against main; the default
+          # GITHUB_TOKEN has the needed scopes when permissions: above is
+          # set.
+          token: ${{ secrets.GITHUB_TOKEN }}

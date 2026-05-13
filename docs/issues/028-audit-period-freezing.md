@@ -6,7 +6,7 @@
 
 ## Narrative
 
-Implement the load-bearing `AuditPeriod` entity and the freezing primitive that solves post-window evidence pollution. When an audit period is frozen, sample populations and control-state queries for that period draw only from evidence records with `observed_at ≤ frozen_at`. Live evaluation continues independently — the auditor's view doesn't shift under their feet. Frozen state is hashed and signed for tamper detection. The append-only ledger makes freezing cheap: we shift the read horizon, no snapshot tables needed. The slice delivers value because Matt's first SOC 2 Type II audit can complete without "the dashboard changed between my walkthrough and my report" complaints.
+Implement the load-bearing `AuditPeriod` entity and the freezing primitive that solves post-window evidence pollution. When an audit period is frozen, sample populations and control-state queries for that period draw only from evidence records with `observed_at ≤ frozen_at`. Live evaluation continues independently — the auditor's view doesn't shift under their feet. Frozen state is hashed and signed for tamper detection. The append-only ledger makes freezing cheap: we shift the read horizon, no snapshot tables needed. The slice delivers value because a solo operator's first SOC 2 Type II audit can complete without "the dashboard changed between my walkthrough and my report" complaints.
 
 ## Acceptance criteria
 

@@ -6,7 +6,7 @@
 
 ## Narrative
 
-Build the program dashboard view per `Plans/mockups/dashboard.html`. Real data bound via TanStack Query to: framework posture (from slice 008), top risks aging (from slice 020), recent drift (from slice 016), upcoming items (from slice 021 + 022 + 024), evidence freshness summary (from slice 016), and the recent activity feed (from slice 015). Layout uses shadcn/ui primitives — port the design language from the HTML mockup, but render via React components. Time-to-paint under 1 second on cached data. The slice delivers value because the home screen Matt opens every morning is real and live.
+Build the program dashboard view per `Plans/mockups/dashboard.html`. Real data bound via TanStack Query to: framework posture (from slice 008), top risks aging (from slice 020), recent drift (from slice 016), upcoming items (from slice 021 + 022 + 024), evidence freshness summary (from slice 016), and the recent activity feed (from slice 015). Layout uses shadcn/ui primitives — port the design language from the HTML mockup, but render via React components. Time-to-paint under 1 second on cached data. The slice delivers value because the home screen the primary persona opens every morning is real and live.
 
 ## Acceptance criteria
 
@@ -20,7 +20,7 @@ Build the program dashboard view per `Plans/mockups/dashboard.html`. Real data b
 
 ## Constitutional invariants honored
 
-- **Replacement-grade criterion 7:** dashboard is what Matt sees first; quality of first-impression matters
+- **Replacement-grade criterion 7:** dashboard is what the primary persona sees first; quality of first-impression matters
 - **Working norms:** mockups are reference, not production — uses shadcn/ui primitives, not raw Tailwind
 
 ## Canvas references

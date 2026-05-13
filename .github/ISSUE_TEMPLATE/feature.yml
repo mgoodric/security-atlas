@@ -1,0 +1,67 @@
+name: Feature request
+description: Propose a new feature, enhancement, or new connector
+title: "[feature]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing an enhancement. The design canvas under [`Plans/`](../Plans) is the system of record for architecture-shaping decisions — please read the relevant canvas section before proposing changes that touch primitives, the UCF graph, the evidence engine, or scope.
+
+        For new connectors, see [`canvas/04-evidence-engine.md`](../Plans/canvas/04-evidence-engine.md).
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What user pain does this address? Who hits it, how often, what's the current workaround?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you build? Be concrete — endpoint shapes, UI surfaces, schema changes, new evidence_kinds.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches did you consider and why this one?
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - New connector
+        - New evidence_kind / JSON Schema
+        - New API endpoint
+        - New UI surface
+        - New framework / crosswalk
+        - Performance / scaling
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: canvas
+    attributes:
+      label: Canvas section affected
+      description: Which `Plans/canvas/*.md` section(s) does this touch? Link them.
+      placeholder: "Plans/canvas/04-evidence-engine.md §4.3"
+  - type: checkboxes
+    id: invariants
+    attributes:
+      label: Constitutional invariants check
+      description: Confirm the proposal does not violate any of these (see `CLAUDE.md`).
+      options:
+        - label: Does NOT introduce per-framework duplicated controls (invariant #1).
+          required: true
+        - label: Does NOT write to source-of-truth evidence from evaluation (invariant #2).
+          required: true
+        - label: Does NOT bypass Postgres RLS for tenant isolation (invariant #6).
+          required: true
+        - label: Does NOT bundle CCM / CAIQ / SIG templates (licensing constraint).
+          required: true
+        - label: Does NOT broaden the AI-assist boundary defined in CLAUDE.md.
+          required: true

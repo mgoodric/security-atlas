@@ -1,0 +1,86 @@
+name: Bug report
+description: Report a defect or unexpected behavior in security-atlas
+title: "[bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill in every section — incomplete reports are slower to triage.
+
+        If this is a **security vulnerability**, do not file it here. See [`SECURITY.md`](../SECURITY.md) for the private disclosure channel.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag, commit SHA, or `main` if running off the tip.
+      placeholder: "v0.1.0 / commit 8da2299 / main"
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      multiple: true
+      options:
+        - platform server (`atlas`)
+        - CLI (`atlas-cli`)
+        - connector — AWS
+        - connector — GitHub
+        - connector — Jira / Linear
+        - connector — osquery / Fleet
+        - connector — manual upload
+        - frontend (`web/`)
+        - SDK — Go
+        - SDK — Python
+        - SDK — TypeScript
+        - OSCAL bridge
+        - migrations
+        - other (specify in description)
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Describe the unexpected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected to happen
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal sequence. Include commands, request payloads, evidence shapes — anything needed for the maintainer to reproduce locally.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      description: Paste relevant log lines or error output. Redact secrets.
+      render: shell
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, container runtime, Postgres version, deployment shape (docker-compose / Helm / bare).
+      placeholder: |
+        OS: Ubuntu 24.04
+        Postgres: 16.4
+        Deploy: docker-compose
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: This is NOT a security vulnerability (those go via SECURITY.md).
+          required: true

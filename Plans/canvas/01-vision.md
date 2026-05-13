@@ -35,7 +35,9 @@ We do not pretend OpenGRC or eramba already solve this. They each solve a slice.
 
 ## 1.4 Personas
 
-The primary persona for v1 is anchored on a real user: **the solo security leader at a 70-person security-product startup who runs the entire program — risk register, board reporting, SOC 2, ISO 27001 (prospect-driven), vendor reviews, policies, exceptions — alone.** Every design decision is filtered through "does this help that person?" before "does this scale to a 2,000-person enterprise?"
+The primary persona for v1 is **the solo security leader at a 50–150-person security-product startup who runs the entire program — risk register, board reporting, SOC 2, ISO 27001 (prospect-driven), vendor reviews, policies, exceptions — alone.** Every design decision is filtered through "does this help that person?" before "does this scale to a 2,000-person enterprise?"
+
+This persona is generic — any operator matching the shape (one head, 50–150 people, security-product company, multi-framework demand) is the v1 audience.
 
 | Persona                                                                        | Role                                                                                                                                                                                                                                               | v1 priority  | Workflow they care about                                                                                                                                                                                          |
 | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -1,0 +1,60 @@
+{
+  "$comment": "Branch-protection ruleset for `main`. Source-of-truth for AC-11 of slice 050. Apply via `gh api -X PUT repos/mgoodric/security-atlas/branches/main/protection --input .github/branch-protection.json` OR the equivalent GitHub MCP call. Keep this file in sync with reality — if the maintainer adjusts via the UI, regenerate via `gh api repos/mgoodric/security-atlas/branches/main/protection > .github/branch-protection.json`.",
+
+  "required_status_checks": {
+    "strict": true,
+    "contexts": [
+      "Go · build + test",
+      "Go · integration (Postgres RLS)",
+      "Frontend · build + lint + test",
+      "Python · lint",
+      "Lint · pre-commit",
+      "Analyze (go)",
+      "Analyze (javascript-typescript)",
+      "Analyze (python)",
+      "codecov/project",
+      "DCO"
+    ]
+  },
+
+  "enforce_admins": true,
+
+  "required_pull_request_reviews": {
+    "required_approving_review_count": 1,
+    "dismiss_stale_reviews": true,
+    "require_code_owner_reviews": false,
+    "require_last_push_approval": true
+  },
+
+  "required_linear_history": true,
+
+  "required_conversation_resolution": true,
+
+  "allow_force_pushes": false,
+
+  "allow_deletions": false,
+
+  "block_creations": false,
+
+  "lock_branch": false,
+
+  "allow_fork_syncing": true,
+
+  "required_signatures": false,
+
+  "$rationale_required_signatures_off": "Signed-commit enforcement adds friction for community drive-by contributors (commits via the GitHub UI editor are signed by the GitHub bot, but commits from clones need a configured signing key). DCO sign-off + Conventional-Commit lint give us provenance and changelog discipline without raising the contributor bar. Revisit if the contributor base grows past ~25 active committers and trust-signal demand changes.",
+
+  "restrictions": {
+    "$comment": "Restrict push to the maintainer (so direct push is blocked for anyone else) PLUS the release-please bot's GitHub App identity, so release PRs can be merged without a human bypass of the review path. Adjust the app slug if a different release-please install is used.",
+    "users": ["mgoodric"],
+    "teams": [],
+    "apps": ["release-please"]
+  },
+
+  "$verification": {
+    "1": "A test PR with a failing CI check must NOT be mergeable. Mergeability resolves only after all checks in required_status_checks.contexts return green.",
+    "2": "A direct `git push origin main` from a clone (bypassing PR) MUST be rejected by the server.",
+    "3": "A `git push --force origin main` MUST be rejected even for the maintainer (enforce_admins=true).",
+    "4": "Approving a PR and then pushing a new commit MUST invalidate the prior approval (dismiss_stale_reviews=true)."
+  }
+}
