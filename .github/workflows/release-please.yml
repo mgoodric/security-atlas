@@ -3,6 +3,29 @@ name: release-please
 on:
   push:
     branches: [main]
+    # Skip pure-docs / planning commits. release-please isn't in
+    # `.github/branch-protection.json` required-checks (it runs on
+    # push to main, not on PRs), so `paths-ignore:` at the workflow
+    # `on:` level is safe here — no required-check deadlock concern.
+    #
+    # This is a different pattern from slice 061's CI gating (see
+    # docs/ci/PATH_FILTERING.md). Slice 061 needs in-workflow stub
+    # jobs because the affected checks are required by branch
+    # protection. release-please is not a required check, so the
+    # simpler `paths-ignore:` form works.
+    #
+    # Note: a `chore(status): ...` or `docs(...)` commit message
+    # type is also excluded from release notes by release-please-
+    # config.json — so even if a touched file slipped through this
+    # filter, no release-notes line would land. This filter is a
+    # runtime optimization to skip the workflow entirely.
+    paths-ignore:
+      - "**/*.md"
+      - "Plans/**"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
+      - ".editorconfig"
 
 permissions:
   contents: write

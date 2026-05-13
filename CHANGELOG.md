@@ -13,6 +13,14 @@ auto-generated notes.
 
 ### Changed
 
+- **CI — release-please skips pure-docs commits.** `.github/workflows/release-please.yml`
+  now uses `paths-ignore:` at the workflow `on:` level for `**/*.md`,
+  `Plans/**`, `docs/**`, `LICENSE`, `.gitignore`, `.editorconfig`.
+  release-please is not in `.github/branch-protection.json`
+  required-checks (it runs on push to main, not on PRs), so the
+  simpler `paths-ignore:` pattern is safe — no required-check
+  deadlock concern, unlike slice 061's in-workflow stub-job pattern
+  for the required CI matrix.
 - **Prompts — anti-stall HARD RULE hoisted to first line of per-slice
   template.** `Plans/prompts/04-per-slice-template.md` now opens with
   the `HARD RULE — DO NOT STALL` callout, makes "do NOT return to
