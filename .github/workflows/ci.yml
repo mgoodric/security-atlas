@@ -12,9 +12,93 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Slice 061 — path-based filtering for docs-only PRs.
+#
+# Why this pattern (not `paths-ignore:` at workflow `on:` level):
+#
+# Branch protection (`.github/branch-protection.json`) requires named status
+# checks to report success on every PR. If we filtered the workflow itself
+# with `paths-ignore:`, docs-only PRs would never trigger the workflow and
+# the required check names would stay "Expected — waiting for status to be
+# reported" forever — the merge button stays disabled.
+#
+# Instead, the workflow ALWAYS runs. A `changes` job runs first and uses
+# `dorny/paths-filter@v3` to set a `code` boolean output. Each expensive
+# job is split into a real job (gated `if: ...code == 'true'`) and a stub
+# sibling with the IDENTICAL `name:` (gated `if: ...code != 'true'`). The
+# two jobs are mutually exclusive — exactly one runs per PR — and GitHub
+# posts a single named check for that job name. Branch protection sees the
+# check resolve green on docs-only PRs in < 30 s instead of ~5 min.
+#
+# Security/secret-scan jobs (CodeQL via `codeql.yml`, GitGuardian via its
+# GitHub App, pre-commit below) are intentionally unconditional. Path
+# filtering is a cost optimization for build/test/lint, never a security
+# exemption.
+#
+# Full docs: `docs/ci/PATH_FILTERING.md`.
+
 jobs:
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # `code: true` if ANY of these patterns match the PR diff (or the
+          # push commit on main). Anything else — markdown, plan docs,
+          # license, changelog — is `code: false` and the expensive jobs
+          # short-circuit via stub-sibling.
+          filters: |
+            code:
+              - '**/*.go'
+              - '**/*.ts'
+              - '**/*.tsx'
+              - '**/*.js'
+              - '**/*.py'
+              - 'go.mod'
+              - 'go.sum'
+              - 'go.work'
+              - 'go.work.sum'
+              - 'package.json'
+              - 'package-lock.json'
+              - '**/package.json'
+              - '**/package-lock.json'
+              - 'pnpm-lock.yaml'
+              - 'migrations/**'
+              - 'sql/**'
+              - 'proto/**'
+              - 'policies/**'
+              - 'schemas/**'
+              - 'connectors/**'
+              - 'web/**'
+              - 'internal/**'
+              - 'cmd/**'
+              - 'pkg/**'
+              - 'oscal-bridge/**'
+              - 'gen/**'
+              - 'Dockerfile*'
+              - '**/Dockerfile'
+              - 'docker-compose*.yml'
+              - 'deploy/**'
+              - '.github/workflows/**'
+              - 'justfile'
+              - '.golangci.yml'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'atlas.hcl'
+              - '.pre-commit-config.yaml'
+              - 'buf.yaml'
+              - 'buf.gen.yaml'
+              - 'scripts/**'
+
   build-go:
     name: Go · build + test
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,8 +116,21 @@ jobs:
       - name: Run unit tests
         run: go test -race ./...
 
+  # Slice 061 stub: posts pass under the SAME required-check name
+  # (`Go · build + test`) when the PR touches no code. Mutually exclusive
+  # with `build-go` above via inverted `if:`.
+  build-go-stub:
+    name: Go · build + test
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+
   tests-integration:
     name: Go · integration (Postgres RLS)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -173,8 +270,18 @@ jobs:
             esac
           done
 
+  tests-integration-stub:
+    name: Go · integration (Postgres RLS)
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+
   lint-go:
     name: Go · lint
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -186,8 +293,18 @@ jobs:
         with:
           version: latest
 
+  lint-go-stub:
+    name: Go · lint
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+
   proto:
     name: Proto · lint + generate diff
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -201,8 +318,18 @@ jobs:
           buf generate
           git diff --exit-code -- gen/proto || (echo "gen/proto changed; run 'just proto-generate' locally and commit" && exit 1)
 
+  proto-stub:
+    name: Proto · lint + generate diff
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+
   build-frontend:
     name: Frontend · install + build
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -217,8 +344,18 @@ jobs:
       - name: Build sdk-typescript workspace
         run: npm run build --workspace @security-atlas/sdk --if-present
 
+  build-frontend-stub:
+    name: Frontend · install + build
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+
   lint-python:
     name: Python · ruff
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -229,6 +366,17 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
 
+  lint-python-stub:
+    name: Python · ruff
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+
+  # Slice 061: pre-commit is INTENTIONALLY unconditional. It auto-formats
+  # markdown (prettier) and YAML; we want it to run on docs-only PRs so
+  # formatting nits never slip through. ~30 s on a docs PR is acceptable.
   precommit:
     name: pre-commit · all hooks
     runs-on: ubuntu-latest
