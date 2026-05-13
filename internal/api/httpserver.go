@@ -16,6 +16,7 @@ import (
 	artifactsapi "github.com/mgoodric/security-atlas/internal/api/artifacts"
 	auditapi "github.com/mgoodric/security-atlas/internal/api/audit"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/authzmw"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
@@ -76,6 +77,15 @@ func (s *Server) httpHandler() http.Handler {
 	// no-op when no credential is in context (bearer-exempt paths like
 	// /auth/* keep their own request-supplied tenant resolution).
 	root.Use(tenancymw.Middleware)
+	// Slice 035: RBAC + ABAC via embedded OPA. Every non-exempt
+	// request reaches authz.Decide; every decision (allow or deny)
+	// writes one row to decision_audit_log. Attaches AFTER tenancymw
+	// so the audit-log INSERT runs under the right tenant GUC.
+	// Exempt prefixes mirror the bearer-auth exempt set; /health is
+	// added because a liveness probe shouldn't require credentials.
+	if s.authzEngine != nil {
+		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health"))
+	}
 
 	queries := dbx.New(s.dbPool)
 	root.Mount("/", anchors.New(queries).Routes())

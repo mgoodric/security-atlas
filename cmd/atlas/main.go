@@ -22,6 +22,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
 	"github.com/mgoodric/security-atlas/internal/exception"
@@ -167,6 +168,22 @@ func main() {
 		apikeySvc := apikeystore.NewStore(pool, authPool, hasher, 0)
 		srv.AttachAPIKeyStore(apikeySvc)
 		fmt.Fprintf(os.Stderr, "atlas: api_keys store wired (BEARER_HASH_KEY ok)\n")
+
+		// Slice 035: construct the OPA engine + decision audit writer
+		// once at startup. The engine loads the embedded rego bundle;
+		// failure here is fatal because every API path needs the engine
+		// to run. The resolver reads user_roles via the app pool (RLS
+		// enforced through tenancy context).
+		azEngineCtx, azCancel := context.WithTimeout(ctx, 10*time.Second)
+		azEngine, err := authz.NewEngine(azEngineCtx, authz.NewDBRolesResolver(pool))
+		azCancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: authz engine: %v\n", err)
+			os.Exit(1)
+		}
+		azAudit := authz.NewAuditWriter(pool)
+		srv.AttachAuthz(azEngine, azAudit)
+		fmt.Fprintf(os.Stderr, "atlas: authz OPA engine wired (5 roles + decision audit)\n")
 
 		// Import bundled platform schemas at boot. Idempotent — no-op when
 		// every kind is already present in the DB. Requires the connection
