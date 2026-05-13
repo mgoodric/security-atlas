@@ -13,6 +13,52 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 035 — RBAC roles (5) + ABAC via OPA embedded + decision
+  audit log.** Graduates the v1 placeholder flag-on-credential
+  authorization model (slice 014 `IsAdmin`, slice 011 `OwnerRoles`,
+  slice 018 `IsApprover`) to a real RBAC + ABAC model backed by the
+  Open Policy Agent SDK running as an **embedded Go library** (not a
+  sidecar; canvas §9.5 tech-stack lock). Five canonical roles (`admin`,
+  `grc_engineer`, `control_owner`, `auditor`, `viewer`) per canvas
+  §9.5; user-to-role membership is per-tenant via a new `user_roles`
+  table (composite PK `(tenant_id, user_id, role)` + role CHECK +
+  four-policy RLS under FORCE — slice 011 / 017 / 018 / 021 / 036
+  pattern). Every non-exempt API request runs through
+  `authzmw.Middleware` (attached AFTER `tenancymw.Middleware`, BEFORE
+  any business handler) which builds a canonical Input from the
+  request context, calls `authz.Decide` against the embedded Rego
+  bundle (10 .rego files under `policies/authz/`: `defaults` +
+  `helpers` + 5 role files + 3 ABAC predicates), and writes one row to
+  the new `decision_audit_log` table for every decision (allow OR
+  deny). The audit log uses the slice-013 / 011 / 026 append-only
+  two-policy RLS template (`tenant_read` SELECT + `tenant_write`
+  INSERT only; no UPDATE / DELETE policies under FORCE) so prior
+  decisions cannot be mutated. Anti-criterion P0 honored: NO endpoint
+  without explicit Decide call (matrix test enumerates the cells); NO
+  decision skips the audit log (allow-path audit-write failure fails
+  the request with 500); NO admin emergency-bypass (the 5 roles are
+  the universe — no `bypass` or `superadmin` in the CHECK
+  constraint). The 5-role enum + the 10 seed Rego policies ship as
+  **`community_draft`** attribution under the slice-007 / 022 HITL
+  gate pattern; orchestrator + user pair-review pre-merge per
+  `docs/audit-log/authz-review.md`. Legacy-flag bridge keeps slice
+  014 / 011 / 018 credstore credentials working without a forklift
+  migration: `IsAdmin` → `admin`, `IsApprover` → `grc_engineer`,
+  non-empty `OwnerRoles` → `control_owner`, else `grc_engineer` for
+  v1 connector keys; user_roles table rows take precedence when
+  present. ABAC: canvas §9.5 example "auditor X can only see scope
+  cells within audit_period Y" implemented in
+  `policies/authz/audit_periods.rego` + `scope_cells.rego` — an
+  auditor with `audit_period_ids=[A]` is denied a sample with
+  `audit_period_id=B`. Migration slot `_018`; spine touch =
+  `github.com/open-policy-agent/opa@v1.16.2` Go SDK
+  (`rego.PrepareForEval` + `ParsedModule` + embedded `inmem.New()`
+  store); zero churn to slice-002 test helpers (separate `user_roles`
+  table, NOT a column on the slice-034 `users` table). Wired into
+  `cmd/atlas` once at startup via `srv.AttachAuthz(engine, audit)`;
+  unit servers (no DB pool) leave it unset and the middleware is a
+  no-op.
+
 - **Slice 050 — Public release readiness + release automation.** Final
   pre-flight slice before the maintainer flips the repository to public
   visibility. **`gh repo edit --visibility public` is NOT executed by

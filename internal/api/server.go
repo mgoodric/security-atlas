@@ -31,6 +31,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 )
@@ -60,6 +61,22 @@ type Server struct {
 	// Slice 034: user-facing auth routes (OIDC login/callback, local
 	// login, logout). Only mounted when set.
 	authHandler *authapi.Handler
+	// Slice 035: OPA-backed authz engine + decision audit writer. The
+	// HTTP authz middleware is attached in httpHandler when both are
+	// non-nil. Unit servers can leave them unset to bypass authz; the
+	// production binary wires them once at startup via AttachAuthz.
+	authzEngine *authz.Engine
+	authzAudit  *authz.AuditWriter
+}
+
+// AttachAuthz wires the slice-035 OPA engine + decision audit writer.
+// cmd/atlas constructs them once at startup with the DB pool + a
+// DBRolesResolver. Unit servers can leave them unset to bypass authz
+// (matching the slice-013/014 attach pattern). Once attached, the HTTP
+// authz middleware runs on every non-exempt request.
+func (s *Server) AttachAuthz(engine *authz.Engine, audit *authz.AuditWriter) {
+	s.authzEngine = engine
+	s.authzAudit = audit
 }
 
 // IssueBootstrapCredential mints a credential for the supplied tenant and
