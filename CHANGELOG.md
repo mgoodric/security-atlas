@@ -13,6 +13,25 @@ auto-generated notes.
 
 ### Added
 
+- **CI — `setup-go` bumped 1.25 → 1.26 across all workflows.** `go.mod`
+  and `go.work` already declare `go 1.26`, but `actions/setup-go@v5`
+  was pinned to `"1.25"` in `ci.yml` (×4 jobs), `codeql.yml`, and
+  `release.yml`. The drift was silent until coverage instrumentation
+  (this same PR) triggered stdlib re-compile, which surfaced
+  `compile: version "go1.26.0" does not match go tool version
+"go1.25.9"`. Bumping the pin to `"1.26"` resolves it everywhere.
+- **CI — Go test coverage + Codecov upload.** Adds
+  `-covermode=atomic -coverprofile=coverage.txt` to both the unit
+  (`Go · build + test`) and integration (`Go · integration
+(Postgres RLS)`) jobs in `.github/workflows/ci.yml`. Integration
+  job additionally uses `-coverpkg=./...` so DB-bound test files
+  attribute coverage to the production packages they exercise.
+  Coverage reports upload to Codecov via `codecov/codecov-action@v5`
+  with flags `unittests` and `integration`; uploads gate on
+  `secrets.CODECOV_TOKEN` and `fail_ci_if_error: false` so a Codecov
+  outage does not block CI. Maintainer-todo entry in
+  `docs/RELEASE_READINESS.md §10` (Codecov enablement) can be
+  closed once the token is set in repo secrets.
 - **Slice 061 — CI path-based filtering for docs-only PRs.** Adds a
   `changes` job to `.github/workflows/ci.yml` using
   `dorny/paths-filter@v3` that classifies each PR as `code: true` /
