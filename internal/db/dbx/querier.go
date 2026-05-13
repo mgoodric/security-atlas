@@ -45,6 +45,13 @@ type Querier interface {
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
 	CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountFrameworkRequirementsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
+	// Rate numerator: distinct user_ids who (a) are in the denominator set
+	// per the same role predicate AND (b) have at least one ack of
+	// policy_version_id with acknowledged_at >= the freshness cutoff.
+	//
+	// The cutoff is a parameter (not `now() - interval '365 days'`) so tests
+	// inject via store.WithClock and integration tests aren't time-bombed.
+	CountFreshAcksForVersion(ctx context.Context, arg CountFreshAcksForVersionParams) (int64, error)
 	// Audit query — exposed for integration tests + the audit log.
 	CountFwToScfEdgesBySourceAttribution(ctx context.Context, sourceAttribution CrosswalkSourceAttribution) (int64, error)
 	// AC-1 + AC-5: count evidence records that match the population's filter.
@@ -57,6 +64,15 @@ type Querier interface {
 	// evidence_records.scope_id. v1 keeps the SQL simple; future slices can
 	// push the predicate down into a JSONB index.
 	CountPopulationEvidence(ctx context.Context, arg CountPopulationEvidenceParams) (int64, error)
+	// Rate denominator: distinct user_ids in api_keys whose owner_roles
+	// intersect the policy's acknowledgment_required_roles OR are flagged
+	// is_admin (admin wildcard). Excludes revoked keys. A user with two
+	// credentials counts once.
+	//
+	// slice-035 (OPA-RBAC) graduates this: replace api_keys with a proper
+	// user-role binding table. Until then this is the stand-in per CONTEXT.md
+	// "Policy acknowledgment (slice 023)".
+	CountRequiredRoleUsersForVersion(ctx context.Context, arg CountRequiredRoleUsersForVersionParams) (int64, error)
 	CountRiskControlLinks(ctx context.Context, arg CountRiskControlLinksParams) (int64, error)
 	CountSCFAnchorsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
 	CountScopeCells(ctx context.Context, tenantID pgtype.UUID) (int64, error)
@@ -198,6 +214,8 @@ type Querier interface {
 	// state-check tree.
 	GetAPIKeyByHash(ctx context.Context, tokenHash []byte) (ApiKey, error)
 	GetAPIKeyByID(ctx context.Context, arg GetAPIKeyByIDParams) (ApiKey, error)
+	// Idempotency lookup for the handler's deduplicate path.
+	GetAcknowledgmentByToken(ctx context.Context, arg GetAcknowledgmentByTokenParams) (PolicyAcknowledgment, error)
 	// Returns the currently-active framework scope for a given framework version,
 	// i.e. the (at most one) row in state `activated` for that (tenant, fv) pair.
 	// AC-3: a partial UNIQUE index guarantees at most one row matches.
@@ -265,6 +283,10 @@ type Querier interface {
 	GetOrgThemeByID(ctx context.Context, id pgtype.UUID) (OrgTheme, error)
 	GetOrgUnitByID(ctx context.Context, arg GetOrgUnitByIDParams) (OrgUnit, error)
 	GetPolicyByID(ctx context.Context, arg GetPolicyByIDParams) (Policy, error)
+	// Single-row lookup used by POST /v1/policies/{id}/acknowledge. The
+	// handler checks status='published' itself so it can return a precise
+	// 409 (vs 404) when the row exists but is not currently in force.
+	GetPolicyForAcknowledge(ctx context.Context, arg GetPolicyForAcknowledgeParams) (Policy, error)
 	GetPopulationByID(ctx context.Context, arg GetPopulationByIDParams) (Population, error)
 	// Lookup an existing parent risk by the sha256 idempotency key stored on
 	// inherent_score. Used by slice 053's POST /v1/risks/aggregate to satisfy
@@ -335,6 +357,16 @@ type Querier interface {
 	// surface (no UpdateEvidenceRecord, no DeleteEvidenceRecord exists).
 	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
 	InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error)
+	// Slice 023 — policy acknowledgment queries.
+	//
+	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
+	// defense-in-depth layer and the WHERE clauses are the primary correctness
+	// guarantee. The 365-day freshness window is parameterized so tests can
+	// shift the boundary via store.WithClock without rewriting SQL.
+	// Append-only insert. The ack_token's UNIQUE partial index dedups
+	// double-clicks within the same UTC day; the handler treats the
+	// 23505 violation as "deduplicated, return original".
+	InsertPolicyAcknowledgment(ctx context.Context, arg InsertPolicyAcknowledgmentParams) (PolicyAcknowledgment, error)
 	// Part 2 of the two-step Publish for SECOND-and-later versions: clones
 	// the approved row's content into a NEW row with status='published',
 	// predecessor_id pointing at the just-superseded prior. Called inside
@@ -494,6 +526,21 @@ type Querier interface {
 	// (testability) and timezone semantics (vendor reviews are date-granular,
 	// not timestamp-granular).
 	ListOverdueVendors(ctx context.Context, arg ListOverdueVendorsParams) ([]Vendor, error)
+	// One-shot query returning every published policy the user must
+	// acknowledge plus their most-recent ack timestamp (if any). Replaces
+	// the slice-023 N+1 (one ListPublishedPolicies + N
+	// LatestAcknowledgmentForUserAndVersion calls) with a single LEFT JOIN.
+	//
+	// A row appears in the result when:
+	//   1. status = 'published' AND cardinality(acknowledgment_required_roles) > 0
+	//   2. The caller's roles intersect required_roles, OR caller is admin.
+	//   3. (no fresh ack exists) computed in Go: we return latest_ack_at and
+	//      let the handler compare against the freshness cutoff. Pushing
+	//      the cutoff into SQL too would mask "stale" from "never ack'd"
+	//      in the response payload, which the UI uses to label items.
+	//
+	// Sort by title ASC, created_at DESC for deterministic ordering.
+	ListPendingAcksForUser(ctx context.Context, arg ListPendingAcksForUserParams) ([]ListPendingAcksForUserRow, error)
 	// Returns every policy for the tenant, newest first. Handler applies
 	// status filter in-memory (cardinality is small per canvas v1 scope).
 	ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Policy, error)
@@ -592,6 +639,10 @@ type Querier interface {
 	// Set the predecessor's retirement deadline on rotation. After retires_at the
 	// predecessor's bearer no longer authenticates (credstore.Authenticate enforces).
 	SetAPIKeyRetiresAt(ctx context.Context, arg SetAPIKeyRetiresAtParams) error
+	// Backreference the evidence record id after slice-013 Process succeeds.
+	// Same-tx update so the row never observes the partial state from
+	// outside.
+	SetAcknowledgmentEvidenceRecord(ctx context.Context, arg SetAcknowledgmentEvidenceRecordParams) error
 	// Point a framework at its current version.
 	SetLatestVersion(ctx context.Context, arg SetLatestVersionParams) error
 	// AC-6: draft -> review. Guarded so callers can never re-submit an already

@@ -119,3 +119,24 @@ No other transitions. `superseded` is terminal for that row; revisions continue 
 | `change-management-policy.md`    | Change Management Policy    | `CHG-02`, `CFG-02`, `CHG-04` |
 
 Exactly 5 — never 6, never 4 (constitutional anti-pattern: "policy template libraries dressed as a feature"). The CLI `atlas-cli policy seed-stock --tenant-id=...` loads these markdown files, resolves the SCF anchor codes to UUIDs via `scf_anchors`, and INSERTs them as `draft` rows with `source_attribution = 'community_draft'`. Missing anchors warn + drop the link (the warning surfaces under AC-7 if all links resolve empty).
+
+## Policy acknowledgment (slice 023)
+
+An affirmative, per-user attestation that a published policy version has been read and accepted. Always:
+
+- **Per-(user × policy_version_id)** — the FK targets the policies row id, not a "logical id". When publish creates a new row with a new id, acks of the prior row do not satisfy the new row (anti-criterion P0-3). Each policy publish forces re-acknowledgment.
+- **Annual recurrence** — an ack older than 365 days is treated as expired; the task reappears in `/v1/me/acknowledgments`. Computed at read time (no cron). Canvas §2.3's `annual` evidence freshness class (400 d) governs _evidence_ `valid_until`; 365 d governs _task reappearance_, which is canvas §2.6's "attest annually" reading.
+- **First-class evidence** — every ack emits one `policy.acknowledgment.v1` evidence record through the slice-013 ingest service (invariant 9). The record's `control_id` is the non-UUID string `policy:<policy_id>:v<version_id>` so the ledger stores it as `control_ref` only; SCF anchor for the kind is `GOV-04` (matching `manual.attestation.v1`).
+- **Role-gated** — a user sees a policy in their pending list iff their credential's `OwnerRoles[]` intersects the policy's `acknowledgment_required_roles[]` OR the credential is `IsAdmin`. The slice-035-future OPA-RBAC graduation will replace this stand-in.
+- **Rate at read time** — `GET /v1/policies/{id}/acknowledgment-rate` returns `{numerator, denominator, percent}`. Denominator = distinct `api_keys.issued_by` user_ids in the tenant whose `owner_roles && policy.acknowledgment_required_roles OR is_admin = true`, excluding `revoked_at IS NOT NULL`. Numerator = denominator users with a fresh ack (≤365 d) of the current published version. `percent = null` when denominator = 0 (vs returning `0` which would mis-imply non-compliance).
+- **Idempotency** — the ack endpoint derives an idempotency key over `(user_id, policy_version_id, day_bucket)`; double-clicks within a day deduplicate; a re-ack 365 days later produces a fresh evidence record.
+
+Routes:
+
+```
+GET  /v1/me/acknowledgments                    (auth required; lists pending for current user)
+POST /v1/policies/{id}/acknowledge             (auth required; 409 if id resolves to non-published row)
+GET  /v1/policies/{id}/acknowledgment-rate     (auth required; numerator/denominator/percent)
+```
+
+P0 anti-criteria: anonymous ack rejected (slice 034 cred required); stale acks not counted; superseded-version ack does not satisfy current.

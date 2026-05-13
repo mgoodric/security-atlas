@@ -85,6 +85,10 @@ func DefaultSeed() []KindVersion {
 		{Kind: "osquery.host_posture.v1", Version: "1.0.0"},
 		{Kind: "jira.ticket_evidence.v1", Version: "1.0.0"},
 		{Kind: "manual.upload.v1", Version: "1.0.0"},
+		// Slice 023: policy acknowledgment workflow. Each
+		// POST /v1/policies/{id}/acknowledge emits one record of this
+		// kind through the slice-013 evidence ledger.
+		{Kind: "policy.acknowledgment.v1", Version: "1.0.0"},
 	}
 }
 

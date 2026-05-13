@@ -59,6 +59,102 @@ auto-generated notes.
   unit servers (no DB pool) leave it unset and the middleware is a
   no-op.
 
+- **Slice 023 — Policy acknowledgment workflow + role-required
+  attestation.** Closes the loop from slice 022's policy library
+  (`policies` table + version chain + `acknowledgment_required_roles`)
+  to canvas §7.1's "Policy attestation rate" KPI: each published
+  policy version is annually re-attested by the credentials whose
+  `OwnerRoles[]` intersect the policy's `acknowledgment_required_roles`
+  (or carry `IsAdmin=true`), and each attestation flows through the
+  slice-013 evidence ledger as a first-class evidence record. The
+  dashboard's policy-attestation metric becomes real, not aspirational.
+  Three routes appended onto the platform router via the
+  parallel-batch Mount-append convention: `GET /v1/me/acknowledgments`
+  (lists pending acks for the current user — published policies whose
+  required-roles intersect the caller's roles AND either have no ack
+  of the current published version OR whose most-recent ack is older
+  than 365 days), `POST /v1/policies/{id}/acknowledge` (records the
+  attestation as a `policy_acknowledgments` row AND emits one
+  `policy.acknowledgment.v1` evidence record via
+  `ingest.Service.Process` — invariant 9 honored), and
+  `GET /v1/policies/{id}/acknowledgment-rate` (returns
+  `{numerator, denominator, percent, window_seconds}` — denominator is
+  the distinct count of `api_keys.issued_by` user_ids whose
+  `owner_roles` intersect the required roles OR are flagged
+  `is_admin`; numerator is the subset who have a fresh — ≤365d — ack
+  of the current published version; `percent: null` when denominator
+  is zero so consumers can distinguish "no required-role members"
+  from "0% acknowledged"). Migration `20260511000017_acknowledgments`
+  creates the `policy_acknowledgments` table (`id, tenant_id,
+policy_id, policy_version_id, user_id, acknowledged_at, ack_token,
+evidence_record_id, created_at`) under FORCE ROW LEVEL SECURITY
+  with the established four-policy split (`tenant_read` SELECT,
+  `tenant_write` INSERT WITH CHECK, `tenant_update` UPDATE
+  USING+WITH CHECK, `tenant_delete` DELETE), two composite FKs that
+  block cross-tenant references (`(tenant_id, policy_version_id)` →
+  `policies(tenant_id, id)` ON DELETE RESTRICT to preserve audit
+  lineage; `(tenant_id, user_id)` → `users(tenant_id, id)` ON DELETE
+  CASCADE — the migration adds the required UNIQUE `(tenant_id, id)`
+  constraint to `users` since slice 012 declared `id` as the single
+  PK), idempotency dedup via partial UNIQUE on `(tenant_id, ack_token)
+WHERE ack_token <> ''`, and three indexes covering the hot paths
+  (per-user-per-version freshness check, per-version rate denominator
+  /numerator, per-policy cross-version analytics). Annual recurrence
+  (365d) is computed at READ time — no cron, no daily job — and matches
+  canvas §2.6's "attest annually" reading (the 365d threshold is
+  separate from canvas §2.3's 400d `annual` freshness class which
+  governs evidence `valid_until`, not user-facing task reappearance).
+  Evidence emission: the handler builds an `EvidenceRecord` with
+  `control_id` set to the non-UUID string
+  `policy:<policy_id>:v<policy_version_id>` so the slice-013 ingest
+  service stores it in `control_ref` only (the ingest service's
+  UUID-parse fallback at `internal/evidence/ingest/ingest.go` line
+  386-392 is the canonical path for non-control-targeted evidence —
+  same pattern as a `scf:VPM-04` reference); `actor_type=human` and
+  `actor_id=cred.UserID` are server-set so AI-driven auto-attest is
+  structurally impossible (canvas AI-assist boundary). New schema
+  `internal/api/schemaregistry/schemas/policy.acknowledgment/1.0.0.json`
+  (`x-owner=platform`, `x-default-scf-anchors=["GOV-04"]`, required
+  fields `policy_id`, `policy_version_id`, `user_id`,
+  `acknowledged_at`); registered in `registry.DefaultSeed` so unit-only
+  servers without a DB-backed registry still resolve the kind. P0
+  anti-criteria all honored: anonymous push rejected at the auth
+  middleware (no DB write, no evidence emitted — verified by a
+  before/after counter test); stale acks (>365d) excluded from the
+  rate numerator at the SQL level (the `freshness_cutoff` parameter
+  on `CountFreshAcksForVersion` is `now() - 365d` — time-injectable via
+  `AckStore.WithClock` so integration tests aren't time-bombed); ack of
+  a `superseded` policy version returns 409 (defense in depth — the FK
+  already targets a specific row id, but the explicit status check
+  surfaces a precise error). Idempotency: the ack token is the
+  sha256-prefix of `(user_id, policy_version_id, day_bucket)` —
+  double-clicks within the same UTC day return the original receipt
+  with `deduplicated=true`; a 365-day-later re-ack produces a fresh
+  row (different `day_bucket` → fresh token). The rate denominator
+  carries an explicit `TODO(slice-035)` marker — when slice 035 lands
+  OPA-driven RBAC with first-class user-role bindings, replace the
+  `api_keys`-based query with one against the canonical
+  `user_role_bindings` table; until then `api_keys.owner_roles +
+is_admin` is the documented stand-in (CONTEXT.md "Policy
+  acknowledgment (slice 023)"). Test-only bridge: a new
+  `credstore.Store.RebindUserIDForTests` + `api.Server.RebindBearerUserIDForTests`
+  pair lets the integration test bind bootstrap credentials (which
+  default `UserID` to the credential id) to seeded `users` rows so the
+  composite FK passes; the slice-034 OIDC-callback path provisions
+  real user ids in production. **AC pass/fail (all 6 + 3 P0
+  anti-criteria PASS):** AC-1 user sees pending acks; AC-2 ack writes
+  the row AND emits the evidence record; AC-3 user without required
+  role does not see the policy; AC-4 v1 ack does not satisfy v2 (each
+  publish creates a new row id; FK target differs); AC-5 ack older
+  than 365d expires; AC-6 rate returns numerator/denominator/percent;
+  P0-1 no anon ack succeeds; P0-2 stale not counted; P0-3 superseded
+  ack returns 409. Dependencies: slices 022 (policies table) + 034
+  (cred.UserID + cred.OwnerRoles + cred.IsAdmin) + 013 (ingest.Service)
+
+  - 014 (DB-backed schema registry) + 033 (tenancy middleware). Next
+    in this cluster: slice 035 graduates the rate-denominator role
+    binding to OPA-driven RBAC.
+
 - **Slice 050 — Public release readiness + release automation.** Final
   pre-flight slice before the maintainer flips the repository to public
   visibility. **`gh repo edit --visibility public` is NOT executed by

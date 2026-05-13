@@ -112,6 +112,18 @@ func (s *Server) IssueBootstrapOwnerCredential(tenantID string, roles []string) 
 	return s.credStore.IssueOwner(tenantID, roles, 0)
 }
 
+// RebindBearerUserIDForTests overrides the UserID field on the
+// credential keyed by the supplied bearer plaintext. Slice 023
+// integration tests use this to bind a bootstrap credential to a
+// seeded users row id so the policy_acknowledgments composite FK
+// passes. Slice 034's OIDC-callback path sets UserID at issue time
+// from the IdP's `sub` claim; this hook bridges bootstrap creds (which
+// default UserID to their own credential id) to seeded users rows for
+// integration tests that don't run the OIDC dance.
+func (s *Server) RebindBearerUserIDForTests(bearer, userID string) error {
+	return s.credStore.RebindUserIDForTests(bearer, userID)
+}
+
 // Config groups the wiring inputs. Zero values yield a sane local setup.
 type Config struct {
 	RotationGrace time.Duration

@@ -1102,6 +1102,18 @@ type Policy struct {
 	SupersededAt                pgtype.Timestamptz `json:"superseded_at"`
 }
 
+type PolicyAcknowledgment struct {
+	ID               pgtype.UUID        `json:"id"`
+	TenantID         pgtype.UUID        `json:"tenant_id"`
+	PolicyID         pgtype.UUID        `json:"policy_id"`
+	PolicyVersionID  pgtype.UUID        `json:"policy_version_id"`
+	UserID           pgtype.UUID        `json:"user_id"`
+	AcknowledgedAt   pgtype.Timestamptz `json:"acknowledged_at"`
+	AckToken         string             `json:"ack_token"`
+	EvidenceRecordID pgtype.UUID        `json:"evidence_record_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type Population struct {
 	ID              pgtype.UUID        `json:"id"`
 	TenantID        pgtype.UUID        `json:"tenant_id"`

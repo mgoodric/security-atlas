@@ -150,7 +150,8 @@ jobs:
             ./internal/evidence/ingest/... \
             ./internal/evidence/streambuf/... \
             ./internal/artifact/... \
-            ./internal/api/artifacts/...
+            ./internal/api/artifacts/... \
+            ./internal/api/policyacks/...
       - name: Migration round-trip — down then up
         run: |
           # Walk down migrations in reverse-alphabetical order (latest down first).

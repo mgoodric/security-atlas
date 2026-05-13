@@ -22,6 +22,7 @@ sql:
       - "migrations/sql/20260511000014_risk_hierarchy_decisions.sql"
       - "migrations/sql/20260511000015_seed_default_themes.sql"
       - "migrations/sql/20260511000016_policies.sql"
+      - "migrations/sql/20260511000017_acknowledgments.sql"
     queries: "internal/db/queries"
     gen:
       go:
