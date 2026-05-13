@@ -3,9 +3,23 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-12 (slice 007 → in-review · HITL pending)
+**Last reconciled:** 2026-05-12 (batch 9 merged — slice 007 → merged · 29/51 on main · slices 008 + 010 newly unblocked)
 
-## Drift detected — 2026-05-12 (slice 007 → in-review · HITL pending)
+## Drift detected — 2026-05-12 (batch 9 merged — slice 007 SOC 2 crosswalk)
+
+Slice 007 (SOC 2 v2017 TSC crosswalk loader) flipped `in-review` → `merged` after HITL pair-review session (orchestrator + reviewer Matt Goodrich, 2026-05-12). **Single biggest critical-path unlock in v1** — slices 008 (UCF graph traversal) + 010 (50 SOC 2 controls) both transition to `ready`. Downstream of 010 the chain advances: slices 012 (control state eval), 016 (freshness/drift), 020 (risk→control), 037 (docker-compose, gated on 010 specifically), 042 (audit workspace) all wait one or two hops behind. The biggest single-slice unlock in v1 is now on main.
+
+| Row | Transition             | Evidence                                                                                                                                                                                                                                                                                                                                                           |
+| --- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 007 | `in-review` → `merged` | commit `b12cfea` on main (gh#29 squashed 2026-05-12; 56 community_draft edges across CC1–CC9 + A1 + C1 + PI1; HITL approved 56/56 as-is per `docs/audit-log/soc2-mapping-review.md` signed 2026-05-12; ZERO `no_relationship` or revisions; PI1.x family shipped as low-confidence intersects_with per explicit decision — SCF PI coverage is structurally narrow) |
+| 008 | `not-ready` → `ready`  | dep 007 `merged`                                                                                                                                                                                                                                                                                                                                                   |
+| 010 | `not-ready` → `ready`  | deps 009, 007 `merged` (HITL on 50-control accuracy)                                                                                                                                                                                                                                                                                                               |
+
+**HITL gate worked cleanly.** Agent produced a full review-ready artifact in one pass (machinery + drafted mappings + structured spot-check report). User reviewed 9 low-confidence rows + a sample of 47 high-confidence, approved all 56 as-is. ~30 min pair-review session, no agent re-run needed. The pattern is reproducible for slices 010 (50 SOC 2 controls) + 022 (5 stock policies) + 035 (role enum) — same machinery+draft+pair-review shape works.
+
+**Counts delta:** merged +1 · in-review −1 · ready +2 · not-ready −2.
+
+## Drift detected — 2026-05-12 (slice 007 → in-review · HITL pending, archived)
 
 Slice 007 (SOC 2 v2017 TSC crosswalk loader) flipped `in-progress` → `in-review`. PR gh#29 opened against main. The slice lands the second half of the UCF graph (canvas §3): two new tables (`framework_requirements` + `fw_to_scf_edges`) via migration `20260511000013`, two new DB enums (`strm_relationship_type` with the five canvas-spec NIST IR 8477 literals + `crosswalk_source_attribution` with `scf_official | community_draft | org_internal`), a new `internal/api/soc2import/` Go package (Load + idempotent Import with reuse of slice-006's two-query upsert pattern), the new HTTP route `GET /v1/requirements/{id}/anchors` for reverse traversal (accepts UUID, `slug:version:code`, or `slug::code` convenience form), and a new `atlas-cli catalog import-soc2 <path>` CLI + `just import-soc2 path` recipe. **Constitutional invariant 1 enforced at DDL level** — no `fw_to_fw_edges` table exists; `TestImport_NoDirectRequirementToRequirementTableExists` queries `information_schema` to assert at most one FK points at `framework_requirements`. **AI-assist boundary enforced** — every drafted row carries `source_attribution: community_draft`; the loader rejects rows missing `relationship_type` or `strength`, eliminating silent `equal/1.0` defaults. **DRAFT mapping data ships at `data/crosswalks/soc2-tsc-2017.yaml`:** 43 SOC 2 TSC criteria (CC1.1–CC9.2 + A1.1–A1.3 + C1.1–C1.2 + PI1.1–PI1.5), 56 drafted edges, 9 flagged low-confidence (`strength ≤ 0.5`) for HITL priority — these cluster around COSO-flavored CC1.x and Processing-Integrity PI1.x where SCF anchor coverage is narrow. **HITL pre-merge gate is the next blocker:** AC-4 (20-mapping spot-check signed in `docs/audit-log/soc2-mapping-review.md`) remains open until the orchestrator + user pair-review the drafts. Agent does NOT self-merge. Source: Option B (agent-authored — SCF's published SOC 2 STRM crosswalk artifact was not available offline; future SCF-published ingest will use `source_attribution=scf_official` and supersede). Migration slot consumed: `20260511000013`. Patches slice-006 `truncateCatalog` test helper for FK cascade order; `fw_to_scf_edges.scf_anchor_id` uses `ON DELETE CASCADE` so SCF wipe-and-reimport drops stale edges automatically.
 
@@ -336,12 +350,12 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 
 | Status        | Count  |
 | ------------- | ------ |
-| `merged`      | 28     |
-| `in-review`   | 1      |
+| `merged`      | 29     |
+| `in-review`   | 0      |
 | `in-progress` | 0      |
-| `ready`       | 3      |
+| `ready`       | 5      |
 | `blocked`     | 0      |
-| `not-ready`   | 19     |
+| `not-ready`   | 17     |
 | **Total**     | **51** |
 
 ## Status enum
@@ -366,10 +380,10 @@ Legal values (use exactly these strings):
 | 004 | AWS connector (S3 encryption, end-to-end)              | `merged`    | spine/004-aws-connector-s3-encryption                | gh#4  | 2026-05-11 | 2026-05-11 | —                                                                        |
 | 005 | Frontend bootstrap (Next.js + auth + SCF browser)      | `merged`    | spine/005-frontend-bootstrap                         | gh#5  | 2026-05-11 | 2026-05-11 | —                                                                        |
 | 006 | SCF catalog importer + Framework/FrameworkVersion API  | `merged`    | catalog/006-scf-catalog-importer                     | gh#6  | 2026-05-11 | 2026-05-11 | open-q #01 cleared at merge                                              |
-| 007 | SOC 2 v2017 (TSC) crosswalk loader                     | `in-review` | catalog/007-soc2-crosswalk-loader                    | gh#29 | 2026-05-12 | —          | HITL gate pending pre-merge (spot-check 9 low-confidence drafted edges)  |
-| 008 | UCF graph traversal query API                          | `not-ready` | —                                                    | —     | —          | —          | waits on 007                                                             |
+| 007 | SOC 2 v2017 (TSC) crosswalk loader                     | `merged`    | catalog/007-soc2-crosswalk-loader                    | gh#29 | 2026-05-12 | 2026-05-12 | HITL approved · 56 community_draft edges · unlocks 008, 010              |
+| 008 | UCF graph traversal query API                          | `ready`     | —                                                    | —     | —          | —          | dep 007 merged                                                           |
 | 009 | Control bundle format spec + parser + upload           | `merged`    | control-as-code/009-control-bundle-format            | gh#16 | 2026-05-11 | 2026-05-11 | unlocks 010, 011 critical path                                           |
-| 010 | SCF-anchored control kit (50 SOC 2 controls)           | `not-ready` | —                                                    | —     | —          | —          | waits on 009, 007 · HITL on accuracy                                     |
+| 010 | SCF-anchored control kit (50 SOC 2 controls)           | `ready`     | —                                                    | —     | —          | —          | deps 009, 007 merged · HITL on 50-control accuracy                       |
 | 011 | Manual control type + attestation flow                 | `merged`    | control-as-code/011-manual-control-attestation       | gh#20 | 2026-05-11 | 2026-05-11 | deps 009, 013, 036 all merged                                            |
 | 012 | Control state evaluation engine                        | `not-ready` | —                                                    | —     | —          | —          | waits on 010, 013, 017                                                   |
 | 013 | Evidence ledger write API + push endpoint              | `merged`    | evidence-pipeline/013-evidence-ledger-write-api      | gh#12 | 2026-05-11 | 2026-05-11 | AC-6 PARTIAL — S3 redirect awaits 036                                    |
@@ -414,29 +428,28 @@ Legal values (use exactly these strings):
 
 ## Ready set right now
 
-| #   | Title                                         | Cluster  | Est (d) | Notes                                                                          |
-| --- | --------------------------------------------- | -------- | ------- | ------------------------------------------------------------------------------ |
-| 007 | SOC 2 v2017 (TSC) crosswalk loader            | catalog  | 1.5     | HITL · critical path · unlocks 008, 010                                        |
-| 022 | Policy library + 5 stock policies             | policies | 2       | HITL · unlocks 023 (with 034 merged)                                           |
-| 035 | RBAC roles + ABAC via OPA embedded            | auth     | 2       | NEWLY UNBLOCKED · HITL on role design · unlocks 025, 042 (audit-flow path)     |
-| 050 | Public release readiness + release automation | infra    | 3       | HITL · gated on open-q #1 (SCF), #3 (license), #15 (CSA); ships .github/+docs/ |
+| #   | Title                                         | Cluster  | Est (d) | Notes                                                                                   |
+| --- | --------------------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------- |
+| 008 | UCF graph traversal query API                 | catalog  | 1.5     | **NEWLY UNBLOCKED · AFK-clean** · dep 007 merged · unlocks 030 (OSCAL export), 041 (UI) |
+| 010 | SCF-anchored control kit (50 SOC 2 controls)  | controls | 2       | NEWLY UNBLOCKED · HITL on 50-control accuracy (machinery+draft pattern reusable)        |
+| 022 | Policy library + 5 stock policies             | policies | 2       | HITL · unlocks 023 (with 034 merged)                                                    |
+| 035 | RBAC roles + ABAC via OPA embedded            | auth     | 2       | HITL on role design · unlocks 025, 042 (audit-flow path)                                |
+| 050 | Public release readiness + release automation | infra    | 3       | HITL · gated on open-q #1 (SCF), #3 (license), #15 (CSA); ships .github/+docs/          |
 
-**Four slices ready** (007, 022, 035, 050). 035 is the newly unblocked one — HITL but the primitives (RLS from 033, OIDC + api_keys from 034) are now in place. After this point the v1 ready set is dominated by HITL slices.
+**Five slices ready** (008, 010, 022, 035, 050). **Slice 008 is the first AFK-clean ready slice since slice 037 was corrected back to not-ready in batch 8** — a graph-traversal API with no HITL component. 010 is HITL but the slice-007 machinery+draft+pair-review pattern proven this batch is directly reusable for 010's 50 SOC 2 controls. 035 + 022 also amenable to that pattern.
 
 Next-batch options:
 
-1. **HITL 035 session** — role enum + OPA Rego policies + handler-level RBAC/ABAC wiring. Modest HITL — needs role-list spot-check, then mechanical. Unlocks slice 025 (auditor role) → 042 (audit workspace).
-2. **HITL 007 session** — SOC 2 crosswalk · biggest critical-path unlock (chain 010 → 012 → 016 → 020 + 042 + 037).
-3. **HITL 022 session** — policy library + 5 stock policies; the only HITL still pure content-review (no architectural decisions).
-4. **Resolve open-q #1/#3/#15** to unblock 050 (release readiness).
+1. **AFK 008 (RECOMMENDED — restores AFK throughput)** — Cypher-ish graph queries over UCF graph + REST endpoints. No HITL. Unlocks slice 030 (OSCAL SSP/POA&M export) + slice 041 (Control detail view UCF mini-viz). 1.5d.
+2. **HITL 010 session (machinery+draft pattern)** — port the slice-007 pair-review shape to the 50 SOC 2 stock controls (agent drafts 50 controls + the SCF anchor selection per slice 009's bundle format, user spot-checks low-confidence rows). Once 010 merges, 037 (docker-compose) AND 012 (control state eval) both unblock.
+3. **HITL 035 / 022 sessions** — same pattern. Modest content review.
+4. **Resolve open-q #1/#3/#15** for 050 (release readiness).
 
-After 007 lands, 010 → 037 unblock in sequence — but the chain through 037 is the longest single path to a "self-host bundle ready" state.
+## In-flight (0 worktrees building)
 
-## In-flight (1 worktree building)
+None. Batch 9 merged.
 
-- **007** — `catalog/007-soc2-crosswalk-loader` · `in-progress` since 2026-05-12 · **HITL gate pre-merge** (orchestrator + user pair-review mappings before squash-merge)
-
-Stale worktrees still on disk: `-009`, `-011`, `-013`, `-014`, `-015`, `-017`, `-018`, `-019`, `-021`, `-024`, `-026`, `-033`, `-034`, `-036`, `-039`, `-044`, `-045`, `-046`, `-047`, `-048`, `-049`, `-051`. Safe to `git worktree remove` whenever ready.
+Stale worktrees still on disk: `-007`, `-009`, `-011`, `-013`, `-014`, `-015`, `-017`, `-018`, `-019`, `-021`, `-024`, `-026`, `-033`, `-034`, `-036`, `-039`, `-044`, `-045`, `-046`, `-047`, `-048`, `-049`, `-051`. Safe to `git worktree remove` whenever ready.
 
 ## Notes
 
