@@ -19,7 +19,7 @@ freshness_class: daily
 evidence_queries:
   - id: terminations_revoked_within_24h
     language: rego
-    evidence_kind: okta.user_lifecycle
+    evidence_kind: okta.user_lifecycle.v1
     description: "Every HRIS termination is followed by an Okta deactivation within 24h"
     expression: |
       package atlas.controls.soc2.cc6_3

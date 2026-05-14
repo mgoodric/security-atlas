@@ -22,7 +22,7 @@ freshness_class: monthly
 evidence_queries:
   - id: training_completion_within_365d
     language: rego
-    evidence_kind: jira.ticket_evidence
+    evidence_kind: jira.ticket_evidence.v1
     description: "Every active user has a closed security-training ticket within 365 days"
     expression: |
       package atlas.controls.soc2.cc1_4

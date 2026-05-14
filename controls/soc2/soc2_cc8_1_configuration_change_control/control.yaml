@@ -19,7 +19,7 @@ freshness_class: daily
 evidence_queries:
   - id: iac_repos_require_reviewed_prs
     language: rego
-    evidence_kind: github.repo_protection
+    evidence_kind: github.repo_protection.v1
     description: "IaC repos require reviewed PRs and have iac:true tag"
     expression: |
       package atlas.controls.soc2.cc8_1_cfg

@@ -19,7 +19,7 @@ freshness_class: annual
 evidence_queries:
   - id: bcp_reviewed_within_12mo
     language: rego
-    evidence_kind: manual.upload
+    evidence_kind: manual.upload.v1
     description: "A BCP review upload exists within the last 365 days"
     expression: |
       package atlas.controls.soc2.cc9_1

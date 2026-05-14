@@ -13,6 +13,27 @@ auto-generated notes.
 
 ### Fixed
 
+- **evidence-pipeline:** schema-registry evidence_kind identifier fix
+  (#068) — a pre-existing identifier inconsistency that broke fresh-deploy
+  control-bundle upload. The canonical evidence_kind identifier convention
+  (`Plans/EVIDENCE_SDK.md` §4.5) is a `.v<major>`-suffixed kind identifier
+  (`osquery.host_posture.v1`) paired with a separate `schema_version`
+  semver — and the schema registry, the bundled JSON Schemas'
+  `x-evidence-kind`, all 9 first-party connectors, and the push SDK/CLI
+  already honored it. The 50 SOC 2 control bundles
+  (`controls/soc2/*/control.yaml`) had drifted to **bare** names
+  (`evidence_kind: osquery.host_posture`), so `internal/control`'s
+  bundle-upload validator probed the registry with a name it did not hold
+  and 400'd — silently broken on `main` for ~14 slices because nothing
+  exercised "fresh bootstrap -> control-bundle upload" until slice 065's
+  self-host e2e job. Fix aligns the 13 distinct bundle references
+  (28 bundles) to the canonical `.v1`-suffixed identifier; no
+  registry/connector/SDK change was needed. Adds a drift-guard test
+  (`internal/control/evidence_kind_drift_test.go`) asserting mutual
+  consistency across `schemas/*/` `x-evidence-kind`, `DefaultSeed()`, and
+  the SOC 2 bundle references so the inconsistency cannot recur silently,
+  and documents the convention at the `DefaultSeed()` definition site.
+  Greens slice 065's previously-red `test-self-host-bundle` AC-12 e2e job.
 - **infra:** self-host bundle P0 fixes (#065) — a P0 follow-up to slice
   037 that unbreaks the shipped v1.3.0 `docker compose` self-host bundle,
   which did not bring a fresh deployment to a working state. Five

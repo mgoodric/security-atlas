@@ -18,7 +18,7 @@ freshness_class: daily
 evidence_queries:
   - id: authorization_taint_rules_clean
     language: rego
-    evidence_kind: sast.scan_result
+    evidence_kind: sast.scan_result.v1
     description: "SAST scans show zero unsuppressed authorization/IDOR findings"
     expression: |
       package atlas.controls.soc2.pi1_3

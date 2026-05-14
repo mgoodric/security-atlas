@@ -20,7 +20,7 @@ freshness_class: daily
 evidence_queries:
   - id: prod_repos_have_branch_protection
     language: rego
-    evidence_kind: github.repo_protection
+    evidence_kind: github.repo_protection.v1
     description: "Every prod-deploying repo has protected main branch with PR reviews and status checks"
     expression: |
       package atlas.controls.soc2.cc8_1

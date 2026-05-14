@@ -69,6 +69,20 @@ func New(seed []KindVersion) *InMemory {
 // the same kinds plus the slice-044 GitHub kinds via embedded JSON
 // Schemas; this slim fallback exists for unit tests that don't want to
 // spin up the file loader.
+//
+// Canonical evidence_kind identifier convention (Plans/EVIDENCE_SDK.md
+// §4.5): the Kind string is `.v<major>`-suffixed (`osquery.host_posture.v1`)
+// and the schema version is a SEPARATE semver (`1.0.0`). The `.v<major>`
+// suffix is part of the stable identifier; the semver tracks additive
+// minor / patch evolution within that major. Every on-the-wire consumer
+// honors this: the 9 first-party connectors, the per-language SDKs, the
+// push CLI, the bundled JSON Schemas' `x-evidence-kind`, and the SOC 2
+// control bundles' `evidence_kind` references. Do NOT reintroduce
+// bare-name kinds here — slice 068 fixed exactly that drift (the SOC 2
+// control bundles had drifted to bare names, breaking fresh-deploy
+// control-bundle upload). Keep this set aligned with the `schemas/*/`
+// directory's `x-evidence-kind` values; `internal/control` ships a
+// drift-guard test that fails the build if they diverge.
 func DefaultSeed() []KindVersion {
 	return []KindVersion{
 		{Kind: "sast.scan_result.v1", Version: "1.0.0"},

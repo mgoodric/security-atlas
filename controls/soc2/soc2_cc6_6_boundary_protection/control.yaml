@@ -20,7 +20,7 @@ freshness_class: daily
 evidence_queries:
   - id: host_firewall_enabled_on_managed_endpoints
     language: rego
-    evidence_kind: osquery.host_posture
+    evidence_kind: osquery.host_posture.v1
     description: "Every managed endpoint reports host firewall = enabled"
     expression: |
       package atlas.controls.soc2.cc6_6_fw

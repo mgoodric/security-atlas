@@ -21,7 +21,7 @@ freshness_class: daily
 evidence_queries:
   - id: every_provision_was_authorized
     language: rego
-    evidence_kind: okta.user_lifecycle
+    evidence_kind: okta.user_lifecycle.v1
     description: "Every Okta user-create in the window has a matching HRIS record or approval ticket"
     expression: |
       package atlas.controls.soc2.cc6_2
