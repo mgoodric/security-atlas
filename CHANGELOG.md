@@ -152,6 +152,36 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 040 — Program dashboard view.** The `/dashboard` route — the
+  solo-security-leader persona's morning home screen — is built per
+  `Plans/mockups/dashboard.html`, ported via shadcn/ui primitives (not a
+  verbatim HTML copy). `web/`-only: no Go, no migration. Six panels, each
+  owning its own TanStack Query so a slow or failing endpoint degrades
+  only that panel — the page never blocks on a single API (AC-7), every
+  panel has an independent `Skeleton` loader and an inline error `Alert`
+  with a Retry button, and a 401 from any panel bounces to `/login`. The
+  four BFF proxy routes under `web/app/api/dashboard/**` share one
+  `dashboardProxy<T>` helper (cookie read, 401 guard, typed client call,
+  upstream-status passthrough) so the bearer token never reaches the
+  browser. **Bound to merged backends:** recent drift
+  (`GET /v1/controls/drift?since=7d`, slice 016), evidence freshness
+  (`GET /v1/evidence/freshness`, slice 016), top risks in treatment
+  (`GET /v1/risks?treatment=mitigate`, slice 019), and upcoming items
+  (`GET /v1/exceptions/expiring`, slice 028). **Endpoint gaps surfaced
+  (not fabricated — anti-criterion P0-1):** the framework posture tiles
+  and the activity feed render endpoint-naming placeholders because no
+  per-framework posture endpoint and no NATS event-stream archive read
+  endpoint exist on main; the risks panel notes that `sort=residual,age`
+  is not a server capability; the upcoming panel notes that
+  board-report / access-review / questionnaire / policy-ack categories
+  need a unified rollup endpoint. The full gap inventory for follow-up
+  backend slices is in
+  `docs/audit-log/040-program-dashboard-view-decisions.md`. AC-1, AC-4,
+  AC-7 and the evidence-freshness panel are fully bound; AC-2, AC-3,
+  AC-5, AC-6 land PARTIAL pending the inventoried endpoints. E2E
+  coverage ships ahead of the runner as `web/e2e/dashboard.spec.ts`
+  under the established `ifPlaywright` shim (one test per AC).
+
 - **Slice 016 — Evidence freshness + drift detection.** Two derived
   leading indicators over the evidence pipeline (canvas §7.1) land as
   the new `internal/freshness`, `internal/drift`, and `internal/freshnessdrift`
