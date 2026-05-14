@@ -2,8 +2,10 @@ package risk
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -177,16 +179,58 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (Risk, error) {
 	return out, err
 }
 
-// ListFilter narrows the result set of List. Empty fields are ignored.
+// ListSort selects the result ordering of List. The empty value keeps the
+// default ListRisks order (created_at DESC, id ASC). Slice 066 adds
+// SortResidualAge for the program dashboard's "top risks aging" panel.
+type ListSort string
+
+const (
+	// SortDefault is the ListRisks SQL order: newest-first.
+	SortDefault ListSort = ""
+	// SortResidualAge ranks by residual-score magnitude descending, then
+	// risk age ascending (oldest in treatment first). Slice 066 AC-3 — the
+	// canvas §7.5 "top risks aging" ranking ("residual × age-since-
+	// treatment"). residual_score is the opaque {likelihood, impact} JSONB;
+	// the magnitude is likelihood × impact. A risk whose residual_score has
+	// no numeric likelihood/impact sorts as magnitude 0 (it ranks below any
+	// scored risk) rather than erroring — the dashboard ranking degrades
+	// gracefully for a malformed score.
+	SortResidualAge ListSort = "residual,age"
+)
+
+// ParseListSort maps the ?sort= query value to a ListSort. An empty value
+// is SortDefault. An unrecognized value returns ErrInvalidSort so the HTTP
+// layer can 400 rather than silently ignoring a typo'd sort.
+func ParseListSort(raw string) (ListSort, error) {
+	switch ListSort(raw) {
+	case SortDefault:
+		return SortDefault, nil
+	case SortResidualAge:
+		return SortResidualAge, nil
+	default:
+		return SortDefault, ErrInvalidSort
+	}
+}
+
+// ErrInvalidSort is returned by ParseListSort for an unrecognized ?sort=
+// value. The HTTP layer maps it to 400.
+var ErrInvalidSort = errors.New("risk: sort must be empty or 'residual,age'")
+
+// ListFilter narrows and orders the result set of List. Empty filter
+// fields are ignored; an empty Sort keeps the default ListRisks order.
 type ListFilter struct {
 	Treatment   dbx.RiskTreatment
 	Category    dbx.RiskCategory
 	Methodology dbx.RiskMethodology
+	// Sort selects the result ordering. Slice 066 (AC-3): additive — the
+	// slice-019 callers that leave it zero get the unchanged default order.
+	Sort ListSort
 }
 
-// List returns all risks for the active tenant, optionally filtered.
-// Filtering is in-memory to keep sqlc queries static; the row count is bounded
-// by tenant-size and v1 cardinality is small (canvas §1.1 — solo security lead).
+// List returns all risks for the active tenant, optionally filtered and
+// ordered. Filtering and the optional residual/age sort are in-memory to
+// keep sqlc queries static; the row count is bounded by tenant-size and v1
+// cardinality is small (canvas §1.1 — solo security lead).
 func (s *Store) List(ctx context.Context, filter ListFilter) ([]Risk, error) {
 	var out []Risk
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
@@ -207,9 +251,63 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Risk, error) {
 			}
 			out = append(out, riskFromRow(r))
 		}
+		if filter.Sort == SortResidualAge {
+			sortByResidualThenAge(out)
+		}
 		return nil
 	})
 	return out, err
+}
+
+// sortByResidualThenAge orders risks by residual-score magnitude descending
+// (the riskiest first), then by created_at ascending (the oldest in
+// treatment first). It is a stable sort so risks tied on both keys keep the
+// underlying ListRisks order. Slice 066 AC-3.
+//
+// Decorate-sort-undecorate: each risk is paired with its magnitude once
+// (so the residual_score JSONB is unmarshalled n times, not the O(n log n)
+// times an unmarshal inside the comparator would cost), the paired slice is
+// sorted, then the risks are written back in order.
+func sortByResidualThenAge(risks []Risk) {
+	type scored struct {
+		risk Risk
+		mag  float64
+	}
+	decorated := make([]scored, len(risks))
+	for i, r := range risks {
+		decorated[i] = scored{risk: r, mag: residualMagnitude(r.ResidualScore)}
+	}
+	sort.SliceStable(decorated, func(i, j int) bool {
+		if decorated[i].mag != decorated[j].mag {
+			return decorated[i].mag > decorated[j].mag // higher residual ranks first
+		}
+		return decorated[i].risk.CreatedAt.Before(decorated[j].risk.CreatedAt) // older ranks first
+	})
+	for i, d := range decorated {
+		risks[i] = d.risk
+	}
+}
+
+// residualMagnitude extracts a sortable scalar from the opaque
+// residual_score JSONB. The v1 residual shape is {likelihood, impact}
+// (canvas §2.2, the 5x5 grid); the magnitude is their product. A score
+// missing either numeric field yields 0 — a malformed or empty score ranks
+// below every properly-scored risk rather than erroring the whole list.
+func residualMagnitude(raw []byte) float64 {
+	if len(raw) == 0 {
+		return 0
+	}
+	var score struct {
+		Likelihood *float64 `json:"likelihood"`
+		Impact     *float64 `json:"impact"`
+	}
+	if err := json.Unmarshal(raw, &score); err != nil {
+		return 0
+	}
+	if score.Likelihood == nil || score.Impact == nil {
+		return 0
+	}
+	return *score.Likelihood * *score.Impact
 }
 
 // HeatmapCell is one (likelihood, impact) bucket in the 5x5 grid.

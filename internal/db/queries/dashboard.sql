@@ -1,0 +1,321 @@
+-- Slice 066 — dashboard backend read endpoints.
+--
+-- Three pure SELECT families that surface existing data behind the
+-- dashboard-grained read paths slice 040's program dashboard view shipped
+-- binding placeholders for. This slice adds NO migration and NO write
+-- surface — it reads framework_versions + the UCF graph, the slice-062
+-- admin_audit_log_v view, and four upcoming-item source tables.
+--
+-- All tenant-scoped reads run inside the request's app.current_tenant GUC
+-- (set by the slice-033 tenancy middleware); RLS is the defense-in-depth
+-- layer and the WHERE clauses on tenant_id are the primary correctness
+-- guarantee (canvas invariant #6). Catalog tables (framework_versions,
+-- frameworks, framework_requirements, fw_to_scf_edges, scf_anchors) carry
+-- no tenant_id and no RLS — they are global, platform-bundled.
+--
+-- Cursor pagination over the activity feed and the upcoming rollup is
+-- keyset, not OFFSET: a (timestamp, id) keyset is stable under concurrent
+-- appends. The keyset predicate is decomposed (ts < cursor_ts OR (ts =
+-- cursor_ts AND id < cursor_id)) rather than a ROW(...) tuple comparison —
+-- a row-comparison tuple mis-infers the id placeholder's type under sqlc
+-- (the slice-064 decisions log records this). Each paginated query fetches
+-- limit+1 rows so the handler detects a next page without a COUNT
+-- round-trip.
+
+-- name: FrameworkPosture :many
+-- AC-1: one row per framework version, with coverage_pct, a freshness
+-- composite, and a 90-day trend delta. Aggregates slice-008 UCF coverage to
+-- the framework-version grain.
+--
+-- Coverage path (constitutional invariant #1 — through the SCF anchor
+-- spine, never per-framework duplicated controls):
+--   framework_versions
+--     -> framework_requirements (per version)
+--       -> fw_to_scf_edges (non-`no_relationship`)
+--         -> scf_anchors
+--           <- controls.scf_anchor_id (the tenant's active controls)
+-- A requirement is "covered" when at least one active (superseded_by IS
+-- NULL) tenant control is anchored on an SCF anchor that a real STRM edge
+-- connects to that requirement. coverage_pct = covered / total
+-- requirements for the version.
+--
+-- freshness_composite: of the tenant controls that cover this version's
+-- requirements, the fraction that are NOT stale per the slice-016
+-- evidence_freshness read model. A control with no freshness row counts as
+-- stale (it has, definitionally, no current evidence).
+--
+-- trend_delta_90d: coverage_pct now minus the coverage_pct as it stood ~90
+-- days ago. "As it stood" is reconstructed from the control_evaluations
+-- ledger (slice 012): a control counted toward coverage 90 days ago iff its
+-- latest evaluation on/before the cutoff had result='pass'. The delta is in
+-- percentage points (e.g. +12.5 means coverage rose 12.5 points).
+--
+-- The whole thing is ONE statement with CTEs — no N+1 (anti-criterion P0).
+-- $1 = tenant_id; $2 = the 90-day-ago cutoff timestamptz (computed in Go).
+WITH version_reqs AS (
+    -- Every (framework_version, requirement) pair for current versions.
+    SELECT
+        fv.id            AS framework_version_id,
+        fv.framework_id  AS framework_id,
+        fv.version       AS framework_version,
+        fr.id            AS requirement_id
+    FROM framework_versions fv
+    JOIN framework_requirements fr ON fr.framework_version_id = fv.id
+    WHERE fv.status = 'current'
+),
+req_anchor AS (
+    -- Each requirement -> the SCF anchors a real STRM edge connects it to.
+    SELECT
+        vr.framework_version_id,
+        vr.framework_id,
+        vr.framework_version,
+        vr.requirement_id,
+        e.scf_anchor_id
+    FROM version_reqs vr
+    JOIN fw_to_scf_edges e
+      ON e.framework_requirement_id = vr.requirement_id
+     AND e.relationship_type <> 'no_relationship'
+),
+covering_control AS (
+    -- Each (requirement, anchor) pair joined to the tenant's active controls
+    -- anchored there. RLS scopes `controls` to the caller's tenant; the
+    -- explicit tenant_id predicate is the primary guarantee.
+    SELECT DISTINCT
+        ra.framework_version_id,
+        ra.framework_id,
+        ra.framework_version,
+        ra.requirement_id,
+        c.id AS control_id
+    FROM req_anchor ra
+    JOIN controls c
+      ON c.scf_anchor_id = ra.scf_anchor_id
+     AND c.tenant_id = $1
+     AND c.superseded_by IS NULL
+),
+covered_now AS (
+    -- Requirements covered today: at least one covering control exists.
+    SELECT framework_version_id, requirement_id
+    FROM covering_control
+    GROUP BY framework_version_id, requirement_id
+),
+control_passed_then AS (
+    -- For each covering control, whether its latest evaluation on/before the
+    -- 90-day cutoff was a pass. DISTINCT ON picks the latest row per control.
+    SELECT DISTINCT ON (ce.control_id)
+        ce.control_id,
+        (ce.result = 'pass') AS passed_then
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = $1
+      AND ce.evaluated_at <= $2
+    ORDER BY ce.control_id, ce.evaluated_at DESC
+),
+covered_then AS (
+    -- Requirements covered 90 days ago: at least one covering control that
+    -- was passing on/before the cutoff.
+    SELECT DISTINCT cc.framework_version_id, cc.requirement_id
+    FROM covering_control cc
+    JOIN control_passed_then cpt ON cpt.control_id = cc.control_id
+    WHERE cpt.passed_then
+),
+control_freshness AS (
+    -- Per covering control, whether it is fresh per the slice-016 read
+    -- model. A control with no freshness row is treated as stale.
+    SELECT DISTINCT
+        cc.framework_version_id,
+        cc.control_id,
+        COALESCE(NOT ef.is_stale, FALSE) AS is_fresh
+    FROM covering_control cc
+    LEFT JOIN evidence_freshness ef
+      ON ef.tenant_id = $1
+     AND ef.control_id = cc.control_id
+)
+SELECT
+    vr.framework_id,
+    vr.framework_version,
+    -- coverage_pct: covered requirements / total requirements, 0..100.
+    CASE WHEN COUNT(DISTINCT vr.requirement_id) = 0 THEN 0.0
+         ELSE ROUND(
+             100.0 * COUNT(DISTINCT cn.requirement_id)
+                   / COUNT(DISTINCT vr.requirement_id), 2)
+    END::float8 AS coverage_pct,
+    -- freshness_composite: fresh covering controls / all covering controls,
+    -- 0..100. 0 when the version has no covering controls.
+    CASE WHEN COUNT(DISTINCT cf.control_id) = 0 THEN 0.0
+         ELSE ROUND(
+             100.0 * COUNT(DISTINCT cf.control_id) FILTER (WHERE cf.is_fresh)
+                   / COUNT(DISTINCT cf.control_id), 2)
+    END::float8 AS freshness_composite,
+    -- trend_delta_90d: coverage_pct now minus coverage_pct at the cutoff, in
+    -- percentage points.
+    CASE WHEN COUNT(DISTINCT vr.requirement_id) = 0 THEN 0.0
+         ELSE ROUND(
+             100.0 * COUNT(DISTINCT cn.requirement_id)
+                   / COUNT(DISTINCT vr.requirement_id)
+           - 100.0 * COUNT(DISTINCT ct.requirement_id)
+                   / COUNT(DISTINCT vr.requirement_id), 2)
+    END::float8 AS trend_delta_90d
+FROM version_reqs vr
+LEFT JOIN covered_now      cn ON cn.framework_version_id = vr.framework_version_id
+                              AND cn.requirement_id      = vr.requirement_id
+LEFT JOIN covered_then     ct ON ct.framework_version_id = vr.framework_version_id
+                              AND ct.requirement_id      = vr.requirement_id
+LEFT JOIN control_freshness cf ON cf.framework_version_id = vr.framework_version_id
+GROUP BY vr.framework_id, vr.framework_version
+ORDER BY vr.framework_id, vr.framework_version;
+
+-- name: ListEvidenceActivity :many
+-- AC-2: paginated read model over the evidence-ingest event archive. Reads
+-- the slice-062 admin_audit_log_v view filtered to the evidence_audit_log
+-- branch — that branch IS the slice-013/015 evidence-ingest event archive,
+-- projected to the AC-2 row shape {ts, event_type, actor, resource_type,
+-- resource_id, summary}. The view is RLS-aware: each source table's
+-- tenant_read policy fires under the caller's GUC, so this SELECT returns
+-- only the caller's tenant rows. The explicit tenant_id predicate is the
+-- primary guarantee.
+--
+-- Keyset paginated newest-first over (ts, resource_id). The keyset
+-- predicate is decomposed (not a ROW(...) tuple) for the sqlc
+-- type-inference reason in the file header. A sentinel cursor
+-- (cursor_ts = 'infinity', cursor_id = max-uuid string) selects the first
+-- page. The handler computes the cutoff values in Go and fetches limit+1.
+SELECT ts, event_type, actor, resource_type, resource_id, summary
+FROM admin_audit_log_v
+WHERE tenant_id = $1
+  AND source_table = 'evidence_audit_log'
+  AND (
+        ts < sqlc.arg(cursor_ts)
+        OR (ts = sqlc.arg(cursor_ts) AND resource_id < sqlc.arg(cursor_id))
+      )
+ORDER BY ts DESC, resource_id DESC
+LIMIT sqlc.arg(row_limit);
+
+-- name: ListUpcomingItems :many
+-- AC-4: unified upcoming-items rollup. ONE UNION ALL across the four
+-- sources — expiring exceptions (021), policy-ack expirations (023), vendor
+-- reviews (024), audit-period milestones (028) — projected to the AC-4 row
+-- shape {due_date, category, title, resource_type, resource_id}. NOT four
+-- round-trips (anti-criterion P0: no N+1).
+--
+-- due_date semantics per source:
+--   exception        — expires_at (the waiver lapses)
+--   policy_ack       — latest ack's acknowledged_at + 365d (the annual
+--                      re-ack falls due); only the freshest ack per
+--                      (policy_version, user) is considered
+--   vendor_review    — last_review_date + the cadence interval (next review
+--                      falls due)
+--   audit_period     — period_end (the audit period closes)
+--
+-- All four are tenant-scoped; RLS fires on each underlying SELECT and the
+-- explicit tenant_id predicates are the primary guarantee.
+--
+-- Keyset paginated date-sorted ascending over (due_date, resource_id). The
+-- decomposed keyset predicate + the optional category filter are pushed
+-- INTO each UNION branch: sqlc v1.31's analyzer cannot resolve column names
+-- in an outer WHERE over a UNION-ALL CTE whose columns are all expressions
+-- (it has no base-column lineage to bind to). Pushing the predicates into
+-- each branch lets sqlc analyze each against real tables. The named args
+-- (cursor_date, cursor_id, category_filter, row_limit) are deduplicated by
+-- sqlc — each appears once in the generated Params struct. This is still
+-- ONE statement / ONE UNION ALL — no N+1 (anti-criterion P0). A sentinel
+-- cursor (cursor_date = '-infinity', cursor_id = '') selects the first
+-- page; the empty category filter ('' = all) narrows to one source.
+SELECT due_date, category, title, resource_type, resource_id
+FROM (
+    -- expiring exceptions: active waivers, ordered by when they lapse.
+    SELECT
+        e.expires_at::timestamptz                 AS due_date,
+        'exception'::text                          AS category,
+        ('Exception on control ' || e.control_id::text) AS title,
+        'exception'::text                          AS resource_type,
+        e.id::text                                 AS resource_id
+    FROM exceptions e
+    WHERE e.tenant_id = $1
+      AND e.status = 'active'
+      AND (sqlc.arg(category_filter)::text = '' OR sqlc.arg(category_filter)::text = 'exception')
+      AND (
+            e.expires_at::timestamptz > sqlc.arg(cursor_date)::timestamptz
+            OR (e.expires_at::timestamptz = sqlc.arg(cursor_date)::timestamptz
+                AND e.id::text > sqlc.arg(cursor_id)::text)
+          )
+
+    UNION ALL
+
+    -- policy-ack expirations: the latest ack per (policy_version, user) plus
+    -- 365 days. DISTINCT ON picks the freshest ack; the +365d interval is
+    -- when that attestation falls due for renewal.
+    SELECT
+        (latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz AS due_date,
+        'policy_ack'::text                         AS category,
+        ('Policy acknowledgment ' || latest_ack.policy_version_id::text) AS title,
+        'policy_acknowledgment'::text              AS resource_type,
+        latest_ack.id::text                        AS resource_id
+    FROM (
+        SELECT DISTINCT ON (pa.policy_version_id, pa.user_id)
+            pa.id, pa.policy_version_id, pa.user_id, pa.acknowledged_at
+        FROM policy_acknowledgments pa
+        WHERE pa.tenant_id = $1
+        ORDER BY pa.policy_version_id, pa.user_id, pa.acknowledged_at DESC
+    ) latest_ack
+    WHERE (sqlc.arg(category_filter)::text = '' OR sqlc.arg(category_filter)::text = 'policy_ack')
+      AND (
+            (latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz > sqlc.arg(cursor_date)::timestamptz
+            OR ((latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz = sqlc.arg(cursor_date)::timestamptz
+                AND latest_ack.id::text > sqlc.arg(cursor_id)::text)
+          )
+
+    UNION ALL
+
+    -- vendor reviews: last_review_date + cadence interval. Vendors with no
+    -- last_review_date are excluded — there is no anchor to project from.
+    SELECT
+        (v.last_review_date + CASE v.review_cadence
+            WHEN 'monthly'   THEN INTERVAL '1 month'
+            WHEN 'quarterly' THEN INTERVAL '3 months'
+            WHEN 'biannual'  THEN INTERVAL '6 months'
+            WHEN 'annual'    THEN INTERVAL '12 months'
+         END)::timestamptz                         AS due_date,
+        'vendor_review'::text                      AS category,
+        ('Vendor review: ' || v.name)              AS title,
+        'vendor'::text                             AS resource_type,
+        v.id::text                                 AS resource_id
+    FROM vendors v
+    WHERE v.tenant_id = $1
+      AND v.last_review_date IS NOT NULL
+      AND (sqlc.arg(category_filter)::text = '' OR sqlc.arg(category_filter)::text = 'vendor_review')
+      AND (
+            (v.last_review_date + CASE v.review_cadence
+                WHEN 'monthly'   THEN INTERVAL '1 month'
+                WHEN 'quarterly' THEN INTERVAL '3 months'
+                WHEN 'biannual'  THEN INTERVAL '6 months'
+                WHEN 'annual'    THEN INTERVAL '12 months'
+             END)::timestamptz > sqlc.arg(cursor_date)::timestamptz
+            OR ((v.last_review_date + CASE v.review_cadence
+                WHEN 'monthly'   THEN INTERVAL '1 month'
+                WHEN 'quarterly' THEN INTERVAL '3 months'
+                WHEN 'biannual'  THEN INTERVAL '6 months'
+                WHEN 'annual'    THEN INTERVAL '12 months'
+             END)::timestamptz = sqlc.arg(cursor_date)::timestamptz
+                AND v.id::text > sqlc.arg(cursor_id)::text)
+          )
+
+    UNION ALL
+
+    -- audit-period milestones: open periods, ordered by when they close.
+    SELECT
+        ap.period_end::timestamptz                 AS due_date,
+        'audit_period'::text                       AS category,
+        ('Audit period closes: ' || ap.name)       AS title,
+        'audit_period'::text                       AS resource_type,
+        ap.id::text                                AS resource_id
+    FROM audit_periods ap
+    WHERE ap.tenant_id = $1
+      AND ap.status = 'open'
+      AND (sqlc.arg(category_filter)::text = '' OR sqlc.arg(category_filter)::text = 'audit_period')
+      AND (
+            ap.period_end::timestamptz > sqlc.arg(cursor_date)::timestamptz
+            OR (ap.period_end::timestamptz = sqlc.arg(cursor_date)::timestamptz
+                AND ap.id::text > sqlc.arg(cursor_id)::text)
+          )
+) rollup
+ORDER BY due_date ASC, resource_id ASC
+LIMIT sqlc.arg(row_limit);
