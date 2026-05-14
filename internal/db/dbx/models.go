@@ -934,6 +934,17 @@ type Control struct {
 	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
 }
 
+type ControlDriftSnapshot struct {
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	SnapshotDate      pgtype.Date        `json:"snapshot_date"`
+	ControlsPassing   int32              `json:"controls_passing"`
+	PassingControlIds []pgtype.UUID      `json:"passing_control_ids"`
+	CapturedAt        pgtype.Timestamptz `json:"captured_at"`
+	Trigger           string             `json:"trigger"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type ControlEvaluation struct {
 	ID                    pgtype.UUID        `json:"id"`
 	TenantID              pgtype.UUID        `json:"tenant_id"`
@@ -1021,6 +1032,19 @@ type EvidenceAuditLog struct {
 	EvidenceKind   *string            `json:"evidence_kind"`
 	RecordID       pgtype.UUID        `json:"record_id"`
 	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+}
+
+type EvidenceFreshness struct {
+	ID               pgtype.UUID        `json:"id"`
+	TenantID         pgtype.UUID        `json:"tenant_id"`
+	ControlID        pgtype.UUID        `json:"control_id"`
+	FreshnessClass   *string            `json:"freshness_class"`
+	LatestObservedAt pgtype.Timestamptz `json:"latest_observed_at"`
+	ValidUntil       pgtype.Timestamptz `json:"valid_until"`
+	IsStale          bool               `json:"is_stale"`
+	EvidenceCount    int32              `json:"evidence_count"`
+	RefreshedAt      pgtype.Timestamptz `json:"refreshed_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 type EvidenceKindSchema struct {

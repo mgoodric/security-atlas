@@ -33,6 +33,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
 	"github.com/mgoodric/security-atlas/internal/exception"
+	"github.com/mgoodric/security-atlas/internal/freshnessdrift"
 )
 
 const (
@@ -139,6 +140,25 @@ func main() {
 			logger,
 		)
 		fmt.Fprintf(os.Stderr, "atlas: evaluation ingest subscriber ready (slice 012)\n")
+	}
+
+	// Slice 016: the freshness + drift read-model refresh background job
+	// (AC-4). RefreshSubscriber binds a THIRD durable JetStream consumer to
+	// the evidence-ingest stream -- it reacts to each ingested record by
+	// refreshing the affected tenant's freshness + drift read models. It is
+	// independent of slice 015's ledger-writer consumer and slice 012's
+	// evaluation consumer (three durable consumers on a Limits-retention
+	// stream each get every message). Only wired when NATS + the DB pool are
+	// both available.
+	var freshnessDriftSubscriber *freshnessdrift.RefreshSubscriber
+	if streamConn != nil && pool != nil {
+		freshnessDriftSubscriber = freshnessdrift.NewRefreshSubscriber(
+			streamConn.Stream(),
+			streamConn.Cfg().Subject,
+			freshnessdrift.NewRefresherFactory(pool),
+			logger,
+		)
+		fmt.Fprintf(os.Stderr, "atlas: freshness/drift refresh subscriber ready (slice 016)\n")
 	}
 
 	cfg := api.Config{
@@ -334,6 +354,20 @@ func main() {
 		}()
 	}
 
+	// Slice 016: drive the freshness/drift refresh subscriber alongside the
+	// other consumers. Shares the same stop signal so SIGTERM tears it down
+	// with everything else (AC-4: refresh on every ledger write).
+	if freshnessDriftSubscriber != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fmt.Fprintf(os.Stderr, "atlas: freshness/drift refresh subscriber starting\n")
+			if err := freshnessDriftSubscriber.Start(ctx); err != nil {
+				errCh <- fmt.Errorf("freshness/drift refresh subscriber: %w", err)
+			}
+		}()
+	}
+
 	// Slice 021: exception auto-expiry tick loop. Runs as the migrator
 	// role (BYPASSRLS) so the sweep can cross tenants -- the per-tenant
 	// transaction inside applies the GUC for RLS-honest writes. Default
@@ -400,6 +434,42 @@ func main() {
 				fmt.Fprintf(os.Stderr, "atlas: eval scheduler ticking every %s\n", interval.String())
 				if err := scheduler.Run(ctx, interval); err != nil {
 					errCh <- fmt.Errorf("eval scheduler: %w", err)
+				}
+			}()
+		}
+	}
+
+	// Slice 016: daily 00:00 UTC freshness + drift read-model recompute
+	// (AC-4, first half). Freshness decays with wall-clock and drift is a
+	// day-over-day delta -- both need a guaranteed daily recompute even when
+	// no new evidence arrives. Runs as the migrator role (BYPASSRLS) to
+	// enumerate tenants; each tenant's refresh runs through app-role Stores
+	// for RLS-honest writes. The scheduler wakes hourly and fires the sweep
+	// the first time it observes a new UTC calendar day. Only mounts when
+	// the migrator URL + the app pool are both available.
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		fdCtx, fdCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		fdPool, err := pgxpool.New(fdCtx, migratorURL)
+		fdCancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: freshness/drift scheduler pool: %v\n", err)
+		} else {
+			tickCheck := freshnessdrift.DefaultDailyTickCheck
+			if raw := os.Getenv("ATLAS_FRESHNESS_DRIFT_TICK_CHECK"); raw != "" {
+				if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+					tickCheck = d
+				} else {
+					fmt.Fprintf(os.Stderr, "atlas: ATLAS_FRESHNESS_DRIFT_TICK_CHECK=%q invalid: %v\n", raw, perr)
+				}
+			}
+			fdScheduler := freshnessdrift.NewScheduler(fdPool, freshnessdrift.NewRefresherFactory(pool), logger)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer fdPool.Close()
+				fmt.Fprintf(os.Stderr, "atlas: freshness/drift scheduler checking every %s\n", tickCheck.String())
+				if err := fdScheduler.Run(ctx, tickCheck); err != nil {
+					errCh <- fmt.Errorf("freshness/drift scheduler: %w", err)
 				}
 			}()
 		}

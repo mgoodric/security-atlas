@@ -30,6 +30,7 @@ import (
 	exceptionsapi "github.com/mgoodric/security-atlas/internal/api/exceptions"
 	featuresapi "github.com/mgoodric/security-atlas/internal/api/features"
 	fwscopesapi "github.com/mgoodric/security-atlas/internal/api/frameworkscopes"
+	freshnessdriftapi "github.com/mgoodric/security-atlas/internal/api/freshnessdrift"
 	meapi "github.com/mgoodric/security-atlas/internal/api/me"
 	orgunitsapi "github.com/mgoodric/security-atlas/internal/api/orgunits"
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
@@ -52,10 +53,12 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/drift"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
+	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
@@ -402,6 +405,21 @@ func (s *Server) httpHandler() http.Handler {
 	controlStateH := controlstateapi.New(controlStateEngine)
 	root.Get("/v1/controls/{id}/state", controlStateH.State)
 	root.Get("/v1/controls/{id}/effectiveness", controlStateH.Effectiveness)
+	// Slice 016: evidence freshness + control drift read model. Two
+	// read-only endpoints over the slice-016 read-model tables
+	// (evidence_freshness, control_drift_snapshots). Routes appended per the
+	// parallel-batch convention (chi rejects two Mounts at "/").
+	// /v1/controls/drift is a static-segment sibling of /v1/controls/{id}/...
+	// -- chi matches the static segment before the {id} wildcard, so no
+	// shadowing. The Stores are pure read surfaces (they never write the
+	// evidence_records or control_evaluations ledgers -- constitutional
+	// invariant #2); the NATS refresh subscriber + daily scheduler that
+	// drive the read-model refresh are wired in cmd/atlas.
+	freshnessStore := freshness.NewStore(s.dbPool)
+	driftStore := drift.NewStore(s.dbPool)
+	freshnessDriftH := freshnessdriftapi.New(freshnessStore, driftStore)
+	root.Get("/v1/evidence/freshness", freshnessDriftH.Freshness)
+	root.Get("/v1/controls/drift", freshnessDriftH.Drift)
 	// Slice 034: admin credentials HTTP API + auth routes. Routes append
 	// per the parallel-batch convention. Admin-credential routes require
 	// the bearer auth middleware (admin gate inside the handler). The
