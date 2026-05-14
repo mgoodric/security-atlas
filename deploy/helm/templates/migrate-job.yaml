@@ -1,0 +1,119 @@
+{{/*
+migrate-job.yaml — the pre-install / pre-upgrade migration Hook Job.
+
+This is the K8s analogue of the docker-compose bundle's one-shot
+`atlas-bootstrap` service. It runs the SAME `bootstrap.sh` (slice 037 /
+065): applies migrations/bootstrap/01-roles.sql + the forward migrations
+through the `schema_migrations` ledger, sets the atlas_app role password,
+seeds the default tenant / scope / user, imports the SCF catalog, and (once
+the atlas server is up) uploads the SOC 2 control bundles.
+
+Why this satisfies the acceptance criteria:
+
+  AC-2  — runs as a `pre-install` hook, so migrations apply against the
+          configured (external) Postgres before any workload starts.
+  AC-7  — also a `pre-upgrade` hook; the `schema_migrations` ledger
+          (slice 065 bug #3) records each applied migration's basename and
+          skips it on re-run, so `helm upgrade` re-runs this Job and it
+          applies ONLY new migrations — idempotently.
+
+Role model (slice 065): the Job connects as `atlas_migrate`
+(BYPASSRLS CREATEROLE) via DATABASE_URL_MIGRATE. On a dedicated cluster the
+01-roles.sql baked into the bootstrap image creates the role; on a SHARED
+external cluster the operator pre-creates atlas_migrate with
+BYPASSRLS CREATEROLE and `ALTER SCHEMA public OWNER TO atlas_migrate` (see
+README "External Postgres"). The chart does NOT reinvent any of this — it
+runs the existing, hardened bootstrap.sh.
+
+hook-weight "-5" orders this Job before the workload manifests (default
+weight 0). hook-delete-policy cleans up the previous Job before re-creating
+(so a `helm upgrade` does not collide with the prior immutable Job) and on
+success.
+*/}}
+{{- $fullname := include "security-atlas.fullname" . -}}
+{{- $imageTag := .Values.image.tag | default .Chart.AppVersion -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-migrate
+  labels:
+    {{- include "security-atlas.componentLabels" (dict "context" . "component" "migrate") | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  # The migration Job must not loop forever on a misconfigured DSN; a small
+  # backoff covers a Postgres that is briefly still accepting connections.
+  backoffLimit: 4
+  # bootstrap.sh phase 5 waits up to ~3 min for the atlas /health endpoint;
+  # give the Job generous headroom over a cold-start migration apply.
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        {{- include "security-atlas.componentSelectorLabels" (dict "context" . "component" "migrate") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "security-atlas.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          # The bootstrap image bakes migrations/ + controls/ into /repo and
+          # ships psql + a POSIX shell (postgres:16-alpine base). It is
+          # self-contained — no repo bind-mount required.
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}/bootstrap:{{ $imageTag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            # bootstrap.sh reads DATABASE_URL as the atlas_migrate DSN.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "security-atlas.secretName" . }}
+                  key: DATABASE_URL_MIGRATE
+            - name: ATLAS_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "security-atlas.secretName" . }}
+                  key: ATLAS_APP_PASSWORD
+            - name: ATLAS_BOOTSTRAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "security-atlas.secretName" . }}
+                  key: ATLAS_BOOTSTRAP_TOKEN
+            - name: ATLAS_DEFAULT_USER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "security-atlas.secretName" . }}
+                  key: ATLAS_DEFAULT_USER_PASSWORD
+            - name: ATLAS_HTTP_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "security-atlas.configMapName" . }}
+                  key: ATLAS_HTTP_URL
+            - name: ATLAS_BOOTSTRAP_TENANT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "security-atlas.configMapName" . }}
+                  key: ATLAS_BOOTSTRAP_TENANT
+            - name: ATLAS_DEFAULT_USER_EMAIL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "security-atlas.configMapName" . }}
+                  key: ATLAS_DEFAULT_USER_EMAIL
+            # The image bakes the repo at /repo; bootstrap.sh defaults
+            # REPO_ROOT to /repo but we set it explicitly for clarity.
+            - name: REPO_ROOT
+              value: /repo
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

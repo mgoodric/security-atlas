@@ -1,0 +1,320 @@
+# Default values for the security-atlas chart.
+#
+# These defaults target a SOLO / DEV deployment: single replicas, the
+# bundled MinIO enabled, inline placeholder secrets, no Ingress. They bring
+# up a working `helm install` on a single-node cluster (minikube / kind /
+# k3s). For the PRODUCTION shape (multi-replica, external Postgres + S3 +
+# IdP, pre-created Secret, Ingress + TLS) see `values-production.yaml`.
+#
+# IMPORTANT — every credential below is the literal placeholder string
+# `changeme`. NOTHING here is a real secret. Override every `changeme`
+# before any non-throwaway install:
+#   helm install security-atlas ./deploy/helm \
+#     --set secrets.postgresAppPassword=$(openssl rand -hex 32) ...
+# or, preferably, pre-create a Kubernetes Secret and set
+# `secrets.existingSecret` (see README.md "Secrets").
+
+# -- Override the chart name (rarely needed).
+nameOverride: ""
+# -- Override the fully-qualified release name (rarely needed).
+fullnameOverride: ""
+
+# ---------------------------------------------------------------------------
+# Images. Default tags track Chart.appVersion; override per release. The
+# atlas server + web frontend + bootstrap/migration images are published by
+# .github/workflows/container-publish.yml.
+# ---------------------------------------------------------------------------
+image:
+  # -- Container registry + repository prefix for all first-party images.
+  registry: ghcr.io
+  repository: mgoodric/security-atlas
+  # -- Global image pull policy.
+  pullPolicy: IfNotPresent
+  # -- Tag override applied to every first-party image. Empty = use
+  #    Chart.appVersion. Set this to pin a specific platform release.
+  tag: ""
+
+# -- Image pull secrets for private registries (list of {name: ...}).
+imagePullSecrets: []
+
+# ---------------------------------------------------------------------------
+# atlas — the platform server. gRPC :50051 + HTTP :8080 (/health).
+# ---------------------------------------------------------------------------
+atlas:
+  # -- Number of atlas server replicas. The server is stateless (state lives
+  #    in Postgres / NATS / S3), so this scales horizontally.
+  replicaCount: 1
+  image:
+    # -- Repository for the atlas server image (defaults to
+    #    `<image.repository>/atlas`).
+    repository: ""
+    # -- Tag override for just the atlas image.
+    tag: ""
+  # -- Resource requests / limits for the atlas pod.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  # -- Set the session cookie Secure flag. Leave false for plain-HTTP dev;
+  #    set true once the deployment is behind TLS (Ingress).
+  secureCookies: false
+  # -- Node scheduling controls.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # -- Extra environment variables (list of core-v1 EnvVar).
+  extraEnv: []
+
+# ---------------------------------------------------------------------------
+# web — the Next.js frontend. Talks to the atlas HTTP API.
+# ---------------------------------------------------------------------------
+web:
+  # -- Number of web frontend replicas. Stateless — scales horizontally.
+  replicaCount: 1
+  image:
+    # -- Repository for the web image (defaults to `<image.repository>/web`).
+    repository: ""
+    # -- Tag override for just the web image.
+    tag: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  # -- The API base URL the BROWSER uses to reach the atlas HTTP API. Leave
+  #    empty when an Ingress fronts both `web` and `atlas` under one host
+  #    with path routing (browser uses same-origin relative URLs). Set to an
+  #    absolute URL only when the browser must reach atlas at a different
+  #    origin than the frontend.
+  publicApiBaseUrl: ""
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraEnv: []
+
+# ---------------------------------------------------------------------------
+# nats — JetStream evidence-ingest buffer. Bundled as a StatefulSet (canvas
+# §10.1: NATS is part of the platform, a single binary). The
+# volumeClaimTemplate persists JetStream stream state across restarts.
+# ---------------------------------------------------------------------------
+nats:
+  image:
+    # -- NATS image repository.
+    repository: nats
+    # -- NATS image tag.
+    tag: "2.10-alpine"
+  # -- Persistent volume size for JetStream data.
+  persistence:
+    enabled: true
+    size: 8Gi
+    # -- StorageClass for the JetStream PVC. Empty = cluster default.
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# postgres — EXTERNAL. The chart NEVER bundles a Postgres operator or an
+# in-cluster Postgres (P0 anti-criterion). Bring your own: RDS, Aurora,
+# CrunchyData operator, Zalando operator, a managed cloud DB, anything.
+# Supply the two role DSNs below (assembled from secrets.* — see README).
+# ---------------------------------------------------------------------------
+postgres:
+  # -- Hostname of the external Postgres. Required.
+  host: postgres
+  # -- Port of the external Postgres.
+  port: 5432
+  # -- Database name.
+  database: security_atlas
+  # -- sslmode for both DSNs. Use `require` (or stricter) for any real
+  #    deployment; `disable` is dev-only.
+  sslmode: disable
+  # -- The application role (RLS-enforced). The atlas server connects as
+  #    this. Password comes from secrets.postgresAppPassword.
+  appUser: atlas_app
+  # -- The migration role (BYPASSRLS CREATEROLE — slice 065). The pre-install
+  #    Job + boot-time schema import connect as this. On a shared cluster the
+  #    operator must pre-create this role with BYPASSRLS CREATEROLE and own
+  #    schema public — see README "External Postgres". Password comes from
+  #    secrets.postgresMigratePassword (may be empty for trust auth).
+  migrateUser: atlas_migrate
+
+# ---------------------------------------------------------------------------
+# minio — OPTIONAL bundled S3-compatible artifact store. Enabled by default
+# so a fresh `helm install` works end-to-end on a single-node cluster. In
+# production set `minio.enabled: false` and point `artifacts.s3Endpoint` at
+# real S3 / a managed object store (see values-production.yaml).
+# ---------------------------------------------------------------------------
+minio:
+  # -- Bundle an in-cluster MinIO. Set false to use external S3.
+  enabled: true
+  image:
+    repository: minio/minio
+    tag: latest
+  # -- Persistent volume for MinIO object data.
+  persistence:
+    enabled: true
+    size: 16Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# artifacts — the evidence artifact store wiring (slice 036). When
+# minio.enabled is true the chart points the atlas server at the in-cluster
+# MinIO Service and uses the MinIO root credentials as the S3 access key.
+# When minio.enabled is false, s3Endpoint is REQUIRED and the S3 credentials
+# come from secrets.s3AccessKeyId / secrets.s3SecretAccessKey.
+# ---------------------------------------------------------------------------
+artifacts:
+  # -- S3 bucket name for evidence artifacts > 1 MB.
+  bucket: atlas-artifacts
+  # -- External S3 endpoint URL. Required when minio.enabled is false;
+  #    ignored when minio.enabled is true.
+  s3Endpoint: ""
+  # -- AWS region label sent to the S3 client.
+  region: us-east-1
+
+# ---------------------------------------------------------------------------
+# oidc — authentication. The platform is an OIDC relying party only (never
+# an IdP). Leave issuer empty to run in local-user mode (the bootstrap seeds
+# a default local user — fine for solo deployments). Set issuer + clientId +
+# clientSecret to wire an external IdP.
+# ---------------------------------------------------------------------------
+oidc:
+  # -- OIDC issuer URL. Empty = local-user mode (no external IdP).
+  issuer: ""
+  # -- OIDC client ID registered with the IdP.
+  clientId: ""
+  # -- OIDC redirect URL (the atlas server's callback). Typically
+  #    https://<your-host>/auth/callback.
+  redirectUrl: ""
+
+# ---------------------------------------------------------------------------
+# bootstrap — first-boot seed configuration consumed by the migration Job.
+# The Job (pre-install / pre-upgrade hook) runs the slice-037/065
+# bootstrap.sh: applies roles + forward migrations (idempotent via the
+# schema_migrations ledger), seeds the default tenant / scope / user, imports
+# the SCF catalog, and uploads the SOC 2 control bundles.
+# ---------------------------------------------------------------------------
+bootstrap:
+  # -- Default tenant UUID. The solo operator is a single-tenant deployment
+  #    of the multi-tenant system. Leave default unless migrating data.
+  tenantId: "00000000-0000-4000-8000-000000000001"
+  # -- Default local sign-in email seeded on first boot.
+  defaultUserEmail: admin@example.com
+
+# ---------------------------------------------------------------------------
+# secrets — credential material. TWO modes:
+#
+#  (1) existingSecret (PRODUCTION): pre-create a Kubernetes Secret with the
+#      keys listed in README "Secrets", then set `existingSecret: <name>`.
+#      The chart renders NO Secret object and the inline values below are
+#      ignored. This keeps real secrets out of values files and Helm
+#      release history.
+#
+#  (2) inline (DEV CONVENIENCE): leave existingSecret empty and the chart
+#      renders a Secret named "<release>-security-atlas-secrets" from the
+#      values below. Every value here is the literal placeholder `changeme`
+#      — override them all via --set / a private values file. This is for
+#      throwaway clusters only.
+# ---------------------------------------------------------------------------
+secrets:
+  # -- Name of a pre-existing Secret to consume. When set, the inline values
+  #    below are ignored and no Secret is rendered. PRODUCTION should use
+  #    this. See README "Secrets" for the required keys.
+  existingSecret: ""
+  # -- Password for the Postgres application role (atlas_app).
+  postgresAppPassword: changeme
+  # -- Password for the Postgres migration role (atlas_migrate). May be left
+  #    as `changeme` and overridden, or set empty for trust auth on a
+  #    dedicated cluster.
+  postgresMigratePassword: changeme
+  # -- HMAC key for api_keys.token_hash (slice 034). The atlas server
+  #    refuses to boot without it. MUST be high-entropy: openssl rand -hex 32.
+  bearerHashKey: changeme
+  # -- Pre-shared admin bearer token used by the migration Job to upload
+  #    control bundles. Rotate / revoke after first boot. openssl rand -hex 32.
+  bootstrapToken: changeme
+  # -- Default local-mode user password seeded on first boot. Change it
+  #    immediately after first sign-in.
+  defaultUserPassword: changeme
+  # -- OIDC client secret. Only used when oidc.issuer is set.
+  oidcClientSecret: changeme
+  # -- S3 access key ID. Used only when minio.enabled is false (external S3).
+  #    When minio.enabled is true the MinIO root credentials are used instead.
+  s3AccessKeyId: changeme
+  # -- S3 secret access key. Used only when minio.enabled is false.
+  s3SecretAccessKey: changeme
+  # -- MinIO root user. Used only when minio.enabled is true; doubles as the
+  #    S3 access key the atlas server uses against the bundled MinIO.
+  minioRootUser: changeme
+  # -- MinIO root password. Used only when minio.enabled is true.
+  minioRootPassword: changeme
+
+# ---------------------------------------------------------------------------
+# ingress — OPTIONAL. Disabled by default. When enabled, fronts the web
+# frontend and the atlas HTTP API under one host. cert-manager integration
+# is opt-in via `ingress.certManager.enabled` (adds the cluster-issuer
+# annotation + a TLS block); you may also supply a pre-existing TLS Secret.
+# ---------------------------------------------------------------------------
+ingress:
+  # -- Render an Ingress object.
+  enabled: false
+  # -- IngressClass name (e.g. nginx, traefik).
+  className: ""
+  # -- Hostname the platform is served on.
+  host: security-atlas.example.com
+  # -- Extra annotations merged onto the Ingress (in addition to any
+  #    cert-manager annotation added below).
+  annotations: {}
+  # -- Path prefixes. `/` routes the browser app to the web frontend; the
+  #    API prefixes route to the atlas HTTP service. pathType is Prefix.
+  paths:
+    web: /
+    apiPrefixes:
+      - /v1
+      - /health
+      - /auth
+  certManager:
+    # -- Add the cert-manager.io/cluster-issuer annotation and a TLS block
+    #    so cert-manager provisions a certificate for `ingress.host`.
+    enabled: false
+    # -- Name of the cert-manager ClusterIssuer to use.
+    clusterIssuer: letsencrypt-prod
+  tls:
+    # -- Name of a pre-existing TLS Secret to use (alternative to
+    #    cert-manager). Ignored when certManager.enabled is true (cert-manager
+    #    manages its own Secret named "<host>-tls").
+    existingSecret: ""
+
+# ---------------------------------------------------------------------------
+# serviceAccount — the identity the workload pods run as.
+# ---------------------------------------------------------------------------
+serviceAccount:
+  # -- Create a ServiceAccount for the workloads.
+  create: true
+  # -- Name override (defaults to the chart fullname).
+  name: ""
+  # -- Annotations for the ServiceAccount (e.g. IRSA role ARN on EKS).
+  annotations: {}
+
+# -- Pod security context applied to every workload pod.
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault

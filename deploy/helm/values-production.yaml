@@ -1,0 +1,152 @@
+# values-production.yaml — the PRODUCTION deployment shape for security-atlas.
+#
+# This is a TEMPLATE, not a drop-in: copy it, fill in the bracketed values,
+# and pass it with `-f`:
+#
+#   helm install security-atlas ./deploy/helm \
+#     --namespace security-atlas --create-namespace \
+#     -f deploy/helm/values-production.yaml \
+#     -f my-private-overrides.yaml
+#
+# It demonstrates the four production differences from the solo defaults:
+#   1. multiple replicas for the stateless tiers (atlas, web)
+#   2. EXTERNAL Postgres (the chart never bundles one — bring RDS / Aurora /
+#      CrunchyData / a managed DB)
+#   3. EXTERNAL S3 (minio.enabled: false) — real object storage
+#   4. a real OIDC IdP, an Ingress with cert-manager TLS, and a pre-created
+#      Kubernetes Secret (NO inline credentials in any values file)
+
+# --- 1. Pin images to a released platform version (do not float on a tag). ---
+image:
+  registry: ghcr.io
+  repository: mgoodric/security-atlas
+  pullPolicy: IfNotPresent
+  # Pin to the exact platform release you have qualified.
+  tag: "0.1.0"
+
+# --- 1. Multiple replicas for the stateless tiers. ---
+atlas:
+  replicaCount: 3
+  # Behind TLS — Secure-flag the session cookies.
+  secureCookies: true
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: "1Gi"
+
+web:
+  replicaCount: 2
+  # Empty: the Ingress fronts web + atlas under one host, so the browser
+  # uses same-origin relative URLs.
+  publicApiBaseUrl: ""
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+# --- NATS: a real StorageClass + sized volume. ---
+nats:
+  persistence:
+    enabled: true
+    size: 20Gi
+    # Set to a provisioner-backed class on your cluster.
+    storageClass: "gp3"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+# --- 2. EXTERNAL Postgres. The chart bundles NO database operator. ---
+postgres:
+  # Point at your managed Postgres (RDS / Aurora / CrunchyData / etc.).
+  host: security-atlas-db.internal.example.com
+  port: 5432
+  database: security_atlas
+  # Require TLS to the database in production.
+  sslmode: require
+  appUser: atlas_app
+  migrateUser: atlas_migrate
+
+# --- 3. EXTERNAL S3 — disable the bundled MinIO. ---
+minio:
+  enabled: false
+
+artifacts:
+  bucket: my-org-security-atlas-evidence
+  # Required when minio.enabled is false. Use your real object-store
+  # endpoint (AWS S3 leaves this empty for the default global endpoint;
+  # MinIO/Ceph/GCS-interop deployments set it explicitly).
+  s3Endpoint: https://s3.us-east-1.amazonaws.com
+  region: us-east-1
+
+# --- 4. Real OIDC IdP. ---
+oidc:
+  issuer: https://idp.example.com/
+  clientId: security-atlas-prod
+  redirectUrl: https://security-atlas.example.com/auth/callback
+
+bootstrap:
+  tenantId: "00000000-0000-4000-8000-000000000001"
+  defaultUserEmail: admin@example.com
+
+# --- 4. Pre-created Secret — NO inline credentials in any values file. ---
+# Create the Secret out-of-band BEFORE `helm install`. It must carry every
+# key listed in deploy/helm/README.md "Secrets". Example:
+#
+#   kubectl create secret generic security-atlas-prod-secrets \
+#     --namespace security-atlas \
+#     --from-literal=DATABASE_URL_APP='postgres://atlas_app:...@host:5432/security_atlas?sslmode=require' \
+#     --from-literal=DATABASE_URL_MIGRATE='postgres://atlas_migrate:...@host:5432/security_atlas?sslmode=require' \
+#     --from-literal=ATLAS_APP_PASSWORD='...' \
+#     --from-literal=BEARER_HASH_KEY="$(openssl rand -hex 32)" \
+#     --from-literal=ATLAS_BOOTSTRAP_TOKEN="$(openssl rand -hex 32)" \
+#     --from-literal=ATLAS_DEFAULT_USER_PASSWORD='...' \
+#     --from-literal=ATLAS_OIDC_CLIENT_SECRET='...' \
+#     --from-literal=AWS_ACCESS_KEY_ID='...' \
+#     --from-literal=AWS_SECRET_ACCESS_KEY='...'
+#
+# (or, preferably, manage it with External Secrets Operator / Sealed Secrets
+# / SOPS — see README "Secrets").
+secrets:
+  existingSecret: security-atlas-prod-secrets
+
+# --- 4. Ingress with cert-manager TLS. ---
+ingress:
+  enabled: true
+  className: nginx
+  host: security-atlas.example.com
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 32m
+  paths:
+    web: /
+    apiPrefixes:
+      - /v1
+      - /health
+      - /auth
+  certManager:
+    enabled: true
+    clusterIssuer: letsencrypt-prod
+  tls:
+    existingSecret: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  # On EKS, bind an IRSA role here so the atlas pods reach real S3 without
+  # static credentials (then the AWS_* keys in the Secret can be omitted):
+  # annotations:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/security-atlas
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault

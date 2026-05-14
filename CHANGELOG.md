@@ -11,6 +11,31 @@ auto-generated notes.
 
 ## [Unreleased]
 
+### Added
+
+- **infra:** Helm chart for Kubernetes deployment (#038) — `deploy/helm/`
+  ships a Helm chart that deploys security-atlas to a K8s cluster with one
+  `helm install`. Bundles the atlas server Deployment, the web frontend
+  Deployment, a NATS JetStream StatefulSet (with a `volumeClaimTemplate`
+  for stream persistence), and an optional MinIO Deployment
+  (`minio.enabled`, default `true` for dev/solo — disable for external
+  S3). Postgres is an external dependency: the chart never bundles a
+  database operator. A `pre-install`/`pre-upgrade` Hook Job runs the
+  existing `bootstrap.sh` (slice 037/065) against the configured Postgres
+  — applying migrations through the `schema_migrations` ledger so
+  `helm upgrade` re-runs it idempotently. `values.yaml` documents the
+  solo-deployment defaults (all credential placeholders are the neutral
+  literal `changeme`); `values-production.yaml` is an annotated template
+  for the production shape — multiple replicas, external Postgres + S3,
+  a real OIDC IdP, an Ingress with cert-manager TLS, and `existingSecret`
+  (no inline credentials in any values file). A new gated CI job
+  (`Helm chart · lint + template`, slice-061 path-filter + stub-sibling
+  pattern, non-required) runs `helm lint` + `helm template` against both
+  the default and production values. `deploy/helm/README.md` documents
+  the values reference, the two-mode secrets model, external-Postgres
+  setup, Ingress / cert-manager integration, and the manual minikube
+  integration check.
+
 ### Fixed
 
 - **evidence-pipeline:** schema-registry evidence_kind fixes (#068) —

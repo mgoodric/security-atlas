@@ -542,3 +542,48 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+
+  # ====================================================================
+  # Slice 038 — Helm chart lint + template.
+  #
+  # Self-contained job block (appended like the slice-030 / slice-065
+  # blocks above) so parallel branches editing ci.yml rebase cleanly.
+  # Runs `helm lint` + `helm template` against deploy/helm/ with BOTH the
+  # solo defaults and values-production.yaml, asserting the chart renders
+  # valid manifests in both shapes. This is slice 038 AC-5.
+  #
+  # Gated on the same `changes.code` path filter as the other expensive
+  # jobs (`deploy/**` is in the filter, so any PR touching the chart runs
+  # this) with a mutually-exclusive stub sibling under the same check
+  # name (slice-061 pattern), so docs-only PRs resolve the check in < 30s.
+  #
+  # NOT yet in .github/branch-protection.json's required-checks list —
+  # like slice 065's `test-self-host-bundle`, it ships non-required and is
+  # promoted to a required check after a few green runs.
+  # ====================================================================
+  helm-lint:
+    name: Helm chart · lint + template
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+      - name: helm lint (default values)
+        run: helm lint deploy/helm
+      - name: helm lint (production values)
+        run: helm lint deploy/helm -f deploy/helm/values-production.yaml
+      - name: helm template (default values)
+        run: helm template ci-default deploy/helm > /dev/null
+      - name: helm template (production values)
+        run: helm template ci-prod deploy/helm -f deploy/helm/values-production.yaml > /dev/null
+
+  helm-lint-stub:
+    name: Helm chart · lint + template
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
