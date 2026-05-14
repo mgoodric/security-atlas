@@ -1,0 +1,48 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc1_5_accountability_acknowledgment
+title: "All personnel acknowledge core security policies"
+description: |
+  The entity holds individuals accountable for their internal control
+  responsibilities (TSC CC1.5, COSO Principle 5). Operationally, every
+  active user must have on file an acknowledgment of each policy in the
+  v1 policy library (Information Security, Access Control, Vendor
+  Management, Incident Response, Change Management). The evidence query
+  reads the `policy.acknowledgment` ledger and asserts coverage across
+  active users.
+
+scf_anchor_id: HRS-01
+control_family: HRS
+implementation_type: automated
+owner_role: hr
+lifecycle_state: active
+freshness_class: weekly
+
+evidence_queries:
+  - id: all_users_acknowledged_core_policies
+    language: rego
+    evidence_kind: policy.acknowledgment
+    description: "Every active user has acknowledged all 5 v1 stock policies in current version"
+    expression: |
+      package atlas.controls.soc2.cc1_5
+
+      default allow := false
+
+      required_policies := {
+        "policy_information_security",
+        "policy_access_control",
+        "policy_vendor_management",
+        "policy_incident_response",
+        "policy_change_management"
+      }
+
+      allow if {
+        every u in input.active_users {
+          ack_policies := {p |
+            some a in input.acknowledgments
+            a.user_id == u.id
+            a.policy_version_id == input.current_policy_versions[a.policy_id]
+            p := a.policy_id
+          }
+          required_policies - ack_policies == set()
+        }
+      }

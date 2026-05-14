@@ -78,6 +78,40 @@ created_by, created_at, sorted attachment_hashes[]}` following ADR
   `_025_walkthroughs`. New packages:
   `internal/audit/walkthrough` + `internal/api/walkthroughs`. Closes
   slice 027; unblocks slice 030 (OSCAL assessment-results export).
+- **Slice 010 — SCF-anchored SOC 2 control kit (50 controls).** Ships
+  the v1 stock SOC 2 control library under `controls/soc2/` — 50
+  control bundles in the slice-009 manifest format, each anchored to
+  an SCF concept and spanning the SOC 2 2017 Trust Services Criteria
+  (Common Criteria + Availability + Confidentiality + Processing
+  Integrity; Privacy deliberately deferred per scope). 26 bundles (52%)
+  carry automated `evidence_queries[]` over the registered evidence
+  kinds — `aws.s3.bucket_encryption_state`, `okta.mfa_policy`,
+  `okta.user_lifecycle`, `okta.app_assignment`, `github.audit_event`,
+  `github.repo_protection`, `osquery.host_posture`, `sast.scan_result`,
+  `jira.ticket_evidence`, `1password.org_policy`,
+  `access_review.completion`, `policy.acknowledgment`, and
+  `manual.upload`. The remaining 24 bundles are `manual_periodic` or
+  `manual_attested` with a full `manual_evidence_schema` capturing what
+  the attesting roleholder records — invariant 9 (manual evidence
+  first-class) honored. Coverage of the slice-007 SOC 2 → SCF crosswalk
+  is 43 / 43 mapped TSC codes (100%), comfortably above the AC-3
+  threshold of 80%. The `cmd/scripts/coverage-check` Go script verifies
+  every bundle parses via slice 009's `ParseDirectory`, every
+  `scf_anchor_id` exists in the slice-006 SCF catalog, every mapped
+  TSC code is reachable via graph traversal (bundle → SCF anchor →
+  STRM edge → TSC requirement) — running `go run
+./cmd/scripts/coverage-check` from the repo root prints a pass/fail
+  summary and exits non-zero on any gate failure. HITL spot-check log
+  at `docs/audit-log/control-kit-review.md` pre-fills an 8-bundle
+  sample table for Matt's signoff and documents five judgment calls
+  (CC6.7 encryption scoping, CC1.4 weak SCF anchor, CC6.3 split across
+  three bundles, PI1 family anchored to SEA-05, PRI family
+  deliberately omitted). No migrations, no Go business logic, no Rego
+  authored under `policies/` — the bundles' Rego/SQL expressions live
+  inside the YAML and are executed by slice 012 (not yet on main).
+  Constitutional invariant 1 (one control, N satisfactions) honored:
+  bundles carry `scf_anchor_id` only; SOC 2 framework satisfaction is
+  derived at query time via the slice-008 traversal.
 - **Slice 060 — Admin settings UI shell.** Surfaces the existing admin
   backends (slice 034 API keys, slice 059 feature flags) in the
   Next.js 15 + shadcn/ui frontend, gated by an admin-only layout that

@@ -1,0 +1,54 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc7_3_security_event_evaluation
+title: "Security-relevant GitHub events are reviewed within review SLA"
+description: |
+  The entity evaluates security events to determine whether they could
+  or have resulted in a failure of the entity to meet its objectives
+  (TSC CC7.3). For a SaaS startup the highest-signal evaluable event
+  stream is GitHub's audit log — branch protection toggles, secret
+  scanning alerts, repo visibility changes, key/token creation. The
+  query asserts every security-tagged GitHub event in the period was
+  acknowledged in the evidence ledger within 24 hours.
+
+scf_anchor_id: AAA-01
+control_family: AAA
+implementation_type: automated
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: daily
+
+evidence_queries:
+  - id: security_github_events_acknowledged
+    language: rego
+    evidence_kind: github.audit_event
+    description: "Every security-tagged GitHub audit event has an acknowledgement within 24h"
+    expression: |
+      package atlas.controls.soc2.cc7_3
+
+      default allow := false
+
+      security_actions := {
+        "protected_branch.destroy",
+        "repo.access",
+        "secret_scanning.disable",
+        "org.invite_member",
+        "org.remove_outside_collaborator"
+      }
+
+      allow if {
+        every e in input.audit_events {
+          security_event_acked(e)
+        }
+      }
+
+      security_event_acked(e) if {
+        not e.action in security_actions
+      }
+      security_event_acked(e) if {
+        e.action in security_actions
+        some ack in input.acknowledgements
+        ack.event_id == e.event_id
+        delta_ns := time.parse_rfc3339_ns(ack.acked_at) - time.parse_rfc3339_ns(e.observed_at)
+        delta_ns >= 0
+        delta_ns <= (24 * 60 * 60 * 1000000000)
+      }

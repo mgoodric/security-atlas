@@ -1,0 +1,40 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc8_1_change_management
+title: "Production-deploying repositories enforce branch protection"
+description: |
+  The entity authorizes, designs, develops or acquires, configures,
+  documents, tests, approves, and implements changes to infrastructure,
+  data, software, and procedures (TSC CC8.1). For a SaaS codebase the
+  testable manifestation is: every repository that deploys to
+  production has GitHub branch protection enabled on the production
+  branch — required pull-request reviews, status checks, no force-push,
+  no direct push by non-admins.
+
+scf_anchor_id: CHG-02
+control_family: CHG
+implementation_type: automated
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: daily
+
+evidence_queries:
+  - id: prod_repos_have_branch_protection
+    language: rego
+    evidence_kind: github.repo_protection
+    description: "Every prod-deploying repo has protected main branch with PR reviews and status checks"
+    expression: |
+      package atlas.controls.soc2.cc8_1
+
+      default allow := false
+
+      allow if {
+        every r in input.repos {
+          r.deploys_to_prod == true
+          some p in r.protection_rules
+          p.branch == r.default_branch
+          p.required_pull_request_reviews.required_approving_review_count >= 1
+          p.required_status_checks.enabled == true
+          p.allow_force_pushes == false
+          p.enforce_admins == true
+        }
+      }

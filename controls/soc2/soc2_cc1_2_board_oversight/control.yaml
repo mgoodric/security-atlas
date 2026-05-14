@@ -1,0 +1,45 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc1_2_board_oversight
+title: "Board reviews security program at least annually"
+description: |
+  The board of directors (or equivalent governing body) demonstrates
+  independence from management and exercises oversight of the security
+  program (TSC CC1.2, COSO Principle 2). The control owner uploads the
+  signed board minutes — or an excerpt thereof — showing the security
+  program was on the agenda and was discussed substantively at least once
+  per fiscal year. For early-stage companies without a formal board,
+  uploads of founder + investor security reviews are an acceptable
+  substitute.
+
+scf_anchor_id: GOV-01
+control_family: GOV
+implementation_type: manual_periodic
+owner_role: ciso
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required: [meeting_date, attendees, security_topics_discussed, minutes_uri]
+  properties:
+    meeting_date:
+      type: string
+      format: date
+    attendees:
+      type: array
+      minItems: 2
+      items:
+        type: string
+    security_topics_discussed:
+      type: array
+      minItems: 1
+      items:
+        type: string
+      description: "Free-text list of security topics on the agenda"
+    minutes_uri:
+      type: string
+      format: uri
+      description: "Link to the canonical minutes (board portal, doc URL, S3 key)"
+    independence_confirmation:
+      type: boolean
+      description: "Confirms the board includes at least one non-management member"

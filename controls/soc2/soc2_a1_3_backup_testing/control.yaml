@@ -1,0 +1,29 @@
+bundle_schema_version: "1"
+bundle_id: soc2_a1_3_backup_testing
+title: "Backup restoration tested at least annually"
+description: |
+  The entity tests recovery plan procedures supporting system recovery
+  to meet its objectives (TSC A1.3). The control owner uploads
+  annually evidence of a backup restoration test — date, data store
+  restored, restoration time achieved, who performed the test, and the
+  pass/fail outcome with notes on any deviations from documented RTO.
+
+scf_anchor_id: BCD-11
+control_family: BCD
+implementation_type: manual_periodic
+owner_role: it-operations
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required: [test_date, tester, store_restored, restoration_time_minutes, outcome]
+  properties:
+    test_date: { type: string, format: date }
+    tester: { type: string, minLength: 1 }
+    store_restored: { type: string }
+    restoration_time_minutes: { type: number, minimum: 0 }
+    rto_target_minutes: { type: number, minimum: 0 }
+    outcome: { type: string, enum: [pass, fail, pass_with_deviation] }
+    deviations: { type: string }
+    evidence_uri: { type: string, format: uri }

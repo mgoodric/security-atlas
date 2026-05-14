@@ -1,0 +1,37 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc6_1_logical_access_baseline
+title: "Identity provider enforces MFA on all org-managed applications"
+description: |
+  The entity implements logical access security software, infrastructure,
+  and architectures over protected information assets (TSC CC6.1). The
+  canonical operationalisation is: the corporate identity provider (Okta
+  / Google Workspace / Azure AD) is the chokepoint for application access
+  and enforces MFA on every assigned application. The query reads the
+  Okta MFA policy snapshot and asserts the policy is enabled, applies to
+  the everyone group, and requires a phishing-resistant factor (WebAuthn,
+  push-with-number-matching) for at least admin roles.
+
+scf_anchor_id: IAC-01
+control_family: IAC
+implementation_type: automated
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: daily
+
+evidence_queries:
+  - id: idp_mfa_policy_enabled
+    language: rego
+    evidence_kind: okta.mfa_policy
+    description: "Okta MFA policy is enabled, applies broadly, requires a phishing-resistant factor for admins"
+    expression: |
+      package atlas.controls.soc2.cc6_1
+
+      default allow := false
+
+      allow if {
+        some pol in input.policies
+        pol.status == "ACTIVE"
+        "everyone" in pol.assigned_groups
+        some factor in pol.required_factors
+        factor in {"webauthn", "okta_verify_push_number_match"}
+      }

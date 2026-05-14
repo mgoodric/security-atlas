@@ -1,0 +1,41 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc3_1_risk_objectives
+title: "Risk management program defines and reviews security objectives"
+description: |
+  The entity specifies objectives with sufficient clarity to enable the
+  identification and assessment of risks (TSC CC3.1). The control owner
+  attests annually that the risk management program documents security
+  objectives in measurable terms (e.g. confidentiality of customer data,
+  availability targets, regulatory obligations) and that those objectives
+  are linked to specific risks in the register.
+
+scf_anchor_id: RSK-01
+control_family: RSK
+implementation_type: manual_attested
+owner_role: ciso
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required: [attested_at, attestor, objectives_documented, linked_to_register]
+  properties:
+    attested_at:
+      type: string
+      format: date-time
+    attestor:
+      type: string
+      minLength: 1
+    objectives_documented:
+      type: array
+      minItems: 3
+      items:
+        type: object
+        required: [objective, measurable_outcome]
+        properties:
+          objective: { type: string }
+          measurable_outcome: { type: string, description: "Quantitative or binary success criterion" }
+    linked_to_register:
+      type: boolean
+      enum: [true]
+      description: "Risk register entries reference these objectives"

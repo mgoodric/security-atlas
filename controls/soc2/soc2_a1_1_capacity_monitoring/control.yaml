@@ -1,0 +1,36 @@
+bundle_schema_version: "1"
+bundle_id: soc2_a1_1_capacity_monitoring
+title: "Production endpoints reporting performance posture"
+description: |
+  The entity maintains, monitors, and evaluates current processing
+  capacity and use of system components to manage capacity demand and
+  to enable the implementation of additional capacity (TSC A1.1).
+  Endpoint posture from osquery surfaces CPU / memory / disk
+  saturation for the in-scope production hosts; the query asserts each
+  reports values within healthy thresholds on the most recent sample.
+
+scf_anchor_id: MON-01
+control_family: MON
+implementation_type: automated
+owner_role: it-operations
+lifecycle_state: active
+freshness_class: hourly
+
+evidence_queries:
+  - id: production_capacity_healthy
+    language: rego
+    evidence_kind: osquery.host_posture
+    description: "Every production host reports capacity headroom on the most recent sample"
+    expression: |
+      package atlas.controls.soc2.a1_1
+
+      default allow := false
+
+      allow if {
+        every p in input.posture_records {
+          p.host_role == "production"
+          p.capacity.disk_pct_used < 85
+          p.capacity.memory_pct_used < 90
+          p.capacity.cpu_pct_used_p95_5m < 90
+        }
+      }

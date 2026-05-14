@@ -1,0 +1,39 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc5_1_control_selection
+title: "Control selection aligned with risk register"
+description: |
+  The entity selects and develops control activities that contribute to
+  the mitigation of risks to the achievement of objectives to acceptable
+  levels (TSC CC5.1). The control owner attests annually that every
+  high or critical entry in the risk register has at least one assigned
+  mitigating control in the control catalog, and conversely that the
+  stock SOC 2 control kit has been reviewed for applicability against
+  the org's risk profile (i.e. controls outside applicability have a
+  documented `applicability_expr` excluding them).
+
+scf_anchor_id: RSK-01
+control_family: RSK
+implementation_type: manual_attested
+owner_role: ciso
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required: [attested_at, attestor, register_to_control_coverage, applicability_review_complete]
+  properties:
+    attested_at:
+      type: string
+      format: date-time
+    attestor:
+      type: string
+      minLength: 1
+    register_to_control_coverage:
+      type: object
+      required: [critical_or_high_risks_count, risks_with_at_least_one_control]
+      properties:
+        critical_or_high_risks_count: { type: integer, minimum: 0 }
+        risks_with_at_least_one_control: { type: integer, minimum: 0 }
+    applicability_review_complete:
+      type: boolean
+      enum: [true]

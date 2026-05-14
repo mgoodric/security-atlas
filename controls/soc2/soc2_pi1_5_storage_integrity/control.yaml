@@ -1,0 +1,46 @@
+bundle_schema_version: "1"
+bundle_id: soc2_pi1_5_storage_integrity
+title: "Storage retention and integrity controls documented per data class"
+description: |
+  The entity implements policies and procedures to store inputs, items
+  in processing, and outputs completely, accurately, and timely in
+  accordance with system specifications to meet the entity's objectives
+  (TSC PI1.5). The control owner attests annually that retention
+  durations are documented for each data class, integrity mechanisms
+  (checksums, signed records, append-only ledgers where applicable)
+  are in place for restricted data, and recovery / re-replay
+  procedures are tested.
+
+scf_anchor_id: DCH-03
+control_family: DCH
+implementation_type: manual_attested
+owner_role: product-engineering
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required: [attested_at, attestor, retention_per_class, integrity_mechanisms]
+  properties:
+    attested_at:
+      type: string
+      format: date-time
+    attestor:
+      type: string
+      minLength: 1
+    retention_per_class:
+      type: object
+      properties:
+        public:       { type: string, description: "Duration string, e.g. '7 years' or 'indefinite'" }
+        internal:     { type: string }
+        confidential: { type: string }
+        restricted:   { type: string }
+    integrity_mechanisms:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        required: [system, mechanism]
+        properties:
+          system: { type: string }
+          mechanism: { type: string, enum: [sha256_content_hash, signed_records, append_only_ledger, db_checksums] }

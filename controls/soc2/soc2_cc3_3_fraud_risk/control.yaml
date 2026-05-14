@@ -1,0 +1,42 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc3_3_fraud_risk
+title: "Fraud risk explicitly considered in annual risk assessment"
+description: |
+  The entity considers the potential for fraud in assessing risks to the
+  achievement of objectives (TSC CC3.3). The control owner attests
+  annually that the risk assessment (per CC3.2) explicitly enumerated
+  fraud scenarios — internal misuse, insider threat, financial-reporting
+  manipulation, account takeover — and that mitigating controls were
+  identified for each. This is a deliberate attestation rather than a
+  document upload because the same risk-assessment PDF satisfies CC3.2.
+
+scf_anchor_id: RSK-04
+control_family: RSK
+implementation_type: manual_attested
+owner_role: ciso
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required: [attested_at, attestor, fraud_scenarios_evaluated, linked_risk_assessment_date]
+  properties:
+    attested_at:
+      type: string
+      format: date-time
+    attestor:
+      type: string
+      minLength: 1
+    fraud_scenarios_evaluated:
+      type: array
+      minItems: 3
+      items:
+        type: object
+        required: [scenario, controls_identified]
+        properties:
+          scenario: { type: string }
+          controls_identified: { type: array, items: { type: string }, minItems: 1 }
+    linked_risk_assessment_date:
+      type: string
+      format: date
+      description: "Date of the risk assessment that evaluated fraud (CC3.2 evidence)"

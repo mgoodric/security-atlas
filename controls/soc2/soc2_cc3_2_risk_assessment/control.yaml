@@ -1,0 +1,43 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc3_2_risk_assessment
+title: "Annual risk assessment completed and reviewed"
+description: |
+  The entity identifies risks to the achievement of its objectives and
+  analyzes risks as a basis for determining how the risks should be
+  managed (TSC CC3.2). The control owner uploads the most recent
+  completed risk assessment — methodology (NIST 800-30 default), date,
+  participants, and a count of risks identified by severity tier. The
+  evidence is the PDF or signed report.
+
+scf_anchor_id: RSK-04
+control_family: RSK
+implementation_type: manual_periodic
+owner_role: ciso
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required: [assessment_date, methodology, participants, risks_by_severity, report_uri]
+  properties:
+    assessment_date:
+      type: string
+      format: date
+    methodology:
+      type: string
+      enum: [nist_800_30, fair, octave, custom]
+    participants:
+      type: array
+      minItems: 2
+      items: { type: string }
+    risks_by_severity:
+      type: object
+      required: [critical, high, medium, low]
+      properties:
+        critical: { type: integer, minimum: 0 }
+        high: { type: integer, minimum: 0 }
+        medium: { type: integer, minimum: 0 }
+        low: { type: integer, minimum: 0 }
+    report_uri:
+      type: string
+      format: uri

@@ -1,0 +1,37 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc6_3_privileged_account_management
+title: "Privileged credentials vaulted with break-glass workflow"
+description: |
+  Privileged accounts are a tested subset of CC6.3 (authorize, modify,
+  remove access). The query reads the 1Password org-policy snapshot and
+  asserts that the vault containing privileged credentials (root keys,
+  shared admin passwords, break-glass accounts) has: a documented list
+  of vault members, sharing-disabled-by-default, and an audit-event
+  stream enabled. Personal-vault sharing of company secrets is
+  disallowed.
+
+scf_anchor_id: IAC-21
+control_family: IAC
+implementation_type: automated
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: daily
+
+evidence_queries:
+  - id: privileged_vault_locked_down
+    language: rego
+    evidence_kind: 1password.org_policy
+    description: "Privileged vault has restricted membership, sharing-disabled-by-default, audit logging on"
+    expression: |
+      package atlas.controls.soc2.cc6_3_pam
+
+      default allow := false
+
+      allow if {
+        some v in input.vaults
+        v.kind == "privileged"
+        v.sharing_default == "disabled"
+        v.audit_events_enabled == true
+        count(v.members) > 0
+        count(v.members) <= input.privileged_role_count
+      }
