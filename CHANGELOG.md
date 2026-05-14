@@ -11,6 +11,42 @@ auto-generated notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- **infra:** self-host bundle P0 fixes (#065) — a P0 follow-up to slice
+  037 that unbreaks the shipped v1.3.0 `docker compose` self-host bundle,
+  which did not bring a fresh deployment to a working state. Five
+  first-deploy bugs are closed. **(1) Audit-writer RLS bypass:**
+  `internal/authz/audit.go` (and the sibling `db_resolver.go`) queried
+  the RLS-enforced `atlas_app` pool OUTSIDE a transaction, so the
+  `app.current_tenant` GUC was unset and the `decision_audit_log` /
+  `user_roles` RLS policies rejected every row — every authenticated
+  request 500'd. Both now wrap the statement in `pool.Begin` +
+  `tenancy.ApplyTenant` + `tx.Commit`. **(2) docker-compose startup
+  deadlock:** `atlas` waited on `atlas-bootstrap`
+  `service_completed_successfully` while `atlas-bootstrap` phase 5 waited
+  on `atlas` `/health` — neither could start. Changed to
+  `service_started` with the `atlas` healthcheck `start_period` bumped
+  to 120s. **(3) Migration idempotency:** every unguarded `CREATE TYPE`
+  across `migrations/sql/*.sql` is now wrapped in a
+  `DO $$ ... EXCEPTION WHEN duplicate_object` block, and `bootstrap.sh`
+  gained a `schema_migrations` ledger so a re-run skips already-applied
+  migrations instead of aborting on the first `relation already exists`.
+  **(4) `ALTER ROLE` denied on a shared Postgres:**
+  `migrations/bootstrap/01-roles.sql` now conditionally grants
+  `atlas_migrate` `CREATEROLE` and `atlas_app` membership
+  `WITH ADMIN OPTION` so first-boot can set `atlas_app`'s password on an
+  externally-provided cluster (`atlas_app` itself stays
+  `NOSUPERUSER NOBYPASSRLS`). **(5) Missing `pgcrypto`:** a new head
+  migration `20260511000000_extensions.sql` creates the `pgcrypto`
+  extension that `seed.sql`'s `digest()` call needs — previously
+  pre-enabled only by chance on `postgres:16-alpine`. A new CI job
+  `test-self-host-bundle` brings the bundle up end-to-end against both
+  the bundled Postgres and an external (non-superuser, trust-disabled)
+  Postgres, and `internal/authz` is added to the CI integration-test
+  list so the audit-writer regression cannot recur silently. See
+  `docs/audit-log/065-self-host-bundle-p0-fixes-decisions.md`.
+
 ### Added
 
 - **risk:** risk-hierarchy backend read endpoints (#067) — fills the
@@ -40,6 +76,28 @@ auto-generated notes.
   `docs/audit-log/067-risk-hierarchy-backend-endpoints-decisions.md` for
   the wire-shape judgment calls (theme key is the slug not a UUID;
   `risk_counts` is keyed by the raw severity scalar).
+- **audit:** OSCAL SSP + POA&M export pipeline (#030) — the audit-handoff
+  bundle generator. `POST /v1/audit-periods/{id}/oscal-export` (and the
+  `atlas-cli oscal` command) produce an OSCAL JSON v1.1.2 bundle for a
+  **frozen** AuditPeriod: a System Security Plan (org profile + scope cells +
+  control implementations + linked policies), an Assessment Plan + Assessment
+  Results (sample populations + walkthroughs as observations + audit notes as
+  observation annotations), and a POA&M (failing `control_evaluations` +
+  open control-scoped audit notes, with owner / due-date / milestone derived
+  per decision D3). Serialization runs through a co-located Python
+  `oscal-bridge/` sidecar wrapping IBM `compliance-trestle`, reached over a
+  gRPC contract (`proto/oscal/v1/`) — this is the first Python in the repo,
+  managed with `uv` + `ruff`. Export bundles carry an ed25519 detached
+  signature in a cosign-compatible envelope (`OSCAL_SIGNING_KEY` env var, or
+  an ephemeral key when unset); `VerifyBundle` validates both the digest
+  match and the signature, closing the digest-rewrite gap. Constitutional:
+  invariant 8 (OSCAL is the wire format), invariant 10 (export rejects a
+  non-frozen period with a typed error), and the product AI-assist boundary
+  (SSP statements come from human-authored control bundle text — no LLM).
+  `Type: JUDGMENT` — four spec-ambiguity calls (SSP statement source, POA&M
+  derivation, OSCAL 1.1.2 pin, the ed25519-vs-cosign signing primitive) are
+  recorded in `docs/audit-log/030-oscal-ssp-poam-export-decisions.md`, with
+  "validate against a real auditor's tooling" as the top revisit item.
 - **frontend:** hierarchical risk dashboard view (#056) — a new
   `/risks/hierarchy` route, the CISO / program-lead surface for the
   multi-level risk + Decision Log work in slices 052-055. Three panels,

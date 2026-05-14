@@ -186,6 +186,29 @@ proto-ci:
     buf generate
     git diff --exit-code -- gen/proto || (echo "gen/proto changed; run 'just proto-generate' and commit" && exit 1)
 
+# ----- OSCAL bridge (slice 030) -----
+
+# Sync the oscal-bridge Python env (uv) with test extras.
+oscal-bridge-sync:
+    cd oscal-bridge && uv sync --extra test
+
+# Regenerate the oscal-bridge Python gRPC stubs from proto/oscal/v1.
+oscal-bridge-gen:
+    bash oscal-bridge/scripts/gen_proto.sh
+
+# Run the oscal-bridge pytest suite (unit + in-process gRPC server).
+oscal-bridge-test:
+    cd oscal-bridge && PYTHONPATH=. uv run --extra test python -m pytest tests/ -q
+
+# Lint + format-check the oscal-bridge Python sources (ruff).
+oscal-bridge-lint:
+    ruff check oscal-bridge
+    ruff format --check oscal-bridge
+
+# Run the OSCAL serialization service locally (sidecar to `atlas`).
+oscal-bridge-serve address="127.0.0.1:50070":
+    cd oscal-bridge && PYTHONPATH=. uv run python -m atlas_oscal_bridge.server --address {{address}}
+
 # ----- Release -----
 #
 # The release pipeline (.github/workflows/release.yml) runs on tag push.

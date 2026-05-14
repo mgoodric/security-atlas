@@ -8,6 +8,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -35,6 +37,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/freshnessdrift"
+	"github.com/mgoodric/security-atlas/internal/oscal"
 	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
@@ -191,6 +194,20 @@ func main() {
 	}
 	srv := api.New(cfg)
 
+	// Slice 065 bug #1 / AC-3 note: the two bootstrap credential-issuance
+	// calls below (IssueBootstrapCredential here, and
+	// IssueBootstrapFixedAdminCredential further down) write into the
+	// IN-MEMORY credstore.Store — NOT the api_keys table. They do not
+	// touch the DB pool at all, so they never hit the
+	// pool.Exec-outside-a-transaction RLS-bypass that bug #1 fixed in the
+	// audit writer; there is no BeginTx/ApplyTenant treatment to apply
+	// here. The slice-037 symptom "api_keys stays empty on a fresh
+	// install" was a downstream effect of bug #1: the audit-writer 500
+	// blocked bootstrap phase 6 (control-bundle upload), so the
+	// authenticated upload path that DOES persist to api_keys never ran
+	// to completion. With the audit writer fixed, phase 6 completes and
+	// api_keys is populated as designed. No change is needed on this
+	// startup-time issuance path.
 	if bootstrapTenant := os.Getenv("ATLAS_BOOTSTRAP_TENANT"); bootstrapTenant != "" {
 		cred, bearer, err := srv.IssueBootstrapCredential(bootstrapTenant)
 		if err != nil {
@@ -291,6 +308,31 @@ func main() {
 		azAudit := authz.NewAuditWriter(pool)
 		srv.AttachAuthz(azEngine, azAudit)
 		fmt.Fprintf(os.Stderr, "atlas: authz OPA engine wired (5 roles + decision audit + auditor attrs)\n")
+
+		// Slice 030: wire the OSCAL export pipeline when the Python
+		// oscal-bridge sidecar is configured. OSCAL_BRIDGE_ADDR is the
+		// gRPC address of the bridge (e.g. 127.0.0.1:50070). When unset,
+		// the export route is simply absent — the bridge is an optional
+		// sidecar, not a hard dependency of the platform binary. The
+		// signing key comes from OSCAL_SIGNING_KEY (hex-encoded ed25519
+		// private key); absent that, a per-process ephemeral key is used
+		// (the public key still travels in every bundle manifest, so the
+		// signature stays verifiable — see the slice-030 decisions log).
+		if bridgeAddr := os.Getenv("OSCAL_BRIDGE_ADDR"); bridgeAddr != "" {
+			bridge, bErr := oscal.DialBridge(bridgeAddr)
+			if bErr != nil {
+				fmt.Fprintf(os.Stderr, "atlas: oscal-bridge dial (%s): %v — OSCAL export disabled\n", bridgeAddr, bErr)
+			} else {
+				signer, sErr := oscalSignerFromEnv()
+				if sErr != nil {
+					fmt.Fprintf(os.Stderr, "atlas: oscal signer: %v — OSCAL export disabled\n", sErr)
+					_ = bridge.Close()
+				} else {
+					srv.AttachOscalExporter(oscal.NewExporter(pool, bridge, signer))
+					fmt.Fprintf(os.Stderr, "atlas: OSCAL export pipeline wired (bridge=%s)\n", bridgeAddr)
+				}
+			}
+		}
 
 		// Import bundled platform schemas at boot. Idempotent — no-op when
 		// every kind is already present in the DB. Requires the connection
@@ -566,6 +608,25 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// oscalSignerFromEnv builds the slice-030 export-bundle signer. When
+// OSCAL_SIGNING_KEY is set (hex-encoded 64-byte ed25519 private key) it
+// is loaded; otherwise a fresh per-process ephemeral keypair is
+// generated. The ephemeral path is acceptable because the public key
+// travels in every bundle manifest — the signature stays verifiable;
+// it just is not anchored to a long-lived identity (the cosign-keyless
+// upgrade is the v3 revisit item in the slice-030 decisions log).
+func oscalSignerFromEnv() (*oscal.Signer, error) {
+	raw := os.Getenv("OSCAL_SIGNING_KEY")
+	if raw == "" {
+		return oscal.NewEphemeralSigner()
+	}
+	key, err := hex.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("OSCAL_SIGNING_KEY is not valid hex: %w", err)
+	}
+	return oscal.NewSigner(ed25519.PrivateKey(key))
 }
 
 // localModeIdpResolver is the slice-037 no-op IdP resolver for local-mode
