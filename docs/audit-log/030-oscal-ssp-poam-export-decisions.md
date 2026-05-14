@@ -19,6 +19,7 @@ once the export is validated against a real auditor's tooling.
 ### D-narrative — SSP implementation statements come from the control bundle text
 
 **Options considered:**
+
 - (A) A distinct "implementation narrative" field on `controls` — does not exist in the schema.
 - (B) Use the control bundle manifest's stored `description` / control text as the human-authored implementation statement, and attach the latest `control_evaluations` result as an OSCAL `prop`.
 
@@ -31,6 +32,7 @@ once the export is validated against a real auditor's tooling.
 ### D3 — POA&M items derive from failing control evaluations + open audit notes
 
 **Options considered:**
+
 - (A) A `findings` table — does not exist; no findings slice is a dependency of 030.
 - (B) Derive POA&M items from `control_evaluations` with `result='fail'` inside the frozen audit horizon, plus open audit notes scoped to controls.
 
@@ -51,10 +53,11 @@ The canvas says "v1.1.x" (a range); this slice pins **1.1.2** (latest 1.1.x at b
 ### D1 — in-process ed25519 detached signature, cosign-compatible envelope
 
 **Options considered:**
+
 - (A) `cosign` the binary — requires either a managed key or keyless OIDC (Fulcio); neither is wired into the deployment yet.
 - (B) An in-process ed25519 detached signature over the bundle digest, wrapped in a cosign-compatible envelope.
 
-**Chosen: (B).** The canvas §9 tech-stack says "cosign signing of audit-export bundles" and the issue's P0 anti-criterion says "does NOT skip cosign signing." Both speak to *intent*: a tamper-detectable, verifiable signature on the export bundle. Option (B) delivers that — `VerifyBundle` checks both that the recomputed digest matches the manifest digest AND that the signature verifies against the recomputed digest, closing the "tamperer rewrites the digest field" gap. The signing key comes from the `OSCAL_SIGNING_KEY` env var; when unset, an ephemeral key is generated (the signature is still cryptographically valid and verifiable within the bundle, just not anchored to a persistent identity).
+**Chosen: (B).** The canvas §9 tech-stack says "cosign signing of audit-export bundles" and the issue's P0 anti-criterion says "does NOT skip cosign signing." Both speak to _intent_: a tamper-detectable, verifiable signature on the export bundle. Option (B) delivers that — `VerifyBundle` checks both that the recomputed digest matches the manifest digest AND that the signature verifies against the recomputed digest, closing the "tamperer rewrites the digest field" gap. The signing key comes from the `OSCAL_SIGNING_KEY` env var; when unset, an ephemeral key is generated (the signature is still cryptographically valid and verifiable within the bundle, just not anchored to a persistent identity).
 
 **This is ADR-worthy** — it is a deviation from the literal tool named in the canvas. It does not block merge (the bundle is signed and verifiable; intent honored), but a follow-up ADR should record the cosign-vs-in-process tradeoff formally.
 
@@ -71,11 +74,11 @@ The canvas says "v1.1.x" (a range); this slice pins **1.1.2** (latest 1.1.x at b
 
 ## Confidence summary
 
-| Decision | Confidence |
-| --- | --- |
-| D-narrative (SSP statement source) | high |
-| D-version (OSCAL 1.1.2 pin) | high |
-| D3 (POA&M source) | medium |
-| D1 (ed25519 signing primitive) | medium — ADR-worthy |
+| Decision                           | Confidence          |
+| ---------------------------------- | ------------------- |
+| D-narrative (SSP statement source) | high                |
+| D-version (OSCAL 1.1.2 pin)        | high                |
+| D3 (POA&M source)                  | medium              |
+| D1 (ed25519 signing primitive)     | medium — ADR-worthy |
 
 No constitutional-invariant conflicts surfaced. The grill confirmed AP/AR sourcing (populations + walkthroughs + audit notes) and audit-period-freezing enforcement are consistent with the canvas taken whole.
