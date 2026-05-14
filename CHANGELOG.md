@@ -9,6 +9,83 @@ Conventional-Commit messages. This file holds pre-release / unreleased
 work and any narrative entries the operator wants alongside the
 auto-generated notes.
 
+## 1.0.0 (2026-05-14)
+
+
+### Features
+
+* **admin:** admin BFF backend endpoints — SSO + Users + audit-log ([#062](https://github.com/mgoodric/security-atlas/issues/062)) ([#70](https://github.com/mgoodric/security-atlas/issues/70)) ([671407f](https://github.com/mgoodric/security-atlas/commit/671407f452485d13536e8f34239fd1e77a644f1e))
+* **audit:** Audit Hub threaded comments + notifications ([#029](https://github.com/mgoodric/security-atlas/issues/029)) ([#71](https://github.com/mgoodric/security-atlas/issues/71)) ([a335e40](https://github.com/mgoodric/security-atlas/commit/a335e402871e9a525f1ba5f5e9b19c4bbce56715))
+* **audit:** AuditPeriod + freezing primitive ([#028](https://github.com/mgoodric/security-atlas/issues/028)) ([#58](https://github.com/mgoodric/security-atlas/issues/58)) ([0ceea9a](https://github.com/mgoodric/security-atlas/commit/0ceea9a8509cbbc3838ba456db70b45af73e6e07))
+* **audit:** Sample-pull primitives (Population + Sample) ([#026](https://github.com/mgoodric/security-atlas/issues/026)) ([d6c8a5c](https://github.com/mgoodric/security-atlas/commit/d6c8a5cc9516d37ac05c4c773093d63a7c6a5ecb))
+* **audit:** walkthrough recording + hash/sign ([#027](https://github.com/mgoodric/security-atlas/issues/027)) ([#78](https://github.com/mgoodric/security-atlas/issues/78)) ([10de8dc](https://github.com/mgoodric/security-atlas/commit/10de8dcc6a917ffa25e1462a462ad006bcd031ff))
+* **auth:** auditor role + scoped read-only access ([#025](https://github.com/mgoodric/security-atlas/issues/025)) ([#67](https://github.com/mgoodric/security-atlas/issues/67)) ([ec431ec](https://github.com/mgoodric/security-atlas/commit/ec431ec79daa7e28aa4fb92cbc47ac23671bd794))
+* **auth:** OIDC RP + local users + api_keys admin ([#034](https://github.com/mgoodric/security-atlas/issues/034)) ([ee0a333](https://github.com/mgoodric/security-atlas/commit/ee0a333e8d5afd84e2be789749f474905a0a76f9))
+* **auth:** Postgres RLS enforcement on every tenant-scoped table + tenancy middleware ([#033](https://github.com/mgoodric/security-atlas/issues/033)) ([c534c85](https://github.com/mgoodric/security-atlas/commit/c534c85aabe622db3bf539fe3ab8593be0850bff))
+* **auth:** RBAC roles (5) + ABAC via OPA embedded + decision audit log ([#035](https://github.com/mgoodric/security-atlas/issues/035)) ([1941a1c](https://github.com/mgoodric/security-atlas/commit/1941a1caf3e52dd0d622a87a100a1dd1ad1acb46))
+* **backlog:** add slice 050 — public release readiness + release automation ([8bf07ff](https://github.com/mgoodric/security-atlas/commit/8bf07ffc17509c0b2ec0b43972bba75178f96ca4))
+* **backlog:** add slices 052–058 — multi-level risk + Decision Log + screenshots + docs ([5d08816](https://github.com/mgoodric/security-atlas/commit/5d088161eeacc9b2be4f54cc043b14d7e05a69c4))
+* **backlog:** add slices 059 + 060 — per-tenant feature flags + admin UI ([#46](https://github.com/mgoodric/security-atlas/issues/46)) ([1db5d4b](https://github.com/mgoodric/security-atlas/commit/1db5d4bbec273056474b584363885a8012336016))
+* **catalog:** SCF catalog importer + Framework / FrameworkVersion API ([#006](https://github.com/mgoodric/security-atlas/issues/006)) ([8da2299](https://github.com/mgoodric/security-atlas/commit/8da2299fd85d5ed62ab23c4b54548050aabca4e3))
+* **catalog:** SOC 2 v2017 TSC crosswalk loader + community-draft mappings ([#007](https://github.com/mgoodric/security-atlas/issues/007)) ([b12cfea](https://github.com/mgoodric/security-atlas/commit/b12cfeae8c52b5480f659dcc31ab012562f022aa))
+* **catalog:** UCF graph traversal query API ([#008](https://github.com/mgoodric/security-atlas/issues/008)) ([06d1875](https://github.com/mgoodric/security-atlas/commit/06d18753c5df847e2953b88cdea9b07a74cd0112))
+* **ci:** path-based filtering for docs-only PRs ([#061](https://github.com/mgoodric/security-atlas/issues/061)) ([#52](https://github.com/mgoodric/security-atlas/issues/52)) ([e48c9c2](https://github.com/mgoodric/security-atlas/commit/e48c9c22d8495fa6846f4e27244f155dc8b3c832))
+* **connectors:** 1Password connector ([#046](https://github.com/mgoodric/security-atlas/issues/046)) ([7c07b9f](https://github.com/mgoodric/security-atlas/commit/7c07b9f16ae0411c63873d55b8c81eba1c2b3583))
+* **connectors:** GitHub connector ([#044](https://github.com/mgoodric/security-atlas/issues/044)) ([6aacc2b](https://github.com/mgoodric/security-atlas/commit/6aacc2bddf407e1b547fa553112cb103bacbe2b9))
+* **connectors:** Jira/Linear ticket connector ([#048](https://github.com/mgoodric/security-atlas/issues/048)) ([78d916d](https://github.com/mgoodric/security-atlas/commit/78d916dcddc01882ec8f22bad259a1e9f1bd521c))
+* **connectors:** Manual upload / CSV / S3 / SFTP escape-hatch ([#049](https://github.com/mgoodric/security-atlas/issues/049)) ([dd68fa2](https://github.com/mgoodric/security-atlas/commit/dd68fa20a9a133dd63d883c1a91aac5687e11d4c))
+* **connectors:** Okta connector ([#045](https://github.com/mgoodric/security-atlas/issues/045)) ([998ac71](https://github.com/mgoodric/security-atlas/commit/998ac71d11d7b1d345a531fa06e9c31fe84d3749))
+* **connectors:** osquery/Fleet endpoint connector ([#047](https://github.com/mgoodric/security-atlas/issues/047)) ([104a090](https://github.com/mgoodric/security-atlas/commit/104a09090d508df15b5508727bab7b05caf1f104))
+* **control-as-code:** Control bundle format spec + parser + upload ([#009](https://github.com/mgoodric/security-atlas/issues/009)) ([8eeb184](https://github.com/mgoodric/security-atlas/commit/8eeb184ca57e0b021072e42f19f0824fac324a7e))
+* **control-as-code:** Manual control type + attestation/upload flow ([#011](https://github.com/mgoodric/security-atlas/issues/011)) ([15c89bb](https://github.com/mgoodric/security-atlas/commit/15c89bb9b84b11559ccc98d702fa5abce94fbdfe))
+* **controls:** SCF-anchored SOC 2 control kit (50 controls) ([#010](https://github.com/mgoodric/security-atlas/issues/010)) ([#77](https://github.com/mgoodric/security-atlas/issues/77)) ([1192b16](https://github.com/mgoodric/security-atlas/commit/1192b16ba57ce48498d1b5b81498dc32044b5e96))
+* **evidence-pipeline:** Evidence ledger write API + push endpoint ([#013](https://github.com/mgoodric/security-atlas/issues/013)) ([daecbe7](https://github.com/mgoodric/security-atlas/commit/daecbe7fae37ab2cd19933298726f2c00669f1c3))
+* **evidence-pipeline:** NATS JetStream evidence buffer + ingestion stage ([#015](https://github.com/mgoodric/security-atlas/issues/015)) ([24fe35e](https://github.com/mgoodric/security-atlas/commit/24fe35eeb8fafb16846d60a6c40dfe20ad3538b4))
+* **evidence-pipeline:** Schema registry service ([#014](https://github.com/mgoodric/security-atlas/issues/014)) ([44718c9](https://github.com/mgoodric/security-atlas/commit/44718c964fad7b129abbf3841ca73881d1d51c88))
+* **frontend:** admin settings UI ([#060](https://github.com/mgoodric/security-atlas/issues/060)) ([#66](https://github.com/mgoodric/security-atlas/issues/66)) ([42c3a79](https://github.com/mgoodric/security-atlas/commit/42c3a79c01acd42fc24044f7cec609fd80932d95))
+* **frontend:** audit workspace view ([#042](https://github.com/mgoodric/security-atlas/issues/042)) ([#80](https://github.com/mgoodric/security-atlas/issues/80)) ([fe86f9c](https://github.com/mgoodric/security-atlas/commit/fe86f9c12a9862eae274ac92bff05af6cd4fa28d))
+* **frontend:** enable /admin/sso form save ([#063](https://github.com/mgoodric/security-atlas/issues/063)) ([#76](https://github.com/mgoodric/security-atlas/issues/76)) ([5f813a6](https://github.com/mgoodric/security-atlas/commit/5f813a6dfc49e327d75d958c2d8cf5d40f41a719))
+* **infra:** CLI binary distribution + release pipeline ([#039](https://github.com/mgoodric/security-atlas/issues/039)) ([8346784](https://github.com/mgoodric/security-atlas/commit/834678441532be47ab1b30aaf370aad95486a84c))
+* **infra:** public release readiness + release automation ([#050](https://github.com/mgoodric/security-atlas/issues/050)) ([95f0faf](https://github.com/mgoodric/security-atlas/commit/95f0faff62ccbc78705edfba503109683f3a9940))
+* **infra:** S3 artifact store integration ([#036](https://github.com/mgoodric/security-atlas/issues/036)) ([a8301ab](https://github.com/mgoodric/security-atlas/commit/a8301abcd85c7d824ae6acf1330cad98f8c9e433))
+* **policies:** policy acknowledgment workflow + role-required attestation ([#023](https://github.com/mgoodric/security-atlas/issues/023)) ([456d9e3](https://github.com/mgoodric/security-atlas/commit/456d9e38e0a21179285f99fdaefaa42a2e12a747))
+* **policies:** policy entity + version chain + 5 stock policies + PDF render ([#022](https://github.com/mgoodric/security-atlas/issues/022)) ([3af9cb0](https://github.com/mgoodric/security-atlas/commit/3af9cb00902712e4ae6b1c955d9815c5d220664f))
+* **risk:** exception/waiver workflow with auto-expiry + calendar API ([#021](https://github.com/mgoodric/security-atlas/issues/021)) ([858f52b](https://github.com/mgoodric/security-atlas/commit/858f52ba82f5e1a902d6044151e2d03dcc5db77b))
+* **risk:** Risk CRUD + NIST 800-30 + 5x5 + ALE-band ([#019](https://github.com/mgoodric/security-atlas/issues/019)) ([a0c5918](https://github.com/mgoodric/security-atlas/commit/a0c5918a2772a8475e0d29bda18ddc543072a1d7))
+* **risk:** schema + migrations for risk hierarchy + themes + Decision Log ([#052](https://github.com/mgoodric/security-atlas/issues/052)) ([bdfc55d](https://github.com/mgoodric/security-atlas/commit/bdfc55d3c88a871057b8cc5757d3dbff15444d95))
+* **risk:** theme tagging + manual aggregation API + org_units CRUD ([#053](https://github.com/mgoodric/security-atlas/issues/053)) ([25658dd](https://github.com/mgoodric/security-atlas/commit/25658ddbcd439c6a1993b811ca255dd4c4d12702))
+* **scope:** FrameworkScope predicate + intersection compute + four-state workflow ([#018](https://github.com/mgoodric/security-atlas/issues/018)) ([247e54f](https://github.com/mgoodric/security-atlas/commit/247e54f01316ba4a5e9ab32a7e7db273d475e1d1))
+* **scope:** Scope dimensions + applicability_expr engine + default single-cell seed ([#017](https://github.com/mgoodric/security-atlas/issues/017)) ([95819c2](https://github.com/mgoodric/security-atlas/commit/95819c28bddc031fc38aa6eb2e09e5b1693df3d8))
+* **spine:** AWS connector (S3 encryption evidence_kind, end-to-end) ([#004](https://github.com/mgoodric/security-atlas/issues/004)) ([423febe](https://github.com/mgoodric/security-atlas/commit/423febee7d5ea0e5991c5a7fabc8fcd5a8cbe3ea))
+* **spine:** Evidence SDK: proto + Go push client + CLI ([#003](https://github.com/mgoodric/security-atlas/issues/003)) ([6c3a2c9](https://github.com/mgoodric/security-atlas/commit/6c3a2c991139d495bf5ac7cec564eacbabc55f8d))
+* **spine:** Frontend bootstrap (Next.js shell + auth shell + SCF browsing page) ([#005](https://github.com/mgoodric/security-atlas/issues/005)) ([72f3f1b](https://github.com/mgoodric/security-atlas/commit/72f3f1ba432fe127cf7ff70deccb16bb1e40b042))
+* **spine:** monorepo skeleton + CI green build ([#001](https://github.com/mgoodric/security-atlas/issues/001)) ([956fb86](https://github.com/mgoodric/security-atlas/commit/956fb8697d7dc020c482910685758b8066adb22b))
+* **spine:** per-tenant feature flags + capability toggles ([#059](https://github.com/mgoodric/security-atlas/issues/059)) ([#54](https://github.com/mgoodric/security-atlas/issues/54)) ([ad3fc09](https://github.com/mgoodric/security-atlas/commit/ad3fc09b31cffe9ef639187ed26e7675b3533a00))
+* **spine:** schema + migrations for six primitives + FrameworkScope + tenancy plumbing ([#002](https://github.com/mgoodric/security-atlas/issues/002)) ([5ab51b0](https://github.com/mgoodric/security-atlas/commit/5ab51b0f009f3857acaca3b1a81375528169649b))
+* **vendor:** Vendor lite module ([#024](https://github.com/mgoodric/security-atlas/issues/024)) ([d3c24c7](https://github.com/mgoodric/security-atlas/commit/d3c24c7b52e756cf5a20a66f9ddc9a63057af114))
+
+
+### Bug Fixes
+
+* **auth:** admincreds Issue/List derive tenant from credential, not request body ([#051](https://github.com/mgoodric/security-atlas/issues/051)) ([81a9a76](https://github.com/mgoodric/security-atlas/commit/81a9a764732bc81a0c6453aaa1b5431c09a6cb80))
+
+
+### Documentation
+
+* **backlog:** add slice 061 — CI path-based filtering for docs-only PRs ([#50](https://github.com/mgoodric/security-atlas/issues/50)) ([cd212cd](https://github.com/mgoodric/security-atlas/commit/cd212cd09e6e6466e15a324b1ca75e44c736a013))
+* **backlog:** add slice 063 — enable /admin/sso form save (post-062 wire-up) ([#74](https://github.com/mgoodric/security-atlas/issues/74)) ([34a8538](https://github.com/mgoodric/security-atlas/commit/34a85382e858cf9975a57039df96f2dd3e51c947))
+* **canvas:** resolve open questions [#13](https://github.com/mgoodric/security-atlas/issues/13) and [#19](https://github.com/mgoodric/security-atlas/issues/19) ([d5df039](https://github.com/mgoodric/security-atlas/commit/d5df039767489524ed3e757213438886535889d0))
+* **coc:** inline Contributor Covenant v2.1 (closes AC-7 from [#050](https://github.com/mgoodric/security-atlas/issues/050)) ([7be8f23](https://github.com/mgoodric/security-atlas/commit/7be8f230534e48c26dd1918f03f13669a9456615))
+* **issues:** mark slices 014, 017, 039 as merged ([ec76427](https://github.com/mgoodric/security-atlas/commit/ec76427d07749b41780443f9dd07d5fd181483f3))
+* **process:** replace dev-process HITL gate with JUDGMENT slices + decisions log ([#82](https://github.com/mgoodric/security-atlas/issues/82)) ([9c01581](https://github.com/mgoodric/security-atlas/commit/9c015817b1451e74e8e9ba5184ea49df076ff12e))
+* **prompts:** add 06-status-reconcile.md for _STATUS.md drift detection ([9bc46c3](https://github.com/mgoodric/security-atlas/commit/9bc46c3158a39d48f4c7cb0b043176ebe5de33bb))
+* **prompts:** fix nested code-fence rendering in 05-parallel-batch ([9c5d802](https://github.com/mgoodric/security-atlas/commit/9c5d802b8c932ab17f705d27779434439592afe4))
+* **prompts:** hoist anti-stall HARD RULE to first line of per-slice template ([#62](https://github.com/mgoodric/security-atlas/issues/62)) ([bb9abee](https://github.com/mgoodric/security-atlas/commit/bb9abee0e7f5358788aae6619066d6eb45db6855))
+* **prompts:** orchestrator now drives the full merge cycle ([a84e2b2](https://github.com/mgoodric/security-atlas/commit/a84e2b232c1326324733cad709e2790145759fae))
+* **prompts:** update 05-parallel-batch.md with batches 1-4 lessons ([be18a97](https://github.com/mgoodric/security-atlas/commit/be18a97bc660f095dba0a39cb637d80d3ac3526d))
+* **prompt:** update parallel-batch for branch-protection-via-PR pattern ([#43](https://github.com/mgoodric/security-atlas/issues/43)) ([7f1b572](https://github.com/mgoodric/security-atlas/commit/7f1b572659783d324fae6feeb751a5d9d6a4b7bf))
+* **readme:** update codecov badge to token-authenticated graph URL ([#64](https://github.com/mgoodric/security-atlas/issues/64)) ([77ef2b0](https://github.com/mgoodric/security-atlas/commit/77ef2b091207b62452c19babfad2803bd4290780))
+
 ## [Unreleased]
 
 ### Changed
