@@ -10,6 +10,14 @@ members = ["oscal-bridge"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Generated gRPC stubs (slice 030) are machine-emitted by
+# `oscal-bridge/scripts/gen_proto.sh` from proto/oscal/v1/oscal.proto.
+# They are not hand-maintained and must not be linted or reformatted —
+# the regen script overwrites them verbatim.
+extend-exclude = [
+    "oscal-bridge/atlas_oscal_bridge/oscal_pb2.py",
+    "oscal-bridge/atlas_oscal_bridge/oscal_pb2_grpc.py",
+]
 
 [tool.ruff.lint]
 select = [

@@ -420,3 +420,41 @@ jobs:
         run: pre-commit validate-config
       - name: Run all hooks against all files
         run: pre-commit run --all-files --show-diff-on-failure
+
+  # ===========================================================================
+  # Slice 030 — OSCAL bridge (Python). Self-contained job block: lints +
+  # tests the oscal-bridge/ Python service (compliance-trestle + gRPC).
+  # Kept as a clearly-delimited append so parallel branches editing this
+  # file (e.g. slice 065's test-self-host-bundle job) rebase cleanly.
+  # Gated on `changes.code` like the other expensive jobs, with a
+  # mutually-exclusive stub sibling under the same check name.
+  # ===========================================================================
+  oscal-bridge:
+    name: OSCAL bridge · Python (ruff + pytest)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Sync oscal-bridge env
+        working-directory: oscal-bridge
+        run: uv sync --extra test
+      - name: Lint (ruff)
+        run: |
+          uv tool run ruff@0.7.0 check oscal-bridge
+          uv tool run ruff@0.7.0 format --check oscal-bridge
+      - name: Test (pytest — unit + in-process gRPC server)
+        working-directory: oscal-bridge
+        run: PYTHONPATH=. uv run --extra test python -m pytest tests/ -q
+
+  oscal-bridge-stub:
+    name: OSCAL bridge · Python (ruff + pytest)
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."

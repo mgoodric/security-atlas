@@ -37,6 +37,7 @@ import (
 	freshnessdriftapi "github.com/mgoodric/security-atlas/internal/api/freshnessdrift"
 	meapi "github.com/mgoodric/security-atlas/internal/api/me"
 	orgunitsapi "github.com/mgoodric/security-atlas/internal/api/orgunits"
+	oscalexportapi "github.com/mgoodric/security-atlas/internal/api/oscalexport"
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	policyacksapi "github.com/mgoodric/security-atlas/internal/api/policyacks"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
@@ -318,6 +319,16 @@ func (s *Server) httpHandler() http.Handler {
 	root.Post("/v1/audit-periods/{id}/freeze", periodsH.Freeze)
 	root.Get("/v1/audit-periods/{id}/control-state", periodsH.ControlState)
 	root.Post("/v1/audit-periods/{id}/populations/{popID}", periodsH.AttachPopulation)
+	// Slice 030: OSCAL SSP + POA&M export. The literal-segment
+	// /oscal-export sub-resource is declared BEFORE the bare /{id} so
+	// chi's declaration-order match keeps it ahead of periodsH.Get. It
+	// only mounts when the production binary has wired the Exporter via
+	// AttachOscalExporter (the export needs a running Python
+	// oscal-bridge); unit servers leave it nil and the route is absent.
+	if s.oscalExporter != nil {
+		oscalExportH := oscalexportapi.New(s.oscalExporter)
+		root.Post("/v1/audit-periods/{id}/oscal-export", oscalExportH.Export)
+	}
 	root.Get("/v1/audit-periods/{id}", periodsH.Get)
 	// Slice 027: walkthrough recording primitive. Routes appended per the
 	// parallel-batch convention (chi rejects two Mounts at "/"). The

@@ -33,6 +33,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
+	"github.com/mgoodric/security-atlas/internal/oscal"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 )
 
@@ -67,6 +68,11 @@ type Server struct {
 	// production binary wires them once at startup via AttachAuthz.
 	authzEngine *authz.Engine
 	authzAudit  *authz.AuditWriter
+	// Slice 030: OSCAL export pipeline. When wired, the
+	// POST /v1/audit-periods/{id}/oscal-export route is mounted. Unit
+	// servers leave it nil (the export needs a running Python
+	// oscal-bridge); the production binary wires it via AttachOscalExporter.
+	oscalExporter *oscal.Exporter
 }
 
 // AttachAuthz wires the slice-035 OPA engine + decision audit writer.
@@ -77,6 +83,15 @@ type Server struct {
 func (s *Server) AttachAuthz(engine *authz.Engine, audit *authz.AuditWriter) {
 	s.authzEngine = engine
 	s.authzAudit = audit
+}
+
+// AttachOscalExporter wires the slice-030 OSCAL export pipeline.
+// cmd/atlas constructs the Exporter at startup with the DB pool, a gRPC
+// client to the Python oscal-bridge, and a signer. Unit servers leave it
+// unset — the export needs a running bridge. Once attached, the
+// POST /v1/audit-periods/{id}/oscal-export route is mounted.
+func (s *Server) AttachOscalExporter(exporter *oscal.Exporter) {
+	s.oscalExporter = exporter
 }
 
 // IssueBootstrapCredential mints a credential for the supplied tenant and
