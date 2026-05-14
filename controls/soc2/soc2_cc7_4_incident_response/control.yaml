@@ -53,5 +53,9 @@ manual_evidence_schema:
           severity: { type: string, enum: [sev0, sev1, sev2, sev3] }
           declared_at: { type: string, format: date-time }
           resolved_at: { type: string, format: date-time }
-          status: { type: string, enum: [open, resolved, post_incident_review_pending] }
+          status:
+            {
+              type: string,
+              enum: [open, resolved, post_incident_review_pending],
+            }
           postmortem_uri: { type: string, format: uri }

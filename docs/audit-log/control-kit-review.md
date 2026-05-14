@@ -17,15 +17,15 @@
 
 Run via `go run ./cmd/scripts/coverage-check`:
 
-| Gate                                              | Threshold | Actual          | Pass |
-| ------------------------------------------------- | --------- | --------------- | ---- |
-| AC-1: bundle count                                | 50        | 50              | yes  |
-| AC-1: every bundle parses + applicability_expr OK | 100%      | 50 / 50         | yes  |
-| AC-2: bundles with evidence_queries[]             | ≥ 50%     | 26 / 50 (52%)   | yes  |
-| AC-3: TSC requirements covered via SCF traversal  | ≥ 80%     | 43 / 43 (100%)  | yes  |
-| AC-4: owner_role + freshness_class set            | 100%      | 50 / 50         | yes  |
-| AC-5: manual bundles have manual_evidence_schema  | 100%      | 24 / 24         | yes  |
-| Invariant 7: every scf_anchor_id exists in catalog| 100%      | 35 / 35 anchors | yes  |
+| Gate                                               | Threshold | Actual          | Pass |
+| -------------------------------------------------- | --------- | --------------- | ---- |
+| AC-1: bundle count                                 | 50        | 50              | yes  |
+| AC-1: every bundle parses + applicability_expr OK  | 100%      | 50 / 50         | yes  |
+| AC-2: bundles with evidence_queries[]              | ≥ 50%     | 26 / 50 (52%)   | yes  |
+| AC-3: TSC requirements covered via SCF traversal   | ≥ 80%     | 43 / 43 (100%)  | yes  |
+| AC-4: owner_role + freshness_class set             | 100%      | 50 / 50         | yes  |
+| AC-5: manual bundles have manual_evidence_schema   | 100%      | 24 / 24         | yes  |
+| Invariant 7: every scf_anchor_id exists in catalog | 100%      | 35 / 35 anchors | yes  |
 
 ## Reviewer signoff
 
@@ -45,16 +45,16 @@ deliberately spans automated + manual, simple + complex, and the two
 highest-judgment-call bundles (CC1.4 weak anchor + CC6.7 transmission
 scoping).
 
-| # | Bundle ID                                       | TSC   | SCF anchor | Impl type        | TSC accuracy (Y/N) | Evidence query sensible (Y/N/n-a) | Freshness sensible (Y/N) | manual_evidence_schema (Y/N/n-a) | Reviewer notes |
-| - | ----------------------------------------------- | ----- | ---------- | ---------------- | ------------------ | --------------------------------- | ------------------------ | -------------------------------- | -------------- |
-| 1 | `soc2_cc1_4_competence_training`                | CC1.4 | HRS-04     | automated        |                    |                                   |                          | n-a                              |                |
-| 2 | `soc2_cc1_5_accountability_acknowledgment`      | CC1.5 | HRS-01     | automated        |                    |                                   |                          | n-a                              |                |
-| 3 | `soc2_cc6_3_access_modification_revocation`     | CC6.3 | IAC-07     | automated        |                    |                                   |                          | n-a                              |                |
-| 4 | `soc2_cc6_7_encryption_in_transit`              | CC6.7 | CRY-08     | automated        |                    |                                   |                          | n-a                              |                |
-| 5 | `soc2_cc7_1_vulnerability_remediation`          | CC7.1 | VPM-04     | automated        |                    |                                   |                          | n-a                              |                |
-| 6 | `soc2_cc7_4_incident_response`                  | CC7.4 | IRO-04     | semi_automated   |                    |                                   |                          |                                  |                |
-| 7 | `soc2_cc9_2_vendor_risk_assessment`             | CC9.2 | TPM-04     | manual_periodic  |                    | n-a                               |                          |                                  |                |
-| 8 | `soc2_pi1_5_storage_integrity`                  | PI1.5 | DCH-03     | manual_attested  |                    | n-a                               |                          |                                  |                |
+| #   | Bundle ID                                   | TSC   | SCF anchor | Impl type       | TSC accuracy (Y/N) | Evidence query sensible (Y/N/n-a) | Freshness sensible (Y/N) | manual_evidence_schema (Y/N/n-a) | Reviewer notes |
+| --- | ------------------------------------------- | ----- | ---------- | --------------- | ------------------ | --------------------------------- | ------------------------ | -------------------------------- | -------------- |
+| 1   | `soc2_cc1_4_competence_training`            | CC1.4 | HRS-04     | automated       |                    |                                   |                          | n-a                              |                |
+| 2   | `soc2_cc1_5_accountability_acknowledgment`  | CC1.5 | HRS-01     | automated       |                    |                                   |                          | n-a                              |                |
+| 3   | `soc2_cc6_3_access_modification_revocation` | CC6.3 | IAC-07     | automated       |                    |                                   |                          | n-a                              |                |
+| 4   | `soc2_cc6_7_encryption_in_transit`          | CC6.7 | CRY-08     | automated       |                    |                                   |                          | n-a                              |                |
+| 5   | `soc2_cc7_1_vulnerability_remediation`      | CC7.1 | VPM-04     | automated       |                    |                                   |                          | n-a                              |                |
+| 6   | `soc2_cc7_4_incident_response`              | CC7.4 | IRO-04     | semi_automated  |                    |                                   |                          |                                  |                |
+| 7   | `soc2_cc9_2_vendor_risk_assessment`         | CC9.2 | TPM-04     | manual_periodic |                    | n-a                               |                          |                                  |                |
+| 8   | `soc2_pi1_5_storage_integrity`              | PI1.5 | DCH-03     | manual_attested |                    | n-a                               |                          |                                  |                |
 
 **Rubric for each column:**
 
@@ -138,7 +138,7 @@ controls assert. Bundles narrate this honestly.
 **Reviewer action:** approve, or de-scope the PI1 family from v1 (would
 drop coverage to 38/38 mapped codes, still 100% of the residual universe).
 
-### 5. PRI-* family deliberately omitted
+### 5. PRI-\* family deliberately omitted
 
 **Choice:** The SCF catalog includes PRI-01 and PRI-04 (Privacy Governance,
 Data Subject Rights). No bundle references them because SOC 2 v2017's
@@ -152,30 +152,30 @@ criterion.
 
 ## Bundle inventory by TSC family (for cross-reference)
 
-| TSC family             | Bundles                                                                                                       |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------- |
-| CC1 (5)                | cc1_1, cc1_2, cc1_3, cc1_4, cc1_5                                                                             |
-| CC2 (3)                | cc2_1, cc2_2, cc2_3                                                                                           |
-| CC3 (4)                | cc3_1, cc3_2, cc3_3, cc3_4                                                                                    |
-| CC4 (2)                | cc4_1, cc4_2                                                                                                  |
-| CC5 (3)                | cc5_1, cc5_2, cc5_3                                                                                           |
-| CC6 (11)               | cc6_1, cc6_2, cc6_3 (×3), cc6_4, cc6_5, cc6_6 (×2), cc6_7 (×2), cc6_8                                         |
-| CC7 (6)                | cc7_1 (×2), cc7_2, cc7_3, cc7_4, cc7_5                                                                        |
-| CC8 (2)                | cc8_1 (×2)                                                                                                    |
-| CC9 (3)                | cc9_1, cc9_2 (×2)                                                                                             |
-| A1 (3)                 | a1_1, a1_2, a1_3                                                                                              |
-| C1 (2)                 | c1_1, c1_2                                                                                                    |
-| PI1 (5)                | pi1_1, pi1_2, pi1_3, pi1_4, pi1_5                                                                             |
-| **Total**              | **50**                                                                                                        |
+| TSC family | Bundles                                                               |
+| ---------- | --------------------------------------------------------------------- |
+| CC1 (5)    | cc1_1, cc1_2, cc1_3, cc1_4, cc1_5                                     |
+| CC2 (3)    | cc2_1, cc2_2, cc2_3                                                   |
+| CC3 (4)    | cc3_1, cc3_2, cc3_3, cc3_4                                            |
+| CC4 (2)    | cc4_1, cc4_2                                                          |
+| CC5 (3)    | cc5_1, cc5_2, cc5_3                                                   |
+| CC6 (11)   | cc6_1, cc6_2, cc6_3 (×3), cc6_4, cc6_5, cc6_6 (×2), cc6_7 (×2), cc6_8 |
+| CC7 (6)    | cc7_1 (×2), cc7_2, cc7_3, cc7_4, cc7_5                                |
+| CC8 (2)    | cc8_1 (×2)                                                            |
+| CC9 (3)    | cc9_1, cc9_2 (×2)                                                     |
+| A1 (3)     | a1_1, a1_2, a1_3                                                      |
+| C1 (2)     | c1_1, c1_2                                                            |
+| PI1 (5)    | pi1_1, pi1_2, pi1_3, pi1_4, pi1_5                                     |
+| **Total**  | **50**                                                                |
 
 ## Implementation-type distribution
 
-| Type             | Count | Notes                                                              |
-| ---------------- | ----- | ------------------------------------------------------------------ |
-| `automated`      | 23    | Rego query over ledger; freshness ≤ daily                          |
-| `semi_automated` | 3     | Automated freshness check + manual_evidence_schema for human input |
-| `manual_periodic`| 11    | Owner uploads evidence on cadence                                  |
-| `manual_attested`| 13    | Roleholder asserts state digitally on cadence                      |
+| Type              | Count | Notes                                                              |
+| ----------------- | ----- | ------------------------------------------------------------------ |
+| `automated`       | 23    | Rego query over ledger; freshness ≤ daily                          |
+| `semi_automated`  | 3     | Automated freshness check + manual_evidence_schema for human input |
+| `manual_periodic` | 11    | Owner uploads evidence on cadence                                  |
+| `manual_attested` | 13    | Roleholder asserts state digitally on cadence                      |
 
 ## Signoff procedure
 

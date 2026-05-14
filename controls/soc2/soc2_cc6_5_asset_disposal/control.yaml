@@ -46,8 +46,30 @@ manual_evidence_schema:
         type: object
         required: [asset_id, asset_type, disposal_method, disposed_at]
         properties:
-          asset_id: { type: string, description: "Serial / instance id / EBS volume id" }
-          asset_type: { type: string, enum: [laptop, mobile, server, removable_media, cloud_volume] }
-          disposal_method: { type: string, enum: [crypto_erase, physical_destruction, cloud_delete, secure_wipe_nist_888] }
+          asset_id:
+            {
+              type: string,
+              description: "Serial / instance id / EBS volume id",
+            }
+          asset_type:
+            {
+              type: string,
+              enum: [laptop, mobile, server, removable_media, cloud_volume],
+            }
+          disposal_method:
+            {
+              type: string,
+              enum:
+                [
+                  crypto_erase,
+                  physical_destruction,
+                  cloud_delete,
+                  secure_wipe_nist_888,
+                ],
+            }
           disposed_at: { type: string, format: date }
-          witness: { type: string, description: "Email of witness (for physical destruction)" }
+          witness:
+            {
+              type: string,
+              description: "Email of witness (for physical destruction)",
+            }

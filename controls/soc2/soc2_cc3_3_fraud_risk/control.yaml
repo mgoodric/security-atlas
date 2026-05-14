@@ -19,7 +19,13 @@ freshness_class: annual
 
 manual_evidence_schema:
   type: object
-  required: [attested_at, attestor, fraud_scenarios_evaluated, linked_risk_assessment_date]
+  required:
+    [
+      attested_at,
+      attestor,
+      fraud_scenarios_evaluated,
+      linked_risk_assessment_date,
+    ]
   properties:
     attested_at:
       type: string
@@ -35,7 +41,8 @@ manual_evidence_schema:
         required: [scenario, controls_identified]
         properties:
           scenario: { type: string }
-          controls_identified: { type: array, items: { type: string }, minItems: 1 }
+          controls_identified:
+            { type: array, items: { type: string }, minItems: 1 }
     linked_risk_assessment_date:
       type: string
       format: date

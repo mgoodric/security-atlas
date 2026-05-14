@@ -29,8 +29,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mgoodric/security-atlas/internal/control"
 	"gopkg.in/yaml.v3"
+
+	"github.com/mgoodric/security-atlas/internal/control"
 )
 
 type scfCatalog struct {

@@ -25,11 +25,23 @@ manual_evidence_schema:
       minItems: 1
       items:
         type: object
-        required: [vendor_name, criticality, contract_status, data_access_scope, last_review_at]
+        required:
+          [
+            vendor_name,
+            criticality,
+            contract_status,
+            data_access_scope,
+            last_review_at,
+          ]
         properties:
           vendor_name: { type: string }
           criticality: { type: string, enum: [critical, high, medium, low] }
-          contract_status: { type: string, enum: [active, expiring_in_90d, lapsed] }
-          data_access_scope: { type: string, enum: [none, metadata_only, customer_data, regulated_data] }
+          contract_status:
+            { type: string, enum: [active, expiring_in_90d, lapsed] }
+          data_access_scope:
+            {
+              type: string,
+              enum: [none, metadata_only, customer_data, regulated_data],
+            }
           dpa_on_file: { type: boolean }
           last_review_at: { type: string, format: date }

@@ -19,7 +19,8 @@ freshness_class: annual
 
 manual_evidence_schema:
   type: object
-  required: [attested_at, attestor, confidential_fields_documented, handling_rules_uri]
+  required:
+    [attested_at, attestor, confidential_fields_documented, handling_rules_uri]
   properties:
     attested_at:
       type: string

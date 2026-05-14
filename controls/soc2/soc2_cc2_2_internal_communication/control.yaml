@@ -40,5 +40,9 @@ manual_evidence_schema:
         properties:
           sent_at: { type: string, format: date }
           topic: { type: string }
-          audience: { type: string, enum: [all_employees, engineering, security_team, leadership] }
+          audience:
+            {
+              type: string,
+              enum: [all_employees, engineering, security_team, leadership],
+            }
           link: { type: string, format: uri }

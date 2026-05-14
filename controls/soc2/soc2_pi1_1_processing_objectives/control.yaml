@@ -33,11 +33,16 @@ manual_evidence_schema:
       minItems: 1
       items:
         type: object
-        required: [service_name, data_classes_processed, sla_published, spec_uri]
+        required:
+          [service_name, data_classes_processed, sla_published, spec_uri]
         properties:
           service_name: { type: string }
           data_classes_processed:
             type: array
-            items: { type: string, enum: [public, internal, confidential, restricted] }
+            items:
+              {
+                type: string,
+                enum: [public, internal, confidential, restricted],
+              }
           sla_published: { type: boolean }
           spec_uri: { type: string, format: uri }

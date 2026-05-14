@@ -38,4 +38,5 @@ manual_evidence_schema:
         required: [store_name, classification]
         properties:
           store_name: { type: string }
-          classification: { type: string, enum: [public, internal, confidential, restricted] }
+          classification:
+            { type: string, enum: [public, internal, confidential, restricted] }

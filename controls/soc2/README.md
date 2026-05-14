@@ -57,21 +57,21 @@ crosswalk's mapping table).
 
 ## TSC family breakdown
 
-| TSC family                       | Count | Range                                  |
-| -------------------------------- | ----- | -------------------------------------- |
-| CC1 — Control environment        | 5     | CC1.1, CC1.2, CC1.3, CC1.4, CC1.5      |
-| CC2 — Communication              | 3     | CC2.1, CC2.2, CC2.3                    |
-| CC3 — Risk assessment            | 4     | CC3.1, CC3.2, CC3.3, CC3.4             |
-| CC4 — Monitoring                 | 2     | CC4.1, CC4.2                           |
-| CC5 — Control activities         | 3     | CC5.1, CC5.2, CC5.3                    |
-| CC6 — Logical & physical access  | 11    | CC6.1–CC6.8 (CC6.3 and CC6.6 have 2)   |
-| CC7 — System operations          | 6     | CC7.1, CC7.2, CC7.3, CC7.4, CC7.5      |
-| CC8 — Change management          | 2     | CC8.1 (CHG-02 + CFG-04)                |
-| CC9 — Risk mitigation            | 3     | CC9.1, CC9.2                           |
-| A1 — Availability                | 3     | A1.1, A1.2, A1.3                       |
-| C1 — Confidentiality             | 2     | C1.1, C1.2                             |
-| PI1 — Processing integrity       | 5     | PI1.1–PI1.5                            |
-| **Total**                        | **50** |                                       |
+| TSC family                      | Count  | Range                                |
+| ------------------------------- | ------ | ------------------------------------ |
+| CC1 — Control environment       | 5      | CC1.1, CC1.2, CC1.3, CC1.4, CC1.5    |
+| CC2 — Communication             | 3      | CC2.1, CC2.2, CC2.3                  |
+| CC3 — Risk assessment           | 4      | CC3.1, CC3.2, CC3.3, CC3.4           |
+| CC4 — Monitoring                | 2      | CC4.1, CC4.2                         |
+| CC5 — Control activities        | 3      | CC5.1, CC5.2, CC5.3                  |
+| CC6 — Logical & physical access | 11     | CC6.1–CC6.8 (CC6.3 and CC6.6 have 2) |
+| CC7 — System operations         | 6      | CC7.1, CC7.2, CC7.3, CC7.4, CC7.5    |
+| CC8 — Change management         | 2      | CC8.1 (CHG-02 + CFG-04)              |
+| CC9 — Risk mitigation           | 3      | CC9.1, CC9.2                         |
+| A1 — Availability               | 3      | A1.1, A1.2, A1.3                     |
+| C1 — Confidentiality            | 2      | C1.1, C1.2                           |
+| PI1 — Processing integrity      | 5      | PI1.1–PI1.5                          |
+| **Total**                       | **50** |                                      |
 
 ## Forking
 

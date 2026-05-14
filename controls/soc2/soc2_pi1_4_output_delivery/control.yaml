@@ -32,10 +32,12 @@ manual_evidence_schema:
       minItems: 1
       items:
         type: object
-        required: [service_name, availability_slo, latency_slo, slo_dashboard_uri]
+        required:
+          [service_name, availability_slo, latency_slo, slo_dashboard_uri]
         properties:
           service_name: { type: string }
-          availability_slo: { type: string, description: "e.g. '99.9% monthly'" }
+          availability_slo:
+            { type: string, description: "e.g. '99.9% monthly'" }
           latency_slo: { type: string, description: "e.g. 'p95 < 250ms'" }
           slo_dashboard_uri: { type: string, format: uri }
     status_page_uri:

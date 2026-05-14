@@ -34,5 +34,6 @@ manual_evidence_schema:
           severity: { type: string, enum: [critical, high, medium, low] }
           identified_at: { type: string, format: date }
           communicated_at: { type: string, format: date }
-          owner: { type: string, description: "Email or role of accountable owner" }
+          owner:
+            { type: string, description: "Email or role of accountable owner" }
           sla_met: { type: boolean }

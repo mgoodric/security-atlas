@@ -28,6 +28,16 @@ manual_evidence_schema:
         properties:
           vendor_name: { type: string }
           criticality: { type: string, enum: [critical, high] }
-          assessment_type: { type: string, enum: [soc2_report, iso_certificate, completed_questionnaire, internal_review] }
+          assessment_type:
+            {
+              type: string,
+              enum:
+                [
+                  soc2_report,
+                  iso_certificate,
+                  completed_questionnaire,
+                  internal_review,
+                ],
+            }
           assessed_at: { type: string, format: date }
           report_uri: { type: string, format: uri }

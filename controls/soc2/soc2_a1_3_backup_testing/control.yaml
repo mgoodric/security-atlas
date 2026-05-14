@@ -17,7 +17,8 @@ freshness_class: annual
 
 manual_evidence_schema:
   type: object
-  required: [test_date, tester, store_restored, restoration_time_minutes, outcome]
+  required:
+    [test_date, tester, store_restored, restoration_time_minutes, outcome]
   properties:
     test_date: { type: string, format: date }
     tester: { type: string, minLength: 1 }

@@ -31,10 +31,14 @@ manual_evidence_schema:
     retention_per_class:
       type: object
       properties:
-        public:       { type: string, description: "Duration string, e.g. '7 years' or 'indefinite'" }
-        internal:     { type: string }
+        public:
+          {
+            type: string,
+            description: "Duration string, e.g. '7 years' or 'indefinite'",
+          }
+        internal: { type: string }
         confidential: { type: string }
-        restricted:   { type: string }
+        restricted: { type: string }
     integrity_mechanisms:
       type: array
       minItems: 1
@@ -43,4 +47,14 @@ manual_evidence_schema:
         required: [system, mechanism]
         properties:
           system: { type: string }
-          mechanism: { type: string, enum: [sha256_content_hash, signed_records, append_only_ledger, db_checksums] }
+          mechanism:
+            {
+              type: string,
+              enum:
+                [
+                  sha256_content_hash,
+                  signed_records,
+                  append_only_ledger,
+                  db_checksums,
+                ],
+            }

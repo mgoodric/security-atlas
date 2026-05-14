@@ -34,7 +34,11 @@ manual_evidence_schema:
         required: [objective, measurable_outcome]
         properties:
           objective: { type: string }
-          measurable_outcome: { type: string, description: "Quantitative or binary success criterion" }
+          measurable_outcome:
+            {
+              type: string,
+              description: "Quantitative or binary success criterion",
+            }
     linked_to_register:
       type: boolean
       enum: [true]

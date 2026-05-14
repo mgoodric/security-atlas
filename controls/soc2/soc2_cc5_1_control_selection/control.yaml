@@ -20,7 +20,13 @@ freshness_class: annual
 
 manual_evidence_schema:
   type: object
-  required: [attested_at, attestor, register_to_control_coverage, applicability_review_complete]
+  required:
+    [
+      attested_at,
+      attestor,
+      register_to_control_coverage,
+      applicability_review_complete,
+    ]
   properties:
     attested_at:
       type: string

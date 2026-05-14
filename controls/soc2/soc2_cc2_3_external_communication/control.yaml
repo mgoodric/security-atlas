@@ -20,7 +20,8 @@ freshness_class: annual
 
 manual_evidence_schema:
   type: object
-  required: [attested_at, attestor, disclosure_policy_uri, customer_notification_path]
+  required:
+    [attested_at, attestor, disclosure_policy_uri, customer_notification_path]
   properties:
     attested_at:
       type: string

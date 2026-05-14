@@ -34,7 +34,8 @@ evidence_queries:
 
 manual_evidence_schema:
   type: object
-  required: [reviewed_at, reviewer, plan_version, rto_hours, rpo_hours, plan_uri]
+  required:
+    [reviewed_at, reviewer, plan_version, rto_hours, rpo_hours, plan_uri]
   properties:
     reviewed_at: { type: string, format: date }
     reviewer: { type: string, minLength: 1 }

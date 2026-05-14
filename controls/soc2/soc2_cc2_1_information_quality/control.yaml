@@ -35,7 +35,13 @@ manual_evidence_schema:
         properties:
           name:
             type: string
-            enum: [asset_inventory, vendor_inventory, data_flow_diagram, system_description]
+            enum:
+              [
+                asset_inventory,
+                vendor_inventory,
+                data_flow_diagram,
+                system_description,
+              ]
           last_reviewed_at:
             type: string
             format: date

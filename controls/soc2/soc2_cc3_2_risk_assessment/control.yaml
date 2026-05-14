@@ -18,7 +18,8 @@ freshness_class: annual
 
 manual_evidence_schema:
   type: object
-  required: [assessment_date, methodology, participants, risks_by_severity, report_uri]
+  required:
+    [assessment_date, methodology, participants, risks_by_severity, report_uri]
   properties:
     assessment_date:
       type: string
