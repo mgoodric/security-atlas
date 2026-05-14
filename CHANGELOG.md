@@ -9,6 +9,13 @@ Conventional-Commit messages. This file holds pre-release / unreleased
 work and any narrative entries the operator wants alongside the
 auto-generated notes.
 
+## [1.1.0](https://github.com/mgoodric/security-atlas/compare/v1.0.0...v1.1.0) (2026-05-14)
+
+
+### Features
+
+* **risk:** declarative aggregation rules engine ([#054](https://github.com/mgoodric/security-atlas/issues/054)) ([#81](https://github.com/mgoodric/security-atlas/issues/81)) ([c3ce306](https://github.com/mgoodric/security-atlas/commit/c3ce306d7a85613866580453b09758d7da918c30))
+
 ## 1.0.0 (2026-05-14)
 
 
