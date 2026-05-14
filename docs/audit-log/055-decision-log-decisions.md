@@ -12,7 +12,7 @@ of these blocked merge.
 The issue (AC-3) names the Decision Log's mutation log `decisions_audit`.
 While building, a name-collision risk surfaced: slice 035 (migration `_018`)
 already shipped a table called **`decision_audit_log`** — but that is the
-OPA *authorization* allow/deny log (it records every RBAC/ABAC `Decide`
+OPA _authorization_ allow/deny log (it records every RBAC/ABAC `Decide`
 call's `result IN ('allow','deny')`). It is a completely different concept
 from the Decision Log's domain-mutation trail.
 
@@ -42,7 +42,7 @@ AC-1 specifies the format `DL-YYYY-MM-DD-NNNN` but does not define what
 - Concurrent same-day creates are guarded by the slice-052
   `UNIQUE (tenant_id, decision_id)` constraint. v1 is a solo-operator tool
   (canvas §1) so a same-millisecond double-create is not a real workload;
-  a retry loop is deliberately *not* added — if a collision ever fires it
+  a retry loop is deliberately _not_ added — if a collision ever fires it
   surfaces as a clean 500 and the operator retries. A retry loop is the
   obvious follow-up if the tool ever goes multi-writer.
 
@@ -72,7 +72,7 @@ shape that satisfies the anti-criterion and is strictly more expressive.
 
 **Confidence: medium-high.** Revisit if a tenant-config table later lands
 for unrelated reasons — at that point a tenant-level default could layer
-*above* the per-decision flag without a schema change to `decisions`.
+_above_ the per-decision flag without a schema change to `decisions`.
 
 ### D4 — AC-7 ships an exported emission function, not a live OSCAL export
 
@@ -101,16 +101,16 @@ slice-030 work left is the call site.
 A failed link INSERT against a foreign-tenant target trips the composite-FK
 violation (SQLSTATE 23503), which **aborts the surrounding transaction** —
 any subsequent statement in that tx fails with SQLSTATE 25P02. So the
-denied-attempt audit row (AC-9) *cannot* be written inline.
+denied-attempt audit row (AC-9) _cannot_ be written inline.
 
 Resolved: `AddLink` detects the FK violation, lets the poisoned transaction
 roll back, then writes the `cross_tenant_link_denied` audit row in a second,
 fresh transaction (`writeAuditTx`). The happy path (link succeeds) still
-writes its `link_added` audit row in the *same* tx as the INSERT, so a
+writes its `link_added` audit row in the _same_ tx as the INSERT, so a
 successful link without an audit row remains impossible.
 
 Fail-ordering: the 404 is the security boundary and is always returned; the
-audit write is the courtesy and is best-effort *after* the boundary. If the
+audit write is the courtesy and is best-effort _after_ the boundary. If the
 second tx also fails, the caller still gets `ErrCrossTenantLink` (→ 404) —
 fail-closed on the boundary, fail-open only on the audit courtesy.
 
@@ -126,12 +126,12 @@ Resolved: the `Notifier` writes an `overdue_notified` row to
 `decisions_audit` in the **same transaction** as the notification INSERT,
 and probes `CountDecisionOverdueNotifications` (served index-only by the
 partial index `idx_decisions_audit_overdue_notified`) before emitting. The
-audit row *is* the authoritative "already notified" marker — append-only,
+audit row _is_ the authoritative "already notified" marker — append-only,
 per-decision, queryable. A second sweep on the same (or any later) day for
 a still-active, still-overdue decision emits nothing.
 
 _Why not a `NOT EXISTS` join inside `ListOverdueDecisions`:_ that query also
-backs the plain `GET /v1/decisions/overdue` endpoint, which must show *all*
+backs the plain `GET /v1/decisions/overdue` endpoint, which must show _all_
 overdue decisions regardless of notification state. Keeping the dedup probe
 in the job (not the shared query) keeps the read-surface query reusable.
 The resulting per-decision probe is an N+1-shaped pattern, but it is bounded
@@ -170,7 +170,7 @@ constraint enforces the pairing).
   decision has an `overdue_notified` row it is never re-notified, even if it
   is later edited to a new `revisit_by` and goes overdue again. For v1 this
   is the safe (no-spam) reading of the anti-criterion. If operators report
-  they *want* a fresh notification after they push out a `revisit_by`, the
+  they _want_ a fresh notification after they push out a `revisit_by`, the
   fix is to scope the dedup probe to "since the last `updated` audit row" —
   deferred until that demand actually surfaces.
 - **D4 — OSCAL narrative wiring.** Slice 030 must call
@@ -179,12 +179,12 @@ constraint enforces the pairing).
 
 ## Confidence summary
 
-| Decision | Confidence  |
-| -------- | ----------- |
-| D1       | high        |
+| Decision | Confidence                    |
+| -------- | ----------------------------- |
+| D1       | high                          |
 | D2       | high / medium (no-retry-loop) |
-| D3       | medium-high |
-| D4       | high        |
-| D5       | high        |
-| D6       | high        |
-| D7       | high        |
+| D3       | medium-high                   |
+| D4       | high                          |
+| D5       | high                          |
+| D6       | high                          |
+| D7       | high                          |
