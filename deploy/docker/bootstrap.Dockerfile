@@ -13,10 +13,12 @@
 # the deployment, and exits 0. The atlas service waits on it
 # (depends_on: ... condition: service_completed_successfully).
 #
-# The repo tree (migrations/, controls/, bootstrap scripts) is mounted at
-# /repo by docker-compose rather than baked into the image, so a
-# `git pull` + `docker compose up` picks up new migrations without an
-# image rebuild.
+# The repo tree (migrations/, controls/, bootstrap scripts) is baked into
+# the image at /repo at build time. Tagged releases carry their own
+# matched migrations + control bundles, so a Watchtower-driven upgrade
+# (pull new image -> restart) brings new migrations along automatically.
+# The legacy `-v $repo:/repo:ro` bind-mount path is no longer required
+# (and is omitted from the GHCR-image self-host bundle).
 
 # ----- Stage 1: build atlas-cli -----
 FROM golang:1.26 AS builder
@@ -39,9 +41,12 @@ FROM postgres:16-alpine
 # postgres:16-alpine ships psql, sh, and wget. No extra packages needed.
 COPY --from=builder /out/atlas-cli /usr/local/bin/atlas-cli
 
-# bootstrap.sh + seed.sql are copied in; the rest of the repo (migrations/,
-# controls/) is bind-mounted at /repo by docker-compose.
+# bootstrap.sh + seed.sql land in /bootstrap. migrations/ + controls/ get
+# baked into /repo so the image is self-contained — no host bind-mount
+# required. REPO_ROOT defaults to /repo (see bootstrap.sh).
 COPY deploy/docker/bootstrap/ /bootstrap/
+COPY migrations/                /repo/migrations/
+COPY controls/                  /repo/controls/
 RUN chmod +x /bootstrap/bootstrap.sh
 
 # Run as the postgres image's unprivileged `postgres` user, not root.

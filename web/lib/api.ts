@@ -1,14 +1,37 @@
-// Client-side API helpers for the platform's HTTP endpoints. The bearer
-// token lives in a cookie that the platform reads server-side; client-side
+// API base URL helpers for the platform's HTTP endpoints. The bearer token
+// lives in a cookie that the platform reads server-side; client-side
 // fetches send the cookie via credentials: "include".
 //
-// The base URL points at the platform's HTTP listener (default :8080).
-// `NEXT_PUBLIC_API_BASE_URL` overrides it in dev / staging / prod.
+// Server-side (BFF route handlers, RSC fetches) and client-side (browser)
+// run on different network paths and need different base URLs:
+//
+//   - SERVER: a Next.js API route handler in the `web` container reaches
+//     atlas over the internal Docker network. Default `http://atlas:8080`
+//     (the compose service name); override with `ATLAS_HTTP_URL`.
+//
+//   - CLIENT: the browser reaches atlas through whatever public URL fronts
+//     the deployment. Default empty string = same-origin relative URLs,
+//     which works for any reverse proxy that routes /v1, /health, and
+//     /api under the same hostname as the web frontend (e.g. NPM with
+//     custom locations). Override at build time with
+//     `NEXT_PUBLIC_API_BASE_URL` when the API lives on a different origin.
+//
+// The published `web` image is therefore deployment-agnostic — the
+// compose sets `ATLAS_HTTP_URL` per environment, and the browser uses
+// same-origin URLs through the reverse proxy.
 
-const DEFAULT_BASE = "http://localhost:8080";
+const SERVER_DEFAULT = "http://atlas:8080";
+const CLIENT_DEFAULT = "";
 
 export function apiBaseURL(): string {
-  return process.env.NEXT_PUBLIC_API_BASE_URL || DEFAULT_BASE;
+  if (typeof window === "undefined") {
+    return (
+      process.env.ATLAS_HTTP_URL ||
+      process.env.NEXT_PUBLIC_API_BASE_URL ||
+      SERVER_DEFAULT
+    );
+  }
+  return process.env.NEXT_PUBLIC_API_BASE_URL || CLIENT_DEFAULT;
 }
 
 export type Anchor = {

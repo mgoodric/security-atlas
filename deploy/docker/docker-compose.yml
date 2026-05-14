@@ -226,7 +226,16 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3000"
-      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080}
+      # ATLAS_HTTP_URL is used by SERVER-side fetches inside the web
+      # container (Next.js BFF route handlers) and must resolve over the
+      # internal Docker network — `atlas` is the compose service name.
+      ATLAS_HTTP_URL: http://atlas:8080
+      # NEXT_PUBLIC_API_BASE_URL is read by the browser. Empty default
+      # means same-origin relative URLs, which works when this deployment
+      # is behind a reverse proxy that fronts both web and atlas under
+      # one hostname. Override only when the browser must reach atlas at
+      # a different origin than the web frontend.
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}
     ports:
       - "${WEB_PORT:-3000}:3000"
     restart: unless-stopped
