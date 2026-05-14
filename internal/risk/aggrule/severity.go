@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/open-policy-agent/opa/v1/rego"
 
 	"github.com/mgoodric/security-atlas/internal/risk"
@@ -70,14 +71,45 @@ func ComputeRuleSeverity(ctx context.Context, fn string, scores []ChildSeverity,
 // policy MUST live in package `aggrule.severity` and assign `severity`.
 const customRegoQuery = "data.aggrule.severity.severity"
 
+// deniedBuiltins are the OPA builtins a tenant-authored severity policy must
+// never be able to reach. OPA's DEFAULT capability set includes http.send,
+// net.lookup_ip_addr, opa.runtime, etc. — leaving them in place would let a
+// custom_rego policy hit the cloud metadata endpoint, do DNS exfiltration, or
+// read the runtime environment. We strip them from the capability set so a
+// policy that references any of them fails at COMPILE time (PrepareForEval
+// errors), not merely at eval time.
+var deniedBuiltins = map[string]bool{
+	"http.send":          true,
+	"net.lookup_ip_addr": true,
+	"opa.runtime":        true,
+	"rego.parse_module":  true,
+	"trace":              true,
+	"print":              true,
+}
+
+// sandboxCapabilities returns an OPA capability set with every network /
+// runtime / introspection builtin removed. This is the structural half of
+// the AI-assist-boundary guarantee — the input shape is the other half.
+func sandboxCapabilities() *ast.Capabilities {
+	caps := ast.CapabilitiesForThisVersion()
+	filtered := make([]*ast.Builtin, 0, len(caps.Builtins))
+	for _, b := range caps.Builtins {
+		if deniedBuiltins[b.Name] {
+			continue
+		}
+		filtered = append(filtered, b)
+	}
+	caps.Builtins = filtered
+	return caps
+}
+
 // evalCustomRego compiles and evaluates a tenant-authored Rego policy.
 //
 // SANDBOX CONTRACT (the AI-assist-boundary guarantee):
 //   - The ONLY input is {child_severities: []int, child_count: int}.
-//   - No rego.Store, no rego.Function, no http.send capability is wired —
-//     the default OPA runtime has no network or storage access, and we pass
-//     no custom builtins, so the policy cannot reach a database, the
-//     filesystem, the network, or any other tenant's data.
+//   - No rego.Store, no rego.Function — and the capability set is restricted
+//     via sandboxCapabilities() so http.send / net.* / opa.runtime are not
+//     even compilable. A policy referencing them fails at PrepareForEval.
 //   - The policy bytes travel WITH the rule (aggregation_rules.rule_body) so
 //     nothing is fetched at evaluation time.
 func evalCustomRego(ctx context.Context, policy string, scores []ChildSeverity) (int, error) {
@@ -98,6 +130,7 @@ func evalCustomRego(ctx context.Context, policy string, scores []ChildSeverity) 
 		rego.Query(customRegoQuery),
 		rego.Module("custom_severity.rego", policy),
 		rego.Input(input),
+		rego.Capabilities(sandboxCapabilities()),
 	).PrepareForEval(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("%w: compile: %v", ErrCustomRego, err)
