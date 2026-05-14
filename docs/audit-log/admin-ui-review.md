@@ -117,3 +117,50 @@ and the feature-flag descriptions match the slice 059 backend.
 - **Reviewer email:** matt@mattgoodrich.com
 - **Sign-off date:** 2026-05-13
 - **Reviewer comment:** "60 looks good to me"
+
+---
+
+## SSO form save enabled by slice 063 on 2026-05-13
+
+The slice 060 stopgap on `/admin/sso` (form `disabled` because the
+backend `PATCH /v1/admin/sso` did not exist on main) has been lifted.
+Slice 062 landed the backend on 2026-05-13; slice 063 ships the thin
+frontend wire-up.
+
+What changed on `/admin/sso`:
+
+- The OIDC configuration form is fully editable. `disabled` attribute
+  removed from every input and the Save button.
+- The Save button posts to a new BFF proxy at
+  `web/app/api/admin/sso/route.ts` (GET + PATCH) which forwards the
+  caller's bearer to `/v1/admin/sso` (slice 062).
+- Submit-button state machine: `idle` → `submitting` (disabled +
+  "Saving…" label) → `success` (green Alert auto-dismissed after ~3s)
+  or `error` (destructive Alert with the backend's JSON `error` field
+  rendered verbatim; user input is preserved).
+- On a successful save the GET query is invalidated and re-fetched so
+  the form mirrors the persisted state (sans `client_secret`).
+- The `Provider name` field from the slice 060 scaffold is gone —
+  slice 062's handler hardcodes `name='primary'` for the v1 single-IdP
+  model. The user-facing form now surfaces `Issuer URL` (the actual
+  user-supplied identifier).
+
+What did NOT change (P0 anti-criteria, all PASS):
+
+- `client_secret` is still write-only. The GET response omits it
+  (slice 062's `GetResponse` has no `client_secret` field), and the
+  input field never re-renders a previously-saved value. After a
+  successful save the secret input is wiped so a follow-up submit
+  without re-entry sends an empty value (which slice 062's handler
+  interprets as "leave existing").
+- No auto-submit on blur or any non-button event. Only the explicit
+  Save button triggers a PATCH.
+- The Discovery preflight button is unchanged — still a pure
+  client-side fetch of `/.well-known/openid-configuration`, never
+  persists state.
+- The backend contract is unchanged. Zero Go file edits in slice 063.
+
+No HITL sign-off required for this slice — the slice 060 sign-off
+(role matrix · SSO preflight UX · feature-flag descriptions) carries
+forward. Slice 063 is a thin wire-up that flips an already-reviewed
+form from `disabled` to enabled.

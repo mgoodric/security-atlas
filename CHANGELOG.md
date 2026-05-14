@@ -39,6 +39,28 @@ auto-generated notes.
 
 ### Changed
 
+- **Slice 063 — `/admin/sso` form save enabled (post-062 wire-up).**
+  Removes the slice 060 stopgap that shipped the `/admin/sso` form
+  `disabled` because the backend `PATCH /v1/admin/sso` did not exist
+  on main. Slice 062 landed the endpoint; this slice flips the
+  stopgap. New BFF proxy at `web/app/api/admin/sso/route.ts`
+  (GET + PATCH, mirroring the slice 060 `credentials` proxy pattern
+  including the slice 051 D1 tenant_id-strip). `web/app/admin/sso/page.tsx`
+  refactored to use TanStack Query (`useQuery` for GET pre-fill,
+  `useMutation` for PATCH with `invalidateQueries` re-fetch on
+  success). Submit-button state machine: `idle | submitting | success
+| error`. Success Alert auto-dismisses after ~3s. Error Alert
+  renders the backend's JSON `error` field verbatim and preserves
+  user input. P0 anti-criteria all hold: `client_secret` stays
+  write-only (`type="password"` + `autoComplete="new-password"`); GET
+  response omits it; the input is wiped after a successful save so a
+  follow-up submit sends empty (which slice 062's handler interprets
+  as "leave existing"). No auto-submit. Preflight button unchanged.
+  No backend / migration / Go edits. Playwright E2E spec
+  (`web/e2e/admin-bootstrap.spec.ts`) extended with fill / submit /
+  reload assertions including the critical write-only check that the
+  `client_secret` input is empty after reload. HITL audit-log entry
+  appended at `docs/audit-log/admin-ui-review.md`.
 - **CI — release-please skips pure-docs commits.** `.github/workflows/release-please.yml`
   now uses `paths-ignore:` at the workflow `on:` level for `**/*.md`,
   `Plans/**`, `docs/**`, `LICENSE`, `.gitignore`, `.editorconfig`.
