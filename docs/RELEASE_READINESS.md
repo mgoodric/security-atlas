@@ -306,3 +306,29 @@ Re-add `Analyze (python)` to `required_status_checks.contexts` in `.github/branc
 **Why orchestrator can't:** owner-namespace move is a project-direction call.
 **Trigger to revisit:** first commercial or community signal that the personal-account owner-string `mgoodric/security-atlas` is friction (e.g., an enterprise asks where the contributor-org is, or the project gains 3+ regular committers and an org-level access model becomes useful).
 **What's needed:** create a GitHub organization, `gh repo transfer` the repo, update all the hard-coded `mgoodric/` references that were whitelisted in §3.
+
+### 10.6 GitHub App for release-please (CI must run on the release PR)
+
+**Status:** `.github/workflows/release-please.yml` is wired for a GitHub App token with a graceful GITHUB_TOKEN fallback. Until the App exists, release-please still opens / updates the release PR, but **the CI matrix does not run on it** — GitHub's anti-recursion rule blocks workflows from triggering on a `GITHUB_TOKEN`-authored branch update, so the release PR deadlocks at 1/10 required checks. (First hit on PR #59 — temporarily unstuck by a manual close+reopen, which re-triggers CI as the maintainer rather than the bot. That manual workaround is needed on every release-please branch update until this App is set up.)
+**Why orchestrator can't:** creating + installing a GitHub App is a GitHub-UI operation on the maintainer's account.
+**What's needed:**
+
+1. **Create the App** — https://github.com/settings/apps → New GitHub App.
+   - Name: e.g. `security-atlas-release-please` (must be globally unique; append a suffix if taken).
+   - Homepage URL: the repo URL is fine.
+   - Uncheck **Webhook → Active** (no webhook needed).
+   - **Repository permissions:** `Contents: Read and write`, `Pull requests: Read and write`, `Issues: Read and write`. Nothing else.
+   - Where can it be installed: **Only on this account**.
+   - Create.
+2. **Generate a private key** — on the App's page, "Private keys" → Generate a private key. A `.pem` downloads.
+3. **Install the App** — App page → Install App → install on `mgoodric/security-atlas` only.
+4. **Wire the credentials into the repo:**
+   ```sh
+   # App ID is shown on the App's settings page (a number).
+   gh variable set RELEASE_PLEASE_APP_ID --body "<the-app-id>"
+   # Private key — paste the full .pem contents.
+   gh secret set RELEASE_PLEASE_APP_PRIVATE_KEY < path/to/downloaded-key.pem
+   ```
+5. **Verify** — the next push to `main` runs `release-please.yml`; the "Mint GitHub App token" step now executes (the `if: vars.RELEASE_PLEASE_APP_ID != ''` guard passes), release-please authors the PR with the App token, and the CI matrix runs on the release PR automatically — no more manual close+reopen.
+
+**Spec reference:** the deadlock + fix are documented inline in `release-please.yml`. The workflow change is safe to merge before the App exists — the `if:` guard skips the token-mint step and falls back to GITHUB_TOKEN until the App vars/secrets are set.
