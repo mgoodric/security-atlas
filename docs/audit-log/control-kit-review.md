@@ -29,15 +29,21 @@ Run via `go run ./cmd/scripts/coverage-check`:
 
 ## Reviewer signoff
 
-| Field        | Value                                                                                       |
-| ------------ | ------------------------------------------------------------------------------------------- |
-| Reviewer     | Matt Goodrich (`matt@mattgoodrich.com`)                                                     |
-| Review date  | _Pending — to be filled on HITL signoff_                                                    |
-| Review scope | Spot-check the 8 bundles in the table below; spot-check the SCF-anchor mapping for accuracy |
-| Decision     | _approve / approve-with-fixes / reject_                                                     |
-| Notes        |                                                                                             |
+| Field        | Value                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reviewer     | Matt Goodrich (`matt@mattgoodrich.com`)                                                                                                                                                                                                                                                                                                                                                         |
+| Review date  | 2026-05-13                                                                                                                                                                                                                                                                                                                                                                                      |
+| Review scope | Spot-check the 8 bundles in the table below; spot-check the SCF-anchor mapping for accuracy                                                                                                                                                                                                                                                                                                     |
+| Decision     | **approve**                                                                                                                                                                                                                                                                                                                                                                                     |
+| Notes        | Blanket approve — reviewer signed off on the kit as a whole ("010 looks good", Matt Goodrich, 2026-05-13), including the 4 surfaced judgment calls (CC6.7 at-rest scoping, CC1.4 HRS-04 anchor, the CC6.x/CC7.x bundle splits, PI1 family inclusion). No per-bundle change requests. The spot-check table below was not filled cell-by-cell — the approve covers the 50-bundle kit as authored. |
 
 ## Spot-check table (pre-filled for the reviewer)
+
+> **Signoff note (2026-05-13):** Reviewer gave a blanket approve on the kit
+> as a whole rather than a cell-by-cell pass. The table below is retained
+> as the sampling frame that informed the review; empty cells reflect that
+> the approve was holistic, not per-cell. Future control-kit slices may
+> still use cell-by-cell signoff.
 
 The reviewer should evaluate each of these 8 bundles against the SOC 2 TSC
 criterion text and check the four columns to the right. The sample
