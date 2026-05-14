@@ -1,0 +1,45 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc6_2_new_user_provisioning
+title: "New users authorized in HRIS before IdP provisioning"
+description: |
+  Prior to issuing system credentials, the entity registers and
+  authorizes new internal and external users (TSC CC6.2). The query
+  reads the Okta user lifecycle stream and asserts every account
+  creation in the period was preceded by an HRIS registration record —
+  i.e. no user was provisioned to the IdP without a corresponding
+  hire / contractor record. Manual-creation exceptions (consultants,
+  break-glass) must be tagged with an approval ticket id in the
+  lifecycle event metadata.
+
+scf_anchor_id: IAC-07
+control_family: IAC
+implementation_type: automated
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: daily
+
+evidence_queries:
+  - id: every_provision_was_authorized
+    language: rego
+    evidence_kind: okta.user_lifecycle
+    description: "Every Okta user-create in the window has a matching HRIS record or approval ticket"
+    expression: |
+      package atlas.controls.soc2.cc6_2
+
+      default allow := false
+
+      allow if {
+        every e in input.lifecycle_events {
+          e.event_type == "user.created"
+          authorized(e)
+        }
+      }
+
+      authorized(e) if {
+        some r in input.hris_records
+        r.email == e.user_email
+        r.hire_date != ""
+      }
+      authorized(e) if {
+        e.approval_ticket_id != ""
+      }

@@ -1,0 +1,41 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc1_1_code_of_conduct
+title: "Code of conduct attested annually by all personnel"
+description: |
+  The entity demonstrates a commitment to integrity and ethical values
+  (TSC CC1.1, COSO Principle 1). All personnel — employees, contractors,
+  and board members — must acknowledge a written code of conduct covering
+  acceptable use, conflicts of interest, fraud reporting, and confidentiality
+  obligations on hire and annually thereafter. The acknowledgment is
+  captured as a digital attestation that becomes an evidence record.
+
+scf_anchor_id: GOV-01
+control_family: GOV
+implementation_type: manual_attested
+owner_role: hr
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required: [attested_at, attestor, code_version, acknowledged]
+  properties:
+    attested_at:
+      type: string
+      format: date-time
+      description: "When the attestor signed the code"
+    attestor:
+      type: string
+      minLength: 1
+      description: "Employee email or stable user id"
+    code_version:
+      type: string
+      pattern: "^v[0-9]+\\.[0-9]+(\\.[0-9]+)?$"
+      description: "Semver of the code-of-conduct document at signing time"
+    acknowledged:
+      type: boolean
+      enum: [true]
+      description: "Must be true; the schema rejects an attested record with acknowledged=false"
+    population_role:
+      type: string
+      enum: [employee, contractor, board_member]

@@ -1,0 +1,36 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc6_3_periodic_access_review
+title: "Quarterly access review completed for in-scope systems"
+description: |
+  Periodic review and validation of user accounts and access privileges
+  is required to satisfy the "modifies, or removes access" half of TSC
+  CC6.3. The query reads the `access_review.completion` ledger and
+  asserts each in-scope system has a completed review record within
+  the last 90 days (i.e. quarterly cadence). The reviewer and
+  remediation actions are captured in the evidence record.
+
+scf_anchor_id: IAC-15
+control_family: IAC
+implementation_type: automated
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: quarterly
+
+evidence_queries:
+  - id: every_in_scope_system_reviewed_in_90d
+    language: rego
+    evidence_kind: access_review.completion
+    description: "Every in-scope system has a completed access review within 90 days"
+    expression: |
+      package atlas.controls.soc2.cc6_3_review
+
+      default allow := false
+
+      allow if {
+        every s in input.in_scope_systems {
+          some r in input.review_records
+          r.system_id == s.id
+          r.status == "completed"
+          time.parse_rfc3339_ns(r.completed_at) > (time.now_ns() - (90 * 24 * 60 * 60 * 1000000000))
+        }
+      }

@@ -1,0 +1,40 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc5_3_policies_procedures
+title: "Core security policies acknowledged in current version"
+description: |
+  The entity deploys control activities through policies that establish
+  what is expected and procedures that put policies into action (TSC
+  CC5.3). Operationally this resolves to: the v1 policy library is
+  current (each policy has been reviewed within its review cadence),
+  and active users have acknowledged the current version. The evidence
+  query reads the `policy.acknowledgment` ledger and asserts the
+  population of acknowledgments matches active users for each policy.
+
+scf_anchor_id: GOV-01
+control_family: GOV
+implementation_type: automated
+owner_role: ciso
+lifecycle_state: active
+freshness_class: weekly
+
+evidence_queries:
+  - id: current_policy_versions_acknowledged
+    language: rego
+    evidence_kind: policy.acknowledgment
+    description: "Every active user has acknowledged the current version of each in-scope policy"
+    expression: |
+      package atlas.controls.soc2.cc5_3
+
+      default allow := false
+
+      allow if {
+        every p in input.policies {
+          p.in_scope == true
+          every u in input.active_users {
+            some a in input.acknowledgments
+            a.user_id == u.id
+            a.policy_id == p.id
+            a.policy_version_id == p.current_version_id
+          }
+        }
+      }

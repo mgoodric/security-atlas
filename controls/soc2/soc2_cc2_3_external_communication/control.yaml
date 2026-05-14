@@ -1,0 +1,43 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc2_3_external_communication
+title: "External security-disclosure and customer-notification channels documented"
+description: |
+  The entity communicates with external parties regarding matters
+  affecting the functioning of internal control (TSC CC2.3). The control
+  owner attests that the public security disclosure channel
+  (security.txt, a security@ alias, a documented vulnerability disclosure
+  policy) is operational, and that customer-notification paths exist for
+  security incidents per contractual obligations. Evidence is the URI of
+  the live disclosure policy plus a sample log of inbound reports
+  triaged in the period.
+
+scf_anchor_id: IRO-09
+control_family: IRO
+implementation_type: manual_periodic
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required:
+    [attested_at, attestor, disclosure_policy_uri, customer_notification_path]
+  properties:
+    attested_at:
+      type: string
+      format: date-time
+    attestor:
+      type: string
+      minLength: 1
+    disclosure_policy_uri:
+      type: string
+      format: uri
+      description: "Public URL of the VDP / security.txt"
+    customer_notification_path:
+      type: string
+      minLength: 10
+      description: "Describes who-contacts-customers and how (status page, account manager, email)"
+    inbound_reports_triaged:
+      type: integer
+      minimum: 0
+      description: "Count of external reports triaged in the period; zero is valid"

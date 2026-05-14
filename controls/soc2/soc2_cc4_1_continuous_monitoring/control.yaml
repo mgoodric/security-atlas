@@ -1,0 +1,37 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc4_1_continuous_monitoring
+title: "Endpoint posture is continuously monitored via osquery / Fleet"
+description: |
+  The entity selects, develops, and performs ongoing and separate
+  evaluations to ascertain whether the components of internal control
+  are present and functioning (TSC CC4.1). The ongoing evaluation half
+  is satisfied automatically by the osquery / Fleet connector reporting
+  endpoint posture (disk encryption, screen lock, OS patch level) for
+  every managed device on at least a daily cadence. The evidence query
+  asserts every active employee endpoint has a posture record within the
+  last 24 hours.
+
+scf_anchor_id: MON-01
+control_family: MON
+implementation_type: automated
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: daily
+
+evidence_queries:
+  - id: every_endpoint_reported_in_24h
+    language: rego
+    evidence_kind: osquery.host_posture
+    description: "Every managed endpoint has a posture record observed within 24h"
+    expression: |
+      package atlas.controls.soc2.cc4_1
+
+      default allow := false
+
+      allow if {
+        every h in input.managed_endpoints {
+          some p in input.posture_records
+          p.host_uuid == h.host_uuid
+          time.parse_rfc3339_ns(p.observed_at) > (time.now_ns() - (24 * 60 * 60 * 1000000000))
+        }
+      }

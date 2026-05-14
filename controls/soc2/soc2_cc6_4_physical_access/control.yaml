@@ -1,0 +1,39 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc6_4_physical_access
+title: "Physical access to processing facilities restricted"
+description: |
+  The entity restricts physical access to facilities and protected
+  information assets (TSC CC6.4). For a cloud-native SaaS startup the
+  testable manifestation is: the production environment runs in a
+  SOC-2-attested third-party data center (the cloud provider), and the
+  vendor's most recent SOC 2 report is on file. For any first-party
+  offices that house company-managed servers or backup media, a
+  badge-access roster is uploaded with the most recent review date.
+
+scf_anchor_id: PES-04
+control_family: PES
+implementation_type: manual_periodic
+owner_role: it-operations
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required: [evidence_type, period_end]
+  properties:
+    period_end: { type: string, format: date }
+    evidence_type:
+      type: string
+      enum: [cloud_provider_soc2, first_party_facility]
+    cloud_provider_soc2:
+      type: object
+      properties:
+        provider: { type: string }
+        report_period: { type: string }
+        report_uri: { type: string, format: uri }
+    first_party_facility:
+      type: object
+      properties:
+        facility_name: { type: string }
+        badge_access_roster_uri: { type: string, format: uri }
+        last_review_at: { type: string, format: date }

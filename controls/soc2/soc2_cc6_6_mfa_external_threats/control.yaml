@@ -1,0 +1,39 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc6_6_mfa_external_threats
+title: "MFA enforced on all internet-facing administrative interfaces"
+description: |
+  The canonical "external-threat authentication" control under TSC CC6.6
+  is MFA on every internet-facing administrative interface. The query
+  reads the Okta MFA policy snapshot AND the Okta app-assignment data,
+  and asserts every app tagged "admin" or "infrastructure" has MFA
+  enforced at sign-in. This is a deliberately narrower test than
+  CC6.1's "MFA everywhere" — auditors sample admin paths first.
+
+scf_anchor_id: IAC-06
+control_family: IAC
+implementation_type: automated
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: daily
+
+evidence_queries:
+  - id: mfa_enforced_on_admin_apps
+    language: rego
+    evidence_kind: okta.app_assignment
+    description: "Every admin/infrastructure app has MFA required at sign-in"
+    expression: |
+      package atlas.controls.soc2.cc6_6_mfa
+
+      default allow := false
+
+      allow if {
+        every app in input.apps {
+          admin_tagged(app)
+          app.sign_on_policy.mfa_required == true
+        }
+      }
+
+      admin_tagged(app) if {
+        some t in app.tags
+        t in {"admin", "infrastructure"}
+      }

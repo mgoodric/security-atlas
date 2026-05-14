@@ -1,0 +1,37 @@
+bundle_schema_version: "1"
+bundle_id: soc2_a1_2_backup_processes
+title: "Backup processes documented and operational"
+description: |
+  The entity authorizes, designs, develops or acquires, implements,
+  operates, approves, maintains, and monitors environmental
+  protections, software, data backup processes, and recovery
+  infrastructure to meet its objectives (TSC A1.2). The control owner
+  uploads quarterly evidence: the list of backed-up data stores, the
+  backup schedule per store, the most recent successful backup
+  timestamp per store, and the retention configuration.
+
+scf_anchor_id: BCD-09
+control_family: BCD
+implementation_type: manual_periodic
+owner_role: it-operations
+lifecycle_state: active
+freshness_class: quarterly
+
+manual_evidence_schema:
+  type: object
+  required: [exported_at, backups]
+  properties:
+    exported_at: { type: string, format: date-time }
+    backups:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        required: [store_name, schedule, last_successful_at, retention_days]
+        properties:
+          store_name: { type: string }
+          schedule: { type: string, enum: [continuous, hourly, daily, weekly] }
+          last_successful_at: { type: string, format: date-time }
+          retention_days: { type: integer, minimum: 1 }
+          encryption_at_rest: { type: boolean }
+          offsite_copy: { type: boolean }

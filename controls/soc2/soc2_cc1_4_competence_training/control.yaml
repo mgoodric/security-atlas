@@ -1,0 +1,44 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc1_4_competence_training
+title: "All personnel complete annual security awareness training"
+description: |
+  The entity demonstrates a commitment to attract, develop, and retain
+  competent individuals (TSC CC1.4, COSO Principle 4). Operationally for
+  SOC 2 the auditor-tested manifestation is: every employee and
+  contractor completes annual security awareness training within their
+  required cadence (on hire + within 12 months thereafter). The control
+  is automated by inspecting completion tickets — each training assignment
+  is filed as a Jira ticket tagged `security-training`, and the evidence
+  query asserts every active user has an open or closed completion ticket
+  within the last 365 days.
+
+scf_anchor_id: HRS-04
+control_family: HRS
+implementation_type: automated
+owner_role: hr
+lifecycle_state: active
+freshness_class: monthly
+
+evidence_queries:
+  - id: training_completion_within_365d
+    language: rego
+    evidence_kind: jira.ticket_evidence
+    description: "Every active user has a closed security-training ticket within 365 days"
+    expression: |
+      package atlas.controls.soc2.cc1_4
+
+      default allow := false
+
+      # input.users         — array of {id, active, email}
+      # input.training_tix  — array of jira tickets with labels[], resolution, resolution_date
+
+      allow if {
+        every u in input.users {
+          u.active == true
+          some t in input.training_tix
+          t.assignee == u.email
+          "security-training" in t.labels
+          t.resolution == "Done"
+          time.parse_rfc3339_ns(t.resolution_date) > (time.now_ns() - (365 * 24 * 60 * 60 * 1000000000))
+        }
+      }

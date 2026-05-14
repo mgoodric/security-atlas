@@ -1,0 +1,43 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc9_2_vendor_risk_assessment
+title: "Critical and high-criticality vendors have current risk assessments"
+description: |
+  The operational half of TSC CC9.2: every vendor with criticality
+  tier "critical" or "high" has a documented risk assessment within
+  the last 12 months (SOC 2 / ISO 27001 report on file, completed
+  questionnaire, or internal assessment). The control owner uploads
+  the assessment-status snapshot quarterly.
+
+scf_anchor_id: TPM-04
+control_family: TPM
+implementation_type: manual_periodic
+owner_role: ciso
+lifecycle_state: active
+freshness_class: quarterly
+
+manual_evidence_schema:
+  type: object
+  required: [exported_at, vendors_assessed]
+  properties:
+    exported_at: { type: string, format: date-time }
+    vendors_assessed:
+      type: array
+      items:
+        type: object
+        required: [vendor_name, criticality, assessment_type, assessed_at]
+        properties:
+          vendor_name: { type: string }
+          criticality: { type: string, enum: [critical, high] }
+          assessment_type:
+            {
+              type: string,
+              enum:
+                [
+                  soc2_report,
+                  iso_certificate,
+                  completed_questionnaire,
+                  internal_review,
+                ],
+            }
+          assessed_at: { type: string, format: date }
+          report_uri: { type: string, format: uri }

@@ -1,0 +1,61 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc7_4_incident_response
+title: "Incident response plan exists and incidents are logged"
+description: |
+  The entity responds to identified security incidents by executing a
+  defined incident response program (TSC CC7.4). The control owner
+  uploads quarterly evidence of: (a) the current IR plan version on
+  file, (b) a list of incidents declared in the period (zero is a
+  valid count, but the listing itself is required evidence), and (c)
+  for each declared incident, a link to the post-incident report or
+  ticket showing the IR playbook was followed.
+
+scf_anchor_id: IRO-04
+control_family: IRO
+implementation_type: semi_automated
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: quarterly
+
+evidence_queries:
+  - id: ir_plan_acknowledged_by_on_call
+    language: rego
+    evidence_kind: policy.acknowledgment
+    description: "Every on-call rotation member has acknowledged the current IR plan version"
+    expression: |
+      package atlas.controls.soc2.cc7_4
+
+      default allow := false
+
+      allow if {
+        every u in input.on_call_users {
+          some a in input.acknowledgments
+          a.user_id == u.id
+          a.policy_id == "policy_incident_response"
+          a.policy_version_id == input.current_ir_plan_version_id
+        }
+      }
+
+manual_evidence_schema:
+  type: object
+  required: [period_start, period_end, ir_plan_version, incidents]
+  properties:
+    period_start: { type: string, format: date }
+    period_end: { type: string, format: date }
+    ir_plan_version: { type: string }
+    incidents:
+      type: array
+      items:
+        type: object
+        required: [incident_id, severity, declared_at, status, postmortem_uri]
+        properties:
+          incident_id: { type: string }
+          severity: { type: string, enum: [sev0, sev1, sev2, sev3] }
+          declared_at: { type: string, format: date-time }
+          resolved_at: { type: string, format: date-time }
+          status:
+            {
+              type: string,
+              enum: [open, resolved, post_incident_review_pending],
+            }
+          postmortem_uri: { type: string, format: uri }

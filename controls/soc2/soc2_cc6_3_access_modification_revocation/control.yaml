@@ -1,0 +1,38 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc6_3_access_modification_revocation
+title: "Terminated users revoked from IdP within 24 hours of termination"
+description: |
+  The entity authorizes, modifies, or removes access to data, software,
+  functions, and other protected information assets (TSC CC6.3). The
+  query joins the HRIS termination stream against the Okta user
+  lifecycle and asserts that every termination event was followed by an
+  Okta user-deactivate or user-delete event within 24 hours. This is
+  the auditor's most-sampled CC6.3 manifestation.
+
+scf_anchor_id: IAC-07
+control_family: IAC
+implementation_type: automated
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: daily
+
+evidence_queries:
+  - id: terminations_revoked_within_24h
+    language: rego
+    evidence_kind: okta.user_lifecycle
+    description: "Every HRIS termination is followed by an Okta deactivation within 24h"
+    expression: |
+      package atlas.controls.soc2.cc6_3
+
+      default allow := false
+
+      allow if {
+        every t in input.terminations {
+          some e in input.lifecycle_events
+          e.user_email == t.email
+          e.event_type in {"user.deactivated", "user.deleted"}
+          delta_ns := time.parse_rfc3339_ns(e.observed_at) - time.parse_rfc3339_ns(t.termination_date)
+          delta_ns >= 0
+          delta_ns <= (24 * 60 * 60 * 1000000000)
+        }
+      }
