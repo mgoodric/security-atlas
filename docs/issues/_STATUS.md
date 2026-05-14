@@ -3,7 +3,17 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-13 (slice 060 → merged · 43/62 on main · HITL signed by Matt Goodrich · admin UI live)
+**Last reconciled:** 2026-05-13 (slice 063 added — `/admin/sso` form save wire-up · 43/63 on main)
+
+## Drift detected — 2026-05-13 (slice 063 added — SSO form save wire-up)
+
+Surfaced by slice 060's merge with the form save-wiring stopgap. Slice 062 shipped the backend endpoint; slice 063 is the thin frontend slice that flips the `disabled` attribute and wires the `onSubmit` handler. Deps 060 + 062 both merged on 2026-05-13. AFK-clean, ~0.5d.
+
+| Row | Transition      | Why                                                                                                          |
+| --- | --------------- | ------------------------------------------------------------------------------------------------------------ |
+| 063 | (new) → `ready` | Enable `/admin/sso` form save · spawned by slice 060 stopgap · deps 060 + 062 merged · completes v1 admin UX |
+
+**Counts delta:** total +1 · ready +1.
 
 ## Drift detected — 2026-05-13 (slice 060 → merged with HITL signoff)
 
@@ -707,10 +717,10 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 | `merged`      | 43     |
 | `in-review`   | 0      |
 | `in-progress` | 0      |
-| `ready`       | 2      |
+| `ready`       | 3      |
 | `blocked`     | 0      |
 | `not-ready`   | 17     |
-| **Total**     | **62** |
+| **Total**     | **63** |
 
 ## Status enum
 
@@ -790,6 +800,7 @@ Legal values (use exactly these strings):
 | 060 | Admin settings UI (SSO · users · API keys · features)  | `merged`    | frontend/060-admin-settings-ui                       | gh#66 | 2026-05-13 | 2026-05-13 | 10/10 ACs · 5/5 P0 · HITL signed off by Matt Goodrich 2026-05-13 ("60 looks good to me") · UI shells + BFF proxies + 5 admin pages + Playwright E2E · slice 062 backend wired · form save-wiring is a follow-up slice                               |
 | 061 | CI path-based filtering (docs-only PR fast-path)       | `merged`    | ci/061-path-filter                                   | gh#52 | 2026-05-13 | 2026-05-13 | 9/9 ACs · 4/4 P0 anti-criteria · dorny/paths-filter@v3 + stub-job pattern · saves ~80% billable on docs PRs                                                                                                                                         |
 | 062 | Admin BFF backend endpoints (SSO + Users + audit-log)  | `merged`    | admin/062-admin-bff-backend-endpoints                | gh#70 | 2026-05-13 | 2026-05-13 | 10/10 ACs · 5/5 P0 anti-criteria · migration `_022` admin_audit_log_v view (UNION ALL across 7 audit-log tables) · 22 integration tests · SSRF-hardened OIDC preflight (Transport.DialContext IP re-check + redirect-disabled) · unblocks slice 060 |
+| 063 | Enable `/admin/sso` form save (post-062 wire-up)       | `ready`     | —                                                    | —     | —          | —          | spawned by slice 060 `disabled`-form stopgap · deps 060 + 062 both merged · AFK-clean · ~0.5d · completes v1 self-administration UX                                                                                                                 |
 
 ## Ready set right now
 
@@ -797,15 +808,16 @@ Legal values (use exactly these strings):
 | --- | --------------------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------- |
 | 010 | SCF-anchored control kit (50 SOC 2 controls)  | controls | 5-7     | HITL · machinery+draft+pair-review pattern proven on 007 + 035 · biggest critical-path unlock |
 | 027 | Walkthrough recording (annotated + hash/sign) | audit    | 2       | deps 025, 036 both merged                                                                     |
+| 063 | Enable `/admin/sso` form save                 | frontend | 0.5     | spawned by slice 060 stopgap · deps 060 + 062 merged · completes v1 self-admin UX             |
 
-**Two slices ready** (010, 027). Slice 060 (Admin UI) is in-review with its 3 PARTIAL ACs now backend-ready — needs **rebase + HITL signoff** to merge, not a new batch.
+**Three slices ready** (010, 027, 063).
 
 Next-batch options:
 
-1. **Rebase + HITL-merge slice 060 first** — its backend dependency (062) just landed; 60 is the most impactful slice still in-flight. Spot-check the role-permission matrix + SSO config UX + flag descriptions, then merge.
-2. **AFK 027 (Walkthrough recording)** — 2d, AFK-clean. Audit-hub adjacent to slice 029. Could pair with HITL 010 in N=2 if you want one HITL + one AFK in parallel.
+1. **AFK 063 (smallest win)** — flip the `/admin/sso` `disabled` form attribute + wire `onSubmit`. ~0.5d. Closes the slice 060 stopgap loop.
+2. **AFK N=2: 063 + 027** — 063 (0.5d) + 027 (2d). Different surfaces (frontend admin vs audit recording). Parallel-safe.
 3. **HITL 010 session** — biggest critical-path unlock (010 → 012 → 030/041/016/020). 5-7d, focused HITL.
-4. **AFK N=1: 027 alone** — minimal review burden while you do the slice 060 HITL spot-check.
+4. **AFK N=1: 027 alone** — audit-hub adjacent to slice 029.
 
 ## In-flight (0 worktrees building · 0 slices in-review)
 
