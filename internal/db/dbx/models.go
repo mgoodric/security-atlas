@@ -1419,3 +1419,40 @@ type VendorScopeCell struct {
 	ScopeCellID pgtype.UUID        `json:"scope_cell_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
+
+type Walkthrough struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID        `json:"audit_period_id"`
+	ControlID     pgtype.UUID        `json:"control_id"`
+	Narrative     string             `json:"narrative"`
+	Transcript    *string            `json:"transcript"`
+	CanonicalHash []byte             `json:"canonical_hash"`
+	Status        string             `json:"status"`
+	CreatedBy     string             `json:"created_by"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WalkthroughAttachment struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	WalkthroughID pgtype.UUID        `json:"walkthrough_id"`
+	StorageKey    string             `json:"storage_key"`
+	ContentType   string             `json:"content_type"`
+	SizeBytes     int64              `json:"size_bytes"`
+	Sha256Hash    string             `json:"sha256_hash"`
+	Annotations   []byte             `json:"annotations"`
+	UploadedBy    string             `json:"uploaded_by"`
+	UploadedAt    pgtype.Timestamptz `json:"uploaded_at"`
+}
+
+type WalkthroughAuditLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	WalkthroughID pgtype.UUID        `json:"walkthrough_id"`
+	Action        string             `json:"action"`
+	Actor         string             `json:"actor"`
+	Detail        []byte             `json:"detail"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+}

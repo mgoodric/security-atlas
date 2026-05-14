@@ -32,9 +32,19 @@ control_owner_readable_resources := {
     "policies",
     "artifacts",
     "framework-scopes",
+    # Slice 027: control owner can read walkthroughs for their controls
+    # (AC-4 "the control's owner can read"). The application layer
+    # enforces ownership by matching control.owner_role to the
+    # credential's OwnerRoles; rego only gates the resource-type touch.
+    "walkthroughs",
 }
 
 control_owner_writable_resources := {
     "evidence",
     "artifacts",
+    # Slice 027: control owner can author walkthroughs for their
+    # controls. The walkthrough.created_by stamp + the control's
+    # owner_role intersection is the per-row gate; rego allows the
+    # action at the role level.
+    "walkthroughs",
 }

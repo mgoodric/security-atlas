@@ -39,12 +39,14 @@ import (
 	themesapi "github.com/mgoodric/security-atlas/internal/api/themes"
 	"github.com/mgoodric/security-atlas/internal/api/ucfcoverage"
 	"github.com/mgoodric/security-atlas/internal/api/vendors"
+	walkthroughsapi "github.com/mgoodric/security-atlas/internal/api/walkthroughs"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/audit"
 	"github.com/mgoodric/security-atlas/internal/audit/auditor"
 	"github.com/mgoodric/security-atlas/internal/audit/notes"
 	"github.com/mgoodric/security-atlas/internal/audit/notifications"
 	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
+	"github.com/mgoodric/security-atlas/internal/audit/walkthrough"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -261,6 +263,21 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/audit-periods/{id}/control-state", periodsH.ControlState)
 	root.Post("/v1/audit-periods/{id}/populations/{popID}", periodsH.AttachPopulation)
 	root.Get("/v1/audit-periods/{id}", periodsH.Get)
+	// Slice 027: walkthrough recording primitive. Routes appended per the
+	// parallel-batch convention (chi rejects two Mounts at "/"). The
+	// attachment + finalize + export sub-resource routes are declared
+	// BEFORE the bare /{id} so chi's declaration-order match keeps them
+	// ahead of the generic UUID-id route. The handler 503s on
+	// attachments when the artifact store isn't wired; the route still
+	// mounts so OpenAPI / discovery surfaces it.
+	walkthroughStore := walkthrough.NewStore(walkthrough.Config{Pool: s.dbPool})
+	walkthroughsH := walkthroughsapi.New(walkthroughStore, walkthroughUploaderFor(s.artifactStore))
+	root.Post("/v1/walkthroughs", walkthroughsH.Create)
+	root.Get("/v1/walkthroughs", walkthroughsH.List)
+	root.Post("/v1/walkthroughs/{id}/attachments", walkthroughsH.AddAttachment)
+	root.Post("/v1/walkthroughs/{id}:finalize", walkthroughsH.Finalize)
+	root.Get("/v1/walkthroughs/{id}/export", walkthroughsH.Export)
+	root.Get("/v1/walkthroughs/{id}", walkthroughsH.Get)
 	// Slice 025: auditor role + scoped read-only access.
 	//
 	//   POST /v1/audit-notes              auditor-only write (period assignment gated)
@@ -398,6 +415,27 @@ func attestUploader(store *artifact.Store) controlsapi.ArtifactUploader {
 		return nil
 	}
 	return &storeArtifactAdapter{store: store}
+}
+
+// walkthroughUploaderFor returns the slice-027 ArtifactUploader adapter
+// over the slice-036 *artifact.Store. The slice-027 handler 503s when
+// the uploader is nil; this keeps unit-test servers (no artifact store
+// wired) functional for the non-attachment endpoints.
+func walkthroughUploaderFor(store *artifact.Store) walkthroughsapi.ArtifactUploader {
+	if store == nil {
+		return nil
+	}
+	return &walkthroughArtifactAdapter{store: store}
+}
+
+// walkthroughArtifactAdapter is the narrow Put-only view of the
+// slice-036 *artifact.Store the slice-027 handler needs.
+type walkthroughArtifactAdapter struct {
+	store *artifact.Store
+}
+
+func (a *walkthroughArtifactAdapter) Put(ctx context.Context, in artifact.PutInput) (artifact.Artifact, error) {
+	return a.store.Put(ctx, in)
 }
 
 type storeArtifactAdapter struct {

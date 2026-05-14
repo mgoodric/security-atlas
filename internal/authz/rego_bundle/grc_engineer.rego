@@ -46,6 +46,10 @@ grc_writable_resources := {
     "audit-notes",
     # Slice 029: /v1/me/notifications mark-read (PATCH /v1/me/notifications/{id}/read).
     "notifications",
+    # Slice 027: GRC engineer authors walkthroughs across the program.
+    # Write surface includes create + attach + finalize; read surface
+    # is implicit from the action == "read" allow rule above.
+    "walkthroughs",
 }
 
 grc_actions := {

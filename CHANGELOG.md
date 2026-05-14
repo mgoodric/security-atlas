@@ -13,6 +13,39 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 027 — Walkthrough recording (annotated + hash/sign).** Canvas
+  §8.3 walkthrough primitive lands as three tenant-scoped tables
+  (`walkthroughs`, `walkthrough_attachments`, `walkthrough_audit_log`)
+  under FORCE ROW LEVEL SECURITY plus a six-route HTTP API at
+  `/v1/walkthroughs*`. Each walkthrough commits a SHA-256 over the
+  canonical-JSON content shape `{control_id, narrative, transcript,
+created_by, created_at, sorted attachment_hashes[]}` following ADR
+  0003's content-only-inputs principle (no random salt, no wall-clock
+  beyond the immutable authoring moment). Adding an attachment
+  recomputes the hash to commit to the new set; `GET
+/v1/walkthroughs/:id` re-computes from the live attachment list and
+  surfaces a `tamper_detected: true` flag on mismatch (AC-6, with the
+  detection event captured in the append-only
+  `walkthrough_audit_log`). Attachments are stored in the slice 036
+  artifact store under the per-tenant prefix
+  (`tenant-{uuid}/{uuid}`); image-annotation metadata rides as
+  free-form `jsonb` on the row. Lifecycle is two-state (`draft` →
+  `finalized`); mutation attempts after finalize or after the
+  referenced `audit_period.frozen_at` are rejected with 409 Conflict
+  (P0-3, constitutional invariant #10). Export ships in two formats:
+  JSON (`walkthrough.ExportJSON` is the slice 030 OSCAL
+  assessment-results contract) and PDF (rendered via chromedp, reusing
+  the slice 022 policy-PDF dependency — no new `go.mod` lines added,
+  documented as the batch's spine-touch dodge). Authorization extends
+  the slice 035 rego bundle: `auditor` reads walkthroughs role-wide
+  (AC-4 "auditor and the control's owner can read"), `control_owner`
+  reads + writes walkthroughs for their controls, `grc_engineer`
+  authors across the program. AI-assist boundary preserved: every row
+  carries a non-empty `created_by` stamp; the schema makes
+  auto-generated authorship infeasible (P0-2). Migration slot
+  `_025_walkthroughs`. New packages:
+  `internal/audit/walkthrough` + `internal/api/walkthroughs`. Closes
+  slice 027; unblocks slice 030 (OSCAL assessment-results export).
 - **Slice 060 — Admin settings UI shell.** Surfaces the existing admin
   backends (slice 034 API keys, slice 059 feature flags) in the
   Next.js 15 + shadcn/ui frontend, gated by an admin-only layout that
