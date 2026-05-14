@@ -93,6 +93,8 @@ Schema-level enforcement: `ai_assisted=true` records cannot have `human_approved
 
 **Inference backend:** local Ollama is the default (no data leaves deployment). Cloud LLMs (Anthropic / OpenAI / Bedrock) are opt-in per-tenant with a visible banner indicating routing.
 
+**This boundary governs the product at runtime — not the development process.** It is constitutional and unchanged. Separately, the _slice-development_ workflow has a `JUDGMENT` slice type (formerly `HITL`): when building a slice, Claude makes the subjective build-time calls itself (control-text accuracy, UX copy, rule-DSL shape, OSCAL conformance choices) and records them in a decisions log rather than blocking the merge on a human sign-off — the maintainer iterates post-deployment. That is a process choice about _how we build_. It does NOT touch this boundary, which is about _how the shipped product behaves_: the product still never publishes an audit-binding artifact without one-click human approval. Never conflate the two. See `Plans/prompts/04-per-slice-template.md` "Slice types".
+
 ### Licensing constraints (do not violate)
 
 - **SCF**: free standard license — can be bundled. Legal review pending before ship (open question).

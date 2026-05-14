@@ -2,7 +2,7 @@
 
 **Cluster:** Infra
 **Estimate:** 3d
-**Type:** HITL
+**Type:** JUDGMENT
 
 ## Narrative
 
@@ -40,7 +40,7 @@ The slice also adds a **per-PR docs gate** to the ship-gate checklist: any PR to
 
 - **Working norms — Markdown over prose** (CLAUDE.md) — docs pages use tables, lists, short paragraphs; no walls of text
 - **Working norms — Cite sources** (CLAUDE.md) — install instructions reference specific versions; framework setup cites SCF + NIST IR 8477; board reporting cites canvas §7 + §10
-- **AI-assist boundary** — docs pages are human-authored or AI-drafted with one-click approval per page; no auto-generated content shipped without review
+- **AI-assist boundary (product, unchanged):** the constitutional boundary governs _audit-binding artifacts at runtime_ — questionnaire answers, SSP narratives, board-report sections. User-docs pages are not audit-binding artifacts; they are dev-process content authored under the `JUDGMENT`-slice model (Claude authors, writes a decisions log, the maintainer iterates post-publish from the revisit list). The two are distinct — see `Plans/prompts/04-per-slice-template.md` "Slice types".
 
 ## Canvas references
 

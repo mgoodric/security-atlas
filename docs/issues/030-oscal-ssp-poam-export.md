@@ -2,11 +2,11 @@
 
 **Cluster:** Audit workflow
 **Estimate:** 4–5d
-**Type:** HITL
+**Type:** JUDGMENT
 
 ## Narrative
 
-Implement the OSCAL export pipeline that produces the audit-handoff bundle: System Security Plan (SSP), Assessment Plan + Assessment Results (AP/AR), and Plan of Action and Milestones (POA&M). The data comes from across the platform: org profile + scope cells + applicable controls + control implementations + linked policies + sample populations + walkthroughs + audit comments + findings. Use IBM `compliance-trestle` (Python, bridged via gRPC) for OSCAL JSON v1.1.x serialization. Export bundles are cosign-signed for tamper detection at handoff. HITL: an auditor partner should validate the first generated SSP before merge to confirm it imports cleanly into their tooling. The slice delivers value because the primary persona's SOC 2 audit handoff is now a single signed bundle — the binary v1 success test depends on this.
+Implement the OSCAL export pipeline that produces the audit-handoff bundle: System Security Plan (SSP), Assessment Plan + Assessment Results (AP/AR), and Plan of Action and Milestones (POA&M). The data comes from across the platform: org profile + scope cells + applicable controls + control implementations + linked policies + sample populations + walkthroughs + audit comments + findings. Use IBM `compliance-trestle` (Python, bridged via gRPC) for OSCAL JSON v1.1.x serialization. Export bundles are cosign-signed for tamper detection at handoff. The slice ships a spec-compliant bundle validated by `compliance-trestle` round-trip; whether a given auditor's tooling imports it cleanly is the kind of thing only real use surfaces — so the decisions log records the conformance choices made and flags "validate against a real auditor's tooling" as the top revisit item. The slice delivers value because the primary persona's SOC 2 audit handoff is now a single signed bundle — the binary v1 success test depends on this.
 
 ## Acceptance criteria
 
@@ -16,7 +16,7 @@ Implement the OSCAL export pipeline that produces the audit-handoff bundle: Syst
 - [ ] AC-4: POA&M generated from open findings with milestones, owners, due dates
 - [ ] AC-5: Export bundle is cosign-signed; signature included in metadata
 - [ ] AC-6: IBM compliance-trestle round-trip validation passes
-- [ ] AC-7: HITL: auditor partner validates the first SSP import into their tooling; documented in `docs/audit-log/oscal-validation.md`
+- [ ] AC-7: `compliance-trestle` round-trip validation passes for SSP + AP/AR + POA&M; the OSCAL-conformance decisions (model-version choices, optional-field handling, any spec-ambiguity calls) are recorded in `docs/audit-log/030-oscal-ssp-poam-export-decisions.md` with "validate against a real auditor's tooling" as the top revisit item
 - [ ] AC-8: `oscal-export` and audit-pack PDF available via UI + CLI
 
 ## Constitutional invariants honored
@@ -37,13 +37,13 @@ Implement the OSCAL export pipeline that produces the audit-handoff bundle: Syst
 
 - Does NOT skip cosign signing of export bundle
 - Does NOT export from a non-frozen period
-- Does NOT permit AI auto-generation of SSP narrative without human approval per section
-- Does NOT skip HITL validation gate
+- Does NOT permit AI auto-generation of SSP narrative without human approval per section — this is the **product runtime AI-assist boundary** (CLAUDE.md), unchanged and constitutional; distinct from the dev-process JUDGMENT model
+- Does NOT skip `compliance-trestle` round-trip validation
 
 ## Skill mix (3–5)
 
 - Go + gRPC bridge to Python compliance-trestle
 - OSCAL JSON v1.1.x schema
 - cosign / sigstore for signing
-- Compliance domain knowledge (HITL)
+- Compliance domain knowledge
 - CLI design (cobra commands)
