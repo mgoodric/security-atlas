@@ -9,6 +9,13 @@ Conventional-Commit messages. This file holds pre-release / unreleased
 work and any narrative entries the operator wants alongside the
 auto-generated notes.
 
+## [1.3.0](https://github.com/mgoodric/security-atlas/compare/v1.2.0...v1.3.0) (2026-05-14)
+
+
+### Features
+
+* **infra:** publish web + bootstrap images, make web image deployment-agnostic ([#95](https://github.com/mgoodric/security-atlas/issues/95)) ([237ff94](https://github.com/mgoodric/security-atlas/commit/237ff94b3ddf2742ce1e59fe4d2cdd5c2130161f))
+
 ## [1.2.0](https://github.com/mgoodric/security-atlas/compare/v1.1.0...v1.2.0) (2026-05-14)
 
 
