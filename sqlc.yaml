@@ -37,6 +37,7 @@ sql:
       - "migrations/sql/20260511000029_risk_control_links.sql"
       - "migrations/sql/20260511000030_decisions_audit.sql"
       - "migrations/sql/20260511000031_board_briefs.sql"
+      - "migrations/sql/20260511000032_board_packs.sql"
       - "migrations/sql/20260511000033_controls_superseded_fk_deferrable.sql"
     queries: "internal/db/queries"
     gen:
