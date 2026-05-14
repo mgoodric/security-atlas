@@ -265,7 +265,8 @@ jobs:
             ./internal/api/controlstate/... \
             ./internal/decision/... \
             ./internal/api/dashboard/... \
-            ./internal/api/risks/...
+            ./internal/api/risks/... \
+            ./internal/authz/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
@@ -458,3 +459,46 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+
+  # ====================================================================
+  # Slice 065 — self-host bundle end-to-end test.
+  #
+  # This block is appended as a self-contained job so it rebase-merges
+  # cleanly alongside other in-flight ci.yml edits. It brings the
+  # docker-compose self-host bundle up against a fresh checkout in TWO
+  # deploy shapes and asserts the slice-037 acceptance criteria actually
+  # pass — covering slice 065 AC-7 (bootstrap idempotency on re-run),
+  # AC-9 (bootstrap against a non-superuser / shared Postgres) and AC-12
+  # (end-to-end install in both deploy shapes). The assertion logic lives
+  # in deploy/docker/test-self-host-bundle.sh; this job just runs it once
+  # per matrix mode.
+  #
+  # Gated on the same `changes.code` path filter as the other expensive
+  # jobs (deploy/** and migrations/** are both in the filter, so any PR
+  # that touches the bundle runs this). No slice-061 stub sibling: the
+  # job uses a `matrix`, so GitHub posts per-mode check names
+  # (`... (bundled)` / `... (external)`) that a single-name stub could
+  # not mirror, and this job is intentionally NOT yet in
+  # .github/branch-protection.json's required-checks list — so a
+  # docs-only PR simply skips it with no "waiting for status" hang.
+  # Promote it to a required check (and add the matrix-named stubs) in a
+  # follow-up once it has a few green runs.
+  # ====================================================================
+  test-self-host-bundle:
+    name: Self-host bundle · end-to-end
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [bundled, external]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run self-host bundle smoke test (${{ matrix.mode }})
+        run: deploy/docker/test-self-host-bundle.sh ${{ matrix.mode }}
+      - name: Dump compose logs on failure
+        if: failure()
+        run: |
+          docker compose -f deploy/docker/docker-compose.yml \
+            -p "sa-selfhost-${{ matrix.mode }}" logs || true

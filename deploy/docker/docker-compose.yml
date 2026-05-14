@@ -173,8 +173,39 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      # Slice 065 bug #2 — startup-ordering deadlock fix.
+      #
+      # This was `condition: service_completed_successfully`, which is a
+      # deadlock: atlas would not start until atlas-bootstrap EXITED, but
+      # atlas-bootstrap phase 5 BLOCKS waiting for atlas's /health to
+      # return 200 (and phase 6 then uploads control bundles to the live
+      # server). Neither container could make progress; atlas-bootstrap
+      # timed out at 90 attempts, exited 1, and atlas never started.
+      #
+      # `service_started` matches the choreography the file header
+      # already describes ("-> atlas starts -> atlas-bootstrap phase 6
+      # uploads control bundles once /health is up"): atlas-bootstrap
+      # runs phases 1-4 (migrations + seed + SCF import) while atlas is
+      # booting in parallel, then phases 5-6 against the live server.
+      # The migrations are idempotent (slice 065 bug #3) so the race
+      # between "bootstrap applying migrations" and "atlas reading the
+      # schema" is benign — atlas's own restart loop (see the bumped
+      # healthcheck start_period below) absorbs the brief window where
+      # the schema is mid-apply.
+      #
+      # Alternative considered and REJECTED: split atlas-bootstrap into
+      # `atlas-bootstrap-pre` (phases 1-4, gated
+      # service_completed_successfully) + `atlas-bootstrap-post`
+      # (phases 5-6, depends_on atlas). That removes the parallelism
+      # entirely (atlas cannot start until every migration is applied)
+      # and doubles the compose service count + the bind-mount and env
+      # duplication, for no real gain: the idempotent-migration +
+      # start_period approach already converges reliably and keeps the
+      # bundle a single bootstrap unit. Revisit only if a future
+      # migration becomes genuinely non-idempotent or long-running
+      # enough that the start_period window is insufficient.
       atlas-bootstrap:
-        condition: service_completed_successfully
+        condition: service_started
     environment:
       # DSNs are assembled in .env (see .env.example) so the compose
       # source carries no `user:pass@host` literal. DATABASE_URL_APP is
@@ -207,7 +238,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
-      start_period: 20s
+      # Slice 065 bug #2: bumped 20s -> 120s. With atlas-bootstrap now
+      # gated on `service_started` (above), atlas boots in PARALLEL with
+      # bootstrap's phase 1-4 migration apply. atlas's own connect-retry
+      # loop needs room to converge while the schema is still being
+      # applied; a 20s start_period would mark atlas unhealthy and churn
+      # the restart loop before bootstrap finished. 120s comfortably
+      # covers a cold-start migration apply on the target 4 vCPU / 16 GB
+      # VM while keeping the post-converge healthcheck cadence tight.
+      start_period: 120s
     restart: unless-stopped
 
   # --------------------------------------------------------------------

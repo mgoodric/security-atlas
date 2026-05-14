@@ -13,19 +13,26 @@
 -- scf_anchors (slice 006). atlas_app gets SELECT; atlas_migrate (DDL role)
 -- gets writes for the importer.
 
-CREATE TYPE strm_relationship_type AS ENUM (
-    'equal',
-    'subset_of',
-    'superset_of',
-    'intersects_with',
-    'no_relationship'
-);
+-- Both enums are wrapped in a DO/EXCEPTION block for re-run idempotency
+-- (slice 065 bug #3): Postgres has no `CREATE TYPE IF NOT EXISTS`, and the
+-- self-host bootstrap re-applies every migration on each `docker compose up`.
+DO $$ BEGIN
+    CREATE TYPE strm_relationship_type AS ENUM (
+        'equal',
+        'subset_of',
+        'superset_of',
+        'intersects_with',
+        'no_relationship'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE TYPE crosswalk_source_attribution AS ENUM (
-    'scf_official',
-    'community_draft',
-    'org_internal'
-);
+DO $$ BEGIN
+    CREATE TYPE crosswalk_source_attribution AS ENUM (
+        'scf_official',
+        'community_draft',
+        'org_internal'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE TABLE framework_requirements (
     id                    UUID PRIMARY KEY,

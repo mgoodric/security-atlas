@@ -23,12 +23,17 @@ DROP POLICY IF EXISTS tenant_update ON framework_scopes;
 DROP POLICY IF EXISTS tenant_delete ON framework_scopes;
 
 -- Re-create the slice-002 ENUM type so the column type-restore below works.
-CREATE TYPE framework_scope_status AS ENUM (
-    'draft',
-    'approved',
-    'active',
-    'retired'
-);
+-- Wrapped in a DO/EXCEPTION block for idempotency (slice 065 bug #3): if a
+-- prior partial down-migration already recreated the type, a bare CREATE
+-- TYPE would abort this script.
+DO $$ BEGIN
+    CREATE TYPE framework_scope_status AS ENUM (
+        'draft',
+        'approved',
+        'active',
+        'retired'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Stage: capture the slice-018 state column into a temporary text column so
 -- we can map it onto the ENUM after dropping the new columns.

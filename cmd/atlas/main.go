@@ -194,6 +194,20 @@ func main() {
 	}
 	srv := api.New(cfg)
 
+	// Slice 065 bug #1 / AC-3 note: the two bootstrap credential-issuance
+	// calls below (IssueBootstrapCredential here, and
+	// IssueBootstrapFixedAdminCredential further down) write into the
+	// IN-MEMORY credstore.Store — NOT the api_keys table. They do not
+	// touch the DB pool at all, so they never hit the
+	// pool.Exec-outside-a-transaction RLS-bypass that bug #1 fixed in the
+	// audit writer; there is no BeginTx/ApplyTenant treatment to apply
+	// here. The slice-037 symptom "api_keys stays empty on a fresh
+	// install" was a downstream effect of bug #1: the audit-writer 500
+	// blocked bootstrap phase 6 (control-bundle upload), so the
+	// authenticated upload path that DOES persist to api_keys never ran
+	// to completion. With the audit writer fixed, phase 6 completes and
+	// api_keys is populated as designed. No change is needed on this
+	// startup-time issuance path.
 	if bootstrapTenant := os.Getenv("ATLAS_BOOTSTRAP_TENANT"); bootstrapTenant != "" {
 		cred, bearer, err := srv.IssueBootstrapCredential(bootstrapTenant)
 		if err != nil {

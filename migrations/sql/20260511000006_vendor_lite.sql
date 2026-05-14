@@ -32,23 +32,31 @@
 --
 -- criticality is the slice-024 scoring band. Three buckets is enough for a
 -- 30–80-vendor portfolio; FAIR or 5-band scoring is phase-2 territory.
+--
+-- Wrapped in a DO/EXCEPTION block for re-run idempotency (slice 065 bug #3):
+-- Postgres has no `CREATE TYPE IF NOT EXISTS`, and the self-host bootstrap
+-- re-applies every migration on each `docker compose up`.
 
-CREATE TYPE vendor_criticality AS ENUM (
-    'low',
-    'medium',
-    'high'
-);
+DO $$ BEGIN
+    CREATE TYPE vendor_criticality AS ENUM (
+        'low',
+        'medium',
+        'high'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- review_cadence captures the interval between reviews. Stored as an enum so
 -- the overdue-computation can map cadence -> interval in one place. Values
 -- intentionally match security-program-typical cadences (no "decadal").
 
-CREATE TYPE vendor_review_cadence AS ENUM (
-    'monthly',
-    'quarterly',
-    'biannual',
-    'annual'
-);
+DO $$ BEGIN
+    CREATE TYPE vendor_review_cadence AS ENUM (
+        'monthly',
+        'quarterly',
+        'biannual',
+        'annual'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ===== vendors =====
 --

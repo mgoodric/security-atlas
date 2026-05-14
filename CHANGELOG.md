@@ -11,6 +11,42 @@ auto-generated notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- **infra:** self-host bundle P0 fixes (#065) — a P0 follow-up to slice
+  037 that unbreaks the shipped v1.3.0 `docker compose` self-host bundle,
+  which did not bring a fresh deployment to a working state. Five
+  first-deploy bugs are closed. **(1) Audit-writer RLS bypass:**
+  `internal/authz/audit.go` (and the sibling `db_resolver.go`) queried
+  the RLS-enforced `atlas_app` pool OUTSIDE a transaction, so the
+  `app.current_tenant` GUC was unset and the `decision_audit_log` /
+  `user_roles` RLS policies rejected every row — every authenticated
+  request 500'd. Both now wrap the statement in `pool.Begin` +
+  `tenancy.ApplyTenant` + `tx.Commit`. **(2) docker-compose startup
+  deadlock:** `atlas` waited on `atlas-bootstrap`
+  `service_completed_successfully` while `atlas-bootstrap` phase 5 waited
+  on `atlas` `/health` — neither could start. Changed to
+  `service_started` with the `atlas` healthcheck `start_period` bumped
+  to 120s. **(3) Migration idempotency:** every unguarded `CREATE TYPE`
+  across `migrations/sql/*.sql` is now wrapped in a
+  `DO $$ ... EXCEPTION WHEN duplicate_object` block, and `bootstrap.sh`
+  gained a `schema_migrations` ledger so a re-run skips already-applied
+  migrations instead of aborting on the first `relation already exists`.
+  **(4) `ALTER ROLE` denied on a shared Postgres:**
+  `migrations/bootstrap/01-roles.sql` now conditionally grants
+  `atlas_migrate` `CREATEROLE` and `atlas_app` membership
+  `WITH ADMIN OPTION` so first-boot can set `atlas_app`'s password on an
+  externally-provided cluster (`atlas_app` itself stays
+  `NOSUPERUSER NOBYPASSRLS`). **(5) Missing `pgcrypto`:** a new head
+  migration `20260511000000_extensions.sql` creates the `pgcrypto`
+  extension that `seed.sql`'s `digest()` call needs — previously
+  pre-enabled only by chance on `postgres:16-alpine`. A new CI job
+  `test-self-host-bundle` brings the bundle up end-to-end against both
+  the bundled Postgres and an external (non-superuser, trust-disabled)
+  Postgres, and `internal/authz` is added to the CI integration-test
+  list so the audit-writer regression cannot recur silently. See
+  `docs/audit-log/065-self-host-bundle-p0-fixes-decisions.md`.
+
 ### Added
 
 - **risk:** risk-hierarchy backend read endpoints (#067) — fills the

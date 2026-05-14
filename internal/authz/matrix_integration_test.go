@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/authz"
@@ -75,6 +76,30 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 		}
 	})
 	return tenant
+}
+
+// tenantTx opens a transaction on the RLS-enforced app pool and applies
+// the `app.current_tenant` GUC from ctx. Reads and DML against
+// FORCE-ROW-LEVEL-SECURITY tables (decision_audit_log, user_roles) MUST
+// go through a GUC-applied transaction — a bare pool.Exec / pool.QueryRow
+// runs with an empty GUC and RLS silently filters every row.
+//
+// The caller MUST `defer tx.Rollback(ctx)` on the returned tx. Rollback
+// is NOT registered via t.Cleanup on purpose: cleanups run AFTER the
+// test function's own deferred `pool.Close()`, and Close() blocks
+// forever waiting for a still-open transaction's connection. Tests that
+// only read never commit; the deferred rollback is the release path.
+func tenantTx(t *testing.T, ctx context.Context, pool *pgxpool.Pool) pgx.Tx {
+	t.Helper()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tenant tx: %v", err)
+	}
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("ApplyTenant: %v", err)
+	}
+	return tx
 }
 
 // matrixCase captures one row in the role × endpoint × expected-outcome
@@ -283,9 +308,13 @@ func TestAuthzAuditLog_BothOutcomesPersist(t *testing.T) {
 		t.Fatalf("Write deny: %v", err)
 	}
 
-	// Verify both rows are visible to the same-tenant read.
+	// Verify both rows are visible to the same-tenant read. The read goes
+	// through a GUC-applied tx — decision_audit_log is FORCE RLS, so a
+	// bare pool.QueryRow with an empty GUC would see zero rows.
+	readTx := tenantTx(t, ctx, appPool)
+	defer func() { _ = readTx.Rollback(ctx) }()
 	var rows int
-	if err := appPool.QueryRow(ctx, `
+	if err := readTx.QueryRow(ctx, `
 		SELECT count(*) FROM decision_audit_log WHERE tenant_id = $1::uuid
 	`, tenant).Scan(&rows); err != nil {
 		t.Fatalf("count: %v", err)
@@ -328,10 +357,20 @@ func TestAuthzAuditLog_AppendOnlyRLS(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 
+	// All three operations below run through ONE GUC-applied tx on the
+	// RLS-enforced app pool. The GUC must be set, otherwise we would be
+	// testing "no tenant context -> 0 rows" instead of the real property:
+	// "tenant context IS set, but decision_audit_log has no UPDATE/DELETE
+	// policy under FORCE ROW LEVEL SECURITY, so the mutation is denied".
+	txn := tenantTx(t, ctx, appPool)
+	// txn may be reassigned below (a failed statement aborts the tx); the
+	// closure reads the current value so whichever tx is live gets rolled
+	// back before the deferred appPool.Close() runs.
+	defer func() { _ = txn.Rollback(ctx) }()
+
 	// UPDATE must be denied for atlas_app -- no UPDATE policy under FORCE
-	// means RLS reports 0 affected rows (the row exists but isn't visible
-	// to UPDATE).
-	tag, err := appPool.Exec(ctx, `
+	// means RLS reports 0 affected rows (or a permission error).
+	tag, err := txn.Exec(ctx, `
 		UPDATE decision_audit_log SET reason = 'tampered' WHERE decision_id = $1
 	`, id)
 	if err != nil {
@@ -340,13 +379,16 @@ func TestAuthzAuditLog_AppendOnlyRLS(t *testing.T) {
 		// Either is acceptable; the test fails only if the row was
 		// actually mutated.
 		t.Logf("UPDATE returned error (acceptable under RLS): %v", err)
+		// A failed statement aborts the tx; reopen for the read-back.
+		_ = txn.Rollback(ctx)
+		txn = tenantTx(t, ctx, appPool)
 	} else if tag.RowsAffected() != 0 {
 		t.Fatalf("UPDATE affected %d rows; append-only RLS should report 0", tag.RowsAffected())
 	}
 
 	// Read back to confirm the row is unchanged.
 	var reason string
-	if err := appPool.QueryRow(ctx, `
+	if err := txn.QueryRow(ctx, `
 		SELECT reason FROM decision_audit_log WHERE decision_id = $1
 	`, id).Scan(&reason); err != nil {
 		t.Fatalf("read-back: %v", err)
@@ -356,7 +398,7 @@ func TestAuthzAuditLog_AppendOnlyRLS(t *testing.T) {
 	}
 
 	// DELETE must also be denied.
-	tag, err = appPool.Exec(ctx, `
+	tag, err = txn.Exec(ctx, `
 		DELETE FROM decision_audit_log WHERE decision_id = $1
 	`, id)
 	if err != nil {

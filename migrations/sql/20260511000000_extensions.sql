@@ -1,0 +1,35 @@
+-- security-atlas — Postgres extensions head migration (slice 065).
+--
+-- This is the FIRST migration applied to any database. It runs before
+-- 20260511000000_init.sql: both files share the `20260511000000` timestamp
+-- prefix, and every migration runner in the repo (deploy/docker/bootstrap/
+-- bootstrap.sh and .github/workflows/ci.yml) iterates `migrations/sql/*.sql`
+-- in plain shell-glob (lexical) order, where `extensions` sorts before
+-- `init` (e < i). So the extensions land before any object that needs them.
+--
+-- Why a discrete head migration rather than prepending into _init.sql:
+--   - _init.sql is the slice-002 source-of-truth that sqlc reads for codegen;
+--     keeping extension DDL out of it avoids sqlc ever trying to parse a
+--     CREATE EXTENSION statement.
+--   - A separate file is trivially reversible (_extensions.down.sql) and
+--     reads as one self-contained concern.
+--
+-- Slice 065 bug #5: `deploy/docker/bootstrap/seed.sql` calls `digest(...)`
+-- to compute the default scope cell's `dimensions_hash`. `digest()` is a
+-- `pgcrypto` function. On the bundled `postgres:16-alpine` image pgcrypto
+-- happened to be available via an init path; on a shared / externally
+-- provided Postgres 16 cluster it is not pre-enabled, and bootstrap died
+-- with `seed.sql:NN: ERROR: function digest(unknown, unknown) does not
+-- exist`. Creating the extension as an explicit migration makes the bundle
+-- work identically against `postgres:16-alpine`, `pgvector/pgvector:pg16`,
+-- and a vanilla shared Postgres 16 cluster.
+--
+-- `gen_random_uuid()` (used as a column DEFAULT across the schema) is part
+-- of core Postgres since 13 and needs NO extension — only `digest()` does.
+-- `uuid-ossp` is intentionally NOT created: a repo-wide grep finds no
+-- `uuid_generate_*` call site.
+--
+-- `CREATE EXTENSION IF NOT EXISTS` is natively idempotent, so re-running
+-- this migration against a database that already has pgcrypto is a no-op.
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
