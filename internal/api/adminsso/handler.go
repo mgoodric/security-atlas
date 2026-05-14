@@ -349,7 +349,7 @@ func (h *Handler) Preflight(w http.ResponseWriter, r *http.Request) {
 	}
 	client := h.preflightOpts.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: h.preflightOpts.Timeout}
+		client = h.newSafeHTTPClient()
 	}
 	resp, err := client.Do(httpReq)
 	if err != nil {
@@ -434,6 +434,65 @@ func (h *Handler) guardSSRF(ctx context.Context, host string) error {
 		}
 	}
 	return nil
+}
+
+// newSafeHTTPClient returns an HTTP client whose Transport re-validates
+// the destination IP at connect-time (closing the TOCTOU window between
+// guardSSRF's pre-check and the actual dial — DNS rebinding) and which
+// refuses to follow HTTP redirects (a redirect to an internal address
+// would otherwise bypass guardSSRF entirely). The handler-level
+// guardSSRF remains as a first line of defense; this Transport is the
+// second.
+//
+// CodeQL `go/request-forgery` flags `client.Do` on a URL that came from
+// user input even when the URL passed a prior check, because Go's
+// default Transport re-resolves the host at dial time using whatever
+// the resolver returns at that moment. This implementation moves the
+// safety check inside DialContext so it fires on every concrete IP
+// returned by the resolver, then dials the validated IP directly.
+func (h *Handler) newSafeHTTPClient() *http.Client {
+	lookup := h.preflightOpts.LookupHost
+	if lookup == nil {
+		lookup = func(ctx context.Context, host string) ([]net.IP, error) {
+			return net.DefaultResolver.LookupIP(ctx, "ip", host)
+		}
+	}
+	dialer := &net.Dialer{Timeout: h.preflightOpts.Timeout}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, fmt.Errorf("split host port: %w", err)
+			}
+			if h.preflightOpts.AllowPrivateIPs {
+				return dialer.DialContext(ctx, network, addr)
+			}
+			ips, err := lookup(ctx, host)
+			if err != nil {
+				return nil, fmt.Errorf("dial-time dns lookup failed: %w", err)
+			}
+			if len(ips) == 0 {
+				return nil, errors.New("dial-time dns lookup returned no addresses")
+			}
+			for _, ip := range ips {
+				if isUnsafeIP(ip) {
+					return nil, fmt.Errorf("connection to %s blocked: resolves to non-routable address %s", host, ip)
+				}
+			}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+		},
+	}
+	return &http.Client{
+		Transport: transport,
+		Timeout:   h.preflightOpts.Timeout,
+		// Refuse to follow redirects — a redirect to an internal host
+		// would otherwise bypass the DialContext check by hopping out
+		// of our Transport on the second request. Discovery documents
+		// have no legitimate reason to redirect.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 // isUnsafeIP reports whether ip is in loopback, link-local, RFC1918,
