@@ -9,7 +9,7 @@ tractable. None of these blocked merge.
 
 ### D1 — The drift definition: what does "a control is passing" mean?
 
-Canvas §7.1 defines *Drift count* as `(controls passing yesterday) −
+Canvas §7.1 defines _Drift count_ as `(controls passing yesterday) −
 (controls passing today)`, signed — but "passing" is underspecified across
 three axes. Resolved:
 
@@ -18,24 +18,24 @@ three axes. Resolved:
   that day has `result='pass'` AND `freshness_status='fresh'`. One failing or
   stale cell means the control is not passing. This makes the API row grain
   `control_id`, matching the `/v1/controls/drift` endpoint shape.
-  - *Options considered:* per-`(control, scope_cell)` tuple grain (matches the
-    *Evidence freshness* KPI's grain) vs per-control rollup. Chose per-control
+  - _Options considered:_ per-`(control, scope_cell)` tuple grain (matches the
+    _Evidence freshness_ KPI's grain) vs per-control rollup. Chose per-control
     because the endpoint is `/v1/controls/drift`, not `/v1/control-cells/drift`,
     and the dashboard "Recent drift" panel lists controls.
-  - *Aggregation operator:* worst-cell (canvas §7.3 says the operator is
+  - _Aggregation operator:_ worst-cell (canvas §7.3 says the operator is
     explicit per KPI). Worst-cell is the honest choice for a pass/fail rollup
     — a control is only "passing" if it is passing everywhere it applies.
 - **"Passing" excludes stale evidence** — `result='pass' AND
-  freshness_status='fresh'`. A control whose freshest passing evidence has
-  aged out of its window is *drifting*, even though nothing flipped to
+freshness_status='fresh'`. A control whose freshest passing evidence has
+  aged out of its window is _drifting_, even though nothing flipped to
   `fail`. This is what makes drift a LEADING indicator and aligns with canvas
   §2.3 ("stale evidence drives a drift signal").
-  - *Option considered:* "passing" = `result='pass'` regardless of freshness
+  - _Option considered:_ "passing" = `result='pass'` regardless of freshness
     (drift = pure pass→fail transitions). Rejected — that would make freshness
     decay invisible to the drift signal, contradicting §2.3.
 - **"Today" vs "yesterday" via persisted daily snapshots.** `delta =
-  controls_passing(latest snapshot) − controls_passing(earliest snapshot in
-  window)`. The `control_drift_snapshots` table stores one snapshot row per
+controls_passing(latest snapshot) − controls_passing(earliest snapshot in
+window)`. The `control_drift_snapshots` table stores one snapshot row per
   refresh; the read path takes the latest row per `(tenant_id, snapshot_date)`.
 
 **Confidence: high.** Grounded directly in canvas §2.3 + §7.1 + §7.3. The
@@ -67,7 +67,7 @@ exported accessor `eval.FreshnessMaxAge(class)` wrapping it, so the table is
 defined in exactly one place. The freshness refresh calls that accessor.
 
 **Confidence: high.** Direct instruction from the slice prompt; the only
-question was *how* to expose it (export wrapper vs move the table) — chose the
+question was _how_ to expose it (export wrapper vs move the table) — chose the
 minimal non-breaking export wrapper.
 
 ### D4 — Refresh-on-ledger-write via a dedicated NATS subscriber
@@ -91,8 +91,8 @@ deployment, single-pathed refresh logic). See revisit list.
 ## Revisit once in use
 
 - **`control_drift_snapshots.CurrentResult` is always `"not_passing"`.** The
-  snapshot ledger records set membership only — it knows a control *left* the
-  passing set but not *why* (`fail` vs `stale`). AC-3 asks for "current
+  snapshot ledger records set membership only — it knows a control _left_ the
+  passing set but not _why_ (`fail` vs `stale`). AC-3 asks for "current
   evidence"; the endpoint currently returns `not_passing`. If the dashboard
   needs the fail-vs-stale distinction on the drift panel, enrich the drift
   report by joining the live `control_evaluations` / `evidence_freshness`
@@ -106,7 +106,7 @@ deployment, single-pathed refresh logic). See revisit list.
   window so a burst of ingests triggers one refresh. Not needed for the
   solo-operator v1 persona; revisit when a connector-heavy tenant appears.
 - **Drift "yesterday" when a day has no snapshot.** The window diff uses the
-  earliest and latest snapshot *that exist* in the window — if the scheduler
+  earliest and latest snapshot _that exist_ in the window — if the scheduler
   missed a day (process down across a 00:00 boundary for >1h is caught by the
   hourly tick-check, but a multi-day outage would leave gaps), the delta spans
   whatever days have snapshots. This is a reasonable degradation but the
@@ -125,9 +125,9 @@ deployment, single-pathed refresh logic). See revisit list.
 
 ## Confidence summary
 
-| Decision | Confidence |
-| -------- | ---------- |
-| D1 — drift definition (grain, stale-exclusion, snapshot mechanism) | high |
-| D2 — two tables, two RLS shapes | high |
-| D3 — reuse `eval.FreshnessMaxAge` | high |
-| D4 — refresh-on-write subscriber + daily scheduler | medium |
+| Decision                                                           | Confidence |
+| ------------------------------------------------------------------ | ---------- |
+| D1 — drift definition (grain, stale-exclusion, snapshot mechanism) | high       |
+| D2 — two tables, two RLS shapes                                    | high       |
+| D3 — reuse `eval.FreshnessMaxAge`                                  | high       |
+| D4 — refresh-on-write subscriber + daily scheduler                 | medium     |
