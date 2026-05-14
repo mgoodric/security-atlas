@@ -460,6 +460,11 @@ type Querier interface {
 	// middleware. Returns just the period UUIDs so the resolver can stuff
 	// them into input.user.attrs.audit_period_ids without joining anything.
 	GetAuditPeriodIDsForUser(ctx context.Context, arg GetAuditPeriodIDsForUserParams) ([]pgtype.UUID, error)
+	// Fetch one frozen brief by id. RLS scopes the lookup to the caller's
+	// tenant — a cross-tenant id returns ErrNoRows (the handler maps that to
+	// 404). The returned `content` + `narrative_md` are the verbatim frozen
+	// snapshot — AC-5 (re-fetch returns the original content).
+	GetBoardBriefByID(ctx context.Context, arg GetBoardBriefByIDParams) (BoardBrief, error)
 	// Returns the JSON-encoded applicability_expr for a single control. The column
 	// is TEXT (slice 002); slice 017 stores JSON in that text.
 	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)
@@ -599,6 +604,22 @@ type Querier interface {
 	// per ADR 0002 — computed by the application layer before this call. last4 is
 	// the last four characters of the plaintext bearer (safe to surface).
 	InsertAPIKey(ctx context.Context, arg InsertAPIKeyParams) (ApiKey, error)
+	// Slice 031: monthly board brief pinned-snapshot queries.
+	//
+	// The board brief is an append-only frozen snapshot (canvas §7.5). These
+	// queries are: one INSERT (generation), two reads (fetch by id, list), and
+	// the read-model inputs the Generator assembles a brief FROM — registered
+	// frameworks and a date-bounded top-risks read.
+	//
+	// Tenant scoping: `board_briefs` and `risks` are tenant-scoped — every query
+	// that touches them runs inside the request's `app.current_tenant` GUC set
+	// by tenancy.Middleware; RLS does the filtering. The `frameworks` catalog
+	// read intentionally has no tenant filter beyond the tenant_id predicate
+	// below (frameworks may be global `tenant_id IS NULL` or tenant-private).
+	// Append one generated brief. The table is append-only (slice 031 migration
+	// `_031`): there is no UPDATE/DELETE path. A re-generation for the same
+	// period_end is a NEW row with a NEW id — never an edit (AC anti-criterion).
+	InsertBoardBrief(ctx context.Context, arg InsertBoardBriefParams) (BoardBrief, error)
 	// Slice 012 — control state evaluation engine queries.
 	//
 	// `control_evaluations` is the append-only output table of the evaluation
@@ -809,6 +830,8 @@ type Querier interface {
 	// the period metadata so the /v1/me/audit-period(s) endpoint can render the
 	// full picture in one round trip.
 	ListAuditorAssignmentsForUser(ctx context.Context, arg ListAuditorAssignmentsForUserParams) ([]ListAuditorAssignmentsForUserRow, error)
+	// Enumerate every brief for the tenant, newest report-date first.
+	ListBoardBriefs(ctx context.Context, tenantID pgtype.UUID) ([]BoardBrief, error)
 	// ===== candidate-risk read (engine) =====
 	// The engine's candidate-risk query. Returns risks for the tenant that:
 	//   - carry the rule's target_theme (the text[] column `themes` contains
@@ -1017,6 +1040,10 @@ type Querier interface {
 	ListFrameworkScopesByFrameworkVersion(ctx context.Context, arg ListFrameworkScopesByFrameworkVersionParams) ([]FrameworkScope, error)
 	ListFrameworkVersionsBySlug(ctx context.Context, slug string) ([]FrameworkVersion, error)
 	ListFrameworks(ctx context.Context) ([]Framework, error)
+	// The registered frameworks the program runs against — both the global
+	// catalog (`tenant_id IS NULL`) and any tenant-private frameworks. Drives
+	// the per-framework posture rows in the brief (one row per framework).
+	ListFrameworksForTenant(ctx context.Context, tenantID pgtype.UUID) ([]Framework, error)
 	// Reverse traversal — given a requirement, return all SCF anchors it maps
 	// to with relationship type and strength. Joins through scf_anchors so the
 	// caller gets the scf_id + family + title in one round trip.
@@ -1147,6 +1174,18 @@ type Querier interface {
 	// rows invisible; the caller compares len(returned)==len(requested) for the
 	// existence check.
 	ListRisksByIDs(ctx context.Context, arg ListRisksByIDsParams) ([]Risk, error)
+	// Date-bounded top-risks read for the board brief's "top-3 risks aging"
+	// section. Board-package-owned (NOT the shared risks.sql ListRisks) so the
+	// parallel slice 066 — which extends ListRisks — stays conflict-free.
+	//
+	// Returns every risk whose treatment is still open (NOT 'accept' with a
+	// still-valid acceptance is the operator's call; here we include all risks
+	// and let the Generator rank by residual severity then age in Go — the
+	// residual_score JSONB shape is methodology-dependent, so the numeric
+	// extraction is done in Go, not a JSONB-path SQL expression that would trip
+	// pgx type inference). `created_at` lower bound is passed explicitly so pgx
+	// never has to infer a bare-placeholder type (SQLSTATE 42P08).
+	ListRisksForBoardBrief(ctx context.Context, arg ListRisksForBoardBriefParams) ([]Risk, error)
 	// AC-3: risks linked to one control via slice 020's risk_control_links.
 	// One join from the link table to risks; the per-link design_score is the
 	// human-set design-quality factor surfaced as link_weight (decisions log

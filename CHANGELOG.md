@@ -46,6 +46,21 @@ auto-generated notes.
   `UNION ALL`. All endpoints are tenant-scoped through RLS, role-gated
   for dashboard/program-read access, and keyset-paginated where
   applicable. Read-only over existing schema — no migration.
+- **board:** monthly board brief — templated, no LLM (#031) — generates a
+  single-page, board-ready posture snapshot (per-framework posture, control
+  drift over the last 30 days, top-3 risks aging) and persists it as a
+  PINNED, IMMUTABLE snapshot. `POST /v1/board-briefs` with a `period_end`
+  generates a brief; `GET /v1/board-briefs/{id}` returns the frozen content
+  verbatim (re-fetching after live state changes returns the original — the
+  snapshot is immutable); `GET /v1/board-briefs/{id}.md` and `.../{id}/pdf`
+  download Markdown and PDF for paste into the deck. The narrative is
+  rendered via Go `text/template` over the structured metrics — there is no
+  LLM dependency anywhere in the path. Adds the `board_briefs` table
+  (migration `_031`), append-only by construction: `tenant_read` +
+  `tenant_write` RLS policies only under FORCE ROW LEVEL SECURITY, so a
+  re-generation is a new row, never an edit. PDF is rendered on demand via
+  the existing chromedp path (no new dependency); the endpoint degrades to
+  503 when Chrome is unavailable.
 - **controls:** control-detail backend read endpoints (#064) — four
   per-control read paths that fill the binding placeholders slice 041's
   control-detail view shipped: `GET /v1/evidence?control_id=` (paginated
