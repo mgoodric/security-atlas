@@ -9,6 +9,14 @@ Conventional-Commit messages. This file holds pre-release / unreleased
 work and any narrative entries the operator wants alongside the
 auto-generated notes.
 
+## [1.2.0](https://github.com/mgoodric/security-atlas/compare/v1.1.0...v1.2.0) (2026-05-14)
+
+
+### Features
+
+* **controls:** control state evaluation engine ([#012](https://github.com/mgoodric/security-atlas/issues/012)) ([#89](https://github.com/mgoodric/security-atlas/issues/89)) ([2a07bdc](https://github.com/mgoodric/security-atlas/commit/2a07bdca697115d6982246a77bb3f46f7450a1ff))
+* **infra:** docker-compose self-host bundle ([#037](https://github.com/mgoodric/security-atlas/issues/037)) ([#88](https://github.com/mgoodric/security-atlas/issues/88)) ([42660e9](https://github.com/mgoodric/security-atlas/commit/42660e9a997bdc50e8abb6b5fba3bd79445f4662))
+
 ## [1.1.0](https://github.com/mgoodric/security-atlas/compare/v1.0.0...v1.1.0) (2026-05-14)
 
 
