@@ -13,6 +13,24 @@ auto-generated notes.
 
 ### Added
 
+- **frontend:** hierarchical risk dashboard view (#056) — a new
+  `/risks/hierarchy` route, the CISO / program-lead surface for the
+  multi-level risk + Decision Log work in slices 052-055. Three panels,
+  each owning its own TanStack Query so a slow or failing endpoint
+  degrades only that panel (extends the slice 040 pattern): an **org
+  tree** (collapsible `org_unit` hierarchy bound to `GET /v1/org_units`),
+  a **theme heatmap** (`themes × org_units` CSS grid with real axes from
+  `GET /v1/themes` + `GET /v1/org_units`, defaults ordered left of
+  tenant-private themes, cell-hover tooltips citing real aggregation-rule
+  thresholds from `GET /v1/aggregation-rules`), and a **decision
+  timeline** (fully bound to `GET /v1/decisions` + `/overdue` — sorted
+  list, amber "Revisit overdue" pills, URL-deep-linkable status /
+  constraints / decision_maker / revisit-range filters). Per-org_unit
+  risk counts and the `themes × org_units` cell-count aggregation have no
+  endpoint on main yet — those render endpoint-naming placeholders rather
+  than fabricated data (slice 040/041 precedent). Pure frontend, no
+  migration. See `docs/audit-log/056-hierarchical-risk-dashboard-decisions.md`
+  for the backend gap inventory.
 - **controls:** control-detail backend read endpoints (#064) — four
   per-control read paths that fill the binding placeholders slice 041's
   control-detail view shipped: `GET /v1/evidence?control_id=` (paginated
