@@ -500,5 +500,13 @@ jobs:
       - name: Dump compose logs on failure
         if: failure()
         run: |
+          # `--env-file` is required even for `logs`: docker-compose.yml
+          # uses `${VAR:?}` required-variable guards (POSTGRES_PASSWORD,
+          # MINIO_ROOT_USER, ...), so a bare `docker compose ... logs`
+          # aborts with "required variable ... is missing a value"
+          # before printing anything. The harness writes .env.test and
+          # only removes it in its own EXIT trap, so it is still present
+          # when this failure step runs.
           docker compose -f deploy/docker/docker-compose.yml \
+            --env-file deploy/docker/.env.test \
             -p "sa-selfhost-${{ matrix.mode }}" logs || true

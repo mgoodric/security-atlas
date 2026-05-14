@@ -1,17 +1,28 @@
 -- security-atlas — role bootstrap. Run ONCE per database before applying
 -- versioned migrations.
 --
+-- This file is idempotent (every CREATE ROLE / GRANT is IF-NOT-EXISTS
+-- guarded), so it is safe to run more than once. The docker-compose
+-- self-host bundle relies on that: it mounts this file into the postgres
+-- container's /docker-entrypoint-initdb.d/, so the three roles are
+-- created at cluster init as the superuser — and then bootstrap.sh phase
+-- 2 re-runs it as atlas_migrate as a clean no-op. See slice-065 decision
+-- 10 (docs/audit-log/065-self-host-bundle-p0-fixes-decisions.md).
+--
 -- Three roles:
 --   atlas_migrate          — used by Atlas for DDL. BYPASSRLS so it can apply
 --                            schema changes against tables that have FORCE
 --                            ROW LEVEL SECURITY. No application code path
 --                            should ever connect as this role. Slice 065
---                            also grants it CREATEROLE + ADMIN OPTION on
+--                            also gives it CREATEROLE + ADMIN OPTION on
 --                            atlas_app so first-boot can set atlas_app's
 --                            password on a shared cluster — see the bug #4
---                            note below. This is the role's ONLY privilege
---                            beyond DDL, and it is scoped to atlas_app
---                            alone.
+--                            note below. On a shared cluster the operator
+--                            grants atlas_migrate BYPASSRLS + CREATEROLE in
+--                            one one-time ALTER ROLE; this widens it beyond
+--                            pure DDL only as far as managing atlas_app's
+--                            password, and the only role it holds ADMIN
+--                            OPTION on is atlas_app.
 --   atlas_app              — used by application + integration tests.
 --                            NOSUPERUSER and NOBYPASSRLS so the RLS policies
 --                            are actually enforced.
@@ -55,13 +66,31 @@
 -- itself is UNCHANGED: still NOSUPERUSER NOBYPASSRLS (anti-criterion P0).
 --
 -- IMPORTANT for shared-cluster operators: a non-superuser role cannot grant
--- ITSELF the CREATEROLE attribute. If you pre-create atlas_migrate on a
--- shared cluster as a non-superuser, you (the cluster admin) must grant it
--- CREATEROLE up front — e.g. `ALTER ROLE atlas_migrate CREATEROLE;` run as
--- a superuser. The DO block below is conditional: when atlas_migrate
--- already has CREATEROLE the ALTER is skipped entirely, and only the
--- WITH ADMIN OPTION grant (which atlas_migrate CAN perform on itself once
--- it holds CREATEROLE) runs.
+-- ITSELF the BYPASSRLS or CREATEROLE attributes. If you pre-create
+-- atlas_migrate on a shared cluster as a non-superuser, you (the cluster
+-- admin) must grant it BOTH up front in one one-time statement run as a
+-- superuser:
+--
+--   ALTER ROLE atlas_migrate BYPASSRLS CREATEROLE;
+--
+-- Both are required:
+--   - BYPASSRLS — PG16 only permits a role that itself has BYPASSRLS to
+--     CREATE another BYPASSRLS role, and the DO block below creates
+--     atlas_service_account WITH BYPASSRLS. Without it, this script dies at
+--     that CREATE ROLE with "permission denied to create role". This is not
+--     a privilege widening: atlas_migrate is a BYPASSRLS role BY DESIGN
+--     (the CREATE ROLE just below makes it `LOGIN BYPASSRLS` on a dedicated
+--     cluster), because the self-host bootstrap connects as atlas_migrate
+--     for the cross-tenant boot-time writes.
+--   - CREATEROLE — lets atlas_migrate create atlas_app (gaining implicit
+--     ADMIN on it) so the ALTER ROLE atlas_app PASSWORD in bootstrap.sh
+--     succeeds.
+-- Together they make the shared-cluster atlas_migrate identical to the
+-- dedicated-container atlas_migrate. The DO block below is conditional:
+-- when atlas_migrate already has CREATEROLE the ALTER is skipped, and only
+-- the WITH ADMIN OPTION grant (which atlas_migrate CAN perform on itself
+-- once it holds CREATEROLE) runs. The slice-065 end-to-end harness's
+-- `external` mode exercises exactly this pre-created-non-superuser path.
 
 DO $$
 BEGIN
@@ -103,11 +132,11 @@ BEGIN
     -- Slice 065 bug #4: ensure atlas_migrate can manage atlas_app's
     -- password on a shared cluster. Conditional so it is a no-op when the
     -- attribute is already present (e.g. the dedicated-container case, or a
-    -- shared-cluster operator who pre-granted CREATEROLE). On a shared
-    -- cluster where atlas_migrate is a non-superuser WITHOUT CREATEROLE,
-    -- this ALTER will itself raise `permission denied` — that is the
-    -- intended signal that the cluster admin must grant CREATEROLE
-    -- out-of-band first (see the header comment).
+    -- shared-cluster operator who pre-granted BYPASSRLS + CREATEROLE). On a
+    -- shared cluster where atlas_migrate is a non-superuser WITHOUT
+    -- CREATEROLE, this ALTER will itself raise `permission denied` — that
+    -- is the intended signal that the cluster admin must grant
+    -- BYPASSRLS + CREATEROLE out-of-band first (see the header comment).
     IF NOT (SELECT rolcreaterole FROM pg_roles WHERE rolname = 'atlas_migrate') THEN
         ALTER ROLE atlas_migrate CREATEROLE;
     END IF;

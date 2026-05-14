@@ -56,31 +56,69 @@ enum is already gone. Matches the per-migration `.down.sql` convention.
 
 **Confidence: high.**
 
-### 4. CREATEROLE on `atlas_migrate` — conditional `DO` block; shared-cluster operators pre-grant
+### 4. Shared-cluster `atlas_migrate` — one-time `BYPASSRLS + CREATEROLE` grant; conditional `DO` block
 
-**The subtlety:** a non-superuser role cannot grant ITSELF `CREATEROLE`.
-On a dedicated `postgres:16-alpine` container with trust auth,
-`atlas_migrate` effectively stands in for the superuser and
-`ALTER ROLE atlas_migrate CREATEROLE` just works. On a genuinely shared
-cluster where `atlas_migrate` is pre-created as a non-superuser, that
-`ALTER` is itself permission-denied.
+**Original framing (CREATEROLE only) was incomplete — corrected during
+the CI-greening follow-up.** A non-superuser role cannot grant ITSELF
+`CREATEROLE` _or_ `BYPASSRLS`. On a dedicated `postgres:16-alpine`
+container, `01-roles.sql` creates `atlas_migrate` as `LOGIN BYPASSRLS`
+directly. On a genuinely shared cluster, `atlas_migrate` is pre-created
+by the operator as a plain non-superuser and the cluster admin must
+widen it.
 
-**Chosen:** the `DO` block in `01-roles.sql` is conditional —
+**The puzzle the CI `external` mode surfaced:** the first cut of the CI
+harness pre-created `atlas_migrate` as `NOSUPERUSER` and granted it only
+`CREATEROLE`. `01-roles.sql` then failed — but NOT on
+`GRANT atlas_app TO atlas_migrate WITH ADMIN OPTION` (that statement is
+fine: `atlas_migrate` creates `atlas_app` in the same `DO` block and is
+therefore implicitly its admin). It failed at
+`CREATE ROLE atlas_service_account ... BYPASSRLS`: PG16 only lets a role
+that itself has the `BYPASSRLS` attribute create another `BYPASSRLS`
+role. The error surfaces as the misleading `permission denied to create
+role`, with `DETAIL: Only roles with the BYPASSRLS attribute may create
+roles with the BYPASSRLS attribute`.
+
+**Chosen:** the documented one-time cluster-admin grant is
+`ALTER ROLE atlas_migrate BYPASSRLS CREATEROLE` — both attributes, in
+one statement. This is **not** a privilege widening beyond the
+dedicated-container case: it makes the shared-cluster `atlas_migrate`
+_identical_ to the dedicated-container `atlas_migrate`, which is
+`LOGIN BYPASSRLS` by design (the self-host bootstrap connects as
+`atlas_migrate` for the cross-tenant boot-time writes — see
+`bootstrap.sh`'s header). `CREATEROLE` then lets it create `atlas_app`
+and hold implicit ADMIN on it so `bootstrap.sh` phase 2.5's
+`ALTER ROLE atlas_app PASSWORD` succeeds.
+
+The `DO` block in `01-roles.sql` stays conditional —
 `IF NOT rolcreaterole THEN ALTER ROLE atlas_migrate CREATEROLE`. When the
-shared-cluster operator has already granted `CREATEROLE` (documented as a
-required one-time cluster-admin step in the file header and exercised by
-the CI `external` mode), the `ALTER` is skipped and only the
-`GRANT atlas_app TO atlas_migrate WITH ADMIN OPTION` runs — which
-`atlas_migrate` CAN perform on itself once it holds `CREATEROLE`. If the
-operator has NOT pre-granted it, the `ALTER` raises a clear
-permission-denied error, which is the correct signal.
+operator has pre-granted `BYPASSRLS + CREATEROLE` (documented in the
+`01-roles.sql` header, exercised by the CI `external` mode), the `ALTER`
+is skipped and only the `WITH ADMIN OPTION` grant runs. If the operator
+pre-granted nothing, the conditional `ALTER` raises a clear
+permission-denied error — the correct signal.
 
 `atlas_app` is unchanged — still `NOSUPERUSER NOBYPASSRLS` (anti-criterion
-P0). The widening of `atlas_migrate` is scoped: the only role it holds
-ADMIN OPTION on is `atlas_app`.
+P0; verified `rolbypassrls = f`, `rolsuper = f` post-fix). `atlas_migrate`
+does NOT become superuser (`rolsuper = f` post-fix). The widening is
+scoped: the only role `atlas_migrate` holds ADMIN OPTION on is
+`atlas_app`.
 
-**Confidence: high.** The CI `external`-mode job exercises exactly this
-pre-created-non-superuser path.
+**Why the soundest of the brief's three options:** option (b)
+"restructure so `atlas_migrate` creates `atlas_app`" is what already
+happens and was never the failure. Option (a)/(c) "have the harness's
+cluster-admin step grant more" is the right shape — and the _minimal_
+correct "more" is exactly `BYPASSRLS`, the attribute `01-roles.sql`
+itself already assigns `atlas_migrate` on a dedicated cluster. No new
+asymmetry between the two deploy shapes; no `atlas_app` change; no
+superuser.
+
+**Confidence: high.** Reproduced locally against `postgres:16-alpine`:
+with the pre-created `NOSUPERUSER` `atlas_migrate` granted only
+`CREATEROLE`, `01-roles.sql` exits 3 at the `atlas_service_account`
+`CREATE ROLE`; granted `BYPASSRLS CREATEROLE` it runs to exit 0, the
+subsequent `ALTER ROLE atlas_app PASSWORD` as `atlas_migrate` succeeds,
+a re-run of `01-roles.sql` is idempotent, and `pg_roles` confirms
+`atlas_app` = `NOSUPERUSER NOBYPASSRLS`, `atlas_migrate` = not superuser.
 
 ### 5. AC-3 — bootstrap credential issuance needs NO change; it is in-memory
 
@@ -202,16 +240,110 @@ during development); callers `defer tx.Rollback(ctx)` instead.
 **Confidence: high.** Caught and fixed the `pool.Close()` deadlock; full
 suite is green.
 
+### 10. Bundled-mode first boot — `01-roles.sql` via initdb + `POSTGRES_HOST_AUTH_METHOD` default
+
+**Discovered during the CI-greening follow-up.** The `bundled` matrix
+mode of `test-self-host-bundle.sh` failed with `atlas-bootstrap` looping
+60× on "Postgres not reachable" then exiting 1. There were TWO stacked
+root causes — both in the bundled deploy shape, neither exercised before
+this slice added the end-to-end harness.
+
+**Cause A — role-bootstrap chicken-and-egg (the primary blocker).**
+`bootstrap.sh` connects to Postgres ONLY as `atlas_migrate`
+(`DATABASE_URL` = `DATABASE_URL_MIGRATE`). On a fresh bundled `pg-data`
+volume that role does not exist yet — and nothing creates it before
+`bootstrap.sh` runs, because `bootstrap.sh` is itself what runs
+`01-roles.sql`, and it tries to do so _as_ `atlas_migrate`. Phase 1's
+wait-for-Postgres loop therefore fails every attempt with `role
+"atlas_migrate" does not exist` and times out. `atlas-bootstrap` cannot
+create the role it needs in order to connect.
+
+**Cause B — auth method.** Even once the role exists, the bundled
+`DATABASE_URL_MIGRATE` is **password-less** (matching `.env.example`,
+which documents `atlas_migrate` "authenticates via trust on the container
+network"), but `postgres:16-alpine` with `POSTGRES_PASSWORD` set and
+`POSTGRES_HOST_AUTH_METHOD` **unset** writes `host all all all
+scram-sha-256` into `pg_hba.conf`, so the cross-container connection is
+rejected with `fe_sendauth: no password supplied`. The
+"trust-on-the-docker-network auth" the compose header + `.env.example`
+both describe was documented but never wired.
+
+**Options considered for Cause A:**
+
+- **(A1)** Give `bootstrap.sh` a superuser DSN and run `01-roles.sql`
+  as `postgres`. Rejected: the `atlas-bootstrap` compose service is
+  deliberately not handed superuser credentials, and adding them widens
+  its blast radius for every boot.
+- **(A2)** Have `bootstrap.sh` connect as `postgres` for phases 1–2
+  only. Rejected: same credential-widening problem; also a larger
+  `bootstrap.sh` restructure than a targeted fix should make.
+- **(A3)** Mount `migrations/bootstrap/01-roles.sql` into the postgres
+  container's `/docker-entrypoint-initdb.d/`. The postgres image runs
+  every file there ONCE at cluster init as the superuser — exactly the
+  right time and privilege to create the three roles. `01-roles.sql` is
+  fully `IF NOT EXISTS`-guarded, so `bootstrap.sh` phase 2 re-running it
+  as `atlas_migrate` is a clean no-op. **Chosen.**
+
+**Chosen: A3 + (for Cause B) `POSTGRES_HOST_AUTH_METHOD:
+${POSTGRES_HOST_AUTH_METHOD:-trust}` on the postgres service.** Both
+needs no schema change and no new credential. The compose `postgres`
+service gains a `${PG_INITDB_ROLES:-../../migrations/bootstrap/01-roles.sql}`
+bind-mount into `/docker-entrypoint-initdb.d/01-roles.sql`, so the
+**shipped bundle is self-bootstrapping**. Both knobs are overridable per
+deploy shape, and the slice-065 harness drives them via `.env.test`:
+
+- `bundled`: `POSTGRES_HOST_AUTH_METHOD=trust`,
+  `PG_INITDB_ROLES=../../migrations/bootstrap/01-roles.sql` (the compose
+  default — roles created at init, trust auth on the docker network).
+- `external`: `POSTGRES_HOST_AUTH_METHOD=` (empty → the postgres image
+  falls back to `scram-sha-256`), `PG_INITDB_ROLES=/dev/null` (an empty
+  no-op initdb script). This keeps the `external` mode's test premise
+  intact: the harness's _own_ `CREATE ROLE atlas_migrate ... NOSUPERUSER`
+  step is what creates the role, exactly as a shared-cluster admin would.
+
+The harness writes both into `.env.test` rather than passing inline
+`VAR=… docker compose` prefixes so EVERY compose invocation in a run —
+the external-mode `up -d postgres`, the full-bundle `up -d --build`, the
+idempotency `run --rm`, the failure-log `logs`, the teardown `down` —
+sees a consistent value via `--env-file`. Shared-cluster operators do
+not run the bundled `postgres` service at all, so neither knob affects
+them.
+
+**Confidence: high.** Reproduced locally against `postgres:16-alpine`:
+(a) a fresh DB with `01-roles.sql` in `/docker-entrypoint-initdb.d/`
+creates all three roles at init with the correct attributes
+(`atlas_migrate` BYPASSRLS+CREATEROLE, `atlas_app` NOSUPERUSER
+NOBYPASSRLS) and `atlas_migrate` can then connect password-less over the
+docker network under `trust`; (b) `/dev/null` mounted as the initdb
+script is a clean no-op (zero `atlas%` roles created); (c)
+`POSTGRES_HOST_AUTH_METHOD` unset → scram (rejects the password-less
+connection), `=trust` → accepts it, `=` empty → scram — i.e. external
+mode's auth posture is unchanged.
+
 ## Revisit once in use
 
 - **Decision 6 (ledger):** if a future slice adopts a real migration tool
   (Atlas/golang-migrate), the `schema_migrations` table created here
   should be reconciled with — or handed over to — that tool. The shape
   (`filename` PK + `applied_at`) is deliberately tool-agnostic.
-- **Decision 4 (CREATEROLE):** the shared-cluster pre-grant requirement is
+- **Decision 4 (BYPASSRLS + CREATEROLE):** the shared-cluster pre-grant
+  requirement (`ALTER ROLE atlas_migrate BYPASSRLS CREATEROLE`) is
   documented in the `01-roles.sql` header and exercised by CI, but it is
   not yet in `docs/SELF_HOSTING.md`. Add it there when the external-DB
   upgrade path gets a dedicated docs section.
+- **Decision 10 (initdb roles + `POSTGRES_HOST_AUTH_METHOD`):** the
+  bundled bundle now (a) mounts `01-roles.sql` into the postgres
+  container's `/docker-entrypoint-initdb.d/` so the roles exist before
+  `bootstrap.sh` connects, and (b) defaults the postgres container to
+  `trust` auth on the docker network — which is what the password-less
+  `.env.example` `DATABASE_URL_MIGRATE` always implicitly required. When
+  the external-DB upgrade path gets a docs section, document that
+  operators pointing at a non-bundled cluster set a real
+  `DATABASE_URL_MIGRATE` password, pre-create the roles themselves, and
+  simply do not run the bundled `postgres` service (so neither
+  `PG_INITDB_ROLES` nor `POSTGRES_HOST_AUTH_METHOD` applies to them). If
+  a future slice adds a real migration runner, fold the initdb
+  role-bootstrap into its first-run step.
 - **Decision 8 (CI job not required):** promote `test-self-host-bundle` to
   a required check once it has a stable green history; add the
   matrix-named stub siblings at that point.

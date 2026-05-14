@@ -46,10 +46,54 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
       POSTGRES_DB: ${POSTGRES_DB:-security_atlas}
+      # Slice 065 bug #2 — bundled-mode auth.
+      #
+      # The bundled bundle's atlas_migrate DSN (.env.example
+      # DATABASE_URL_MIGRATE) carries NO password — it relies on
+      # "trust-on-the-docker-network auth", which this header and
+      # .env.example both document. But postgres:16-alpine with
+      # POSTGRES_PASSWORD set and POSTGRES_HOST_AUTH_METHOD UNSET writes
+      # `host all all all scram-sha-256` into pg_hba.conf, so the
+      # password-less atlas-bootstrap connection is rejected with
+      # `fe_sendauth: no password supplied` and bootstrap's
+      # wait-for-Postgres loop times out. Defaulting this to `trust`
+      # wires the auth posture the bundle already documents. Operators
+      # pointing at an EXTERNAL cluster set DATABASE_URL_MIGRATE with a
+      # real password and can override this to `scram-sha-256` (or empty
+      # — the postgres image then falls back to scram); the slice-065
+      # end-to-end harness exercises both via .env.test.
+      #
+      # `:-` vs `-`: the `-` (no colon) form is deliberate. The harness's
+      # external mode sets POSTGRES_HOST_AUTH_METHOD to an EXPLICIT empty
+      # string; `${VAR-default}` honours an explicit empty value (only an
+      # entirely-unset VAR falls back to `trust`), whereas `${VAR:-default}`
+      # would override the empty value back to `trust` and break external
+      # mode.
+      POSTGRES_HOST_AUTH_METHOD: ${POSTGRES_HOST_AUTH_METHOD-trust}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pg-data:/var/lib/postgresql/data
+      # Slice 065 bug #2 (part 2) — role-bootstrap chicken-and-egg.
+      #
+      # atlas-bootstrap connects to Postgres ONLY as atlas_migrate
+      # (DATABASE_URL = DATABASE_URL_MIGRATE). On a fresh bundled volume
+      # that role does not exist yet, so bootstrap.sh's wait-for-Postgres
+      # loop never connects ("role atlas_migrate does not exist") and
+      # times out — atlas-bootstrap cannot create the role it needs to
+      # connect as. The postgres image runs every file in
+      # /docker-entrypoint-initdb.d ONCE at cluster init as the superuser,
+      # which is exactly the right place to create the three roles.
+      # 01-roles.sql is fully IF-NOT-EXISTS-guarded, so bootstrap.sh phase
+      # 2 re-running it as atlas_migrate stays a clean no-op.
+      #
+      # PG_INITDB_ROLES defaults to the repo's 01-roles.sql so the shipped
+      # bundle is self-bootstrapping. The slice-065 end-to-end harness's
+      # `external` mode points it at /dev/null instead (an empty no-op
+      # initdb script) so that mode keeps its "atlas_migrate is
+      # pre-created by the cluster admin as a non-superuser" test premise.
+      # Shared-cluster operators do not run this `postgres` service at all.
+      - ${PG_INITDB_ROLES:-../../migrations/bootstrap/01-roles.sql}:/docker-entrypoint-initdb.d/01-roles.sql:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 5s
