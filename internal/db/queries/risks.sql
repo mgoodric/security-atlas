@@ -77,6 +77,64 @@ SELECT COUNT(*)::bigint
 FROM risk_control_links
 WHERE tenant_id = $1 AND risk_id = $2;
 
+-- name: ListRiskControlLinkWeights :many
+-- Slice 020: returns each control link for a risk WITH the per-link
+-- effectiveness weighting columns (migration `_029`). The residual derivation
+-- reads design_score + the three weights here; operational_score and
+-- coverage_score are computed at read time from the evaluation ledger and are
+-- never stored on the link row (caching a derived score beyond its staleness
+-- threshold is a P0 anti-criterion).
+SELECT control_id, design_score, weight_design, weight_operation,
+       weight_coverage, created_at
+FROM risk_control_links
+WHERE tenant_id = $1 AND risk_id = $2
+ORDER BY created_at ASC, control_id ASC;
+
+-- name: GetRiskControlLink :one
+-- Slice 020: one link row by (risk, control). Used to confirm a link exists
+-- before returning its effectiveness breakdown.
+SELECT control_id, design_score, weight_design, weight_operation,
+       weight_coverage, created_at
+FROM risk_control_links
+WHERE tenant_id = $1 AND risk_id = $2 AND control_id = $3;
+
+-- name: LinkRiskControlWithWeights :exec
+-- Slice 020: link a control to a risk with explicit effectiveness weights.
+-- Idempotent: ON CONFLICT updates the weights so a re-link with new weights
+-- is an update, not a 23505. The slice-019 LinkRiskControl (no weights) stays
+-- for the create-risk path — it relies on the column DEFAULTs.
+INSERT INTO risk_control_links (
+    risk_id, control_id, tenant_id,
+    design_score, weight_design, weight_operation, weight_coverage
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (tenant_id, risk_id, control_id) DO UPDATE
+SET design_score     = EXCLUDED.design_score,
+    weight_design    = EXCLUDED.weight_design,
+    weight_operation = EXCLUDED.weight_operation,
+    weight_coverage  = EXCLUDED.weight_coverage;
+
+-- name: ListRiskIDsLinkedToControl :many
+-- Slice 020: every risk in the tenant that links the given control. The
+-- evidence-ingest residual subscriber uses this to find which risks must be
+-- recomputed when a control's state changes.
+SELECT risk_id
+FROM risk_control_links
+WHERE tenant_id = $1 AND control_id = $2
+ORDER BY risk_id ASC;
+
+-- name: UpdateRiskResidual :one
+-- Slice 020: writes the freshly-derived residual_score JSONB onto a risk.
+-- This is the ONLY column the residual derivation mutates — it never touches
+-- inherent_score, never touches evidence (constitutional invariant #2). The
+-- $3 parameter is cast to jsonb explicitly so sqlc does not borrow the
+-- bytea-via-JSONB inference and force an awkward caller type.
+UPDATE risks
+SET residual_score = sqlc.arg(residual_score)::jsonb,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
 -- name: UpdateRiskThemes :one
 -- Replaces the themes array on a risk. The application validates that every
 -- supplied theme is in the visible vocabulary (defaults + tenant-private)

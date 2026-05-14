@@ -19,6 +19,17 @@ import (
 // a sentinel (not pgx.ErrNoRows) so callers do not need to import pgx.
 var ErrNotFound = errors.New("risk: not found")
 
+// ErrControlNotFound is returned by LinkControl when the control id does not
+// resolve within the active tenant. Distinct from ErrNotFound (the risk) so
+// the HTTP layer can phrase the 404 precisely. Slice 020.
+var ErrControlNotFound = errors.New("risk: control not found")
+
+// ErrLinkWeightOutOfRange is returned by LinkControl when a supplied
+// design_score or weight is outside [0,1]. The DB CHECK constraints
+// (migration `_029`) are the defense-in-depth peer; this is the primary
+// validation so the API returns a 400 rather than a raw 23514. Slice 020.
+var ErrLinkWeightOutOfRange = errors.New("risk: link weight must be between 0 and 1")
+
 // Store wraps the sqlc Queries with the tenancy plumbing required for RLS.
 // Same shape as scope.Store: every method opens a tx, applies the tenant GUC,
 // runs queries inside that transaction.
@@ -253,6 +264,133 @@ func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 		}
 		return nil
 	})
+}
+
+// LinkControlInput is the API-shape for POST /v1/risks/{id}/controls. The
+// three weights + design_score are optional: when DesignScoreSet / WeightsSet
+// are false the migration `_029` column DEFAULTs apply (design 0.5, weights
+// 0.3/0.5/0.2). Slice 020.
+type LinkControlInput struct {
+	RiskID    uuid.UUID
+	ControlID uuid.UUID
+
+	DesignScore    float64
+	DesignScoreSet bool
+
+	WeightDesign    float64
+	WeightOperation float64
+	WeightCoverage  float64
+	WeightsSet      bool
+}
+
+// LinkControl links a control to a risk (AC-1). Validates that BOTH the risk
+// and the control exist within the active tenant before writing the link —
+// the composite FK on risk_control_links would also reject a bad id, but
+// resolving here lets the HTTP layer return a precise 404 (risk vs control)
+// instead of a raw 23503. Idempotent: re-linking the same control updates the
+// per-link weights rather than 23505-ing.
+//
+// When no weights are supplied (DesignScoreSet / WeightsSet both false), the
+// slice-019 weight-free LinkRiskControl query is used so the migration `_029`
+// column DEFAULTs apply. When any are supplied, LinkRiskControlWithWeights
+// writes the explicit values (the unsupplied ones in that group default to
+// their migration `_029` value via the input zero-value being overridden
+// below).
+func (s *Store) LinkControl(ctx context.Context, in LinkControlInput) error {
+	// Primary validation — DB CHECK is defense-in-depth.
+	for _, v := range []struct {
+		set bool
+		val float64
+	}{
+		{in.DesignScoreSet, in.DesignScore},
+		{in.WeightsSet, in.WeightDesign},
+		{in.WeightsSet, in.WeightOperation},
+		{in.WeightsSet, in.WeightCoverage},
+	} {
+		if v.set && (v.val < 0 || v.val > 1) {
+			return ErrLinkWeightOutOfRange
+		}
+	}
+
+	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		// The risk must exist in-tenant (AC-1: link on unknown risk -> 404).
+		if _, err := q.GetRiskByID(ctx, dbx.GetRiskByIDParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(in.RiskID),
+		}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("link control: get risk: %w", err)
+		}
+		// The control must exist in-tenant (AC-1: link unknown control -> 404).
+		if _, err := q.GetControlByID(ctx, dbx.GetControlByIDParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(in.ControlID),
+		}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrControlNotFound
+			}
+			return fmt.Errorf("link control: get control: %w", err)
+		}
+
+		if !in.DesignScoreSet && !in.WeightsSet {
+			// No weights supplied — let the migration `_029` DEFAULTs apply.
+			if err := q.LinkRiskControl(ctx, dbx.LinkRiskControlParams{
+				RiskID:    pgUUID(in.RiskID),
+				ControlID: pgUUID(in.ControlID),
+				TenantID:  pgUUID(tenantID),
+			}); err != nil {
+				return fmt.Errorf("link control: %w", err)
+			}
+			return nil
+		}
+
+		// At least one weight supplied — write explicit values. Unsupplied
+		// values in the group fall back to the migration `_029` defaults so a
+		// caller setting only design_score does not zero the weights.
+		design := defaultIfUnset(in.DesignScoreSet, in.DesignScore, 0.5)
+		wDesign := defaultIfUnset(in.WeightsSet, in.WeightDesign, 0.3)
+		wOper := defaultIfUnset(in.WeightsSet, in.WeightOperation, 0.5)
+		wCover := defaultIfUnset(in.WeightsSet, in.WeightCoverage, 0.2)
+
+		designN, err := floatToNumeric(design)
+		if err != nil {
+			return err
+		}
+		wDesignN, err := floatToNumeric(wDesign)
+		if err != nil {
+			return err
+		}
+		wOperN, err := floatToNumeric(wOper)
+		if err != nil {
+			return err
+		}
+		wCoverN, err := floatToNumeric(wCover)
+		if err != nil {
+			return err
+		}
+		if err := q.LinkRiskControlWithWeights(ctx, dbx.LinkRiskControlWithWeightsParams{
+			RiskID:          pgUUID(in.RiskID),
+			ControlID:       pgUUID(in.ControlID),
+			TenantID:        pgUUID(tenantID),
+			DesignScore:     designN,
+			WeightDesign:    wDesignN,
+			WeightOperation: wOperN,
+			WeightCoverage:  wCoverN,
+		}); err != nil {
+			return fmt.Errorf("link control with weights: %w", err)
+		}
+		return nil
+	})
+}
+
+// defaultIfUnset returns val when set is true, otherwise def.
+func defaultIfUnset(set bool, val, def float64) float64 {
+	if set {
+		return val
+	}
+	return def
 }
 
 // inTx is the same plumbing as scope.Store.inTx — sets the tenant GUC inside

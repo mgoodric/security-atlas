@@ -1350,10 +1350,14 @@ type RiskAggregation struct {
 }
 
 type RiskControlLink struct {
-	RiskID    pgtype.UUID        `json:"risk_id"`
-	ControlID pgtype.UUID        `json:"control_id"`
-	TenantID  pgtype.UUID        `json:"tenant_id"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	RiskID          pgtype.UUID        `json:"risk_id"`
+	ControlID       pgtype.UUID        `json:"control_id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	DesignScore     pgtype.Numeric     `json:"design_score"`
+	WeightDesign    pgtype.Numeric     `json:"weight_design"`
+	WeightOperation pgtype.Numeric     `json:"weight_operation"`
+	WeightCoverage  pgtype.Numeric     `json:"weight_coverage"`
 }
 
 type Sample struct {

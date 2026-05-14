@@ -489,6 +489,9 @@ type Querier interface {
 	// and would force the caller to pass []byte).
 	GetRiskByAggregationKey(ctx context.Context, arg GetRiskByAggregationKeyParams) (Risk, error)
 	GetRiskByID(ctx context.Context, arg GetRiskByIDParams) (Risk, error)
+	// Slice 020: one link row by (risk, control). Used to confirm a link exists
+	// before returning its effectiveness breakdown.
+	GetRiskControlLink(ctx context.Context, arg GetRiskControlLinkParams) (GetRiskControlLinkRow, error)
 	// Idempotency lookup: find the meta-risk a rule already created for a
 	// given (rule_id, window_start) window. The key is stored on the
 	// meta-risk's inherent_score JSONB as 'aggregation_key' (slice 053
@@ -622,6 +625,11 @@ type Querier interface {
 	// Idempotent: ON CONFLICT DO NOTHING so re-running a "link these controls"
 	// request does not 23505 on a re-link.
 	LinkRiskControl(ctx context.Context, arg LinkRiskControlParams) error
+	// Slice 020: link a control to a risk with explicit effectiveness weights.
+	// Idempotent: ON CONFLICT updates the weights so a re-link with new weights
+	// is an update, not a 23505. The slice-019 LinkRiskControl (no weights) stays
+	// for the create-risk path — it relies on the column DEFAULTs.
+	LinkRiskControlWithWeights(ctx context.Context, arg LinkRiskControlWithWeightsParams) error
 	// Active keys for a tenant. Excludes revoked rows; includes retired-but-not-yet-
 	// past-grace predecessors so the admin UI can show "rotating out — valid until X."
 	ListAPIKeysByTenant(ctx context.Context, tenantID pgtype.UUID) ([]ApiKey, error)
@@ -979,8 +987,19 @@ type Querier interface {
 	// parents (e.g., an ownership-themed risk feeds both an org-level ownership
 	// meta-risk and a team-level meta-risk).
 	ListRiskAggregationParents(ctx context.Context, arg ListRiskAggregationParentsParams) ([]ListRiskAggregationParentsRow, error)
+	// Slice 020: returns each control link for a risk WITH the per-link
+	// effectiveness weighting columns (migration `_029`). The residual derivation
+	// reads design_score + the three weights here; operational_score and
+	// coverage_score are computed at read time from the evaluation ledger and are
+	// never stored on the link row (caching a derived score beyond its staleness
+	// threshold is a P0 anti-criterion).
+	ListRiskControlLinkWeights(ctx context.Context, arg ListRiskControlLinkWeightsParams) ([]ListRiskControlLinkWeightsRow, error)
 	// Returns all control links for a single risk.
 	ListRiskControlLinks(ctx context.Context, arg ListRiskControlLinksParams) ([]ListRiskControlLinksRow, error)
+	// Slice 020: every risk in the tenant that links the given control. The
+	// evidence-ingest residual subscriber uses this to find which risks must be
+	// recomputed when a control's state changes.
+	ListRiskIDsLinkedToControl(ctx context.Context, arg ListRiskIDsLinkedToControlParams) ([]pgtype.UUID, error)
 	// Enumerate all risks for the tenant, newest first. Filters are applied
 	// in the application layer because sqlc's static typing makes optional
 	// WHERE clauses noisy; the row count is bounded by tenant-size anyway.
@@ -1167,6 +1186,12 @@ type Querier interface {
 	// updated_at is set explicitly so the schema's per-row default doesn't
 	// silently keep stale values.
 	UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, error)
+	// Slice 020: writes the freshly-derived residual_score JSONB onto a risk.
+	// This is the ONLY column the residual derivation mutates — it never touches
+	// inherent_score, never touches evidence (constitutional invariant #2). The
+	// $3 parameter is cast to jsonb explicitly so sqlc does not borrow the
+	// bytea-via-JSONB inference and force an awkward caller type.
+	UpdateRiskResidual(ctx context.Context, arg UpdateRiskResidualParams) (Risk, error)
 	// Replaces the themes array on a risk. The application validates that every
 	// supplied theme is in the visible vocabulary (defaults + tenant-private)
 	// BEFORE calling. Returns the updated row. Slice 053 (POST/DELETE

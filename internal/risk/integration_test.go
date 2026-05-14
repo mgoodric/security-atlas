@@ -74,13 +74,20 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 
 // seedControl creates a control row directly via the admin pool (BYPASSRLS) so
 // we have something to link to in mitigate cases.
+//
+// Slice 020 patch: `controls.bundle_id` became NOT NULL in slice 009's
+// migration, which landed in the cumulative schema after slice 019 authored
+// this helper — same stale-fixture precedent as slices 019/018/009. The
+// bundle_id is computed in Go (not a reused placeholder) so it does not trip
+// pgx single-placeholder type inference (SQLSTATE 42P08).
 func seedControl(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
 	t.Helper()
 	ctrlID := uuid.New()
+	bundleID := "slice-019-test-bundle-" + ctrlID.String()
 	if _, err := admin.Exec(context.Background(), `
-		INSERT INTO controls (id, tenant_id, title, control_family, implementation_type)
-		VALUES ($1, $2, 'Test control', 'AAA', 'automated')
-	`, ctrlID, tenant); err != nil {
+		INSERT INTO controls (id, tenant_id, title, control_family, implementation_type, bundle_id)
+		VALUES ($1, $2, 'Test control', 'AAA', 'automated', $3)
+	`, ctrlID, tenant, bundleID); err != nil {
 		t.Fatalf("seed control: %v", err)
 	}
 	return ctrlID

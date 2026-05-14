@@ -28,13 +28,27 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-// Handler bundles the slice-019 routes over a single risk.Store.
+// Handler bundles the slice-019 routes over a single risk.Store. Slice 020
+// adds an optional ResidualDeriver — when set, GET /v1/risks/{id} returns the
+// derived residual + effectiveness breakdown and POST /v1/risks/{id}/controls
+// is served. When nil (a deployment without NATS/eval wired), the risk routes
+// still work and residual_score is whatever was last persisted.
 type Handler struct {
-	store *risk.Store
+	store   *risk.Store
+	deriver *risk.ResidualDeriver
 }
 
-// New constructs a Handler.
+// New constructs a Handler. The ResidualDeriver is attached separately via
+// WithDeriver so the slice-019/053 callers that pass only a Store keep
+// working unchanged.
 func New(store *risk.Store) *Handler { return &Handler{store: store} }
+
+// WithDeriver attaches the slice-020 ResidualDeriver and returns the handler
+// for chaining. httpserver.go calls this when the eval engine is available.
+func (h *Handler) WithDeriver(d *risk.ResidualDeriver) *Handler {
+	h.deriver = d
+	return h
+}
 
 // ----- wire shapes -----
 
@@ -187,7 +201,20 @@ func (h *Handler) GetRisk(w http.ResponseWriter, r *http.Request) {
 		writeServerErr(w, "get risk", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"risk": riskWireFrom(rk)})
+	body := map[string]any{"risk": riskWireFrom(rk)}
+	// Slice 020 (AC-2): when the residual deriver is wired, return the
+	// live-derived residual + the per-linked-control effectiveness breakdown.
+	// Derive is the pure read path — recompute=false, so a GET never triggers
+	// evaluation (the NATS subscriber + scheduler own that).
+	if h.deriver != nil {
+		res, derr := h.deriver.Derive(ctx, id, false)
+		if derr != nil {
+			writeServerErr(w, "derive residual", derr)
+			return
+		}
+		body["residual"] = residualWireFrom(res)
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 // DeleteRisk handles DELETE /v1/risks/{id}.
