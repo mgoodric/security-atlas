@@ -106,6 +106,24 @@ auditor_period_matches if {
     assigned == input.resource.attrs.audit_period_id
 }
 
+# Slice 027: auditor can read walkthroughs. The auditor's testing notes
+# referencing a walkthrough live in audit_notes with scope_type='walkthrough'
+# (slice 029 widened the enum). Visibility=auditor_only keeps those private
+# at the query layer; this rule only governs READ on the walkthrough
+# artifact itself, which is shared between auditor and control owner per
+# AC-4 ("auditor and the control's owner can read").
+#
+# Auditor write on walkthroughs is intentionally NOT granted at the
+# auditor-role layer; walkthroughs can be authored by control_owner or
+# grc_engineer (see control_owner.rego + grc_engineer.rego). An auditor
+# who needs to record a walkthrough does so via their assigned engineer
+# credential or has the grc_engineer role flag set on their credential.
+allow if {
+    has_role("auditor")
+    is_read
+    input.resource.type == "walkthroughs"
+}
+
 # Resources the auditor can read without an audit_period predicate.
 # audit-periods is included so the auditor can list periods (the
 # handler-level filter in slice 028 is admin-only -- auditors hit

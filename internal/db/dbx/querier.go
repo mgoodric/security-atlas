@@ -242,6 +242,25 @@ type Querier interface {
 	// INSERT WITH CHECK policy. dpa_signed_at is required by CHECK constraint
 	// whenever dpa_signed=true.
 	CreateVendor(ctx context.Context, arg CreateVendorParams) (Vendor, error)
+	// Slice 027 — walkthrough recording primitive.
+	//
+	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
+	// defense-in-depth layer. The hash is computed in Go (sha256 over canonical
+	// JSON, ADR 0003 content-only-inputs pattern) and persisted as canonical_hash
+	// on the walkthroughs row. Tamper detection (AC-6) re-computes the hash on
+	// the GET path and compares to the stored value.
+	// Insert a walkthrough in status='draft' with the initial canonical_hash.
+	// The hash is computed in Go over {control_id, narrative, transcript,
+	// created_by, created_at, attachment_hashes[]} -- on create, the attachment
+	// list is empty so the hash is over the no-attachment shape. The handler
+	// recomputes the hash on every attachment addition and on finalize.
+	CreateWalkthrough(ctx context.Context, arg CreateWalkthroughParams) (Walkthrough, error)
+	// Insert an attachment metadata row. The blob itself lives in the slice
+	// 036 artifact store under storage_key. sha256_hash is the lowercase-hex
+	// sha256 of the bytes, computed by the handler at upload time (the
+	// slice 036 store does the same re-compute; both writes use the same
+	// hash so verification is symmetric).
+	CreateWalkthroughAttachment(ctx context.Context, arg CreateWalkthroughAttachmentParams) (WalkthroughAttachment, error)
 	DeleteDecision(ctx context.Context, arg DeleteDecisionParams) error
 	// Used by tests + cleanup paths. Production deployments will rarely delete
 	// a scope (supersession is the lifecycle exit); the row is preserved as
@@ -274,6 +293,11 @@ type Querier interface {
 	// run on the same threshold finds zero active rows that have already
 	// expired, so it is a no-op.
 	ExpireActiveExceptionsBefore(ctx context.Context, arg ExpireActiveExceptionsBeforeParams) ([]Exception, error)
+	// Flip status draft->finalized + stamp the as-finalized canonical_hash.
+	// The hash on this row is the commitment auditors verify against; once
+	// the row is finalized, the slice's tamper-detection re-compute compares
+	// the live re-hash to this stored value.
+	FinalizeWalkthrough(ctx context.Context, arg FinalizeWalkthroughParams) (Walkthrough, error)
 	// Dedup lookup: returns an existing artifact id when the same content
 	// has already been uploaded by this tenant. Partial unique index
 	// (tenant_id, content_hash) WHERE content_hash IS NOT NULL keeps the
@@ -445,6 +469,7 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) (User, error)
 	GetUserByID(ctx context.Context, arg GetUserByIDParams) (User, error)
 	GetVendor(ctx context.Context, arg GetVendorParams) (Vendor, error)
+	GetWalkthroughByID(ctx context.Context, arg GetWalkthroughByIDParams) (Walkthrough, error)
 	// Returns risk counts grouped by (likelihood, impact) for risks whose
 	// methodology shares the 5x5 (likelihood, impact 1..5) shape. nist_800_30
 	// and qualitative_5x5 both use this shape (canvas §2.2 + AC-7); other
@@ -860,6 +885,18 @@ type Querier interface {
 	// pattern keeps the query plan stable and lets sqlc emit a *VendorCriticality
 	// parameter so callers can pass nil for "no filter".
 	ListVendors(ctx context.Context, arg ListVendorsParams) ([]Vendor, error)
+	// AC-3 + AC-6: returns the sorted sha256_hash strings for the hash-input
+	// computation. Sorted at the DB so a verifier's re-compute matches the
+	// writer's commitment without trusting a Go-side sort.
+	ListWalkthroughAttachmentHashes(ctx context.Context, arg ListWalkthroughAttachmentHashesParams) ([]string, error)
+	// Ordered by uploaded_at then id so a re-list at any point in time
+	// yields a deterministic sequence. The hash inputs are the SORTED
+	// sha256_hash values, not the iteration order, so the list order does
+	// not affect the walkthrough hash directly.
+	ListWalkthroughAttachments(ctx context.Context, arg ListWalkthroughAttachmentsParams) ([]WalkthroughAttachment, error)
+	ListWalkthroughAuditLog(ctx context.Context, arg ListWalkthroughAuditLogParams) ([]WalkthroughAuditLog, error)
+	ListWalkthroughsByControl(ctx context.Context, arg ListWalkthroughsByControlParams) ([]Walkthrough, error)
+	ListWalkthroughsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]Walkthrough, error)
 	// Append a row to the access log. Action is enforced by CHECK
 	// ('upload' | 'download'). Caller passes tenant_id + artifact_id + actor.
 	LogArtifactAccess(ctx context.Context, arg LogArtifactAccessParams) error
@@ -962,6 +999,11 @@ type Querier interface {
 	// updates are not supported in lite (no PATCH semantics merge). updated_at
 	// is application-owned (no trigger).
 	UpdateVendor(ctx context.Context, arg UpdateVendorParams) (Vendor, error)
+	// Re-stamps the canonical_hash + updated_at after an attachment is added.
+	// Only succeeds when the walkthrough is in status='draft' -- the WHERE
+	// guard makes a post-finalize mutation a zero-row UPDATE which the
+	// handler surfaces as 409 Conflict.
+	UpdateWalkthroughHash(ctx context.Context, arg UpdateWalkthroughHashParams) (Walkthrough, error)
 	// Insert-or-update the tenant's primary IdP config. The application
 	// supplies the encrypted client_secret_enc; an empty bytea is rejected
 	// at the application layer for INSERT but permitted for UPDATE-only
@@ -1016,6 +1058,11 @@ type Querier interface {
 	// Every sample pull writes one row here. The seed -> sample_id mapping
 	// captured in (seed, sample_id) is the re-audit trail (AC-6).
 	WriteSampleAuditLog(ctx context.Context, arg WriteSampleAuditLogParams) (SampleAuditLog, error)
+	// Append-only lifecycle log. action is DB-constrained
+	// (walkthrough_created | attachment_added | walkthrough_finalized |
+	// tamper_detected | mutation_rejected_frozen). detail captures action-
+	// specific payload.
+	WriteWalkthroughAuditLog(ctx context.Context, arg WriteWalkthroughAuditLogParams) (WalkthroughAuditLog, error)
 }
 
 var _ Querier = (*Queries)(nil)

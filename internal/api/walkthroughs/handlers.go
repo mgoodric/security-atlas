@@ -1,0 +1,501 @@
+// Package walkthroughs serves the slice-027 HTTP API. Routes (appended to
+// the platform root router by internal/api/httpserver.go):
+//
+//	POST   /v1/walkthroughs                          create (status=draft)
+//	GET    /v1/walkthroughs                          list current tenant
+//	GET    /v1/walkthroughs/{id}                     get + tamper-check (AC-6)
+//	POST   /v1/walkthroughs/{id}/attachments         multipart upload (AC-2)
+//	POST   /v1/walkthroughs/{id}:finalize            terminal hash commit
+//	GET    /v1/walkthroughs/{id}/export              ?format=pdf|json (AC-5)
+//
+// Authorization:
+//   - Write paths (POST) require IsAdmin OR OwnerRoles contains
+//     "grc_engineer". The slice-035 OPA middleware also enforces
+//     resource_type="walkthroughs" + the period-assignment ABAC predicate
+//     for auditors (per policies/authz/auditor.rego, added by this slice).
+//   - Read paths additionally allow the "auditor" role (period-scoped via
+//     the OPA layer).
+//
+// All handlers run with the tenant set by upstream auth middleware
+// (internal/api/authctx + internal/api/tenancymw). The walkthrough.Store
+// opens its own transaction per call and applies the tenant GUC; the
+// slice-036 artifact.Store does the same for its writes.
+package walkthroughs
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/artifact"
+	"github.com/mgoodric/security-atlas/internal/audit/walkthrough"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
+)
+
+// MaxAttachmentBytes caps a single walkthrough attachment. The artifact
+// store's MaxUploadBytes is the global ceiling; we use that here so the
+// limits stay in lockstep.
+var MaxAttachmentBytes = artifact.MaxUploadBytes
+
+// MaxMultipartMemory bounds the in-memory portion of the multipart parse.
+const MaxMultipartMemory = int64(8 * 1024 * 1024) // 8 MiB
+
+// ArtifactUploader is the narrow surface this handler needs from the
+// slice-036 artifact store. Tests inject an in-memory fake; production
+// passes the real *artifact.Store via the adapter below.
+type ArtifactUploader interface {
+	Put(ctx context.Context, in artifact.PutInput) (artifact.Artifact, error)
+}
+
+// Handler bundles slice-027 routes over a walkthrough.Store + an optional
+// artifact uploader. When the uploader is nil, the attachments endpoint
+// 503s -- consistent with the slice-011 attest pattern.
+type Handler struct {
+	store    *walkthrough.Store
+	uploader ArtifactUploader
+}
+
+// New constructs a Handler.
+func New(store *walkthrough.Store, uploader ArtifactUploader) *Handler {
+	return &Handler{store: store, uploader: uploader}
+}
+
+// ----- wire shapes -----
+
+type createReq struct {
+	ControlID     string `json:"control_id"`
+	AuditPeriodID string `json:"audit_period_id,omitempty"`
+	Narrative     string `json:"narrative"`
+	Transcript    string `json:"transcript,omitempty"`
+}
+
+type walkthroughWire struct {
+	ID             string           `json:"id"`
+	AuditPeriodID  string           `json:"audit_period_id,omitempty"`
+	ControlID      string           `json:"control_id"`
+	Narrative      string           `json:"narrative"`
+	Transcript     string           `json:"transcript,omitempty"`
+	Status         string           `json:"status"`
+	CanonicalHash  string           `json:"canonical_hash"`
+	CreatedBy      string           `json:"created_by"`
+	CreatedAt      time.Time        `json:"created_at"`
+	UpdatedAt      time.Time        `json:"updated_at"`
+	Attachments    []attachmentWire `json:"attachments,omitempty"`
+	TamperDetected bool             `json:"tamper_detected"`
+}
+
+type attachmentWire struct {
+	ID          string          `json:"id"`
+	StorageKey  string          `json:"storage_key"`
+	ContentType string          `json:"content_type"`
+	SizeBytes   int64           `json:"size_bytes"`
+	SHA256      string          `json:"sha256"`
+	Annotations json.RawMessage `json:"annotations"`
+	UploadedBy  string          `json:"uploaded_by"`
+	UploadedAt  time.Time       `json:"uploaded_at"`
+}
+
+// ----- handlers -----
+
+// Create handles POST /v1/walkthroughs (AC-1).
+func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.authnContext(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !canWrite(cred) {
+		writeError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		return
+	}
+
+	var req createReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Narrative == "" {
+		writeError(w, http.StatusBadRequest, "narrative is required")
+		return
+	}
+	ctrlID, err := uuid.Parse(req.ControlID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "control_id must be a UUID")
+		return
+	}
+	in := walkthrough.CreateInput{
+		ControlID:  ctrlID,
+		Narrative:  req.Narrative,
+		Transcript: req.Transcript,
+		CreatedBy:  cred.ID,
+	}
+	if req.AuditPeriodID != "" {
+		pid, err := uuid.Parse(req.AuditPeriodID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "audit_period_id must be a UUID")
+			return
+		}
+		in.AuditPeriodID = &pid
+	}
+
+	wt, err := h.store.Create(ctx, in)
+	if err != nil {
+		h.writeStoreErr(w, "create walkthrough", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"walkthrough": toWire(wt)})
+}
+
+// Get handles GET /v1/walkthroughs/{id}. AC-4 + AC-6.
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+	ctx, _, ok := h.authnContext(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	wt, err := h.store.Get(ctx, id)
+	if err != nil {
+		h.writeStoreErr(w, "get walkthrough", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"walkthrough": toWire(wt)})
+}
+
+// List handles GET /v1/walkthroughs.
+func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	ctx, _, ok := h.authnContext(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	ws, err := h.store.List(ctx)
+	if err != nil {
+		h.writeStoreErr(w, "list walkthroughs", err)
+		return
+	}
+	out := make([]walkthroughWire, len(ws))
+	for i, wt := range ws {
+		out[i] = toWire(wt)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"walkthroughs": out, "count": len(out)})
+}
+
+// AddAttachment handles POST /v1/walkthroughs/{id}/attachments (AC-2).
+//
+// Multipart form:
+//
+//	file          required: binary payload
+//	annotations   optional: free-form JSON metadata (image regions, notes)
+//
+// On success, the blob is persisted via the slice-036 artifact store
+// (per-tenant prefix; AC-2) and a walkthrough_attachments row is written
+// with the sha256 + storage_key. The walkthrough's canonical_hash is
+// recomputed inside walkthrough.Store.AddAttachment.
+func (h *Handler) AddAttachment(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.authnContext(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !canWrite(cred) {
+		writeError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		return
+	}
+	if h.uploader == nil {
+		writeError(w, http.StatusServiceUnavailable, "artifact store not configured")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, MaxAttachmentBytes+1024)
+	if err := r.ParseMultipartForm(MaxMultipartMemory); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", MaxAttachmentBytes))
+			return
+		}
+		writeError(w, http.StatusBadRequest, "invalid multipart body: "+err.Error())
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "missing `file` form part")
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	body, err := io.ReadAll(file)
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", MaxAttachmentBytes))
+			return
+		}
+		writeError(w, http.StatusBadRequest, "read body: "+err.Error())
+		return
+	}
+	if int64(len(body)) > MaxAttachmentBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", MaxAttachmentBytes))
+		return
+	}
+	if len(body) == 0 {
+		writeError(w, http.StatusBadRequest, "empty file")
+		return
+	}
+
+	contentType := strings.TrimSpace(header.Header.Get("Content-Type"))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	sum := sha256.Sum256(body)
+	hash := hex.EncodeToString(sum[:])
+
+	// Annotations JSON (optional). Validate that it parses; the schema
+	// is intentionally free-form (v1 ships with no canonical shape).
+	annotationsRaw := strings.TrimSpace(r.FormValue("annotations"))
+	if annotationsRaw == "" {
+		annotationsRaw = "{}"
+	}
+	var probe any
+	if err := json.Unmarshal([]byte(annotationsRaw), &probe); err != nil {
+		writeError(w, http.StatusBadRequest, "annotations must be valid JSON")
+		return
+	}
+
+	// Persist the blob to the slice-036 artifact store FIRST. If the
+	// store-level write fails, we never wrote the walkthrough_attachments
+	// row, so the walkthrough's canonical_hash stays consistent with its
+	// current attachment set.
+	art, err := h.uploader.Put(ctx, artifact.PutInput{
+		ContentType: contentType,
+		SizeBytes:   int64(len(body)),
+		ContentHash: hash,
+		UploadedBy:  cred.ID,
+		Body:        body,
+	})
+	if err != nil {
+		writeArtifactErr(w, "store attachment blob", err)
+		return
+	}
+
+	// Wire the metadata + hash into the walkthroughs side. AddAttachment
+	// recomputes the canonical hash over the new attachment set.
+	wt, err := h.store.AddAttachment(ctx, walkthrough.AttachInput{
+		WalkthroughID:  id,
+		StorageKey:     art.StorageKey,
+		ContentType:    art.ContentType,
+		SizeBytes:      art.SizeBytes,
+		SHA256Hex:      hash,
+		AnnotationsRaw: []byte(annotationsRaw),
+		UploadedBy:     cred.ID,
+	})
+	if err != nil {
+		h.writeStoreErr(w, "add attachment", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"walkthrough": toWire(wt)})
+}
+
+// Finalize handles POST /v1/walkthroughs/{id}:finalize.
+func (h *Handler) Finalize(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.authnContext(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !canWrite(cred) {
+		writeError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	wt, err := h.store.Finalize(ctx, id, cred.ID)
+	if err != nil {
+		h.writeStoreErr(w, "finalize walkthrough", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"walkthrough": toWire(wt)})
+}
+
+// Export handles GET /v1/walkthroughs/{id}/export?format=pdf|json (AC-5).
+//
+// JSON shape mirrors walkthrough.ExportJSON exactly; PDF is rendered via
+// chromedp through walkthrough.RenderPDF. PDF unavailability (missing
+// Chrome binary) is surfaced as 503 so operators can run the platform
+// without Chrome and still get the JSON export.
+func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
+	ctx, _, ok := h.authnContext(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	if format == "" {
+		format = "json"
+	}
+	wt, err := h.store.Get(ctx, id)
+	if err != nil {
+		h.writeStoreErr(w, "get walkthrough (export)", err)
+		return
+	}
+	switch format {
+	case "json":
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="walkthrough-%s.json"`, id.String()))
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(walkthrough.ToExportJSON(wt))
+	case "pdf":
+		ctx2, cancel := context.WithTimeout(r.Context(), walkthrough.PDFTimeout)
+		defer cancel()
+		buf, err := walkthrough.RenderPDF(ctx2, wt)
+		if err != nil {
+			if errors.Is(err, walkthrough.ErrChromeUnavailable) {
+				writeError(w, http.StatusServiceUnavailable, "PDF rendering unavailable: chromedp browser missing")
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "render PDF: " + err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="walkthrough-%s.pdf"`, id.String()))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(buf)
+	default:
+		writeError(w, http.StatusBadRequest, "format must be 'json' or 'pdf'")
+	}
+}
+
+// ----- helpers -----
+
+func (h *Handler) authnContext(r *http.Request) (context.Context, credstore.Credential, bool) {
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok || cred.TenantID == "" {
+		return nil, credstore.Credential{}, false
+	}
+	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
+		return nil, credstore.Credential{}, false
+	}
+	return r.Context(), cred, true
+}
+
+// canWrite returns true when the credential is an admin or carries the
+// grc_engineer owner role. Mirrors the slice-028 (audit_periods)
+// defense-in-depth check. The slice-035 OPA middleware is the primary
+// gate; this handler-local check returns 403 even when the OPA
+// middleware is not wired (unit-test servers).
+func canWrite(cred credstore.Credential) bool {
+	if cred.IsAdmin {
+		return true
+	}
+	for _, role := range cred.OwnerRoles {
+		if role == "grc_engineer" {
+			return true
+		}
+	}
+	return false
+}
+
+func toWire(wt walkthrough.Walkthrough) walkthroughWire {
+	out := walkthroughWire{
+		ID:             wt.ID.String(),
+		ControlID:      wt.ControlID.String(),
+		Narrative:      wt.Narrative,
+		Transcript:     wt.Transcript,
+		Status:         string(wt.Status),
+		CanonicalHash:  hex.EncodeToString(wt.CanonicalHash),
+		CreatedBy:      wt.CreatedBy,
+		CreatedAt:      wt.CreatedAt,
+		UpdatedAt:      wt.UpdatedAt,
+		TamperDetected: wt.TamperDetected,
+	}
+	if wt.AuditPeriodID != nil {
+		out.AuditPeriodID = wt.AuditPeriodID.String()
+	}
+	if len(wt.Attachments) > 0 {
+		out.Attachments = make([]attachmentWire, len(wt.Attachments))
+		for i, a := range wt.Attachments {
+			annotations := a.AnnotationsRaw
+			if len(annotations) == 0 {
+				annotations = []byte(`{}`)
+			}
+			out.Attachments[i] = attachmentWire{
+				ID:          a.ID.String(),
+				StorageKey:  a.StorageKey,
+				ContentType: a.ContentType,
+				SizeBytes:   a.SizeBytes,
+				SHA256:      a.SHA256Hex,
+				Annotations: json.RawMessage(annotations),
+				UploadedBy:  a.UploadedBy,
+				UploadedAt:  a.UploadedAt,
+			}
+		}
+	}
+	return out
+}
+
+func (h *Handler) writeStoreErr(w http.ResponseWriter, op string, err error) {
+	switch {
+	case errors.Is(err, walkthrough.ErrNotFound):
+		writeError(w, http.StatusNotFound, "walkthrough not found")
+	case errors.Is(err, walkthrough.ErrFinalized):
+		writeError(w, http.StatusConflict, "walkthrough is finalized")
+	case errors.Is(err, walkthrough.ErrPeriodFrozen):
+		writeError(w, http.StatusConflict, "audit period is frozen")
+	default:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": op + ": " + err.Error()})
+	}
+}
+
+func writeArtifactErr(w http.ResponseWriter, op string, err error) {
+	switch {
+	case errors.Is(err, artifact.ErrOversized):
+		writeError(w, http.StatusRequestEntityTooLarge, err.Error())
+	case errors.Is(err, artifact.ErrInvalidInput):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, artifact.ErrHashMismatch):
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": op + ": " + err.Error()})
+	}
+}
+
+func writeJSON(w http.ResponseWriter, code int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func writeError(w http.ResponseWriter, code int, msg string) {
+	writeJSON(w, code, map[string]string{"error": msg})
+}
