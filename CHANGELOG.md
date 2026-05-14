@@ -182,6 +182,33 @@ auto-generated notes.
   what makes AC-7's point-in-time replay meaningful — an upsert table
   would destroy the prior computed state — and it matches the established
   `evidence_audit_log` / `aggregation_rule_evaluations` precedent.
+- **Slice 037 — docker-compose self-host bundle.** A single
+  `deploy/docker/docker-compose.yml` brings the whole platform online on
+  one VM — Postgres 16, NATS JetStream, MinIO, the `atlas` server, and
+  the Next.js frontend — and seeds it on first boot via a one-shot
+  `atlas-bootstrap` container: bootstrap roles + all forward migrations,
+  a default tenant + builtin scope dimension + default scope cell +
+  default local user, the SCF catalog, and the 50 SOC 2 control bundles.
+  New: `atlas.Dockerfile` / `atlas-cli.Dockerfile` / `web.Dockerfile`
+  (multi-stage, distroless or non-root runtime), `bootstrap.Dockerfile` +
+  `bootstrap/bootstrap.sh` + `bootstrap/seed.sql`, a documented
+  `.env.example` (no real secrets — every value is the literal `CHANGE_ME`
+  placeholder), `just self-host-*` recipes, and
+  `docs/getting-started/first-evidence.md` (the 4-hour clone-to-first-
+  evidence walkthrough). `docs/SELF_HOSTING.md` gains a full-bundle
+  quick-start. To make the slice's own acceptance criteria pass, a small
+  in-scope platform touch lands alongside: a `GET /health` liveness route
+  (`internal/api/httpserver.go`), `AttachAuthHandler` wiring in
+  `cmd/atlas/main.go` so `/auth/local/login` mounts in local mode, a
+  fixed-token admin credential path (`ATLAS_BOOTSTRAP_TOKEN` →
+  `credstore.IssueFixedAdmin`) so the offline bootstrap can authenticate
+  control-bundle uploads, an `atlas-cli bootstrap hash-password` helper,
+  and `output: "standalone"` in `web/next.config.ts`. The scope expansion
+  and every judgment call are recorded in
+  `docs/audit-log/037-docker-compose-self-host-decisions.md`. CI
+  validates `docker compose config`; the full-stack smoke test is
+  documented for manual runs (slice-036 service-container flakiness).
+
 - **Slice 042 — Audit workspace view.** The `/audit` route lands an
   auditor in their assigned `AuditPeriod` context and surfaces the
   end-to-end audit cycle in one Next.js view: left-nav control list,

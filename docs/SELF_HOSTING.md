@@ -17,7 +17,91 @@ The target is the same primary persona as the platform itself — the solo secur
 
 ---
 
-## Quick start (single-host docker-compose)
+## Quick start — the full self-host bundle (recommended)
+
+The `deploy/docker/docker-compose.yml` bundle brings up the **whole
+platform** on one host — Postgres, NATS JetStream, MinIO, the `atlas`
+server, and the Next.js frontend — and seeds it on first boot
+(migrations, default tenant/scope/user, the SCF catalog, and the 50 SOC 2
+control bundles). It is the bundle behind the "installable + first
+evidence in 4 hours" acceptance criterion; the end-to-end walkthrough
+lives in [`docs/getting-started/first-evidence.md`](getting-started/first-evidence.md).
+
+```sh
+# 1. Clone the repo (the bundle bind-mounts migrations/ + controls/ from it).
+git clone https://github.com/mgoodric/security-atlas.git
+cd security-atlas
+
+# 2. Create your env file from the template and edit every CHANGE_ME value.
+cp deploy/docker/.env.example deploy/docker/.env
+${EDITOR:-vi} deploy/docker/.env
+#    Generate strong values:  openssl rand -hex 32
+
+# 3. Bring the whole stack up (builds images on first run).
+just self-host-up
+#    or, without `just`:
+#    docker compose -f deploy/docker/docker-compose.yml \
+#      --env-file deploy/docker/.env up -d --build
+
+# 4. Watch the one-shot bootstrap finish (migrations + seed + SCF + controls).
+just self-host-logs            # Ctrl-C once you see "bootstrap complete"
+
+# 5. Confirm the platform is alive.
+curl -fsS http://localhost:8080/health        # {"status":"ok","db":"ok"}
+
+# 6. Open the UI and sign in with ATLAS_DEFAULT_USER_EMAIL / _PASSWORD.
+open http://localhost:3000
+```
+
+Services in the bundle (`docker compose ps` / `just self-host-ps`):
+
+| Service           | Role                                                              |
+| ----------------- | ----------------------------------------------------------------- |
+| `postgres`        | Postgres 16 — primary store (`pg-data` volume)                    |
+| `nats`            | NATS JetStream — evidence-ingest buffer (`nats-data` volume)      |
+| `minio`           | S3-compatible artifact store (`minio-data` volume)                |
+| `minio-mc`        | one-shot — creates the artifacts bucket, then exits               |
+| `atlas-bootstrap` | one-shot — migrations + seed + SCF import + control upload, exits |
+| `atlas`           | platform server — gRPC `:50051`, HTTP `:8080` (`/health`)         |
+| `web`             | Next.js frontend — `:3000`                                        |
+
+`just` recipes for the bundle: `self-host-up`, `self-host-down`
+(keeps data), `self-host-wipe` (`down -v` — deletes volumes),
+`self-host-logs`, `self-host-ps`, `self-host-build`, `self-host-config`
+(validates the compose file without starting anything).
+
+### Manual smoke test
+
+CI validates that `docker-compose.yml` parses (`just self-host-config`);
+it does not run a full stack bring-up (the MinIO / NATS service-container
+startup is too flaky for a fast CI gate). To smoke-test the bundle
+yourself on a host with Docker:
+
+```sh
+cp deploy/docker/.env.example deploy/docker/.env   # edit the CHANGE_ME values
+just self-host-up
+# wait for the bootstrap one-shot to exit 0:
+docker compose -f deploy/docker/docker-compose.yml ps atlas-bootstrap
+curl -fsS http://localhost:8080/health             # expect HTTP 200
+curl -fsS http://localhost:3000 -o /dev/null -w '%{http_code}\n'   # expect 200
+just self-host-wipe                                # tear down + delete volumes
+```
+
+### Bootstrap credential — rotate it
+
+`ATLAS_BOOTSTRAP_TOKEN` is a pre-shared admin token the one-shot
+bootstrap container uses to upload the control bundles. It is a
+convenience credential for first boot. Once you have signed in and
+issued a real operator API key, **revoke or rotate the bootstrap
+token** — it should not remain a long-lived admin credential.
+
+---
+
+## Quick start — the Watchtower auto-update example (server-only)
+
+The example compose file at [`deploy/watchtower/docker-compose.example.yml`](../deploy/watchtower/docker-compose.example.yml)
+is a slimmer, server-only deployment (no bundled frontend / NATS / MinIO)
+focused on auto-update from GHCR:
 
 ```sh
 # 1. Pick a deploy dir.
@@ -38,10 +122,10 @@ docker compose up -d
 docker compose exec atlas atlas migrate up
 
 # 6. Confirm the platform is alive.
-curl -fsSL http://localhost:8080/healthz
+curl -fsSL http://localhost:8080/health
 ```
 
-The example compose file at [`deploy/watchtower/docker-compose.example.yml`](../deploy/watchtower/docker-compose.example.yml) brings up three containers:
+The example compose file brings up three containers:
 
 - `security-atlas` — the platform server
 - `security-atlas-postgres` — Postgres 16 (data persisted in the `atlas-pg-data` volume)

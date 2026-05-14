@@ -95,6 +95,15 @@ func (s *Server) IssueBootstrapAdminCredential(tenantID string) (credstore.Crede
 	return s.credStore.IssueAdmin(tenantID, 0)
 }
 
+// IssueBootstrapFixedAdminCredential mints an admin-flagged credential for
+// tenantID whose bearer token is the caller-supplied deterministic token.
+// Slice 037: the docker-compose self-host bundle's one-shot bootstrap
+// container uses a pre-shared ATLAS_BOOTSTRAP_TOKEN to authenticate
+// control-bundle uploads against the freshly started server.
+func (s *Server) IssueBootstrapFixedAdminCredential(tenantID, token string) (credstore.Credential, error) {
+	return s.credStore.IssueFixedAdmin(tenantID, token)
+}
+
 // IssueBootstrapApproverCredential mints an approver-flagged credential for
 // the supplied tenant. Tests use it to drive the slice-018 FrameworkScope
 // approval flow (approver-only). Production deployments will graduate to
