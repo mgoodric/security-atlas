@@ -66,12 +66,16 @@
 -- itself is UNCHANGED: still NOSUPERUSER NOBYPASSRLS (anti-criterion P0).
 --
 -- IMPORTANT for shared-cluster operators: a non-superuser role cannot grant
--- ITSELF the BYPASSRLS or CREATEROLE attributes. If you pre-create
--- atlas_migrate on a shared cluster as a non-superuser, you (the cluster
--- admin) must grant it BOTH up front in one one-time statement run as a
--- superuser:
+-- ITSELF the BYPASSRLS or CREATEROLE attributes, nor take ownership of a
+-- schema it does not own. If you pre-create atlas_migrate on a shared
+-- cluster as a non-superuser, you (the cluster admin) must, up front, run
+-- these two one-time statements as a superuser:
 --
 --   ALTER ROLE atlas_migrate BYPASSRLS CREATEROLE;
+--   ALTER SCHEMA public OWNER TO atlas_migrate;
+--
+-- The second one (schema ownership) is the slice-065 bug #6 fix — see the
+-- bug #6 note further down, just above the GRANT USAGE line.
 --
 -- Both are required:
 --   - BYPASSRLS — PG16 only permits a role that itself has BYPASSRLS to
@@ -164,6 +168,44 @@ END $$;
 DO $$
 BEGIN
     EXECUTE format('GRANT ALL PRIVILEGES ON DATABASE %I TO atlas_migrate', current_database());
+END $$;
+
+-- Slice 065 bug #6 — `permission denied for schema public`.
+--
+-- Postgres 15+ no longer grants the `PUBLIC` pseudo-role CREATE on schema
+-- `public` (it is owned by `pg_database_owner` and only `pg_database_owner`
+-- can create in it by default). atlas_migrate is the DDL role — bootstrap.sh
+-- runs every forward migration + seed.sql as it — so without an explicit
+-- privilege the first `CREATE TABLE` in `public` dies with
+-- `ERROR: permission denied for schema public`.
+--
+-- The fix is to make atlas_migrate OWN schema public. atlas_migrate is
+-- already the role that owns every schema object (it is BYPASSRLS
+-- specifically so it can apply DDL against FORCE-RLS tables); owning the
+-- schema it is responsible for is the drift-free expression of that role —
+-- create / drop / alter / down-migrations all just work, with no per-object
+-- GRANT to maintain. atlas_app is untouched: still USAGE-only (it never
+-- does DDL).
+--
+-- Conditional, for the same reason the `ALTER ROLE atlas_migrate CREATEROLE`
+-- above is conditional: this file runs in BOTH self-host deploy modes, but
+-- only the bundled-mode initdb path runs it as the postgres superuser — the
+-- only context that can `ALTER SCHEMA public OWNER` here. In external
+-- (shared-cluster) mode the operator's one-time cluster-admin step sets the
+-- owner first (`ALTER SCHEMA public OWNER TO atlas_migrate`, run as a
+-- superuser — see deploy/docker/test-self-host-bundle.sh and the header
+-- note), so this block sees atlas_migrate already owning public and is a
+-- no-op. A shared-cluster operator who skipped that one-time step gets a
+-- clear `must be owner of schema public` error — the intended signal.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_namespace
+        WHERE nspname = 'public'
+          AND pg_get_userbyid(nspowner) = 'atlas_migrate'
+    ) THEN
+        ALTER SCHEMA public OWNER TO atlas_migrate;
+    END IF;
 END $$;
 
 GRANT USAGE ON SCHEMA public TO atlas_app;

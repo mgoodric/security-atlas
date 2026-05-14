@@ -320,6 +320,118 @@ script is a clean no-op (zero `atlas%` roles created); (c)
 connection), `=trust` → accepts it, `=` empty → scram — i.e. external
 mode's auth posture is unchanged.
 
+### 11. Schema-`public` privilege — `ALTER SCHEMA public OWNER TO atlas_migrate`
+
+**Discovered during the third CI-greening pass.** Once decisions 4 + 10
+cleared the role-creation and reachability layers, the rebased CI run
+surfaced the next layer, identical in both modes:
+
+    atlas-bootstrap-1 | ERROR: permission denied for schema public
+    FAIL: atlas-bootstrap exited 1, want 0
+
+**Root cause.** Postgres 15+ no longer grants the `PUBLIC` pseudo-role
+(and therefore `atlas_migrate`) CREATE on schema `public` — it is owned
+by `pg_database_owner` and only `pg_database_owner` can create in it by
+default. `01-roles.sql` granted `atlas_migrate` `ALL PRIVILEGES ON
+DATABASE` and `atlas_app` `USAGE ON SCHEMA public`, but nothing let
+`atlas_migrate` create objects in `public`. `bootstrap.sh` runs all 33
+forward migrations + `seed.sql` as `atlas_migrate`, so the first
+`CREATE TABLE` in `public` died. (`\dn+ public` before the fix:
+owner `pg_database_owner`, access `atlas_app=U`, `atlas_migrate` nothing.)
+
+**Options considered** (the maintainer named all three):
+
+- **(A)** `GRANT CREATE ON SCHEMA public TO atlas_migrate`. Works, but
+  objects end up owned by `atlas_migrate` while the schema stays owned by
+  `pg_database_owner` — a split-ownership shape, and `atlas_migrate`
+  would still need a separate `USAGE` grant.
+- **(B)** `GRANT ALL ON SCHEMA public TO atlas_migrate` (USAGE + CREATE).
+  Same split-ownership shape.
+- **(C)** `ALTER SCHEMA public OWNER TO atlas_migrate`. **Chosen.**
+
+**Chosen: (C).** `atlas_migrate` is the DDL role — it is `BYPASSRLS`
+specifically so it can apply DDL against `FORCE ROW LEVEL SECURITY`
+tables, and `bootstrap.sh` runs every migration as it. Making it OWN the
+schema it is responsible for is the drift-free expression of that role:
+create / drop / alter / down-migrations all just work, with no
+per-object GRANT to maintain and no split between schema-owner and
+object-owner. `atlas_app` is untouched — still `USAGE`-only (verified:
+post-fix `has_schema_privilege('atlas_app','public','CREATE')` = false),
+because `atlas_app` never does DDL.
+
+**Where the `ALTER` is issued, per mode** — the same dual-context
+problem as decision 4's `CREATEROLE`:
+
+- `01-roles.sql` gains a **conditional** `DO` block —
+  `IF NOT (atlas_migrate owns public) THEN ALTER SCHEMA public OWNER TO
+atlas_migrate`. In **bundled** mode `01-roles.sql` runs at initdb as
+  the `postgres` superuser, which CAN issue `ALTER SCHEMA ... OWNER`, so
+  the block executes. In **external** mode `01-roles.sql` runs inside
+  `bootstrap.sh` as the non-superuser `atlas_migrate`, which CANNOT take
+  schema ownership — so the **harness's one-time cluster-admin step**
+  (run as the `postgres` superuser, alongside `ALTER ROLE atlas_migrate
+BYPASSRLS CREATEROLE`) sets the owner first, and the conditional block
+  in `01-roles.sql` then sees it done and is a no-op.
+- A shared-cluster operator who skips the one-time step gets a clear
+  `ERROR: must be owner of schema public` from the conditional `ALTER` —
+  the intended diagnostic signal, exactly matching the `CREATEROLE`
+  pattern.
+
+The CI `Go · integration (Postgres RLS)` job is unaffected: it runs
+`01-roles.sql` as the `postgres` superuser (so the conditional `ALTER`
+executes cleanly and sets the owner) and then applies migrations as the
+`postgres` superuser too, which can create in any schema regardless of
+owner.
+
+**Confidence: high.** Reproduced locally against `postgres:16-alpine`,
+both modes end-to-end: (a) bundled — `01-roles.sql` at initdb sets the
+owner, `atlas_migrate` can then `CREATE TABLE` in `public`, a re-run of
+`01-roles.sql` as `atlas_migrate` is a clean no-op (the conditional
+correctly detects already-owner); (b) external — the harness
+cluster-admin step sets the owner, `01-roles.sql` as `atlas_migrate`
+exits 0 with the `ALTER` skipped; (c) **all 33 forward migrations +
+`seed.sql` + `CREATE EXTENSION pgcrypto`** apply clean as `atlas_migrate`
+once it owns `public` — no further privilege layer found; (d) the
+skip-the-step path raises the clear `must be owner of schema public`
+error; (e) anti-criteria hold — `atlas_app` `NOSUPERUSER NOBYPASSRLS`
+and `USAGE`-only on `public`, `atlas_migrate` not superuser.
+
+### 12. CI failure-log dump — write a throwaway stub env file in the step
+
+**The bug in commit 28c1436.** That commit added `--env-file
+deploy/docker/.env.test` to the ci.yml "Dump compose logs on failure"
+step — correct in principle (`docker-compose.yml` uses `${VAR:?}`
+required-variable guards, so a bare `docker compose ... logs` aborts
+before printing anything). But it was still broken: the harness's own
+`cleanup()` EXIT trap runs `rm -f "${ENV_FILE}"`, so `.env.test` is
+**gone** by the time the CI failure step runs — CI showed `couldn't find
+env file`. The comment in 28c1436 claiming the file is "still present"
+was simply wrong.
+
+**Options considered:**
+
+- **(A)** Move the harness's `.env.test` removal out of the `cleanup()`
+  trap (or behind a flag) so it survives for the dump step. Rejected:
+  `cleanup()` also does the `docker compose down -v` teardown, which
+  SHOULD always run; splitting it is fragile, and leaving `.env.test` on
+  disk after a successful run is its own small wart.
+- **(B)** Pass the required values to the dump step via `-e` flags.
+  Rejected: nine `${VAR:?}` guards — verbose and easy to drift.
+- **(C)** Have the dump step write its OWN throwaway stub env file. The
+  values are irrelevant for `docker compose logs` — compose only needs
+  the `${VAR:?}` guards _satisfied_ to parse the compose file; it never
+  connects anywhere. **Chosen.**
+
+**Chosen: (C).** The dump step `cat`s a nine-line stub env file (every
+guarded var = `x`) to `/tmp/compose-logs.env` and points `--env-file` at
+that. It is self-contained, does not depend on harness internals, and
+cannot drift out of sync with the compose guards in a way that silently
+breaks (if a new `${VAR:?}` is added, the dump fails loudly the same way
+a missing var fails anywhere else — and the fix is one obvious line).
+
+**Confidence: high.** The nine stub vars were enumerated directly from
+`grep -oE '\$\{[A-Z_]+:\?\}' docker-compose.yml`.
+
 ## Revisit once in use
 
 - **Decision 6 (ledger):** if a future slice adopts a real migration tool
@@ -344,6 +456,13 @@ mode's auth posture is unchanged.
   `PG_INITDB_ROLES` nor `POSTGRES_HOST_AUTH_METHOD` applies to them). If
   a future slice adds a real migration runner, fold the initdb
   role-bootstrap into its first-run step.
+- **Decision 11 (schema-`public` ownership):** the shared-cluster
+  one-time grant is now TWO statements (`ALTER ROLE atlas_migrate
+BYPASSRLS CREATEROLE` + `ALTER SCHEMA public OWNER TO atlas_migrate`).
+  Document both together in the `docs/SELF_HOSTING.md` external-DB
+  section when it lands. If a future slice adopts a real migration tool,
+  the schema-ownership step belongs in that tool's one-time provisioning
+  path, not a hand-run SQL file.
 - **Decision 8 (CI job not required):** promote `test-self-host-bundle` to
   a required check once it has a stable green history; add the
   matrix-named stub siblings at that point.

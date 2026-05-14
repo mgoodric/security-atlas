@@ -500,13 +500,29 @@ jobs:
       - name: Dump compose logs on failure
         if: failure()
         run: |
-          # `--env-file` is required even for `logs`: docker-compose.yml
-          # uses `${VAR:?}` required-variable guards (POSTGRES_PASSWORD,
-          # MINIO_ROOT_USER, ...), so a bare `docker compose ... logs`
-          # aborts with "required variable ... is missing a value"
-          # before printing anything. The harness writes .env.test and
-          # only removes it in its own EXIT trap, so it is still present
-          # when this failure step runs.
+          # docker-compose.yml uses `${VAR:?}` required-variable guards
+          # (POSTGRES_PASSWORD, MINIO_ROOT_USER, ...), so a bare
+          # `docker compose ... logs` aborts with "required variable ...
+          # is missing a value" before printing anything — `--env-file`
+          # is required even for `logs`.
+          #
+          # The harness's own `cleanup()` EXIT trap `rm -f`s
+          # deploy/docker/.env.test, so by the time this failure step
+          # runs that file is GONE — we cannot point `--env-file` at it.
+          # The values do not matter for `logs` (compose only needs the
+          # guards satisfied to parse the file), so write a throwaway
+          # stub env file here and use that.
+          cat > /tmp/compose-logs.env <<'STUB'
+          POSTGRES_PASSWORD=x
+          ATLAS_APP_PASSWORD=x
+          MINIO_ROOT_USER=x
+          MINIO_ROOT_PASSWORD=x
+          BEARER_HASH_KEY=x
+          ATLAS_BOOTSTRAP_TOKEN=x
+          ATLAS_DEFAULT_USER_PASSWORD=x
+          DATABASE_URL_APP=x
+          DATABASE_URL_MIGRATE=x
+          STUB
           docker compose -f deploy/docker/docker-compose.yml \
-            --env-file deploy/docker/.env.test \
+            --env-file /tmp/compose-logs.env \
             -p "sa-selfhost-${{ matrix.mode }}" logs || true

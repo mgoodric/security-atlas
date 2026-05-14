@@ -175,15 +175,30 @@ if [ "${MODE}" = "external" ]; then
     # atlas_app itself stays NOSUPERUSER NOBYPASSRLS; atlas_migrate does
     # NOT become superuser. If 01-roles.sql still could not run, bootstrap
     # would die and assertion 3 below would fail.
+    #
+    # The same cluster-admin step also transfers ownership of schema
+    # `public` to atlas_migrate (slice-065 bug #6). Postgres 15+ no longer
+    # lets the PUBLIC pseudo-role — and therefore atlas_migrate — create
+    # objects in `public`, so bootstrap.sh's forward migrations would die
+    # with `permission denied for schema public`. atlas_migrate is the DDL
+    # role, so it owns the schema it manages; atlas_app stays USAGE-only.
+    # 01-roles.sql ALSO contains this `ALTER SCHEMA ... OWNER`, conditional
+    # on atlas_migrate not already owning public — in bundled mode that
+    # runs at initdb as the superuser, but in external mode 01-roles.sql
+    # runs as the non-superuser atlas_migrate, which CANNOT take schema
+    # ownership. So the transfer must happen HERE, in the superuser
+    # cluster-admin step; 01-roles.sql then sees it done and skips it.
     "${COMPOSE[@]}" exec -T postgres psql -U postgres -d security_atlas -v ON_ERROR_STOP=1 <<'SQL'
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'atlas_migrate') THEN
         CREATE ROLE atlas_migrate LOGIN PASSWORD 'test-atlas-migrate-password' NOSUPERUSER;
     END IF;
 END $$;
--- The one-time cluster-admin grant the slice-065 docstring documents:
--- a non-superuser role cannot grant ITSELF BYPASSRLS or CREATEROLE.
+-- The one-time cluster-admin grants the slice-065 docstring documents:
+-- a non-superuser role cannot grant ITSELF BYPASSRLS or CREATEROLE, nor
+-- take ownership of a schema it does not own.
 ALTER ROLE atlas_migrate BYPASSRLS CREATEROLE;
+ALTER SCHEMA public OWNER TO atlas_migrate;
 GRANT ALL PRIVILEGES ON DATABASE security_atlas TO atlas_migrate;
 SQL
 fi
