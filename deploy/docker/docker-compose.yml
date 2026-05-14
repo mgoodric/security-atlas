@@ -46,10 +46,54 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
       POSTGRES_DB: ${POSTGRES_DB:-security_atlas}
+      # Slice 065 bug #2 — bundled-mode auth.
+      #
+      # The bundled bundle's atlas_migrate DSN (.env.example
+      # DATABASE_URL_MIGRATE) carries NO password — it relies on
+      # "trust-on-the-docker-network auth", which this header and
+      # .env.example both document. But postgres:16-alpine with
+      # POSTGRES_PASSWORD set and POSTGRES_HOST_AUTH_METHOD UNSET writes
+      # `host all all all scram-sha-256` into pg_hba.conf, so the
+      # password-less atlas-bootstrap connection is rejected with
+      # `fe_sendauth: no password supplied` and bootstrap's
+      # wait-for-Postgres loop times out. Defaulting this to `trust`
+      # wires the auth posture the bundle already documents. Operators
+      # pointing at an EXTERNAL cluster set DATABASE_URL_MIGRATE with a
+      # real password and can override this to `scram-sha-256` (or empty
+      # — the postgres image then falls back to scram); the slice-065
+      # end-to-end harness exercises both via .env.test.
+      #
+      # `:-` vs `-`: the `-` (no colon) form is deliberate. The harness's
+      # external mode sets POSTGRES_HOST_AUTH_METHOD to an EXPLICIT empty
+      # string; `${VAR-default}` honours an explicit empty value (only an
+      # entirely-unset VAR falls back to `trust`), whereas `${VAR:-default}`
+      # would override the empty value back to `trust` and break external
+      # mode.
+      POSTGRES_HOST_AUTH_METHOD: ${POSTGRES_HOST_AUTH_METHOD-trust}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pg-data:/var/lib/postgresql/data
+      # Slice 065 bug #2 (part 2) — role-bootstrap chicken-and-egg.
+      #
+      # atlas-bootstrap connects to Postgres ONLY as atlas_migrate
+      # (DATABASE_URL = DATABASE_URL_MIGRATE). On a fresh bundled volume
+      # that role does not exist yet, so bootstrap.sh's wait-for-Postgres
+      # loop never connects ("role atlas_migrate does not exist") and
+      # times out — atlas-bootstrap cannot create the role it needs to
+      # connect as. The postgres image runs every file in
+      # /docker-entrypoint-initdb.d ONCE at cluster init as the superuser,
+      # which is exactly the right place to create the three roles.
+      # 01-roles.sql is fully IF-NOT-EXISTS-guarded, so bootstrap.sh phase
+      # 2 re-running it as atlas_migrate stays a clean no-op.
+      #
+      # PG_INITDB_ROLES defaults to the repo's 01-roles.sql so the shipped
+      # bundle is self-bootstrapping. The slice-065 end-to-end harness's
+      # `external` mode points it at /dev/null instead (an empty no-op
+      # initdb script) so that mode keeps its "atlas_migrate is
+      # pre-created by the cluster admin as a non-superuser" test premise.
+      # Shared-cluster operators do not run this `postgres` service at all.
+      - ${PG_INITDB_ROLES:-../../migrations/bootstrap/01-roles.sql}:/docker-entrypoint-initdb.d/01-roles.sql:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 5s
@@ -173,8 +217,39 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      # Slice 065 bug #2 — startup-ordering deadlock fix.
+      #
+      # This was `condition: service_completed_successfully`, which is a
+      # deadlock: atlas would not start until atlas-bootstrap EXITED, but
+      # atlas-bootstrap phase 5 BLOCKS waiting for atlas's /health to
+      # return 200 (and phase 6 then uploads control bundles to the live
+      # server). Neither container could make progress; atlas-bootstrap
+      # timed out at 90 attempts, exited 1, and atlas never started.
+      #
+      # `service_started` matches the choreography the file header
+      # already describes ("-> atlas starts -> atlas-bootstrap phase 6
+      # uploads control bundles once /health is up"): atlas-bootstrap
+      # runs phases 1-4 (migrations + seed + SCF import) while atlas is
+      # booting in parallel, then phases 5-6 against the live server.
+      # The migrations are idempotent (slice 065 bug #3) so the race
+      # between "bootstrap applying migrations" and "atlas reading the
+      # schema" is benign — atlas's own restart loop (see the bumped
+      # healthcheck start_period below) absorbs the brief window where
+      # the schema is mid-apply.
+      #
+      # Alternative considered and REJECTED: split atlas-bootstrap into
+      # `atlas-bootstrap-pre` (phases 1-4, gated
+      # service_completed_successfully) + `atlas-bootstrap-post`
+      # (phases 5-6, depends_on atlas). That removes the parallelism
+      # entirely (atlas cannot start until every migration is applied)
+      # and doubles the compose service count + the bind-mount and env
+      # duplication, for no real gain: the idempotent-migration +
+      # start_period approach already converges reliably and keeps the
+      # bundle a single bootstrap unit. Revisit only if a future
+      # migration becomes genuinely non-idempotent or long-running
+      # enough that the start_period window is insufficient.
       atlas-bootstrap:
-        condition: service_completed_successfully
+        condition: service_started
     environment:
       # DSNs are assembled in .env (see .env.example) so the compose
       # source carries no `user:pass@host` literal. DATABASE_URL_APP is
@@ -207,7 +282,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
-      start_period: 20s
+      # Slice 065 bug #2: bumped 20s -> 120s. With atlas-bootstrap now
+      # gated on `service_started` (above), atlas boots in PARALLEL with
+      # bootstrap's phase 1-4 migration apply. atlas's own connect-retry
+      # loop needs room to converge while the schema is still being
+      # applied; a 20s start_period would mark atlas unhealthy and churn
+      # the restart loop before bootstrap finished. 120s comfortably
+      # covers a cold-start migration apply on the target 4 vCPU / 16 GB
+      # VM while keeping the post-converge healthcheck cadence tight.
+      start_period: 120s
     restart: unless-stopped
 
   # --------------------------------------------------------------------
