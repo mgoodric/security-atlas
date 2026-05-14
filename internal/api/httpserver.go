@@ -27,6 +27,7 @@ import (
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	controlstateapi "github.com/mgoodric/security-atlas/internal/api/controlstate"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	dashboardapi "github.com/mgoodric/security-atlas/internal/api/dashboard"
 	decisionsapi "github.com/mgoodric/security-atlas/internal/api/decisions"
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
 	exceptionsapi "github.com/mgoodric/security-atlas/internal/api/exceptions"
@@ -468,6 +469,21 @@ func (s *Server) httpHandler() http.Handler {
 	freshnessDriftH := freshnessdriftapi.New(freshnessStore, driftStore)
 	root.Get("/v1/evidence/freshness", freshnessDriftH.Freshness)
 	root.Get("/v1/controls/drift", freshnessDriftH.Drift)
+	// Slice 066: dashboard backend read endpoints. Three pure reads that
+	// fill three of the four binding placeholders slice 040's program
+	// dashboard view shipped (per-framework posture, the evidence-ingest
+	// activity feed, the unified upcoming-items rollup; the fourth,
+	// sort=residual,age on /v1/risks, extends the risks routes below).
+	// Routes appended per the parallel-batch convention (chi rejects two
+	// Mounts at "/"). /v1/frameworks/posture, /v1/activity, /v1/upcoming are
+	// fresh top-level paths -- no shadowing of any existing route. The Store
+	// is a pure read surface over existing tables + the slice-062
+	// admin_audit_log_v view -- this slice adds no migration and no write
+	// path (constitutional invariant #2).
+	dashboardH := dashboardapi.New(dashboardapi.NewStore(s.dbPool))
+	root.Get("/v1/frameworks/posture", dashboardH.FrameworkPosture)
+	root.Get("/v1/activity", dashboardH.Activity)
+	root.Get("/v1/upcoming", dashboardH.Upcoming)
 	// Slice 034: admin credentials HTTP API + auth routes. Routes append
 	// per the parallel-batch convention. Admin-credential routes require
 	// the bearer auth middleware (admin gate inside the handler). The

@@ -31,6 +31,21 @@ auto-generated notes.
   than fabricated data (slice 040/041 precedent). Pure frontend, no
   migration. See `docs/audit-log/056-hierarchical-risk-dashboard-decisions.md`
   for the backend gap inventory.
+- **catalog:** dashboard backend read endpoints (#066) — fills the four
+  binding placeholders slice 040's program dashboard view shipped.
+  `GET /v1/frameworks/posture` returns per-framework-version coverage,
+  a freshness composite, and a 90-day trend delta, aggregated through
+  the SCF anchor spine. `GET /v1/activity` is a keyset-paginated read
+  model over the evidence-ingest event archive (the slice-062
+  `admin_audit_log_v` view, filtered to the evidence branch).
+  `GET /v1/risks` now accepts `?sort=residual,age`, ranking by
+  residual-score magnitude then risk age — an additive, optional
+  parameter that leaves the existing filters unchanged. `GET /v1/upcoming`
+  is a unified, date-sorted rollup across expiring exceptions, policy-ack
+  expirations, vendor reviews, and audit-period milestones in one
+  `UNION ALL`. All endpoints are tenant-scoped through RLS, role-gated
+  for dashboard/program-read access, and keyset-paginated where
+  applicable. Read-only over existing schema — no migration.
 - **controls:** control-detail backend read endpoints (#064) — four
   per-control read paths that fill the binding placeholders slice 041's
   control-detail view shipped: `GET /v1/evidence?control_id=` (paginated

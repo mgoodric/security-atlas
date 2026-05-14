@@ -344,6 +344,59 @@ type Querier interface {
 	// (tenant_id, content_hash) WHERE content_hash IS NOT NULL keeps the
 	// result single-row.
 	FindArtifactByHash(ctx context.Context, arg FindArtifactByHashParams) (Artifact, error)
+	// Slice 066 — dashboard backend read endpoints.
+	//
+	// Three pure SELECT families that surface existing data behind the
+	// dashboard-grained read paths slice 040's program dashboard view shipped
+	// binding placeholders for. This slice adds NO migration and NO write
+	// surface — it reads framework_versions + the UCF graph, the slice-062
+	// admin_audit_log_v view, and four upcoming-item source tables.
+	//
+	// All tenant-scoped reads run inside the request's app.current_tenant GUC
+	// (set by the slice-033 tenancy middleware); RLS is the defense-in-depth
+	// layer and the WHERE clauses on tenant_id are the primary correctness
+	// guarantee (canvas invariant #6). Catalog tables (framework_versions,
+	// frameworks, framework_requirements, fw_to_scf_edges, scf_anchors) carry
+	// no tenant_id and no RLS — they are global, platform-bundled.
+	//
+	// Cursor pagination over the activity feed and the upcoming rollup is
+	// keyset, not OFFSET: a (timestamp, id) keyset is stable under concurrent
+	// appends. The keyset predicate is decomposed (ts < cursor_ts OR (ts =
+	// cursor_ts AND id < cursor_id)) rather than a ROW(...) tuple comparison —
+	// a row-comparison tuple mis-infers the id placeholder's type under sqlc
+	// (the slice-064 decisions log records this). Each paginated query fetches
+	// limit+1 rows so the handler detects a next page without a COUNT
+	// round-trip.
+	// AC-1: one row per framework version, with coverage_pct, a freshness
+	// composite, and a 90-day trend delta. Aggregates slice-008 UCF coverage to
+	// the framework-version grain.
+	//
+	// Coverage path (constitutional invariant #1 — through the SCF anchor
+	// spine, never per-framework duplicated controls):
+	//   framework_versions
+	//     -> framework_requirements (per version)
+	//       -> fw_to_scf_edges (non-`no_relationship`)
+	//         -> scf_anchors
+	//           <- controls.scf_anchor_id (the tenant's active controls)
+	// A requirement is "covered" when at least one active (superseded_by IS
+	// NULL) tenant control is anchored on an SCF anchor that a real STRM edge
+	// connects to that requirement. coverage_pct = covered / total
+	// requirements for the version.
+	//
+	// freshness_composite: of the tenant controls that cover this version's
+	// requirements, the fraction that are NOT stale per the slice-016
+	// evidence_freshness read model. A control with no freshness row counts as
+	// stale (it has, definitionally, no current evidence).
+	//
+	// trend_delta_90d: coverage_pct now minus the coverage_pct as it stood ~90
+	// days ago. "As it stood" is reconstructed from the control_evaluations
+	// ledger (slice 012): a control counted toward coverage 90 days ago iff its
+	// latest evaluation on/before the cutoff had result='pass'. The delta is in
+	// percentage points (e.g. +12.5 means coverage rose 12.5 points).
+	//
+	// The whole thing is ONE statement with CTEs — no N+1 (anti-criterion P0).
+	// $1 = tenant_id; $2 = the 90-day-ago cutoff timestamptz (computed in Go).
+	FrameworkPosture(ctx context.Context, arg FrameworkPostureParams) ([]FrameworkPostureRow, error)
 	// AC-2 + AC-6: flip status open->frozen, stamp the freeze metadata. The
 	// `WHERE status='open'` guard means re-freezing a frozen row matches zero
 	// rows (RETURNING returns nothing) and the application surfaces 409
@@ -842,6 +895,21 @@ type Querier interface {
 	// The 10 built-in themes (canvas §6.5). Visible to every tenant via the
 	// `tenant_or_catalog_read` policy.
 	ListDefaultThemes(ctx context.Context) ([]OrgTheme, error)
+	// AC-2: paginated read model over the evidence-ingest event archive. Reads
+	// the slice-062 admin_audit_log_v view filtered to the evidence_audit_log
+	// branch — that branch IS the slice-013/015 evidence-ingest event archive,
+	// projected to the AC-2 row shape {ts, event_type, actor, resource_type,
+	// resource_id, summary}. The view is RLS-aware: each source table's
+	// tenant_read policy fires under the caller's GUC, so this SELECT returns
+	// only the caller's tenant rows. The explicit tenant_id predicate is the
+	// primary guarantee.
+	//
+	// Keyset paginated newest-first over (ts, resource_id). The keyset
+	// predicate is decomposed (not a ROW(...) tuple) for the sqlc
+	// type-inference reason in the file header. A sentinel cursor
+	// (cursor_ts = 'infinity', cursor_id = max-uuid string) selects the first
+	// page. The handler computes the cutoff values in Go and fetches limit+1.
+	ListEvidenceActivity(ctx context.Context, arg ListEvidenceActivityParams) ([]ListEvidenceActivityRow, error)
 	ListEvidenceAuditEntriesByCredential(ctx context.Context, arg ListEvidenceAuditEntriesByCredentialParams) ([]EvidenceAuditLog, error)
 	// The evaluation engine's read of the evidence ledger for one control,
 	// bounded by the point-in-time horizon `as_of` (AC-1's `?as-of=` and AC-7's
@@ -1148,6 +1216,36 @@ type Querier interface {
 	// '' so the comparison matches. This avoids pgx single-placeholder
 	// type-inference issues (SQLSTATE 42P08).
 	ListThreadForScope(ctx context.Context, arg ListThreadForScopeParams) ([]ListThreadForScopeRow, error)
+	// AC-4: unified upcoming-items rollup. ONE UNION ALL across the four
+	// sources — expiring exceptions (021), policy-ack expirations (023), vendor
+	// reviews (024), audit-period milestones (028) — projected to the AC-4 row
+	// shape {due_date, category, title, resource_type, resource_id}. NOT four
+	// round-trips (anti-criterion P0: no N+1).
+	//
+	// due_date semantics per source:
+	//   exception        — expires_at (the waiver lapses)
+	//   policy_ack       — latest ack's acknowledged_at + 365d (the annual
+	//                      re-ack falls due); only the freshest ack per
+	//                      (policy_version, user) is considered
+	//   vendor_review    — last_review_date + the cadence interval (next review
+	//                      falls due)
+	//   audit_period     — period_end (the audit period closes)
+	//
+	// All four are tenant-scoped; RLS fires on each underlying SELECT and the
+	// explicit tenant_id predicates are the primary guarantee.
+	//
+	// Keyset paginated date-sorted ascending over (due_date, resource_id). The
+	// decomposed keyset predicate + the optional category filter are pushed
+	// INTO each UNION branch: sqlc v1.31's analyzer cannot resolve column names
+	// in an outer WHERE over a UNION-ALL CTE whose columns are all expressions
+	// (it has no base-column lineage to bind to). Pushing the predicates into
+	// each branch lets sqlc analyze each against real tables. The named args
+	// (cursor_date, cursor_id, category_filter, row_limit) are deduplicated by
+	// sqlc — each appears once in the generated Params struct. This is still
+	// ONE statement / ONE UNION ALL — no N+1 (anti-criterion P0). A sentinel
+	// cursor (cursor_date = '-infinity', cursor_id = '') selects the first
+	// page; the empty category filter ('' = all) narrows to one source.
+	ListUpcomingItems(ctx context.Context, arg ListUpcomingItemsParams) ([]ListUpcomingItemsRow, error)
 	// Cells attached to one vendor.
 	ListVendorScopeCells(ctx context.Context, arg ListVendorScopeCellsParams) ([]pgtype.UUID, error)
 	// AC-2 filter by criticality. NULL criticality_filter means "all" — the

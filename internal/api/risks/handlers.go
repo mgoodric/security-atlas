@@ -157,16 +157,28 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListRisks handles GET /v1/risks (AC-6).
+//
+// Filters (slice 019): ?treatment= ?category= ?methodology=.
+// Ordering (slice 066, AC-3): ?sort=residual,age ranks the result by
+// residual-score magnitude descending then risk age ascending — the
+// program dashboard's "top risks aging" panel. ?sort= is additive and
+// optional; omitting it keeps the default newest-first order.
 func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
+	sortOrder, err := risk.ParseListSort(r.URL.Query().Get("sort"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	filter := risk.ListFilter{
 		Treatment:   dbx.RiskTreatment(r.URL.Query().Get("treatment")),
 		Category:    dbx.RiskCategory(r.URL.Query().Get("category")),
 		Methodology: dbx.RiskMethodology(r.URL.Query().Get("methodology")),
+		Sort:        sortOrder,
 	}
 	risks, err := h.store.List(ctx, filter)
 	if err != nil {
