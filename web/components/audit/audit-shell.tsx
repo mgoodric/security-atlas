@@ -28,10 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import type { AuditPeriod } from "@/lib/api/audit";
 import { AuditPeriodBar } from "@/components/audit/audit-period-bar";
-import {
-  ControlNav,
-  type NavControl,
-} from "@/components/audit/control-nav";
+import { ControlNav, type NavControl } from "@/components/audit/control-nav";
 import { ControlWorkspace } from "@/components/audit/control-workspace";
 import { AnnotationDraftProvider } from "@/components/audit/annotation-draft-store";
 
@@ -117,9 +114,9 @@ export function AuditShell({
                 Select a control to begin testing
               </p>
               <p>
-                Pick a control from the left nav, or add one by id. Each
-                control opens a workspace for population sampling,
-                walkthrough recording, and the Audit Hub comment thread.
+                Pick a control from the left nav, or add one by id. Each control
+                opens a workspace for population sampling, walkthrough
+                recording, and the Audit Hub comment thread.
               </p>
             </div>
           )}

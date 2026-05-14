@@ -17,12 +17,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   listAnnotations,
@@ -53,9 +48,7 @@ export function SamplePanel({ controlId }: { controlId: string }) {
             <CardContent>
               <SamplePullForm
                 populationId={population.id}
-                onSampleDrawn={(s) =>
-                  setSamples((prev) => [s, ...prev])
-                }
+                onSampleDrawn={(s) => setSamples((prev) => [s, ...prev])}
               />
             </CardContent>
           </Card>

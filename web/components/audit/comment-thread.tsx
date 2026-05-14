@@ -48,13 +48,7 @@ export function CommentThread({
   const [body, setBody] = useState("");
   const [visibility, setVisibility] = useState<NoteVisibility>("shared");
 
-  const threadKey = [
-    "audit",
-    "notes",
-    auditPeriodId,
-    "control",
-    controlId,
-  ];
+  const threadKey = ["audit", "notes", auditPeriodId, "control", controlId];
 
   const thread = useQuery({
     queryKey: threadKey,
@@ -139,9 +133,7 @@ export function CommentThread({
             <select
               data-testid="comment-visibility"
               value={visibility}
-              onChange={(e) =>
-                setVisibility(e.target.value as NoteVisibility)
-              }
+              onChange={(e) => setVisibility(e.target.value as NoteVisibility)}
               className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             >
               <option value="shared">shared (auditee can see)</option>
@@ -178,7 +170,8 @@ function CommentItem({
   note: AuditNote;
   callerUserId?: string;
 }) {
-  const mine = callerUserId !== undefined && note.author_user_id === callerUserId;
+  const mine =
+    callerUserId !== undefined && note.author_user_id === callerUserId;
   const privateNote = note.visibility === "auditor_only";
   return (
     <li

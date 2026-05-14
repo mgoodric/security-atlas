@@ -29,8 +29,8 @@ export async function POST(
   } catch {
     body = {};
   }
-  return forwardJSON(
-    `/v1/samples/${encodeURIComponent(id)}/annotations`,
-    { method: "POST", jsonBody: body },
-  );
+  return forwardJSON(`/v1/samples/${encodeURIComponent(id)}/annotations`, {
+    method: "POST",
+    jsonBody: body,
+  });
 }

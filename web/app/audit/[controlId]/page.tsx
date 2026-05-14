@@ -39,8 +39,8 @@ export default async function ControlWorkspacePage({
         <Alert>
           <AlertTitle>No audit period assigned</AlertTitle>
           <AlertDescription>
-            You are signed in but not assigned to any audit period, so
-            this control cannot be opened for testing.
+            You are signed in but not assigned to any audit period, so this
+            control cannot be opened for testing.
           </AlertDescription>
         </Alert>
       </div>
@@ -53,8 +53,8 @@ export default async function ControlWorkspacePage({
         <Alert variant="destructive">
           <AlertTitle>Could not load the audit workspace</AlertTitle>
           <AlertDescription>
-            The platform returned an unexpected status ({resolution.status}
-            ) resolving your assigned audit period.
+            The platform returned an unexpected status ({resolution.status})
+            resolving your assigned audit period.
           </AlertDescription>
         </Alert>
       </div>

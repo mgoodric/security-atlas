@@ -133,9 +133,7 @@ export function SampleAnnotation({
       </div>
       {mutation.error ? (
         <Alert variant="destructive" data-testid="annotation-error">
-          <AlertDescription>
-            {String(mutation.error.message)}
-          </AlertDescription>
+          <AlertDescription>{String(mutation.error.message)}</AlertDescription>
         </Alert>
       ) : null}
     </div>

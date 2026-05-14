@@ -20,17 +20,8 @@ import { useMutation } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   createWalkthrough,
   uploadWalkthroughAttachment,
@@ -115,9 +106,7 @@ export function WalkthroughRecorder({
             <div>
               <Button
                 type="submit"
-                disabled={
-                  createMutation.isPending || narrative.trim() === ""
-                }
+                disabled={createMutation.isPending || narrative.trim() === ""}
                 data-testid="walkthrough-save"
               >
                 {createMutation.isPending ? "Saving…" : "Record walkthrough"}
@@ -142,8 +131,7 @@ export function WalkthroughRecorder({
                   {walkthrough.canonical_hash}
                 </code>
               </div>
-              {walkthrough.attachments &&
-              walkthrough.attachments.length > 0 ? (
+              {walkthrough.attachments && walkthrough.attachments.length > 0 ? (
                 <span
                   data-testid="walkthrough-attachment-count"
                   className="text-xs text-muted-foreground"
@@ -160,9 +148,7 @@ export function WalkthroughRecorder({
                 <Input
                   type="file"
                   data-testid="walkthrough-file"
-                  onChange={(e) =>
-                    setFile(e.target.files?.[0] ?? null)
-                  }
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                   className="max-w-xs"
                 />
                 <Button
