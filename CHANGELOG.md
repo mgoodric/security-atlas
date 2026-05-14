@@ -152,6 +152,37 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 016 — Evidence freshness + drift detection.** Two derived
+  leading indicators over the evidence pipeline (canvas §7.1) land as
+  the new `internal/freshness`, `internal/drift`, and `internal/freshnessdrift`
+  packages plus migration `_028`. **Freshness** answers "is the most
+  recent evidence record for each control inside its `freshness_class`
+  window?" — it reads `evidence_records` joined to `controls.freshness_class`,
+  derives a per-control `valid_until` (`latest observed_at` + the class
+  max-age), and UPSERTs the result into the materialized `evidence_freshness`
+  read-model table. **Drift** answers "which controls flipped out of passing
+  day-over-day?" — it reads the slice-012 `control_evaluations` ledger, rolls
+  each control up worst-cell (a control passes iff EVERY applicable
+  `(control, scope_cell)` tuple's latest evaluation is `result=pass` AND
+  `freshness_status=fresh` — stale evidence does NOT count as passing, per
+  canvas §2.3), and APPENDS a daily passing-control snapshot to the
+  append-only `control_drift_snapshots` ledger. The signed drift delta is
+  `controls_passing(latest) − controls_passing(earliest)` over the window.
+  Both read models refresh on every evidence ingest (a third durable
+  JetStream consumer on the slice-015 stream) and on a daily 00:00 UTC
+  scheduler tick. Two read-only endpoints: `GET /v1/evidence/freshness?bucket=class`
+  returns the per-class fresh/stale distribution; `GET /v1/controls/drift?since=Nd`
+  returns the signed delta plus the flipped-out controls with their
+  last-passing date. Constitutional invariant 2 holds structurally — the
+  read models are derived purely from the immutable ledgers and NEVER write
+  or delete `evidence_records` / `control_evaluations`; stale evidence is
+  flagged, never deleted, so point-in-time audit replay is preserved
+  (AC-6). Invariant 6: `evidence_freshness` carries four-policy RLS (it is
+  UPSERTed current state); `control_drift_snapshots` carries append-only
+  two-policy RLS under FORCE (it is a snapshot ledger). The canvas §2.3
+  class → max-age mapping is reused via the newly exported
+  `eval.FreshnessMaxAge` — never redefined.
+
 - **Slice 012 — Control state evaluation engine.** The evaluation stage
   of the evidence pipeline (canvas §4.3) lands as the new `internal/eval`
   package plus migration `_027`. The engine is a read-only consumer of the

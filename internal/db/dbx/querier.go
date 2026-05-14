@@ -404,6 +404,9 @@ type Querier interface {
 	// tenant (UNIQUE (tenant_id, decision_id)).
 	GetDecisionByDecisionID(ctx context.Context, arg GetDecisionByDecisionIDParams) (Decision, error)
 	GetDecisionByID(ctx context.Context, arg GetDecisionByIDParams) (Decision, error)
+	// Single-control freshness lookup — used by tests and by future per-control
+	// detail surfaces.
+	GetEvidenceFreshnessByControl(ctx context.Context, arg GetEvidenceFreshnessByControlParams) (EvidenceFreshness, error)
 	// Look up one schema visible to the tenant. Prefers the tenant's private
 	// row when one exists for the same (kind, semver); otherwise returns the
 	// global row. The ORDER BY puts the non-null tenant_id first.
@@ -463,6 +466,9 @@ type Querier interface {
 	// lookup. Used to decide whether the current write falls inside an
 	// existing window. Returns the most recent 'fired' row for the rule.
 	GetLastFiredEvaluation(ctx context.Context, arg GetLastFiredEvaluationParams) (AggregationRuleEvaluation, error)
+	// The latest snapshot for one specific calendar day — used by the on-ingest
+	// refresh to decide whether today already has a snapshot, and by tests.
+	GetLatestDriftSnapshotForDay(ctx context.Context, arg GetLatestDriftSnapshotForDayParams) (ControlDriftSnapshot, error)
 	GetLocalCredentialByUserID(ctx context.Context, arg GetLocalCredentialByUserIDParams) (LocalCredential, error)
 	GetOidcIdpConfigByName(ctx context.Context, arg GetOidcIdpConfigByNameParams) (OidcIdpConfig, error)
 	GetOrgThemeByID(ctx context.Context, id pgtype.UUID) (OrgTheme, error)
@@ -547,6 +553,13 @@ type Querier interface {
 	// Insert a new control row (initial upload or supersession). Caller is
 	// responsible for UPDATE-ing the predecessor's superseded_by in the same tx.
 	InsertControlVersion(ctx context.Context, arg InsertControlVersionParams) (Control, error)
+	// The drift refresh write: APPEND one snapshot row. The table is append-only
+	// (no UPDATE/DELETE RLS policy) — every refresh, scheduled or on-ingest,
+	// appends a fresh row; the read path takes the latest row per
+	// (tenant_id, snapshot_date). controls_passing and passing_control_ids are
+	// both computed in Go from ListPassingControlsForDay and MUST agree (CHECK
+	// constraint control_drift_snapshots_count_matches_set).
+	InsertDriftSnapshot(ctx context.Context, arg InsertDriftSnapshotParams) (ControlDriftSnapshot, error)
 	// AC-7: every push attempt — accepted or rejected — lands in the audit
 	// log keyed by credential id. The platform layer writes one row per
 	// decision; rejections include reason_code (validation, idempotency
@@ -760,6 +773,28 @@ type Querier interface {
 	// NO `WHERE tenant_id = ?` clause: invariant 6 — RLS does the tenant
 	// filtering. Adding such a clause would be a constitutional violation.
 	ListControlsForAnchors(ctx context.Context, dollar_1 []pgtype.UUID) ([]ListControlsForAnchorsRow, error)
+	// Slice 016 — evidence freshness read-model + control drift snapshot queries.
+	//
+	// `evidence_freshness` is a materialized current-state read model (one row per
+	// (tenant_id, control_id), UPSERTed on refresh). `control_drift_snapshots` is
+	// an append-only daily snapshot ledger (every refresh APPENDS; latest row per
+	// (tenant_id, snapshot_date) wins). Both are DERIVED purely from the immutable
+	// ledgers (`evidence_records`, `control_evaluations`) — slice 016 never writes
+	// the ledgers (constitutional invariant #2).
+	//
+	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
+	// defense-in-depth layer and the WHERE clauses are the primary correctness
+	// guarantee (canvas invariant #6). Every timestamp / date cutoff is computed
+	// in Go and passed as an explicit parameter — never a single-placeholder
+	// expression that would trip pgx type inference (SQLSTATE 42P08).
+	// ===== evidence_freshness =====
+	// The freshness refresh input: every active (non-superseded) control for the
+	// tenant, joined to its evidence ledger aggregate (freshest observed_at +
+	// record count). LEFT JOIN so a control with zero evidence still produces a
+	// row (latest_observed_at NULL, evidence_count 0). The evidence join matches
+	// BOTH the UUID control_id path and the free-form control_ref path (slice
+	// 013), so evidence pushed under an SCF-anchor string is still counted.
+	ListControlsWithLatestEvidence(ctx context.Context, tenantID pgtype.UUID) ([]ListControlsWithLatestEvidenceRow, error)
 	ListDecisionControls(ctx context.Context, arg ListDecisionControlsParams) ([]ListDecisionControlsRow, error)
 	ListDecisionExceptions(ctx context.Context, arg ListDecisionExceptionsParams) ([]ListDecisionExceptionsRow, error)
 	ListDecisionRisks(ctx context.Context, arg ListDecisionRisksParams) ([]ListDecisionRisksRow, error)
@@ -789,6 +824,11 @@ type Querier interface {
 	// observed_at DESC so the caller can pick the most-recent record as the
 	// pass/fail-driving observation.
 	ListEvidenceForPeriodControl(ctx context.Context, arg ListEvidenceForPeriodControlParams) ([]ListEvidenceForPeriodControlRow, error)
+	// AC-1 / AC-2 read: every freshness row for the tenant. The handler buckets
+	// by freshness_class and counts is_stale in Go — a flat list keeps the query
+	// single-purpose and lets the handler shape both the ?bucket=class
+	// distribution and the per-class stale counts from one read.
+	ListEvidenceFreshness(ctx context.Context, tenantID pgtype.UUID) ([]EvidenceFreshness, error)
 	// Hash-input ingredient #1 (ADR 0003): the sorted UUIDs of evidence records
 	// visible at the period's horizon. The frozen-at filter is parameterized so
 	// a verifier can replay the hash for any horizon.
@@ -853,6 +893,13 @@ type Querier interface {
 	// collapses the append-only history to the current row per cell. Used by
 	// GET /v1/controls/:id/state when no scope filter is supplied.
 	ListLatestControlEvaluations(ctx context.Context, arg ListLatestControlEvaluationsParams) ([]ControlEvaluation, error)
+	// AC-3 read: the latest snapshot per calendar day for the tenant, for every
+	// day from `since_date` through today. DISTINCT ON (snapshot_date) collapses
+	// the append-only intra-day refresh trail to the authoritative latest row per
+	// day. The handler diffs consecutive days' passing_control_ids to derive the
+	// signed delta and the flipped-to-fail control set. `since_date` is computed
+	// in Go (today - N days) and passed explicitly.
+	ListLatestDriftSnapshotsSince(ctx context.Context, arg ListLatestDriftSnapshotsSinceParams) ([]ControlDriftSnapshot, error)
 	// Recipient-scoped list. Unread first (NULLS FIRST on read_at), then
 	// newest first within each read-status bucket. The index
 	// idx_notifications_recipient_unread_first directly serves this order.
@@ -872,6 +919,18 @@ type Querier interface {
 	// (testability) and timezone semantics (vendor reviews are date-granular,
 	// not timestamp-granular).
 	ListOverdueVendors(ctx context.Context, arg ListOverdueVendorsParams) ([]Vendor, error)
+	// ===== control_drift_snapshots =====
+	// The drift snapshot input: for one tenant, the set of controls "passing" as
+	// of `as_of` under the worst-cell rollup. A control passes iff EVERY
+	// applicable (control, scope_cell) tuple's LATEST evaluation at or before
+	// `as_of` has result='pass' AND freshness_status='fresh'. Stale evidence does
+	// NOT count as passing (canvas §2.3: stale evidence drives the drift signal).
+	//
+	// The inner DISTINCT ON collapses the append-only control_evaluations ledger
+	// to the latest row per (control_id, scope_cell_id). The outer aggregate
+	// keeps a control only when NO cell is non-(pass+fresh): bool_and over the
+	// per-cell pass+fresh predicate.
+	ListPassingControlsForDay(ctx context.Context, arg ListPassingControlsForDayParams) ([]pgtype.UUID, error)
 	// One-shot query returning every published policy the user must
 	// acknowledge plus their most-recent ack timestamp (if any). Replaces
 	// the slice-023 N+1 (one ListPublishedPolicies + N
@@ -1131,6 +1190,12 @@ type Querier interface {
 	// with secret-unchanged semantics. id is supplied by the caller (UUIDv4)
 	// so the insert path is deterministic in tests.
 	UpsertAdminSSO(ctx context.Context, arg UpsertAdminSSOParams) (UpsertAdminSSORow, error)
+	// The freshness refresh write: UPSERT one control's freshness row onto the
+	// (tenant_id, control_id) unique key. valid_until and is_stale are computed
+	// in Go (Go owns the canvas §2.3 class -> max-age mapping via
+	// internal/eval.FreshnessMaxAge — never re-derived in SQL). On conflict every
+	// derived column is refreshed.
+	UpsertEvidenceFreshness(ctx context.Context, arg UpsertEvidenceFreshnessParams) (EvidenceFreshness, error)
 	// Idempotent toggle write. INSERT-on-first-toggle or UPDATE on subsequent
 	// toggles. created_at is set on insert only (excluded from the conflict
 	// update clause). The application supplies last_changed_by + last_changed_at

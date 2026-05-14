@@ -71,6 +71,20 @@ func freshnessMaxAge(class string) (time.Duration, bool) {
 	return defaultFreshnessMaxAge, true
 }
 
+// FreshnessMaxAge is the exported accessor for the canvas §2.3 freshness
+// model — the class -> max-acceptable-evidence-age mapping. It exists so
+// sibling packages (slice 016's freshness read model) reuse the SAME mapping
+// rather than redefining it: the table lives in exactly one place,
+// freshnessMaxAgeTable above. An unknown or empty class falls back to the
+// `monthly` (90d) default; the returned bool reports whether the class was a
+// known member of the table. Callers may surface that in logging but never
+// need to special-case it — the returned duration is always usable.
+func FreshnessMaxAge(class string) (time.Duration, bool) {
+	_, known := freshnessMaxAgeTable[class]
+	d, _ := freshnessMaxAge(class)
+	return d, known
+}
+
 // inWindowRecord is one evidence record's result that fell INSIDE the
 // freshness window. computeResult only ever sees in-window records — the
 // freshness filter (inWindowRecords) is applied first. This is the type-level
