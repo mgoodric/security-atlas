@@ -9,6 +9,15 @@ Conventional-Commit messages. This file holds pre-release / unreleased
 work and any narrative entries the operator wants alongside the
 auto-generated notes.
 
+## [1.4.0](https://github.com/mgoodric/security-atlas/compare/v1.3.0...v1.4.0) (2026-05-14)
+
+
+### Features
+
+* **evidence:** evidence freshness + drift detection ([#016](https://github.com/mgoodric/security-atlas/issues/016)) ([#94](https://github.com/mgoodric/security-atlas/issues/94)) ([6a34472](https://github.com/mgoodric/security-atlas/commit/6a34472b57ebb3c52f722044643cbe3420495cfb))
+* **frontend:** control detail view + UCF mini-viz ([#041](https://github.com/mgoodric/security-atlas/issues/041)) ([#93](https://github.com/mgoodric/security-atlas/issues/93)) ([6db7395](https://github.com/mgoodric/security-atlas/commit/6db7395093c7d56dc472cab9b871fb8bd168ea20))
+* **risk:** risk-control linkage + residual derivation ([#020](https://github.com/mgoodric/security-atlas/issues/020)) ([#96](https://github.com/mgoodric/security-atlas/issues/96)) ([841647a](https://github.com/mgoodric/security-atlas/commit/841647aa943fab7f14b9dd2e07651242ef3242c9))
+
 ## [1.3.0](https://github.com/mgoodric/security-atlas/compare/v1.2.0...v1.3.0) (2026-05-14)
 
 
