@@ -776,6 +776,49 @@ type AdminAuditLogV struct {
 	Summary      []byte             `json:"summary"`
 }
 
+type AggregationRule struct {
+	ID               pgtype.UUID        `json:"id"`
+	TenantID         pgtype.UUID        `json:"tenant_id"`
+	RuleID           string             `json:"rule_id"`
+	TargetTheme      string             `json:"target_theme"`
+	MinRisks         int32              `json:"min_risks"`
+	MinTeams         int32              `json:"min_teams"`
+	WindowDays       int32              `json:"window_days"`
+	ParentLevel      RiskLevel          `json:"parent_level"`
+	SeverityFunction string             `json:"severity_function"`
+	RuleBody         []byte             `json:"rule_body"`
+	Status           string             `json:"status"`
+	ActivatedBy      *string            `json:"activated_by"`
+	ActivatedAt      pgtype.Timestamptz `json:"activated_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AggregationRuleAuditLog struct {
+	ID         pgtype.UUID        `json:"id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	RuleID     pgtype.UUID        `json:"rule_id"`
+	Event      string             `json:"event"`
+	Actor      string             `json:"actor"`
+	FromStatus *string            `json:"from_status"`
+	ToStatus   *string            `json:"to_status"`
+	Detail     []byte             `json:"detail"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type AggregationRuleEvaluation struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	RuleID      pgtype.UUID        `json:"rule_id"`
+	EvaluatedAt pgtype.Timestamptz `json:"evaluated_at"`
+	Outcome     string             `json:"outcome"`
+	RiskCount   int32              `json:"risk_count"`
+	TeamCount   int32              `json:"team_count"`
+	WindowStart pgtype.Timestamptz `json:"window_start"`
+	MetaRiskID  pgtype.UUID        `json:"meta_risk_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type ApiKey struct {
 	ID             pgtype.UUID        `json:"id"`
 	TenantID       pgtype.UUID        `json:"tenant_id"`

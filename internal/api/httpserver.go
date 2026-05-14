@@ -15,6 +15,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
 	"github.com/mgoodric/security-atlas/internal/api/adminsso"
 	"github.com/mgoodric/security-atlas/internal/api/adminusers"
+	aggregationrulesapi "github.com/mgoodric/security-atlas/internal/api/aggregationrules"
 	"github.com/mgoodric/security-atlas/internal/api/anchors"
 	artifactsapi "github.com/mgoodric/security-atlas/internal/api/artifacts"
 	auditapi "github.com/mgoodric/security-atlas/internal/api/audit"
@@ -55,6 +56,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/risk"
+	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/vendor"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
@@ -175,6 +177,20 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/themes", themesH.ListVisible)
 	root.Post("/v1/risks/{id}/themes", themesH.AssignThemes)
 	root.Delete("/v1/risks/{id}/themes/{theme}", themesH.RemoveTheme)
+	// Slice 054: declarative aggregation rules engine. Routes appended per
+	// the parallel-batch convention -- chi.Mux rejects two Mounts at "/",
+	// so individual routes register onto the root. The literal-segment
+	// transition routes (/activate, /deactivate) are declared BEFORE the
+	// bare /{id} so chi's declaration-order match keeps them ahead of the
+	// generic UUID-id route. POST accepts application/json AND
+	// application/yaml; rules are created `staged` and only go live via
+	// the HITL PATCH .../activate.
+	aggrulesH := aggregationrulesapi.New(aggrule.NewStore(s.dbPool))
+	root.Post("/v1/aggregation-rules", aggrulesH.Create)
+	root.Get("/v1/aggregation-rules", aggrulesH.List)
+	root.Patch("/v1/aggregation-rules/{id}/activate", aggrulesH.Activate)
+	root.Patch("/v1/aggregation-rules/{id}/deactivate", aggrulesH.Deactivate)
+	root.Get("/v1/aggregation-rules/{id}", aggrulesH.Get)
 	// Slice 053: org_unit CRUD (canvas §6.4 hierarchy).
 	orgunitsH := orgunitsapi.New(risksStore)
 	root.Post("/v1/org_units", orgunitsH.Create)
