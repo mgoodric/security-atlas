@@ -24,6 +24,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
 	"github.com/mgoodric/security-atlas/internal/exception"
@@ -115,6 +116,24 @@ func main() {
 		streamPub = streambuf.NewJetStreamPublisher(conn)
 		streamConsumer = streambuf.NewConsumer(conn, ingestSvc)
 		fmt.Fprintf(os.Stderr, "atlas: NATS JetStream substrate ready (slice 015)\n")
+	}
+
+	// Slice 012: the evaluation-stage background job (AC-2). The
+	// IngestSubscriber binds a SECOND durable JetStream consumer to the
+	// same evidence-ingest stream slice 015 created -- it reacts to each
+	// ingested record by re-evaluating the affected control. It is
+	// independent of slice 015's ledger-writer consumer (two durable
+	// consumers on a Limits-retention stream each get every message). Only
+	// wired when NATS + the DB pool are both available.
+	var evalSubscriber *eval.IngestSubscriber
+	if streamConn != nil && pool != nil {
+		evalSubscriber = eval.NewIngestSubscriber(
+			streamConn.Stream(),
+			streamConn.Cfg().Subject,
+			eval.NewEngineFactory(pool),
+			logger,
+		)
+		fmt.Fprintf(os.Stderr, "atlas: evaluation ingest subscriber ready (slice 012)\n")
 	}
 
 	cfg := api.Config{
@@ -257,6 +276,20 @@ func main() {
 		}()
 	}
 
+	// Slice 012: drive the evaluation ingest subscriber alongside the
+	// other consumers. Shares the same stop signal so SIGTERM tears it
+	// down with everything else (AC-2).
+	if evalSubscriber != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fmt.Fprintf(os.Stderr, "atlas: evaluation ingest subscriber starting\n")
+			if err := evalSubscriber.Start(ctx); err != nil {
+				errCh <- fmt.Errorf("eval ingest subscriber: %w", err)
+			}
+		}()
+	}
+
 	// Slice 021: exception auto-expiry tick loop. Runs as the migrator
 	// role (BYPASSRLS) so the sweep can cross tenants -- the per-tenant
 	// transaction inside applies the GUC for RLS-honest writes. Default
@@ -287,6 +320,42 @@ func main() {
 				fmt.Fprintf(os.Stderr, "atlas: exception expirer ticking every %s\n", interval.String())
 				if err := expirer.Run(ctx, interval); err != nil {
 					errCh <- fmt.Errorf("exception expirer: %w", err)
+				}
+			}()
+		}
+	}
+
+	// Slice 012: time-based control-state recompute (AC-2, second half).
+	// Freshness decays with wall-clock -- a control `fresh` yesterday is
+	// `stale` today even with no new evidence -- so the engine must
+	// re-evaluate on a schedule independent of ingest. Runs as the migrator
+	// role (BYPASSRLS) to enumerate tenants; each tenant's evaluation runs
+	// through an app-role Engine for RLS-honest writes. Only mounts when
+	// the migrator URL + the app pool are both available. Cadence defaults
+	// to hourly; ATLAS_EVAL_RECOMPUTE_INTERVAL overrides for dev loops.
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		schedCtx, schedCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		schedPool, err := pgxpool.New(schedCtx, migratorURL)
+		schedCancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: eval scheduler pool: %v\n", err)
+		} else {
+			interval := eval.DefaultRecomputeInterval
+			if raw := os.Getenv("ATLAS_EVAL_RECOMPUTE_INTERVAL"); raw != "" {
+				if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+					interval = d
+				} else {
+					fmt.Fprintf(os.Stderr, "atlas: ATLAS_EVAL_RECOMPUTE_INTERVAL=%q invalid: %v\n", raw, perr)
+				}
+			}
+			scheduler := eval.NewScheduler(schedPool, eval.NewEngineFactory(pool), logger)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer schedPool.Close()
+				fmt.Fprintf(os.Stderr, "atlas: eval scheduler ticking every %s\n", interval.String())
+				if err := scheduler.Run(ctx, interval); err != nil {
+					errCh <- fmt.Errorf("eval scheduler: %w", err)
 				}
 			}()
 		}

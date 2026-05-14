@@ -934,6 +934,22 @@ type Control struct {
 	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
 }
 
+type ControlEvaluation struct {
+	ID                    pgtype.UUID        `json:"id"`
+	TenantID              pgtype.UUID        `json:"tenant_id"`
+	ControlID             pgtype.UUID        `json:"control_id"`
+	ScopeCellID           pgtype.UUID        `json:"scope_cell_id"`
+	EvalRunID             pgtype.UUID        `json:"eval_run_id"`
+	EvaluatedAt           pgtype.Timestamptz `json:"evaluated_at"`
+	Result                EvidenceResult     `json:"result"`
+	FreshnessStatus       string             `json:"freshness_status"`
+	EvidenceCountInWindow int32              `json:"evidence_count_in_window"`
+	LastObservedAt        pgtype.Timestamptz `json:"last_observed_at"`
+	FreshnessClass        *string            `json:"freshness_class"`
+	Trigger               string             `json:"trigger"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+}
+
 type Decision struct {
 	ID            pgtype.UUID        `json:"id"`
 	TenantID      pgtype.UUID        `json:"tenant_id"`

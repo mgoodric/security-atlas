@@ -526,6 +526,24 @@ type Querier interface {
 	// per ADR 0002 — computed by the application layer before this call. last4 is
 	// the last four characters of the plaintext bearer (safe to surface).
 	InsertAPIKey(ctx context.Context, arg InsertAPIKeyParams) (ApiKey, error)
+	// Slice 012 — control state evaluation engine queries.
+	//
+	// `control_evaluations` is the append-only output table of the evaluation
+	// stage (canvas §4.3). The engine reads `evidence_records` (the immutable
+	// ledger) and `controls` (slice 009 bundles), computes derived state, and
+	// appends rows here. There is NO UpdateControlEvaluation / NO
+	// DeleteControlEvaluation query — the table is append-only at both the RLS
+	// layer (no UPDATE/DELETE policy under FORCE) and this sqlc surface.
+	//
+	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
+	// defense-in-depth layer and the WHERE clauses are the primary correctness
+	// guarantee (canvas invariant #6). Every timestamp cutoff is computed in Go
+	// and passed as an explicit parameter — never a single-placeholder
+	// expression that would trip pgx type inference (SQLSTATE 42P08).
+	// Append one evaluation row. The ONLY write this slice performs. Note the
+	// absence of any INSERT into evidence_records — the engine has no
+	// evidence-write surface (constitutional invariant #2).
+	InsertControlEvaluation(ctx context.Context, arg InsertControlEvaluationParams) (ControlEvaluation, error)
 	// Insert a new control row (initial upload or supersession). Caller is
 	// responsible for UPDATE-ing the predecessor's superseded_by in the same tx.
 	InsertControlVersion(ctx context.Context, arg InsertControlVersionParams) (Control, error)
@@ -722,6 +740,11 @@ type Querier interface {
 	// sqlc.arg keeps sqlc from inferring it as text[] just because it appears
 	// inside an ARRAY[] constructor.
 	ListCandidateRisksForRule(ctx context.Context, arg ListCandidateRisksForRuleParams) ([]Risk, error)
+	// AC-6: every evaluation for one control inside the rolling-30-day window.
+	// The cutoff is computed in Go (now - 30d) and passed explicitly so pgx
+	// does not have to infer the type of a bare placeholder. The handler /
+	// effectiveness.go aggregates these into the rolling pass rate.
+	ListControlEvaluationsForEffectiveness(ctx context.Context, arg ListControlEvaluationsForEffectivenessParams) ([]ListControlEvaluationsForEffectivenessRow, error)
 	// Hash-input ingredient #2 (ADR 0003): the sorted UUIDs of controls in the
 	// tenant's catalog. v1 takes the full tenant catalog; a future slice may
 	// narrow to controls satisfied by the period's framework_version_id once
@@ -753,6 +776,12 @@ type Querier interface {
 	// `tenant_or_catalog_read` policy.
 	ListDefaultThemes(ctx context.Context) ([]OrgTheme, error)
 	ListEvidenceAuditEntriesByCredential(ctx context.Context, arg ListEvidenceAuditEntriesByCredentialParams) ([]EvidenceAuditLog, error)
+	// The evaluation engine's read of the evidence ledger for one control,
+	// bounded by the point-in-time horizon `as_of` (AC-1's `?as-of=` and AC-7's
+	// replay both pass an explicit horizon; live evaluation passes 'infinity').
+	// Ordered observed_at DESC so the engine sees the freshest record first.
+	// This is a pure SELECT — the engine never mutates the ledger.
+	ListEvidenceForControlAsOf(ctx context.Context, arg ListEvidenceForControlAsOfParams) ([]ListEvidenceForControlAsOfRow, error)
 	// AC-3: control-state read for a period. Returns evidence records for one
 	// control bounded by the period's frozen_at horizon (or live when the
 	// period is still 'open', in which case the caller passes NULL and the
@@ -820,6 +849,10 @@ type Querier interface {
 	// to with relationship type and strength. Joins through scf_anchors so the
 	// caller gets the scf_id + family + title in one round trip.
 	ListFwToScfEdgesForRequirement(ctx context.Context, frameworkRequirementID pgtype.UUID) ([]ListFwToScfEdgesForRequirementRow, error)
+	// Every (control, scope_cell)'s latest state for one control. DISTINCT ON
+	// collapses the append-only history to the current row per cell. Used by
+	// GET /v1/controls/:id/state when no scope filter is supplied.
+	ListLatestControlEvaluations(ctx context.Context, arg ListLatestControlEvaluationsParams) ([]ControlEvaluation, error)
 	// Recipient-scoped list. Unread first (NULLS FIRST on read_at), then
 	// newest first within each read-status bucket. The index
 	// idx_notifications_recipient_unread_first directly serves this order.
@@ -913,6 +946,12 @@ type Querier interface {
 	// Tenant-private themes only. Caller composes with ListDefaultThemes when a
 	// full visible vocabulary is needed.
 	ListTenantThemes(ctx context.Context, tenantID pgtype.UUID) ([]OrgTheme, error)
+	// The scheduled time-based recompute (AC-2) runs as the migrator role
+	// (BYPASSRLS) so it can enumerate every tenant; the per-tenant evaluation
+	// then applies the GUC inside its own transaction for RLS-honest writes.
+	// This mirrors slice 021's ListTenantsWithActiveExceptions cross-tenant
+	// sweep pattern.
+	ListTenantsWithActiveControls(ctx context.Context) ([]pgtype.UUID, error)
 	// The auto-expiry cron walks tenants that currently hold any active
 	// exception. Returns the distinct tenant_ids so the cron can apply each
 	// tenant's GUC before running ExpireActiveExceptionsBefore. Runs as the
