@@ -129,7 +129,7 @@ ledger is the correct engineering fix and is exactly what `bootstrap.sh`'s
 own history anticipated (the justfile comment: "A real migration runner
 lands when slice N adds the second migration" — slice 065 is well past
 that). The `CREATE TYPE` guards are still applied and still matter: they
-cover the *partial-failure recovery* path — a migration that errored
+cover the _partial-failure recovery_ path — a migration that errored
 AFTER creating its enums but BEFORE its `schema_migrations` row was
 written will be retried, and the guarded `CREATE TYPE` lets it get past
 the enums it already created. The ledger row + the migration DDL are
