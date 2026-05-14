@@ -32,8 +32,19 @@
 #   3. atlas-bootstrap exits 0 (migrations + seed + SCF import + the 50
 #      SOC 2 control-bundle uploads all succeeded).
 #   4. `controls` ends up with the 50 seeded control rows.
-#   5. `api_keys` ends up with at least the bootstrap fixed-token row
-#      (proves the audit-writer fix unblocked phase 6 — slice 065 bug #1).
+#   5. `decision_audit_log` ends up with at least one row — every
+#      authenticated control-bundle upload in phase 6 passes through the
+#      OPA authz middleware, which writes one decision row per request.
+#      A populated `decision_audit_log` therefore proves (a) phase 6's
+#      authenticated upload path actually ran, and (b) slice 065 bug #1's
+#      fix held: that bug was an RLS-blind write to THIS table, which
+#      500'd every authenticated request and blocked phase 6 entirely.
+#      (Earlier revisions of this harness asserted on `api_keys` here —
+#      that was a mistaken premise: nothing in the bootstrap flow writes
+#      `api_keys`. The bootstrap uploader authenticates with the IN-MEMORY
+#      fixed-token credential — see cmd/atlas/main.go — never a DB-backed
+#      api_keys row. `decision_audit_log` is the table that actually
+#      records phase 6 running.)
 #   6. A fresh re-run of `docker compose run --rm atlas-bootstrap` exits 0
 #      and does not duplicate seed rows (slice 065 bug #3 idempotency,
 #      AC-7).
@@ -288,10 +299,12 @@ CONTROLS="$(db_count 'SELECT count(*) FROM controls')"
 [ "${CONTROLS}" = "50" ] || fail "controls row count = ${CONTROLS}, want 50"
 log "controls table has 50 rows"
 
-# Assertion 5: api_keys has the bootstrap fixed-token row.
-APIKEYS="$(db_count 'SELECT count(*) FROM api_keys')"
-[ "${APIKEYS}" -ge 1 ] 2>/dev/null || fail "api_keys row count = ${APIKEYS}, want >= 1"
-log "api_keys table has ${APIKEYS} row(s)"
+# Assertion 5: decision_audit_log has at least one row — proves phase 6's
+# authenticated control-bundle upload path ran AND slice 065 bug #1's fix
+# (the RLS-blind write to this very table) held. See the header comment.
+AUDITROWS="$(db_count 'SELECT count(*) FROM decision_audit_log')"
+[ "${AUDITROWS}" -ge 1 ] 2>/dev/null || fail "decision_audit_log row count = ${AUDITROWS}, want >= 1"
+log "decision_audit_log table has ${AUDITROWS} row(s)"
 
 # ---------------------------------------------------------------------
 # Assertion 6 (AC-7): a fresh re-run of atlas-bootstrap against the now-

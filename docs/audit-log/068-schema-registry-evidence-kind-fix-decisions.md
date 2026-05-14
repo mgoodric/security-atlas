@@ -197,6 +197,41 @@ what made the atlas stderr in 4a visible at all.
 **Confidence: high** — purely additive diagnostics; no behaviour change to
 the assertions.
 
+**4d. Harness assertion 5 was checking a table the bootstrap flow never
+writes.** With 4a/4b fixed, the e2e job advanced past `/health` and
+control-bundle upload (`controls` reached 50 rows in both modes — the
+identifier + cache-race fixes demonstrably worked) and then failed a NEW
+assertion: `api_keys row count = 0, want >= 1`. Assertion 5's stated
+intent was "prove the audit-writer fix unblocked phase 6 (slice 065 bug
+#1)" — but it asserted on the wrong table. **Nothing in the bootstrap flow
+writes `api_keys`:** `seed.sql` does not, the SCF import does not, and the
+control-bundle upload does not. `api_keys` is the slice-034 DB-backed key
+store, written only by the `/v1/admin/credentials` HTTP route. The
+bootstrap uploader authenticates with the **in-memory** fixed-token
+credential (`IssueBootstrapFixedAdminCredential` →
+`credStore.IssueFixedAdmin`), never a DB row. The assertion could never
+have passed — slice 065 merged with this e2e job red, so it had never
+actually run green. The `cmd/atlas/main.go` comment that claimed "phase 6
+completing populates api_keys as designed" was the same misconception in
+source form.
+
+**Chosen.** Re-point assertion 5 at `decision_audit_log`. That IS the
+table slice 065 bug #1 was about: the bug was an RLS-blind write to
+`decision_audit_log` in the OPA authz audit writer, which 500'd every
+authenticated request and blocked phase 6 entirely. Every authenticated
+request — including phase 6's 50 control-bundle uploads, which mount under
+`authzmw.Middleware` — writes one decision row there. A populated
+`decision_audit_log` therefore proves exactly what assertion 5's comment
+always intended: phase 6's authenticated path ran AND bug #1's fix held.
+The misleading `cmd/atlas/main.go` comment was corrected in the same
+change.
+
+**Confidence: high** — `decision_audit_log` is demonstrably the
+slice-065-bug-#1 table (`internal/authz/audit.go` writes it), the control
+upload route demonstrably mounts under the authz middleware, and the
+corrected assertion tests a real, causally-linked post-condition rather
+than an unrelated table.
+
 ## Revisit once in use
 
 - **Decision 3** — if the bare-directory / `.v1`-`x-evidence-kind`

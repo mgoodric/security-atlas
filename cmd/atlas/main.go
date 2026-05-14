@@ -200,14 +200,20 @@ func main() {
 	// IN-MEMORY credstore.Store — NOT the api_keys table. They do not
 	// touch the DB pool at all, so they never hit the
 	// pool.Exec-outside-a-transaction RLS-bypass that bug #1 fixed in the
-	// audit writer; there is no BeginTx/ApplyTenant treatment to apply
-	// here. The slice-037 symptom "api_keys stays empty on a fresh
-	// install" was a downstream effect of bug #1: the audit-writer 500
-	// blocked bootstrap phase 6 (control-bundle upload), so the
-	// authenticated upload path that DOES persist to api_keys never ran
-	// to completion. With the audit writer fixed, phase 6 completes and
-	// api_keys is populated as designed. No change is needed on this
-	// startup-time issuance path.
+	// authz audit writer; there is no BeginTx/ApplyTenant treatment to
+	// apply here. No change is needed on this startup-time issuance path.
+	//
+	// (Slice 068 correction: an earlier revision of this comment claimed
+	// that "phase 6 completing populates api_keys as designed." That is
+	// wrong — nothing in the bootstrap flow writes api_keys. The bootstrap
+	// uploader authenticates with the in-memory fixed-token credential
+	// minted just below, never a DB-backed api_keys row. What slice 065
+	// bug #1 actually unblocked is the OPA authz audit writer's write to
+	// decision_audit_log: every authenticated request — including phase
+	// 6's 50 control-bundle uploads — logs one decision row there, and
+	// the bug's RLS-blind write 500'd those requests. The self-host e2e
+	// harness's assertion 5 was corrected to check decision_audit_log
+	// accordingly.)
 	if bootstrapTenant := os.Getenv("ATLAS_BOOTSTRAP_TENANT"); bootstrapTenant != "" {
 		cred, bearer, err := srv.IssueBootstrapCredential(bootstrapTenant)
 		if err != nil {

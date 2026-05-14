@@ -50,6 +50,14 @@ auto-generated notes.
     the CI runner. The harness also dumps full compose logs on failure
     *before* its cleanup trap tears the stack down, so future self-host
     failures stay diagnosable.
+  - **harness assertion on the wrong table.** Once the above were fixed
+    the e2e job advanced and exposed that its assertion 5 checked
+    `api_keys` for a row the bootstrap flow never writes (the bootstrap
+    uploader authenticates with an in-memory fixed-token credential, not
+    a DB-backed key) — so it could never have passed. Fix: re-points
+    assertion 5 at `decision_audit_log`, the table slice 065 bug #1 was
+    actually about, which every authenticated control-bundle upload
+    populates via the OPA authz middleware.
 - **infra:** self-host bundle P0 fixes (#065) — a P0 follow-up to slice
   037 that unbreaks the shipped v1.3.0 `docker compose` self-host bundle,
   which did not bring a fresh deployment to a working state. Five
