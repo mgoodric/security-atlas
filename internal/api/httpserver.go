@@ -87,8 +87,12 @@ func (s *Server) httpHandler() http.Handler {
 	// Slice 034: /auth/* (login/callback/logout) is bearer-exempt — users
 	// don't have a bearer yet at the moment they sign in. The middleware
 	// must skip the prefix. Note: /v1/admin/credentials* DOES go through
-	// bearer auth (admin endpoints require an admin credential).
-	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/"))
+	// bearer auth (admin endpoints require an admin credential). Slice 037
+	// adds /health to the same exempt set — the docker-compose self-host
+	// bundle's healthcheck and the atlas-bootstrap readiness poll both hit
+	// it with no credential. (The /health *route* is registered below,
+	// after every .Use() — chi requires all middleware before any route.)
+	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health"))
 	// Slice 033: lift the authenticated credential's tenant id onto the
 	// request context so every downstream handler — and every database
 	// transaction it opens — runs under the right `app.current_tenant`
@@ -114,6 +118,14 @@ func (s *Server) httpHandler() http.Handler {
 
 	queries := dbx.New(s.dbPool)
 	root.Mount("/", anchors.New(queries).Routes())
+
+	// Slice 037: /health liveness probe. Registered after the root Mount
+	// and alongside the other direct routes below — chi panics if a route
+	// is added before all .Use() middleware, and registering it directly
+	// on root (not via a second Mount("/")) avoids the double-mount
+	// panic. It is bearer- and authz-exempt via the exemption lists
+	// passed to the middleware above, so it answers with no credential.
+	root.Get("/health", s.handleHealth)
 	// Slice 008: UCF graph traversal HTTP API. Three read endpoints
 	// query the requirement-anchor-control graph through the SCF spine
 	// (canvas §3 / Plans/UCF_GRAPH_MODEL.md). Routes are appended
@@ -599,4 +611,30 @@ func writeAuthError(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
 	_, _ = w.Write([]byte(`{"error":"` + msg + `"}`))
+}
+
+// handleHealth is the slice-037 liveness probe used by the docker-compose
+// self-host bundle's healthcheck and the atlas-bootstrap readiness poll.
+//
+// It always returns 200 when the process is serving HTTP. If the DB pool
+// is attached it runs a short-timeout ping; a failed ping reports
+// `{"db":"degraded"}` but still 200 — `/health` is liveness ("is the
+// process up?"), not readiness. Returning 503 on a transient DB blip
+// would cause compose to mark atlas unhealthy and restart-loop it during
+// Postgres warm-up. Bootstrap ordering already gates atlas on
+// postgres-healthy, so the DB is reachable by the time atlas runs.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	db := "ok"
+	if s.dbPool != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := s.dbPool.Ping(ctx); err != nil {
+			db = "degraded"
+		}
+	} else {
+		db = "absent"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"ok","db":"` + db + `"}`))
 }

@@ -1,0 +1,68 @@
+# Docker build context exclusions (slice 037).
+#
+# The self-host bundle's images build with `context: ../..` (the repo
+# root), so without this file `docker build` would ship node_modules/,
+# .git/, build artifacts, and any local .env into the build daemon —
+# slow, and a credential-leak risk. Keep this list aligned with
+# .gitignore's "do not ship" intent.
+
+# Version control
+.git/
+.github/
+
+# Secrets / local config — never enters a build context
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+.aws/
+.ssh/
+.gnupg/
+
+# Node
+node_modules/
+**/node_modules/
+.next/
+web/.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+.npm/
+
+# Go build artifacts
+bin/
+*.out
+*.test
+coverage.txt
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.uv/
+
+# Tooling caches
+.cache/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.agentdiff/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Docs and planning — not needed in any runtime image. The bootstrap
+# container bind-mounts migrations/ + controls/ at runtime instead of
+# baking them in, so they are not needed in the build context either,
+# but they are small and harmless if a future image wants them; left in.
+Plans/

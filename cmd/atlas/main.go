@@ -16,13 +16,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/audit/auditor"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
+	"github.com/mgoodric/security-atlas/internal/auth/oidc"
+	"github.com/mgoodric/security-atlas/internal/auth/sessions"
+	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
@@ -156,6 +161,28 @@ func main() {
 			cred.ID, cred.TenantID, bearer)
 	}
 
+	// Slice 037: when ATLAS_BOOTSTRAP_TOKEN is set, mint a fixed-token
+	// admin credential for ATLAS_BOOTSTRAP_TENANT. The docker-compose
+	// self-host bundle's one-shot atlas-bootstrap container uses this
+	// deterministic token to authenticate control-bundle uploads — it
+	// cannot consume the random token the block above prints to stderr.
+	// This is a self-host bootstrap convenience; .env.example flags the
+	// token as a must-rotate value.
+	if bootstrapToken := os.Getenv("ATLAS_BOOTSTRAP_TOKEN"); bootstrapToken != "" {
+		bootstrapTenant := os.Getenv("ATLAS_BOOTSTRAP_TENANT")
+		if bootstrapTenant == "" {
+			fmt.Fprintln(os.Stderr, "atlas: ATLAS_BOOTSTRAP_TOKEN set but ATLAS_BOOTSTRAP_TENANT empty — skipping fixed-token credential")
+		} else {
+			cred, err := srv.IssueBootstrapFixedAdminCredential(bootstrapTenant, bootstrapToken)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "atlas: bootstrap fixed-token issue: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Fprintf(os.Stderr, "atlas: fixed-token admin credential issued: id=%s tenant=%s last4=%s\n",
+				cred.ID, cred.TenantID, cred.Last4)
+		}
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
@@ -188,6 +215,23 @@ func main() {
 		apikeySvc := apikeystore.NewStore(pool, authPool, hasher, 0)
 		srv.AttachAPIKeyStore(apikeySvc)
 		fmt.Fprintf(os.Stderr, "atlas: api_keys store wired (BEARER_HASH_KEY ok)\n")
+
+		// Slice 037: wire the user-facing auth routes so /auth/local/login
+		// mounts. The docker-compose self-host bundle is a local-mode
+		// deployment — a default local user signs in with email+password,
+		// no external IdP. The OIDC authenticator is still constructed
+		// (the handler requires a non-nil *oidc.Authenticator) but its
+		// resolver always reports "unknown IdP": OIDC is an opt-in
+		// post-install configuration step, not part of first sign-in.
+		// secureCookies follows ATLAS_SECURE_COOKIES (default false for
+		// the local-HTTP self-host default; operators set it true behind
+		// TLS).
+		userStore := users.NewStore(pool)
+		sessionStore := sessions.NewStore(pool, 0)
+		oidcAuth := oidc.New(localModeIdpResolver{})
+		secureCookies := os.Getenv("ATLAS_SECURE_COOKIES") == "true"
+		srv.AttachAuthHandler(authapi.New(oidcAuth, userStore, sessionStore, secureCookies))
+		fmt.Fprintf(os.Stderr, "atlas: auth handler wired (/auth/local/login mounted, secure_cookies=%t)\n", secureCookies)
 
 		// Slice 035: construct the OPA engine + decision audit writer
 		// once at startup. The engine loads the embedded rego bundle;
@@ -380,4 +424,17 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// localModeIdpResolver is the slice-037 no-op IdP resolver for local-mode
+// self-host deployments. The docker-compose bundle ships local-mode
+// authentication (email + password against a seeded default user); OIDC
+// is an opt-in post-install configuration step. Until an operator
+// configures an IdP, every OIDC resolution reports "unknown IdP" and the
+// /auth/oidc/* routes 400 cleanly — /auth/local/login is the working
+// sign-in path.
+type localModeIdpResolver struct{}
+
+func (localModeIdpResolver) ResolveIdp(_ context.Context, _ uuid.UUID, _ string) (oidc.IdpConfig, error) {
+	return oidc.IdpConfig{}, oidc.ErrUnknownIdp
 }

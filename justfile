@@ -211,3 +211,46 @@ print-version version:
     /tmp/security-atlas-cli --version
     /tmp/security-atlas-cli version
     rm /tmp/security-atlas-cli
+
+# ----- Self-host (docker-compose single-VM bundle, slice 037) -----
+#
+# The bundle lives in deploy/docker/. It brings up Postgres + NATS +
+# MinIO + the atlas server + the Next.js frontend on one VM, and on
+# first boot runs migrations + seeds the default tenant/scope/user +
+# imports the SCF catalog + uploads the 50 SOC 2 control bundles.
+#
+# Before the first `self-host-up`, copy the env template and edit it:
+#   cp deploy/docker/.env.example deploy/docker/.env
+# See docs/SELF_HOSTING.md and docs/getting-started/first-evidence.md.
+
+_self_host_compose := "docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env"
+
+# Validate the self-host compose file parses (no containers started).
+self-host-config:
+    docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env.example config -q
+    @echo "deploy/docker/docker-compose.yml is valid"
+
+# Build the three self-host images (atlas, atlas-cli/bootstrap, web).
+self-host-build:
+    {{_self_host_compose}} build
+
+# Bring the self-host bundle up in the background. Requires
+# deploy/docker/.env (copy it from .env.example first).
+self-host-up:
+    {{_self_host_compose}} up -d --build
+
+# Tail logs from the running self-host bundle.
+self-host-logs:
+    {{_self_host_compose}} logs -f
+
+# Stop the self-host bundle (keeps volumes — data survives).
+self-host-down:
+    {{_self_host_compose}} down
+
+# Stop the self-host bundle AND delete its volumes (full wipe).
+self-host-wipe:
+    {{_self_host_compose}} down -v
+
+# Show the status of every self-host service.
+self-host-ps:
+    {{_self_host_compose}} ps

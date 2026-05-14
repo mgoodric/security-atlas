@@ -1,77 +1,68 @@
-# Local development stack for security-atlas.
+# security-atlas — single-VM self-host bundle (slice 037).
 #
-# - postgres: the platform's primary store
-# - minio:    S3-compatible object store for slice 036 artifacts
-# - nats:     JetStream evidence-ingest buffer (slice 015)
+# One `docker compose up -d` brings the whole platform online:
 #
-# Production self-host swaps minio for any S3-compatible backend (AWS S3,
-# Cloudflare R2, Wasabi, Ceph RadosGW). The platform binary reads
-# `ARTIFACTS_BUCKET`, `ARTIFACTS_S3_ENDPOINT`, and the standard AWS
-# credential env vars from its environment. NATS_URL points the platform
-# at the JetStream-enabled NATS instance; without it the push path
-# falls back to direct Service.Process (slice 013 behavior).
+#   postgres         primary store (Postgres 16)
+#   nats             JetStream evidence-ingest buffer (slice 015)
+#   minio            S3-compatible artifact store (slice 036)
+#   minio-mc         one-shot: creates the artifacts bucket, then exits
+#   atlas-bootstrap  one-shot: migrations + seed + SCF import + control
+#                    bundle upload, then exits 0 (slice 037)
+#   atlas            platform server — gRPC :50051 + HTTP :8080 (/health)
+#   web              Next.js frontend — :3000
 #
-# Run: `docker compose -f deploy/docker/docker-compose.yml up -d`
-# Stop: `docker compose -f deploy/docker/docker-compose.yml down`
+# Startup ordering (enforced by depends_on conditions):
+#   postgres/nats/minio healthy
+#     -> minio-mc completes (bucket ready)
+#     -> atlas-bootstrap completes (DB migrated + seeded + SCF imported)
+#     -> atlas starts -> atlas-bootstrap phase 6 uploads control bundles
+#                        once /health is up
+#     -> web starts
+#
+# Target: a mid-size VM (4 vCPU / 16 GB RAM). Initial bring-up < 5 min
+# (acceptance criterion AC-1). See docs/SELF_HOSTING.md and
+# docs/getting-started/first-evidence.md.
+#
+# Secrets: every credential is read from the environment. Copy
+# `.env.example` to `.env` and edit it before first boot — `.env` is
+# gitignored. NOTHING in this file is a real secret. The `${VAR:?}`
+# syntax makes compose fail fast with "required variable VAR is missing"
+# if a credential is unset; `.env.example` documents what each one is.
+#
+# Run:  docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env up -d
+# Stop: docker compose -f deploy/docker/docker-compose.yml down
+# Wipe: docker compose -f deploy/docker/docker-compose.yml down -v
+
+name: security-atlas
 
 services:
+  # --------------------------------------------------------------------
+  # Postgres 16 — primary store. RLS-enforced; the app connects as
+  # atlas_app, migrations + bootstrap connect as atlas_migrate.
+  # --------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: security_atlas
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:-security_atlas}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 12
+    restart: unless-stopped
 
-  minio:
-    # Slice 036: S3-compatible object store for the artifact store.
-    # Default credentials are intentionally trivial — they only ever bind
-    # to the host on local-dev. Production rotates these per deployment.
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio-data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  # Bootstraps the default artifacts bucket the platform reads from. Runs
-  # once, exits, and leaves the bucket in place for subsequent `up`s.
-  minio-mc:
-    image: minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin &&
-      mc mb --ignore-existing local/atlas-artifacts &&
-      echo 'bucket atlas-artifacts ready'
-      "
-
+  # --------------------------------------------------------------------
+  # NATS JetStream — evidence-ingest buffer (slice 015). `-js` enables
+  # JetStream; `-sd /data` persists stream state so a restart preserves
+  # the buffer.
+  # --------------------------------------------------------------------
   nats:
-    # Slice 015: NATS JetStream evidence-ingest buffer. Single binary,
-    # ~14 MB image. `-js` enables JetStream; `-sd /data` stores stream
-    # state on disk so a container restart preserves the buffer (AC-4
-    # replay capability).
-    #
-    # Self-host production typically points NATS_URL at this service and
-    # rotates the lack-of-auth defaults via a NATS-native auth config
-    # (tokens, NKeys, JWT) when exposing the broker beyond localhost.
     image: nats:2.10-alpine
     command:
       - "-js"
@@ -80,16 +71,167 @@ services:
       - "--http_port"
       - "8222"
     ports:
-      - "4222:4222"
-      - "8222:8222"
+      - "${NATS_PORT:-4222}:4222"
+      - "${NATS_MONITOR_PORT:-8222}:8222"
     volumes:
       - nats-data:/data
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8222/healthz"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 12
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------
+  # MinIO — S3-compatible artifact store (slice 036). The official
+  # `minio/minio` image needs `server /data` passed explicitly (the
+  # `bitnami/minio` image is unpullable — do not switch to it).
+  # --------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------
+  # minio-mc — one-shot: creates the artifacts bucket, then exits. Leaves
+  # the bucket in place for subsequent `up`s (idempotent --ignore-existing).
+  # --------------------------------------------------------------------
+  minio-mc:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+      mc mb --ignore-existing local/${ARTIFACTS_BUCKET:-atlas-artifacts} &&
+      echo 'bucket ${ARTIFACTS_BUCKET:-atlas-artifacts} ready'
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+    restart: "no"
+
+  # --------------------------------------------------------------------
+  # atlas-bootstrap — one-shot first-boot: migrations + roles + seed
+  # (default tenant/scope/user) + SCF catalog import + control-bundle
+  # upload. Exits 0 on success. The repo tree is bind-mounted read-only
+  # at /repo so a `git pull` picks up new migrations without a rebuild.
+  # --------------------------------------------------------------------
+  atlas-bootstrap:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/bootstrap.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-mc:
+        condition: service_completed_successfully
+    environment:
+      # DSNs are assembled in .env (see .env.example) rather than inline
+      # here so the compose source never contains a `user:pass@host`
+      # literal. atlas_migrate uses peer/trust on the container network;
+      # its DSN carries no password.
+      DATABASE_URL: ${DATABASE_URL_MIGRATE:?}
+      ATLAS_APP_PASSWORD: ${ATLAS_APP_PASSWORD:?}
+      ATLAS_HTTP_URL: http://atlas:8080
+      ATLAS_BOOTSTRAP_TENANT: ${ATLAS_BOOTSTRAP_TENANT:-00000000-0000-4000-8000-000000000001}
+      ATLAS_BOOTSTRAP_TOKEN: ${ATLAS_BOOTSTRAP_TOKEN:?}
+      ATLAS_DEFAULT_USER_EMAIL: ${ATLAS_DEFAULT_USER_EMAIL:-admin@example.com}
+      ATLAS_DEFAULT_USER_PASSWORD: ${ATLAS_DEFAULT_USER_PASSWORD:?}
+      REPO_ROOT: /repo
+    volumes:
+      - ../..:/repo:ro
+    restart: "no"
+
+  # --------------------------------------------------------------------
+  # atlas — the platform server. gRPC :50051 + HTTP :8080. Connects as
+  # atlas_app (RLS-enforced) for app reads/writes and atlas_migrate
+  # (BYPASSRLS) for the boot-time schema import + cross-tenant sweeps.
+  # --------------------------------------------------------------------
+  atlas:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/atlas.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      atlas-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      # DSNs are assembled in .env (see .env.example) so the compose
+      # source carries no `user:pass@host` literal. DATABASE_URL_APP is
+      # the RLS-enforced app-role pool; DATABASE_URL_MIGRATE is the
+      # BYPASSRLS migrate-role pool for boot-time schema import + sweeps.
+      DATABASE_URL_APP: ${DATABASE_URL_APP:?}
+      DATABASE_URL: ${DATABASE_URL_MIGRATE:?}
+      ATLAS_HTTP_ADDR: ":8080"
+      ATLAS_GRPC_ADDR: ":50051"
+      NATS_URL: nats://nats:4222
+      # Slice 034: HMAC key for api_keys.token_hash. Refuse-to-boot if unset.
+      BEARER_HASH_KEY: ${BEARER_HASH_KEY:?}
+      # Slice 037: fixed-token admin credential for the bootstrap uploader.
+      ATLAS_BOOTSTRAP_TENANT: ${ATLAS_BOOTSTRAP_TENANT:-00000000-0000-4000-8000-000000000001}
+      ATLAS_BOOTSTRAP_TOKEN: ${ATLAS_BOOTSTRAP_TOKEN:?}
+      # Local-HTTP default: cookies are not Secure-flagged. Set to "true"
+      # once the deployment is behind TLS.
+      ATLAS_SECURE_COOKIES: ${ATLAS_SECURE_COOKIES:-false}
+      # Slice 036: artifact store wiring.
+      ARTIFACTS_BUCKET: ${ARTIFACTS_BUCKET:-atlas-artifacts}
+      ARTIFACTS_S3_ENDPOINT: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+    ports:
+      - "${ATLAS_HTTP_PORT:-8080}:8080"
+      - "${ATLAS_GRPC_PORT:-50051}:50051"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/atlas", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------
+  # web — the Next.js frontend. Talks to the atlas HTTP API. In a
+  # browser, NEXT_PUBLIC_API_BASE_URL must be reachable from the user's
+  # machine, so it points at the host-published atlas port, not the
+  # in-network service name.
+  # --------------------------------------------------------------------
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/web.Dockerfile
+    depends_on:
+      atlas:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    restart: unless-stopped
 
 volumes:
+  pg-data:
   minio-data:
   nats-data:
