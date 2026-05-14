@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -225,6 +226,15 @@ type ListFilter struct {
 	// Sort selects the result ordering. Slice 066 (AC-3): additive — the
 	// slice-019 callers that leave it zero get the unchanged default order.
 	Sort ListSort
+	// Theme, when non-empty, restricts to risks carrying that theme slug
+	// in their themes array. Slice 067 (AC-4): additive — powers slice
+	// 056's heatmap-cell-click side panel. Composes with every other
+	// filter and with Sort.
+	Theme string
+	// OrgUnitID, when non-nil, restricts to risks attributed to that
+	// org_unit. Slice 067 (AC-4): additive — the other half of the
+	// heatmap-cell-click filter (a cell is a (theme, org_unit) pair).
+	OrgUnitID *uuid.UUID
 }
 
 // List returns all risks for the active tenant, optionally filtered and
@@ -248,6 +258,20 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Risk, error) {
 			}
 			if filter.Methodology != "" && r.Methodology != filter.Methodology {
 				continue
+			}
+			// Slice 067 (AC-4): theme + org_unit filters. Theme matches
+			// when the slug is an element of the risk's themes array;
+			// org_unit matches when the risk is attributed to that unit.
+			// Both are additive and compose with the filters above. Theme
+			// slugs are stored normalised (trimmed, lowercased) by slice
+			// 053's AssignThemes, so an exact-element match is correct.
+			if filter.Theme != "" && !slices.Contains(r.Themes, filter.Theme) {
+				continue
+			}
+			if filter.OrgUnitID != nil {
+				if !r.OrgUnitID.Valid || uuid.UUID(r.OrgUnitID.Bytes) != *filter.OrgUnitID {
+					continue
+				}
 			}
 			out = append(out, riskFromRow(r))
 		}

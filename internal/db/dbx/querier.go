@@ -1332,6 +1332,51 @@ type Querier interface {
 	PublishApprovedPolicy(ctx context.Context, arg PublishApprovedPolicyParams) (Policy, error)
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
+	// Slice 067: risk-hierarchy backend read endpoints. Two read-only
+	// aggregation queries that fill the placeholders slice 056 (hierarchical
+	// risk dashboard) shipped binding empty-state affordances for. No
+	// migration — these read existing slice-052 (org_units, risks.org_unit_id,
+	// risks.themes) + slice-053 (org_themes) schema.
+	//
+	// Severity is NOT a stored column. A risk's severity scalar is
+	// likelihood × impact on the 5×5 grid (canvas §6.6 / internal/risk/
+	// severity.go). For aggregated parent risks slice 053 also stamps an
+	// explicit `severity` field inside inherent_score; that explicit value
+	// takes precedence when present. pgx cannot cast a non-numeric jsonb value
+	// to int, so every numeric extraction is guarded by a
+	// jsonb_typeof(...) = 'number' check exactly as the slice-019
+	// HeatmapBuckets query does. A risk whose inherent_score carries no
+	// numeric severity component resolves to severity 0 — it is still counted
+	// (constitutional invariant 9: malformed-score and rule-driven/manual
+	// risks are peers, never filtered out), it just lands in the severity-0
+	// bucket. The guarded-CASE expression is wrapped in COALESCE(..., 0) and
+	// cast ::int so sqlc types the column as a clean non-null Go int.
+	// AC-1: per-org-unit risk count broken down by severity scalar. ONE
+	// GROUP BY query for the whole tenant — joined to the org-unit tree in Go,
+	// never one query per node (anti-criterion: no N+1).
+	//
+	// Risks with a NULL org_unit_id are excluded — the per-org-unit rollup is
+	// keyed on a real org_unit binding.
+	RiskCountsByOrgUnit(ctx context.Context, tenantID pgtype.UUID) ([]RiskCountsByOrgUnitRow, error)
+	// AC-3: the themes × org_units aggregation — the heatmap panel's central
+	// data source. Each row is one (theme, org_unit) cell: the contributing-
+	// risk count and the aggregate (max) severity. ONE query for the whole
+	// grid (anti-criterion: no N+1).
+	//
+	// `risks.themes` is a TEXT[] of theme-name slugs; unnest expands it so a
+	// risk tagged with N themes contributes to N cells. The join to
+	// org_themes recovers the built-in (tenant_id IS NULL) vs tenant-private
+	// flag so the API can order built-in themes before tenant-private ones
+	// (slice 056 AC-3's rendering contract). The org_themes SELECT policy
+	// (tenant_or_catalog_read) makes both built-in and this tenant's private
+	// themes visible. A theme slug with no org_themes match (shouldn't happen
+	// post-slice-053 vocab validation) is excluded — it has no axis position.
+	//
+	// Risks with a NULL org_unit_id or an empty themes array contribute no
+	// cells (a cell requires both a theme axis and an org_unit axis).
+	// aggregate_severity is MAX(per-risk severity) across the cell's risks —
+	// the canvas §6.6 default `max` severity function, conservative.
+	RiskThemeOrgUnitGrid(ctx context.Context, tenantID pgtype.UUID) ([]RiskThemeOrgUnitGridRow, error)
 	// Set the predecessor's retirement deadline on rotation. After retires_at the
 	// predecessor's bearer no longer authenticates (credstore.Authenticate enforces).
 	SetAPIKeyRetiresAt(ctx context.Context, arg SetAPIKeyRetiresAtParams) error
