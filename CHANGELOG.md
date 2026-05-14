@@ -9,6 +9,21 @@ Conventional-Commit messages. This file holds pre-release / unreleased
 work and any narrative entries the operator wants alongside the
 auto-generated notes.
 
+## [Unreleased]
+
+### Added
+
+- **controls:** control-detail backend read endpoints (#064) — four
+  per-control read paths that fill the binding placeholders slice 041's
+  control-detail view shipped: `GET /v1/evidence?control_id=` (paginated
+  evidence-ledger records, default 30-day window), `GET
+  /v1/controls/{id}/policies` (slice-022-linked policies), `GET
+  /v1/controls/{id}/risks` (slice-020-linked risks with per-link weight),
+  and `GET /v1/controls/{id}/history` (the `control_evaluations` ledger,
+  newest-first). All four are tenant-scoped through RLS, role-gated for
+  control-read access, and keyset-paginated where applicable. Read-only
+  over existing schema — no migration.
+
 ## [1.3.0](https://github.com/mgoodric/security-atlas/compare/v1.2.0...v1.3.0) (2026-05-14)
 
 

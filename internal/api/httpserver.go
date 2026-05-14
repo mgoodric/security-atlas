@@ -23,6 +23,7 @@ import (
 	auditperiodsapi "github.com/mgoodric/security-atlas/internal/api/auditperiods"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
+	controldetailapi "github.com/mgoodric/security-atlas/internal/api/controldetail"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	controlstateapi "github.com/mgoodric/security-atlas/internal/api/controlstate"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
@@ -417,6 +418,21 @@ func (s *Server) httpHandler() http.Handler {
 	controlStateH := controlstateapi.New(controlStateEngine)
 	root.Get("/v1/controls/{id}/state", controlStateH.State)
 	root.Get("/v1/controls/{id}/effectiveness", controlStateH.Effectiveness)
+	// Slice 064: control-detail backend read endpoints. Four pure reads that
+	// fill the four binding placeholders slice 041's control-detail view
+	// shipped (evidence stream, linked policies, linked risks, control
+	// history). Routes appended per the parallel-batch convention (chi
+	// rejects two Mounts at "/"). The three /v1/controls/{id}/ sub-resources
+	// sit alongside slice 012's /state + /effectiveness -- chi resolves
+	// declaration order within the same method, so no shadowing. The Store
+	// is a pure read surface over existing tables (evidence_records,
+	// policies, risk_control_links, control_evaluations) -- this slice adds
+	// no migration and no write path (constitutional invariant #2).
+	controlDetailH := controldetailapi.New(controldetailapi.NewStore(s.dbPool))
+	root.Get("/v1/evidence", controlDetailH.Evidence)
+	root.Get("/v1/controls/{id}/policies", controlDetailH.Policies)
+	root.Get("/v1/controls/{id}/risks", controlDetailH.Risks)
+	root.Get("/v1/controls/{id}/history", controlDetailH.History)
 	// Slice 016: evidence freshness + control drift read model. Two
 	// read-only endpoints over the slice-016 read-model tables
 	// (evidence_freshness, control_drift_snapshots). Routes appended per the

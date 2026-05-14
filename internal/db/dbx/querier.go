@@ -761,6 +761,16 @@ type Querier interface {
 	// sqlc.arg keeps sqlc from inferring it as text[] just because it appears
 	// inside an ARRAY[] constructor.
 	ListCandidateRisksForRule(ctx context.Context, arg ListCandidateRisksForRuleParams) ([]Risk, error)
+	// AC-4: the control's evaluation history from slice 012's control_eval-
+	// uations append-only ledger, newest-first, keyset-paginated. The keyset
+	// predicate is decomposed (not a ROW(...) comparison) for the same
+	// sqlc-type-inference reason as ListEvidenceForControlPaged:
+	//   evaluated_at < cursor_ts OR (evaluated_at = cursor_ts AND id < cursor_id)
+	// ties on evaluated_at fall back to id; a sentinel cursor selects the
+	// first page. The handler computes the cutoff values in Go. This is a
+	// pure SELECT over the append-only ledger — no evaluation is triggered
+	// (constitutional invariant #2).
+	ListControlEvaluationHistoryPaged(ctx context.Context, arg ListControlEvaluationHistoryPagedParams) ([]ListControlEvaluationHistoryPagedRow, error)
 	// AC-6: every evaluation for one control inside the rolling-30-day window.
 	// The cutoff is computed in Go (now - 30d) and passed explicitly so pgx
 	// does not have to infer the type of a bare placeholder. The handler /
@@ -825,6 +835,38 @@ type Querier interface {
 	// Ordered observed_at DESC so the engine sees the freshest record first.
 	// This is a pure SELECT — the engine never mutates the ledger.
 	ListEvidenceForControlAsOf(ctx context.Context, arg ListEvidenceForControlAsOfParams) ([]ListEvidenceForControlAsOfRow, error)
+	// Slice 064 — control-detail backend read endpoints.
+	//
+	// Four pure SELECTs that surface existing data behind per-control read
+	// paths for the slice-041 control-detail view. This slice adds NO migration
+	// and NO write surface — it reads the evidence ledger, the policy library,
+	// risk_control_links + risks, and the control_evaluations ledger.
+	//
+	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
+	// defense-in-depth layer and the WHERE clauses are the primary correctness
+	// guarantee (canvas invariant #6). Every pagination cutoff is computed in Go
+	// and passed as an explicit parameter — never a single-placeholder
+	// expression that would trip pgx type inference (SQLSTATE 42P08).
+	//
+	// Cursor pagination over the two append-only ledgers (evidence_records,
+	// control_evaluations) is keyset, not OFFSET: a (timestamp, id) keyset is
+	// stable under concurrent appends, which OFFSET is not. The handler passes
+	// the decoded cursor's timestamp + id; a zero/sentinel cursor selects the
+	// first page. Each query fetches limit+1 rows so the handler can tell
+	// whether a next page exists without a second COUNT round-trip.
+	// AC-1: paginated evidence-ledger records resolved for one control, bounded
+	// by the [since, until] observed_at window. Resolution reuses slice 012's
+	// control->evidence path verbatim: (control_id = $2 OR control_ref = $3),
+	// where $3 is the UUID's string form (slice 012's loadEvidence passes
+	// controlRef := ctrlID.String()). The keyset predicate is decomposed
+	// (not a row-comparison tuple) so sqlc infers each placeholder's type
+	// correctly — a (observed_at, id) ROW(...) comparison mis-infers the id
+	// placeholder as timestamptz under sqlc v1.31. The decomposed form
+	//   observed_at < cursor_ts OR (observed_at = cursor_ts AND id < cursor_id)
+	// is the same keyset semantics: ties on observed_at fall back to id. A
+	// sentinel cursor (cursor_ts = 'infinity', cursor_id = max-uuid) selects
+	// the first page. The handler computes all cutoff values in Go.
+	ListEvidenceForControlPaged(ctx context.Context, arg ListEvidenceForControlPagedParams) ([]ListEvidenceForControlPagedRow, error)
 	// AC-3: control-state read for a period. Returns evidence records for one
 	// control bounded by the period's frozen_at horizon (or live when the
 	// period is still 'open', in which case the caller passes NULL and the
@@ -957,6 +999,17 @@ type Querier interface {
 	// Returns every policy for the tenant, newest first. Handler applies
 	// status filter in-memory (cardinality is small per canvas v1 scope).
 	ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Policy, error)
+	// AC-2: policies linked to one control via slice 022's policies.linked_-
+	// control_ids UUID[] array. The array-containment predicate
+	// linked_control_ids @> ARRAY[sqlc.arg(control_id)::uuid] resolves the
+	// linkage through the existing slice-022 column — no re-derivation. The
+	// control id is a single named scalar arg cast to uuid inside the array
+	// literal; sqlc then types it as a plain pgtype.UUID (a bare $2 would be
+	// typed []pgtype.UUID, which pgx cannot encode as a uuid array element).
+	// Newest-first so the rail reads naturally; id ASC tiebreaks for stable
+	// ordering. The policy library is small per the canvas v1 scope, so this
+	// endpoint is not paginated.
+	ListPoliciesLinkedToControl(ctx context.Context, arg ListPoliciesLinkedToControlParams) ([]ListPoliciesLinkedToControlRow, error)
 	// Returns the version chain for a policy id by walking predecessor_id.
 	// Recursive CTE keeps the query inside Postgres rather than client-side
 	// traversal. Returns oldest-first so the chain reads naturally
@@ -1008,6 +1061,14 @@ type Querier interface {
 	// rows invisible; the caller compares len(returned)==len(requested) for the
 	// existence check.
 	ListRisksByIDs(ctx context.Context, arg ListRisksByIDsParams) ([]Risk, error)
+	// AC-3: risks linked to one control via slice 020's risk_control_links.
+	// One join from the link table to risks; the per-link design_score is the
+	// human-set design-quality factor surfaced as link_weight (decisions log
+	// D7). residual_score + inherent_score are the risk's computed/authored
+	// JSONB, passed through. The risk register is small per canvas v1 scope,
+	// so this endpoint is not paginated. Newest-link-first; risk id ASC
+	// tiebreaks.
+	ListRisksLinkedToControl(ctx context.Context, arg ListRisksLinkedToControlParams) ([]ListRisksLinkedToControlRow, error)
 	// Paginated anchor list for a specific framework_version. Caller supplies
 	// limit + offset; default at the call site.
 	ListSCFAnchorsForVersion(ctx context.Context, arg ListSCFAnchorsForVersionParams) ([]ScfAnchor, error)
