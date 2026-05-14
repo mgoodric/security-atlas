@@ -93,6 +93,9 @@ type Querier interface {
 	CountRiskControlLinks(ctx context.Context, arg CountRiskControlLinksParams) (int64, error)
 	CountSCFAnchorsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
 	CountScopeCells(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	// Used by the /v1/me/notifications response to surface the unread count
+	// in the page header.
+	CountUnreadNotificationsForUser(ctx context.Context, arg CountUnreadNotificationsForUserParams) (int64, error)
 	// AC-3 burndown: returns total + overdue counts per criticality band. Used
 	// by the dashboard panel (slice 040) and the quarterly board pack (slice 032).
 	// Returns one row per criticality present in the result set; empty bands are
@@ -109,7 +112,27 @@ type Querier interface {
 	// may be NULL today but every code path in slice 036 supplies it.
 	CreateArtifact(ctx context.Context, arg CreateArtifactParams) (Artifact, error)
 	// ===== audit_notes =====
+	// Slice 025 legacy entry point. Pins visibility to 'auditor_only' and
+	// parent_note_id to NULL so existing slice-025 callers keep their
+	// private-write semantics with zero behavior change. Slice 029 adds the
+	// richer CreateAuditNoteV2 below.
 	CreateAuditNote(ctx context.Context, arg CreateAuditNoteParams) (AuditNote, error)
+	// Slice 029 entry point. Accepts visibility ('auditor_only'|'shared') and
+	// optional parent_note_id (for replies). The application layer validates
+	// the parent's scope+period match before calling; this query trusts the
+	// caller for that check.
+	//
+	// OSCAL preservation note (slice 030 contract): every field on this row
+	// maps to an OSCAL assessment-results `observation` annotation:
+	//   - id            -> observation.uuid
+	//   - body          -> observation.description
+	//   - author_user_id-> observation.collected
+	//   - scope_type/id -> observation.subject (object-reference)
+	//   - parent_note_id-> observation.related-observations
+	//   - visibility    -> observation.props (custom prop ns="security-atlas")
+	// Slice 030 reads via ListThreadForScope; do not change the column set
+	// without updating slice 030's mapper.
+	CreateAuditNoteV2(ctx context.Context, arg CreateAuditNoteV2Params) (AuditNote, error)
 	// Slice 028 — AuditPeriod + freezing primitive.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -147,6 +170,21 @@ type Querier interface {
 	// the same JSON (the application computes and passes both to keep the DB
 	// trigger comparison cheap).
 	CreateFrameworkScope(ctx context.Context, arg CreateFrameworkScopeParams) (FrameworkScope, error)
+	// Slice 029 -- notifications spine.
+	//
+	// In-app notifications. Slice 029 dispatches a row per distinct prior
+	// thread author when a new audit_note lands; the recipient sees it on
+	// /v1/me/notifications. Future slices may reuse this spine for other
+	// notification types (evidence freshness, policy acknowledgment, etc.).
+	//
+	// All queries are tenant-scoped via the leading (tenant_id, ...); RLS
+	// under FORCE keeps the cross-tenant boundary safe even on a
+	// misconfigured query. The recipient_user_id filter is the second-line
+	// protection -- a caller cannot list another user's notifications.
+	// Insert a single notification row. The payload is opaque JSONB; the
+	// handler/dispatch layer is responsible for the shape consistency per
+	// notification type.
+	CreateNotification(ctx context.Context, arg CreateNotificationParams) (Notification, error)
 	CreateOidcIdpConfig(ctx context.Context, arg CreateOidcIdpConfigParams) (OidcIdpConfig, error)
 	// Create a tenant-private theme. tenant_id is required and must match the
 	// GUC. Default themes (tenant_id IS NULL) are migration-only and not
@@ -291,6 +329,11 @@ type Querier interface {
 	// auditor A's note) returns zero rows -> ErrNotFound at the application
 	// layer. This is the second-auditor-cannot-read guarantee (P0-2 / AC-4).
 	GetAuditNoteByID(ctx context.Context, arg GetAuditNoteByIDParams) (AuditNote, error)
+	// Slice 029 visibility-aware get. Returns the row when:
+	//   - shared visibility (any tenant member can read), OR
+	//   - author_user_id = caller (private note belonging to caller)
+	// Cross-author auditor_only rows return zero rows -> ErrNotFound.
+	GetAuditNoteByIDForReader(ctx context.Context, arg GetAuditNoteByIDForReaderParams) (AuditNote, error)
 	GetAuditPeriodByID(ctx context.Context, arg GetAuditPeriodByIDParams) (AuditPeriod, error)
 	// AttrsResolver hot path -- runs once per auditor request from the OPA
 	// middleware. Returns just the period UUIDs so the resolver can stuff
@@ -682,6 +725,11 @@ type Querier interface {
 	// to with relationship type and strength. Joins through scf_anchors so the
 	// caller gets the scf_id + family + title in one round trip.
 	ListFwToScfEdgesForRequirement(ctx context.Context, frameworkRequirementID pgtype.UUID) ([]ListFwToScfEdgesForRequirementRow, error)
+	// Recipient-scoped list. Unread first (NULLS FIRST on read_at), then
+	// newest first within each read-status bucket. The index
+	// idx_notifications_recipient_unread_first directly serves this order.
+	// $3 is the limit and $4 the offset for paging.
+	ListNotificationsForUser(ctx context.Context, arg ListNotificationsForUserParams) ([]Notification, error)
 	ListOidcIdpConfigsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]OidcIdpConfig, error)
 	// Direct children only (single hop). Recursive descent is the caller's
 	// responsibility; for tree walks the application uses a recursive CTE
@@ -775,6 +823,36 @@ type Querier interface {
 	// tenant's GUC before running ExpireActiveExceptionsBefore. Runs as the
 	// migrator role (BYPASSRLS) so it sees every tenant.
 	ListTenantsWithActiveExceptions(ctx context.Context) ([]pgtype.UUID, error)
+	// Slice 029 notification dispatch helper. Returns the distinct authors
+	// of every note in the thread (shared OR private, all variants), used
+	// to compute who should receive a notification when a new reply lands.
+	// The notification dispatch layer filters out the new note's own
+	// author to avoid self-notification.
+	//
+	// Parameters mirror ListThreadForScope: scope_id is passed as text
+	// (empty string for "no scope_id"). COALESCE matches NULL to ''.
+	ListThreadAuthorsForScope(ctx context.Context, arg ListThreadAuthorsForScopeParams) ([]string, error)
+	// Slice 029 thread retrieval. Returns every note in the scope's thread
+	// visible to the caller (visibility filter applies row-by-row):
+	//   - 'shared' notes: visible to all tenant members
+	//   - 'auditor_only' notes: visible only to the author
+	//
+	// A recursive CTE walks from the root note(s) down through replies. The
+	// depth guard caps recursion at 100 to prevent runaway traversal on a
+	// pathological dataset.
+	//
+	// Parameters:
+	//   $1 tenant_id (uuid)
+	//   $2 audit_period_id (uuid)
+	//   $3 scope_type (text)
+	//   $4 scope_id (text, NULL-equivalent passed as empty string '')
+	//   $5 caller user_id (text, for visibility filter)
+	//
+	// The handler MUST pass an empty string for scope_id when the caller
+	// meant "no scope_id" -- the WHERE clause coalesces NULL scope_id to
+	// '' so the comparison matches. This avoids pgx single-placeholder
+	// type-inference issues (SQLSTATE 42P08).
+	ListThreadForScope(ctx context.Context, arg ListThreadForScopeParams) ([]ListThreadForScopeRow, error)
 	// Cells attached to one vendor.
 	ListVendorScopeCells(ctx context.Context, arg ListVendorScopeCellsParams) ([]pgtype.UUID, error)
 	// AC-2 filter by criticality. NULL criticality_filter means "all" — the
@@ -787,6 +865,10 @@ type Querier interface {
 	LogArtifactAccess(ctx context.Context, arg LogArtifactAccessParams) error
 	// Flip a predecessor row to superseded. Idempotent: no-op if already set.
 	MarkControlSuperseded(ctx context.Context, arg MarkControlSupersededParams) error
+	// Recipient-scoped mark-read. Idempotent: re-marking an already-read
+	// notification preserves the original read_at (COALESCE keeps the
+	// earliest timestamp).
+	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (Notification, error)
 	// Slice 053 cycle detection (AC-4). Returns every node id in the parent_id
 	// chain starting at $2 ("the proposed parent"), tenant-scoped to $1. The
 	// application checks whether $3 ("the node whose parent we're setting")

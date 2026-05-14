@@ -827,6 +827,7 @@ type AuditNote struct {
 	Visibility    string             `json:"visibility"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ParentNoteID  pgtype.UUID        `json:"parent_note_id"`
 }
 
 type AuditPeriod struct {
@@ -1138,6 +1139,16 @@ type LocalCredential struct {
 	Params       []byte             `json:"params"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Notification struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	RecipientUserID string             `json:"recipient_user_id"`
+	Type            string             `json:"type"`
+	Payload         []byte             `json:"payload"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	ReadAt          pgtype.Timestamptz `json:"read_at"`
 }
 
 type OidcIdpConfig struct {
