@@ -16,7 +16,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.7.2
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/nats-io/nats.go v1.52.0
 	github.com/open-policy-agent/opa v1.16.2
 	github.com/pkg/sftp v1.13.10
