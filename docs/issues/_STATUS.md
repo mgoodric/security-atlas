@@ -3,7 +3,17 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-13 (batch 21 claim-stake — 012 + 037 → in-progress · 48/63 on main)
+**Last reconciled:** 2026-05-13 (slice 012 → in-review · 48/63 on main)
+
+## Drift detected — 2026-05-13 (slice 012 → in-review)
+
+Slice 012 (Control state evaluation engine) flipped `in-progress` → `in-review`. PR [gh#89](https://github.com/mgoodric/security-atlas/pull/89) opened against main. **7/7 ACs + 3/3 P0 anti-criteria PASS.** New `internal/eval` package — the evaluation stage (canvas §4.3): a read-only consumer of the slice-013 evidence ledger that computes `(control × scope_cell × time) → {pass, fail, na, inconclusive}` + `freshness_status` and appends to the new `control_evaluations` table (migration `_027`). **Constitutional invariant 2 enforced structurally** — the engine's only writer has one INSERT target (`control_evaluations`); no `evidence_records` write code exists, and the ledger is append-only at the RLS layer (slice 013). Point-in-time replay (AC-7) reproduces identical computed state because state derives purely from the immutable ledger. `state.go` holds the pure deterministic rollup (wall clock enters only as the freshness-window cutoff, never the result — AC-3 idempotency). Rego evidence-query path runs in slice 054's capabilities-restricted OPA sandbox (`http.send`/`net.*`/`opa.runtime` stripped, compile-time rejection). Two read endpoints `GET /v1/controls/{id}/state` (`?scope=` + `?as-of=`) + `/effectiveness` appended onto the platform router. AC-2 background job: a NATS `IngestSubscriber` (2nd durable consumer on slice 015's stream) + a time-based `Scheduler`, both wired in `cmd/atlas`. **Migration `_027`** `control_evaluations` — append-only ledger, FORCE RLS + `tenant_read`/`tenant_write` policies only, composite FKs for D3; up→down→up byte-clean; `audit-rls.sh` passes. **Naming-drift resolved** (grill-with-docs): the issue spec's literal `control_state` is superseded by `control_evaluations` — an append-only evaluation ledger is what makes AC-7's point-in-time replay meaningful and matches the `evidence_audit_log` / `aggregation_rule_evaluations` precedent; recorded in `CONTEXT.md`. **Verification:** `go build ./...` clean, `golangci-lint run` 0 issues, `pre-commit run --all-files` all passed, unit + integration tests pass with `-race` (DB never mocked), ship-gate CLEAR TO SHIP (0 critical / 0 high / 0 advisory). **CI** added `internal/eval` + `internal/api/controlstate` to the integration-test allowlist. **Time spent:** ~50 min end-to-end. **Surprises:** (1) `scope_cells` had no `(tenant_id, id)` composite key — added `scope_cells_tenant_id_unique` in `_027` so the cross-tenant-safe FK works; (2) the AC-7 replay test initially conflated the evidence horizon with the evaluation-row read horizon — pinning the evidence horizon while reading latest state via `FarFuture` is the honest semantics; (3) simplify pass caught 3 over-generated sqlc queries (removed).
+
+| Row | Transition                  | Evidence                |
+| --- | --------------------------- | ----------------------- |
+| 012 | `in-progress` → `in-review` | gh#89 opened 2026-05-13 |
+
+**Counts delta:** in-progress −1 · in-review +1.
 
 ## Drift detected — 2026-05-13 (batch 21 claim-stake — 012 AFK + 037 AFK)
 
