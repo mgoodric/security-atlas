@@ -35,6 +35,22 @@ auto-generated notes.
   artifact published without one-click human approval at runtime —
   is untouched.
 
+### Fixed
+
+- **CI — release-please PR no longer deadlocks at 1/10 checks.**
+  GitHub's anti-recursion rule blocks workflows from triggering on a
+  `GITHUB_TOKEN`-authored branch update — so release-please's PR never
+  got the required-check CI matrix and could never satisfy branch
+  protection. `.github/workflows/release-please.yml` now mints a
+  GitHub App installation token (`actions/create-github-app-token`)
+  when the `RELEASE_PLEASE_APP_ID` repo variable is set, with a
+  graceful fallback to `GITHUB_TOKEN` until the App is configured
+  (setup steps: `docs/RELEASE_READINESS.md §10.6`). Separately,
+  `CHANGELOG.md` is now in a new `.prettierignore` — release-please
+  generates the file in its own markdown style, which prettier kept
+  reflowing, failing the `pre-commit` check on every release PR (and
+  on manual `[Unreleased]` edits — caught 4+ times in CI).
+
 ### Added
 
 - **Slice 042 — Audit workspace view.** The `/audit` route lands an

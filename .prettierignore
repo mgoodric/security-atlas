@@ -1,0 +1,9 @@
+# CHANGELOG.md is managed by release-please (googleapis/release-please-action).
+# release-please generates its release sections in its own markdown style,
+# which prettier then reformats — every release PR failed the
+# `pre-commit · all hooks` check on a prettier CHANGELOG reflow, and manual
+# `[Unreleased]` edits hit the same reflow churn (caught 4+ times in CI
+# across batches). The CHANGELOG is prose; prettier adds ~no value there.
+# Ignoring it ends that whole class of failure and keeps release-please's
+# output authoritative.
+CHANGELOG.md
