@@ -42,14 +42,21 @@ This affects **every evidence_kind the SOC 2 bundles reference** (13 distinct ki
 
 The bug was latent because nothing exercised "fresh bootstrap -> upload control bundles" end-to-end until slice 065's AC-12 job. **It means fresh-deploy control-bundle upload is broken on `main` today** — slice 037's "4-hour-to-first-evidence" demo path does not actually work from a clean checkout.
 
-The fix is a small, bounded alignment: change the SOC 2 control bundles to reference the canonical `.v1`-suffixed identifier the registry, connectors, schema files, and SDK already use. No registry / connector / SDK change is needed — they were already correct. The slice delivers value because it unbreaks the self-host bundle's last broken phase and greens slice 065's AC-12 end-to-end job.
+The identifier alignment is a small, bounded change: the SOC 2 control bundles are aligned to reference the canonical `.v1`-suffixed identifier the registry, connectors, schema files, and SDK already use. No registry / connector / SDK change is needed for the identifier itself — they were already correct.
+
+> **Scope grew (PR #125).** The identifier alignment alone did **not** green slice 065's `test-self-host-bundle` e2e job — that job stayed red in both matrix modes. A CI-driven root-cause pass found two further independent defects that also block fresh-deploy control-bundle upload:
+>
+> 1. **Boot-time schema-cache race.** `cmd/atlas` imports the bundled schemas via the BYPASSRLS migrate pool (succeeds) but hydrates its in-memory cache via the RLS-bound `atlas_app` pool — and the self-host bundle starts `atlas` in parallel with `atlas-bootstrap` (`depends_on: service_started`), so `LoadFromDB` races `bootstrap.sh` phase 2.5's `ALTER ROLE atlas_app PASSWORD`. On a scram-sha-256 cluster (external mode) the single attempt loses the race (`SQLSTATE 28P01`), the in-memory registry stays empty, and every control-bundle upload 400's. Fixed by retrying the boot-time cache load with backoff (`cmd/atlas/main.go::retrySchemaCacheLoad`).
+> 2. **Distroless `/health` probe bug.** The slice-065 harness probed atlas liveness with `docker exec atlas wget` — but the atlas image is distroless (no shell, no wget), so the probe always failed regardless of server health (the bundled-mode false failure). Fixed by curling atlas's host-published port from the CI runner. The harness also now dumps compose logs on failure before its cleanup trap runs, so future failures stay diagnosable.
+>
+> See `docs/audit-log/068-schema-registry-evidence-kind-fix-decisions.md` decision 4. The slice delivers value because it unbreaks the self-host bundle's last broken phase and greens slice 065's AC-12 end-to-end job.
 
 ## Acceptance criteria
 
 - [ ] AC-1: Every `controls/soc2/*/control.yaml` `evidence_kind` reference uses the canonical `.v<major>`-suffixed identifier (`osquery.host_posture.v1`, `sast.scan_result.v1`, etc.) — matching `DefaultSeed()`, the bundled schema files' `x-evidence-kind`, and the convention in `Plans/EVIDENCE_SDK.md` §4.5.
-- [ ] AC-2: Confirm `internal/control/validate.go::registryKnowsKind` resolves the `.v1`-suffixed kinds once the bundles are corrected (it probes `IsRegistered(kind, "1.0.0")`; `osquery.host_posture.v1` + `1.0.0` is exactly what the registry holds). If a `validate.go` change is needed, make it; if not, verify and record that no change was required.
-- [ ] AC-3: A fresh-deploy bootstrap's phase-6 control-bundle upload succeeds — every evidence_kind referenced by every `controls/soc2/*/control.yaml` resolves in the registry. Verify by driving the real `Bundle.ValidateEvidenceKinds` path against an in-memory registry seeded from `DefaultSeed()` for every SOC 2 bundle.
-- [ ] AC-4: Slice 065's `test-self-host-bundle` CI matrix job passes in **both** modes (bundled + external) — the end-to-end proof. (Slice 065's AC-12 has been red pending this slice; 068 is what greens it.)
+- [x] AC-2: Confirm `internal/control/validate.go::registryKnowsKind` resolves the `.v1`-suffixed kinds once the bundles are corrected (it probes `IsRegistered(kind, "1.0.0")`; `osquery.host_posture.v1` + `1.0.0` is exactly what the registry holds). If a `validate.go` change is needed, make it; if not, verify and record that no change was required. **Done:** no `validate.go` change required (decisions log section 2). The e2e job did reveal, though, that this probe is only as good as the in-memory registry it reads, and `cmd/atlas` was not reliably populating that registry at boot (see AC-3).
+- [x] AC-3: A fresh-deploy bootstrap's phase-6 control-bundle upload succeeds — every `evidence_kind` referenced by every `controls/soc2/*/control.yaml` resolves in the registry. Verify by driving the real `Bundle.ValidateEvidenceKinds` path against an in-memory registry seeded from `DefaultSeed()` for every SOC 2 bundle. **Done:** the unit-level path is verified by the drift-guard test; the e2e path additionally required the `cmd/atlas` boot-time schema-cache retry fix (decisions log section 4a) — the running server's in-memory registry was empty because `LoadFromDB` raced the `atlas_app` role password.
+- [ ] AC-4: Slice 065's `test-self-host-bundle` CI matrix job passes in **both** modes (bundled + external) — the end-to-end proof. (Slice 065's AC-12 has been red pending this slice; 068 is what greens it.) **Note:** required the `cmd/atlas` retry fix (4a) plus the harness `/health` probe fix (4b) on top of the identifier alignment.
 - [ ] AC-5: A drift-guard test asserting mutual consistency: (a) every evidence_kind referenced by `controls/soc2/*` resolves in `DefaultSeed()`; (b) the `schemas/*/` `x-evidence-kind` set equals the `DefaultSeed()` kind set; (c) every kind in both sets carries a `.v<major>` suffix. This prevents silent recurrence — the inconsistency was latent for ~14 slices precisely because nothing asserted it.
 - [ ] AC-6: Audit the other evidence_kind consumers — the Evidence SDK push path, the connectors (`connectors/*`) — confirming they already use the canonical `.v1`-suffixed convention (they do). Document the canonical convention (`.v<major>`-suffixed kind identifier + separate semver) in a comment at the `DefaultSeed()` definition site so the next contributor does not reintroduce the bare-name drift.
 - [ ] AC-7: `CHANGELOG.md` entry under `[Unreleased]/Fixed`.
@@ -82,7 +89,7 @@ Both merged. (Slice 065 is also merged; its `test-self-host-bundle` job is the e
 
 ## Skill mix (3–5)
 
-- Go — schema registry + control-bundle validation path
-- Root-cause analysis (which direction the identifier convention should align — grill against the canvas)
+- Go — schema registry + control-bundle validation path + `cmd/atlas` boot sequencing
+- Root-cause analysis (which direction the identifier convention should align — grill against the canvas; and the CI-driven pass that found the boot-time cache race + distroless `/health` probe bug)
 - Test design (the mutual-consistency drift-guard across schemas / seed / control bundles)
-- docker-compose self-host bundle verification (slice 065's `test-self-host-bundle.sh`)
+- docker-compose self-host bundle verification (slice 065's `test-self-host-bundle.sh` — including its startup-ordering interaction with `cmd/atlas`)

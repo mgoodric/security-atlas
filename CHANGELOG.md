@@ -13,27 +13,43 @@ auto-generated notes.
 
 ### Fixed
 
-- **evidence-pipeline:** schema-registry evidence_kind identifier fix
-  (#068) — a pre-existing identifier inconsistency that broke fresh-deploy
-  control-bundle upload. The canonical evidence_kind identifier convention
-  (`Plans/EVIDENCE_SDK.md` §4.5) is a `.v<major>`-suffixed kind identifier
-  (`osquery.host_posture.v1`) paired with a separate `schema_version`
-  semver — and the schema registry, the bundled JSON Schemas'
-  `x-evidence-kind`, all 9 first-party connectors, and the push SDK/CLI
-  already honored it. The 50 SOC 2 control bundles
-  (`controls/soc2/*/control.yaml`) had drifted to **bare** names
-  (`evidence_kind: osquery.host_posture`), so `internal/control`'s
-  bundle-upload validator probed the registry with a name it did not hold
-  and 400'd — silently broken on `main` for ~14 slices because nothing
-  exercised "fresh bootstrap -> control-bundle upload" until slice 065's
-  self-host e2e job. Fix aligns the 13 distinct bundle references
-  (28 bundles) to the canonical `.v1`-suffixed identifier; no
-  registry/connector/SDK change was needed. Adds a drift-guard test
-  (`internal/control/evidence_kind_drift_test.go`) asserting mutual
-  consistency across `schemas/*/` `x-evidence-kind`, `DefaultSeed()`, and
-  the SOC 2 bundle references so the inconsistency cannot recur silently,
-  and documents the convention at the `DefaultSeed()` definition site.
-  Greens slice 065's previously-red `test-self-host-bundle` AC-12 e2e job.
+- **evidence-pipeline:** schema-registry evidence_kind fixes (#068) —
+  unbreaks fresh-deploy control-bundle upload and greens slice 065's
+  `test-self-host-bundle` AC-12 e2e job in both deploy shapes. Three
+  distinct defects:
+  - **evidence_kind identifier drift.** The canonical evidence_kind
+    identifier convention (`Plans/EVIDENCE_SDK.md` §4.5) is a
+    `.v<major>`-suffixed kind identifier (`osquery.host_posture.v1`)
+    paired with a separate `schema_version` semver — and the schema
+    registry, the bundled JSON Schemas' `x-evidence-kind`, all 9
+    first-party connectors, and the push SDK/CLI already honored it. The
+    50 SOC 2 control bundles (`controls/soc2/*/control.yaml`) had drifted
+    to **bare** names, so `internal/control`'s bundle-upload validator
+    probed the registry with a name it did not hold. Fix aligns the 13
+    distinct bundle references (26 control.yaml files) to the canonical
+    `.v1`-suffixed identifier; adds a drift-guard test
+    (`internal/control/evidence_kind_drift_test.go`).
+  - **boot-time schema-cache race (the actual e2e blocker).** Even with
+    the identifiers aligned, the `external` deploy shape still 400'd:
+    `cmd/atlas` imports the bundled schemas into Postgres via the
+    BYPASSRLS migrate pool (succeeds), then hydrates its in-memory cache
+    via the RLS-bound `atlas_app` pool — but the self-host bundle starts
+    `atlas` in parallel with `atlas-bootstrap` (`depends_on:
+    service_started`, slice 065), and `atlas_app`'s password is set by
+    `bootstrap.sh` phase 2.5, which races atlas's boot. A single
+    `LoadFromDB` attempt lost that race on a scram-sha-256 cluster and
+    failed with SQLSTATE 28P01 — leaving the in-memory registry empty so
+    every control-bundle upload 400'd "not registered". Fix: the
+    boot-time cache load now retries with backoff (~90s budget) until the
+    app role is authenticable.
+  - **distroless `/health` false failure.** The slice-065 e2e harness
+    probed atlas liveness with `docker exec atlas wget ...`, but the
+    atlas image is distroless — no shell, no wget — so the probe always
+    failed even when the server was healthy (the `bundled`-mode false
+    failure). Fix: the harness now curls atlas's host-published port from
+    the CI runner. The harness also dumps full compose logs on failure
+    *before* its cleanup trap tears the stack down, so future self-host
+    failures stay diagnosable.
 - **infra:** self-host bundle P0 fixes (#065) — a P0 follow-up to slice
   037 that unbreaks the shipped v1.3.0 `docker compose` self-host bundle,
   which did not bring a fresh deployment to a working state. Five

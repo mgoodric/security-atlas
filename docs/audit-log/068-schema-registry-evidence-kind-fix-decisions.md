@@ -9,6 +9,15 @@ implementation, against `Plans/EVIDENCE_SDK.md` §4.5 and
 correction in the JUDGMENT-slice format (Decisions made · Revisit once in
 use · Confidence per decision). It does NOT block merge.
 
+**Scope note (PR #125).** The initial implementation (decisions 1–3) was
+the evidence_kind identifier alignment. It was correct but did not green
+slice 065's `test-self-host-bundle` e2e job — a CI-driven root-cause pass
+found two further independent defects (a boot-time schema-cache race and a
+distroless-image `/health` probe bug) plus a harness diagnostics gap.
+Those are decision 4 below; the slice scope grew from "yaml identifier
+alignment" to "fresh-deploy control-bundle upload works end-to-end in both
+self-host deploy shapes".
+
 ## Decisions made
 
 ### 1. The fix direction in the original issue doc was INVERTED — the canvas wins
@@ -103,6 +112,90 @@ because directory names are not part of the convention.
 contributor browsing `schemas/` may briefly be confused by the bare
 directory vs `.v1` `x-evidence-kind`. Mitigated by the existing
 `embedded_fs.go` comment and the new `DefaultSeed()` convention comment.
+
+### 4. The identifier alignment was necessary but NOT sufficient — two further root causes surfaced in CI
+
+The identifier fix (decision 1) was correct and stays. But it did **not**
+green slice 065's `test-self-host-bundle` e2e job — that job stayed red in
+**both** matrix modes. A CI-driven root-cause pass (PR #125) found two
+further, independent defects, neither of which is about the `.v1` vs bare
+identifier:
+
+**4a. Boot-time schema-cache hydration raced `atlas_app`'s password.**
+The `external` deploy shape kept 400'ing `evidence_kind
+"osquery.host_posture.v1" is not registered` even with the bundles
+aligned. The atlas server stderr (now visible — see 4c) showed the real
+chain:
+
+```
+atlas: schema import inserted=16 total=16
+atlas: schema cache reload: list global schemas: failed to connect to
+  `user=atlas_app ...`: failed SASL auth: FATAL: password authentication
+  failed for user "atlas_app" (SQLSTATE 28P01)
+```
+
+`cmd/atlas` imports the bundled schemas into Postgres via the BYPASSRLS
+**migrate** pool — that succeeds (`inserted=16`). It then hydrates its
+**in-memory** registry cache via the RLS-bound **app** pool
+(`schemaSvc.LoadFromDB`). But the self-host bundle starts `atlas` in
+parallel with `atlas-bootstrap` (`depends_on: service_started`, a slice-065
+change), and `atlas_app`'s password is set by `bootstrap.sh` phase 2.5
+(`ALTER ROLE atlas_app PASSWORD ...`) — which races atlas's boot. On a
+scram-sha-256 cluster (external mode) the single `LoadFromDB` attempt lost
+that race and failed `28P01`; the in-memory cache stayed empty;
+`controlsRegistry.IsRegistered` returned false for every kind; phase 6's
+control-bundle upload 400'd. The `bundled` mode masked this because
+`POSTGRES_HOST_AUTH_METHOD=trust` lets `atlas_app` connect password-less
+regardless of whether the password is set yet.
+
+**Chosen.** Make the boot-time cache load resilient: `cmd/atlas` now
+retries `LoadFromDB` with a fixed 2s backoff for up to ~90s
+(`retrySchemaCacheLoad`) until the app role is authenticable. The schema
+rows were already durably written via the migrate pool, so this only
+waits for the app pool to become connectable — bootstrap sets the password
+within seconds. The HTTP listener still starts only **after** this
+completes, so by the time control-bundle uploads or `/health` probes
+arrive the in-memory registry is hydrated. The retry respects `ctx`
+cancellation (SIGTERM during boot is honoured) and stays non-fatal on
+exhaustion (matches the prior log-and-continue behaviour). No deadlock:
+bootstrap phase 2.5 (sets password) runs before phase 5 (waits for atlas
+`/health`), and atlas's retry budget (90s) sits inside phase 5's wait
+budget (180s).
+
+**Confidence: high** — the failure mode is unambiguous in the atlas
+stderr, the fix targets exactly the raced call, and the ordering analysis
+shows no new deadlock.
+
+**4b. The e2e harness's `/health` probe could never pass against the
+distroless atlas image.** The `bundled` mode failed with `atlas /health
+never returned 200` even though atlas booted cleanly and `atlas-bootstrap`
+exited 0 (which means bootstrap's _own_ phase-5 `/health` poll — run from
+the alpine-based bootstrap container, over the Docker network — _had_
+succeeded). The harness probed liveness with `docker exec atlas wget ...`,
+but the atlas image is `gcr.io/distroless/static-debian12` — no shell, no
+`wget`, no `curl`. `docker exec atlas wget` therefore _always_ fails
+("executable not found"), independent of server health.
+
+**Chosen.** The harness now resolves atlas's host-published `:8080` port
+(`docker compose port atlas 8080`) and `curl`s `/health` from the CI
+runner. This is both correct (the runner has `curl`) and a more faithful
+smoke test than an in-container loopback probe — it exercises the same
+path a real operator's browser or load balancer takes.
+
+**Confidence: high** — distroless images demonstrably have no `wget`; the
+host-port path is what the bundle already documents for operator access.
+
+**4c. The harness destroyed the evidence on every failure.** The blocker
+that made 4a/4b hard to diagnose: the harness's `cleanup()` EXIT trap runs
+`docker compose down -v` on every `fail()`, so CI's "Dump compose logs on
+failure" step always ran against an already-destroyed stack and printed
+nothing. **Chosen.** `fail()` now dumps full compose logs for all services
+(`--tail=300`) to stdout _before_ `exit 1` triggers the cleanup trap.
+`cleanup()` is unchanged (it still tears the stack down afterward). This is
+what made the atlas stderr in 4a visible at all.
+
+**Confidence: high** — purely additive diagnostics; no behaviour change to
+the assertions.
 
 ## Revisit once in use
 

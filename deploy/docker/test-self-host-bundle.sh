@@ -243,13 +243,26 @@ log "atlas-bootstrap exited 0"
 
 # ---------------------------------------------------------------------
 # Assertion 2: atlas /health returns 200.
+#
+# The atlas image is distroless (gcr.io/distroless/static-debian12) — no
+# shell, no wget, no curl. `docker exec atlas wget ...` therefore ALWAYS
+# fails ("executable not found"), which used to read as "/health never
+# returned 200" even when the server was perfectly healthy (the bundled-
+# mode false failure). Probe the HOST-published port instead: compose
+# maps atlas's :8080 to a host port, and the runner has curl. This is the
+# same path a real operator's browser / load balancer takes, so it is
+# also a more faithful smoke test than an in-container loopback probe.
 # ---------------------------------------------------------------------
 log "checking atlas /health"
 ATLAS_CID="$("${COMPOSE[@]}" ps -q atlas)"
 [ -n "${ATLAS_CID}" ] || fail "atlas container not found"
+# `docker compose port` prints e.g. `0.0.0.0:8080`; take the port field.
+ATLAS_HOSTPORT="$("${COMPOSE[@]}" port atlas 8080 2>/dev/null | awk -F: 'NF{print $NF}')"
+[ -n "${ATLAS_HOSTPORT}" ] || fail "could not resolve atlas host-published :8080 port"
+log "atlas /health host port is ${ATLAS_HOSTPORT}"
 HEALTH_OK=""
 for i in $(seq 1 60); do
-    if docker exec "${ATLAS_CID}" wget -q -O /dev/null http://localhost:8080/health 2>/dev/null; then
+    if curl -fsS -o /dev/null "http://127.0.0.1:${ATLAS_HOSTPORT}/health" 2>/dev/null; then
         HEALTH_OK=1
         break
     fi
