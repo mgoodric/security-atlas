@@ -40,6 +40,28 @@ auto-generated notes.
   `docs/audit-log/067-risk-hierarchy-backend-endpoints-decisions.md` for
   the wire-shape judgment calls (theme key is the slug not a UUID;
   `risk_counts` is keyed by the raw severity scalar).
+- **audit:** OSCAL SSP + POA&M export pipeline (#030) — the audit-handoff
+  bundle generator. `POST /v1/audit-periods/{id}/oscal-export` (and the
+  `atlas-cli oscal` command) produce an OSCAL JSON v1.1.2 bundle for a
+  **frozen** AuditPeriod: a System Security Plan (org profile + scope cells +
+  control implementations + linked policies), an Assessment Plan + Assessment
+  Results (sample populations + walkthroughs as observations + audit notes as
+  observation annotations), and a POA&M (failing `control_evaluations` +
+  open control-scoped audit notes, with owner / due-date / milestone derived
+  per decision D3). Serialization runs through a co-located Python
+  `oscal-bridge/` sidecar wrapping IBM `compliance-trestle`, reached over a
+  gRPC contract (`proto/oscal/v1/`) — this is the first Python in the repo,
+  managed with `uv` + `ruff`. Export bundles carry an ed25519 detached
+  signature in a cosign-compatible envelope (`OSCAL_SIGNING_KEY` env var, or
+  an ephemeral key when unset); `VerifyBundle` validates both the digest
+  match and the signature, closing the digest-rewrite gap. Constitutional:
+  invariant 8 (OSCAL is the wire format), invariant 10 (export rejects a
+  non-frozen period with a typed error), and the product AI-assist boundary
+  (SSP statements come from human-authored control bundle text — no LLM).
+  `Type: JUDGMENT` — four spec-ambiguity calls (SSP statement source, POA&M
+  derivation, OSCAL 1.1.2 pin, the ed25519-vs-cosign signing primitive) are
+  recorded in `docs/audit-log/030-oscal-ssp-poam-export-decisions.md`, with
+  "validate against a real auditor's tooling" as the top revisit item.
 - **frontend:** hierarchical risk dashboard view (#056) — a new
   `/risks/hierarchy` route, the CISO / program-lead surface for the
   multi-level risk + Decision Log work in slices 052-055. Three panels,
