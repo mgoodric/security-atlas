@@ -312,6 +312,23 @@ type ListFilter struct {
 	// Now is the clock used for the revisit-window filter. Defaults to
 	// time.Now().UTC() when zero -- callers override only in tests.
 	Now time.Time
+	// Constraints, when non-empty, restricts to decisions whose
+	// constraints array intersects this set (OR-within-facet: a decision
+	// matches if it carries ANY of the requested constraint tags). Slice
+	// 067 (AC-5): additive — powers slice 056's deep-linkable filter bar.
+	Constraints []string
+	// DecisionMaker, when non-empty, restricts to decisions made by that
+	// decision_maker (exact match). Slice 067 (AC-5): additive.
+	DecisionMaker string
+	// RevisitByFrom / RevisitByTo, when non-nil, restrict to decisions
+	// whose revisit_by falls within [from, to] inclusive. Slice 067
+	// (AC-5): additive. Unlike RevisitDueWithinDays (which is active-only,
+	// a dashboard "due soon" cut), this is a status-agnostic date-range
+	// filter — the filter bar can find a revisited decision by its
+	// revisit_by date. A decision with a NULL revisit_by is excluded when
+	// either bound is set.
+	RevisitByFrom *time.Time
+	RevisitByTo   *time.Time
 }
 
 // List returns decisions for the active tenant, newest first, after
@@ -350,6 +367,15 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Decision, error)
 		for _, r := range rows {
 			d := decisionFromRow(r)
 			if statusCut && d.Status != filter.Status {
+				continue
+			}
+			// Slice 067 (AC-5): the additive richer filters. Applied
+			// in-memory over the query result — the same pattern as the
+			// statusCut above — so the slice-055 sqlc queries stay static
+			// and the new filters compose with every existing one. v1
+			// Decision Log cardinality is small (anti-criteria budget 50
+			// decisions per tenant); a full scan is well within bounds.
+			if !matchesRicherFilters(d, filter) {
 				continue
 			}
 			out = append(out, d)
@@ -866,6 +892,56 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries,
 		return fmt.Errorf("decision: commit: %w", err)
 	}
 	return nil
+}
+
+// ----- slice 067 richer-filter matching -----
+
+// matchesRicherFilters reports whether d satisfies the slice-067 additive
+// filters (constraints / decision_maker / revisit_by range). An unset
+// filter field is ignored. All set filters compose by AND — a decision
+// must satisfy every one.
+func matchesRicherFilters(d Decision, filter ListFilter) bool {
+	if len(filter.Constraints) > 0 && !constraintsIntersect(d.Constraints, filter.Constraints) {
+		return false
+	}
+	if filter.DecisionMaker != "" && d.DecisionMaker != filter.DecisionMaker {
+		return false
+	}
+	if filter.RevisitByFrom != nil || filter.RevisitByTo != nil {
+		// A revisit_by range filter excludes decisions with no revisit_by
+		// — there is no date to fall inside the window.
+		if d.RevisitBy == nil {
+			return false
+		}
+		rb := d.RevisitBy.UTC()
+		if filter.RevisitByFrom != nil && rb.Before(filter.RevisitByFrom.UTC()) {
+			return false
+		}
+		if filter.RevisitByTo != nil && rb.After(filter.RevisitByTo.UTC()) {
+			return false
+		}
+	}
+	return true
+}
+
+// constraintsIntersect reports whether have and want share at least one
+// element. Slice 067 (AC-5): the ?constraints= filter is OR-within-facet —
+// a decision matches if it carries ANY of the requested constraint tags,
+// the conventional faceted-filter-bar semantics.
+func constraintsIntersect(have, want []string) bool {
+	if len(have) == 0 || len(want) == 0 {
+		return false
+	}
+	set := make(map[string]struct{}, len(have))
+	for _, c := range have {
+		set[c] = struct{}{}
+	}
+	for _, c := range want {
+		if _, ok := set[c]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // ----- row conversion -----

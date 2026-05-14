@@ -176,9 +176,22 @@ func (h *Handler) CreateDecision(w http.ResponseWriter, r *http.Request) {
 
 // ListDecisions handles GET /v1/decisions (AC-2). Filters:
 //
-//	?status=active|revisited|superseded|expired
-//	?revisit_due_within_days=N
+//	?status=active|revisited|superseded|expired   (slice 055)
+//	?revisit_due_within_days=N                    (slice 055)
+//	?constraints=<csv>                            (slice 067, AC-5)
+//	?decision_maker=<id>                          (slice 067, AC-5)
+//	?revisit_by_from=<iso-date>                   (slice 067, AC-5)
+//	?revisit_by_to=<iso-date>                     (slice 067, AC-5)
+//
+// The slice-067 filters are additive — they compose with the slice-055
+// filters and with each other (all by AND). They power slice 056 AC-7's
+// deep-linkable filter bar, which previously filtered constraints /
+// decision_maker / revisit_by client-side.
 func (h *Handler) ListDecisions(w http.ResponseWriter, r *http.Request) {
+	// Slice 067 (AC-6): handler-level program-read guard, runs FIRST.
+	if !requireProgramRead(w, r) {
+		return
+	}
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "tenant context missing")
@@ -196,6 +209,31 @@ func (h *Handler) ListDecisions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		filter.RevisitDueWithinDays = days
+	}
+	// Slice 067 (AC-5): the additive richer filters.
+	if raw := strings.TrimSpace(r.URL.Query().Get("constraints")); raw != "" {
+		filter.Constraints = splitCSV(raw)
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("decision_maker")); raw != "" {
+		filter.DecisionMaker = raw
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("revisit_by_from")); raw != "" {
+		from, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "revisit_by_from must be an ISO date (YYYY-MM-DD)")
+			return
+		}
+		f := from.UTC()
+		filter.RevisitByFrom = &f
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("revisit_by_to")); raw != "" {
+		to, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "revisit_by_to must be an ISO date (YYYY-MM-DD)")
+			return
+		}
+		t := to.UTC()
+		filter.RevisitByTo = &t
 	}
 	rows, err := h.store.List(ctx, filter)
 	if err != nil {
@@ -545,6 +583,21 @@ func linkSliceWire(links []decision.Link) []linkWire {
 			Kind:      string(l.Kind),
 			TargetID:  l.TargetID.String(),
 			CreatedAt: l.CreatedAt,
+		}
+	}
+	return out
+}
+
+// splitCSV parses a comma-separated query value into a trimmed,
+// empty-dropped slice. Slice 067 (AC-5): the ?constraints= filter is
+// multi-value via CSV ("time-pressure,cost"). A trailing comma or a
+// doubled comma yields no spurious empty entry.
+func splitCSV(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
 		}
 	}
 	return out

@@ -196,6 +196,11 @@ func (s *Server) httpHandler() http.Handler {
 	root.Post("/v1/risks", risksH.CreateRisk)
 	root.Get("/v1/risks", risksH.ListRisks)
 	root.Get("/v1/risks/heatmap", risksH.Heatmap)
+	// Slice 067: themes × org_units aggregation — slice 056's heatmap
+	// panel's central data source. A literal-segment route declared
+	// alongside /v1/risks/heatmap, before the generic /v1/risks/{id}, so
+	// chi's declaration-order match keeps it ahead of the UUID-id route.
+	root.Get("/v1/risks/theme-heatmap", risksH.ThemeHeatmap)
 	// Slice 053: manual aggregation + live recompute. Literal-segment
 	// routes (/aggregate, /{id}/aggregation) declared before the generic
 	// /v1/risks/{id} so chi's declaration-order match keeps them ahead.

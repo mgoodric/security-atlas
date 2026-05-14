@@ -13,6 +13,33 @@ auto-generated notes.
 
 ### Added
 
+- **risk:** risk-hierarchy backend read endpoints (#067) — fills the
+  three binding placeholders slice 056's hierarchical risk dashboard
+  shipped, following the 040→066 / 041→064 precedent. `GET /v1/org_units`
+  now honors `?include_risk_counts=true`: each org-unit node gains a
+  `risk_counts` map (severity scalar → count of risks attributed to that
+  node), aggregated in one query joined to the tree (no N+1); without the
+  param the response shape is byte-identical to the slice-053 shape. The
+  `GET /v1/risks` row shape gains `org_unit_id`, `themes`, and a computed
+  `severity` field so the org tree and downstream panels can attribute a
+  risk without a second round-trip. A new `GET /v1/risks/theme-heatmap`
+  returns the `themes × org_units` aggregation grid — per cell a
+  contributing-risk count and the aggregate (max) severity, built-in
+  themes ordered before tenant-private ones. `GET /v1/risks` accepts
+  additive `?theme=` + `?org_unit=` filters (composable with the
+  slice-019 treatment/category/methodology filters and slice-066's
+  `?sort=`) so the heatmap-cell-click side panel can page the
+  contributing risks. `GET /v1/decisions` accepts additive
+  `?constraints=<csv>` (multi-value, OR-within-facet), `?decision_maker=`,
+  and a `?revisit_by_from=`/`?revisit_by_to=` range, additive to
+  slice-055's `?status=` + `?revisit_due_within_days=`. Every endpoint is
+  tenant-scoped through the standard RLS path and gated by a handler-level
+  program-read role guard (the slice 064/066 defense-in-depth pattern).
+  Pure read-only over existing slice-052/053/019/055 schema — no
+  migration, no new write surface. See
+  `docs/audit-log/067-risk-hierarchy-backend-endpoints-decisions.md` for
+  the wire-shape judgment calls (theme key is the slug not a UUID;
+  `risk_counts` is keyed by the raw severity scalar).
 - **frontend:** hierarchical risk dashboard view (#056) — a new
   `/risks/hierarchy` route, the CISO / program-lead surface for the
   multi-level risk + Decision Log work in slices 052-055. Three panels,
