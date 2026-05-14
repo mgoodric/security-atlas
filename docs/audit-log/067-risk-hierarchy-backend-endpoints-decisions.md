@@ -31,19 +31,19 @@ columns are therefore keyed by theme name. AC-7 of this very issue says
 Using a UUID would force slice 056's frontend into a second lookup
 (`GET /v1/themes` returns no id to join on) and contradict the contract
 slice 056 actually shipped. `org_unit_id` stays a real UUID — `org_units`
-*does* have a UUID `id` and slice 056's org tree is keyed on it.
+_does_ have a UUID `id` and slice 056's org tree is keyed on it.
 **Confidence: high** — the issue's own AC-7 makes slice 056's merged
 contract authoritative over AC-3's loose wording.
 
 ### 2. No `meta_risk_present` field on the heatmap cell
 
 Slice 056's decisions log (#2, and the "endpoint gap inventory" table's
-"Heatmap meta-risk icon" row) *wishes* for a `meta_risk_present` flag on
+"Heatmap meta-risk icon" row) _wishes_ for a `meta_risk_present` flag on
 each cell — a marker for cells where an aggregation rule has fired. But
 the issue's AC-3 defines the cell shape as exactly four fields and does
 NOT list it, and the constitutional-invariants section only requires that
 the heatmap "counts rule-driven meta-risks and manual aggregations as
-peers" — i.e. must not *filter either out*.
+peers" — i.e. must not _filter either out_.
 
 **Chosen:** the aggregation counts every risk attributed to a
 (theme, org_unit) cell — meta-risk or leaf, manual or rule-driven —
@@ -103,10 +103,10 @@ against multiple requested tags.
 
 **Chosen:** OR-within-facet — a decision matches if its `constraints`
 array intersects the requested set (`?constraints=time-pressure,cost`
-matches a decision tagged with *either*). This is the conventional
+matches a decision tagged with _either_). This is the conventional
 faceted-filter-bar behavior (selecting two tags in one facet broadens,
 not narrows) and matches how slice 056's URL-deep-linkable filter bar
-would behave. Across *different* filters (`constraints` vs
+would behave. Across _different_ filters (`constraints` vs
 `decision_maker` vs the revisit range) the composition is AND, like every
 other filter. **Confidence: high** — standard faceted-filtering
 convention; the alternative (AND-within-facet) would make a multi-select
@@ -115,7 +115,7 @@ constraint facet nearly always return empty.
 ### 6. `?revisit_by_from`/`?revisit_by_to` is status-agnostic
 
 Slice 055's existing `?revisit_due_within_days=N` is an `active`-only,
-"due soon" dashboard cut. Slice 067 adds a `revisit_by` date *range*.
+"due soon" dashboard cut. Slice 067 adds a `revisit_by` date _range_.
 
 **Chosen:** the new range filter is status-agnostic — it filters purely
 on the `revisit_by` date, so slice 056's filter bar can find a
@@ -144,7 +144,7 @@ apply it ONLY to the read endpoints slice 067 touches:
 slice-019/020/053/055 write/read-one endpoints — retrofitting authz onto
 untouched endpoints is out of slice-067 scope and would risk other
 slices' tests. The existing `risks`/`decisions` integration tests issue
-*owner* credentials (`OwnerRoles` non-empty → guard admits them), so they
+_owner_ credentials (`OwnerRoles` non-empty → guard admits them), so they
 stay green — confirmed by re-running slice 066's sort tests. The slice-056
 hierarchical risk dashboard audience (CISO / program-lead) is exactly the
 operator/auditor audience the dashboard slice's guard already serves, so
@@ -183,12 +183,12 @@ coherent. **Confidence: high** — direct copy of the 064/066 precedent.
 
 ## Confidence summary
 
-| Decision                                                  | Confidence  |
-| --------------------------------------------------------- | ----------- |
-| 1. Heatmap theme key is the slug, not a UUID              | high        |
-| 2. No `meta_risk_present` field (peers, not filtered)     | high        |
-| 3. `risk_counts` keyed by raw severity scalar             | medium-high |
-| 4. Severity computed, not selected                       | high        |
-| 5. `?constraints=` is OR-within-facet                     | high        |
-| 6. `?revisit_by` range is status-agnostic                 | medium-high |
-| 7. Program-read guard on touched read endpoints only      | high        |
+| Decision                                              | Confidence  |
+| ----------------------------------------------------- | ----------- |
+| 1. Heatmap theme key is the slug, not a UUID          | high        |
+| 2. No `meta_risk_present` field (peers, not filtered) | high        |
+| 3. `risk_counts` keyed by raw severity scalar         | medium-high |
+| 4. Severity computed, not selected                    | high        |
+| 5. `?constraints=` is OR-within-facet                 | high        |
+| 6. `?revisit_by` range is status-agnostic             | medium-high |
+| 7. Program-read guard on touched read endpoints only  | high        |
