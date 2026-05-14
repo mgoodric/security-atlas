@@ -34,6 +34,12 @@ jobs:
           - name: atlas-cli
             dockerfile: deploy/docker/atlas-cli.Dockerfile
             target: ghcr.io/mgoodric/security-atlas-cli
+          - name: web
+            dockerfile: deploy/docker/web.Dockerfile
+            target: ghcr.io/mgoodric/security-atlas-web
+          - name: bootstrap
+            dockerfile: deploy/docker/bootstrap.Dockerfile
+            target: ghcr.io/mgoodric/security-atlas-bootstrap
     steps:
       - name: Checkout
         uses: actions/checkout@v4
