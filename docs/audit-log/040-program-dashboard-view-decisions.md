@@ -15,14 +15,14 @@ the dashboard is in real use against a real platform.
 Verified against `internal/api/` and `internal/api/httpserver.go` on
 `main @ e2d7024` at slice-build time:
 
-| Dashboard panel | Endpoint the panel wants | On main? | Slice 040 behavior |
-| --------------- | ------------------------ | -------- | ------------------ |
-| Recent drift | `GET /v1/controls/drift?since=7d` | yes (slice 016) | fully bound |
-| Evidence freshness | `GET /v1/evidence/freshness` | yes (slice 016) | fully bound |
-| Top risks aging | `GET /v1/risks?treatment=mitigate` | partial — filter exists, `sort=residual,age` does not | bound to the filter; sort gap noted in-panel |
-| Upcoming items | `GET /v1/exceptions/expiring?within=30d` | partial — exceptions exist, no unified upcoming-rollup | bound to exceptions; other categories noted as a gap |
-| Framework posture | `GET /v1/frameworks/posture` (per-framework coverage + trend) | no | endpoint-naming placeholder |
-| Activity feed | `GET /v1/activity` (NATS event-stream archive read model) | no | endpoint-naming placeholder |
+| Dashboard panel    | Endpoint the panel wants                                      | On main?                                               | Slice 040 behavior                                   |
+| ------------------ | ------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------- |
+| Recent drift       | `GET /v1/controls/drift?since=7d`                             | yes (slice 016)                                        | fully bound                                          |
+| Evidence freshness | `GET /v1/evidence/freshness`                                  | yes (slice 016)                                        | fully bound                                          |
+| Top risks aging    | `GET /v1/risks?treatment=mitigate`                            | partial — filter exists, `sort=residual,age` does not  | bound to the filter; sort gap noted in-panel         |
+| Upcoming items     | `GET /v1/exceptions/expiring?within=30d`                      | partial — exceptions exist, no unified upcoming-rollup | bound to exceptions; other categories noted as a gap |
+| Framework posture  | `GET /v1/frameworks/posture` (per-framework coverage + trend) | no                                                     | endpoint-naming placeholder                          |
+| Activity feed      | `GET /v1/activity` (NATS event-stream archive read model)     | no                                                     | endpoint-naming placeholder                          |
 
 A follow-up backend slice should scope: (1) a per-framework posture
 endpoint — coverage + freshness composite + 90-day trend per framework
@@ -48,7 +48,7 @@ expirations, vendor reviews, and audit-period milestones.
 **Chosen: (B).**
 
 **Rationale.** §7.2's "separate dashboards" rule is scoped to the
-*exec-facing board pack* (§7.5) — the sentence's stated failure mode is
+_exec-facing board pack_ (§7.5) — the sentence's stated failure mode is
 "lets **execs** misread the program". Slice 040's `/dashboard` is the
 **operator's** home screen: per `CLAUDE.md`, the primary v1 persona is
 the solo security leader who runs the whole program, and per the issue
@@ -141,7 +141,7 @@ shape the frontend does not own and invent an ordering — that is
 exactly the kind of fabricated-derived-value the slice's P0
 anti-criterion forbids, and a client-side ranking could disagree with
 whatever a future server-side `sort=residual,age` produces. Option (A)
-blocks a whole panel on a missing *sort*, when the `treatment` filter —
+blocks a whole panel on a missing _sort_, when the `treatment` filter —
 the substantive part — works today. Option (C) binds what exists, shows
 the real `treatment=mitigate` rows, and the `top-risks-sort-gap` note
 states plainly that residual × age ranking needs a server-side
@@ -166,7 +166,7 @@ capability. AC-3 is recorded as PARTIAL.
 
 **Rationale.** `GET /v1/exceptions/expiring?within=30d` exists and is
 bound. `GET /v1/audit-periods` and `GET /v1/vendors/burndown` also
-exist, but there is no single endpoint that *merges* upcoming items into
+exist, but there is no single endpoint that _merges_ upcoming items into
 one chronological feed, and policy-ack expiry is only available
 per-policy (`GET /v1/policies/{id}/acknowledgment-rate`), not as a
 tenant-wide "acks expiring" list. Rather than render four separate
@@ -176,7 +176,7 @@ coherent "Upcoming" panel — slice 040 binds the one clean source
 rollup endpoint would add. AC-5 is recorded as PARTIAL.
 
 **Confidence: medium.** Binding exceptions-expiring is unambiguously
-correct; the *presentation* choice (one note vs. several stub
+correct; the _presentation_ choice (one note vs. several stub
 sub-panels) is a judgment a maintainer iterating against real data
 might want revisited — e.g. once the audit-period and vendor-review
 data is wired in, the panel may want explicit per-category sections.
@@ -205,8 +205,8 @@ flagged.
 - **Bind the framework posture tiles** (decision 2) once a
   `GET /v1/frameworks/posture` endpoint ships — the
   `framework-posture-panel` placeholder is the seam; add the client fn
-  + a `dashboardProxy` route following the four already in this slice,
-  and replace the six-slot scaffold with real tiles + trend sparklines.
+  - a `dashboardProxy` route following the four already in this slice,
+    and replace the six-slot scaffold with real tiles + trend sparklines.
 - **Bind the activity feed** (decision 3) once an activity /
   event-stream archive read endpoint ships — wire infinite scroll
   (`useInfiniteQuery`) and activate the filter chips.
@@ -215,8 +215,8 @@ flagged.
   dedicated aging view) — drop the `top-risks-sort-gap` note then.
 - **Expand the upcoming panel** (decision 5) once a unified
   upcoming-rollup endpoint exists, or wire audit-period + vendor-review
-  + policy-ack-expiry as explicit per-category sections — drop the
-  `upcoming-gap` note then.
+  - policy-ack-expiry as explicit per-category sections — drop the
+    `upcoming-gap` note then.
 - **Install `@playwright/test`** and run `web/e2e/dashboard.spec.ts` for
   real — today it is a static `ifPlaywright` contract (the repo-wide
   pattern; installing the runner touches `web/package.json`, a spine
