@@ -909,3 +909,176 @@ export function fetchControlEffectiveScope(
       `?framework_version=${encodeURIComponent(frameworkVersionID)}`,
   );
 }
+
+// ===== Slice 040 — Program dashboard view =====
+//
+// The dashboard at `/dashboard` is the solo-security-leader persona's
+// morning home screen. It binds six panels, each to a real backend
+// endpoint via a thin BFF proxy under `/api/dashboard/**`. No panel
+// fabricates data (anti-criterion P0-1).
+//
+// Endpoint inventory verified against main `internal/api/` at slice time:
+//
+//   * Recent drift       GET /v1/controls/drift?since=7d   (slice 016) — bound
+//   * Evidence freshness GET /v1/evidence/freshness        (slice 016) — bound
+//   * Top risks aging    GET /v1/risks?treatment=mitigate  (slice 019) — bound
+//       The mockup asks for `sort=residual,age`. The ListRisks handler
+//       supports only treatment/category/methodology filters — there is
+//       no `sort` param, and `residual_score` is an opaque json blob with
+//       no exposed `age` field. The panel binds the `treatment=mitigate`
+//       filter (which exists) and renders the returned rows honestly; it
+//       does NOT fabricate a residual/age ordering. The server-side
+//       `sort=residual,age` capability is a follow-up backend gap.
+//   * Upcoming items     GET /v1/exceptions/expiring?within=30d (slice 028) — bound
+//       The mockup's "upcoming" panel also wants board-report-due,
+//       access-review, and questionnaire-due rows. There is no unified
+//       upcoming-rollup endpoint on main; exceptions-expiring is the one
+//       real source and is bound. The other categories are noted as a
+//       labelled gap in the panel rather than fabricated.
+//   * Framework posture  (no endpoint)  — MISSING; tiles render an
+//       endpoint-naming placeholder (slice 041/060 precedent).
+//   * Activity feed      (no endpoint)  — MISSING; feed renders an
+//       endpoint-naming placeholder. There is no NATS event-stream
+//       archive read endpoint on main.
+//
+// See `docs/audit-log/040-program-dashboard-view-decisions.md` for the
+// full gap inventory so a follow-up backend slice can be scoped.
+
+// driftRowWire mirrors `driftRowWire` in internal/api/freshnessdrift/handlers.go.
+export type DriftRow = {
+  control_id: string;
+  last_passing: string;
+  current_result: string;
+};
+
+// DriftReport mirrors the Drift handler's JSON envelope.
+export type DriftReport = {
+  since: string;
+  through: string;
+  delta: number;
+  flipped_out_count: number;
+  flipped_out: DriftRow[];
+};
+
+// freshnessClassBucket mirrors `freshnessClassBucket` in the same handler.
+export type FreshnessBucket = {
+  freshness_class: string;
+  total: number;
+  fresh: number;
+  stale: number;
+};
+
+// FreshnessReport mirrors the Freshness handler's JSON envelope.
+export type FreshnessReport = {
+  bucket: string;
+  buckets: FreshnessBucket[];
+  total: number;
+  total_stale: number;
+};
+
+// DashboardRisk mirrors `riskWire` in internal/api/risks/handlers.go.
+// `inherent_score` / `residual_score` are opaque JSON blobs by design —
+// the dashboard renders them as-is and never parses an ordering out.
+export type DashboardRisk = {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  methodology: string;
+  inherent_score: unknown;
+  treatment: string;
+  treatment_owner: string;
+  residual_score: unknown;
+  review_due_at?: string;
+  accepted_until?: string | null;
+  accepter: string;
+  instrument_reference: string;
+  linked_control_ids: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type RiskListResponse = { risks: DashboardRisk[]; count: number };
+
+// ExpiringException mirrors `exceptionWire` in internal/api/exceptions/handlers.go.
+export type ExpiringException = {
+  id: string;
+  control_id: string;
+  justification: string;
+  compensating_controls: string[];
+  requested_by: string;
+  requested_at: string;
+  approved_by?: string;
+  approved_at?: string;
+  effective_from?: string;
+  expires_at: string;
+  expired_at?: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ExpiringExceptionsResponse = {
+  exceptions: ExpiringException[];
+  count: number;
+  within: string;
+};
+
+// ----- server-side fns (called by the BFF route handlers) -----
+
+export async function getControlDrift(
+  bearer: string,
+  since = "7d",
+): Promise<DriftReport> {
+  const res = await apiFetch(
+    `/v1/controls/drift?since=${encodeURIComponent(since)}`,
+    bearer,
+  );
+  return (await res.json()) as DriftReport;
+}
+
+export async function getEvidenceFreshness(
+  bearer: string,
+): Promise<FreshnessReport> {
+  const res = await apiFetch(`/v1/evidence/freshness`, bearer);
+  return (await res.json()) as FreshnessReport;
+}
+
+export async function getMitigateRisks(
+  bearer: string,
+): Promise<DashboardRisk[]> {
+  const res = await apiFetch(`/v1/risks?treatment=mitigate`, bearer);
+  const body = (await res.json()) as RiskListResponse;
+  return body.risks;
+}
+
+export async function getExpiringExceptions(
+  bearer: string,
+  within = "30d",
+): Promise<ExpiringExceptionsResponse> {
+  const res = await apiFetch(
+    `/v1/exceptions/expiring?within=${encodeURIComponent(within)}`,
+    bearer,
+  );
+  return (await res.json()) as ExpiringExceptionsResponse;
+}
+
+// ----- browser-side fns (hit the BFF under /api/dashboard/**) -----
+
+export function fetchDashboardDrift(): Promise<DriftReport> {
+  return bffControlFetch<DriftReport>(`/api/dashboard/drift`);
+}
+
+export function fetchDashboardFreshness(): Promise<FreshnessReport> {
+  return bffControlFetch<FreshnessReport>(`/api/dashboard/freshness`);
+}
+
+export function fetchDashboardRisks(): Promise<DashboardRisk[]> {
+  return bffControlFetch<RiskListResponse>(`/api/dashboard/risks`).then(
+    (b) => b.risks,
+  );
+}
+
+export function fetchDashboardUpcoming(): Promise<ExpiringExceptionsResponse> {
+  return bffControlFetch<ExpiringExceptionsResponse>(`/api/dashboard/upcoming`);
+}
