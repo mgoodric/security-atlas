@@ -197,6 +197,54 @@ auto-generated notes.
   coverage ships ahead of the runner as `web/e2e/dashboard.spec.ts`
   under the established `ifPlaywright` shim (one test per AC).
 
+- **Slice 055 — Decision Log CRUD + linkage.** The Decision Log
+  primitive (canvas §6.7) lands as the new `internal/decision` package
+  plus the `internal/api/decisions` HTTP surface. A **Decision**
+  captures a non-compliance operational or architectural tradeoff —
+  "ship MVP, defer SAML to v1.2" — distinct from a formal, scoped,
+  time-bounded Exception (§6.3); the two are linkable and, with Risks
+  and Controls, form the audit narrative chain. Slice 052 had already
+  shipped the `decisions` table + the four M:N link tables; slice 055
+  adds the business logic, the HTTP CRUD, supersession, the revisit
+  calendar, the daily overdue-notification job, and the OSCAL
+  audit-narrative emission. Migration `_030` adds one append-only table
+  (`decisions_audit` — SELECT + INSERT RLS policies only under FORCE
+  ROW LEVEL SECURITY, append-only by construction; mirrors
+  `exception_audit_log`) and one column
+  (`decisions.audit_narrative_opt_out`, default `false`). Endpoints:
+  `POST /v1/decisions` (generates a `DL-YYYY-MM-DD-NNNN` identifier —
+  per-tenant, per-day sequence), `GET /v1/decisions`
+  (`?status=` + `?revisit_due_within_days=` filters),
+  `GET /v1/decisions/overdue`, `GET /v1/decisions/{id}` (decision +
+  all four linkage arrays), `GET /v1/decisions/{id}/audit-log`,
+  `PATCH /v1/decisions/{id}`, `POST /v1/decisions/{id}/supersede`
+  (the old decision is never deleted — the `superseded_by` chain
+  preserves the auditor trail), and idempotent
+  `POST`/`DELETE /v1/decisions/{id}/links/{kind}[/{targetID}]` for the
+  four link kinds (risks, controls, exceptions, scope_predicates).
+  Every mutation writes one append-only `decisions_audit` row.
+  **Cross-tenant linkage is denied with a 404** (existence-leak
+  prevention — never a 403): a link whose target does not resolve in
+  the caller's tenant trips the composite-FK violation, the attempt is
+  recorded as a `cross_tenant_link_denied` audit row in a fresh
+  transaction (the FK violation poisons the original), and the caller
+  sees 404. A daily background `Notifier` (wired in `cmd/atlas`
+  alongside the exception expirer; runs as the migrator role to sweep
+  cross-tenant) emits **one** in-app notification per overdue decision
+  to its `decision_maker` — the `overdue_notified` audit row is the
+  authoritative dedup marker, so the job never re-notifies.
+  **AI-assist boundary honored:** `decision_maker` is a required,
+  human-set field on every create — there is no AI auto-creation path;
+  the OSCAL narrative emission (`EmitRemarks`, unit-tested here, called
+  by the slice-030 OSCAL export later) is pure deterministic
+  templating, and `audit_narrative_opt_out` lets a human exclude a
+  decision from audit-narrative export. Constitutional invariants
+  honored: #6 (tenant isolation — FORCE RLS on `decisions_audit`, the
+  store applies the tenant GUC per transaction), #8 (OSCAL is the wire
+  format — decisions surface in the SSP narrative as `<remarks>`
+  context, not in the daily model), #9 (manual evidence is
+  first-class — the Decision Log carries the same audit weight as
+  every other primitive).
 - **Slice 016 — Evidence freshness + drift detection.** Two derived
   leading indicators over the evidence pipeline (canvas §7.1) land as
   the new `internal/freshness`, `internal/drift`, and `internal/freshnessdrift`

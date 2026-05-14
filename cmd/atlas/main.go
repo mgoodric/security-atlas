@@ -29,6 +29,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/decision"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
@@ -431,6 +432,44 @@ func main() {
 				fmt.Fprintf(os.Stderr, "atlas: exception expirer ticking every %s\n", interval.String())
 				if err := expirer.Run(ctx, interval); err != nil {
 					errCh <- fmt.Errorf("exception expirer: %w", err)
+				}
+			}()
+		}
+	}
+
+	// Slice 055: Decision Log overdue-notification tick loop (AC-6). Runs as
+	// the migrator role (BYPASSRLS) so the sweep can cross tenants -- the
+	// per-tenant transaction inside applies the GUC for RLS-honest writes.
+	// Each tick emits one in-app notification per not-yet-notified overdue
+	// decision to its decision_maker, paired with one `overdue_notified`
+	// row in decisions_audit (the authoritative dedup marker -- P0
+	// anti-criterion: never repeated). Default cadence is 24h;
+	// ATLAS_DECISION_OVERDUE_INTERVAL overrides for dev loops. Only mounts
+	// when the migrator URL is available (the same guard the exception
+	// expirer uses).
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" {
+		overdueCtx, overdueCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		overduePool, err := pgxpool.New(overdueCtx, migratorURL)
+		overdueCancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: decision overdue pool: %v\n", err)
+		} else {
+			interval := decision.DefaultOverdueInterval
+			if raw := os.Getenv("ATLAS_DECISION_OVERDUE_INTERVAL"); raw != "" {
+				if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+					interval = d
+				} else {
+					fmt.Fprintf(os.Stderr, "atlas: ATLAS_DECISION_OVERDUE_INTERVAL=%q invalid: %v\n", raw, perr)
+				}
+			}
+			notifier := decision.NewNotifier(overduePool, logger)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer overduePool.Close()
+				fmt.Fprintf(os.Stderr, "atlas: decision overdue notifier ticking every %s\n", interval.String())
+				if err := notifier.Run(ctx, interval); err != nil {
+					errCh <- fmt.Errorf("decision overdue notifier: %w", err)
 				}
 			}()
 		}

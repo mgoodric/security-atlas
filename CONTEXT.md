@@ -77,6 +77,66 @@ No other transitions. `denied` and `expired` are terminal.
 
 **Calendar surface** — `GET /v1/exceptions/expiring?within=30d` powers the "Upcoming items" dashboard panel (canvas §6.3, dashboard mockup).
 
+## Decision Log (slice 055)
+
+A **Decision** captures a non-compliance operational or architectural
+tradeoff — "shipping MVP, deferring SAML to v1.2", "skipping IaC because
+the tool sunsets Q3". Distinct from an Exception (canvas §6.7): an
+Exception is a formal, scoped, time-bounded bypass of a specific control;
+a Decision is the broader rationale record. The two are linkable —
+together with Risks and Controls they form the audit narrative chain.
+
+- **Human-authored** — `decision_maker` and `decided_at` are required and
+  human-set. There is no AI auto-creation path (P0 anti-criterion). AI may
+  draft `narrative` / suggest `constraints` tags, but a human owns the
+  record.
+- **`decision_id`** — the tenant-visible identifier, format
+  `DL-YYYY-MM-DD-NNNN` where the date is `decided_at`'s calendar date and
+  `NNNN` is a zero-padded per-tenant, per-day sequence. Unique within
+  tenant (`UNIQUE (tenant_id, decision_id)`).
+- **Linkable** — four separate M:N link tables (`decision_risks`,
+  `decision_controls`, `decision_exceptions`, `decision_scope_predicates`,
+  all from slice 052). Linkage is idempotent. A link to an entity in
+  another tenant returns **404** (existence-leak prevention, P0).
+- **Logged** — every mutation (`PATCH`, supersede, cross-tenant link
+  attempt, overdue-notification emission) writes one row to
+  `decisions_audit` (append-only; slice 055 migration `_030`). The audit
+  row for an `overdue_notified` action is the authoritative
+  "already notified" marker — the daily job checks for it before emitting.
+
+States (`decision_status` enum, slice 052):
+
+- `active` — initial state. Set by `POST /v1/decisions`.
+- `revisited` — reviewed at its `revisit_by` date without being changed.
+- `superseded` — terminal. Pairs with the `superseded_by` FK to the
+  replacement decision. The old decision is **never deleted** (P0
+  anti-criterion) — the auditor trail is preserved.
+- `expired` — terminal. The decision's relevance has lapsed.
+
+**Supersession** — `POST /v1/decisions/{id}/supersede` takes
+`{superseded_by: <existing decision UUID>}`. The replacement decision must
+already exist (a separate `POST` first). Sets the old decision to
+`superseded`, populates `superseded_by`, writes a `decisions_audit` row.
+
+**`revisit_by`** is an optional hint date, not a gate (contrast with the
+Exception's hard `expires_at`). Decisions with `revisit_by < today AND
+status = 'active'` surface in `GET /v1/decisions/overdue`. A daily
+background job emits **one** in-app notification per overdue decision to
+its `decision_maker` — never repeated (P0 anti-criterion).
+
+**`audit_narrative_opt_out`** — a per-decision boolean (slice 055
+migration `_030`, default `false`). When `true`, the decision is excluded
+from OSCAL SSP narrative emission. Per-decision rather than per-tenant
+because opt-out is a per-record judgement; a tenant-config table is not
+warranted by v1.
+
+**OSCAL narrative** — decisions linked to in-scope controls appear in the
+SSP export (slice 030) as `<remarks>` blocks, format:
+`[DL-id] {title} ({decision_maker}, {decided_at}) — Linked risks: {ids}.
+Revisit: {revisit_by or "n/a"}.` Slice 055 ships the emission function
+(`internal/decision` exported, unit-tested); slice 030 calls it. Decisions
+are audit **context**, not compliance artifacts (canvas §6.7, invariant 8).
+
 ## License posture (slice 050)
 
 The project is licensed **Apache 2.0** — the canonical instance of the "permissive license" the canvas §1.2 thesis requires. Permissive matters because the platform is designed to be embedded in commercial deployments (the disqualification of OpenGRC at canvas §1.2 turns specifically on its CC BY-NC-SA license being incompatible with that goal). Copyleft alternatives (AGPL) were considered and rejected because they would block the same embedded-in-commercial-deployments use case the platform targets. Open-question #3 (`Plans/canvas/11-open-questions.md`) is resolved by slice 050.

@@ -262,7 +262,8 @@ jobs:
             ./internal/featureflag/... \
             ./internal/api/features/... \
             ./internal/eval/... \
-            ./internal/api/controlstate/...
+            ./internal/api/controlstate/... \
+            ./internal/decision/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@v5
         with:

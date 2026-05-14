@@ -11,6 +11,31 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countDecisionsByDecidedDate = `-- name: CountDecisionsByDecidedDate :one
+SELECT count(*) AS same_day_count
+FROM decisions
+WHERE tenant_id = $1
+  AND decided_at >= $2
+  AND decided_at < $3
+`
+
+type CountDecisionsByDecidedDateParams struct {
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	DecidedAt   pgtype.Timestamptz `json:"decided_at"`
+	DecidedAt_2 pgtype.Timestamptz `json:"decided_at_2"`
+}
+
+// Slice 055: count decisions whose decided_at falls on a given UTC calendar
+// date. Drives the per-tenant per-day NNNN sequence in the
+// DL-YYYY-MM-DD-NNNN identifier. $2 is the start-of-day (inclusive), $3 the
+// start of the next day (exclusive).
+func (q *Queries) CountDecisionsByDecidedDate(ctx context.Context, arg CountDecisionsByDecidedDateParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countDecisionsByDecidedDate, arg.TenantID, arg.DecidedAt, arg.DecidedAt_2)
+	var same_day_count int64
+	err := row.Scan(&same_day_count)
+	return same_day_count, err
+}
+
 const createDecision = `-- name: CreateDecision :one
 INSERT INTO decisions (
     id, tenant_id, decision_id, title, narrative, constraints,
@@ -20,7 +45,7 @@ VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10, $11, $12
 )
-RETURNING id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at
+RETURNING id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at, audit_narrative_opt_out
 `
 
 type CreateDecisionParams struct {
@@ -72,6 +97,7 @@ func (q *Queries) CreateDecision(ctx context.Context, arg CreateDecisionParams) 
 		&i.SupersededBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AuditNarrativeOptOut,
 	)
 	return i, err
 }
@@ -92,7 +118,7 @@ func (q *Queries) DeleteDecision(ctx context.Context, arg DeleteDecisionParams) 
 }
 
 const getDecisionByDecisionID = `-- name: GetDecisionByDecisionID :one
-SELECT id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at
+SELECT id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at, audit_narrative_opt_out
 FROM decisions
 WHERE tenant_id = $1 AND decision_id = $2
 `
@@ -122,12 +148,13 @@ func (q *Queries) GetDecisionByDecisionID(ctx context.Context, arg GetDecisionBy
 		&i.SupersededBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AuditNarrativeOptOut,
 	)
 	return i, err
 }
 
 const getDecisionByID = `-- name: GetDecisionByID :one
-SELECT id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at
+SELECT id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at, audit_narrative_opt_out
 FROM decisions
 WHERE tenant_id = $1 AND id = $2
 `
@@ -155,12 +182,13 @@ func (q *Queries) GetDecisionByID(ctx context.Context, arg GetDecisionByIDParams
 		&i.SupersededBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AuditNarrativeOptOut,
 	)
 	return i, err
 }
 
 const listDecisions = `-- name: ListDecisions :many
-SELECT id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at
+SELECT id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at, audit_narrative_opt_out
 FROM decisions
 WHERE tenant_id = $1
 ORDER BY decided_at DESC, id ASC
@@ -190,6 +218,7 @@ func (q *Queries) ListDecisions(ctx context.Context, tenantID pgtype.UUID) ([]De
 			&i.SupersededBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AuditNarrativeOptOut,
 		); err != nil {
 			return nil, err
 		}
@@ -202,7 +231,7 @@ func (q *Queries) ListDecisions(ctx context.Context, tenantID pgtype.UUID) ([]De
 }
 
 const listDecisionsByStatus = `-- name: ListDecisionsByStatus :many
-SELECT id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at
+SELECT id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at, audit_narrative_opt_out
 FROM decisions
 WHERE tenant_id = $1 AND status = $2
 ORDER BY decided_at DESC, id ASC
@@ -237,6 +266,7 @@ func (q *Queries) ListDecisionsByStatus(ctx context.Context, arg ListDecisionsBy
 			&i.SupersededBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AuditNarrativeOptOut,
 		); err != nil {
 			return nil, err
 		}
@@ -249,7 +279,7 @@ func (q *Queries) ListDecisionsByStatus(ctx context.Context, arg ListDecisionsBy
 }
 
 const listDecisionsDueForRevisit = `-- name: ListDecisionsDueForRevisit :many
-SELECT id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at
+SELECT id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at, audit_narrative_opt_out
 FROM decisions
 WHERE tenant_id = $1
   AND status = 'active'
@@ -289,6 +319,7 @@ func (q *Queries) ListDecisionsDueForRevisit(ctx context.Context, arg ListDecisi
 			&i.SupersededBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AuditNarrativeOptOut,
 		); err != nil {
 			return nil, err
 		}
@@ -298,6 +329,172 @@ func (q *Queries) ListDecisionsDueForRevisit(ctx context.Context, arg ListDecisi
 		return nil, err
 	}
 	return items, nil
+}
+
+const listOverdueDecisions = `-- name: ListOverdueDecisions :many
+SELECT id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at, audit_narrative_opt_out
+FROM decisions
+WHERE tenant_id = $1
+  AND status = 'active'
+  AND revisit_by IS NOT NULL
+  AND revisit_by < $2
+ORDER BY revisit_by ASC, id ASC
+`
+
+type ListOverdueDecisionsParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	RevisitBy pgtype.Date `json:"revisit_by"`
+}
+
+// Slice 055: active decisions whose revisit_by has already passed. $2 is
+// "today" (a DATE). Powers GET /v1/decisions/overdue and the daily
+// overdue-notification job.
+func (q *Queries) ListOverdueDecisions(ctx context.Context, arg ListOverdueDecisionsParams) ([]Decision, error) {
+	rows, err := q.db.Query(ctx, listOverdueDecisions, arg.TenantID, arg.RevisitBy)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Decision
+	for rows.Next() {
+		var i Decision
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.DecisionID,
+			&i.Title,
+			&i.Narrative,
+			&i.Constraints,
+			&i.Tradeoffs,
+			&i.DecisionMaker,
+			&i.DecidedAt,
+			&i.RevisitBy,
+			&i.Status,
+			&i.SupersededBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AuditNarrativeOptOut,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTenantsWithOverdueDecisions = `-- name: ListTenantsWithOverdueDecisions :many
+SELECT DISTINCT tenant_id
+FROM decisions
+WHERE status = 'active'
+  AND revisit_by IS NOT NULL
+  AND revisit_by < $1
+`
+
+// Slice 055: every tenant with at least one active, overdue decision. Run
+// by the daily overdue-notification job as the migrator role (BYPASSRLS)
+// to enumerate tenants before applying each tenant's GUC. $1 is "today".
+func (q *Queries) ListTenantsWithOverdueDecisions(ctx context.Context, revisitBy pgtype.Date) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listTenantsWithOverdueDecisions, revisitBy)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var tenant_id pgtype.UUID
+		if err := rows.Scan(&tenant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, tenant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setDecisionAuditNarrativeOptOut = `-- name: SetDecisionAuditNarrativeOptOut :one
+UPDATE decisions
+SET audit_narrative_opt_out = $3,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at, audit_narrative_opt_out
+`
+
+type SetDecisionAuditNarrativeOptOutParams struct {
+	TenantID             pgtype.UUID `json:"tenant_id"`
+	ID                   pgtype.UUID `json:"id"`
+	AuditNarrativeOptOut bool        `json:"audit_narrative_opt_out"`
+}
+
+// Slice 055: flip the per-decision OSCAL-narrative opt-out flag.
+func (q *Queries) SetDecisionAuditNarrativeOptOut(ctx context.Context, arg SetDecisionAuditNarrativeOptOutParams) (Decision, error) {
+	row := q.db.QueryRow(ctx, setDecisionAuditNarrativeOptOut, arg.TenantID, arg.ID, arg.AuditNarrativeOptOut)
+	var i Decision
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.DecisionID,
+		&i.Title,
+		&i.Narrative,
+		&i.Constraints,
+		&i.Tradeoffs,
+		&i.DecisionMaker,
+		&i.DecidedAt,
+		&i.RevisitBy,
+		&i.Status,
+		&i.SupersededBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AuditNarrativeOptOut,
+	)
+	return i, err
+}
+
+const supersedeDecision = `-- name: SupersedeDecision :one
+UPDATE decisions
+SET status = 'superseded',
+    superseded_by = $3,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND status = 'active'
+RETURNING id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at, audit_narrative_opt_out
+`
+
+type SupersedeDecisionParams struct {
+	TenantID     pgtype.UUID `json:"tenant_id"`
+	ID           pgtype.UUID `json:"id"`
+	SupersededBy pgtype.UUID `json:"superseded_by"`
+}
+
+// Slice 055: mark a decision superseded and point superseded_by at the
+// replacement. The WHERE status = 'active' guard means a non-active (already
+// superseded / expired) decision returns zero rows -- the store
+// disambiguates that into a 409. The old row is never deleted (P0
+// anti-criterion); only its status + superseded_by + updated_at change.
+func (q *Queries) SupersedeDecision(ctx context.Context, arg SupersedeDecisionParams) (Decision, error) {
+	row := q.db.QueryRow(ctx, supersedeDecision, arg.TenantID, arg.ID, arg.SupersededBy)
+	var i Decision
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.DecisionID,
+		&i.Title,
+		&i.Narrative,
+		&i.Constraints,
+		&i.Tradeoffs,
+		&i.DecisionMaker,
+		&i.DecidedAt,
+		&i.RevisitBy,
+		&i.Status,
+		&i.SupersededBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AuditNarrativeOptOut,
+	)
+	return i, err
 }
 
 const updateDecision = `-- name: UpdateDecision :one
@@ -313,7 +510,7 @@ SET title = $3,
     superseded_by = $11,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at
+RETURNING id, tenant_id, decision_id, title, narrative, constraints, tradeoffs, decision_maker, decided_at, revisit_by, status, superseded_by, created_at, updated_at, audit_narrative_opt_out
 `
 
 type UpdateDecisionParams struct {
@@ -360,6 +557,7 @@ func (q *Queries) UpdateDecision(ctx context.Context, arg UpdateDecisionParams) 
 		&i.SupersededBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AuditNarrativeOptOut,
 	)
 	return i, err
 }
