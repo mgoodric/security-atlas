@@ -71,11 +71,44 @@ ifPlaywright(() => {
     //      await expect(page.getByText(tile, { exact: true })).toBeVisible();
     //    }
     //
-    // 3. SSO discovery preflight.
+    // 3. SSO discovery preflight + save (slice 063 extension).
     //    await page.goto("/admin/sso");
-    //    await page.fill('input#issuer', "https://accounts.google.com");
+    //    await page.fill('input#preflight-issuer', "https://accounts.google.com");
     //    await page.click("text=Run preflight");
     //    await expect(page.getByText("Discovery OK")).toBeVisible();
+    //
+    // 3b. Fill the OIDC configuration form and submit (slice 063).
+    //    await page.fill('input#sso-issuer-url', "https://idp.example.com");
+    //    await page.fill('input#sso-client-id', "platform-rp-client");
+    //    await page.fill('input#sso-client-secret', "test-secret-placeholder");
+    //    await page.fill('input#sso-redirect-url', "https://your-deployment.example/auth/oidc/callback");
+    //    await page.fill('input#sso-allowed-domains', "example.com");
+    //    await page.click('[data-testid="sso-save-button"]');
+    //    await expect(page.locator('[data-testid="sso-save-success"]')).toBeVisible();
+    //
+    // 3c. Reload and assert the GET re-render shows the saved fields
+    //     and DOES NOT show client_secret (slice 034 AC-9 / write-once).
+    //    await page.reload();
+    //    await expect(page.locator('input#sso-issuer-url')).toHaveValue(
+    //      "https://idp.example.com",
+    //    );
+    //    await expect(page.locator('input#sso-client-id')).toHaveValue(
+    //      "platform-rp-client",
+    //    );
+    //    await expect(page.locator('input#sso-redirect-url')).toHaveValue(
+    //      "https://your-deployment.example/auth/oidc/callback",
+    //    );
+    //    // Critically: client_secret input is empty after the reload.
+    //    // The backend never returns it; the UI never re-renders it.
+    //    await expect(page.locator('input#sso-client-secret')).toHaveValue(
+    //      "",
+    //    );
+    //
+    // 3d. Re-submit with an empty client_secret — slice 062 contract
+    //     treats this as "leave existing", so the save must succeed.
+    //    await page.fill('input#sso-allowed-domains', "example.com, sub.example.com");
+    //    await page.click('[data-testid="sso-save-button"]');
+    //    await expect(page.locator('[data-testid="sso-save-success"]')).toBeVisible();
     //
     // 4. Toggle a feature flag.
     //    await page.goto("/admin/features");

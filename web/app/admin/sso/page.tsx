@@ -1,27 +1,25 @@
-// Slice 060 — /admin/sso (AC-2).
+// Slice 063 — /admin/sso form save enabled.
 //
-// BACKEND GAP: as of slice 060 there is no `/v1/admin/sso` HTTP endpoint
-// for CRUD on `oidc_idp_configs`. Slice 034 ships the table + the OIDC
-// callback handlers, but exposes no admin REST surface. The follow-up
-// slice (tentatively 060.5) ships the endpoint; this page lands the UX
-// shell so the admin overview renders consistently.
+// Slice 060 shipped this page with the form intentionally `disabled` —
+// a stopgap because the backend `PATCH /v1/admin/sso` did not exist on
+// main. Slice 062 landed that endpoint (admin BFF backend endpoints).
+// This slice (063) flips the stopgap: `disabled` is removed, the form
+// posts via the new BFF proxy at `web/app/api/admin/sso/route.ts`, and
+// success/error states render inline.
 //
-// What this page DOES today:
-//   - Renders the OIDC config form (visual scaffold)
-//   - Runs a client-side discovery preflight (fetch IdP's
-//     .well-known/openid-configuration directly) — this is independent of
-//     the backend gap and useful to wire-test an IdP URL today.
-//   - Surfaces the gap prominently so an operator doesn't waste time
-//     filling the form before save lands.
-//
-// Anti-criterion P0: when save DOES land, the `client_secret` field is
-// write-only on the API. The audit log records "SSO config changed" but
-// not the secret value. This UI keeps the secret in a password-type
-// input and never re-fetches it.
+// Anti-criteria P0 honored:
+//   - client_secret stays write-only: input is `type="password"` +
+//     `autoComplete="new-password"`. The GET response sans client_secret
+//     never re-fetches the secret, and an empty submit means "leave
+//     existing" per slice 062's handler contract.
+//   - No auto-submit. Only the explicit Save button triggers a PATCH.
+//   - Discovery preflight is read-only and never persists state.
+//   - Backend contract unchanged — no Go file edits in this slice.
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   Card,
@@ -31,9 +29,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import type { AdminSSOConfig } from "@/lib/api";
 
 type Preflight =
   | { state: "idle" }
@@ -47,9 +45,144 @@ type Preflight =
     }
   | { state: "error"; message: string };
 
+// FormState holds the controlled inputs. client_secret is intentionally
+// separate from the GET-derived state because it is never read back from
+// the server — see anti-criterion P0 above.
+type FormState = {
+  issuer_url: string;
+  client_id: string;
+  client_secret: string;
+  redirect_url: string;
+  allowed_email_domains: string;
+};
+
+const EMPTY_FORM: FormState = {
+  issuer_url: "",
+  client_id: "",
+  client_secret: "",
+  redirect_url: "",
+  allowed_email_domains: "",
+};
+
+function configToForm(c: AdminSSOConfig | null): FormState {
+  if (!c) return EMPTY_FORM;
+  return {
+    issuer_url: c.issuer_url ?? "",
+    client_id: c.client_id ?? "",
+    client_secret: "", // never re-populated from server
+    redirect_url: c.redirect_url ?? "",
+    allowed_email_domains: (c.allowed_email_domains ?? []).join(", "),
+  };
+}
+
 export default function SSOConfigPage() {
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [showSuccess, setShowSuccess] = useState(false);
   const [issuerURL, setIssuerURL] = useState("");
   const [preflight, setPreflight] = useState<Preflight>({ state: "idle" });
+  // Tracks the last server payload we synced into local form state.
+  // When this differs from the current query data the next render
+  // re-seeds the form. This is the React 19 "store the previous value
+  // in state" pattern (https://react.dev/reference/react/useState#storing-information-from-previous-renders)
+  // and avoids the `react-hooks/set-state-in-effect` lint by syncing
+  // during render, not in an effect.
+  const [seededFrom, setSeededFrom] = useState<AdminSSOConfig | null | "init">(
+    "init",
+  );
+
+  // GET the current config. The BFF returns { config: null } when no
+  // config is set, so the form renders empty rather than erroring.
+  const { data, isLoading } = useQuery({
+    queryKey: ["admin", "sso"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/sso");
+      if (!res.ok) {
+        throw new Error(`failed to load SSO config: ${res.status}`);
+      }
+      const body = (await res.json()) as { config: AdminSSOConfig | null };
+      return body.config;
+    },
+  });
+
+  // Seed the form whenever the GET resolves to a different config than
+  // we last seeded from. client_secret stays empty (write-only).
+  // Sync-during-render is safe here because we only call setState on
+  // identity change, which converges in one extra render.
+  if (data !== undefined && data !== seededFrom) {
+    setSeededFrom(data ?? null);
+    setForm(configToForm(data ?? null));
+  }
+
+  const mutation = useMutation({
+    mutationFn: async (body: FormState) => {
+      const allowed = body.allowed_email_domains
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      // Slice 062 PATCH wire shape. client_secret omitted means "leave
+      // existing"; the BFF strips an empty string for the same effect.
+      const payload: Record<string, unknown> = {
+        issuer_url: body.issuer_url,
+        client_id: body.client_id,
+        redirect_url: body.redirect_url,
+        allowed_email_domains: allowed,
+      };
+      if (body.client_secret) {
+        payload.client_secret = body.client_secret;
+      }
+      const res = await fetch("/api/admin/sso", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        let msg = `${res.status} ${res.statusText}`;
+        try {
+          const j = (await res.json()) as { error?: string };
+          if (j.error) msg = j.error;
+        } catch {
+          /* not JSON; fall back to status line */
+        }
+        throw new Error(msg);
+      }
+      return (await res.json()) as { config: AdminSSOConfig };
+    },
+    onSuccess: () => {
+      // Wipe the just-typed secret so a second submit without re-entering
+      // it sends an empty string (which the backend interprets as
+      // "leave existing"). This is also a UX cue that the secret was
+      // accepted and is no longer visible in plaintext anywhere.
+      setForm((f) => ({ ...f, client_secret: "" }));
+      setShowSuccess(true);
+      // Re-fetch the GET so the form mirrors the persisted state.
+      void queryClient.invalidateQueries({ queryKey: ["admin", "sso"] });
+    },
+  });
+
+  // Auto-dismiss the success banner after ~3s.
+  useEffect(() => {
+    if (!showSuccess) return;
+    const t = setTimeout(() => setShowSuccess(false), 3000);
+    return () => clearTimeout(t);
+  }, [showSuccess]);
+
+  // Submit-button state machine — derived from the mutation state so
+  // every render reflects truth without an extra state variable.
+  const submitState: "idle" | "submitting" | "success" | "error" =
+    mutation.isPending
+      ? "submitting"
+      : mutation.isError
+        ? "error"
+        : showSuccess
+          ? "success"
+          : "idle";
+
+  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setShowSuccess(false);
+    mutation.mutate(form);
+  }
 
   async function runPreflight() {
     if (!issuerURL.trim()) {
@@ -99,17 +232,6 @@ export default function SSOConfigPage() {
         </p>
       </div>
 
-      <Alert>
-        <AlertTitle>Backend save endpoint not yet shipped</AlertTitle>
-        <AlertDescription>
-          As of slice 060, the <code>/v1/admin/sso</code> CRUD endpoint is not
-          on main. The OIDC config table (<code>oidc_idp_configs</code>) and the
-          runtime callback handlers ship in slice 034; the admin REST surface
-          ships in the follow-up slice. You can preflight an IdP discovery URL
-          below today, and configure SSO via direct DB insert as a stopgap.
-        </AlertDescription>
-      </Alert>
-
       <Card>
         <CardHeader>
           <CardTitle>Discovery preflight</CardTitle>
@@ -120,12 +242,12 @@ export default function SSOConfigPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <label htmlFor="issuer" className="text-sm font-medium">
+          <label htmlFor="preflight-issuer" className="text-sm font-medium">
             Issuer URL
           </label>
           <div className="flex flex-col gap-2 sm:flex-row">
             <Input
-              id="issuer"
+              id="preflight-issuer"
               type="url"
               placeholder="https://accounts.google.com"
               value={issuerURL}
@@ -133,6 +255,7 @@ export default function SSOConfigPage() {
               className="flex-1"
             />
             <Button
+              type="button"
               onClick={runPreflight}
               disabled={preflight.state === "loading"}
             >
@@ -145,60 +268,119 @@ export default function SSOConfigPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>OIDC configuration (form scaffold)</CardTitle>
+          <CardTitle>OIDC configuration</CardTitle>
           <CardDescription>
-            Form layout that the save endpoint will bind to. Provider, client
-            ID, redirect URL, and allowed email domains. The client secret field
-            is write-only and never re-fetched.
+            Provider issuer, client ID, redirect URL, and allowed email domains.
+            The client secret is write-only — saved values never re-render in
+            this form. Leave the secret field blank to keep the current value.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Provider name">
-              <Input placeholder="e.g. google, okta, custom" disabled />
-            </Field>
-            <Field label="Client ID">
-              <Input placeholder="opaque IdP-issued identifier" disabled />
-            </Field>
-            <Field label="Client secret (write-only)">
-              <Input
-                type="password"
-                placeholder="••••••••"
-                autoComplete="new-password"
-                disabled
-              />
-            </Field>
-            <Field label="Redirect URL">
-              <Input
-                placeholder="https://your-deployment.example/auth/oidc/callback"
-                disabled
-              />
-            </Field>
-            <Field
-              label="Allowed email domains (comma-separated)"
-              className="sm:col-span-2"
-            >
-              <Input placeholder="example.com, sub.example.com" disabled />
-            </Field>
-          </div>
-          <Button disabled className="w-full sm:w-auto">
-            Save (backend pending)
-          </Button>
-        </CardContent>
-      </Card>
+        <CardContent>
+          <form
+            onSubmit={onSubmit}
+            className="space-y-4"
+            data-testid="sso-config-form"
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Issuer URL">
+                <Input
+                  id="sso-issuer-url"
+                  type="url"
+                  placeholder="https://accounts.google.com"
+                  value={form.issuer_url}
+                  onChange={(e) =>
+                    setForm({ ...form, issuer_url: e.target.value })
+                  }
+                  disabled={isLoading || mutation.isPending}
+                />
+              </Field>
+              <Field label="Client ID">
+                <Input
+                  id="sso-client-id"
+                  placeholder="opaque IdP-issued identifier"
+                  value={form.client_id}
+                  onChange={(e) =>
+                    setForm({ ...form, client_id: e.target.value })
+                  }
+                  disabled={isLoading || mutation.isPending}
+                />
+              </Field>
+              <Field label="Client secret (write-only)">
+                <Input
+                  id="sso-client-secret"
+                  type="password"
+                  placeholder={
+                    data ? "leave blank to keep current" : "••••••••"
+                  }
+                  autoComplete="new-password"
+                  value={form.client_secret}
+                  onChange={(e) =>
+                    setForm({ ...form, client_secret: e.target.value })
+                  }
+                  disabled={isLoading || mutation.isPending}
+                />
+              </Field>
+              <Field label="Redirect URL">
+                <Input
+                  id="sso-redirect-url"
+                  type="url"
+                  placeholder="https://your-deployment.example/auth/oidc/callback"
+                  value={form.redirect_url}
+                  onChange={(e) =>
+                    setForm({ ...form, redirect_url: e.target.value })
+                  }
+                  disabled={isLoading || mutation.isPending}
+                />
+              </Field>
+              <Field
+                label="Allowed email domains (comma-separated)"
+                className="sm:col-span-2"
+              >
+                <Input
+                  id="sso-allowed-domains"
+                  placeholder="example.com, sub.example.com"
+                  value={form.allowed_email_domains}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      allowed_email_domains: e.target.value,
+                    })
+                  }
+                  disabled={isLoading || mutation.isPending}
+                />
+              </Field>
+            </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>HITL review note</CardTitle>
-          <CardDescription>
-            This page is one of three flagged for human review on the slice 060
-            PR.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="text-sm">
-          <Badge variant="outline">awaiting human review</Badge> See{" "}
-          <code>docs/audit-log/admin-ui-review.md</code> for the SSO callback
-          URL preflight sign-off line.
+            {submitState === "success" ? (
+              <Alert data-testid="sso-save-success">
+                <AlertTitle>Saved</AlertTitle>
+                <AlertDescription>
+                  SSO configuration updated. The form has been re-loaded from
+                  the server (the secret is never re-displayed).
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {submitState === "error" ? (
+              <Alert variant="destructive" data-testid="sso-save-error">
+                <AlertTitle>Save failed</AlertTitle>
+                <AlertDescription>
+                  {mutation.error instanceof Error
+                    ? mutation.error.message
+                    : "unknown error"}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            <Button
+              type="submit"
+              disabled={isLoading || mutation.isPending}
+              className="w-full sm:w-auto"
+              data-testid="sso-save-button"
+            >
+              {submitState === "submitting" ? "Saving…" : "Save"}
+            </Button>
+          </form>
         </CardContent>
       </Card>
     </div>

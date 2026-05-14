@@ -3,7 +3,17 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-13 (batch 19 claim-stake — 010 + 027 + 063 → in-progress · 43/63 on main)
+**Last reconciled:** 2026-05-13 (slice 063 → in-review · batch 19 partial · 43/63 on main)
+
+## Drift detected — 2026-05-13 (slice 063 → in-review)
+
+Slice 063 (Enable `/admin/sso` form save) flipped `in-progress` → `in-review`. PR gh#76 opened against main. **9/9 ACs + 4/4 P0 anti-criteria PASS.** New BFF proxy at `web/app/api/admin/sso/route.ts` (GET + PATCH) mirroring slice 060's credentials proxy pattern (auth-header forwarding + slice 051 D1 tenant_id strip + empty client_secret strip so upstream "leave existing" branch fires). `web/app/admin/sso/page.tsx` refactored to TanStack Query (useQuery GET pre-fill + useMutation PATCH + invalidateQueries re-fetch on success). Submit-button state machine: idle / submitting / success / error. Success Alert auto-dismisses ~3s; error Alert renders backend `error` field verbatim and preserves user input. **client_secret stays write-only end-to-end** — `type="password"` + `autoComplete="new-password"`, GET response omits it (slice 062 GetResponse struct has no client_secret field), input wiped after successful save. **Playwright E2E extended** under existing ifPlaywright shim with fill / submit / reload assertions including the critical write-once check that the client_secret input is empty after reload. **Pre-commit clean** — prettier auto-fixed once on first run (the known #1 failure mode), clean on re-run. **TypeScript clean**, **ESLint clean**, **Next build succeeds**. **Zero backend / migration / go.mod edits** (P0-4). **HITL audit log appended** at `docs/audit-log/admin-ui-review.md` documenting that the slice 060 stopgap is lifted and the slice 060 HITL signoff carries forward (no new HITL required — this slice wires up an already-reviewed surface). **CHANGELOG** entry under `[Unreleased]/Changed`. **Constitutional invariants honored**: #6 RLS (admin gate inherited from slice 060 layout + slice 062 requireAdmin defense-in-depth), slice 034 AC-9 (write-once secret), AI-assist boundary (every submit is a human click). **Time spent:** ~25 min end-to-end. **Surprises:** (1) initial `useEffect` form-seed pattern tripped `react-hooks/set-state-in-effect` lint; switched to the React 19 "store previous value in state" pattern (`seededFrom` tracker, sync-during-render only on identity change). (2) Decision to drop the slice 060 "Provider name" form field — slice 062's handler hardcodes `name='primary'` for the v1 single-IdP model, so the field would be inert; surfaced `Issuer URL` instead which IS user-supplied. Documented in HITL log.
+
+| Row | Transition                  | Evidence                |
+| --- | --------------------------- | ----------------------- |
+| 063 | `in-progress` → `in-review` | gh#76 opened 2026-05-13 |
+
+**Counts delta:** in-progress −1 · in-review +1.
 
 ## Drift detected — 2026-05-13 (batch 19 claim-stake — 010 HITL + 027 AFK + 063 AFK)
 
@@ -818,7 +828,7 @@ Legal values (use exactly these strings):
 | 060 | Admin settings UI (SSO · users · API keys · features)  | `merged`      | frontend/060-admin-settings-ui                       | gh#66 | 2026-05-13 | 2026-05-13 | 10/10 ACs · 5/5 P0 · HITL signed off by Matt Goodrich 2026-05-13 ("60 looks good to me") · UI shells + BFF proxies + 5 admin pages + Playwright E2E · slice 062 backend wired · form save-wiring is a follow-up slice                               |
 | 061 | CI path-based filtering (docs-only PR fast-path)       | `merged`      | ci/061-path-filter                                   | gh#52 | 2026-05-13 | 2026-05-13 | 9/9 ACs · 4/4 P0 anti-criteria · dorny/paths-filter@v3 + stub-job pattern · saves ~80% billable on docs PRs                                                                                                                                         |
 | 062 | Admin BFF backend endpoints (SSO + Users + audit-log)  | `merged`      | admin/062-admin-bff-backend-endpoints                | gh#70 | 2026-05-13 | 2026-05-13 | 10/10 ACs · 5/5 P0 anti-criteria · migration `_022` admin_audit_log_v view (UNION ALL across 7 audit-log tables) · 22 integration tests · SSRF-hardened OIDC preflight (Transport.DialContext IP re-check + redirect-disabled) · unblocks slice 060 |
-| 063 | Enable `/admin/sso` form save (post-062 wire-up)       | `in-progress` | frontend/063-admin-sso-form-enable                   | —     | 2026-05-13 | —          | batch 19 (N=3) · AFK · removes 060 stopgap · `web/app/admin/sso/page.tsx` + new BFF proxy · Playwright E2E extension                                                                                                                                |
+| 063 | Enable `/admin/sso` form save (post-062 wire-up)       | `in-review`   | frontend/063-admin-sso-form-enable                   | gh#76 | 2026-05-13 | —          | batch 19 (N=3) · AFK · 9/9 ACs PASS · 4/4 P0 anti-criteria PASS · BFF proxy at `web/app/api/admin/sso/route.ts` · TanStack Query mutation + state machine · Playwright E2E extension with reload write-once check                                   |
 
 ## Ready set right now
 

@@ -597,3 +597,74 @@ export async function patchFeatureFlag(
   }
   return (await res.json()) as FeatureFlagPatchResponse;
 }
+
+// ===== Slice 063 — Admin SSO config (binds to slice 062 backend) =====
+//
+// Wire shape mirrors `internal/api/adminsso/handler.go`:
+//   GET   /v1/admin/sso   -> AdminSSOConfig sans client_secret (404 = unset)
+//   PATCH /v1/admin/sso   -> upsert; empty client_secret => leave existing
+//
+// client_secret is NEVER returned from GET. The UI keeps the input
+// password-typed and treats an empty submit as "leave existing" per
+// slice 062's handler contract (slice 034 AC-9 / write-once secret).
+
+export type AdminSSOConfig = {
+  id: string;
+  name: string;
+  issuer_url: string;
+  client_id: string;
+  redirect_url: string;
+  allowed_email_domains: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type AdminSSOPatchRequest = {
+  issuer_url: string;
+  client_id: string;
+  client_secret?: string;
+  redirect_url: string;
+  allowed_email_domains: string[];
+};
+
+// getAdminSSO returns the tenant's primary IdP config, or null if none
+// is set yet (upstream 404). Throws on any other non-2xx.
+export async function getAdminSSO(
+  bearer: string,
+): Promise<AdminSSOConfig | null> {
+  const res = await fetch(`${apiBaseURL()}/v1/admin/sso`, {
+    headers: { Authorization: `Bearer ${bearer}` },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as AdminSSOConfig;
+}
+
+export async function patchAdminSSO(
+  bearer: string,
+  body: AdminSSOPatchRequest,
+): Promise<AdminSSOConfig> {
+  const res = await fetch(`${apiBaseURL()}/v1/admin/sso`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    // Bubble up the upstream JSON body's `error` field for UI display
+    // (slice 062 always returns {error: string} on non-2xx).
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // body not JSON; fall back to status line
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as AdminSSOConfig;
+}
