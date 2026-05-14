@@ -11,6 +11,13 @@ import (
 )
 
 type Querier interface {
+	// HITL transition: staged -> active OR inactive -> active (reactivation).
+	// Sets activated_by + activated_at; the engine reads activated_at as the
+	// "do not consider risks older than this" cut-off so re-activation never
+	// re-fires on stale data (anti-criterion P0). The WHERE status guard
+	// refuses the transition from an unexpected state (zero rows returned ->
+	// the handler probes to disambiguate missing-row vs wrong-state).
+	ActivateAggregationRule(ctx context.Context, arg ActivateAggregationRuleParams) (AggregationRule, error)
 	// AC-4 enable: approved -> active. effective_from is the operator-supplied
 	// moment when the waiver effect begins. The DB does not gate on
 	// (effective_from > now); slice scope keeps that to the application layer
@@ -107,6 +114,23 @@ type Querier interface {
 	// severity, severity_function, child_count, and aggregation_key live inside
 	// the `inherent_score` JSONB.
 	CreateAggregateRisk(ctx context.Context, arg CreateAggregateRiskParams) (Risk, error)
+	// Slice 054 — declarative aggregation rules engine queries.
+	//
+	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
+	// defense-in-depth layer and the WHERE clauses are the primary correctness
+	// guarantee (canvas invariant #6). The two log tables (evaluations,
+	// audit_log) have SELECT + INSERT policies only under FORCE RLS so no
+	// UPDATE/DELETE path exists — append-only by construction.
+	//
+	// The engine's hot path is ListActiveAggregationRules + the candidate-risk
+	// read; both run on every risk write inside the SAME tenant transaction as
+	// the risk INSERT/UPDATE/DELETE.
+	// Insert a new rule. ALWAYS lands as 'staged' — the HITL gate. The
+	// application validates the rule body against the JSON Schema BEFORE
+	// calling; the DB CHECK constraints are defense-in-depth. activated_by /
+	// activated_at are left NULL (the activation-coherent CHECK requires this
+	// for status='staged').
+	CreateAggregationRule(ctx context.Context, arg CreateAggregationRuleParams) (AggregationRule, error)
 	// Insert an artifact row after the blob has been written to S3. RLS
 	// evaluates the INSERT WITH CHECK against current_tenant. content_hash
 	// may be NULL today but every code path in slice 036 supplies it.
@@ -261,6 +285,12 @@ type Querier interface {
 	// slice 036 store does the same re-compute; both writes use the same
 	// hash so verification is symmetric).
 	CreateWalkthroughAttachment(ctx context.Context, arg CreateWalkthroughAttachmentParams) (WalkthroughAttachment, error)
+	// Transition: active -> inactive. Stops new firings; historical meta-risks
+	// are untouched. activated_by / activated_at are intentionally PRESERVED
+	// (not cleared) so the activation-coherent CHECK still holds for an
+	// inactive row and the audit story stays legible.
+	DeactivateAggregationRule(ctx context.Context, arg DeactivateAggregationRuleParams) (AggregationRule, error)
+	DeleteAggregationRule(ctx context.Context, arg DeleteAggregationRuleParams) error
 	DeleteDecision(ctx context.Context, arg DeleteDecisionParams) error
 	// Used by tests + cleanup paths. Production deployments will rarely delete
 	// a scope (supersession is the lifecycle exit); the row is preserved as
@@ -345,6 +375,9 @@ type Querier interface {
 	// Returns a single user with their roles and most-recent session timestamp.
 	// 404 (pgx.ErrNoRows) when the id is not in the tenant.
 	GetAdminUser(ctx context.Context, arg GetAdminUserParams) (GetAdminUserRow, error)
+	GetAggregationRuleByID(ctx context.Context, arg GetAggregationRuleByIDParams) (AggregationRule, error)
+	// Lookup by the human-authored rule_id (the canvas §6.6 identifier).
+	GetAggregationRuleByRuleID(ctx context.Context, arg GetAggregationRuleByRuleIDParams) (AggregationRule, error)
 	// Look up an artifact by id. RLS USING current_tenant_matches(tenant_id)
 	// means the row is invisible to other tenants — handler interprets
 	// pgx.ErrNoRows as 404 (no existence leak).
@@ -426,6 +459,10 @@ type Querier interface {
 	// edge doesn't exist yet. Importer calls this first to classify
 	// Created/Updated/Unchanged.
 	GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) (FwToScfEdge, error)
+	// The engine's "when did this rule last fire, and into which window"
+	// lookup. Used to decide whether the current write falls inside an
+	// existing window. Returns the most recent 'fired' row for the rule.
+	GetLastFiredEvaluation(ctx context.Context, arg GetLastFiredEvaluationParams) (AggregationRuleEvaluation, error)
 	GetLocalCredentialByUserID(ctx context.Context, arg GetLocalCredentialByUserIDParams) (LocalCredential, error)
 	GetOidcIdpConfigByName(ctx context.Context, arg GetOidcIdpConfigByNameParams) (OidcIdpConfig, error)
 	GetOrgThemeByID(ctx context.Context, id pgtype.UUID) (OrgTheme, error)
@@ -446,6 +483,12 @@ type Querier interface {
 	// and would force the caller to pass []byte).
 	GetRiskByAggregationKey(ctx context.Context, arg GetRiskByAggregationKeyParams) (Risk, error)
 	GetRiskByID(ctx context.Context, arg GetRiskByIDParams) (Risk, error)
+	// Idempotency lookup: find the meta-risk a rule already created for a
+	// given (rule_id, window_start) window. The key is stored on the
+	// meta-risk's inherent_score JSONB as 'aggregation_key' (slice 053
+	// pattern). If found, the engine UPDATEs it rather than creating a
+	// duplicate (canvas §6.6: one meta-risk per rule per window).
+	GetRuleMetaRiskByKey(ctx context.Context, arg GetRuleMetaRiskByKeyParams) (Risk, error)
 	GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnchor, error)
 	// Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
 	// framework version.
@@ -551,6 +594,9 @@ type Querier interface {
 	// Active keys for a tenant. Excludes revoked rows; includes retired-but-not-yet-
 	// past-grace predecessors so the admin UI can show "rotating out — valid until X."
 	ListAPIKeysByTenant(ctx context.Context, tenantID pgtype.UUID) ([]ApiKey, error)
+	// The engine's hot path: every 'active' rule for the tenant. Runs on every
+	// risk write. Hits idx_aggregation_rules_tenant_status.
+	ListActiveAggregationRules(ctx context.Context, tenantID pgtype.UUID) ([]AggregationRule, error)
 	// Every active (non-superseded) control for the active tenant.
 	ListActiveControls(ctx context.Context, tenantID pgtype.UUID) ([]ListActiveControlsRow, error)
 	// Slice 062 — admin /v1/admin/audit-log query.
@@ -598,6 +644,14 @@ type Querier interface {
 	// role-less users. last_login_at is the max(sessions.last_seen_at) for
 	// non-revoked sessions; NULL when no session row exists.
 	ListAdminUsers(ctx context.Context, arg ListAdminUsersParams) ([]ListAdminUsersRow, error)
+	ListAggregationRuleAuditLog(ctx context.Context, arg ListAggregationRuleAuditLogParams) ([]AggregationRuleAuditLog, error)
+	// Per-rule evaluation history, newest first — the auditor view. Hits
+	// idx_aggregation_rule_evaluations_tenant_rule.
+	ListAggregationRuleEvaluations(ctx context.Context, arg ListAggregationRuleEvaluationsParams) ([]AggregationRuleEvaluation, error)
+	// Every rule for the tenant, newest first. The handler applies the
+	// optional status filter in-memory; cardinality is small (a solo security
+	// lead runs a handful of rules).
+	ListAggregationRules(ctx context.Context, tenantID pgtype.UUID) ([]AggregationRule, error)
 	// Bypass-RLS path used at boot by the platform-schema importer running as
 	// atlas_migrate. Returns every row regardless of tenant. Never reachable
 	// through the app role under RLS.
@@ -652,6 +706,22 @@ type Querier interface {
 	// the period metadata so the /v1/me/audit-period(s) endpoint can render the
 	// full picture in one round trip.
 	ListAuditorAssignmentsForUser(ctx context.Context, arg ListAuditorAssignmentsForUserParams) ([]ListAuditorAssignmentsForUserRow, error)
+	// ===== candidate-risk read (engine) =====
+	// The engine's candidate-risk query. Returns risks for the tenant that:
+	//   - carry the rule's target_theme (the text[] column `themes` contains
+	//     the scalar `target_theme` — `@>` with a one-element array literal),
+	//   - were created on/after the window cut-off (`window_start` — the later
+	//     of the window start and the rule's activated_at, computed in Go), and
+	//   - use an aggregation-eligible methodology so slice 053's severity
+	//     functions can read a comparable (likelihood, impact) scalar.
+	// Hits idx_risks_tenant_created_themes for the (tenant_id, created_at)
+	// range scan, then the GIN-backed theme containment narrows the slice.
+	// The methodology filter mirrors slice 053's IsAggregableMethodology.
+	//
+	// target_theme is a SCALAR text parameter — the explicit `::text` cast on
+	// sqlc.arg keeps sqlc from inferring it as text[] just because it appears
+	// inside an ARRAY[] constructor.
+	ListCandidateRisksForRule(ctx context.Context, arg ListCandidateRisksForRuleParams) ([]Risk, error)
 	// Hash-input ingredient #2 (ADR 0003): the sorted UUIDs of controls in the
 	// tenant's catalog. v1 takes the full tenant catalog; a future slice may
 	// narrow to controls satisfied by the period's framework_version_id once
@@ -969,6 +1039,12 @@ type Querier interface {
 	UnlinkDecisionScopePredicate(ctx context.Context, arg UnlinkDecisionScopePredicateParams) error
 	UnlinkRiskAggregation(ctx context.Context, arg UnlinkRiskAggregationParams) error
 	UnlinkRiskControl(ctx context.Context, arg UnlinkRiskControlParams) error
+	// Edit the threshold fields + the rule body. Does NOT touch status or
+	// activation metadata — a threshold edit is not a lifecycle transition and
+	// (per the issue's notes) must NOT retroactively re-fire on pre-edit data.
+	// The application writes a 'threshold_changed' aggregation_rule_audit_log
+	// row alongside this call.
+	UpdateAggregationRuleThresholds(ctx context.Context, arg UpdateAggregationRuleThresholdsParams) (AggregationRule, error)
 	UpdateDecision(ctx context.Context, arg UpdateDecisionParams) (Decision, error)
 	// Patch the predicate. The BEFORE UPDATE trigger
 	// (framework_scopes_bounce_on_predicate_change_trg) ensures that if this row
@@ -982,6 +1058,12 @@ type Querier interface {
 	// Update an existing edge in place. Importer decides whether to call this
 	// based on a content-equality check.
 	UpdateFwToScfEdge(ctx context.Context, arg UpdateFwToScfEdgeParams) (FwToScfEdge, error)
+	// Recompute path: the engine recomputes the meta-risk's severity blob when
+	// new children join the window. Only inherent_score is touched — title,
+	// level, treatment, and lifecycle are frozen at create time (canvas §6.6:
+	// closing a child never auto-closes the parent; the engine never mutates
+	// parent lifecycle).
+	UpdateMetaRiskInherentScore(ctx context.Context, arg UpdateMetaRiskInherentScoreParams) (Risk, error)
 	UpdateOrgUnit(ctx context.Context, arg UpdateOrgUnitParams) (OrgUnit, error)
 	// Full-update path (PATCH handler reads existing, mutates fields, writes).
 	// updated_at is set explicitly so the schema's per-row default doesn't
@@ -1042,6 +1124,17 @@ type Querier interface {
 	// is the conflict target. On conflict we update display_name + email (the IdP
 	// is canonical) and updated_at.
 	UpsertUserByIdpSubject(ctx context.Context, arg UpsertUserByIdpSubjectParams) (User, error)
+	// ===== aggregation_rule_audit_log (append-only) =====
+	// Append-only. Every lifecycle transition (created / activated /
+	// deactivated / reactivated) and every threshold edit writes one row
+	// naming the human actor. The HITL gate's evidence trail.
+	WriteAggregationRuleAuditLog(ctx context.Context, arg WriteAggregationRuleAuditLogParams) (AggregationRuleAuditLog, error)
+	// ===== aggregation_rule_evaluations (append-only) =====
+	// Append-only. EVERY evaluation cycle writes exactly one row, including
+	// 'no_match' (canvas §6.6 + AC-8: the audit trail proves the engine ran).
+	// window_start + meta_risk_id are non-NULL only for outcome='fired' (the
+	// fired-coherent CHECK enforces this).
+	WriteAggregationRuleEvaluation(ctx context.Context, arg WriteAggregationRuleEvaluationParams) (AggregationRuleEvaluation, error)
 	// Append-only lifecycle log. action is constrained at the DB layer
 	// (period_created | period_frozen | freeze_rejected_already_frozen |
 	// population_attached). detail is a free-form JSONB for action-specific

@@ -162,6 +162,61 @@ auto-generated notes.
   high-confidence findings — the BFF is a thin auth-injecting proxy
   that delegates all authz/tenancy to the platform's RLS +
   `auditor_assignments`.
+- **Slice 054 — Declarative aggregation rules engine.** Canvas §6.6's
+  automatic risk roll-up pattern lands as the new `internal/risk/aggrule`
+  package plus migration `_026`. A declarative rule — authored in YAML or
+  JSON, parsed into one `aggrule.Rule` struct either way — defines when
+  child-level risks should auto-generate a parent-level meta-risk (e.g.
+  "≥3 `ownership` risks across ≥2 teams in 90 days → org-level pattern
+  risk"). `dsl.go` validates against one schema with field-level 400s and
+  a structural self-referential-`rule_id` guard; `severity.go` delegates
+  `max` / `weighted_max` / `sum` verbatim to slice 053's already
+  unit-tested `risk.ComputeSeverity` (no reimplementation) and evaluates
+  the fourth function, `custom_rego`, in an OPA sandbox whose input is
+  ONLY `{child_severities, child_count}` — no database handle, no other
+  builtins, no cross-tenant reach (AI-assist boundary; the policy bytes
+  ride in `rule_body` rather than being fetched at evaluation time).
+  `engine.go` re-evaluates active rules inside the caller's transaction
+  and writes exactly one `aggregation_rule_evaluations` ledger row per
+  active rule per cycle — including `no_match` — so an auditor can trust
+  the engine ran (AC-8). Migration `_026` adds three tenant-scoped tables
+  under FORCE ROW LEVEL SECURITY: `aggregation_rules` (four-policy split)
+  and the append-only `aggregation_rule_evaluations` +
+  `aggregation_rule_audit_log` (SELECT + INSERT policies only — append-only
+  by construction), with composite `(tenant_id, rule_id)` FKs and an
+  AC-9 partial perf index on `risks`. The HTTP API at
+  `/v1/aggregation-rules` ships POST (accepts `application/json` AND
+  `application/yaml`), GET list, GET by id, and the two HITL transition
+  routes `PATCH .../activate` + `PATCH .../deactivate`. Rules are ALWAYS
+  created `staged` and do not execute until an explicit human action flips
+  them to `active` — the activation gate, with every transition naming the
+  actor in the audit log (AC-2, AI-assist boundary). Cycle prevention is
+  runtime exclusion: rule-generated meta-risks carry
+  `inherent_score.rule_generated = true` and the engine's candidate read
+  filters them out, so a rule never re-aggregates its own output (a static
+  theme-match rejection would reject every rule, since a meta-risk carries
+  the union of its children's themes including `target_theme`); a
+  lightweight `Validate()` self-reference check stays as defense in depth.
+  Window idempotency keys one meta-risk per `(rule_id, window_start)` with
+  `window_start` snapped to the UTC day boundary so concurrent writes
+  converge; re-running a rule on the same window UPDATEs the existing
+  meta-risk rather than duplicating, and re-activation never re-fires on
+  pre-activation data because the engine reads `activated_at` as a
+  window-floor (P0 anti-criteria). Closing a child never auto-closes the
+  parent — the meta-risk's severity recomputes lower but its lifecycle is
+  independent (AC-6). The engine's only write surface is the narrow
+  unexported `metaRiskWriter` interface (create/update meta-risk, link
+  aggregation, write evaluation) — it is structurally incapable of
+  mutating arbitrary `risks`, `controls`, or anything else, the safety
+  bound enforced by construction. Constitutional invariants honoured: #6
+  (RLS on all three tables, every query tenant-scoped), #9 (rule-driven
+  and slice-053 manual aggregations coexist in `risk_aggregations`,
+  `rule_id` distinguishes the source), AI-assist boundary (sandboxed
+  custom Rego + HITL staged→active gate). Tests: 11 unit tests on the DSL,
+  5 on severity (each delegation cross-checked against slice 053
+  directly, plus sandbox-isolation cases), 8 engine integration tests
+  and 6 HTTP integration tests covering AC-1 through AC-10 and every P0
+  anti-criterion.
 - **Slice 027 — Walkthrough recording (annotated + hash/sign).** Canvas
   §8.3 walkthrough primitive lands as three tenant-scoped tables
   (`walkthroughs`, `walkthrough_attachments`, `walkthrough_audit_log`)
