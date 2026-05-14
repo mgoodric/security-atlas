@@ -1,0 +1,37 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc6_7_encryption_in_transit
+title: "Data is encrypted in transit; storage encryption-at-rest enforced"
+description: |
+  The entity restricts the transmission, movement, and removal of
+  information to authorized internal and external users and processes
+  (TSC CC6.7). The auditor-tested manifestation has two prongs: (a)
+  encryption in transit (TLS-only public endpoints) and (b)
+  encryption-at-rest enforcement on data-bearing stores. For SOC 2 v1
+  this control covers prong (b) via the slice-004 AWS S3 encryption
+  evidence; prong (a) is covered by deployment-level controls outside
+  this bundle (load balancer / CDN config). NOTE: This is a JUDGMENT
+  CALL — see review log for the alternative scoping.
+
+scf_anchor_id: CRY-08
+control_family: CRY
+implementation_type: automated
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: daily
+
+evidence_queries:
+  - id: all_s3_buckets_encrypted_at_rest
+    language: rego
+    evidence_kind: aws.s3.bucket_encryption_state
+    description: "Every S3 bucket has default encryption enabled with SSE-S3 or SSE-KMS"
+    expression: |
+      package atlas.controls.soc2.cc6_7
+
+      default allow := false
+
+      allow if {
+        every b in input.buckets {
+          b.server_side_encryption.enabled == true
+          b.server_side_encryption.algorithm in {"AES256", "aws:kms"}
+        }
+      }

@@ -1,0 +1,36 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc8_1_configuration_change_control
+title: "Infrastructure changes go through reviewed pull requests"
+description: |
+  The configuration-change-control half of TSC CC8.1: infrastructure
+  changes (Terraform, Kubernetes manifests, IAM policy JSON) are
+  modified only via reviewed pull requests on the IaC repository. The
+  query asserts that the dedicated IaC repos have branch protection
+  with required reviews AND that the repo is tagged
+  `iac: true` so future automation can target it deterministically.
+
+scf_anchor_id: CFG-04
+control_family: CFG
+implementation_type: automated
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: daily
+
+evidence_queries:
+  - id: iac_repos_require_reviewed_prs
+    language: rego
+    evidence_kind: github.repo_protection
+    description: "IaC repos require reviewed PRs and have iac:true tag"
+    expression: |
+      package atlas.controls.soc2.cc8_1_cfg
+
+      default allow := false
+
+      allow if {
+        every r in input.repos {
+          r.topics[_] == "iac"
+          some p in r.protection_rules
+          p.branch == r.default_branch
+          p.required_pull_request_reviews.required_approving_review_count >= 1
+        }
+      }

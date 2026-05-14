@@ -1,0 +1,41 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc3_4_change_risk_reassessment
+title: "Material configuration changes are reviewed before merge"
+description: |
+  The entity identifies and assesses changes that could significantly
+  impact the system of internal control (TSC CC3.4). Operationally for a
+  SaaS startup the auditor-tested manifestation is: configuration
+  changes (infrastructure-as-code, security-relevant code, schema
+  migrations) are subject to peer review before merge. The query reads
+  the GitHub audit log and asserts that every push to a protected branch
+  in the period was preceded by a pull-request approval from a non-author
+  reviewer.
+
+scf_anchor_id: CFG-04
+control_family: CFG
+implementation_type: automated
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: daily
+
+evidence_queries:
+  - id: protected_branch_pushes_were_pr_reviewed
+    language: rego
+    evidence_kind: github.audit_event
+    description: "Every push to a protected branch had a non-author PR approval"
+    expression: |
+      package atlas.controls.soc2.cc3_4
+
+      default allow := false
+
+      allow if {
+        every e in input.audit_events {
+          e.action == "git.push"
+          e.protected_branch == true
+          some pr in input.pull_requests
+          pr.merge_commit_sha == e.commit_sha
+          some r in pr.reviews
+          r.state == "approved"
+          r.user != pr.author
+        }
+      }

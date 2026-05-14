@@ -1,0 +1,43 @@
+bundle_schema_version: "1"
+bundle_id: soc2_c1_1_confidentiality_identification
+title: "Confidential information identified per data classification scheme"
+description: |
+  The entity identifies and maintains confidential information to meet
+  the entity's objectives related to confidentiality (TSC C1.1). The
+  control owner attests annually that the data classification scheme
+  (see CC6.7's data_classification control) identifies which fields,
+  tables, and data flows are designated "confidential", and that the
+  designation is reflected in handling controls (access restrictions,
+  encryption-at-rest requirements, retention rules).
+
+scf_anchor_id: DCH-01
+control_family: DCH
+implementation_type: manual_attested
+owner_role: ciso
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required:
+    [attested_at, attestor, confidential_fields_documented, handling_rules_uri]
+  properties:
+    attested_at:
+      type: string
+      format: date-time
+    attestor:
+      type: string
+      minLength: 1
+    confidential_fields_documented:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        required: [system, field_or_table, handling_class]
+        properties:
+          system: { type: string }
+          field_or_table: { type: string }
+          handling_class: { type: string, enum: [confidential, restricted] }
+    handling_rules_uri:
+      type: string
+      format: uri

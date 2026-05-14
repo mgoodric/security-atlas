@@ -1,0 +1,42 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc6_7_data_classification
+title: "Data classification scheme published and applied"
+description: |
+  The transmission-restriction half of CC6.7 depends on knowing what
+  data is protected. The control owner attests annually that a
+  documented data classification scheme exists (public / internal /
+  confidential / restricted at minimum), that each major data store has
+  been classified, and that handling rules for each class are
+  documented (TLS-only for confidential, encryption-at-rest mandatory
+  for restricted, etc.).
+
+scf_anchor_id: DCH-01
+control_family: DCH
+implementation_type: manual_attested
+owner_role: ciso
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required: [attested_at, attestor, scheme_uri, classified_stores]
+  properties:
+    attested_at:
+      type: string
+      format: date-time
+    attestor:
+      type: string
+      minLength: 1
+    scheme_uri:
+      type: string
+      format: uri
+    classified_stores:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        required: [store_name, classification]
+        properties:
+          store_name: { type: string }
+          classification:
+            { type: string, enum: [public, internal, confidential, restricted] }

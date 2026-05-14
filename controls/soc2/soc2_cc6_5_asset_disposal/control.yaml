@@ -1,0 +1,75 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc6_5_asset_disposal
+title: "Decommissioned media and devices are securely wiped"
+description: |
+  The entity discontinues logical and physical protections over
+  physical assets only after the ability to read or recover data has
+  been diminished (TSC CC6.5). The owner uploads quarterly evidence of
+  device disposal — laptops returned by terminated employees and wiped,
+  storage media physically destroyed, EBS volumes deleted — including
+  serial numbers, dates, and disposal method. For cloud-native orgs the
+  bulk of this evidence is the storage-deletion log from the cloud
+  provider.
+
+scf_anchor_id: AST-09
+control_family: AST
+implementation_type: semi_automated
+owner_role: it-operations
+lifecycle_state: active
+freshness_class: quarterly
+
+evidence_queries:
+  - id: disposal_log_uploaded_within_quarter
+    language: rego
+    evidence_kind: manual.upload
+    description: "A disposal-log upload exists within the last 90 days"
+    expression: |
+      package atlas.controls.soc2.cc6_5
+
+      default allow := false
+
+      allow if {
+        some u in input.uploads
+        u.control_bundle_id == "soc2_cc6_5_asset_disposal"
+        time.parse_rfc3339_ns(u.observed_at) > (time.now_ns() - (90 * 24 * 60 * 60 * 1000000000))
+      }
+
+manual_evidence_schema:
+  type: object
+  required: [period_start, period_end, disposals]
+  properties:
+    period_start: { type: string, format: date }
+    period_end: { type: string, format: date }
+    disposals:
+      type: array
+      items:
+        type: object
+        required: [asset_id, asset_type, disposal_method, disposed_at]
+        properties:
+          asset_id:
+            {
+              type: string,
+              description: "Serial / instance id / EBS volume id",
+            }
+          asset_type:
+            {
+              type: string,
+              enum: [laptop, mobile, server, removable_media, cloud_volume],
+            }
+          disposal_method:
+            {
+              type: string,
+              enum:
+                [
+                  crypto_erase,
+                  physical_destruction,
+                  cloud_delete,
+                  secure_wipe_nist_888,
+                ],
+            }
+          disposed_at: { type: string, format: date }
+          witness:
+            {
+              type: string,
+              description: "Email of witness (for physical destruction)",
+            }

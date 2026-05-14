@@ -1,0 +1,47 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc9_1_business_continuity
+title: "Business continuity plan reviewed annually"
+description: |
+  The entity identifies, selects, and develops risk mitigation
+  activities for risks arising from potential business disruptions (TSC
+  CC9.1). The control owner uploads the current business continuity /
+  disaster recovery plan annually, alongside a confirmation that the
+  document was reviewed and is current — including stated RTO / RPO
+  targets, leadership succession plan, and communication tree.
+
+scf_anchor_id: BCD-02
+control_family: BCD
+implementation_type: semi_automated
+owner_role: ciso
+lifecycle_state: active
+freshness_class: annual
+
+evidence_queries:
+  - id: bcp_reviewed_within_12mo
+    language: rego
+    evidence_kind: manual.upload
+    description: "A BCP review upload exists within the last 365 days"
+    expression: |
+      package atlas.controls.soc2.cc9_1
+
+      default allow := false
+
+      allow if {
+        some u in input.uploads
+        u.control_bundle_id == "soc2_cc9_1_business_continuity"
+        time.parse_rfc3339_ns(u.observed_at) > (time.now_ns() - (365 * 24 * 60 * 60 * 1000000000))
+      }
+
+manual_evidence_schema:
+  type: object
+  required:
+    [reviewed_at, reviewer, plan_version, rto_hours, rpo_hours, plan_uri]
+  properties:
+    reviewed_at: { type: string, format: date }
+    reviewer: { type: string, minLength: 1 }
+    plan_version: { type: string }
+    rto_hours: { type: number, minimum: 0 }
+    rpo_hours: { type: number, minimum: 0 }
+    plan_uri: { type: string, format: uri }
+    succession_plan_documented: { type: boolean }
+    communication_tree_documented: { type: boolean }

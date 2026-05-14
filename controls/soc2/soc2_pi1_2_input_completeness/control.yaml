@@ -1,0 +1,46 @@
+bundle_schema_version: "1"
+bundle_id: soc2_pi1_2_input_completeness
+title: "Input validation is exercised by SAST and contract tests"
+description: |
+  The entity implements policies and procedures over system inputs,
+  including controls over completeness and accuracy (TSC PI1.2). The
+  SAST scanner is configured with input-validation taint rules; the
+  evidence query asserts every in-scope repo's most recent scan
+  surfaces zero unsuppressed findings in the rule set covering
+  injection, deserialization, and schema-violation patterns.
+
+scf_anchor_id: SEA-05
+control_family: SEA
+implementation_type: automated
+owner_role: product-engineering
+lifecycle_state: active
+freshness_class: daily
+
+evidence_queries:
+  - id: input_validation_taint_rules_clean
+    language: rego
+    evidence_kind: sast.scan_result
+    description: "SAST scans show zero unsuppressed input-validation findings"
+    expression: |
+      package atlas.controls.soc2.pi1_2
+
+      default allow := false
+
+      input_validation_rule_ids := {
+        "injection.sql",
+        "injection.command",
+        "deserialization.unsafe",
+        "input.schema_violation"
+      }
+
+      allow if {
+        every s in input.scans {
+          relevant_count(s) == 0
+        }
+      }
+
+      relevant_count(s) := count([f |
+        some f in s.findings
+        f.rule_id in input_validation_rule_ids
+        f.suppressed != true
+      ])

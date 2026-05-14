@@ -1,0 +1,42 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc5_2_general_tech_controls
+title: "Secure engineering principles documented and applied to new systems"
+description: |
+  The entity selects and develops general control activities over
+  technology to support the achievement of objectives (TSC CC5.2). The
+  control owner attests annually that a documented secure-engineering
+  reference (architecture-review-board criteria, default-deny baselines,
+  least-privilege design defaults, mandatory threat modeling for
+  net-new services) is in force and was applied to each new service
+  shipped in the period.
+
+scf_anchor_id: SEA-01
+control_family: SEA
+implementation_type: manual_attested
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required: [attested_at, attestor, reference_doc_uri, new_services_reviewed]
+  properties:
+    attested_at:
+      type: string
+      format: date-time
+    attestor:
+      type: string
+      minLength: 1
+    reference_doc_uri:
+      type: string
+      format: uri
+      description: "Link to the documented secure-engineering reference"
+    new_services_reviewed:
+      type: array
+      items:
+        type: object
+        required: [service, reviewed_at]
+        properties:
+          service: { type: string }
+          reviewed_at: { type: string, format: date }
+          threat_model_uri: { type: string, format: uri }

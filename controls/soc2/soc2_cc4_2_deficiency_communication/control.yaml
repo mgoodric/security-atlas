@@ -1,0 +1,39 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc4_2_deficiency_communication
+title: "Control deficiencies communicated to owners within defined SLA"
+description: |
+  The entity evaluates and communicates internal control deficiencies
+  in a timely manner to those parties responsible for taking corrective
+  action (TSC CC4.2). The control owner uploads quarterly evidence
+  showing identified control deficiencies (failed control evaluations,
+  audit findings, internal-audit observations) and the date each was
+  communicated to its accountable owner. The SLA tested is: critical
+  deficiencies communicated within 5 business days, high within 10,
+  medium within 30, low within 90.
+
+scf_anchor_id: AAA-12
+control_family: AAA
+implementation_type: manual_periodic
+owner_role: ciso
+lifecycle_state: active
+freshness_class: quarterly
+
+manual_evidence_schema:
+  type: object
+  required: [period_start, period_end, deficiencies]
+  properties:
+    period_start: { type: string, format: date }
+    period_end: { type: string, format: date }
+    deficiencies:
+      type: array
+      items:
+        type: object
+        required: [id, severity, identified_at, communicated_at, owner]
+        properties:
+          id: { type: string }
+          severity: { type: string, enum: [critical, high, medium, low] }
+          identified_at: { type: string, format: date }
+          communicated_at: { type: string, format: date }
+          owner:
+            { type: string, description: "Email or role of accountable owner" }
+          sla_met: { type: boolean }

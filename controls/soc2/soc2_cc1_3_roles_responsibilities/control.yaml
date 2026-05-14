@@ -1,0 +1,44 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc1_3_roles_responsibilities
+title: "Security roles and responsibilities documented and assigned"
+description: |
+  Management establishes, with board oversight, structures, reporting
+  lines, and appropriate authorities and responsibilities for the security
+  program (TSC CC1.3, COSO Principle 3). The control owner attests
+  annually that each documented security role (CISO, security engineering,
+  control owners, incident commander on-call rotation) has a named
+  individual assigned and that the role-responsibility matrix is current.
+  The attestation captures the matrix version that was reviewed.
+
+scf_anchor_id: GOV-04
+control_family: GOV
+implementation_type: manual_attested
+owner_role: ciso
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required: [attested_at, attestor, matrix_version, all_roles_assigned]
+  properties:
+    attested_at:
+      type: string
+      format: date-time
+    attestor:
+      type: string
+      minLength: 1
+    matrix_version:
+      type: string
+      description: "Version of the role-responsibility document reviewed"
+    all_roles_assigned:
+      type: boolean
+      enum: [true]
+      description: "Set true only when every documented role has a named owner"
+    gaps_noted:
+      type: array
+      items:
+        type: object
+        required: [role, status]
+        properties:
+          role: { type: string }
+          status: { type: string, enum: [vacant, interim, contractor_filled] }

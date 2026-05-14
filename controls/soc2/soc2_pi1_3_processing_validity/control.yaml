@@ -1,0 +1,45 @@
+bundle_schema_version: "1"
+bundle_id: soc2_pi1_3_processing_validity
+title: "Authorization checks asserted by SAST in processing-path code"
+description: |
+  The entity implements policies and procedures over system processing
+  to result in products, services, and reporting to meet the entity's
+  objectives (TSC PI1.3). The SAST rule set covering authorization /
+  IDOR / privilege-escalation patterns surfaces zero unsuppressed
+  findings on the most recent scan of every in-scope repo.
+
+scf_anchor_id: SEA-05
+control_family: SEA
+implementation_type: automated
+owner_role: product-engineering
+lifecycle_state: active
+freshness_class: daily
+
+evidence_queries:
+  - id: authorization_taint_rules_clean
+    language: rego
+    evidence_kind: sast.scan_result
+    description: "SAST scans show zero unsuppressed authorization/IDOR findings"
+    expression: |
+      package atlas.controls.soc2.pi1_3
+
+      default allow := false
+
+      authz_rule_ids := {
+        "authz.missing_check",
+        "authz.idor",
+        "authz.privilege_escalation",
+        "authz.broken_object_level"
+      }
+
+      allow if {
+        every s in input.scans {
+          relevant_count(s) == 0
+        }
+      }
+
+      relevant_count(s) := count([f |
+        some f in s.findings
+        f.rule_id in authz_rule_ids
+        f.suppressed != true
+      ])

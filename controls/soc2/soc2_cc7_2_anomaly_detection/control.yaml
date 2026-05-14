@@ -1,0 +1,35 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc7_2_anomaly_detection
+title: "Anomalous behavior detection is operational on production endpoints"
+description: |
+  The entity monitors system components and the operation of those
+  components for anomalies indicative of malicious acts, natural
+  disasters, and errors (TSC CC7.2). The osquery posture stream
+  surfaces the EDR / behavioral-detection engine state on each
+  endpoint; the query asserts every managed endpoint has the engine
+  running and reporting healthy.
+
+scf_anchor_id: MON-08
+control_family: MON
+implementation_type: automated
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: daily
+
+evidence_queries:
+  - id: edr_running_on_every_managed_endpoint
+    language: rego
+    evidence_kind: osquery.host_posture
+    description: "Every managed endpoint has EDR / anomaly detection engine running"
+    expression: |
+      package atlas.controls.soc2.cc7_2
+
+      default allow := false
+
+      allow if {
+        every p in input.posture_records {
+          p.edr.installed == true
+          p.edr.running == true
+          p.edr.health_status == "healthy"
+        }
+      }

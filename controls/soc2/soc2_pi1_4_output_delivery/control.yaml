@@ -1,0 +1,45 @@
+bundle_schema_version: "1"
+bundle_id: soc2_pi1_4_output_delivery
+title: "Output delivery SLAs published and monitored"
+description: |
+  The entity implements policies and procedures to make available or
+  deliver output completely, accurately, and timely in accordance with
+  specifications to meet the entity's objectives (TSC PI1.4). The
+  control owner attests annually that each in-scope service publishes
+  an availability and latency SLA, the SLO is measured against actual
+  performance, and breaches are reported to customers per the
+  documented status-page workflow.
+
+scf_anchor_id: SEA-05
+control_family: SEA
+implementation_type: manual_attested
+owner_role: product-engineering
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required: [attested_at, attestor, services_with_slas, status_page_uri]
+  properties:
+    attested_at:
+      type: string
+      format: date-time
+    attestor:
+      type: string
+      minLength: 1
+    services_with_slas:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        required:
+          [service_name, availability_slo, latency_slo, slo_dashboard_uri]
+        properties:
+          service_name: { type: string }
+          availability_slo:
+            { type: string, description: "e.g. '99.9% monthly'" }
+          latency_slo: { type: string, description: "e.g. 'p95 < 250ms'" }
+          slo_dashboard_uri: { type: string, format: uri }
+    status_page_uri:
+      type: string
+      format: uri

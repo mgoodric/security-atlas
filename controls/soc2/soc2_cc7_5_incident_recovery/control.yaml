@@ -1,0 +1,55 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc7_5_incident_recovery
+title: "Tabletop exercise for incident recovery completed annually"
+description: |
+  The entity identifies, develops, and implements activities to recover
+  from identified security incidents (TSC CC7.5). The control owner
+  attests annually that an incident-recovery tabletop exercise was
+  conducted, including a date, participants, scenario tested,
+  identified gaps, and remediation items filed. Tabletops are the
+  auditor-canonical recovery-capability evidence absent real incidents.
+
+scf_anchor_id: IRO-04
+control_family: IRO
+implementation_type: manual_attested
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required:
+    [
+      attested_at,
+      attestor,
+      exercise_date,
+      scenario,
+      participants,
+      gaps_identified,
+    ]
+  properties:
+    attested_at:
+      type: string
+      format: date-time
+    attestor:
+      type: string
+      minLength: 1
+    exercise_date:
+      type: string
+      format: date
+    scenario:
+      type: string
+      minLength: 20
+      description: "Free-text description of the tabletop scenario (e.g. 'production database ransomware')"
+    participants:
+      type: array
+      minItems: 3
+      items: { type: string }
+    gaps_identified:
+      type: array
+      items:
+        type: object
+        required: [gap, remediation_ticket_id]
+        properties:
+          gap: { type: string }
+          remediation_ticket_id: { type: string }

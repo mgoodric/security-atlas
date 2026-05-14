@@ -1,0 +1,52 @@
+bundle_schema_version: "1"
+bundle_id: soc2_c1_2_confidential_disposal
+title: "Confidential information disposed per retention schedule"
+description: |
+  The entity disposes of confidential information to meet the entity's
+  objectives related to confidentiality (TSC C1.2). The control owner
+  uploads quarterly evidence showing that confidential data past the
+  retention schedule was disposed of: deleted rows / dropped tables /
+  retired backups / shredded paper, with dates and disposal method.
+  Pairs with CC6.5 (asset disposal) — this control is the data-level
+  view; CC6.5 is the hardware-level view.
+
+scf_anchor_id: AST-09
+control_family: AST
+implementation_type: manual_periodic
+owner_role: it-operations
+lifecycle_state: active
+freshness_class: quarterly
+
+manual_evidence_schema:
+  type: object
+  required: [period_start, period_end, disposals]
+  properties:
+    period_start: { type: string, format: date }
+    period_end: { type: string, format: date }
+    disposals:
+      type: array
+      items:
+        type: object
+        required:
+          [data_class, system, retention_basis, disposed_at, disposal_method]
+        properties:
+          data_class: { type: string, enum: [confidential, restricted] }
+          system: { type: string }
+          retention_basis:
+            {
+              type: string,
+              description: "Policy citation or regulatory citation triggering disposal",
+            }
+          disposed_at: { type: string, format: date }
+          disposal_method:
+            {
+              type: string,
+              enum:
+                [
+                  sql_delete,
+                  table_drop,
+                  backup_purge,
+                  crypto_erase,
+                  physical_shred,
+                ],
+            }
