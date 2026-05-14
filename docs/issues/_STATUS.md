@@ -3,7 +3,11 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-14 (batch 24 merged — 056 + 066 + 031 → merged · 59/66 on main)
+**Last reconciled:** 2026-05-14 (batch 24 merged — 056 + 066 + 031 → merged · 59/67 on main)
+
+## Drift detected — 2026-05-14 (slice 065 added — slice 037 self-host P0 follow-up)
+
+Slice 065 (self-host bundle P0 fixes) added to the backlog. A P0 follow-up to slice 037 — the v1.2.0 / v1.3.0 docker-compose self-host bundle does not bring a fresh deployment to a working state. Five distinct first-deploy bugs, discovered during the v1.3.0 first-deploy session: (1) the audit writer's INSERT runs outside a transaction so the `app.current_tenant` GUC is unset and the `decision_audit_log` RLS `WITH CHECK` rejects every row — every authenticated request 500s; (2) the atlas/atlas-bootstrap `depends_on` condition deadlocks startup; (3) unguarded `CREATE TYPE` statements break any bootstrap re-run; (4) `ALTER ROLE` permission denial on a shared (non-superuser) Postgres; (5) missing `pgcrypto` extension breaks `seed.sql`'s `digest()` call. Cluster infra/deploy, AFK, ~1.5d. Deps 037/033/034 all merged → status `ready`. Full file:line bug inventory + proposed code shapes in the issue doc.
 
 ## Drift detected — 2026-05-14 (batch 24 merged — 056 + 066 + 031)
 
@@ -920,10 +924,10 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 | `merged`      | 59     |
 | `in-review`   | 0      |
 | `in-progress` | 0      |
-| `ready`       | 4      |
+| `ready`       | 5      |
 | `blocked`     | 0      |
 | `not-ready`   | 3      |
-| **Total**     | **66** |
+| **Total**     | **67** |
 
 ## Status enum
 
@@ -1005,6 +1009,7 @@ Legal values (use exactly these strings):
 | 062 | Admin BFF backend endpoints (SSO + Users + audit-log)  | `merged`    | admin/062-admin-bff-backend-endpoints                | gh#70  | 2026-05-13 | 2026-05-13 | 10/10 ACs · 5/5 P0 anti-criteria · migration `_022` admin_audit_log_v view (UNION ALL across 7 audit-log tables) · 22 integration tests · SSRF-hardened OIDC preflight (Transport.DialContext IP re-check + redirect-disabled) · unblocks slice 060                                                                                                                                                                                                    |
 | 063 | Enable `/admin/sso` form save (post-062 wire-up)       | `merged`    | frontend/063-admin-sso-form-enable                   | gh#76  | 2026-05-13 | 2026-05-13 | 9/9 ACs · 4/4 P0 · BFF proxy at `web/app/api/admin/sso/route.ts` · TanStack Query mutation + state machine · Playwright E2E extension with reload write-once check · slice 060 stopgap removed                                                                                                                                                                                                                                                         |
 | 064 | Control-detail backend read endpoints                  | `merged`    | controls/064-control-detail-backend-endpoints        | gh#102 | 2026-05-14 | 2026-05-14 | batch 23 · AFK · 8/8 ACs · 6/6 P0 · no migration · `internal/api/controldetail` · 4 read endpoints fill slice 041's placeholders (`GET /v1/evidence?control_id=`, `/controls/{id}/policies\|risks\|history`) · reuses slice-012 control→evidence resolution · keyset pagination · 7 judgment calls in decisions log · commit 9f42ea8                                                                                                                   |
+| 065 | self-host bundle P0 fixes (slice 037 follow-up)        | `ready`     | —                                                    | —      | —          | —          | **NEW** · P0 follow-up to slice 037 · 5 first-deploy bugs (audit-writer RLS GUC unset outside txn, bootstrap/atlas `depends_on` deadlock, unguarded `CREATE TYPE`, `ALTER ROLE` denial on shared Postgres, missing `pgcrypto`) · cluster infra/deploy · AFK · deps 037/033/034 merged                                                                                                                                                                  |
 | 066 | Dashboard backend read endpoints                       | `merged`    | catalog/066-dashboard-backend-endpoints              | gh#109 | 2026-05-14 | 2026-05-14 | batch 24 · AFK · 8/8 ACs · 6/6 P0 · no migration · `internal/api/dashboard` · 4 read endpoints fill slice 040's placeholders (`GET /v1/frameworks/posture\|activity\|upcoming` + `?sort=residual,age` on `/v1/risks`) · `/v1/activity` reads slice-062 `admin_audit_log_v` evidence branch · additive `risk.ListSort` · 5 judgment calls in decisions log · commit 786b8a0                                                                             |
 | 067 | Risk-hierarchy backend read endpoints                  | `ready`     | —                                                    | —      | —          | —          | **NEW** (from slice 056 decisions log) · fills slice 056's placeholders: `GET /v1/org_units?include_risk_counts=true`, `GET /v1/risks/theme-heatmap` (themes × org_units aggregation), per-cell contributing-risk filter, richer `/v1/decisions` filters · deps 052/053/054/055 merged · 040→066 pattern                                                                                                                                               |
 
@@ -1015,9 +1020,10 @@ Legal values (use exactly these strings):
 | 030 | OSCAL SSP + POA&M export pipeline     | audit   | 4-5     | deps 008/012/017/018/026/028 merged · JUDGMENT-type · lands first Python (`oscal-bridge/`) · **sole critical-path bottleneck** — unblocks 032 → 043 → 057 |
 | 038 | Helm chart for K8s                    | infra   | 2       | dep 037 merged · leaf slice · possible `justfile` spine touch                                                                                             |
 | 058 | User docs scaffold + 5 core pages     | docs    | 3       | deps 005 + 050 merged · JUDGMENT-type (docs authorship) · `justfile` spine touch                                                                          |
+| 065 | self-host bundle P0 fixes             | infra   | 1.5     | **new** · P0 follow-up to slice 037 · `internal/authz/` + `deploy/docker/` + `migrations/` · deps 037/033/034 merged · no spine touch                     |
 | 067 | Risk-hierarchy backend read endpoints | risk    | 2-2.5   | **new** (from slice 056 decisions log) · fills slice 056's 4 endpoint placeholders · no spine touch                                                       |
 
-**Four slices ready** (030, 038, 058, 067). 067 is the only conflict-light pick (no spine touch — `internal/api/*` + httpserver.go mount-append + sqlc, known-safe); 030 (`pyproject.toml`), 038 + 058 (`justfile`) each carry a spine touch, at most one per batch. A conflict-free next batch: 067 + one of {030, 038, 058}. 030 is the highest-value (sole critical-path bottleneck) — a focused 030 + 067 pairing is the natural next batch.
+**Five slices ready** (030, 038, 058, 065, 067). 065 + 067 are the conflict-light picks (no spine touch); 030 (`pyproject.toml`), 038 + 058 (`justfile`) each carry a spine touch, at most one per batch. 065 touches `internal/authz/` + `deploy/docker/` + `migrations/` and 067 touches `internal/api/*` + `httpserver.go` — disjoint, they pair cleanly. A conflict-free next batch: 065 + 067 + one of {030, 038, 058}. 030 is the highest-value (sole critical-path bottleneck) — and 065 unbreaks the shipped v1.3.0 self-host bundle, so 030 + 065 + 067 is a strong N=3.
 
 ## In-flight (0 worktrees building)
 
