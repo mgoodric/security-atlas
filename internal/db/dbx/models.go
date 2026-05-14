@@ -764,6 +764,18 @@ func (ns NullVendorReviewCadence) Value() (driver.Value, error) {
 	return string(ns.VendorReviewCadence), nil
 }
 
+// Slice 062 — unified read across the seven per-domain audit-log tables. RLS-aware: each source-table tenant_read policy fires under the caller's app.current_tenant GUC. Append-only by construction (no INSERT path).
+type AdminAuditLogV struct {
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	Ts           pgtype.Timestamptz `json:"ts"`
+	SourceTable  string             `json:"source_table"`
+	EventType    string             `json:"event_type"`
+	Actor        string             `json:"actor"`
+	ResourceType string             `json:"resource_type"`
+	ResourceID   string             `json:"resource_id"`
+	Summary      []byte             `json:"summary"`
+}
+
 type ApiKey struct {
 	ID             pgtype.UUID        `json:"id"`
 	TenantID       pgtype.UUID        `json:"tenant_id"`
@@ -893,6 +905,22 @@ type Decision struct {
 	SupersededBy  pgtype.UUID        `json:"superseded_by"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DecisionAuditLog struct {
+	DecisionID    pgtype.UUID        `json:"decision_id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	UserID        string             `json:"user_id"`
+	UserRoles     []string           `json:"user_roles"`
+	Action        string             `json:"action"`
+	ResourceType  string             `json:"resource_type"`
+	ResourceID    string             `json:"resource_id"`
+	Result        string             `json:"result"`
+	Reason        string             `json:"reason"`
+	PolicyHits    []string           `json:"policy_hits"`
+	RequestPath   string             `json:"request_path"`
+	RequestMethod string             `json:"request_method"`
 }
 
 type DecisionControl struct {
@@ -1345,6 +1373,14 @@ type User struct {
 	IdpSubject  string             `json:"idp_subject"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserRole struct {
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	UserID    string             `json:"user_id"`
+	Role      string             `json:"role"`
+	GrantedAt pgtype.Timestamptz `json:"granted_at"`
+	GrantedBy string             `json:"granted_by"`
 }
 
 type Vendor struct {

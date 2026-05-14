@@ -23,9 +23,11 @@ sql:
       - "migrations/sql/20260511000015_seed_default_themes.sql"
       - "migrations/sql/20260511000016_policies.sql"
       - "migrations/sql/20260511000017_acknowledgments.sql"
+      - "migrations/sql/20260511000018_rbac_authz.sql"
       - "migrations/sql/20260511000019_feature_flags.sql"
       - "migrations/sql/20260511000020_audit_periods.sql"
       - "migrations/sql/20260511000021_audit_notes.sql"
+      - "migrations/sql/20260511000022_admin_audit_log_view.sql"
     queries: "internal/db/queries"
     gen:
       go:
