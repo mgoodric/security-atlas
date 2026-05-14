@@ -185,4 +185,3 @@ criterion.
    - **Approves**: fills the "Decision" row above with `approve`, commits the updated review log, the PR can merge.
    - **Approves-with-fixes**: leaves the agent specific change requests in the "Reviewer notes" column for each affected bundle; the agent makes the fixes; reviewer re-checks the diff; updates to `approve`.
    - **Rejects**: the slice goes back to the agent for substantial rework with the failure reasons captured in this file.
-
