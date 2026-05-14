@@ -197,6 +197,43 @@ auto-generated notes.
   what makes AC-7's point-in-time replay meaningful — an upsert table
   would destroy the prior computed state — and it matches the established
   `evidence_audit_log` / `aggregation_rule_evaluations` precedent.
+- **Slice 041 — Control detail view + UCF mini-viz.** The control
+  detail view lands at `/controls/[id]` as a Next.js 16 App Router
+  client page built per `Plans/mockups/control.html`. It is the
+  surface that makes the UCF graph claim tactile (canvas §3,
+  `UCF_GRAPH_MODEL.md` §3): a control header with the SCF anchor
+  pill + lifecycle badge, a KPI strip, a coverage-by-framework table
+  showing the STRM relationship type and mapping strength per
+  requirement, a hand-rolled SVG UCF mini-viz drawing
+  `control → SCF anchor → framework requirements` with STRM-typed
+  edges, a freshness clock, and a per-framework effective-scope
+  panel. Constitutional invariant 1 (one control, N framework
+  satisfactions) is rendered directly in the mini-viz; invariant 5
+  (FrameworkScope intersection) is rendered as dashed/greyed
+  out-of-scope rows in both the table and the viz — never hidden.
+  Four BFF proxy routes under `web/app/api/controls/[id]/`
+  (`coverage`, `state`, `effectiveness`, `effective-scope`) read the
+  httpOnly `sa_session_token` cookie server-side and forward it as a
+  bearer to the merged backend slices 008 (UCF graph traversal), 012
+  (control state + effectiveness), and 018 (effective-scope), with
+  `encodeURIComponent` on every dynamic path and query segment. New
+  presentational components live under `web/components/control/`,
+  new types + client functions in `web/lib/api.ts`, and an
+  `ifPlaywright` E2E contract at `web/e2e/control-detail.spec.ts`
+  (matching the slice-042 / slice-060 pattern — `@playwright/test`
+  is not yet a dependency). The `relationship_type` field is typed
+  as an open string with a known-value style map + neutral fallback
+  rather than a closed union, so the five-value DB enum, the
+  three-value mockup shorthand, and slice 005's three-value
+  `lib/api.ts` union cannot drift the view. Known gap: the evidence
+  stream section ships as an empty-state placeholder naming the
+  missing `GET /v1/evidence?control_id=…` list endpoint (only
+  `POST /v1/evidence:push` is on main) — the slice-060 precedent for
+  an unshipped backend dependency. The decisions log at
+  `docs/audit-log/041-control-detail-view-decisions.md` records the
+  STRM-vocabulary-drift resolution, the evidence-endpoint gap, and
+  the freshness clock binding to slice 012's `/state` in place of
+  the not-yet-merged slice 016 `valid_until`.
 - **Slice 037 — docker-compose self-host bundle.** A single
   `deploy/docker/docker-compose.yml` brings the whole platform online on
   one VM — Postgres 16, NATS JetStream, MinIO, the `atlas` server, and
