@@ -24,6 +24,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
+	controlstateapi "github.com/mgoodric/security-atlas/internal/api/controlstate"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
 	exceptionsapi "github.com/mgoodric/security-atlas/internal/api/exceptions"
@@ -51,6 +52,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
@@ -375,6 +377,19 @@ func (s *Server) httpHandler() http.Handler {
 	if s.ingestService != nil {
 		root.Post("/v1/policies/{id}/acknowledge", policyAcksH.Acknowledge)
 	}
+	// Slice 012: control state evaluation engine. Two read-only endpoints
+	// over the control_evaluations ledger. Routes appended per the
+	// parallel-batch convention (chi rejects two Mounts at "/"). Both are
+	// literal-segment sub-resources under /v1/controls/{id}/ alongside slice
+	// 017's /applicability and slice 018's /effective-scope -- chi resolves
+	// declaration order within the same method, so no shadowing. The engine
+	// is a pure read+append surface (it never writes evidence_records --
+	// constitutional invariant #2), so it needs only the DB pool; the NATS
+	// consumer + scheduler that drive evaluation are wired in cmd/atlas.
+	controlStateEngine := eval.NewEngine(eval.NewStore(s.dbPool), scope.NewStore(s.dbPool))
+	controlStateH := controlstateapi.New(controlStateEngine)
+	root.Get("/v1/controls/{id}/state", controlStateH.State)
+	root.Get("/v1/controls/{id}/effectiveness", controlStateH.Effectiveness)
 	// Slice 034: admin credentials HTTP API + auth routes. Routes append
 	// per the parallel-batch convention. Admin-credential routes require
 	// the bearer auth middleware (admin gate inside the handler). The

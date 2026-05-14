@@ -137,6 +137,51 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 012 — Control state evaluation engine.** The evaluation stage
+  of the evidence pipeline (canvas §4.3) lands as the new `internal/eval`
+  package plus migration `_027`. The engine is a read-only consumer of the
+  slice-013 append-only evidence ledger: it reads `evidence_records`, runs
+  each control's `evidence_queries[]`, and computes
+  `(control × scope_cell × time) → {pass, fail, na, inconclusive}` plus a
+  `freshness_status` (`fresh` / `stale` / `no_evidence`), appending the
+  derived state to the new `control_evaluations` table. Constitutional
+  invariant 2 (ingestion and evaluation are separated stages) is enforced
+  structurally — the engine's only writer (`Store.appendEvaluation`) has
+  exactly one INSERT target, `control_evaluations`; there is no code path
+  that touches `evidence_records`, and the ledger is additionally
+  append-only at the RLS layer (slice 013). Because state derives purely
+  from the immutable ledger, point-in-time replay (AC-7) is always
+  possible: `Replay` re-evaluates from the ledger and reproduces identical
+  computed state. `state.go` holds the pure, deterministic rollup logic
+  (`computeResult`, `computeFreshness`, `freshnessMaxAge` mapping the
+  canvas §2.3 freshness table — realtime 24h … annual 400d); wall clock
+  enters only as the freshness-window cutoff, never the pass/fail result,
+  so evaluation is idempotent (AC-3). Out-of-window evidence never reaches
+  the result computation — `inWindowRecords` filters first (P0
+  anti-criterion). A control's `evidence_queries[]` Rego expression, when
+  declared, drives the result instead of the per-record rollup; it runs in
+  a capabilities-restricted OPA sandbox reusing slice 054's
+  `sandboxCapabilities()` pattern (`http.send` / `net.*` / `opa.runtime`
+  stripped so a tenant-authored-adjacent query fails at compile time) with
+  input limited to the in-window records. `manual_attested` controls flow
+  through the same path (invariant 9 / AC-4). Effectiveness (AC-6) is the
+  rolling-30-day pass rate over `control_evaluations` — the canvas §6.2
+  `operational_score` slice 020's risk residual derivation will consume.
+  Two read-only HTTP endpoints, `GET /v1/controls/{id}/state`
+  (`?scope=` predicate filter + `?as-of=` point-in-time horizon) and
+  `GET /v1/controls/{id}/effectiveness`, are appended onto the platform
+  router. AC-2's background job has two halves: an `IngestSubscriber`
+  binds a second durable JetStream consumer to slice 015's evidence stream
+  and re-evaluates the affected control on every ingest, and a `Scheduler`
+  tick loop (mirroring slice 021's `exception.Expirer`) re-evaluates every
+  active control per tenant on a cadence so freshness decay is caught even
+  with no new evidence — both wired in `cmd/atlas`. The issue spec's
+  literal `control_state` table name is superseded by
+  `control_evaluations`: an append-only evaluation ledger
+  (latest-row-by-`evaluated_at` wins per `(control_id, scope_cell_id)`) is
+  what makes AC-7's point-in-time replay meaningful — an upsert table
+  would destroy the prior computed state — and it matches the established
+  `evidence_audit_log` / `aggregation_rule_evaluations` precedent.
 - **Slice 042 — Audit workspace view.** The `/audit` route lands an
   auditor in their assigned `AuditPeriod` context and surfaces the
   end-to-end audit cycle in one Next.js view: left-nav control list,

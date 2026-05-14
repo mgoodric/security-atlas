@@ -4,6 +4,16 @@
 
 This file is created lazily as terms are resolved during design work. Most of the canon lives under `Plans/canvas/` — this is the short index plus the precise definitions that don't have a single-paragraph home there.
 
+## Control evaluation (slice 012)
+
+The output of the **evaluation stage** (canvas §4.3) — the read-only engine that consumes the append-only evidence ledger and computes per-control state. Lives in `internal/eval`. Always:
+
+- **Writes `control_evaluations`, never `evidence_records`.** The table is named `control_evaluations` (the issue spec's literal `control_state` is superseded). It is an **append-only evaluation ledger** — one row per evaluation run per `(control_id, scope_cell_id)`, latest-row-by-`evaluated_at` wins. Append-only is what makes point-in-time replay meaningful (an upsert "current state" table would destroy prior computed state) and matches the `evidence_audit_log` / `aggregation_rule_evaluations` precedent. Slice 016 (freshness read-model) and slice 020 (risk residual) consume this table by that name.
+- **`result`** is the slice-002 `evidence_result` enum (`pass` / `fail` / `na` / `inconclusive`). Zero in-window evidence → `inconclusive`, never `fail` (absence of evidence is not evidence of failure). Any in-window `fail` → `fail`; any in-window `pass` (no fail) → `pass`.
+- **`freshness_status`** (`fresh` / `stale` / `no_evidence`) is orthogonal to `result`. Computed inline from raw `observed_at` + the control's `freshness_class` max-age (canvas §2.3) — the materialized freshness read-model is slice 016, which depends on 012. Out-of-window evidence never reaches the `result` computation.
+- **Idempotent + replayable.** The computed columns are a deterministic function of the ledger slice; wall clock enters only as the freshness-window cutoff and the `evaluated_at` stamp, never the result. Deleting every `control_evaluations` row and re-running `Replay` reproduces identical computed state.
+- **Live vs period-bounded.** `GET /v1/controls/{id}/state` is the slice-012 **live** entrypoint (per the AuditPeriod note below); `GET /v1/audit-periods/{id}/control-state` is slice 028's period-bounded entrypoint. The two share no SQL.
+
 ## Coverage (slice 008)
 
 The graph-traversal result that answers "what is the relationship between a framework requirement and a tenant's controls?" — produced by joining `framework_requirements → fw_to_scf_edges → scf_anchors → controls.scf_anchor_id`. Always:
