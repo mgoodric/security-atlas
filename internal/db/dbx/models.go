@@ -907,6 +907,16 @@ type AuditorAssignment struct {
 	GrantedBy     string             `json:"granted_by"`
 }
 
+type BoardBrief struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	PeriodEnd   pgtype.Date        `json:"period_end"`
+	GeneratedAt pgtype.Timestamptz `json:"generated_at"`
+	Content     []byte             `json:"content"`
+	NarrativeMd string             `json:"narrative_md"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type Control struct {
 	ID                   pgtype.UUID               `json:"id"`
 	TenantID             pgtype.UUID               `json:"tenant_id"`

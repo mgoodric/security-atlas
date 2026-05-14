@@ -23,6 +23,7 @@ import (
 	auditperiodsapi "github.com/mgoodric/security-atlas/internal/api/auditperiods"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
+	boardapi "github.com/mgoodric/security-atlas/internal/api/board"
 	controldetailapi "github.com/mgoodric/security-atlas/internal/api/controldetail"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	controlstateapi "github.com/mgoodric/security-atlas/internal/api/controlstate"
@@ -54,6 +55,7 @@ import (
 	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/audit/walkthrough"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
+	"github.com/mgoodric/security-atlas/internal/board"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/decision"
@@ -484,6 +486,21 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/frameworks/posture", dashboardH.FrameworkPosture)
 	root.Get("/v1/activity", dashboardH.Activity)
 	root.Get("/v1/upcoming", dashboardH.Upcoming)
+	// Slice 031: monthly board brief. Generates a single-page, board-ready
+	// posture snapshot (per-framework posture + 30-day drift + top-3 risks
+	// aging) and persists it as a PINNED, IMMUTABLE snapshot (canvas §7.5).
+	// The Generator is a pure reader of the slice-016 freshness + drift read
+	// models (reused via the freshnessStore + driftStore constructed above)
+	// plus the frameworks + risks tables; its only write target is the
+	// append-only board_briefs table. The narrative is TEMPLATED — no LLM
+	// (AC-6, P0 anti-criterion). Routes appended per the parallel-batch
+	// convention (chi rejects two Mounts at "/"); the literal-suffix routes
+	// (/{id}.md, /{id}/pdf) are declared before the bare /{id} so chi's
+	// declaration-order match keeps them ahead of the generic id route.
+	boardStore := board.NewStore(s.dbPool)
+	boardGen := board.NewGenerator(boardStore, freshnessStore, driftStore)
+	boardH := boardapi.New(boardGen, boardStore)
+	boardH.RegisterRoutes(root)
 	// Slice 034: admin credentials HTTP API + auth routes. Routes append
 	// per the parallel-batch convention. Admin-credential routes require
 	// the bearer auth middleware (admin gate inside the handler). The
