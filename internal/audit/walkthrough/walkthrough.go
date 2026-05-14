@@ -251,8 +251,16 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (Walkthrough, error) {
 		if err != nil {
 			return fmt.Errorf("recompute hash: %w", err)
 		}
+		// Copy the assembled walkthrough into the function result, then
+		// flip TamperDetected on `out` directly when the hash mismatch
+		// is detected. (Writing `wt.TamperDetected = true` before the
+		// copy is functionally identical, but CodeQL's
+		// `go/useless-assignment-to-field` taint analysis can't see
+		// through the value copy and flags the local-var write as
+		// useless.)
+		out = wt
 		if !hashEqual(recomputed, wt.CanonicalHash) {
-			wt.TamperDetected = true
+			out.TamperDetected = true
 			// Best-effort: log the detection. A failure here does NOT
 			// fail the Get -- the auditor still needs to see the row.
 			_ = writeLog(ctx, q, tenantID, row.ID, "tamper_detected", "system",
@@ -261,7 +269,6 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (Walkthrough, error) {
 					"recomputed_hash": hex.EncodeToString(recomputed),
 				})
 		}
-		out = wt
 		return nil
 	})
 	return out, err
