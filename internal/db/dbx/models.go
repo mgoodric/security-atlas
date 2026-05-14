@@ -962,20 +962,21 @@ type ControlEvaluation struct {
 }
 
 type Decision struct {
-	ID            pgtype.UUID        `json:"id"`
-	TenantID      pgtype.UUID        `json:"tenant_id"`
-	DecisionID    string             `json:"decision_id"`
-	Title         string             `json:"title"`
-	Narrative     string             `json:"narrative"`
-	Constraints   []string           `json:"constraints"`
-	Tradeoffs     string             `json:"tradeoffs"`
-	DecisionMaker string             `json:"decision_maker"`
-	DecidedAt     pgtype.Timestamptz `json:"decided_at"`
-	RevisitBy     pgtype.Date        `json:"revisit_by"`
-	Status        DecisionStatus     `json:"status"`
-	SupersededBy  pgtype.UUID        `json:"superseded_by"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ID                   pgtype.UUID        `json:"id"`
+	TenantID             pgtype.UUID        `json:"tenant_id"`
+	DecisionID           string             `json:"decision_id"`
+	Title                string             `json:"title"`
+	Narrative            string             `json:"narrative"`
+	Constraints          []string           `json:"constraints"`
+	Tradeoffs            string             `json:"tradeoffs"`
+	DecisionMaker        string             `json:"decision_maker"`
+	DecidedAt            pgtype.Timestamptz `json:"decided_at"`
+	RevisitBy            pgtype.Date        `json:"revisit_by"`
+	Status               DecisionStatus     `json:"status"`
+	SupersededBy         pgtype.UUID        `json:"superseded_by"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	AuditNarrativeOptOut bool               `json:"audit_narrative_opt_out"`
 }
 
 type DecisionAuditLog struct {
@@ -1020,6 +1021,16 @@ type DecisionScopePredicate struct {
 	TargetID   pgtype.UUID        `json:"target_id"`
 	TenantID   pgtype.UUID        `json:"tenant_id"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type DecisionsAudit struct {
+	ID         pgtype.UUID        `json:"id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	DecisionID pgtype.UUID        `json:"decision_id"`
+	Action     string             `json:"action"`
+	Actor      string             `json:"actor"`
+	Detail     string             `json:"detail"`
+	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
 }
 
 type EvidenceAuditLog struct {

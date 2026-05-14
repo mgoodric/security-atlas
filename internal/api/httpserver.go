@@ -27,6 +27,7 @@ import (
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	controlstateapi "github.com/mgoodric/security-atlas/internal/api/controlstate"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	decisionsapi "github.com/mgoodric/security-atlas/internal/api/decisions"
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
 	exceptionsapi "github.com/mgoodric/security-atlas/internal/api/exceptions"
 	featuresapi "github.com/mgoodric/security-atlas/internal/api/features"
@@ -54,6 +55,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/decision"
 	"github.com/mgoodric/security-atlas/internal/drift"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/exception"
@@ -375,6 +377,24 @@ func (s *Server) httpHandler() http.Handler {
 	root.Patch("/v1/exceptions/{id}/approve", exceptionsH.Approve)
 	root.Patch("/v1/exceptions/{id}/deny", exceptionsH.Deny)
 	root.Patch("/v1/exceptions/{id}/activate", exceptionsH.Activate)
+	// Slice 055: Decision Log CRUD + linkage (canvas Â§6.7). Routes appended
+	// per the parallel-batch convention -- chi.Mux rejects two Mounts at
+	// "/", so individual routes register onto the root. The literal-segment
+	// route /v1/decisions/overdue is declared BEFORE the bare
+	// /v1/decisions/{id} so chi's declaration-order match keeps the calendar
+	// route ahead of the generic UUID-id route. The link sub-resource
+	// routes are declared after the bare /{id} routes but use distinct path
+	// shapes (/{id}/links/{kind}[/{targetID}]) so there is no shadowing.
+	decisionsH := decisionsapi.New(decision.NewStore(s.dbPool))
+	root.Post("/v1/decisions", decisionsH.CreateDecision)
+	root.Get("/v1/decisions", decisionsH.ListDecisions)
+	root.Get("/v1/decisions/overdue", decisionsH.Overdue)
+	root.Get("/v1/decisions/{id}", decisionsH.GetDecision)
+	root.Get("/v1/decisions/{id}/audit-log", decisionsH.AuditLog)
+	root.Patch("/v1/decisions/{id}", decisionsH.UpdateDecision)
+	root.Post("/v1/decisions/{id}/supersede", decisionsH.Supersede)
+	root.Post("/v1/decisions/{id}/links/{kind}", decisionsH.AddLink)
+	root.Delete("/v1/decisions/{id}/links/{kind}/{targetID}", decisionsH.RemoveLink)
 	// Slice 022: policy library. Routes appended per the parallel-batch
 	// convention (chi rejects two Mounts at "/"). Sub-resource transitions
 	// (submit/approve/publish) are declared before /{id} so chi's

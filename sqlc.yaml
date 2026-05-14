@@ -35,6 +35,7 @@ sql:
       - "migrations/sql/20260511000027_control_evaluations.sql"
       - "migrations/sql/20260511000028_evidence_freshness_drift.sql"
       - "migrations/sql/20260511000029_risk_control_links.sql"
+      - "migrations/sql/20260511000030_decisions_audit.sql"
     queries: "internal/db/queries"
     gen:
       go:

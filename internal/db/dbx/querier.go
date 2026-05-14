@@ -67,6 +67,17 @@ type Querier interface {
 	AttachPopulationToPeriod(ctx context.Context, arg AttachPopulationToPeriodParams) error
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
+	// Slice 055 overdue-job dedup probe: has this decision already had an
+	// `overdue_notified` audit row written? A non-zero count means the daily
+	// job already notified the decision_maker -- skip re-emission (P0
+	// anti-criterion: one notification per overdue decision, never repeated).
+	// Served index-only by idx_decisions_audit_overdue_notified.
+	CountDecisionOverdueNotifications(ctx context.Context, arg CountDecisionOverdueNotificationsParams) (int64, error)
+	// Slice 055: count decisions whose decided_at falls on a given UTC calendar
+	// date. Drives the per-tenant per-day NNNN sequence in the
+	// DL-YYYY-MM-DD-NNNN identifier. $2 is the start-of-day (inclusive), $3 the
+	// start of the next day (exclusive).
+	CountDecisionsByDecidedDate(ctx context.Context, arg CountDecisionsByDecidedDateParams) (int64, error)
 	CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountFrameworkRequirementsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
 	// Rate numerator: distinct user_ids who (a) are in the denominator set
@@ -813,6 +824,9 @@ type Querier interface {
 	// BOTH the UUID control_id path and the free-form control_ref path (slice
 	// 013), so evidence pushed under an SCF-anchor string is still counted.
 	ListControlsWithLatestEvidence(ctx context.Context, tenantID pgtype.UUID) ([]ListControlsWithLatestEvidenceRow, error)
+	// The audit trail for a single decision, oldest first. Powers the
+	// decision-detail audit-log rail.
+	ListDecisionAudit(ctx context.Context, arg ListDecisionAuditParams) ([]DecisionsAudit, error)
 	ListDecisionControls(ctx context.Context, arg ListDecisionControlsParams) ([]ListDecisionControlsRow, error)
 	ListDecisionExceptions(ctx context.Context, arg ListDecisionExceptionsParams) ([]ListDecisionExceptionsRow, error)
 	ListDecisionRisks(ctx context.Context, arg ListDecisionRisksParams) ([]ListDecisionRisksRow, error)
@@ -961,6 +975,10 @@ type Querier interface {
 	// generated in code (no static sqlc query yet — see slice 056).
 	ListOrgUnitChildren(ctx context.Context, arg ListOrgUnitChildrenParams) ([]OrgUnit, error)
 	ListOrgUnits(ctx context.Context, tenantID pgtype.UUID) ([]OrgUnit, error)
+	// Slice 055: active decisions whose revisit_by has already passed. $2 is
+	// "today" (a DATE). Powers GET /v1/decisions/overdue and the daily
+	// overdue-notification job.
+	ListOverdueDecisions(ctx context.Context, arg ListOverdueDecisionsParams) ([]Decision, error)
 	// AC-4 overdue calc — vendors whose last_review_date + cadence is older than
 	// the cutoff date. NULL last_review_date means "never reviewed" which always
 	// counts as overdue (a vendor with no review on file is by definition past
@@ -1096,6 +1114,10 @@ type Querier interface {
 	// tenant's GUC before running ExpireActiveExceptionsBefore. Runs as the
 	// migrator role (BYPASSRLS) so it sees every tenant.
 	ListTenantsWithActiveExceptions(ctx context.Context) ([]pgtype.UUID, error)
+	// Slice 055: every tenant with at least one active, overdue decision. Run
+	// by the daily overdue-notification job as the migrator role (BYPASSRLS)
+	// to enumerate tenants before applying each tenant's GUC. $1 is "today".
+	ListTenantsWithOverdueDecisions(ctx context.Context, revisitBy pgtype.Date) ([]pgtype.UUID, error)
 	// Slice 029 notification dispatch helper. Returns the distinct authors
 	// of every note in the thread (shared OR private, all variants), used
 	// to compute who should receive a notification when a new reply lands.
@@ -1180,6 +1202,8 @@ type Querier interface {
 	// Same-tx update so the row never observes the partial state from
 	// outside.
 	SetAcknowledgmentEvidenceRecord(ctx context.Context, arg SetAcknowledgmentEvidenceRecordParams) error
+	// Slice 055: flip the per-decision OSCAL-narrative opt-out flag.
+	SetDecisionAuditNarrativeOptOut(ctx context.Context, arg SetDecisionAuditNarrativeOptOutParams) (Decision, error)
 	// Point a framework at its current version.
 	SetLatestVersion(ctx context.Context, arg SetLatestVersionParams) error
 	// Stamp populations.frozen_at from the parent period's frozen_at. Called
@@ -1193,6 +1217,12 @@ type Querier interface {
 	SubmitFrameworkScope(ctx context.Context, arg SubmitFrameworkScopeParams) (FrameworkScope, error)
 	// Transition: draft -> under_review. Operator action; no role gate.
 	SubmitPolicyForReview(ctx context.Context, arg SubmitPolicyForReviewParams) (Policy, error)
+	// Slice 055: mark a decision superseded and point superseded_by at the
+	// replacement. The WHERE status = 'active' guard means a non-active (already
+	// superseded / expired) decision returns zero rows -- the store
+	// disambiguates that into a 409. The old row is never deleted (P0
+	// anti-criterion); only its status + superseded_by + updated_at change.
+	SupersedeDecision(ctx context.Context, arg SupersedeDecisionParams) (Decision, error)
 	// Part 1 of the two-step Publish: marks the prior 'published' row as
 	// 'superseded'. Used inside the same transaction as InsertPublishedPolicy
 	// so the chain transition is atomic. Returns the updated prior row so the
@@ -1330,6 +1360,21 @@ type Querier interface {
 	// population_attached). detail is a free-form JSONB for action-specific
 	// payload (e.g., the rejected freeze attempt records the offending actor).
 	WriteAuditPeriodLog(ctx context.Context, arg WriteAuditPeriodLogParams) (AuditPeriodAuditLog, error)
+	// Decision Log audit log (slice 055, migration _030).
+	//
+	// decisions_audit is an append-only mutation log: every PATCH, supersede,
+	// link add/remove, denied cross-tenant link attempt, and overdue-notification
+	// emission writes one row. There is no UPDATE or DELETE query -- the table
+	// has no UPDATE/DELETE RLS policy and atlas_app has no UPDATE/DELETE grant,
+	// so an UPDATE/DELETE query would fail at runtime anyway. Append-only by
+	// construction.
+	//
+	// All queries are tenant-scoped via the leading (tenant_id, ...); RLS under
+	// FORCE keeps the cross-tenant boundary safe even on a misconfigured query.
+	// Append one audit row. `action` is one of the decisions_audit_action_chk
+	// enum values; `detail` is free-form context (a diff, a link target id, a
+	// replacement decision id, a notification recipient, etc.).
+	WriteDecisionAudit(ctx context.Context, arg WriteDecisionAuditParams) (DecisionsAudit, error)
 	// Append-only. Every lifecycle transition writes one row (including
 	// system-driven auto-expiry). The exception_audit_log table has
 	// SELECT+INSERT policies only under FORCE RLS so no UPDATE/DELETE path
