@@ -41,6 +41,29 @@ jobs:
     name: Open / update release PR
     runs-on: ubuntu-latest
     steps:
+      # Mint a GitHub App installation token when the App is configured.
+      #
+      # WHY: GitHub's anti-recursion rule says a workflow run triggered by
+      # `GITHUB_TOKEN` does NOT trigger further workflow runs. release-please
+      # runs as a workflow; if it creates / force-updates the release PR's
+      # branch with GITHUB_TOKEN, the `pull_request` event never fires the
+      # required-check CI matrix — the release PR deadlocks at 1/10 checks
+      # and can never satisfy branch protection. A GitHub App installation
+      # token is attributed to the App, not to GITHUB_TOKEN, so the CI
+      # matrix runs on the release PR normally.
+      #
+      # GRACEFUL FALLBACK: until the App is set up (the repo variable
+      # `RELEASE_PLEASE_APP_ID` is unset), this step is skipped and the
+      # workflow falls back to GITHUB_TOKEN. release-please still opens /
+      # updates the PR — the PR just won't get CI until the App is
+      # configured. Setup steps: docs/RELEASE_READINESS.md §10.
+      - name: Mint GitHub App token
+        id: app-token
+        if: ${{ vars.RELEASE_PLEASE_APP_ID != '' }}
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
       - name: Run release-please
         uses: googleapis/release-please-action@v4
         with:
@@ -53,8 +76,7 @@ jobs:
           # every release requires explicit human approval. release-please
           # opens / updates the PR and that's it.
           skip-github-release: false
-          # Release-please needs to be able to push to a branch named
-          # release-please--... and to open a PR against main; the default
-          # GITHUB_TOKEN has the needed scopes when permissions: above is
-          # set.
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # App installation token when the App is configured; GITHUB_TOKEN
+          # fallback otherwise. The App token is what lets the CI matrix
+          # run on the release PR (see the "Mint GitHub App token" comment).
+          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
