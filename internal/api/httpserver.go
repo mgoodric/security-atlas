@@ -178,7 +178,15 @@ func (s *Server) httpHandler() http.Handler {
 	// parallel-batch convention — chi.Mux rejects two Mounts at "/", and other
 	// batches are also appending here, so order-of-append must not matter.
 	risksStore := risk.NewStore(s.dbPool)
-	risksH := risksapi.New(risksStore)
+	// Slice 020: the residual deriver ties risk-control links to slice 012's
+	// evaluation engine. GET /v1/risks/{id} returns the derived residual +
+	// effectiveness breakdown when this is attached; POST
+	// /v1/risks/{id}/controls links a control and recomputes residual.
+	risksDeriver := risk.NewResidualDeriver(
+		risksStore,
+		eval.NewEngine(eval.NewStore(s.dbPool), scope.NewStore(s.dbPool)),
+	)
+	risksH := risksapi.New(risksStore).WithDeriver(risksDeriver)
 	root.Post("/v1/risks", risksH.CreateRisk)
 	root.Get("/v1/risks", risksH.ListRisks)
 	root.Get("/v1/risks/heatmap", risksH.Heatmap)
@@ -187,6 +195,10 @@ func (s *Server) httpHandler() http.Handler {
 	// /v1/risks/{id} so chi's declaration-order match keeps them ahead.
 	root.Post("/v1/risks/aggregate", risksH.Aggregate)
 	root.Get("/v1/risks/{id}/aggregation", risksH.LiveAggregation)
+	// Slice 020: POST /v1/risks/{id}/controls — link a control to a risk.
+	// Literal-suffix route declared before the generic /v1/risks/{id} so
+	// chi's declaration-order match keeps it ahead.
+	root.Post("/v1/risks/{id}/controls", risksH.LinkControl)
 	root.Get("/v1/risks/{id}", risksH.GetRisk)
 	root.Delete("/v1/risks/{id}", risksH.DeleteRisk)
 	// Slice 053: theme catalog + per-risk theme tagging.

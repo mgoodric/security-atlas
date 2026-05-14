@@ -34,6 +34,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/freshnessdrift"
+	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
 const (
@@ -159,6 +160,24 @@ func main() {
 			logger,
 		)
 		fmt.Fprintf(os.Stderr, "atlas: freshness/drift refresh subscriber ready (slice 016)\n")
+	}
+
+	// Slice 020: the residual subscriber binds a FOURTH durable JetStream
+	// consumer to the same evidence-ingest stream. On every ingested record
+	// it recomputes residual risk for every risk linked to the affected
+	// control. It re-evaluates each control from the ledger first (the
+	// EvaluateControl-first race fix), so a just-ingested record is reflected
+	// even before slice 012's own subscriber writes the new evaluation row.
+	// Only wired when NATS + the DB pool are both available.
+	var residualSubscriber *risk.ResidualSubscriber
+	if streamConn != nil && pool != nil {
+		residualSubscriber = risk.NewResidualSubscriber(
+			streamConn.Stream(),
+			streamConn.Cfg().Subject,
+			pool,
+			logger,
+		)
+		fmt.Fprintf(os.Stderr, "atlas: risk residual subscriber ready (slice 020)\n")
 	}
 
 	cfg := api.Config{
@@ -364,6 +383,20 @@ func main() {
 			fmt.Fprintf(os.Stderr, "atlas: freshness/drift refresh subscriber starting\n")
 			if err := freshnessDriftSubscriber.Start(ctx); err != nil {
 				errCh <- fmt.Errorf("freshness/drift refresh subscriber: %w", err)
+			}
+		}()
+	}
+
+	// Slice 020: drive the risk residual subscriber alongside the other
+	// consumers. Shares the same stop signal so SIGTERM tears it down with
+	// everything else (AC-5).
+	if residualSubscriber != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fmt.Fprintf(os.Stderr, "atlas: risk residual subscriber starting\n")
+			if err := residualSubscriber.Start(ctx); err != nil {
+				errCh <- fmt.Errorf("risk residual subscriber: %w", err)
 			}
 		}()
 	}
