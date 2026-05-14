@@ -11,6 +11,32 @@ auto-generated notes.
 
 ## [Unreleased]
 
+### Added
+
+- **Slice 060 — Admin settings UI shell.** Surfaces the existing admin
+  backends (slice 034 API keys, slice 059 feature flags) in the
+  Next.js 15 + shadcn/ui frontend, gated by an admin-only layout that
+  hits the BFF `/api/admin/me` self-introspection endpoint and renders
+  a 403 page (not a 404) for non-admin signed-in users (AC-7). API
+  keys page honors the slice 034 AC-9 write-once-bearer contract — the
+  plaintext shows in a dismissible callout exactly once on issue or
+  rotate and is never re-fetched (P0). Features page groups flags by
+  category, requires explicit modal confirmation on every flip in
+  either direction, and never auto-enables (P0). SSO, Users, and Audit
+  pages ship as scaffolds with documented backend gaps — the
+  `/v1/admin/sso` CRUD endpoint, the `/v1/admin/users` list, and the
+  unified `/v1/admin/audit-log` read are NOT on main and ship in the
+  follow-up slice (tentatively 060.5). The role-permission matrix on
+  `/admin/users` is the operator-facing source for the five RBAC
+  roles defined in canvas §9.5 and is one of three HITL surfaces
+  flagged for human review on the slice 060 PR; the others are the
+  SSO callback-URL preflight UX and the feature-flag descriptions.
+  Mobile responsive down to 375px (AC-8). Playwright E2E spec
+  authored at `web/e2e/admin-bootstrap.spec.ts` ahead of the
+  Playwright runner install (AC-10) — file documents the six-step
+  bootstrap flow and the pre-conditions for running it. HITL review
+  log at `docs/audit-log/admin-ui-review.md`.
+
 ### Changed
 
 - **CI — release-please skips pure-docs commits.** `.github/workflows/release-please.yml`

@@ -438,3 +438,162 @@ export async function uploadArtifact(
     throw new APIError(res.status, `${res.status} ${res.statusText}`);
   return (await res.json()) as ArtifactUploadResponse;
 }
+
+// ===== Slice 060 — Admin settings (API keys + features) =====
+//
+// The admin section binds to three already-shipped backend surfaces:
+//   * /v1/admin/credentials (slice 034 — issue / list / rotate / revoke)
+//   * /v1/admin/features    (slice 059 — list + per-key PATCH)
+//   * cred.IsAdmin          (slice 034 — boolean on the calling credential)
+//
+// SSO config CRUD, the user/roles list, and a unified audit-log read
+// model are NOT on main as of slice 060; those page surfaces ship as
+// empty-state placeholders that name the missing endpoint and the
+// follow-up slice. See `Plans/canvas/10-roadmap.md` and the slice 060 PR
+// description for the gap inventory.
+
+export type AdminCredential = {
+  id: string;
+  tenant_id: string;
+  scope_predicate: string;
+  allowed_kinds: string[];
+  last4: string;
+  issued_at: string;
+  last_used_at?: string | null;
+  is_admin: boolean;
+  is_approver: boolean;
+  owner_roles: string[];
+  rotated_from?: string | null;
+};
+
+export type AdminCredentialListResponse = { items: AdminCredential[] };
+
+export type AdminCredentialIssueRequest = {
+  scope_predicate: string;
+  allowed_kinds: string[];
+  ttl_seconds: number;
+  is_admin: boolean;
+  is_approver: boolean;
+  owner_roles: string[];
+};
+
+export type AdminCredentialIssueResponse = {
+  id: string;
+  tenant_id: string;
+  bearer_token: string;
+  last4: string;
+  issued_at: string;
+  expires_at?: string;
+};
+
+export type AdminCredentialRotateResponse = {
+  id: string;
+  bearer_token: string;
+  last4: string;
+  predecessor_expires_at: string;
+};
+
+export async function listAdminCredentials(
+  bearer: string,
+): Promise<AdminCredential[]> {
+  const res = await apiFetch(`/v1/admin/credentials`, bearer);
+  const body = (await res.json()) as AdminCredentialListResponse;
+  return body.items;
+}
+
+export async function issueAdminCredential(
+  bearer: string,
+  body: AdminCredentialIssueRequest,
+): Promise<AdminCredentialIssueResponse> {
+  const res = await fetch(`${apiBaseURL()}/v1/admin/credentials`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as AdminCredentialIssueResponse;
+}
+
+export async function rotateAdminCredential(
+  bearer: string,
+  id: string,
+): Promise<AdminCredentialRotateResponse> {
+  const res = await fetch(
+    `${apiBaseURL()}/v1/admin/credentials/${encodeURIComponent(id)}/rotate`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${bearer}` },
+    },
+  );
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as AdminCredentialRotateResponse;
+}
+
+export async function revokeAdminCredential(
+  bearer: string,
+  id: string,
+): Promise<void> {
+  const res = await fetch(
+    `${apiBaseURL()}/v1/admin/credentials/${encodeURIComponent(id)}/revoke`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${bearer}` },
+    },
+  );
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+}
+
+export type FeatureFlag = {
+  key: string;
+  enabled: boolean;
+  description: string;
+  category: string;
+  last_changed_by?: string;
+  last_changed_at?: string | null;
+  has_override: boolean;
+};
+
+export type FeatureFlagListResponse = { items: FeatureFlag[] };
+
+export type FeatureFlagPatchResponse = {
+  key: string;
+  enabled: boolean;
+  has_override: boolean;
+};
+
+export async function listFeatureFlags(bearer: string): Promise<FeatureFlag[]> {
+  const res = await apiFetch(`/v1/admin/features`, bearer);
+  const body = (await res.json()) as FeatureFlagListResponse;
+  return body.items;
+}
+
+export async function patchFeatureFlag(
+  bearer: string,
+  key: string,
+  body: { enabled: boolean; reason?: string },
+): Promise<FeatureFlagPatchResponse> {
+  const res = await fetch(
+    `${apiBaseURL()}/v1/admin/features/${encodeURIComponent(key)}`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${bearer}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as FeatureFlagPatchResponse;
+}
