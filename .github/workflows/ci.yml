@@ -526,3 +526,18 @@ jobs:
           docker compose -f deploy/docker/docker-compose.yml \
             --env-file /tmp/compose-logs.env \
             -p "sa-selfhost-${{ matrix.mode }}" logs || true
+
+  # Slice 061 stub: posts pass under the SAME check name
+  # (`Self-host bundle · end-to-end`) when the PR touches no code.
+  # Mutually exclusive with `test-self-host-bundle` above via inverted
+  # `if:`. The real job uses a matrix that produces `(bundled)` and
+  # `(external)` expansions when it runs; the stub posts the base name
+  # only — sufficient because this check is non-required and the only
+  # purpose of the stub is to keep the rollup green on docs-only PRs.
+  test-self-host-bundle-stub:
+    name: Self-host bundle · end-to-end
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
