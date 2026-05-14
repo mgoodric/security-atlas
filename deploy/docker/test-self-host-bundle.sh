@@ -59,7 +59,18 @@ ENV_FILE="${COMPOSE_DIR}/.env.test"
 COMPOSE=(docker compose -f "${COMPOSE_DIR}/docker-compose.yml" --env-file "${ENV_FILE}" -p "sa-selfhost-${MODE}")
 
 log()  { echo "[test-self-host:${MODE}] $*"; }
-fail() { echo "[test-self-host:${MODE}] FAIL: $*" >&2; exit 1; }
+fail() {
+    echo "[test-self-host:${MODE}] FAIL: $*" >&2
+    # Dump full compose logs for EVERY service (especially atlas) to stdout
+    # BEFORE the EXIT trap's cleanup() tears the stack down. Without this,
+    # `cleanup` runs `down -v` first and CI's later "Dump compose logs on
+    # failure" step prints nothing — every self-host e2e failure used to
+    # destroy the atlas server logs before anyone could read them.
+    echo "[test-self-host:${MODE}] ==== compose logs (all services, tail=300) ====" >&2
+    "${COMPOSE[@]}" logs --no-color --tail=300 2>&1 || true
+    echo "[test-self-host:${MODE}] ==== end compose logs ====" >&2
+    exit 1
+}
 
 cleanup() {
     log "tearing down"

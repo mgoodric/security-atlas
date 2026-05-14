@@ -25,16 +25,16 @@ use · Confidence per decision). It does NOT block merge.
 
 This is factually wrong. Ground-truth audit of the codebase:
 
-| Source | Form | Evidence |
-|---|---|---|
-| `Plans/EVIDENCE_SDK.md` §4.5 | **`.v1`-suffixed** | "A stable identifier (`sast.scan_result.v1`, `access_review.completion.v1`, `manual.attestation.v1`)" + push-record example line 119 `"evidence_kind": "sast.scan_result.v1"` |
-| `Plans/EVIDENCE_SDK.md` §6 (CLI) | **`.v1`-suffixed** | `--kind sast.scan_result.v1` |
-| `docs/issues/014` AC-3 | **`.v1`-suffixed** | "ships ~10 v1 platform schemas: `sast.scan_result.v1`, ..." |
-| All 9 first-party connectors | **`.v1`-suffixed** | `EvidenceKind: "osquery.host_posture.v1"`, AWS `SupportedKind = "aws.s3.bucket_encryption_state.v1"`, etc. |
-| `DefaultSeed()` | **`.v1`-suffixed** | `{Kind: "osquery.host_posture.v1", Version: "1.0.0"}` |
-| All 16 bundled JSON schema files | **`.v1`-suffixed** | `"x-evidence-kind": "osquery.host_posture.v1"` |
-| `cmd/atlas-cli/cmd_evidence.go` help | **`.v1`-suffixed** | `"evidence_kind (e.g., sast.scan_result.v1)"` |
-| **`controls/soc2/*/control.yaml`** | **bare** ← the actual drift | `evidence_kind: osquery.host_posture` |
+| Source                               | Form                        | Evidence                                                                                                                                                                      |
+| ------------------------------------ | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Plans/EVIDENCE_SDK.md` §4.5         | **`.v1`-suffixed**          | "A stable identifier (`sast.scan_result.v1`, `access_review.completion.v1`, `manual.attestation.v1`)" + push-record example line 119 `"evidence_kind": "sast.scan_result.v1"` |
+| `Plans/EVIDENCE_SDK.md` §6 (CLI)     | **`.v1`-suffixed**          | `--kind sast.scan_result.v1`                                                                                                                                                  |
+| `docs/issues/014` AC-3               | **`.v1`-suffixed**          | "ships ~10 v1 platform schemas: `sast.scan_result.v1`, ..."                                                                                                                   |
+| All 9 first-party connectors         | **`.v1`-suffixed**          | `EvidenceKind: "osquery.host_posture.v1"`, AWS `SupportedKind = "aws.s3.bucket_encryption_state.v1"`, etc.                                                                    |
+| `DefaultSeed()`                      | **`.v1`-suffixed**          | `{Kind: "osquery.host_posture.v1", Version: "1.0.0"}`                                                                                                                         |
+| All 16 bundled JSON schema files     | **`.v1`-suffixed**          | `"x-evidence-kind": "osquery.host_posture.v1"`                                                                                                                                |
+| `cmd/atlas-cli/cmd_evidence.go` help | **`.v1`-suffixed**          | `"evidence_kind (e.g., sast.scan_result.v1)"`                                                                                                                                 |
+| **`controls/soc2/*/control.yaml`**   | **bare** ← the actual drift | `evidence_kind: osquery.host_posture`                                                                                                                                         |
 
 The push path uses a `.v1`-suffixed `EvidenceKind` plus a separate
 `SchemaVersion` (`"1.0.0"`) — exactly the canvas's "stable identifier +
@@ -81,14 +81,14 @@ both sides simply agree on one canonical string.
 **Confidence: high** — proven by an integration-style test over the real
 validation code and the real bundle files.
 
-### 3. Schema *directory* names left bare — cosmetic, not load-bearing
+### 3. Schema _directory_ names left bare — cosmetic, not load-bearing
 
 **The question.** The `internal/api/schemaregistry/schemas/` directories
 are bare (`osquery.host_posture/`) while their `x-evidence-kind` values
 are `.v1`-suffixed. Should the directories be renamed to match?
 
 **Chosen.** Left as-is. `LoadPlatformSchemas` already strips the
-`.v<major>` suffix from `x-evidence-kind` to derive the *expected*
+`.v<major>` suffix from `x-evidence-kind` to derive the _expected_
 directory name, and that path-consistency check passes today. The
 registered identifier comes from `x-evidence-kind` (`.v1`-suffixed), not
 the directory name — so the directory name is a discovery breadcrumb,
