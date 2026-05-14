@@ -11,6 +11,30 @@ auto-generated notes.
 
 ## [Unreleased]
 
+### Changed
+
+- **Dev-process: `HITL` slice type replaced with `JUDGMENT`.** The
+  slice-development workflow previously blocked a slice's merge on a
+  human sign-off for subjective calls (control-text accuracy,
+  role-permission matrices, UX copy, rule-DSL shape, OSCAL
+  conformance). In practice the maintainer can't evaluate most of
+  those with real confidence until the product is in actual use, so
+  the sign-off was friction without signal. New model: Claude makes
+  the judgment call with best-reasoned, pattern-matched judgment,
+  writes a decisions log at `docs/audit-log/<NNN>-<slug>-decisions.md`
+  (Decisions made · Revisit once in use · Confidence per decision),
+  and the slice merges when CI is green. The maintainer iterates
+  post-deployment from the revisit list. Updated:
+  `Plans/prompts/04-per-slice-template.md` (new "Slice types"
+  section + workflow step 8b), `Plans/prompts/05-parallel-batch.md`
+  (HITL removed as a batching constraint; "solo-by-design" reframed
+  to file-conflict-only), `CLAUDE.md` (note distinguishing
+  dev-process judgment from the product's runtime AI-assist
+  boundary), slice docs 030 + 058 (`Type: HITL` → `JUDGMENT`). The
+  product's constitutional AI-assist boundary — no audit-binding
+  artifact published without one-click human approval at runtime —
+  is untouched.
+
 ### Added
 
 - **Slice 042 — Audit workspace view.** The `/audit` route lands an

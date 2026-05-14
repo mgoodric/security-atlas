@@ -24,7 +24,7 @@ Step 1 — Conflict-safe selection (report-back BEFORE acting):
    - Why each picked slice is conflict-safe vs the others
    - Migration sequence numbers allocated, if any
    - Any ready-set slice you deliberately skipped and why
-   - Cap recommendation (3 default; lower if review burden seems high)
+   - Cap recommendation (3 default; lower only if file-conflict surface between picks is hard to predict — NOT for "review burden", which no longer exists under the JUDGMENT-slice model)
    - Open-questions check: explicitly state that no picked slice has an unresolved open question in Plans/canvas/11-open-questions.md
 
 Step 2 — On approval, set up worktrees AND flip status atomically (via status-only PR):
@@ -57,7 +57,8 @@ Launch N Engineer subagents in parallel (single message, multiple Agent tool cal
 
 PLUS these explicit pattern-reuse directives (drawn from prior batches' learnings):
 
-- HARD RULE — DO NOT STALL. The slice is not done until the PR is open on GitHub. The most common stall shape is returning grill-with-docs analysis (or ship-gate / security-review output) as a "final report" instead of executing the implementation. If you find yourself drafting any such report and the PR is not yet open, STOP drafting and finish the workflow first. Commit + push + open PR + flip _STATUS.md to `in-review` are non-optional steps, not appendices. **Specifically: after grill-with-docs completes, immediately proceed to tdd in the SAME agent turn — do NOT return to caller after the grill.** (Stall observed twice — slice 061 batch 15, slice 028 batch 16.)
+- HARD RULE — DO NOT STALL. The slice is not done until the PR is open on GitHub. The most common stall shape is returning grill-with-docs analysis (or a surfaced design question, or ship-gate / security-review output) as a "final report" instead of executing the implementation. If you find yourself drafting any such report and the PR is not yet open, STOP drafting and finish the workflow first. Commit + push + open PR + flip _STATUS.md to `in-review` are non-optional steps, not appendices. **Specifically: after grill-with-docs completes, immediately proceed to tdd in the SAME agent turn — do NOT return to caller after the grill.** A surfaced design question is YOURS to resolve — pick the best-reasoned, pattern-matched answer, record it in the decisions log, and keep going. Only return to the caller for a true constitutional-invariant conflict. (Stall observed across slices 061, 028, 029, 042, 054 — the last two were design-question stalls; 054 stalled twice and was switched to a fresh agent with the design settled as facts.)
+- JUDGMENT-type slice? Make the subjective calls yourself and write the decisions log at `docs/audit-log/<NNN>-<slug>-decisions.md` (Decisions made · Revisit once in use · Confidence per decision — see `Plans/prompts/04-per-slice-template.md` "Slice types"). It does NOT block merge. There is no human sign-off gate — the maintainer iterates post-deployment from your revisit list.
 - Use the established `internal/api/httpserver.go` Mount-append pattern (slices 014/017/018/019/024/036/009 are reference). Never add a second `chi.NewRouter().Mount("/", ...)` — chi panics. Use `root.Get/Post/Patch/Delete` directly.
 - Match slices 014/017/018/036's four-policy RLS pattern for any new tenant-scoped table (`tenant_read` FOR SELECT, `tenant_write` FOR INSERT WITH CHECK, `tenant_update` FOR UPDATE USING + WITH CHECK, `tenant_delete` FOR DELETE — all under `FORCE ROW LEVEL SECURITY`). For append-only audit tables (slices 013, 036) use only `tenant_read` + `tenant_write` — the explicit absence of update/delete policies under FORCE makes the table append-only by construction.
 - If you ALTER an existing table to add a NOT NULL column (or a new CHECK constraint), ALSO patch slice 002's `internal/db/integration_test.go` test helpers (`mustInsertControl`, `mustInsertRisk`, etc.) to supply the new column with a sensible default value — same precedent as slices 019, 018, 009. Without this patch, slice 002's existing RLS tests break.
@@ -166,19 +167,19 @@ Use Algorithm mode in the orchestrator. Initialize a PRD (id: parallel-batch-<ti
 
 ## How fidelity stays high
 
-| Fidelity risk                                    | Mitigation                                                                                                                                                             |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Context contamination between slices             | Each slice gets a fresh Engineer subagent — separate context window, separate `CLAUDE.md` read                                                                         |
-| Quality gates skipped under time pressure        | Per-slice template runs verbatim; "do NOT relax any step" is explicit                                                                                                  |
-| Merge conflicts on shared files                  | Conflict pre-check in Step 1; spine files capped at one slice per batch; known-safe patterns documented for `httpserver.go`, sqlc files, `CHANGELOG.md`, `DefaultSeed` |
-| Migration sequence collisions                    | Explicit sequence allocation reported back in Step 1                                                                                                                   |
-| Review burden exceeds bandwidth                  | N ≤ 3 cap; lower on any batch you don't trust                                                                                                                          |
-| One slice's failure cascades                     | Subagents independent; failure isolated to its PR                                                                                                                      |
-| Subagent stalls before opening PR                | HARD RULE preamble + orchestrator close-out playbook after 2 failed resumes                                                                                            |
-| Slice ALTERs a slice-002 table → existing breaks | Subagent prompt explicitly directs the slice-002 test helper patch                                                                                                     |
-| CI catches a regression the agent missed         | Failure-mode playbook covers the four recurring shapes (prettier, GitGuardian, sqlc, NOT NULL fixture). Orchestrator fixes mechanically; escalates design calls.       |
-| Rebase queue introduces fresh conflicts          | Known-safe rebase recipes: `sqlc generate` for dbx files, append-only for httpserver routes + sqlc.yaml + CHANGELOG, partial CHANGELOG merge into `[Unreleased]/Added` |
-| Orchestrator merges something that should wait   | Hard rule pauses for any design-decision-shaped CI failure or unresolved open question. Mechanical fixes (prettier nit, GitGuardian-on-test-literal) proceed.          |
+| Fidelity risk                                    | Mitigation                                                                                                                                                                                                           |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Context contamination between slices             | Each slice gets a fresh Engineer subagent — separate context window, separate `CLAUDE.md` read                                                                                                                       |
+| Quality gates skipped under time pressure        | Per-slice template runs verbatim; "do NOT relax any step" is explicit                                                                                                                                                |
+| Merge conflicts on shared files                  | Conflict pre-check in Step 1; spine files capped at one slice per batch; known-safe patterns documented for `httpserver.go`, sqlc files, `CHANGELOG.md`, `DefaultSeed`                                               |
+| Migration sequence collisions                    | Explicit sequence allocation reported back in Step 1                                                                                                                                                                 |
+| File-conflict surface hard to predict            | N ≤ 3 cap; Step 1 conflict pre-check; lower N if predicted file scopes are uncertain. (Review burden is no longer a batching factor — JUDGMENT slices self-resolve + write a decisions log; no human sign-off gate.) |
+| One slice's failure cascades                     | Subagents independent; failure isolated to its PR                                                                                                                                                                    |
+| Subagent stalls before opening PR                | HARD RULE preamble + orchestrator close-out playbook after 2 failed resumes                                                                                                                                          |
+| Slice ALTERs a slice-002 table → existing breaks | Subagent prompt explicitly directs the slice-002 test helper patch                                                                                                                                                   |
+| CI catches a regression the agent missed         | Failure-mode playbook covers the four recurring shapes (prettier, GitGuardian, sqlc, NOT NULL fixture). Orchestrator fixes mechanically; escalates design calls.                                                     |
+| Rebase queue introduces fresh conflicts          | Known-safe rebase recipes: `sqlc generate` for dbx files, append-only for httpserver routes + sqlc.yaml + CHANGELOG, partial CHANGELOG merge into `[Unreleased]/Added`                                               |
+| Orchestrator merges something that should wait   | Hard rule pauses for any design-decision-shaped CI failure or unresolved open question. Mechanical fixes (prettier nit, GitGuardian-on-test-literal) proceed.                                                        |
 
 ## Timing
 
@@ -201,24 +202,26 @@ The orchestrator stays interactive during the subagent wait — Engineer subagen
 
 ## When to use which N
 
-| N   | When                                                                                                                                |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | After a hard slice, when you want a single point of focus, OR for solo-by-design slices (033 RLS-everywhere; 034 OIDC; 050 release) |
-| 2   | When two slices are genuinely independent and you have review bandwidth                                                             |
-| 3   | Default for sustained throughput after 001+002 merge                                                                                |
-| 4+  | Avoid unless you have collaborators reviewing PRs                                                                                   |
+| N   | When                                                                                     |
+| --- | ---------------------------------------------------------------------------------------- |
+| 1   | After a hard slice, when you want a single point of focus, OR for a solo-by-design slice |
+| 2   | When two slices are genuinely independent                                                |
+| 3   | Default for sustained throughput                                                         |
+| 4+  | Avoid — the orchestrator's merge-queue + rebase loop is the bottleneck, not slice count  |
+
+`JUDGMENT`-type slices are NOT a batching constraint. Under the current model the agent makes the judgment calls itself and writes a decisions log (see `Plans/prompts/04-per-slice-template.md` "Slice types") — there is no human sign-off gate to serialize on, so a batch can hold any mix of `AFK` and `JUDGMENT` slices. The only real batching constraints are file-conflict surface (Step 1) and the one-spine-touch-per-batch rule.
 
 ## Solo-by-design slices (do NOT batch these)
 
-These slices touch surfaces that conflict with every concurrent slice. Run them alone.
+These slices touch surfaces that conflict with every concurrent slice. Run them alone. Note: the reason is **always file-conflict surface** — never review burden. Under the JUDGMENT-slice model there is no human-review serialization, so "needs focused review" is no longer a solo reason.
 
-| Slice                                     | Why solo                                                                                           |
-| ----------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| 033 Postgres RLS enforcement everywhere   | Touches RLS on every existing tenant-scoped table — races every slice that adds a table            |
-| 034 OIDC RP + local users + api_keys CRUD | Substantive auth refactor (OIDC flow + sessions + web/ login + api_keys table + admin endpoints)   |
-| 050 Public release readiness + automation | License / persona / sanitize judgment calls; HITL across many files                                |
-| 007 SOC 2 v2017 (TSC) crosswalk loader    | HITL on 20 mapping spot-checks — needs focused review attention, not split between three reviewers |
-| 022 Policy library + 5 stock policies     | HITL on stock policy text — same focused-review reason as 007                                      |
+| Slice                                     | Why solo                                                                                         |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| 033 Postgres RLS enforcement everywhere   | Touches RLS on every existing tenant-scoped table — races every slice that adds a table          |
+| 034 OIDC RP + local users + api_keys CRUD | Substantive auth refactor (OIDC flow + sessions + web/ login + api_keys table + admin endpoints) |
+| 050 Public release readiness + automation | Touches LICENSE, README, CI release config, persona/sanitize sweeps across many top-level files  |
+
+(Slices 007, 022, 010 were previously listed here for "HITL focused-review" reasons. They are all merged, and the review-burden rationale no longer exists under the JUDGMENT model — they would not be solo-by-design today.)
 
 ## Example batches (historical, for pattern reference)
 
