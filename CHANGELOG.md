@@ -13,6 +13,38 @@ auto-generated notes.
 
 ### Added
 
+- **Slice 042 — Audit workspace view.** The `/audit` route lands an
+  auditor in their assigned `AuditPeriod` context and surfaces the
+  end-to-end audit cycle in one Next.js view: left-nav control list,
+  per-control population summary + sample-pull form + sample
+  annotation, walkthrough recorder (narrative + attachment upload to
+  slice 027), and the Audit Hub comment thread (slice 029, auditor vs
+  auditee visually distinguished). 32 new files (~2.6k lines): BFF
+  proxy routes under `web/app/api/audit/**` that read the httpOnly
+  `sa_session_token` cookie server-side and forward it as a bearer to
+  the platform API; 3 pages + `layout.tsx`; 12 `web/components/audit/*`
+  components; TanStack Query hooks in `web/lib/api/audit.ts` +
+  `audit-server.ts` + `bff.ts`; a Playwright E2E at
+  `web/e2e/audit-workspace.spec.ts`. AC-7 (no annotation loss on tab
+  switch) is solved by `annotation-draft-store.tsx` — in-progress
+  annotations live in a context store that survives control-tab
+  switches rather than unmounting with the form. Constitutional
+  invariant 10 (audit-period freezing) holds by construction: the
+  workspace calls ONLY period-bounded endpoints
+  (`/v1/audit-periods/:id/control-state`, `/v1/populations/*`,
+  `/v1/samples/*`, `/v1/walkthroughs/*`, `/v1/audit-notes/thread`,
+  `/v1/me/*`) — never the slice-012 live-state path — so the auditor
+  sees state as of `audit_period_end`, not live. P0 anti-criteria
+  hold: no BFF route accepts a period id from untrusted input (period
+  resolution is exclusively `GET /v1/me/audit-period` with the
+  caller's bearer); the comment thread renders the server-filtered
+  `/v1/audit-notes/thread` response verbatim with no client-side
+  visibility filter (the `auditor_only` styling is a presentational
+  cue, the platform is the boundary); dynamic `[id]` path segments are
+  `encodeURIComponent`-wrapped. Security review found zero
+  high-confidence findings — the BFF is a thin auth-injecting proxy
+  that delegates all authz/tenancy to the platform's RLS +
+  `auditor_assignments`.
 - **Slice 027 — Walkthrough recording (annotated + hash/sign).** Canvas
   §8.3 walkthrough primitive lands as three tenant-scoped tables
   (`walkthroughs`, `walkthrough_attachments`, `walkthrough_audit_log`)
