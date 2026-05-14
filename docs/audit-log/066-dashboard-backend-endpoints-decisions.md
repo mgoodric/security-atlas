@@ -63,7 +63,7 @@ test.
   — the anti-criterion's named escape hatch ("if `residual_score`
   genuinely cannot be sorted without a generated column or index").
 - **(B) Extract the scalar in SQL** (`(residual_score->>'likelihood')::
-  numeric`) and `ORDER BY` it — extends the `ListRisks` SQL.
+numeric`) and `ORDER BY` it — extends the `ListRisks` SQL.
 - **(C) Extract the scalar in Go** after the existing static `ListRisks`
   query and sort in memory.
 
@@ -105,7 +105,7 @@ the established `Store.List` pattern.
   Go** — N round-trips, one per framework version.
 - **(C) One SQL query that walks the SCF anchor spine:**
   `framework_versions → framework_requirements → fw_to_scf_edges →
-  scf_anchors ← controls.scf_anchor_id`.
+scf_anchors ← controls.scf_anchor_id`.
 
 **Chosen: (C).**
 
@@ -127,8 +127,7 @@ The whole thing is one statement with CTEs — no N+1 (anti-criterion
 P0). Option (A) does not exist and would violate invariant #1; option
 (B) is the N+1 the anti-criterion forbids.
 
-**Confidence: high.** The spine is the same one `ucfcoverage` (slice
-008) walks; the integration test verifies coverage, freshness, and
+**Confidence: high.** The spine is the same one `ucfcoverage` (slice 008) walks; the integration test verifies coverage, freshness, and
 trend numbers against a deterministic fixture across two framework
 versions.
 
@@ -237,13 +236,13 @@ the category filter, and keyset pagination.
 
 ## Confidence summary
 
-| Decision                                          | Confidence |
-| ------------------------------------------------- | ---------- |
-| 1 — activity feed reads admin_audit_log_v branch  | high       |
-| 2 — residual sorted via JSONB extraction in Go    | high       |
-| 3 — framework posture through the SCF anchor spine| high       |
-| 4 — program-read reuses control-read role set     | medium     |
-| 5 — keyset predicate pushed into each UNION branch| high       |
+| Decision                                           | Confidence |
+| -------------------------------------------------- | ---------- |
+| 1 — activity feed reads admin_audit_log_v branch   | high       |
+| 2 — residual sorted via JSONB extraction in Go     | high       |
+| 3 — framework posture through the SCF anchor spine | high       |
+| 4 — program-read reuses control-read role set      | medium     |
+| 5 — keyset predicate pushed into each UNION branch | high       |
 
 The one `medium`-confidence call (4) is the top of the revisit list — it
 is a role-vocabulary judgment a maintainer may want changed once a
