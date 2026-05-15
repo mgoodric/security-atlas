@@ -1,4 +1,4 @@
-# 082 — Pre-push hook: add `npm run lint -w web` once slice 078 lands
+# 083 — Pre-push hook: add `npm run lint -w web` once slice 078 lands
 
 **Cluster:** Infra
 **Estimate:** 0.25d
@@ -20,7 +20,7 @@ Once slice 078 lands, the pre-push hook should ALSO run `npm run lint -w web` lo
     Engineer picks the smallest viable option at slice-run-time.
 - [ ] AC-3: Test locally: introduce a deliberate ESLint-breakable change (`web/app/page.tsx` has an unused variable, for example), attempt `git push`, confirm the hook blocks. Record the result in the decisions log.
 - [ ] AC-4: CONTRIBUTING.md "Local CI parity" subsection updated: drop the "until then it is limited to the pre-commit suite" caveat, replace with "and `npm run lint -w web` for frontend ESLint."
-- [ ] AC-5: `docs/audit-log/082-pre-push-hook-add-lint-decisions.md` records the option chosen (A/B/C) + rationale + AC-3 test result.
+- [ ] AC-5: `docs/audit-log/083-pre-push-hook-add-lint-decisions.md` records the option chosen (A/B/C) + rationale + AC-3 test result.
 
 ## Constitutional invariants honored
 
