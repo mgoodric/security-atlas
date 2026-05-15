@@ -96,6 +96,29 @@ sign-in. OIDC is a later configuration step, not a prerequisite.
 - 50 SOC 2 control bundles — each is a control definition plus its
   `evidence_query`. Forkable as-is.
 
+## Verifying your install
+
+The build version, commit, and build time are baked into the binary at
+release time and surface in three places. All three report the same
+value (single source of truth: Go ldflags).
+
+```sh
+# JSON, scriptable
+curl -s http://localhost:8080/v1/version
+
+# Human-readable banner (inside the running container)
+docker compose -f deploy/docker/docker-compose.yml exec atlas /usr/local/bin/atlas --version
+
+# OCI image annotation
+docker inspect deploy-atlas:latest \
+  --format '{{ index .Config.Labels "org.opencontainers.image.version" }}'
+```
+
+The same version also renders in the bottom-right of every page in the
+web UI — click the trigger to expand a small panel with `commit`,
+`build_time`, and `go_version`. No phone-home call; the value is read
+once at app boot and cached for the session.
+
 ## Tear down
 
 ```sh

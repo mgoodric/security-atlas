@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { Sidebar } from "@/components/shell/sidebar";
 import { TopBar } from "@/components/shell/topbar";
+import { VersionFooter } from "@/components/version-footer";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 export default async function AuthedLayout({
@@ -22,6 +23,10 @@ export default async function AuthedLayout({
         <Sidebar />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
+      {/* Slice 072: build-version footer. Fixed-position; does not
+        consume layout space. `print:hidden` keeps it off the
+        board-pack print stylesheet (anti-criterion P0-A2). */}
+      <VersionFooter />
     </div>
   );
 }
