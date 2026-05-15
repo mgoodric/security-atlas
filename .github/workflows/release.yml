@@ -79,13 +79,12 @@ jobs:
         uses: anchore/sbom-action/download-syft@v0
         continue-on-error: true
 
-      - name: GoReleaser check
-        run: goreleaser check
-        env:
-          # GoReleaser CLI is shipped via the action; pin to v2.
-          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
-
-      - name: Run GoReleaser
+      - name: Run GoReleaser (validates config then builds + signs + publishes)
+        # goreleaser-action installs the CLI to PATH and invokes the requested
+        # subcommand. `release --clean` already validates the config before
+        # building — no separate `goreleaser check` step is needed (and a
+        # pre-install `goreleaser check` would exit 127 because the CLI is
+        # only put on PATH by this very action). Removed in slice 080.
         uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"

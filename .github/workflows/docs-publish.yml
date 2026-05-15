@@ -63,10 +63,18 @@ jobs:
         # Only upload on tag push — the deploy job consumes it. We
         # could upload on every run, but a tag-only upload keeps PR
         # builds lightweight (build-and-discard).
+        #
+        # The path must match where `mkdocs build --config-file
+        # docs-site/mkdocs.yml` actually writes its output. mkdocs
+        # resolves a relative `site_dir` (default: `site`) relative to
+        # the config file's directory, so the rendered site lands at
+        # `docs-site/site/`, not workspace-root `site/`. Pointing the
+        # artifact at the wrong path was the slice-080 root cause for
+        # the failing Pages deploy on every release tag.
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-pages-artifact@v5
         with:
-          path: site
+          path: docs-site/site
 
   deploy:
     name: Deploy to GitHub Pages
