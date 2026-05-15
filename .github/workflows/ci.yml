@@ -44,8 +44,8 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           # `code: true` if ANY of these patterns match the PR diff (or the
@@ -101,8 +101,8 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
           cache: true
@@ -125,7 +125,7 @@ jobs:
       - name: Go · coverage gate
         run: go run ./cmd/scripts/coverage-gate -profile=coverage.txt
       - name: Upload unit coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.txt
@@ -133,7 +133,7 @@ jobs:
           fail_ci_if_error: false
       - name: Upload coverage profile as workflow artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: go-unit-coverage
           path: coverage.txt
@@ -148,7 +148,7 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   tests-integration:
     name: Go · integration (Postgres RLS)
@@ -191,8 +191,8 @@ jobs:
       # Slice 015 — NATS JetStream endpoint reachable from the runner.
       NATS_URL: nats://localhost:4222
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
           cache: true
@@ -285,7 +285,7 @@ jobs:
             ./internal/authz/... \
             ./internal/control/...
       - name: Upload integration coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.txt
@@ -318,7 +318,7 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   lint-go:
     name: Go · lint
@@ -326,12 +326,12 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
           cache: true
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: latest
 
@@ -341,7 +341,7 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   proto:
     name: Proto · lint + generate diff
@@ -349,7 +349,7 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: bufbuild/buf-action@v1
         with:
           setup_only: true
@@ -366,7 +366,7 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   build-frontend:
     name: Frontend · install + build
@@ -374,8 +374,8 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: "npm"
@@ -392,7 +392,7 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   lint-python:
     name: Python · ruff
@@ -400,8 +400,8 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - run: pip install ruff==0.7.0
@@ -414,7 +414,7 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   # Slice 061: pre-commit is INTENTIONALLY unconditional. It auto-formats
   # markdown (prettier) and YAML; we want it to run on docs-only PRs so
@@ -423,14 +423,14 @@ jobs:
     name: pre-commit · all hooks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
       - run: pip install pre-commit==3.8.0
@@ -453,9 +453,9 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
       - name: Set up Python
         run: uv python install 3.11
       - name: Sync oscal-bridge env
@@ -475,7 +475,7 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   # ====================================================================
   # Slice 065 — self-host bundle end-to-end test.
@@ -511,7 +511,7 @@ jobs:
       matrix:
         mode: [bundled, external]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Run self-host bundle smoke test (${{ matrix.mode }})
         run: deploy/docker/test-self-host-bundle.sh ${{ matrix.mode }}
       - name: Dump compose logs on failure
@@ -557,7 +557,7 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   # ====================================================================
   # Slice 038 — Helm chart lint + template.
@@ -583,8 +583,8 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
+      - uses: actions/checkout@v6
+      - uses: azure/setup-helm@v5
         with:
           version: v3.16.2
       - name: helm lint (default values)
@@ -602,7 +602,7 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   # ====================================================================
   # Slice 069 — Frontend vitest.
@@ -627,8 +627,8 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: "npm"
@@ -639,7 +639,7 @@ jobs:
         run: npm run test:coverage
       - name: Upload coverage summary as workflow artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-vitest-coverage
           path: web/coverage/coverage-summary.json
@@ -651,7 +651,7 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   # ====================================================================
   # Slice 069 — Frontend Playwright e2e.
@@ -708,12 +708,12 @@ jobs:
       # TEST_USER_EMAIL / TEST_USER_PASSWORD flow against a seeded user.
       TEST_BEARER: test-bearer-e2e
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
           cache: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: "npm"
@@ -794,7 +794,7 @@ jobs:
         run: npx playwright test
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: |
@@ -815,4 +815,4 @@ jobs:
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
