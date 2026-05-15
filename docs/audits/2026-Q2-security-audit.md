@@ -81,6 +81,8 @@ Missing scanners:
 
 **Fix:** add three CI jobs (Go vulncheck, npm audit, Trivy on the built image) following the slice-069 stub-job pattern. Initially informational, not in required-checks (would flake the merge queue on every new published CVE). Filed as slice **089**.
 
+**Remediation status:** addressed in slice 089 — three new `.github/workflows/ci.yml` jobs (`Go · govulncheck` with pinned `govulncheck@v1.1.3`, `Frontend · npm audit` with `--omit=dev --audit-level=high --workspace web`, `Container · Trivy scan` with `aquasecurity/trivy-action@0.28.0` against a locally-built `atlas:trivy-scan`). All three follow the slice-061/069 stub-job pattern and are NOT in `.github/branch-protection.json`'s required-checks list (P0-A1) — promotion-to-required is a future slice once cadence + false-positive rate are observed. HIGH+CRITICAL is the unified fail threshold; rationale + per-scanner suppression mechanism reference: `docs/audit-log/089-dependency-vulnerability-scanning-decisions.md`. Merge commit SHA updates here when the squash-merge lands.
+
 ### LOW — AI-assist boundary not yet schema-enforced
 
 CLAUDE.md constitutional invariant says:
