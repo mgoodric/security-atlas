@@ -1,0 +1,84 @@
+{{/*
+nats-statefulset.yaml — NATS JetStream evidence-ingest buffer (canvas
+§10.1: NATS is part of the platform, a single binary). A StatefulSet with
+a volumeClaimTemplate so JetStream stream state survives pod restarts
+(`-js -sd /data`). Single replica in v1 — clustered NATS is a later
+concern; the StatefulSet shape is chosen now so persistence is correct
+from day one.
+*/}}
+{{- $fullname := include "security-atlas.fullname" . -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $fullname }}-nats
+  labels:
+    {{- include "security-atlas.componentLabels" (dict "context" . "component" "nats") | nindent 4 }}
+spec:
+  serviceName: {{ $fullname }}-nats
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "security-atlas.componentSelectorLabels" (dict "context" . "component" "nats") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "security-atlas.componentLabels" (dict "context" . "component" "nats") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "security-atlas.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: nats
+          image: "{{ .Values.nats.image.repository }}:{{ .Values.nats.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "-js"
+            - "-sd"
+            - "/data"
+            - "--http_port"
+            - "8222"
+          ports:
+            - name: client
+              containerPort: 4222
+            - name: monitor
+              containerPort: 8222
+          volumeMounts:
+            - name: nats-data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: monitor
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: monitor
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.nats.resources | nindent 12 }}
+      {{- if not .Values.nats.persistence.enabled }}
+      volumes:
+        - name: nats-data
+          emptyDir: {}
+      {{- end }}
+  {{- if .Values.nats.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: nats-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- if .Values.nats.persistence.storageClass }}
+        storageClassName: {{ .Values.nats.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.nats.persistence.size | quote }}
+  {{- end }}

@@ -1,0 +1,22 @@
+{{/*
+atlas-service.yaml — ClusterIP Service fronting the atlas server. Exposes
+HTTP 8080 (anchors/frameworks + /health, and the target of the Ingress API
+paths) and gRPC 50051 (Evidence + Admin + Connector APIs).
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "security-atlas.fullname" . }}-atlas
+  labels:
+    {{- include "security-atlas.componentLabels" (dict "context" . "component" "atlas") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "security-atlas.componentSelectorLabels" (dict "context" . "component" "atlas") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: grpc
+      port: 50051
+      targetPort: grpc

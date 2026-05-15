@@ -7,3 +7,10 @@
 # Ignoring it ends that whole class of failure and keeps release-please's
 # output authoritative.
 CHANGELOG.md
+
+# Helm chart templates (slice 038) embed Go-template `{{ ... }}` directives
+# that are NOT valid YAML — prettier would mangle the control flow and the
+# `nindent` whitespace that Helm rendering depends on. The pure-YAML chart
+# files (Chart.yaml, values.yaml, values-production.yaml) stay
+# prettier-managed; only templates/ and NOTES.txt are ignored.
+deploy/helm/templates/

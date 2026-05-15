@@ -1,0 +1,69 @@
+{{/*
+minio-bucket-job.yaml — one-shot Job that creates the artifacts bucket in
+the bundled MinIO. Rendered only when `minio.enabled` is true.
+
+Runs as a post-install / post-upgrade Helm hook so it executes AFTER the
+MinIO Deployment + Service exist. Idempotent: `mc mb --ignore-existing` is
+a clean no-op when the bucket already exists, so re-installs / upgrades do
+not error. The direct analogue of the docker-compose bundle's `minio-mc`
+one-shot service.
+*/}}
+{{- if .Values.minio.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "security-atlas.fullname" . }}-minio-bucket
+  labels:
+    {{- include "security-atlas.componentLabels" (dict "context" . "component" "minio-bucket") | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "security-atlas.componentSelectorLabels" (dict "context" . "component" "minio-bucket") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "security-atlas.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: mc
+          image: "minio/mc:latest"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              # Retry until MinIO is reachable (the Deployment may still be
+              # rolling out when this hook fires).
+              for i in $(seq 1 30); do
+                if mc alias set local "http://{{ include "security-atlas.fullname" . }}-minio:9000" \
+                  "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; then
+                  break
+                fi
+                echo "waiting for minio... ($i)"
+                sleep 2
+              done
+              mc mb --ignore-existing "local/{{ .Values.artifacts.bucket }}"
+              echo "bucket {{ .Values.artifacts.bucket }} ready"
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "security-atlas.secretName" . }}
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "security-atlas.secretName" . }}
+                  key: MINIO_ROOT_PASSWORD
+{{- end }}

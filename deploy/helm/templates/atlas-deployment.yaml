@@ -1,0 +1,79 @@
+{{/*
+atlas-deployment.yaml — the platform server (cmd/atlas). Stateless: all
+state is in Postgres / NATS / S3, so it scales horizontally via
+atlas.replicaCount. gRPC :50051 + HTTP :8080 (/health).
+*/}}
+{{- $fullname := include "security-atlas.fullname" . -}}
+{{- $imageTag := .Values.atlas.image.tag | default .Values.image.tag | default .Chart.AppVersion -}}
+{{- $imageRepo := .Values.atlas.image.repository | default (printf "%s/atlas" .Values.image.repository) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-atlas
+  labels:
+    {{- include "security-atlas.componentLabels" (dict "context" . "component" "atlas") | nindent 4 }}
+spec:
+  replicas: {{ .Values.atlas.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "security-atlas.componentSelectorLabels" (dict "context" . "component" "atlas") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "security-atlas.componentLabels" (dict "context" . "component" "atlas") | nindent 8 }}
+      annotations:
+        # Roll the Deployment when the config / secret content changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "security-atlas.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: atlas
+          image: "{{ .Values.image.registry }}/{{ $imageRepo }}:{{ $imageTag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: grpc
+              containerPort: 50051
+          envFrom:
+            - configMapRef:
+                name: {{ include "security-atlas.configMapName" . }}
+            - secretRef:
+                name: {{ include "security-atlas.secretName" . }}
+          {{- with .Values.atlas.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # The atlas server exposes /health on the HTTP port (slice 037).
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.atlas.resources | nindent 12 }}
+      {{- with .Values.atlas.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.atlas.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.atlas.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

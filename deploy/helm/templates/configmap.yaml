@@ -1,0 +1,35 @@
+{{/*
+configmap.yaml — non-secret environment shared by the atlas server, the web
+frontend, and the migration Job. Anything sensitive (passwords, HMAC keys,
+tokens, DSNs containing a password) lives in the Secret, not here.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "security-atlas.configMapName" . }}
+  labels:
+    {{- include "security-atlas.labels" . | nindent 4 }}
+data:
+  # --- atlas server listen addresses ---
+  ATLAS_HTTP_ADDR: ":8080"
+  ATLAS_GRPC_ADDR: ":50051"
+  ATLAS_SECURE_COOKIES: {{ .Values.atlas.secureCookies | quote }}
+  # --- NATS ---
+  NATS_URL: {{ include "security-atlas.natsUrl" . | quote }}
+  # --- artifact store (slice 036) ---
+  ARTIFACTS_BUCKET: {{ .Values.artifacts.bucket | quote }}
+  ARTIFACTS_S3_ENDPOINT: {{ include "security-atlas.s3Endpoint" . | quote }}
+  AWS_REGION: {{ .Values.artifacts.region | quote }}
+  # --- bootstrap / first-boot seed (consumed by the migration Job) ---
+  ATLAS_BOOTSTRAP_TENANT: {{ .Values.bootstrap.tenantId | quote }}
+  ATLAS_DEFAULT_USER_EMAIL: {{ .Values.bootstrap.defaultUserEmail | quote }}
+  ATLAS_HTTP_URL: {{ printf "http://%s-atlas:8080" (include "security-atlas.fullname" .) | quote }}
+  # --- web frontend ---
+  ATLAS_HTTP_URL_WEB: {{ printf "http://%s-atlas:8080" (include "security-atlas.fullname" .) | quote }}
+  NEXT_PUBLIC_API_BASE_URL: {{ .Values.web.publicApiBaseUrl | quote }}
+  {{- if .Values.oidc.issuer }}
+  # --- OIDC (relying party) — non-secret fields ---
+  ATLAS_OIDC_ISSUER: {{ .Values.oidc.issuer | quote }}
+  ATLAS_OIDC_CLIENT_ID: {{ .Values.oidc.clientId | quote }}
+  ATLAS_OIDC_REDIRECT_URL: {{ .Values.oidc.redirectUrl | quote }}
+  {{- end }}
