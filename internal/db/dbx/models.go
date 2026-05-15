@@ -907,6 +907,29 @@ type AuditorAssignment struct {
 	GrantedBy     string             `json:"granted_by"`
 }
 
+type BoardBrief struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	PeriodEnd   pgtype.Date        `json:"period_end"`
+	GeneratedAt pgtype.Timestamptz `json:"generated_at"`
+	Content     []byte             `json:"content"`
+	NarrativeMd string             `json:"narrative_md"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type BoardPack struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	PeriodEnd   pgtype.Date        `json:"period_end"`
+	Status      string             `json:"status"`
+	Content     []byte             `json:"content"`
+	NarrativeMd string             `json:"narrative_md"`
+	PublishedBy *string            `json:"published_by"`
+	PublishedAt pgtype.Timestamptz `json:"published_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Control struct {
 	ID                   pgtype.UUID               `json:"id"`
 	TenantID             pgtype.UUID               `json:"tenant_id"`
@@ -934,6 +957,17 @@ type Control struct {
 	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
 }
 
+type ControlDriftSnapshot struct {
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	SnapshotDate      pgtype.Date        `json:"snapshot_date"`
+	ControlsPassing   int32              `json:"controls_passing"`
+	PassingControlIds []pgtype.UUID      `json:"passing_control_ids"`
+	CapturedAt        pgtype.Timestamptz `json:"captured_at"`
+	Trigger           string             `json:"trigger"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type ControlEvaluation struct {
 	ID                    pgtype.UUID        `json:"id"`
 	TenantID              pgtype.UUID        `json:"tenant_id"`
@@ -951,20 +985,21 @@ type ControlEvaluation struct {
 }
 
 type Decision struct {
-	ID            pgtype.UUID        `json:"id"`
-	TenantID      pgtype.UUID        `json:"tenant_id"`
-	DecisionID    string             `json:"decision_id"`
-	Title         string             `json:"title"`
-	Narrative     string             `json:"narrative"`
-	Constraints   []string           `json:"constraints"`
-	Tradeoffs     string             `json:"tradeoffs"`
-	DecisionMaker string             `json:"decision_maker"`
-	DecidedAt     pgtype.Timestamptz `json:"decided_at"`
-	RevisitBy     pgtype.Date        `json:"revisit_by"`
-	Status        DecisionStatus     `json:"status"`
-	SupersededBy  pgtype.UUID        `json:"superseded_by"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ID                   pgtype.UUID        `json:"id"`
+	TenantID             pgtype.UUID        `json:"tenant_id"`
+	DecisionID           string             `json:"decision_id"`
+	Title                string             `json:"title"`
+	Narrative            string             `json:"narrative"`
+	Constraints          []string           `json:"constraints"`
+	Tradeoffs            string             `json:"tradeoffs"`
+	DecisionMaker        string             `json:"decision_maker"`
+	DecidedAt            pgtype.Timestamptz `json:"decided_at"`
+	RevisitBy            pgtype.Date        `json:"revisit_by"`
+	Status               DecisionStatus     `json:"status"`
+	SupersededBy         pgtype.UUID        `json:"superseded_by"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	AuditNarrativeOptOut bool               `json:"audit_narrative_opt_out"`
 }
 
 type DecisionAuditLog struct {
@@ -1011,6 +1046,16 @@ type DecisionScopePredicate struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type DecisionsAudit struct {
+	ID         pgtype.UUID        `json:"id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	DecisionID pgtype.UUID        `json:"decision_id"`
+	Action     string             `json:"action"`
+	Actor      string             `json:"actor"`
+	Detail     string             `json:"detail"`
+	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
+}
+
 type EvidenceAuditLog struct {
 	ID             pgtype.UUID        `json:"id"`
 	TenantID       pgtype.UUID        `json:"tenant_id"`
@@ -1021,6 +1066,19 @@ type EvidenceAuditLog struct {
 	EvidenceKind   *string            `json:"evidence_kind"`
 	RecordID       pgtype.UUID        `json:"record_id"`
 	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+}
+
+type EvidenceFreshness struct {
+	ID               pgtype.UUID        `json:"id"`
+	TenantID         pgtype.UUID        `json:"tenant_id"`
+	ControlID        pgtype.UUID        `json:"control_id"`
+	FreshnessClass   *string            `json:"freshness_class"`
+	LatestObservedAt pgtype.Timestamptz `json:"latest_observed_at"`
+	ValidUntil       pgtype.Timestamptz `json:"valid_until"`
+	IsStale          bool               `json:"is_stale"`
+	EvidenceCount    int32              `json:"evidence_count"`
+	RefreshedAt      pgtype.Timestamptz `json:"refreshed_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 type EvidenceKindSchema struct {
@@ -1326,10 +1384,14 @@ type RiskAggregation struct {
 }
 
 type RiskControlLink struct {
-	RiskID    pgtype.UUID        `json:"risk_id"`
-	ControlID pgtype.UUID        `json:"control_id"`
-	TenantID  pgtype.UUID        `json:"tenant_id"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	RiskID          pgtype.UUID        `json:"risk_id"`
+	ControlID       pgtype.UUID        `json:"control_id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	DesignScore     pgtype.Numeric     `json:"design_score"`
+	WeightDesign    pgtype.Numeric     `json:"weight_design"`
+	WeightOperation pgtype.Numeric     `json:"weight_operation"`
+	WeightCoverage  pgtype.Numeric     `json:"weight_coverage"`
 }
 
 type Sample struct {

@@ -20,7 +20,7 @@ freshness_class: quarterly
 evidence_queries:
   - id: ir_plan_acknowledged_by_on_call
     language: rego
-    evidence_kind: policy.acknowledgment
+    evidence_kind: policy.acknowledgment.v1
     description: "Every on-call rotation member has acknowledged the current IR plan version"
     expression: |
       package atlas.controls.soc2.cc7_4

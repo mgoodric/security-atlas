@@ -1,0 +1,109 @@
+{{/*
+minio-deployment.yaml — OPTIONAL bundled MinIO (S3-compatible artifact
+store). Rendered only when `minio.enabled` is true. Enabled by default so a
+fresh `helm install` works end-to-end on a single-node cluster; production
+sets `minio.enabled: false` and points `artifacts.s3Endpoint` at real S3.
+
+This is NOT a violation of the "no bundled database" anti-criterion — that
+anti-criterion is Postgres-specific. MinIO here is the dev/solo artifact
+store, the direct K8s analogue of the docker-compose bundle's `minio`
+service.
+*/}}
+{{- if .Values.minio.enabled }}
+{{- $fullname := include "security-atlas.fullname" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-minio
+  labels:
+    {{- include "security-atlas.componentLabels" (dict "context" . "component" "minio") | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    # MinIO holds a ReadWriteOnce PVC — Recreate avoids a multi-attach
+    # deadlock on rollout.
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "security-atlas.componentSelectorLabels" (dict "context" . "component" "minio") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "security-atlas.componentLabels" (dict "context" . "component" "minio") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "security-atlas.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: minio
+          image: "{{ .Values.minio.image.repository }}:{{ .Values.minio.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - server
+            - /data
+            - --console-address
+            - ":9001"
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "security-atlas.secretName" . }}
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "security-atlas.secretName" . }}
+                  key: MINIO_ROOT_PASSWORD
+          ports:
+            - name: s3
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          volumeMounts:
+            - name: minio-data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: s3
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: s3
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.minio.resources | nindent 12 }}
+      volumes:
+        - name: minio-data
+          {{- if .Values.minio.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $fullname }}-minio
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- if .Values.minio.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fullname }}-minio
+  labels:
+    {{- include "security-atlas.componentLabels" (dict "context" . "component" "minio") | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.minio.persistence.storageClass }}
+  storageClassName: {{ .Values.minio.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.minio.persistence.size | quote }}
+{{- end }}
+{{- end }}

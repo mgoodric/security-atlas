@@ -1,0 +1,25 @@
+{{/*
+nats-service.yaml — headless ClusterIP Service for the NATS StatefulSet.
+Exposes 4222 (client — the atlas server connects here) and 8222
+(monitoring / healthz). clusterIP: None so the StatefulSet pod gets a
+stable DNS name; the atlas server connects via the Service name (see
+_helpers.tpl "security-atlas.natsUrl").
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "security-atlas.fullname" . }}-nats
+  labels:
+    {{- include "security-atlas.componentLabels" (dict "context" . "component" "nats") | nindent 4 }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    {{- include "security-atlas.componentSelectorLabels" (dict "context" . "component" "nats") | nindent 4 }}
+  ports:
+    - name: client
+      port: 4222
+      targetPort: client
+    - name: monitor
+      port: 8222
+      targetPort: monitor

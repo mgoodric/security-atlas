@@ -1,0 +1,28 @@
+# GitGuardian configuration — https://docs.gitguardian.com/ggshield-docs/configuration
+#
+# Slice 037: the docker-compose self-host bundle's compose file and env
+# template are credential *templates*, not credential stores. Every
+# "password"/"token"/"key" line in them is a `${VAR}` environment
+# reference or the literal placeholder `CHANGE_ME` — there is never a
+# real secret value committed (real values live in `.env`, which is
+# gitignored). GitGuardian's heuristic "Generic Password" detector
+# nonetheless fires on lines like:
+#
+#   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+#
+# treating the `:?error message` fragment as a value. Path-scoping these
+# two template files out of the scan removes that false-positive class
+# without weakening secret detection anywhere else in the repo — there is
+# nothing in them to hide.
+#
+# This is a path exclusion for two specific template files, NOT a
+# repo-wide detector disable. Every other path (including all Go, TS,
+# and SQL source) is still fully scanned.
+
+version: 2
+
+secret:
+  ignored-paths:
+    - "deploy/docker/docker-compose.yml"
+    - "deploy/docker/.env.example"
+    - "deploy/watchtower/docker-compose.example.yml"

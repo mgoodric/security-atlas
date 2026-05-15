@@ -1,0 +1,229 @@
+// security-atlas OSCAL bridge contract — Go <-> Python.
+//
+// Slice 030. The Go platform aggregates frozen-AuditPeriod data into the
+// platform-side OSCAL input messages below; the Python oscal-bridge
+// (wrapping IBM compliance-trestle) maps them to canonical OSCAL JSON
+// v1.1.x documents and validates round-trip.
+//
+// The bridge is intentionally a thin serializer: it owns no business
+// logic and no database access. All scoping, freezing-horizon
+// enforcement, and tenant isolation happen on the Go side BEFORE a
+// request reaches this contract. The bridge never calls an LLM — SSP
+// narrative text arrives pre-authored in the input messages (CLAUDE.md
+// product-runtime AI-assist boundary).
+//
+// Wire format is frozen on merge — field numbers cannot change without a
+// v2 package.
+
+syntax = "proto3";
+
+package oscal.v1;
+
+option go_package = "github.com/mgoodric/security-atlas/gen/proto/oscal/v1;oscalv1";
+
+// OscalBridgeService serializes platform aggregates into OSCAL JSON
+// v1.1.x and validates them via compliance-trestle round-trip.
+service OscalBridgeService {
+  // SerializeSSP maps an SspInput to an OSCAL system-security-plan JSON
+  // document. The response carries the canonical JSON bytes.
+  rpc SerializeSSP(SerializeSSPRequest) returns (SerializeSSPResponse);
+
+  // SerializeAssessment maps an AssessmentInput to an OSCAL
+  // assessment-plan JSON document AND an assessment-results JSON
+  // document (returned as two members).
+  rpc SerializeAssessment(SerializeAssessmentRequest) returns (SerializeAssessmentResponse);
+
+  // SerializePOAM maps a PoamInput to an OSCAL
+  // plan-of-action-and-milestones JSON document.
+  rpc SerializePOAM(SerializePOAMRequest) returns (SerializePOAMResponse);
+
+  // RoundTripValidate parses an OSCAL JSON document back through
+  // compliance-trestle and re-serializes it, asserting structural
+  // validity. AC-6 / AC-7. The export pipeline calls this on every
+  // bundle member before the bundle is finalized.
+  rpc RoundTripValidate(RoundTripValidateRequest) returns (RoundTripValidateResponse);
+}
+
+// ----- shared -----
+
+// Metadata is the OSCAL document metadata block, populated by the Go
+// aggregator. oscal_version is pinned to "1.1.2" (slice 030 decision).
+message Metadata {
+  string title = 1;
+  string version = 2;
+  string oscal_version = 3;
+  // RFC-3339. Wall-clock instant the export ran.
+  string last_modified = 4;
+  // The frozen AuditPeriod's frozen_at, RFC-3339.
+  string frozen_at = 5;
+  // Free-form roles/parties are intentionally omitted in v1; trestle
+  // accepts a minimal metadata block.
+}
+
+// ControlImplementation is one implemented-requirement: a control plus
+// its human-authored implementation statement (the control bundle
+// description — never AI-generated) and its latest evaluation result.
+message ControlImplementation {
+  string control_id = 1;
+  // SCF anchor code, e.g. "IAC-06".
+  string scf_id = 2;
+  string title = 3;
+  // Human-authored implementation narrative (control bundle description).
+  string statement = 4;
+  // Latest control_evaluations result within the frozen horizon:
+  // pass | fail | na | inconclusive | no_evidence.
+  string evaluation_result = 5;
+  // RFC-3339 of the latest evaluation, empty when none.
+  string evaluated_at = 6;
+  // Policy ids linked to this control.
+  repeated string linked_policy_ids = 7;
+}
+
+// ScopeCell is one multidimensional scope tuple included in the SSP
+// system-characteristics.
+message ScopeCell {
+  string id = 1;
+  string label = 2;
+  // Canonical JSON of the dimension map.
+  string dimensions_json = 3;
+}
+
+// Policy is a linked governance document summarised into the SSP.
+message Policy {
+  string id = 1;
+  string title = 2;
+  string version = 3;
+  string status = 4;
+}
+
+// ----- SSP -----
+
+message SspInput {
+  Metadata metadata = 1;
+  // Org profile.
+  string tenant_id = 2;
+  string organization_name = 3;
+  string system_name = 4;
+  // System description / authorization boundary summary.
+  string system_description = 5;
+  repeated ScopeCell scope_cells = 6;
+  repeated ControlImplementation control_implementations = 7;
+  repeated Policy policies = 8;
+}
+
+message SerializeSSPRequest {
+  SspInput input = 1;
+}
+
+// SerializeSSPResponse carries the canonical SSP JSON document.
+message SerializeSSPResponse {
+  // Canonical OSCAL JSON v1.1.x system-security-plan document bytes.
+  bytes oscal_json = 1;
+}
+
+// ----- Assessment (AP + AR) -----
+
+// SamplePopulation is one auditor-defined population + the sample drawn.
+message SamplePopulation {
+  string population_id = 1;
+  string control_id = 2;
+  int64 population_size = 3;
+  // Evidence record ids in the drawn sample.
+  repeated string sampled_evidence_ids = 4;
+  // RFC-3339 horizon the population was frozen at.
+  string frozen_at = 5;
+}
+
+// Walkthrough is an auditor/owner-recorded explanation, exported as an
+// assessment-results observation.
+message Walkthrough {
+  string id = 1;
+  string control_id = 2;
+  string narrative = 3;
+  string status = 4;
+  // lowercase hex sha256 of the canonical walkthrough content.
+  string canonical_hash = 5;
+  bool tamper_detected = 6;
+}
+
+// AuditNote is one auditor<->auditee threaded comment, exported as an
+// observation annotation.
+message AuditNote {
+  string id = 1;
+  // control | finding | sample
+  string scope_kind = 2;
+  string scope_ref = 3;
+  string author = 4;
+  string body = 5;
+  string created_at = 6;
+}
+
+message AssessmentInput {
+  Metadata metadata = 1;
+  string tenant_id = 2;
+  string audit_period_id = 3;
+  string audit_period_name = 4;
+  repeated SamplePopulation populations = 5;
+  repeated Walkthrough walkthroughs = 6;
+  repeated AuditNote audit_notes = 7;
+}
+
+message SerializeAssessmentRequest {
+  AssessmentInput input = 1;
+}
+
+message SerializeAssessmentResponse {
+  // OSCAL assessment-plan JSON.
+  bytes assessment_plan_json = 1;
+  // OSCAL assessment-results JSON.
+  bytes assessment_results_json = 2;
+}
+
+// ----- POA&M -----
+
+// PoamItem is one open finding: a failing control evaluation or an open
+// audit note on control scope. milestone/owner/due_date per AC-4.
+message PoamItem {
+  string id = 1;
+  string control_id = 2;
+  string title = 3;
+  string description = 4;
+  // low | moderate | high — derived from evaluation result.
+  string severity = 5;
+  string owner = 6;
+  // RFC-3339.
+  string due_date = 7;
+  string milestone = 8;
+}
+
+message PoamInput {
+  Metadata metadata = 1;
+  string tenant_id = 2;
+  string audit_period_id = 3;
+  repeated PoamItem items = 4;
+}
+
+message SerializePOAMRequest {
+  PoamInput input = 1;
+}
+
+// SerializePOAMResponse carries the canonical POA&M JSON document.
+message SerializePOAMResponse {
+  // Canonical OSCAL JSON v1.1.x plan-of-action-and-milestones bytes.
+  bytes oscal_json = 1;
+}
+
+// ----- round-trip -----
+
+message RoundTripValidateRequest {
+  // One of: system-security-plan | assessment-plan |
+  // assessment-results | plan-of-action-and-milestones.
+  string model_type = 1;
+  bytes oscal_json = 2;
+}
+
+message RoundTripValidateResponse {
+  bool valid = 1;
+  // Human-readable validation errors when valid=false.
+  repeated string errors = 2;
+}

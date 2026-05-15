@@ -20,7 +20,7 @@ freshness_class: daily
 evidence_queries:
   - id: security_github_events_acknowledged
     language: rego
-    evidence_kind: github.audit_event
+    evidence_kind: github.audit_event.v1
     description: "Every security-tagged GitHub audit event has an acknowledgement within 24h"
     expression: |
       package atlas.controls.soc2.cc7_3

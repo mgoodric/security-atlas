@@ -186,6 +186,29 @@ proto-ci:
     buf generate
     git diff --exit-code -- gen/proto || (echo "gen/proto changed; run 'just proto-generate' and commit" && exit 1)
 
+# ----- OSCAL bridge (slice 030) -----
+
+# Sync the oscal-bridge Python env (uv) with test extras.
+oscal-bridge-sync:
+    cd oscal-bridge && uv sync --extra test
+
+# Regenerate the oscal-bridge Python gRPC stubs from proto/oscal/v1.
+oscal-bridge-gen:
+    bash oscal-bridge/scripts/gen_proto.sh
+
+# Run the oscal-bridge pytest suite (unit + in-process gRPC server).
+oscal-bridge-test:
+    cd oscal-bridge && PYTHONPATH=. uv run --extra test python -m pytest tests/ -q
+
+# Lint + format-check the oscal-bridge Python sources (ruff).
+oscal-bridge-lint:
+    ruff check oscal-bridge
+    ruff format --check oscal-bridge
+
+# Run the OSCAL serialization service locally (sidecar to `atlas`).
+oscal-bridge-serve address="127.0.0.1:50070":
+    cd oscal-bridge && PYTHONPATH=. uv run python -m atlas_oscal_bridge.server --address {{address}}
+
 # ----- Release -----
 #
 # The release pipeline (.github/workflows/release.yml) runs on tag push.
@@ -211,3 +234,133 @@ print-version version:
     /tmp/security-atlas-cli --version
     /tmp/security-atlas-cli version
     rm /tmp/security-atlas-cli
+
+# ----- Self-host (docker-compose single-VM bundle, slice 037) -----
+#
+# The bundle lives in deploy/docker/. It brings up Postgres + NATS +
+# MinIO + the atlas server + the Next.js frontend on one VM, and on
+# first boot runs migrations + seeds the default tenant/scope/user +
+# imports the SCF catalog + uploads the 50 SOC 2 control bundles.
+#
+# Before the first `self-host-up`, copy the env template and edit it:
+#   cp deploy/docker/.env.example deploy/docker/.env
+# See docs/SELF_HOSTING.md and docs/getting-started/first-evidence.md.
+
+_self_host_compose := "docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env"
+
+# Validate the self-host compose file parses (no containers started).
+self-host-config:
+    docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env.example config -q
+    @echo "deploy/docker/docker-compose.yml is valid"
+
+# Build the three self-host images (atlas, atlas-cli/bootstrap, web).
+self-host-build:
+    {{_self_host_compose}} build
+
+# Bring the self-host bundle up in the background. Requires
+# deploy/docker/.env (copy it from .env.example first).
+self-host-up:
+    {{_self_host_compose}} up -d --build
+
+# Tail logs from the running self-host bundle.
+self-host-logs:
+    {{_self_host_compose}} logs -f
+
+# Stop the self-host bundle (keeps volumes — data survives).
+self-host-down:
+    {{_self_host_compose}} down
+
+# Stop the self-host bundle AND delete its volumes (full wipe).
+self-host-wipe:
+    {{_self_host_compose}} down -v
+
+# Show the status of every self-host service.
+self-host-ps:
+    {{_self_host_compose}} ps
+
+# ----- Documentation site (mkdocs Material, slice 058) -----
+#
+# The user-facing docs live at docs-site/. We invoke mkdocs in isolation
+# via `uv tool run --with-requirements` so it never pollutes the
+# monorepo's uv workspace. Dependency pins are in docs-site/requirements.txt.
+
+_docs_uv := "uv tool run --with-requirements docs-site/requirements.txt --with mkdocs-material"
+
+# Serve the docs site locally with live reload at http://127.0.0.1:8000/.
+docs-serve:
+    {{_docs_uv}} --from mkdocs mkdocs serve --config-file docs-site/mkdocs.yml
+
+# Strict build — fails on broken links, missing nav entries, dead pages.
+# .github/workflows/docs-publish.yml runs this same recipe on every PR.
+docs-build:
+    {{_docs_uv}} --from mkdocs mkdocs build --strict --config-file docs-site/mkdocs.yml
+
+# ----- README screenshots (slice 057) -----
+#
+# Refreshes the screenshots + animated GIF embedded in README.md from
+# the actually-running app. This is an on-demand recipe — CI does NOT
+# block on screenshot freshness (anti-criterion P0-A4). Run it when
+# the captured views drift visibly from the merged frontend.
+#
+# Prerequisites (one-time):
+#   - `just build-frontend` succeeds (Next.js builds without error)
+#   - `npx playwright install chromium` (Playwright browser binaries)
+#   - `ffmpeg` on PATH (Homebrew: `brew install ffmpeg`)
+#   - `pngquant` on PATH for size optimization (optional but recommended:
+#     `brew install pngquant`)
+#
+# What it does:
+#   1. Builds the web/ workspace (`npm run build` in web/) — produces
+#      the production-mode bundle that the captures render against.
+#   2. Starts `next start` in the background on :3000 with ATLAS_HTTP_URL
+#      pointed at a fixture-driven stub server on :8787 (spun up inside
+#      the Playwright spec via `web/scripts/stub-platform-server.ts`).
+#   3. Runs the capture spec at
+#      `web/scripts/capture-readme-screenshots.spec.ts` — produces 8
+#      PNGs + 1 webm under `docs/images/` + the Playwright `test-results/`
+#      directory.
+#   4. ffmpeg converts the recorded webm → `docs/images/flow-create-control.gif`
+#      with a generated palette (smaller than naive single-pass).
+#   5. pngquant compresses the PNGs in place (lossy palette quantization)
+#      to keep the total weight ≤ 5 MB (anti-criterion P0-A3).
+#
+# Determinism: the stub server replays static JSON fixtures from
+# `fixtures/readme-demo/**`, so every run produces the same captured
+# pixels modulo font rasterization. Fixture content is neutral — no
+# maintainer references, no real tenant data (anti-criterion P0-A2).
+refresh-screenshots:
+    @echo "[1/5] Building web/ (production mode — standalone output)…"
+    cd web && npm run build
+    @echo "[2/5] Copying static assets into the standalone bundle…"
+    cp -R web/.next/static web/.next/standalone/web/.next/static
+    @echo "[3/5] Bundling capture script via esbuild…"
+    ./node_modules/.bin/esbuild \
+        web/scripts/capture-readme-screenshots.ts \
+        --bundle \
+        --platform=node \
+        --target=node20 \
+        --external:playwright \
+        --external:@playwright/test \
+        --outfile=web/scripts/.capture-readme-screenshots.bundled.js
+    @echo "[4/5] Running capture (boots production Next server + stub platform)…"
+    cd web && node scripts/.capture-readme-screenshots.bundled.js
+    @echo "[5/6] Converting recorded webm → optimized GIF via ffmpeg…"
+    WEBM=$(find web/test-results/readme-capture-video -name '*.webm' 2>/dev/null | head -1); \
+        if [ -z "$WEBM" ]; then \
+            echo "no flow-recording webm produced — GIF skipped"; \
+            exit 1; \
+        else \
+            ffmpeg -y -i "$WEBM" \
+                -vf "fps=10,scale=1280:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3" \
+                -loop 0 \
+                docs/images/flow-create-control.gif; \
+        fi
+    @echo "[6/6] Compressing PNGs via pngquant (optional)…"
+    if command -v pngquant >/dev/null 2>&1; then \
+        find docs/images -name '*.png' -exec pngquant --quality=70-90 --speed=1 --force --ext .png {} \; ; \
+    else \
+        echo "pngquant not on PATH — skipping PNG compression"; \
+    fi
+    @echo "Refresh complete. Total weight:"
+    @du -sh docs/images/*.{png,gif} 2>/dev/null | awk '{print "    " $0}'
+    @du -sch docs/images/*.{png,gif} 2>/dev/null | tail -1 | awk '{print "  TOTAL: " $1}'

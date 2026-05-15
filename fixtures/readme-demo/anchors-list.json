@@ -1,0 +1,40 @@
+{
+  "anchors": [
+    {
+      "id": "scf-iac-06",
+      "scf_id": "IAC-06",
+      "family": "Identification & Authentication",
+      "name": "Identity Provisioning",
+      "description": "Mechanisms exist to establish, activate, modify, review, disable, and remove identifiers and credentials."
+    },
+    {
+      "id": "scf-iac-23",
+      "scf_id": "IAC-23",
+      "family": "Identification & Authentication",
+      "name": "Periodic Access Review",
+      "description": "Mechanisms exist to periodically review the access rights of users."
+    },
+    {
+      "id": "scf-cm-04",
+      "scf_id": "CM-04",
+      "family": "Change Management",
+      "name": "Change Authorization",
+      "description": "Mechanisms exist to authorize changes prior to implementation."
+    },
+    {
+      "id": "scf-tpm-04",
+      "scf_id": "TPM-04",
+      "family": "Third-Party Management",
+      "name": "Vendor Due Diligence",
+      "description": "Mechanisms exist to perform due diligence on prospective third parties."
+    },
+    {
+      "id": "scf-vpm-06",
+      "scf_id": "VPM-06",
+      "family": "Vulnerability & Patch Management",
+      "name": "Vulnerability Scanning Cadence",
+      "description": "Mechanisms exist to scan for vulnerabilities on a defined cadence."
+    }
+  ],
+  "count": 5
+}

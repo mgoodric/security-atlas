@@ -21,7 +21,7 @@ freshness_class: quarterly
 evidence_queries:
   - id: disposal_log_uploaded_within_quarter
     language: rego
-    evidence_kind: manual.upload
+    evidence_kind: manual.upload.v1
     description: "A disposal-log upload exists within the last 90 days"
     expression: |
       package atlas.controls.soc2.cc6_5

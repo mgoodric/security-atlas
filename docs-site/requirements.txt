@@ -1,0 +1,8 @@
+# Pinned docs-site build dependencies. Used by `just docs-build`,
+# `just docs-serve`, and `.github/workflows/docs-publish.yml`.
+#
+# Installed in isolation via `uv tool run --with-requirements
+# docs-site/requirements.txt mkdocs ...` so it never pollutes the
+# monorepo's `uv` workspace.
+mkdocs-material==9.5.39
+mkdocs-git-revision-date-localized-plugin==1.2.6

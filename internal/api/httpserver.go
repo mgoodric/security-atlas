@@ -23,15 +23,21 @@ import (
 	auditperiodsapi "github.com/mgoodric/security-atlas/internal/api/auditperiods"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
+	boardapi "github.com/mgoodric/security-atlas/internal/api/board"
+	controldetailapi "github.com/mgoodric/security-atlas/internal/api/controldetail"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	controlstateapi "github.com/mgoodric/security-atlas/internal/api/controlstate"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	dashboardapi "github.com/mgoodric/security-atlas/internal/api/dashboard"
+	decisionsapi "github.com/mgoodric/security-atlas/internal/api/decisions"
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
 	exceptionsapi "github.com/mgoodric/security-atlas/internal/api/exceptions"
 	featuresapi "github.com/mgoodric/security-atlas/internal/api/features"
 	fwscopesapi "github.com/mgoodric/security-atlas/internal/api/frameworkscopes"
+	freshnessdriftapi "github.com/mgoodric/security-atlas/internal/api/freshnessdrift"
 	meapi "github.com/mgoodric/security-atlas/internal/api/me"
 	orgunitsapi "github.com/mgoodric/security-atlas/internal/api/orgunits"
+	oscalexportapi "github.com/mgoodric/security-atlas/internal/api/oscalexport"
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	policyacksapi "github.com/mgoodric/security-atlas/internal/api/policyacks"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
@@ -50,12 +56,16 @@ import (
 	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/audit/walkthrough"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
+	"github.com/mgoodric/security-atlas/internal/board"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/decision"
+	"github.com/mgoodric/security-atlas/internal/drift"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
+	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
@@ -87,8 +97,12 @@ func (s *Server) httpHandler() http.Handler {
 	// Slice 034: /auth/* (login/callback/logout) is bearer-exempt — users
 	// don't have a bearer yet at the moment they sign in. The middleware
 	// must skip the prefix. Note: /v1/admin/credentials* DOES go through
-	// bearer auth (admin endpoints require an admin credential).
-	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/"))
+	// bearer auth (admin endpoints require an admin credential). Slice 037
+	// adds /health to the same exempt set — the docker-compose self-host
+	// bundle's healthcheck and the atlas-bootstrap readiness poll both hit
+	// it with no credential. (The /health *route* is registered below,
+	// after every .Use() — chi requires all middleware before any route.)
+	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health"))
 	// Slice 033: lift the authenticated credential's tenant id onto the
 	// request context so every downstream handler — and every database
 	// transaction it opens — runs under the right `app.current_tenant`
@@ -114,6 +128,14 @@ func (s *Server) httpHandler() http.Handler {
 
 	queries := dbx.New(s.dbPool)
 	root.Mount("/", anchors.New(queries).Routes())
+
+	// Slice 037: /health liveness probe. Registered after the root Mount
+	// and alongside the other direct routes below — chi panics if a route
+	// is added before all .Use() middleware, and registering it directly
+	// on root (not via a second Mount("/")) avoids the double-mount
+	// panic. It is bearer- and authz-exempt via the exemption lists
+	// passed to the middleware above, so it answers with no credential.
+	root.Get("/health", s.handleHealth)
 	// Slice 008: UCF graph traversal HTTP API. Three read endpoints
 	// query the requirement-anchor-control graph through the SCF spine
 	// (canvas §3 / Plans/UCF_GRAPH_MODEL.md). Routes are appended
@@ -163,15 +185,32 @@ func (s *Server) httpHandler() http.Handler {
 	// parallel-batch convention — chi.Mux rejects two Mounts at "/", and other
 	// batches are also appending here, so order-of-append must not matter.
 	risksStore := risk.NewStore(s.dbPool)
-	risksH := risksapi.New(risksStore)
+	// Slice 020: the residual deriver ties risk-control links to slice 012's
+	// evaluation engine. GET /v1/risks/{id} returns the derived residual +
+	// effectiveness breakdown when this is attached; POST
+	// /v1/risks/{id}/controls links a control and recomputes residual.
+	risksDeriver := risk.NewResidualDeriver(
+		risksStore,
+		eval.NewEngine(eval.NewStore(s.dbPool), scope.NewStore(s.dbPool)),
+	)
+	risksH := risksapi.New(risksStore).WithDeriver(risksDeriver)
 	root.Post("/v1/risks", risksH.CreateRisk)
 	root.Get("/v1/risks", risksH.ListRisks)
 	root.Get("/v1/risks/heatmap", risksH.Heatmap)
+	// Slice 067: themes × org_units aggregation — slice 056's heatmap
+	// panel's central data source. A literal-segment route declared
+	// alongside /v1/risks/heatmap, before the generic /v1/risks/{id}, so
+	// chi's declaration-order match keeps it ahead of the UUID-id route.
+	root.Get("/v1/risks/theme-heatmap", risksH.ThemeHeatmap)
 	// Slice 053: manual aggregation + live recompute. Literal-segment
 	// routes (/aggregate, /{id}/aggregation) declared before the generic
 	// /v1/risks/{id} so chi's declaration-order match keeps them ahead.
 	root.Post("/v1/risks/aggregate", risksH.Aggregate)
 	root.Get("/v1/risks/{id}/aggregation", risksH.LiveAggregation)
+	// Slice 020: POST /v1/risks/{id}/controls — link a control to a risk.
+	// Literal-suffix route declared before the generic /v1/risks/{id} so
+	// chi's declaration-order match keeps it ahead.
+	root.Post("/v1/risks/{id}/controls", risksH.LinkControl)
 	root.Get("/v1/risks/{id}", risksH.GetRisk)
 	root.Delete("/v1/risks/{id}", risksH.DeleteRisk)
 	// Slice 053: theme catalog + per-risk theme tagging.
@@ -280,6 +319,16 @@ func (s *Server) httpHandler() http.Handler {
 	root.Post("/v1/audit-periods/{id}/freeze", periodsH.Freeze)
 	root.Get("/v1/audit-periods/{id}/control-state", periodsH.ControlState)
 	root.Post("/v1/audit-periods/{id}/populations/{popID}", periodsH.AttachPopulation)
+	// Slice 030: OSCAL SSP + POA&M export. The literal-segment
+	// /oscal-export sub-resource is declared BEFORE the bare /{id} so
+	// chi's declaration-order match keeps it ahead of periodsH.Get. It
+	// only mounts when the production binary has wired the Exporter via
+	// AttachOscalExporter (the export needs a running Python
+	// oscal-bridge); unit servers leave it nil and the route is absent.
+	if s.oscalExporter != nil {
+		oscalExportH := oscalexportapi.New(s.oscalExporter)
+		root.Post("/v1/audit-periods/{id}/oscal-export", oscalExportH.Export)
+	}
 	root.Get("/v1/audit-periods/{id}", periodsH.Get)
 	// Slice 027: walkthrough recording primitive. Routes appended per the
 	// parallel-batch convention (chi rejects two Mounts at "/"). The
@@ -347,6 +396,24 @@ func (s *Server) httpHandler() http.Handler {
 	root.Patch("/v1/exceptions/{id}/approve", exceptionsH.Approve)
 	root.Patch("/v1/exceptions/{id}/deny", exceptionsH.Deny)
 	root.Patch("/v1/exceptions/{id}/activate", exceptionsH.Activate)
+	// Slice 055: Decision Log CRUD + linkage (canvas Â§6.7). Routes appended
+	// per the parallel-batch convention -- chi.Mux rejects two Mounts at
+	// "/", so individual routes register onto the root. The literal-segment
+	// route /v1/decisions/overdue is declared BEFORE the bare
+	// /v1/decisions/{id} so chi's declaration-order match keeps the calendar
+	// route ahead of the generic UUID-id route. The link sub-resource
+	// routes are declared after the bare /{id} routes but use distinct path
+	// shapes (/{id}/links/{kind}[/{targetID}]) so there is no shadowing.
+	decisionsH := decisionsapi.New(decision.NewStore(s.dbPool))
+	root.Post("/v1/decisions", decisionsH.CreateDecision)
+	root.Get("/v1/decisions", decisionsH.ListDecisions)
+	root.Get("/v1/decisions/overdue", decisionsH.Overdue)
+	root.Get("/v1/decisions/{id}", decisionsH.GetDecision)
+	root.Get("/v1/decisions/{id}/audit-log", decisionsH.AuditLog)
+	root.Patch("/v1/decisions/{id}", decisionsH.UpdateDecision)
+	root.Post("/v1/decisions/{id}/supersede", decisionsH.Supersede)
+	root.Post("/v1/decisions/{id}/links/{kind}", decisionsH.AddLink)
+	root.Delete("/v1/decisions/{id}/links/{kind}/{targetID}", decisionsH.RemoveLink)
 	// Slice 022: policy library. Routes appended per the parallel-batch
 	// convention (chi rejects two Mounts at "/"). Sub-resource transitions
 	// (submit/approve/publish) are declared before /{id} so chi's
@@ -390,6 +457,81 @@ func (s *Server) httpHandler() http.Handler {
 	controlStateH := controlstateapi.New(controlStateEngine)
 	root.Get("/v1/controls/{id}/state", controlStateH.State)
 	root.Get("/v1/controls/{id}/effectiveness", controlStateH.Effectiveness)
+	// Slice 064: control-detail backend read endpoints. Four pure reads that
+	// fill the four binding placeholders slice 041's control-detail view
+	// shipped (evidence stream, linked policies, linked risks, control
+	// history). Routes appended per the parallel-batch convention (chi
+	// rejects two Mounts at "/"). The three /v1/controls/{id}/ sub-resources
+	// sit alongside slice 012's /state + /effectiveness -- chi resolves
+	// declaration order within the same method, so no shadowing. The Store
+	// is a pure read surface over existing tables (evidence_records,
+	// policies, risk_control_links, control_evaluations) -- this slice adds
+	// no migration and no write path (constitutional invariant #2).
+	controlDetailH := controldetailapi.New(controldetailapi.NewStore(s.dbPool))
+	root.Get("/v1/evidence", controlDetailH.Evidence)
+	root.Get("/v1/controls/{id}/policies", controlDetailH.Policies)
+	root.Get("/v1/controls/{id}/risks", controlDetailH.Risks)
+	root.Get("/v1/controls/{id}/history", controlDetailH.History)
+	// Slice 016: evidence freshness + control drift read model. Two
+	// read-only endpoints over the slice-016 read-model tables
+	// (evidence_freshness, control_drift_snapshots). Routes appended per the
+	// parallel-batch convention (chi rejects two Mounts at "/").
+	// /v1/controls/drift is a static-segment sibling of /v1/controls/{id}/...
+	// -- chi matches the static segment before the {id} wildcard, so no
+	// shadowing. The Stores are pure read surfaces (they never write the
+	// evidence_records or control_evaluations ledgers -- constitutional
+	// invariant #2); the NATS refresh subscriber + daily scheduler that
+	// drive the read-model refresh are wired in cmd/atlas.
+	freshnessStore := freshness.NewStore(s.dbPool)
+	driftStore := drift.NewStore(s.dbPool)
+	freshnessDriftH := freshnessdriftapi.New(freshnessStore, driftStore)
+	root.Get("/v1/evidence/freshness", freshnessDriftH.Freshness)
+	root.Get("/v1/controls/drift", freshnessDriftH.Drift)
+	// Slice 066: dashboard backend read endpoints. Three pure reads that
+	// fill three of the four binding placeholders slice 040's program
+	// dashboard view shipped (per-framework posture, the evidence-ingest
+	// activity feed, the unified upcoming-items rollup; the fourth,
+	// sort=residual,age on /v1/risks, extends the risks routes below).
+	// Routes appended per the parallel-batch convention (chi rejects two
+	// Mounts at "/"). /v1/frameworks/posture, /v1/activity, /v1/upcoming are
+	// fresh top-level paths -- no shadowing of any existing route. The Store
+	// is a pure read surface over existing tables + the slice-062
+	// admin_audit_log_v view -- this slice adds no migration and no write
+	// path (constitutional invariant #2).
+	dashboardH := dashboardapi.New(dashboardapi.NewStore(s.dbPool))
+	root.Get("/v1/frameworks/posture", dashboardH.FrameworkPosture)
+	root.Get("/v1/activity", dashboardH.Activity)
+	root.Get("/v1/upcoming", dashboardH.Upcoming)
+	// Slice 031: monthly board brief. Generates a single-page, board-ready
+	// posture snapshot (per-framework posture + 30-day drift + top-3 risks
+	// aging) and persists it as a PINNED, IMMUTABLE snapshot (canvas §7.5).
+	// The Generator is a pure reader of the slice-016 freshness + drift read
+	// models (reused via the freshnessStore + driftStore constructed above)
+	// plus the frameworks + risks tables; its only write target is the
+	// append-only board_briefs table. The narrative is TEMPLATED — no LLM
+	// (AC-6, P0 anti-criterion). Routes appended per the parallel-batch
+	// convention (chi rejects two Mounts at "/"); the literal-suffix routes
+	// (/{id}.md, /{id}/pdf) are declared before the bare /{id} so chi's
+	// declaration-order match keeps them ahead of the generic id route.
+	boardStore := board.NewStore(s.dbPool)
+	boardGen := board.NewGenerator(boardStore, freshnessStore, driftStore)
+	boardH := boardapi.New(boardGen, boardStore)
+	boardH.RegisterRoutes(root)
+	// Slice 032: quarterly board pack. Extends the slice-031 monthly brief
+	// into the full board-meeting artifact — a multi-section report
+	// (posture, top risks, coverage trend, open findings, operational
+	// metrics, investment-vs-coverage, asks of the board) with a
+	// draft -> publish lifecycle. The PackGenerator reuses the same
+	// slice-016 freshness + drift read models plus the board-pack-owned
+	// failing-evaluations read (control_evaluations as of period_end —
+	// decision D4). The narrative is TEMPLATED — no LLM (P0 anti-criterion).
+	// Publish is gated on every section being human-approved (decision D6).
+	// Routes appended per the parallel-batch convention; the literal-suffix
+	// and deeper /sections/... routes are declared before the bare /{id}.
+	boardPackStore := board.NewPackStore(s.dbPool)
+	boardPackGen := board.NewPackGenerator(boardPackStore, freshnessStore, driftStore)
+	boardPackH := boardapi.NewPack(boardPackGen, boardPackStore)
+	boardPackH.RegisterRoutes(root)
 	// Slice 034: admin credentials HTTP API + auth routes. Routes append
 	// per the parallel-batch convention. Admin-credential routes require
 	// the bearer auth middleware (admin gate inside the handler). The
@@ -599,4 +741,30 @@ func writeAuthError(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
 	_, _ = w.Write([]byte(`{"error":"` + msg + `"}`))
+}
+
+// handleHealth is the slice-037 liveness probe used by the docker-compose
+// self-host bundle's healthcheck and the atlas-bootstrap readiness poll.
+//
+// It always returns 200 when the process is serving HTTP. If the DB pool
+// is attached it runs a short-timeout ping; a failed ping reports
+// `{"db":"degraded"}` but still 200 — `/health` is liveness ("is the
+// process up?"), not readiness. Returning 503 on a transient DB blip
+// would cause compose to mark atlas unhealthy and restart-loop it during
+// Postgres warm-up. Bootstrap ordering already gates atlas on
+// postgres-healthy, so the DB is reachable by the time atlas runs.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	db := "ok"
+	if s.dbPool != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := s.dbPool.Ping(ctx); err != nil {
+			db = "degraded"
+		}
+	} else {
+		db = "absent"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"ok","db":"` + db + `"}`))
 }

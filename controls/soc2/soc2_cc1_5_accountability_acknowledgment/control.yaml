@@ -20,7 +20,7 @@ freshness_class: weekly
 evidence_queries:
   - id: all_users_acknowledged_core_policies
     language: rego
-    evidence_kind: policy.acknowledgment
+    evidence_kind: policy.acknowledgment.v1
     description: "Every active user has acknowledged all 5 v1 stock policies in current version"
     expression: |
       package atlas.controls.soc2.cc1_5

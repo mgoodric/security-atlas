@@ -287,6 +287,44 @@ func (q *Queries) GetRiskByID(ctx context.Context, arg GetRiskByIDParams) (Risk,
 	return i, err
 }
 
+const getRiskControlLink = `-- name: GetRiskControlLink :one
+SELECT control_id, design_score, weight_design, weight_operation,
+       weight_coverage, created_at
+FROM risk_control_links
+WHERE tenant_id = $1 AND risk_id = $2 AND control_id = $3
+`
+
+type GetRiskControlLinkParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	RiskID    pgtype.UUID `json:"risk_id"`
+	ControlID pgtype.UUID `json:"control_id"`
+}
+
+type GetRiskControlLinkRow struct {
+	ControlID       pgtype.UUID        `json:"control_id"`
+	DesignScore     pgtype.Numeric     `json:"design_score"`
+	WeightDesign    pgtype.Numeric     `json:"weight_design"`
+	WeightOperation pgtype.Numeric     `json:"weight_operation"`
+	WeightCoverage  pgtype.Numeric     `json:"weight_coverage"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+// Slice 020: one link row by (risk, control). Used to confirm a link exists
+// before returning its effectiveness breakdown.
+func (q *Queries) GetRiskControlLink(ctx context.Context, arg GetRiskControlLinkParams) (GetRiskControlLinkRow, error) {
+	row := q.db.QueryRow(ctx, getRiskControlLink, arg.TenantID, arg.RiskID, arg.ControlID)
+	var i GetRiskControlLinkRow
+	err := row.Scan(
+		&i.ControlID,
+		&i.DesignScore,
+		&i.WeightDesign,
+		&i.WeightOperation,
+		&i.WeightCoverage,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const heatmapBuckets = `-- name: HeatmapBuckets :many
 SELECT
     (inherent_score->>'likelihood')::int  AS likelihood,
@@ -356,6 +394,101 @@ func (q *Queries) LinkRiskControl(ctx context.Context, arg LinkRiskControlParams
 	return err
 }
 
+const linkRiskControlWithWeights = `-- name: LinkRiskControlWithWeights :exec
+INSERT INTO risk_control_links (
+    risk_id, control_id, tenant_id,
+    design_score, weight_design, weight_operation, weight_coverage
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (tenant_id, risk_id, control_id) DO UPDATE
+SET design_score     = EXCLUDED.design_score,
+    weight_design    = EXCLUDED.weight_design,
+    weight_operation = EXCLUDED.weight_operation,
+    weight_coverage  = EXCLUDED.weight_coverage
+`
+
+type LinkRiskControlWithWeightsParams struct {
+	RiskID          pgtype.UUID    `json:"risk_id"`
+	ControlID       pgtype.UUID    `json:"control_id"`
+	TenantID        pgtype.UUID    `json:"tenant_id"`
+	DesignScore     pgtype.Numeric `json:"design_score"`
+	WeightDesign    pgtype.Numeric `json:"weight_design"`
+	WeightOperation pgtype.Numeric `json:"weight_operation"`
+	WeightCoverage  pgtype.Numeric `json:"weight_coverage"`
+}
+
+// Slice 020: link a control to a risk with explicit effectiveness weights.
+// Idempotent: ON CONFLICT updates the weights so a re-link with new weights
+// is an update, not a 23505. The slice-019 LinkRiskControl (no weights) stays
+// for the create-risk path — it relies on the column DEFAULTs.
+func (q *Queries) LinkRiskControlWithWeights(ctx context.Context, arg LinkRiskControlWithWeightsParams) error {
+	_, err := q.db.Exec(ctx, linkRiskControlWithWeights,
+		arg.RiskID,
+		arg.ControlID,
+		arg.TenantID,
+		arg.DesignScore,
+		arg.WeightDesign,
+		arg.WeightOperation,
+		arg.WeightCoverage,
+	)
+	return err
+}
+
+const listRiskControlLinkWeights = `-- name: ListRiskControlLinkWeights :many
+SELECT control_id, design_score, weight_design, weight_operation,
+       weight_coverage, created_at
+FROM risk_control_links
+WHERE tenant_id = $1 AND risk_id = $2
+ORDER BY created_at ASC, control_id ASC
+`
+
+type ListRiskControlLinkWeightsParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	RiskID   pgtype.UUID `json:"risk_id"`
+}
+
+type ListRiskControlLinkWeightsRow struct {
+	ControlID       pgtype.UUID        `json:"control_id"`
+	DesignScore     pgtype.Numeric     `json:"design_score"`
+	WeightDesign    pgtype.Numeric     `json:"weight_design"`
+	WeightOperation pgtype.Numeric     `json:"weight_operation"`
+	WeightCoverage  pgtype.Numeric     `json:"weight_coverage"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+// Slice 020: returns each control link for a risk WITH the per-link
+// effectiveness weighting columns (migration `_029`). The residual derivation
+// reads design_score + the three weights here; operational_score and
+// coverage_score are computed at read time from the evaluation ledger and are
+// never stored on the link row (caching a derived score beyond its staleness
+// threshold is a P0 anti-criterion).
+func (q *Queries) ListRiskControlLinkWeights(ctx context.Context, arg ListRiskControlLinkWeightsParams) ([]ListRiskControlLinkWeightsRow, error) {
+	rows, err := q.db.Query(ctx, listRiskControlLinkWeights, arg.TenantID, arg.RiskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRiskControlLinkWeightsRow
+	for rows.Next() {
+		var i ListRiskControlLinkWeightsRow
+		if err := rows.Scan(
+			&i.ControlID,
+			&i.DesignScore,
+			&i.WeightDesign,
+			&i.WeightOperation,
+			&i.WeightCoverage,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRiskControlLinks = `-- name: ListRiskControlLinks :many
 SELECT control_id, created_at
 FROM risk_control_links
@@ -387,6 +520,41 @@ func (q *Queries) ListRiskControlLinks(ctx context.Context, arg ListRiskControlL
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRiskIDsLinkedToControl = `-- name: ListRiskIDsLinkedToControl :many
+SELECT risk_id
+FROM risk_control_links
+WHERE tenant_id = $1 AND control_id = $2
+ORDER BY risk_id ASC
+`
+
+type ListRiskIDsLinkedToControlParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	ControlID pgtype.UUID `json:"control_id"`
+}
+
+// Slice 020: every risk in the tenant that links the given control. The
+// evidence-ingest residual subscriber uses this to find which risks must be
+// recomputed when a control's state changes.
+func (q *Queries) ListRiskIDsLinkedToControl(ctx context.Context, arg ListRiskIDsLinkedToControlParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listRiskIDsLinkedToControl, arg.TenantID, arg.ControlID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var risk_id pgtype.UUID
+		if err := rows.Scan(&risk_id); err != nil {
+			return nil, err
+		}
+		items = append(items, risk_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -571,6 +739,52 @@ func (q *Queries) UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, e
 		arg.Accepter,
 		arg.InstrumentReference,
 	)
+	var i Risk
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Description,
+		&i.Category,
+		&i.Methodology,
+		&i.InherentScore,
+		&i.Treatment,
+		&i.TreatmentOwner,
+		&i.ResidualScore,
+		&i.ReviewDueAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AcceptedUntil,
+		&i.Accepter,
+		&i.InstrumentReference,
+		&i.Level,
+		&i.OrgUnitID,
+		&i.Themes,
+	)
+	return i, err
+}
+
+const updateRiskResidual = `-- name: UpdateRiskResidual :one
+UPDATE risks
+SET residual_score = $3::jsonb,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+`
+
+type UpdateRiskResidualParams struct {
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	ID            pgtype.UUID `json:"id"`
+	ResidualScore []byte      `json:"residual_score"`
+}
+
+// Slice 020: writes the freshly-derived residual_score JSONB onto a risk.
+// This is the ONLY column the residual derivation mutates — it never touches
+// inherent_score, never touches evidence (constitutional invariant #2). The
+// $3 parameter is cast to jsonb explicitly so sqlc does not borrow the
+// bytea-via-JSONB inference and force an awkward caller type.
+func (q *Queries) UpdateRiskResidual(ctx context.Context, arg UpdateRiskResidualParams) (Risk, error) {
+	row := q.db.QueryRow(ctx, updateRiskResidual, arg.TenantID, arg.ID, arg.ResidualScore)
 	var i Risk
 	err := row.Scan(
 		&i.ID,

@@ -8,97 +8,128 @@
 -- migrations. See ARCHITECTURE_CANVAS.md sections 02-primitives.md and 05-scopes.md.
 
 -- ===== Enum types (prefixed per table to avoid global-namespace collisions) =====
+--
+-- Every CREATE TYPE is wrapped in a DO block that swallows `duplicate_object`
+-- (slice 065 bug #3). Postgres has no `CREATE TYPE IF NOT EXISTS`, so the
+-- exception-catch is the canonical idempotency idiom. Without it, re-running
+-- this migration against a partially-migrated database — which the
+-- self-host bootstrap does on every `docker compose up` — aborts on the
+-- first `type "..." already exists` error and strands the deployment.
 
-CREATE TYPE control_implementation_type AS ENUM (
-    'automated',
-    'semi_automated',
-    'manual_attested',
-    'manual_periodic'
-);
+DO $$ BEGIN
+    CREATE TYPE control_implementation_type AS ENUM (
+        'automated',
+        'semi_automated',
+        'manual_attested',
+        'manual_periodic'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE TYPE control_lifecycle_state AS ENUM (
-    'draft',
-    'proposed',
-    'active',
-    'deprecated',
-    'retired'
-);
+DO $$ BEGIN
+    CREATE TYPE control_lifecycle_state AS ENUM (
+        'draft',
+        'proposed',
+        'active',
+        'deprecated',
+        'retired'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE TYPE risk_category AS ENUM (
-    'confidentiality',
-    'integrity',
-    'availability',
-    'privacy',
-    'regulatory',
-    'operational',
-    'financial'
-);
+DO $$ BEGIN
+    CREATE TYPE risk_category AS ENUM (
+        'confidentiality',
+        'integrity',
+        'availability',
+        'privacy',
+        'regulatory',
+        'operational',
+        'financial'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE TYPE risk_methodology AS ENUM (
-    'nist_800_30',
-    'fair',
-    'cis_ram',
-    'iso_27005',
-    'qualitative_5x5'
-);
+DO $$ BEGIN
+    CREATE TYPE risk_methodology AS ENUM (
+        'nist_800_30',
+        'fair',
+        'cis_ram',
+        'iso_27005',
+        'qualitative_5x5'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE TYPE risk_treatment AS ENUM (
-    'accept',
-    'mitigate',
-    'transfer',
-    'avoid'
-);
+DO $$ BEGIN
+    CREATE TYPE risk_treatment AS ENUM (
+        'accept',
+        'mitigate',
+        'transfer',
+        'avoid'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE TYPE scope_environment AS ENUM (
-    'prod',
-    'staging',
-    'dev',
-    'sandbox'
-);
+DO $$ BEGIN
+    CREATE TYPE scope_environment AS ENUM (
+        'prod',
+        'staging',
+        'dev',
+        'sandbox'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE TYPE scope_data_classification AS ENUM (
-    'restricted',
-    'confidential',
-    'internal',
-    'public'
-);
+DO $$ BEGIN
+    CREATE TYPE scope_data_classification AS ENUM (
+        'restricted',
+        'confidential',
+        'internal',
+        'public'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE TYPE evidence_result AS ENUM (
-    'pass',
-    'fail',
-    'na',
-    'inconclusive'
-);
+DO $$ BEGIN
+    CREATE TYPE evidence_result AS ENUM (
+        'pass',
+        'fail',
+        'na',
+        'inconclusive'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE TYPE evidence_freshness_class AS ENUM (
-    'realtime',
-    'daily',
-    'weekly',
-    'monthly',
-    'quarterly',
-    'annual'
-);
+DO $$ BEGIN
+    CREATE TYPE evidence_freshness_class AS ENUM (
+        'realtime',
+        'daily',
+        'weekly',
+        'monthly',
+        'quarterly',
+        'annual'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE TYPE framework_version_status AS ENUM (
-    'current',
-    'legacy',
-    'withdrawn'
-);
+DO $$ BEGIN
+    CREATE TYPE framework_version_status AS ENUM (
+        'current',
+        'legacy',
+        'withdrawn'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE TYPE policy_status AS ENUM (
-    'draft',
-    'under_review',
-    'approved',
-    'published',
-    'superseded'
-);
+DO $$ BEGIN
+    CREATE TYPE policy_status AS ENUM (
+        'draft',
+        'under_review',
+        'approved',
+        'published',
+        'superseded'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE TYPE framework_scope_status AS ENUM (
-    'draft',
-    'approved',
-    'active',
-    'retired'
-);
+DO $$ BEGIN
+    CREATE TYPE framework_scope_status AS ENUM (
+        'draft',
+        'approved',
+        'active',
+        'retired'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ===== Tables =====
 --

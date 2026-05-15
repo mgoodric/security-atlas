@@ -1,0 +1,71 @@
+{{/*
+ingress.yaml — OPTIONAL. Rendered only when `ingress.enabled` is true.
+
+Fronts the web frontend and the atlas HTTP API under one host:
+  `/`              -> web Service   (the browser app)
+  `/v1` `/health` `/auth` (configurable) -> atlas Service (the HTTP API)
+
+This single-host shape is why `web.publicApiBaseUrl` can stay empty — the
+browser uses same-origin relative URLs and the Ingress path-routes /v1 etc.
+to the atlas server.
+
+cert-manager integration is opt-in:
+  - `ingress.certManager.enabled` adds the cluster-issuer annotation and a
+    TLS block; cert-manager provisions a cert into `<host>-tls`.
+  - alternatively `ingress.tls.existingSecret` points at a TLS Secret you
+    manage yourself.
+  - with neither, the Ingress is plain HTTP (dev only).
+*/}}
+{{- if .Values.ingress.enabled }}
+{{- $fullname := include "security-atlas.fullname" . -}}
+{{- $host := .Values.ingress.host -}}
+{{- $tlsSecret := "" -}}
+{{- if .Values.ingress.certManager.enabled -}}
+{{- $tlsSecret = printf "%s-tls" $host -}}
+{{- else if .Values.ingress.tls.existingSecret -}}
+{{- $tlsSecret = .Values.ingress.tls.existingSecret -}}
+{{- end -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "security-atlas.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.ingress.certManager.enabled }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.certManager.clusterIssuer | quote }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- if $tlsSecret }}
+  tls:
+    - hosts:
+        - {{ $host | quote }}
+      secretName: {{ $tlsSecret | quote }}
+  {{- end }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          {{- range .Values.ingress.paths.apiPrefixes }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-atlas
+                port:
+                  number: 8080
+          {{- end }}
+          - path: {{ .Values.ingress.paths.web }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-web
+                port:
+                  number: 3000
+{{- end }}

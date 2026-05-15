@@ -20,7 +20,7 @@ freshness_class: daily
 evidence_queries:
   - id: privileged_vault_locked_down
     language: rego
-    evidence_kind: 1password.org_policy
+    evidence_kind: 1password.org_policy.v1
     description: "Privileged vault has restricted membership, sharing-disabled-by-default, audit logging on"
     expression: |
       package atlas.controls.soc2.cc6_3_pam

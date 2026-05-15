@@ -1,0 +1,33 @@
+apiVersion: v2
+name: security-atlas
+description: >-
+  Open-source, self-hostable GRC platform — control-graph and evidence-pipeline
+  system. This chart deploys the atlas server, web frontend, NATS JetStream,
+  and an optional bundled MinIO to a Kubernetes cluster. Postgres is an
+  external dependency (bring your own RDS / Aurora / CrunchyData / operator).
+type: application
+# Chart version — bump on any chart change (SemVer for the chart packaging).
+version: 0.1.0
+
+# appVersion tracks the security-atlas platform release the chart's default
+# image tags point at. Keep in sync with the published container tags.
+appVersion: "0.1.0"
+
+home: https://github.com/mgoodric/security-atlas
+sources:
+  - https://github.com/mgoodric/security-atlas
+
+keywords:
+  - grc
+  - compliance
+  - soc2
+  - oscal
+  - evidence
+
+maintainers:
+  - name: security-atlas maintainers
+    url: https://github.com/mgoodric/security-atlas
+# No subchart dependencies. Postgres is external by design (the chart never
+# bundles a database — see deploy/helm/README.md). NATS and MinIO are shipped
+# as first-party templates rather than upstream subcharts to keep the values
+# surface small and the slice self-contained.

@@ -43,22 +43,30 @@
 -- risk_level: the three-tier hierarchy from canvas §6.4. Reused by `risks`,
 -- `org_units`, and `aggregation_rules` (slice 054). Prefixed with `risk_` so
 -- the global enum namespace stays unambiguous.
-CREATE TYPE risk_level AS ENUM (
-    'team',
-    'org',
-    'company'
-);
+--
+-- Wrapped in a DO/EXCEPTION block for re-run idempotency (slice 065 bug #3):
+-- Postgres has no `CREATE TYPE IF NOT EXISTS`, and the self-host bootstrap
+-- re-applies every migration on each `docker compose up`.
+DO $$ BEGIN
+    CREATE TYPE risk_level AS ENUM (
+        'team',
+        'org',
+        'company'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- decision_status: canvas §6.7 lifecycle states. `revisited` is a non-terminal
 -- state indicating the decision has been reviewed at its revisit_by date
 -- without being changed; `superseded` is terminal and pairs with the
 -- `superseded_by` FK.
-CREATE TYPE decision_status AS ENUM (
-    'active',
-    'revisited',
-    'superseded',
-    'expired'
-);
+DO $$ BEGIN
+    CREATE TYPE decision_status AS ENUM (
+        'active',
+        'revisited',
+        'superseded',
+        'expired'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ===== org_units =====
 --

@@ -65,3 +65,57 @@ RETURNING *;
 -- name: DeleteDecision :exec
 DELETE FROM decisions
 WHERE tenant_id = $1 AND id = $2;
+
+-- name: CountDecisionsByDecidedDate :one
+-- Slice 055: count decisions whose decided_at falls on a given UTC calendar
+-- date. Drives the per-tenant per-day NNNN sequence in the
+-- DL-YYYY-MM-DD-NNNN identifier. $2 is the start-of-day (inclusive), $3 the
+-- start of the next day (exclusive).
+SELECT count(*) AS same_day_count
+FROM decisions
+WHERE tenant_id = $1
+  AND decided_at >= $2
+  AND decided_at < $3;
+
+-- name: SupersedeDecision :one
+-- Slice 055: mark a decision superseded and point superseded_by at the
+-- replacement. The WHERE status = 'active' guard means a non-active (already
+-- superseded / expired) decision returns zero rows -- the store
+-- disambiguates that into a 409. The old row is never deleted (P0
+-- anti-criterion); only its status + superseded_by + updated_at change.
+UPDATE decisions
+SET status = 'superseded',
+    superseded_by = $3,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND status = 'active'
+RETURNING *;
+
+-- name: SetDecisionAuditNarrativeOptOut :one
+-- Slice 055: flip the per-decision OSCAL-narrative opt-out flag.
+UPDATE decisions
+SET audit_narrative_opt_out = $3,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
+-- name: ListOverdueDecisions :many
+-- Slice 055: active decisions whose revisit_by has already passed. $2 is
+-- "today" (a DATE). Powers GET /v1/decisions/overdue and the daily
+-- overdue-notification job.
+SELECT *
+FROM decisions
+WHERE tenant_id = $1
+  AND status = 'active'
+  AND revisit_by IS NOT NULL
+  AND revisit_by < $2
+ORDER BY revisit_by ASC, id ASC;
+
+-- name: ListTenantsWithOverdueDecisions :many
+-- Slice 055: every tenant with at least one active, overdue decision. Run
+-- by the daily overdue-notification job as the migrator role (BYPASSRLS)
+-- to enumerate tenants before applying each tenant's GUC. $1 is "today".
+SELECT DISTINCT tenant_id
+FROM decisions
+WHERE status = 'active'
+  AND revisit_by IS NOT NULL
+  AND revisit_by < $1;
