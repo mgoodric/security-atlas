@@ -64,7 +64,7 @@ non-required first).
 **Options considered:**
 
 - **(i)** Add `continue-on-error: true` only on the `Run Playwright
-  tests` step (line ~792 of `ci.yml`, the actual `npx playwright test`
+tests` step (line ~792 of `ci.yml`, the actual `npx playwright test`
   invocation).
 - **(ii)** Add `continue-on-error: true` at job level so EVERY step of
   the `frontend-playwright` job is allowed to fail without poisoning
@@ -120,15 +120,15 @@ The slice doc reads "the five un-shimmed specs (`web/e2e/*.spec.ts`)".
 At the time this slice runs the directory contains seven `.spec.ts`
 files:
 
-| Spec file                       | Slice    | Seed-data needed? |
-| ------------------------------- | -------- | ----------------- |
-| `admin-bootstrap.spec.ts`       | 060      | yes (failing)     |
-| `audit-workspace.spec.ts`       | 048      | yes (failing)     |
-| `control-detail.spec.ts`        | 041      | yes (failing)     |
-| `dashboard.spec.ts`             | 040      | yes (failing)     |
-| `risk-hierarchy.spec.ts`        | 056      | yes (failing)     |
-| `first-time-login.spec.ts`      | 073      | no (route-mocked) |
-| `version-footer.spec.ts`        | 072      | no (unauth `/login`)|
+| Spec file                  | Slice | Seed-data needed?    |
+| -------------------------- | ----- | -------------------- |
+| `admin-bootstrap.spec.ts`  | 060   | yes (failing)        |
+| `audit-workspace.spec.ts`  | 048   | yes (failing)        |
+| `control-detail.spec.ts`   | 041   | yes (failing)        |
+| `dashboard.spec.ts`        | 040   | yes (failing)        |
+| `risk-hierarchy.spec.ts`   | 056   | yes (failing)        |
+| `first-time-login.spec.ts` | 073   | no (route-mocked)    |
+| `version-footer.spec.ts`   | 072   | no (unauth `/login`) |
 
 The slice doc's "five un-shimmed" claim is consistent with reality: the
 two route-mocked specs (slice 072 + 073) were authored under the same
