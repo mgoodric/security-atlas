@@ -99,6 +99,7 @@ Allowed types:
 | `feat`     | minor | New feature                              |
 | `fix`      | patch | Bug fix                                  |
 | `docs`     | none  | Docs-only change                         |
+| `deps`     | none  | Dependency bump (Dependabot)             |
 | `chore`    | none  | Tooling / housekeeping                   |
 | `refactor` | none  | Code restructure without behavior change |
 | `test`     | none  | Adding or refining tests only            |
@@ -111,6 +112,10 @@ Allowed types:
 Breaking changes — add `!` after the type (e.g. `feat(api)!: drop deprecated /v0`) **and** include a `BREAKING CHANGE:` footer. This triggers a major bump.
 
 Scope is optional but recommended (`feat(evidence):`, `fix(ucf):`, `docs(canvas):`).
+
+### Dependency updates
+
+Dependabot opens PRs every Monday with the `deps:` prefix (`deps(deps):`, `deps(deps-dev):`, `deps(actions):`, etc.) across all ecosystems (Go modules, npm, pip, Docker, GitHub Actions). Release-please surfaces them under the **Dependencies** section in `CHANGELOG.md`. Patch and minor bumps are reviewed individually; majors are investigated for breaking-change exposure before merge.
 
 ---
 
