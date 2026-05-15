@@ -9,6 +9,29 @@ Conventional-Commit messages. Each entry links to its slice issue, the
 merging PR, and the squash-merge commit. For richer per-slice narrative
 see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
+## [1.6.0](https://github.com/mgoodric/security-atlas/compare/v1.5.1...v1.6.0) (2026-05-15)
+
+
+### Features
+
+* **auth:** First-time login UX + bootstrap-token discoverability ([#073](https://github.com/mgoodric/security-atlas/issues/073)) ([#149](https://github.com/mgoodric/security-atlas/issues/149)) ([b618863](https://github.com/mgoodric/security-atlas/commit/b6188631e855ff35b81b28bc0005ccf828a9acab))
+* **frontend:** Version string surfaced in the UI ([#072](https://github.com/mgoodric/security-atlas/issues/072)) ([#148](https://github.com/mgoodric/security-atlas/issues/148)) ([c1c0995](https://github.com/mgoodric/security-atlas/commit/c1c0995d304621735a128452a48bab23e6be625c))
+* **infra:** Dependabot deps commit prefix + release-please section ([#077](https://github.com/mgoodric/security-atlas/issues/077)) ([#147](https://github.com/mgoodric/security-atlas/issues/147)) ([6536a74](https://github.com/mgoodric/security-atlas/commit/6536a74a381b0be2483df96cf891970d0964435d))
+* **infra:** Pre-push hook + slice-template step 9a guidance ([#081](https://github.com/mgoodric/security-atlas/issues/081)) ([#165](https://github.com/mgoodric/security-atlas/issues/165)) ([ac52834](https://github.com/mgoodric/security-atlas/commit/ac528343130428989d52f96ab7575e90e5fbe8b4))
+* **infra:** Quarantine Frontend · Playwright e2e until seed-harness lands ([#079](https://github.com/mgoodric/security-atlas/issues/079)) ([#164](https://github.com/mgoodric/security-atlas/issues/164)) ([88df0c9](https://github.com/mgoodric/security-atlas/commit/88df0c9d65bf90f0591a9f943817755d8e5a985b))
+
+
+### Bug Fixes
+
+* **infra:** Release-tag infrastructure (GoReleaser cosign + mkdocs publish) ([#080](https://github.com/mgoodric/security-atlas/issues/080)) ([#166](https://github.com/mgoodric/security-atlas/issues/166)) ([f224ac0](https://github.com/mgoodric/security-atlas/commit/f224ac0b550b9fc3ec5de6480fc6569a4a5500e1))
+
+
+### Documentation
+
+* **backlog:** add v2 slice 078 (eslint 10 + react-plugin incompat) ([#161](https://github.com/mgoodric/security-atlas/issues/161)) ([6a539e8](https://github.com/mgoodric/security-atlas/commit/6a539e84e8eb66c089d7c761edc32d06f6d8078a))
+* **backlog:** add v2 slices 076 (metrics catalog) and 077 (deps prefix) ([#145](https://github.com/mgoodric/security-atlas/issues/145)) ([7b6a2f5](https://github.com/mgoodric/security-atlas/commit/7b6a2f547b8a3accccff4c2521202c37890adf03))
+* **backlog:** add v2 slices 079, 080, 081 (CI hardening spillover) ([#162](https://github.com/mgoodric/security-atlas/issues/162)) ([90886f5](https://github.com/mgoodric/security-atlas/commit/90886f55dcfccf46e0a28790d4276426ddbd4cf4))
+
 ## [1.5.1](https://github.com/mgoodric/security-atlas/compare/v1.5.0...v1.5.1) (2026-05-15)
 
 
