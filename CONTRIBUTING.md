@@ -34,32 +34,33 @@ After `just install-hooks`, commits with malformed Go (or unformatted YAML / JSO
 
 ## Task surface (`just`)
 
-| Recipe                  | What it does                                                              |
-| ----------------------- | ------------------------------------------------------------------------- |
-| `just`                  | List all recipes                                                          |
-| `just db-up`            | Start a local Postgres 16 in Docker                                       |
-| `just db-down`          | Tear down the local Postgres                                              |
-| `just migrate-up`       | Bootstrap roles + apply forward SQL migrations (requires `$DATABASE_URL`) |
-| `just migrate-down`     | Apply the latest reverse migration                                        |
-| `just sqlc-generate`    | Run `sqlc generate` against the schema                                    |
-| `just test-integration` | Run integration tests (requires `$DATABASE_URL_APP`)                      |
-| `just build`            | Build all components (Go + frontend)                                      |
-| `just build-go`         | Build Go binaries only                                                    |
-| `just build-frontend`   | Build the `web/` workspace                                                |
-| `just test`             | Run all tests                                                             |
-| `just test-go`          | Run Go tests (`go test -race ./...` in CI)                                |
-| `just test-frontend`    | Run frontend tests                                                        |
-| `just lint`             | Run all linters (Go + frontend + Python)                                  |
-| `just lint-go`          | `golangci-lint run ./...`                                                 |
-| `just lint-frontend`    | `npm run lint` in `web/`                                                  |
-| `just lint-python`      | `ruff check .`                                                            |
-| `just fmt`              | Format all code (in-place)                                                |
-| `just fmt-go`           | `gofmt -w` + `goimports -w -local github.com/mgoodric/security-atlas`     |
-| `just fmt-python`       | `ruff format .`                                                           |
-| `just install-hooks`    | Install pre-commit hooks (one-time)                                       |
-| `just hooks-run`        | Run pre-commit against the whole tree                                     |
-| `just tidy`             | `go mod tidy` and fail if `go.mod` / `go.sum` change                      |
-| `just ci`               | Run what CI runs (lint + test + build)                                    |
+| Recipe                     | What it does                                                              |
+| -------------------------- | ------------------------------------------------------------------------- |
+| `just`                     | List all recipes                                                          |
+| `just db-up`               | Start a local Postgres 16 in Docker                                       |
+| `just db-down`             | Tear down the local Postgres                                              |
+| `just migrate-up`          | Bootstrap roles + apply forward SQL migrations (requires `$DATABASE_URL`) |
+| `just migrate-down`        | Apply the latest reverse migration                                        |
+| `just sqlc-generate`       | Run `sqlc generate` against the schema                                    |
+| `just test-integration`    | Run integration tests (requires `$DATABASE_URL_APP`)                      |
+| `just build`               | Build all components (Go + frontend)                                      |
+| `just build-go`            | Build Go binaries only                                                    |
+| `just build-frontend`      | Build the `web/` workspace                                                |
+| `just test`                | Run all tests                                                             |
+| `just test-go`             | Run Go tests (`go test -race ./...` in CI)                                |
+| `just test-frontend`       | Run frontend tests                                                        |
+| `just lint`                | Run all linters (Go + frontend + Python)                                  |
+| `just lint-go`             | `golangci-lint run ./...`                                                 |
+| `just lint-frontend`       | `npm run lint` in `web/`                                                  |
+| `just lint-python`         | `ruff check .`                                                            |
+| `just fmt`                 | Format all code (in-place)                                                |
+| `just fmt-go`              | `gofmt -w` + `goimports -w -local github.com/mgoodric/security-atlas`     |
+| `just fmt-python`          | `ruff format .`                                                           |
+| `just install-hooks`       | Install pre-commit hooks (one-time)                                       |
+| `just hooks-run`           | Run pre-commit against the whole tree                                     |
+| `just tidy`                | `go mod tidy` and fail if `go.mod` / `go.sum` change                      |
+| `just ci`                  | Run what CI runs (lint + test + build)                                    |
+| `just refresh-screenshots` | Re-capture README screenshots + animated GIF (slice 057)                  |
 
 ---
 
@@ -150,6 +151,40 @@ If a commit was AI-assisted, also include a `Co-authored-by:` trailer naming the
 See [`.github/branch-protection.json`](./.github/branch-protection.json) for the full ruleset.
 
 ---
+
+## Refreshing the README screenshots
+
+The README embeds four screenshots + one animated GIF of the running app
+(`docs/images/`). They are version-controlled artifacts refreshed on
+demand — CI does NOT block on screenshot freshness. When the merged
+frontend drifts visibly from what's captured, regenerate:
+
+```sh
+just refresh-screenshots
+```
+
+The recipe:
+
+1. Builds `web/` in production mode (`npm run build`).
+2. Spins up a fixture-driven stub of the Go platform on `:8787`
+   (`web/scripts/stub-platform-server.ts`) serving JSON from
+   `fixtures/readme-demo/**`.
+3. Runs the capture spec
+   (`web/scripts/capture-readme-screenshots.spec.ts`) under
+   `web/playwright.config.ts` to produce eight PNGs (light + dark for
+   each of four views) at 1440×900, plus a webm of an 8-second flow.
+4. Converts the webm to a palette-optimized GIF via `ffmpeg`.
+5. Quantizes the PNGs in place via `pngquant` (optional but recommended).
+
+Prerequisites: `ffmpeg` and `pngquant` on `$PATH` (Homebrew installs
+both); `npx playwright install chromium` once per machine. The Next.js
+server boots in ~2 seconds on a modern laptop; the whole capture run
+typically completes in under a minute.
+
+Fixture constraints — see `fixtures/readme-demo/README.md`. All seed
+data is neutral: no maintainer references, no real tenant names, no
+vendor-prefixed credentials. When you edit fixtures, run the recipe to
+regenerate the artifacts and commit both in the same change.
 
 ## AI-assist boundary
 
