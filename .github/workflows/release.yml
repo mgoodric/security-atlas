@@ -77,7 +77,11 @@ jobs:
         # downloads against a public.key it doesn't ship for v3 releases.
         # cosign-installer v4 is the first version that natively bootstraps
         # cosign v3 binaries.
-        uses: sigstore/cosign-installer@v4
+        # cosign-installer doesn't ship a floating `@v4` major tag yet
+        # (only specific points like v4.0.0, v4.1.x). Pin to the latest
+        # v4.1.x. When the maintainer re-checks, dependabot's actions
+        # group will surface newer 4.x.
+        uses: sigstore/cosign-installer@v4.1.2
         with:
           cosign-release: "v3.0.6"
 
