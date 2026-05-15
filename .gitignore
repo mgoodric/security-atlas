@@ -85,3 +85,6 @@ docs-site/site/
 ### Slice 069 — Playwright runner artifacts
 web/playwright-report/
 web/test-results/
+
+### Slice 057 — README capture pipeline bundled artifact
+web/scripts/.capture-readme-screenshots.bundled.js

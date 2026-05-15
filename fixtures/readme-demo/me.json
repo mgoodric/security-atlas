@@ -1,0 +1,13 @@
+{
+  "user": {
+    "id": "00000000-0000-0000-0000-000000000001",
+    "email": "demo-operator@example.com",
+    "display_name": "Demo Operator",
+    "roles": ["grc_engineer", "control_owner"]
+  },
+  "tenant": {
+    "id": "00000000-0000-0000-0000-000000000010",
+    "slug": "demo-tenant",
+    "display_name": "Acme Industries"
+  }
+}

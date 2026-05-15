@@ -1,0 +1,26 @@
+{
+  "control_id": "acme-soc2-ac-1",
+  "states": [
+    {
+      "scope_cell_id": "sc-prod-aws-us",
+      "result": "pass",
+      "freshness_status": "fresh",
+      "evidence_count_in_window": 12,
+      "last_observed_at": "2026-05-14T08:14:00Z",
+      "evaluated_at": "2026-05-14T08:14:30Z",
+      "freshness_class": "daily",
+      "trigger": "evidence_ingested"
+    },
+    {
+      "scope_cell_id": "sc-prod-aws-eu",
+      "result": "pass",
+      "freshness_status": "fresh",
+      "evidence_count_in_window": 8,
+      "last_observed_at": "2026-05-14T07:32:00Z",
+      "evaluated_at": "2026-05-14T07:33:00Z",
+      "freshness_class": "daily",
+      "trigger": "evidence_ingested"
+    }
+  ],
+  "count": 2
+}
