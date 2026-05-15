@@ -23,32 +23,15 @@
 //     tenant (for the P0-2 private-note assertion)
 //   - the period has at least one control with evidence in-window
 
-/* eslint-disable @typescript-eslint/no-unused-vars */
+import { test, expect } from "@playwright/test";
 
-// import { test, expect } from "@playwright/test";
+// Slice 069 — Playwright is now installed; the `ifPlaywright` shim that
+// used to wrap this file has been removed. Test bodies that still hold
+// commented assertions are deliberately preserved — turning them on is
+// per-spec follow-up work as the seed-data preconditions in the preamble
+// are established by the test harness.
 
-type Test = (name: string, fn: () => Promise<void> | void) => void;
-type Expect = <T>(actual: T) => {
-  toBeVisible(): Promise<void>;
-  toBeHidden(): Promise<void>;
-  toContainText(substr: string): Promise<void>;
-  toHaveText(s: string | RegExp): Promise<void>;
-  toHaveValue(s: string): Promise<void>;
-  toHaveAttribute(name: string, value: string): Promise<void>;
-  not: {
-    toBeVisible(): Promise<void>;
-    toContainText(substr: string): Promise<void>;
-  };
-};
-
-declare const test: Test;
-declare const expect: Expect;
-
-function ifPlaywright(_fn: () => void) {
-  // No-op shim until Playwright lands. Keeps this file a static contract.
-}
-
-ifPlaywright(() => {
+test.describe("audit workspace", () => {
   test("AC-1: /audit lands the auditor in their assigned AuditPeriod", async () => {
     // 1. Sign in with the auditor bearer.
     //    await page.goto("/login");
@@ -193,6 +176,3 @@ ifPlaywright(() => {
     //    expect(requests.some((u) => u.includes("/v1/controls/") && u.endsWith("/state"))).toBe(false);
   });
 });
-
-// Module marker — keeps this file a module under TS strict mode.
-export {};

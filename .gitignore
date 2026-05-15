@@ -81,3 +81,7 @@ htmlcov/
 
 ### Docs site (mkdocs Material build output, slice 058)
 docs-site/site/
+
+### Slice 069 — Playwright runner artifacts
+web/playwright-report/
+web/test-results/

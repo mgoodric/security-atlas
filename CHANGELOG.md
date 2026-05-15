@@ -112,6 +112,32 @@ auto-generated notes.
   textarea, save button, approve button, and publish form is hidden
   (AC-7 immutability). No `web/package.json` change (conflict-safety
   with parallel slice 069, which adds the vitest runner).
+- **infra:** verification suite — Playwright + vitest + Go coverage gate (#069) —
+  closes the loop on existing latent-quality investment by wiring four
+  enforced verification surfaces into CI. `@playwright/test` lands as a
+  `web/devDependency`; the five existing specs under `web/e2e/*.spec.ts`
+  (slices 040 / 041 / 042 / 056 / 060) drop their `ifPlaywright` shim
+  and become real chromium-only Playwright tests against a docker-compose
+  bring-up (postgres + nats + minio + atlas + web). `vitest` lands with
+  module-level seed tests for `web/lib/api.ts` (server-vs-client URL
+  resolution), `web/lib/api/bff.ts` (bearer-cookie forwarding, 401
+  shape, status passthrough), and `web/app/api/admin/me/route.ts`
+  (admin-introspection BFF). A new `cmd/scripts/coverage-gate` Go script
+  parses the `Go · build + test` job's `coverage.txt` and fails CI when
+  any package falls below its per-package floor in
+  `cmd/scripts/coverage-thresholds.json` (initial floors are derived
+  from a measured `go test -cover ./...` run on main minus a 2-pp noise
+  band — ratchet, not stretch, per slice 069 P0-A4; the issue doc's
+  "all other `internal/...` ≥ 60%" blanket is intentionally a follow-up
+  slice rather than a stretch goal that would require writing tests this
+  slice scopes out). Two new CI jobs (`Frontend · Playwright e2e`,
+  `Frontend · vitest`) join the required check list in
+  `.github/branch-protection.json` (10 → 12 contexts); both follow the
+  slice-061 stub-sibling pattern so docs-only PRs short-circuit in <30s.
+  `web/e2e/README.md` documents the auth-fixture modes and trace-viewer
+  debugging; `web/testing.md` documents the vitest-vs-Playwright
+  decision matrix; CLAUDE.md gains a new "Testing discipline" section
+  enumerating the four enforced surfaces.
 - **infra:** Helm chart for Kubernetes deployment (#038) — `deploy/helm/`
   ships a Helm chart that deploys security-atlas to a K8s cluster with one
   `helm install`. Bundles the atlas server Deployment, the web frontend

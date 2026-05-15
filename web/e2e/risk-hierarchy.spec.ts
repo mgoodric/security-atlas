@@ -27,35 +27,15 @@
 //     whose revisit_by is in the past (so the amber overdue pill has
 //     data)
 
-/* eslint-disable @typescript-eslint/no-unused-vars */
+import { test, expect } from "@playwright/test";
 
-// import { test, expect } from "@playwright/test";
+// Slice 069 — Playwright is now installed; the `ifPlaywright` shim that
+// used to wrap this file has been removed. Test bodies that still hold
+// commented assertions are deliberately preserved — turning them on is
+// per-spec follow-up work as the seed-data preconditions in the preamble
+// are established by the test harness.
 
-type Test = (name: string, fn: () => Promise<void> | void) => void;
-type Expect = <T>(actual: T) => {
-  toBeVisible(): Promise<void>;
-  toBeHidden(): Promise<void>;
-  toContainText(substr: string): Promise<void>;
-  toHaveText(s: string | RegExp): Promise<void>;
-  toHaveAttribute(name: string, value: string): Promise<void>;
-  toHaveCount(n: number): Promise<void>;
-  toHaveURL(re: RegExp): Promise<void>;
-  toBeGreaterThan(n: number): void;
-  not: {
-    toBeVisible(): Promise<void>;
-    toContainText(substr: string): Promise<void>;
-    toHaveURL(re: RegExp): Promise<void>;
-  };
-};
-
-declare const test: Test;
-declare const expect: Expect;
-
-function ifPlaywright(_fn: () => void) {
-  // No-op shim until Playwright lands. Keeps this file a static contract.
-}
-
-ifPlaywright(() => {
+test.describe("risk hierarchy view", () => {
   test("AC-9a: loading the page with seeded data renders the three panels", async () => {
     // 1. Sign in.
     //    await page.goto("/login");
@@ -188,6 +168,3 @@ ifPlaywright(() => {
     //    await expect(page.getByTestId("decision-timeline-empty-action")).toBeVisible();
   });
 });
-
-// Module marker — keeps this file a module under TS strict mode.
-export {};

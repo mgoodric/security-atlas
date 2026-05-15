@@ -26,32 +26,15 @@
 //     dashed/greyed row has data)
 //   - KNOWN_CONTROL_ID is that control's UUID
 
-/* eslint-disable @typescript-eslint/no-unused-vars */
+import { test, expect } from "@playwright/test";
 
-// import { test, expect } from "@playwright/test";
+// Slice 069 — Playwright is now installed; the `ifPlaywright` shim that
+// used to wrap this file has been removed. Test bodies that still hold
+// commented assertions are deliberately preserved — turning them on is
+// per-spec follow-up work as the seed-data preconditions in the preamble
+// are established by the test harness.
 
-type Test = (name: string, fn: () => Promise<void> | void) => void;
-type Expect = <T>(actual: T) => {
-  toBeVisible(): Promise<void>;
-  toBeHidden(): Promise<void>;
-  toContainText(substr: string): Promise<void>;
-  toHaveText(s: string | RegExp): Promise<void>;
-  toHaveAttribute(name: string, value: string): Promise<void>;
-  toHaveCount(n: number): Promise<void>;
-  not: {
-    toBeVisible(): Promise<void>;
-    toContainText(substr: string): Promise<void>;
-  };
-};
-
-declare const test: Test;
-declare const expect: Expect;
-
-function ifPlaywright(_fn: () => void) {
-  // No-op shim until Playwright lands. Keeps this file a static contract.
-}
-
-ifPlaywright(() => {
+test.describe("control detail view", () => {
   test("AC-1: /controls/:id renders the full detail layout", async () => {
     // 1. Sign in.
     //    await page.goto("/login");
@@ -166,6 +149,3 @@ ifPlaywright(() => {
     //    await expect(page).toHaveURL(/\/login/);
   });
 });
-
-// Module marker — keeps this file a module under TS strict mode.
-export {};
