@@ -9,6 +9,30 @@ Conventional-Commit messages. Each entry links to its slice issue, the
 merging PR, and the squash-merge commit. For richer per-slice narrative
 see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
+## [1.5.1](https://github.com/mgoodric/security-atlas/compare/v1.5.0...v1.5.1) (2026-05-15)
+
+
+### Documentation
+
+* **backlog:** add v2 slices 070-075 ([#142](https://github.com/mgoodric/security-atlas/issues/142)) ([0f396bd](https://github.com/mgoodric/security-atlas/commit/0f396bd9c40647f9530539180157afb536809beb))
+* **changelog:** drain stale Unreleased sections (everything is released) ([#141](https://github.com/mgoodric/security-atlas/issues/141)) ([06f1c2f](https://github.com/mgoodric/security-atlas/commit/06f1c2f7290645d7782da99f8c7128d84e0a9bf1))
+
+
+### CI / CD
+
+* **deps:** bump the actions group across 1 directory with 22 updates ([#137](https://github.com/mgoodric/security-atlas/issues/137)) ([7502b18](https://github.com/mgoodric/security-atlas/commit/7502b18c0700d68ca06401fbbf6178ee688943be))
+
+
+### Dependencies and chores
+
+* **deps-dev:** bump @types/node from 20.19.40 to 25.8.0 ([#39](https://github.com/mgoodric/security-atlas/issues/39)) ([a600c44](https://github.com/mgoodric/security-atlas/commit/a600c444c52edaed1836a0ab3d9d790bf17e59ef))
+* **deps-dev:** bump eslint from 9.39.4 to 10.3.0 ([#38](https://github.com/mgoodric/security-atlas/issues/38)) ([3e8734c](https://github.com/mgoodric/security-atlas/commit/3e8734c1bdddaecea958a623b2da0a34a0d8643a))
+* **deps-dev:** bump typescript from 5.9.3 to 6.0.3 ([#40](https://github.com/mgoodric/security-atlas/issues/40)) ([17b3620](https://github.com/mgoodric/security-atlas/commit/17b3620ba8ed0f8b3ec2b24c2b7b6c6f39ab67cf))
+* **deps:** bump github.com/jackc/pgx/v5 ([#35](https://github.com/mgoodric/security-atlas/issues/35)) ([9359e3a](https://github.com/mgoodric/security-atlas/commit/9359e3a3595ce743d6ce617fd4a21db7021a7bdd))
+* **deps:** bump golang.org/x/crypto from 0.50.0 to 0.51.0 ([#36](https://github.com/mgoodric/security-atlas/issues/36)) ([e02e6f1](https://github.com/mgoodric/security-atlas/commit/e02e6f1e51c1b6d39039bee44d3f282989ae0029))
+* **deps:** bump the next group across 1 directory with 2 updates ([#37](https://github.com/mgoodric/security-atlas/issues/37)) ([a89eb36](https://github.com/mgoodric/security-atlas/commit/a89eb368d72f839f1c60867b6c70afd9d0654b87))
+* **release-please:** surface chore and ci commits in changelog ([#144](https://github.com/mgoodric/security-atlas/issues/144)) ([4b31c2e](https://github.com/mgoodric/security-atlas/commit/4b31c2e1d9904200af4d80b37ac08e659c140e82))
+
 ## [1.5.0](https://github.com/mgoodric/security-atlas/compare/v1.4.0...v1.5.0) (2026-05-15)
 
 
