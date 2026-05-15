@@ -26,8 +26,8 @@ updates:
           - "github.com/stretchr/*"
           - "github.com/jackc/*"
     commit-message:
-      prefix: "chore"
-      prefix-development: "chore"
+      prefix: "deps"
+      prefix-development: "deps"
       include: "scope"
 
   # npm workspaces (web/ + sdk/typescript/)
@@ -54,8 +54,8 @@ updates:
         patterns:
           - "@tanstack/*"
     commit-message:
-      prefix: "chore"
-      prefix-development: "chore"
+      prefix: "deps"
+      prefix-development: "deps"
       include: "scope"
 
   # Python (uv / pyproject.toml at root + oscal-bridge/)
@@ -66,7 +66,7 @@ updates:
       day: "monday"
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "chore"
+      prefix: "deps"
       include: "scope"
 
   - package-ecosystem: "pip"
@@ -76,7 +76,7 @@ updates:
       day: "monday"
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "chore"
+      prefix: "deps"
       include: "scope"
 
   # Docker base images
@@ -87,7 +87,7 @@ updates:
       day: "monday"
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "chore"
+      prefix: "deps"
       include: "scope"
 
   # GitHub Actions workflows
@@ -102,5 +102,5 @@ updates:
         patterns:
           - "*"
     commit-message:
-      prefix: "ci"
+      prefix: "deps"
       include: "scope"

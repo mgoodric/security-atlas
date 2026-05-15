@@ -15,16 +15,13 @@
         { "type": "fix", "section": "Bug Fixes", "hidden": false },
         { "type": "perf", "section": "Performance", "hidden": false },
         { "type": "revert", "section": "Reverts", "hidden": false },
+        { "type": "deps", "section": "Dependencies", "hidden": false },
         { "type": "docs", "section": "Documentation", "hidden": false },
         { "type": "refactor", "section": "Code Refactoring", "hidden": true },
         { "type": "test", "section": "Tests", "hidden": true },
         { "type": "build", "section": "Build", "hidden": true },
         { "type": "ci", "section": "CI / CD", "hidden": false },
-        {
-          "type": "chore",
-          "section": "Dependencies and chores",
-          "hidden": false
-        },
+        { "type": "chore", "section": "Chores", "hidden": true },
         { "type": "style", "section": "Style", "hidden": true }
       ],
       "bump-minor-pre-major": true,
