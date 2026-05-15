@@ -3,7 +3,31 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-15 (slice 089 status flip — `in-progress` → `in-review`, PR #177)
+**Last reconciled:** 2026-05-15 (slice 089 merged — Q2 audit-remediation campaign COMPLETE)
+
+## Drift detected — 2026-05-15 (slice 089 merged — Q2 audit-remediation campaign complete)
+
+Slice 089 (Dependency vulnerability scanning) merged at `9baeb7d` (PR #177). **The Q2 2026 security-audit remediation campaign is now fully complete**: all 5 slices (085 tracker + 086 HIGH + 087 MEDIUM-HIGH + 088 MEDIUM + 089 MEDIUM) landed today.
+
+- **089** (`9baeb7d` / PR #177) — three new informational CI jobs: `Go · govulncheck`, `Frontend · npm audit`, `Container · Trivy scan`. All use slice-069 stub-job pattern (NOT in required-checks per AC-4 — first-run cleanup phase). Pinned versions: `govulncheck@v1.1.3` + `aquasecurity/trivy-action@0.28.0`. HIGH+CRITICAL unified threshold across all three. 7 decisions D1-D7 high-confidence. AC-8 first-run hot-fix landed in same PR (Trivy action pin needed v-prefixed tag).
+
+Audit-campaign rollup (all 5 slices merged today, 2026-05-15):
+
+| Slice | Severity    | Commit  | PR   |
+| ----- | ----------- | ------- | ---- |
+| 085   | tracker     | e09ebfb | #168 |
+| 086   | HIGH        | f74a083 | #172 |
+| 087   | MEDIUM-HIGH | f7afbec | #171 |
+| 088   | MEDIUM      | 8304071 | #173 |
+| 089   | MEDIUM      | 9baeb7d | #177 |
+
+Spillover: none. AC-8's govulncheck failure on existing deps was acknowledged in the decisions log; engineer's grill decided to keep the job informational rather than block this PR.
+
+| Row | Transition             | Evidence                                                                                                                                                  |
+| --- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 089 | `in-review` → `merged` | PR #177 squashed at `9baeb7d` · 3 informational CI jobs + decisions log · AC-4 verified (branch-protection.json untouched) · closes Q2 audit campaign 5/5 |
+
+**Counts delta:** in-progress −1 · merged +1 (76 → 77).
 
 ## Drift detected — 2026-05-15 (slice 089 claim-stake · last allowed iter 8/8 today · audit-remediation finale)
 
@@ -1339,9 +1363,9 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 
 | Status        | Count  |
 | ------------- | ------ |
-| `merged`      | 76     |
+| `merged`      | 77     |
 | `in-review`   | 0      |
-| `in-progress` | 4      |
+| `in-progress` | 3      |
 | `ready`       | 5      |
 | `blocked`     | 0      |
 | `not-ready`   | 1      |
@@ -1453,7 +1477,7 @@ Legal values (use exactly these strings):
 | 086 | Fix open redirect on signIn `from` parameter                        | `merged`    | auth/086-fix-open-redirect-signin-from                  | gh#172 | 2026-05-15 | 2026-05-15 | batch 31 · AFK · ~0.25d · **HIGH severity** (from slice 085 audit) · `web/lib/safe-redirect.ts` helper rejecting fully-qualified / protocol-relative / `javascript:` / backslash-prefixed paths + bare-`/` → `/dashboard` · single-point validation in `web/app/login/actions.ts` covers both call sites · 9-case vitest (35/35 pass) + Playwright spec (post-079 quarantined, `TEST_BEARER`-gated) · `CONTRIBUTING.md` "Open-redirect prevention" subsection · `docs/audits/2026-Q2-security-audit.md` remediation status line · 9 decisions logged (8 high · 1 medium) · commit `f74a083`                                                                                                                                                                                                                                                                                                                                                                       |
 | 087 | Security HTTP headers middleware                                    | `merged`    | infra/087-security-http-headers-middleware              | gh#171 | 2026-05-15 | 2026-05-15 | batch 31 · AFK · ~0.5d · **MEDIUM-HIGH severity** (from slice 085 audit) · new `internal/api/securityheaders` package · HSTS / X-Content-Type-Options / X-Frame-Options / Referrer-Policy / CSP applied as first chi middleware before bearer-auth · CSP ships report-only (Next.js inline-script hydration would violate enforced `script-src 'self'`); enforcement trajectory in decisions log §D1 · README ## Security one-line · 7 unit tests + 3 integration tests + Playwright spec · commit `f7afbec`                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 088 | CLI `http.Client` explicit timeout                                  | `merged`    | infra/088-cli-http-client-timeout                       | gh#173 | 2026-05-15 | 2026-05-15 | batch 31 · AFK · ~0.25d · **MEDIUM severity** (from slice 085 audit) · `cmd/atlas-cli/cmd_features.go:181` + `cmd/atlas-cli/cmd_credentials.go:148` no longer use `http.DefaultClient.Do` (no timeout) · new `cmdhttp.Client(timeout)` constructor + AC-4 grep gate clean in `cmd/atlas-cli/` · README ## Security one-line · 100% test coverage on cmdhttp · coverage-thresholds floor 98 · 7 decisions D1-D7 high-confidence · commit `8304071`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 089 | Dependency vulnerability scanning (govulncheck + npm audit + Trivy) | `in-review` | infra/089-dependency-vulnerability-scanning             | gh#177 | 2026-05-15 | 2026-05-15 | iter 8/8 solo · AFK · ~0.5d · **MEDIUM severity** (from slice 085 audit) · 3 new CI jobs (`Go · govulncheck` + `Frontend · npm audit` + `Container · Trivy scan`) · slice-069 stub-job pattern (informational, NOT required-checks initially) · complements Dependabot (which catches upgrade-available; these catch known-CVE-on-current-version) · closes Q2 audit-remediation campaign · pinned `govulncheck@v1.1.3` + `aquasecurity/trivy-action@0.28.0` · HIGH+CRITICAL unified threshold · 7 decisions D1-D7 high-confidence · branch-protection.json untouched (P0-A1 verified) · PR #177                                                                                                                                                                                                                                                                                                                                                                  |
+| 089 | Dependency vulnerability scanning (govulncheck + npm audit + Trivy) | `merged`    | infra/089-dependency-vulnerability-scanning             | gh#177 | 2026-05-15 | 2026-05-15 | iter 8/8 solo · AFK · ~0.5d · **MEDIUM severity** (from slice 085 audit) · 3 new CI jobs (`Go · govulncheck` + `Frontend · npm audit` + `Container · Trivy scan`) · slice-069 stub-job pattern (informational, NOT required-checks initially) · complements Dependabot · pinned `govulncheck@v1.1.3` + `aquasecurity/trivy-action@0.28.0` · HIGH+CRITICAL unified threshold · 7 decisions D1-D7 high-confidence · branch-protection.json untouched (P0-A1 verified) · AC-8 first-run Trivy action-pin hot-fix in same PR · **closes Q2 audit campaign 5/5** · commit `9baeb7d`                                                                                                                                                                                                                                                                                                                                                                                    |
 
 ## Ready set right now
 
