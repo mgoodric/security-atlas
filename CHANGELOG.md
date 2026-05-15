@@ -9,6 +9,26 @@ Conventional-Commit messages. Each entry links to its slice issue, the
 merging PR, and the squash-merge commit. For richer per-slice narrative
 see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
+## [1.7.0](https://github.com/mgoodric/security-atlas/compare/v1.6.0...v1.7.0) (2026-05-15)
+
+
+### Features
+
+* **infra:** dependency vulnerability scanning (govulncheck + npm audit + Trivy) ([#089](https://github.com/mgoodric/security-atlas/issues/089)) ([#177](https://github.com/mgoodric/security-atlas/issues/177)) ([9baeb7d](https://github.com/mgoodric/security-atlas/commit/9baeb7d2f11e70337ac609a68096db3a6b11643a))
+* **infra:** security HTTP headers middleware ([#087](https://github.com/mgoodric/security-atlas/issues/087)) ([#171](https://github.com/mgoodric/security-atlas/issues/171)) ([f7afbec](https://github.com/mgoodric/security-atlas/commit/f7afbeca3e1f33152ed746ca72b0e7f22ec2ea7c))
+
+
+### Bug Fixes
+
+* **auth:** validate signIn redirect target ([#086](https://github.com/mgoodric/security-atlas/issues/086)) ([#172](https://github.com/mgoodric/security-atlas/issues/172)) ([f74a083](https://github.com/mgoodric/security-atlas/commit/f74a083f122c0eb1f279b534eae2a23a6dd3ee9b))
+* **infra:** atlas-cli explicit http.Client timeout ([#088](https://github.com/mgoodric/security-atlas/issues/088)) ([#173](https://github.com/mgoodric/security-atlas/issues/173)) ([8304071](https://github.com/mgoodric/security-atlas/commit/83040712804ad0dda08de71edbb900bf2e5b2159))
+
+
+### Documentation
+
+* **security:** add README Security section (slice 085 AC-4) ([#168](https://github.com/mgoodric/security-atlas/issues/168)) ([e09ebfb](https://github.com/mgoodric/security-atlas/commit/e09ebfb210c302c545a32710a859f5cb0cf706ed))
+* **status:** reconcile slice 085 → merged (PR [#168](https://github.com/mgoodric/security-atlas/issues/168) e09ebfb) ([#169](https://github.com/mgoodric/security-atlas/issues/169)) ([ffee86f](https://github.com/mgoodric/security-atlas/commit/ffee86fc0220a29d9be51f9fd7645d4b8de5f7ff))
+
 ## [Unreleased]
 
 ### Added
