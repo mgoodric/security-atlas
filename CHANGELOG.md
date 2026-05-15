@@ -15,6 +15,11 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 - **infra:** Security HTTP headers middleware ([#087](https://github.com/mgoodric/security-atlas/issues/087)) — new `internal/api/securityheaders/` package applied as the FIRST `root.Use(...)` in the chi chain. Sets HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy on every response (including 401s + auth-exempt `/health` + `/auth/*` + `/login`). CSP ships as `Content-Security-Policy-Report-Only` initially (Next.js inline-script hydration would violate `script-src 'self'` enforcement); the trajectory toward enforced mode is documented in `docs/audit-log/087-security-http-headers-middleware-decisions.md`. Remediates the MEDIUM-HIGH finding from the 2026-Q2 security audit.
 
+### Fixed
+
+- **infra (slice 088):** atlas-cli outbound HTTP calls now carry an explicit per-call timeout via the new `cmd/atlas-cli/cmdhttp` package (10s for feature-flag reads, 30s for credential reset-bootstrap). Resolves the Q2 2026 security audit MEDIUM finding — the package-level-default HTTP client has no timeout and a hung atlas server would previously stall the CLI indefinitely. AC-4 grep gate enforces zero residual package-level-default-client references under `cmd/atlas-cli/`.
+
+
 ## [1.6.0](https://github.com/mgoodric/security-atlas/compare/v1.5.1...v1.6.0) (2026-05-15)
 
 

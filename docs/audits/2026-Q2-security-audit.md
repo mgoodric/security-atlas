@@ -65,6 +65,8 @@ Specific risks:
 
 **Fix:** replace both occurrences with `client := &http.Client{Timeout: 30 * time.Second}` then `client.Do(req)`. Filed as slice **088**.
 
+**Remediation status:** resolved by slice 088 — new `cmd/atlas-cli/cmdhttp.Client(timeout)` constructor; both call sites updated (10s for feature-flag reads, 30s for credential issuance which may invoke cosign signing). AC-4 grep gate enforces zero residual package-level-default-client references under `cmd/atlas-cli/`. See `docs/audit-log/088-cli-http-client-timeout-decisions.md`.
+
 ### MEDIUM — No dependency vulnerability scanning beyond Dependabot
 
 **Files:** `.github/workflows/ci.yml`, `.github/workflows/codeql.yml`

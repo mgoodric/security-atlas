@@ -8,6 +8,7 @@
   "thresholds": {
     "cmd/atlas": 0,
     "cmd/atlas-cli": 0,
+    "cmd/atlas-cli/cmdhttp": 98,
 
     "connectors/1password/cmd/atlas-1password": 12,
     "connectors/1password/internal/idem": 98,
