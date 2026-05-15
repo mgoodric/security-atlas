@@ -4,11 +4,11 @@ A first-time user installing the docker-compose self-host bundle (slice 037) or 
 
 The bootstrap admin token is generated at platform startup. You can find it via three orthogonal paths:
 
-| Path | Command |
-| --- | --- |
-| Container logs (docker-compose) | `docker compose logs atlas 2>&1 \| grep BOOTSTRAP_TOKEN` |
+| Path                            | Command                                                             |
+| ------------------------------- | ------------------------------------------------------------------- |
+| Container logs (docker-compose) | `docker compose logs atlas 2>&1 \| grep BOOTSTRAP_TOKEN`            |
 | Container logs (Helm / kubectl) | `kubectl logs deploy/atlas --tail=200 2>&1 \| grep BOOTSTRAP_TOKEN` |
-| Filesystem | `cat ${ATLAS_DATA_DIR:-/var/lib/atlas}/bootstrap-token` |
+| Filesystem                      | `cat ${ATLAS_DATA_DIR:-/var/lib/atlas}/bootstrap-token`             |
 
 The token is **single-use**: on the first successful sign-in the platform atomically deletes the file AND marks `platform_status.first_signin_at` so the login page swaps back to the existing copy. Long-lived bootstrap tokens on disk are a credential leak shape this platform does not introduce.
 

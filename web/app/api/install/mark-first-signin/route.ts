@@ -28,10 +28,7 @@ export async function POST() {
   const jar = await cookies();
   const bearer = jar.get(SESSION_COOKIE)?.value;
   if (!bearer) {
-    return NextResponse.json(
-      { error: "unauthenticated" },
-      { status: 401 },
-    );
+    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
   let upstream: Response;
   try {
@@ -56,10 +53,7 @@ export async function POST() {
     return NextResponse.json(body, { status: 200 });
   }
   if (upstream.status === 401) {
-    return NextResponse.json(
-      { error: "unauthenticated" },
-      { status: 401 },
-    );
+    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
   return NextResponse.json(
     { error: `upstream ${upstream.status}` },

@@ -62,12 +62,12 @@ foot-gun gate engages.
 
 The candidate thresholds considered:
 
-| Threshold | "Real user" definition | Rejected because |
-| --- | --- | --- |
-| First user (any) | First `signIn` action ever | Chosen |
-| First admin user | First admin sign-in | Hides the foot-gun for the case where a non-admin reset happens first; non-admin re-issuance is still wrong |
+| Threshold          | "Real user" definition                    | Rejected because                                                                                                           |
+| ------------------ | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| First user (any)   | First `signIn` action ever                | Chosen                                                                                                                     |
+| First admin user   | First admin sign-in                       | Hides the foot-gun for the case where a non-admin reset happens first; non-admin re-issuance is still wrong                |
 | Any active session | A non-expired session in `sessions` table | Coupled to slice 034's session implementation; "session exists right now" is more brittle than "sign-in has ever occurred" |
-| First OIDC binding | An OIDC user with `idp_subject` linked | Misses the local-mode self-host path entirely |
+| First OIDC binding | An OIDC user with `idp_subject` linked    | Misses the local-mode self-host path entirely                                                                              |
 
 The chosen threshold is the strongest signal that the platform is no
 longer in fresh-install mode. It is also the cheapest to compute (a
@@ -101,11 +101,11 @@ separate them.
 
 The three candidate defaults:
 
-| Path | When it makes sense | Rejected because |
-| --- | --- | --- |
-| `/var/lib/atlas/bootstrap-token` | FHS-correct for a daemon's mutable state | Wrong for `./atlas` bare-binary devs on macOS / Windows |
-| `${ATLAS_DATA_DIR}/bootstrap-token` | Container deployments (docker-compose, Helm) | Empty when run bare-binary |
-| `./atlas-data/bootstrap-token` | Bare-binary on a dev laptop | Pollutes CWD; surprising for production deploys |
+| Path                                | When it makes sense                          | Rejected because                                        |
+| ----------------------------------- | -------------------------------------------- | ------------------------------------------------------- |
+| `/var/lib/atlas/bootstrap-token`    | FHS-correct for a daemon's mutable state     | Wrong for `./atlas` bare-binary devs on macOS / Windows |
+| `${ATLAS_DATA_DIR}/bootstrap-token` | Container deployments (docker-compose, Helm) | Empty when run bare-binary                              |
+| `./atlas-data/bootstrap-token`      | Bare-binary on a dev laptop                  | Pollutes CWD; surprising for production deploys         |
 
 The env-var-first pattern lets each deployment shape configure its own
 canonical location: docker-compose's `.env.example` sets
@@ -134,12 +134,12 @@ token plaintext is NEVER logged, not even hashed (P0-A2).**
 
 The candidate shapes:
 
-| Shape | Rejected because |
-| --- | --- |
-| `INFO consumed; hash=<sha256[:8]>` | Tempts a future bug where the full hash gets logged; the hash is not useful operationally (the operator already knows the token was consumed because they signed in) |
-| `INFO consumed; path=/var/lib/atlas/bootstrap-token` | Full path is documented anyway, but redaction is overcautious-by-design — defense in depth costs nothing here |
-| `DEBUG consumed` | An event that happens exactly once per platform lifetime deserves INFO; an operator should be able to see it without raising the log level |
-| **Chosen: `INFO consumed; path=atlas/bootstrap-token`** | The basename plus parent-basename gives enough operational signal to grep without echoing the full filesystem layout |
+| Shape                                                   | Rejected because                                                                                                                                                     |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INFO consumed; hash=<sha256[:8]>`                      | Tempts a future bug where the full hash gets logged; the hash is not useful operationally (the operator already knows the token was consumed because they signed in) |
+| `INFO consumed; path=/var/lib/atlas/bootstrap-token`    | Full path is documented anyway, but redaction is overcautious-by-design — defense in depth costs nothing here                                                        |
+| `DEBUG consumed`                                        | An event that happens exactly once per platform lifetime deserves INFO; an operator should be able to see it without raising the log level                           |
+| **Chosen: `INFO consumed; path=atlas/bootstrap-token`** | The basename plus parent-basename gives enough operational signal to grep without echoing the full filesystem layout                                                 |
 
 The `redactPath` helper in `internal/platform/bootstrap_file.go`
 encapsulates the redaction logic. The test in
@@ -163,10 +163,10 @@ policies under FORCE ROW LEVEL SECURITY.**
 
 The candidate shapes:
 
-| Shape | Rejected because |
-| --- | --- |
-| No RLS, with `GRANT SELECT, UPDATE TO atlas_app` | No defense-in-depth; a buggy app-pool handler could flip the marker |
-| Two policies (public_read SELECT, elevated_write UPDATE) with FORCE | UPDATE policy needs a meaningful USING predicate; we don't have one (there is no `app.elevated_pool` setting to key on) |
+| Shape                                                                                       | Rejected because                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No RLS, with `GRANT SELECT, UPDATE TO atlas_app`                                            | No defense-in-depth; a buggy app-pool handler could flip the marker                                                                                                                                                                                                                       |
+| Two policies (public_read SELECT, elevated_write UPDATE) with FORCE                         | UPDATE policy needs a meaningful USING predicate; we don't have one (there is no `app.elevated_pool` setting to key on)                                                                                                                                                                   |
 | **Chosen: one policy (public_read SELECT, USING true), no write policy, GRANT SELECT only** | Atlas_app cannot mutate at all — writes MUST go through the migrate pool (BYPASSRLS). The atlas server's elevated handlers use the migrate pool already; the CLI's reset-bootstrap path goes through an admin HTTP endpoint that uses the migrate pool. Zero "intentional bypass" surface |
 
 The slice 068 pattern with `tenant_id IS NULL` worked because there
@@ -194,10 +194,10 @@ scope at action time). The dedicated BFF route at
 
 The two paths considered:
 
-| Path | Rejected because |
-| --- | --- |
-| `signIn` action → BFF route → atlas | One extra hop on the sign-in hot path for zero added benefit; the bearer is already in scope in the action |
-| **Chosen: `signIn` action → atlas directly; BFF route remains for client-side fallback paths and the vitest contract** | No extra hop; the BFF route is still testable in isolation per AC-13 |
+| Path                                                                                                                   | Rejected because                                                                                           |
+| ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `signIn` action → BFF route → atlas                                                                                    | One extra hop on the sign-in hot path for zero added benefit; the bearer is already in scope in the action |
+| **Chosen: `signIn` action → atlas directly; BFF route remains for client-side fallback paths and the vitest contract** | No extra hop; the BFF route is still testable in isolation per AC-13                                       |
 
 The fire-and-forget shape inside `signIn` (the `try { ... } catch {}`)
 is intentional: the metadata write must NEVER block the production
@@ -223,10 +223,10 @@ new bearer + force flag to the new HTTP endpoint so atlas resets
 
 The two candidate shapes:
 
-| Shape | Rejected because |
-| --- | --- |
+| Shape                                                            | Rejected because                                                                                                                                       |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Extend `AdminCredentialsService` proto with `ResetBootstrap` RPC | Couples a credential lifecycle concern to a platform_status concern; the proto would carry the `Force` flag forever as a credential-issuance parameter |
-| **Chosen: separate HTTP endpoint** | The proto stays focused on credential CRUD; the platform_status reset is a HTTP-only admin operation with its own JSON contract |
+| **Chosen: separate HTTP endpoint**                               | The proto stays focused on credential CRUD; the platform_status reset is a HTTP-only admin operation with its own JSON contract                        |
 
 The CLI's two-step flow keeps the existing `credentials issue` shape
 intact for callers who don't want the reset behavior, and adds the
@@ -262,14 +262,14 @@ when we expect to need them:
 
 ## Confidence summary
 
-| Decision | Confidence |
-| --- | --- |
-| D1 — drop `_internal` prefix | high |
-| D2 — `--force` threshold = any sign-in | high |
-| D3 — `ATLAS_DATA_DIR` env-var first | high |
-| D4 — INFO + redacted path | high |
-| D5 — public-read + no-write RLS | high |
-| D6 — direct call from `signIn` action | high |
+| Decision                               | Confidence  |
+| -------------------------------------- | ----------- |
+| D1 — drop `_internal` prefix           | high        |
+| D2 — `--force` threshold = any sign-in | high        |
+| D3 — `ATLAS_DATA_DIR` env-var first    | high        |
+| D4 — INFO + redacted path              | high        |
+| D5 — public-read + no-write RLS        | high        |
+| D6 — direct call from `signIn` action  | high        |
 | D7 — separate HTTP endpoint, not proto | medium-high |
 
 No decision in this slice was a coin flip. The medium-high on D7 is
