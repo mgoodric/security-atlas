@@ -37,6 +37,8 @@ redirect(target || "/dashboard");
 
 **Fix:** validate `target` matches `^/[^/]` (relative path starting with `/` but not `//` which would be protocol-relative). Reject anything else, fall back to `/dashboard`. Filed as slice **086**.
 
+**Remediation status:** shipped in slice 086 (commit `<TBD post-merge>`). Helper at `web/lib/safe-redirect.ts`; both `signIn` redirect call sites validated; 9-case unit test enumerating attack/safe variants; Playwright spec under slice-079 quarantine; CONTRIBUTING.md gains "Open-redirect prevention" reviewer guidance. Decisions log: `docs/audit-log/086-fix-open-redirect-signin-from-decisions.md`.
+
 ### MEDIUM-HIGH — Missing security HTTP headers
 
 **Files:** `internal/api/httpserver.go`, the broader middleware stack
