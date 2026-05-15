@@ -66,24 +66,31 @@ jobs:
           cache: true
 
       - name: Install cosign
-        # cosign-installer@v4 + cosign v3.x — bumped together in slice 080
-        # so both are aligned. The v3-on-v3 (installer + tool) pairing is
-        # the canonical combination as of 2026-05; v3-installer-on-v2-tool
-        # broke because cosign v2 does not understand the protobuf-bundle
-        # format that goreleaser-action@v7 ships its goreleaser binary with
-        # (action's internal supply-chain check fails: "bundle does not
-        # contain cert for verification"). v3-installer-on-v3-tool also
-        # broke because cosign-installer v3 bootstrap-verifies cosign v3
-        # downloads against a public.key it doesn't ship for v3 releases.
-        # cosign-installer v4 is the first version that natively bootstraps
-        # cosign v3 binaries.
-        # cosign-installer doesn't ship a floating `@v4` major tag yet
-        # (only specific points like v4.0.0, v4.1.x). Pin to the latest
-        # v4.1.x. When the maintainer re-checks, dependabot's actions
-        # group will surface newer 4.x.
-        uses: sigstore/cosign-installer@v4.1.2
+        # cosign v2.4.1 pinned via cosign-installer@v3. This is the
+        # known-good pairing for the `cosign sign-blob --output-signature
+        # --output-certificate` flow our `.goreleaser.yaml signs:` block
+        # uses + the cosign `verify-blob --certificate ... --signature ...`
+        # flow that the Self-verify step + the Release-notes verify
+        # snippet document for consumers.
+        #
+        # Why pinned and not floating: the cosign v3 + goreleaser-action@v7
+        # migration is non-trivial — see the iteration log in
+        # `docs/audit-log/080-fix-release-tag-infrastructure-decisions.md`.
+        # Bumping cosign to v3 requires reworking the signs: args (new
+        # bundle-format flag set) AND keeping consumer docs in sync. That
+        # cosign-v3 migration is filed as a follow-on slice; this slice
+        # ships the workflow-ordering fix + the mkdocs path fix on the
+        # known-good cosign v2 stack.
+        #
+        # Why goreleaser-action@v6 not @v7: v7 added an internal cosign
+        # pre-flight verify that uses our installed cosign to verify the
+        # downloaded goreleaser binary's signature; the binary is signed
+        # in the v3 protobuf-bundle format, which cosign v2 cannot verify.
+        # v6 uses a non-cosign verify path. v6.4.0 is the latest v6 (2025-
+        # 08); follow-on cosign-v3 slice bumps to v7 together.
+        uses: sigstore/cosign-installer@v3
         with:
-          cosign-release: "v3.0.6"
+          cosign-release: "v2.4.1"
 
       - name: Install syft (SBOM)
         # SBOM generation is best-effort; not gated by ship-gate but useful
@@ -100,7 +107,14 @@ jobs:
         # building — no separate `goreleaser check` step is needed (and a
         # pre-install `goreleaser check` would exit 127 because the CLI is
         # only put on PATH by this very action). Removed in slice 080.
-        uses: goreleaser/goreleaser-action@v7
+        #
+        # Pinned to v6 (not v7) — v7 added an internal cosign-v3-bundle
+        # verify of the downloaded goreleaser binary that requires cosign
+        # v3 on PATH. cosign v3 migration is filed as a follow-on slice
+        # (the `signs:` args set + consumer docs need a coordinated bump).
+        # v6.4.0 is the latest v6; dependabot's actions group will surface
+        # @v7 again, the follow-on slice consumes that flag.
+        uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
           args: release --clean

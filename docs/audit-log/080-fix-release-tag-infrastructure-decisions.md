@@ -175,16 +175,60 @@ no such file or directory` — cosign v3 defaults to writing a
 ...` consumer flow (Self-verify step + Release-notes verify
    snippet) functioning without docs changes.
 
-**Fix chosen — Path A-1 squared.** Both the installer **and** the
-cosign tool need to be on their newest stable major:
-`sigstore/cosign-installer@v4` + `cosign-release: v3.0.6`. Bumping
-only one or the other breaks at a different layer.
+5. **Fifth test-tag run** (run `25941231558`): tried opting out of the
+   v3 bundle format via `--new-bundle-format=false` in the `signs:` args.
+   cosign v3 rejected with `must provide --new-bundle-format or --bundle
+where applicable with --signing-config or --use-signing-config` — the
+   `--new-bundle-format` flag is a boolean-toggle, not a value flag, and
+   the keyless flow may require coordinated changes to the
+   COSIGN_EXPERIMENTAL env + the args set + the consumer-side
+   `verify-blob` args.
+
+**Strategic re-think after iteration 5:** continuing to push through the
+cosign v3 migration was no longer in scope for slice 080. The original
+load-bearing fix — workflow ordering (Surface A novel) — is proven
+correct (every prior release-tag failure was the same `goreleaser:
+command not found` exit 127, and the A-novel fix unblocks that). The
+cosign-v3 cascade is a real migration that needs the new-bundle-format
+flag set worked out, the consumer-side `verify-blob` args worked out,
+and the published docs (Release-notes verify snippet + Self-verify
+step) kept in sync. That deserves its own slice with proper testing
+budget, not a deep tail of cascading version bumps inside slice 080.
+
+**Final fix shape for slice 080 — Path A-novel + tactical revert of
+goreleaser-action @v7 → @v6:**
+
+- Keep `sigstore/cosign-installer@v3` + `cosign-release: v2.4.1` (the
+  known-good pairing from slice 039).
+- **Pin `goreleaser/goreleaser-action@v7` → `@v6`** because v7 added
+  the cosign-protobuf-bundle pre-flight verify that trips cosign v2.
+  goreleaser-action v6.4.0 uses a non-cosign verify path and works
+  with cosign v2.4.1.
+- Keep `.goreleaser.yaml` `signs:` args exactly as authored in slice 039
+  — no `--new-bundle-format`, no `--bundle`. The legacy two-file output
+  is exactly what the consumer docs (Release-notes header + Self-verify
+  step + `RELEASE_READINESS §11.1`) use.
+- **File slice 082 — cosign v3 + goreleaser-action@v7 migration** as
+  a follow-on (`status: not-ready` until dependabot surfaces both
+  upstream bumps for review together). The slice 082 doc captures the
+  full migration scope so the cosign v3 + goreleaser-action v7 +
+  signs-args + consumer-docs changes ship as one coordinated PR when
+  the maintainer pulls the trigger.
+
+**Why this is the right strategic call (not the lazy one):** the slice
+080 anti-criterion P0-A2 forbids removing cosign signing as the
+path-of-least-resistance fix. The tactical revert **preserves cosign
+signing end-to-end** at the configuration that was authored in slice
+039, has working consumer docs, and has the `Self-verify signed
+checksums` round-trip test working against it. Path A-3 (drop cosign)
+was rejected for the same reason. The cosign-v3 migration deserves a
+dedicated slice; jamming it into slice 080 mid-flight would either
+ship a half-broken sign+verify chain or stall slice 080 indefinitely.
 
 **P0-A2 still honored:** the cosign signing chain is preserved
-end-to-end. cosign v3 `sign-blob` and `verify-blob` retain the v2
-CLI surface for keyless OIDC; the `.goreleaser.yaml` `signs:` block
-and the `Self-verify signed checksums` step both pass through
-without source changes.
+end-to-end on the v2.4.1 stack. The `.goreleaser.yaml` `signs:` block,
+the `Install cosign` step, and the `Self-verify signed checksums` step
+all retain their slice-039 configuration.
 
 ### 2. Surface B — fix the upload-pages-artifact path
 
