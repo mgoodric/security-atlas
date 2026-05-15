@@ -130,19 +130,45 @@ the same `tar:` prefix.
 Removes 7 lines (the step block) from `release.yml`. Honors P0-A4: no
 `continue-on-error`.
 
-**Surface-A follow-on (A-1 also needed):** the test-tag run after the
-A-novel fix surfaced a second failure mode inside `goreleaser-action@v7`
-itself: the action's pre-flight cosign-verify of its own downloaded
-goreleaser binary failed with `bundle does not contain cert for
-verification, please provide public key`. Cause: cosign v2.4.1 (the
-pinned version) does not understand the protobuf-bundle format that
-goreleaser-action@v7 ships its goreleaser binary with. Cosign added
-protobuf-bundle support in v3.x. Fix: bump `cosign-release` from
-`v2.4.1` to `v3.0.6` (Path A-1 from the slice doc — newer cosign).
-The bumped cosign retains backward compatibility for our own
-`sign-blob` / `verify-blob` invocations (the keyless-OIDC flow is the
-canonical path in both v2 and v3). Honors P0-A2: the signing path is
-preserved end-to-end; only the cosign client version moves.
+**Surface-A follow-on cascade (A-1 + A-2 both needed):**
+
+1. **First test-tag run** (e2c5aa8 → tag `v0.0.0-slice080-test`, run
+   `25940730205`): the A-novel fix took effect — `goreleaser check`
+   step is gone — but a new failure surfaced inside
+   `goreleaser-action@v7`'s internal pre-flight: the action's
+   cosign-verify of its own downloaded goreleaser binary failed with
+   `bundle does not contain cert for verification, please provide
+public key`. Cause: cosign v2.4.1 does not understand the Sigstore
+   protobuf-bundle format that goreleaser-action@v7 ships its binary
+   with.
+
+2. **Second test-tag run** (3d44566 → re-tagged, run `25940837351`):
+   bumped `cosign-release: "v2.4.1"` → `"v3.0.6"` (Path A-1: newer
+   cosign). The cosign-installer@v3 action then failed at its own
+   bootstrap stage — it downloaded the v3.0.6 binary + its detached
+   signature, then exited 22 trying to verify v3.0.6 against the
+   public.key that cosign-installer@v3 bundles. cosign-installer@v3
+   does not know how to bootstrap cosign v3.x; its bundled trust
+   anchors were never updated for the v3 release. The v3-installer-on-v3
+   pairing is non-functional.
+
+3. **Third test-tag run** (this commit → re-tagged, see verification
+   notes below): bumped `sigstore/cosign-installer@v3` →
+   `sigstore/cosign-installer@v4`. cosign-installer v4 is the first
+   release that natively bootstraps cosign v3 binaries (per the
+   installer's release notes for v4.0.0). The v4-installer-on-v3-tool
+   pairing is the canonical combination.
+
+**Fix chosen — Path A-1 squared.** Both the installer **and** the
+cosign tool need to be on their newest stable major:
+`sigstore/cosign-installer@v4` + `cosign-release: v3.0.6`. Bumping
+only one or the other breaks at a different layer.
+
+**P0-A2 still honored:** the cosign signing chain is preserved
+end-to-end. cosign v3 `sign-blob` and `verify-blob` retain the v2
+CLI surface for keyless OIDC; the `.goreleaser.yaml` `signs:` block
+and the `Self-verify signed checksums` step both pass through
+without source changes.
 
 ### 2. Surface B — fix the upload-pages-artifact path
 

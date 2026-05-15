@@ -66,14 +66,19 @@ jobs:
           cache: true
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        # cosign-installer@v4 + cosign v3.x — bumped together in slice 080
+        # so both are aligned. The v3-on-v3 (installer + tool) pairing is
+        # the canonical combination as of 2026-05; v3-installer-on-v2-tool
+        # broke because cosign v2 does not understand the protobuf-bundle
+        # format that goreleaser-action@v7 ships its goreleaser binary with
+        # (action's internal supply-chain check fails: "bundle does not
+        # contain cert for verification"). v3-installer-on-v3-tool also
+        # broke because cosign-installer v3 bootstrap-verifies cosign v3
+        # downloads against a public.key it doesn't ship for v3 releases.
+        # cosign-installer v4 is the first version that natively bootstraps
+        # cosign v3 binaries.
+        uses: sigstore/cosign-installer@v4
         with:
-          # cosign 3.x. Bumped from v2.4.1 in slice 080: the pinned 2.4.1
-          # could not verify the bundle format that goreleaser-action@v7
-          # ships its own goreleaser binary with (the action's internal
-          # supply-chain check failed: "bundle does not contain cert for
-          # verification, please provide public key"). cosign 3.x supports
-          # the new Sigstore protobuf-bundle format and unblocks the action.
           cosign-release: "v3.0.6"
 
       - name: Install syft (SBOM)
