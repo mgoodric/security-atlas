@@ -47,7 +47,7 @@
 // The recipe wraps this script — see the justfile for the full chain.
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdir, readdir, stat, unlink } from "node:fs/promises";
+import { mkdir, readdir, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import {
