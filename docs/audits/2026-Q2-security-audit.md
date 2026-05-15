@@ -55,6 +55,8 @@ Specific risks:
 
 **Fix:** add a `security-headers` middleware run as the first `root.Use(...)` in `httpserver.go`, before the bearer-auth middleware. Sets the canonical hardening set. Filed as slice **087**.
 
+**Remediation status:** addressed in slice 087 (`internal/api/securityheaders/`); CSP ships as `Content-Security-Policy-Report-Only` initially per the report-only-first trajectory documented in `docs/audit-log/087-security-http-headers-middleware-decisions.md` §D1. Merge commit SHA updates here when the squash-merge lands.
+
 ### MEDIUM — CLI `http.DefaultClient.Do(req)` without timeout
 
 **Files:** `cmd/atlas-cli/cmd_features.go:181`, `cmd/atlas-cli/cmd_credentials.go:148`

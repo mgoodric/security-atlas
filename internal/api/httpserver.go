@@ -43,6 +43,7 @@ import (
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
+	"github.com/mgoodric/security-atlas/internal/api/securityheaders"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	themesapi "github.com/mgoodric/security-atlas/internal/api/themes"
 	"github.com/mgoodric/security-atlas/internal/api/ucfcoverage"
@@ -93,6 +94,14 @@ func (s *Server) HTTPHandlerForTests() http.Handler {
 // local dev frontend.
 func (s *Server) httpHandler() http.Handler {
 	root := chi.NewRouter()
+	// Slice 087: hardening HTTP headers (HSTS, X-Content-Type-Options,
+	// X-Frame-Options, Referrer-Policy, CSP-Report-Only) must be the FIRST
+	// middleware in the chain so they apply to EVERY response — including
+	// the bearer-auth 401s, the /auth/* sign-in flow, /health, /v1/version,
+	// and /v1/install-state. Surfaced by the 2026-Q2 security audit
+	// (MEDIUM-HIGH finding); see docs/audits/2026-Q2-security-audit.md and
+	// internal/api/securityheaders/middleware.go.
+	root.Use(securityheaders.Middleware)
 	root.Use(corsMiddleware)
 	// Slice 034: /auth/* (login/callback/logout) is bearer-exempt — users
 	// don't have a bearer yet at the moment they sign in. The middleware
