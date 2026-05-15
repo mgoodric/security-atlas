@@ -9,6 +9,38 @@ Conventional-Commit messages. This file holds pre-release / unreleased
 work and any narrative entries the operator wants alongside the
 auto-generated notes.
 
+## [1.4.0](https://github.com/mgoodric/security-atlas/compare/v1.3.0...v1.4.0) (2026-05-15)
+
+
+### Features
+
+* **audit:** OSCAL SSP + POA&M export pipeline ([#030](https://github.com/mgoodric/security-atlas/issues/030)) ([#114](https://github.com/mgoodric/security-atlas/issues/114)) ([f201262](https://github.com/mgoodric/security-atlas/commit/f201262cfe858a6ab92ac225e7c12c21681822d9))
+* **board:** Monthly board brief (templated, no LLM) ([#031](https://github.com/mgoodric/security-atlas/issues/031)) ([#108](https://github.com/mgoodric/security-atlas/issues/108)) ([6109fce](https://github.com/mgoodric/security-atlas/commit/6109fce915bb5c6f47dda176e63d602b16874e1d))
+* **board:** Quarterly board pack + investment-vs-coverage ([#032](https://github.com/mgoodric/security-atlas/issues/032)) ([#126](https://github.com/mgoodric/security-atlas/issues/126)) ([69238b1](https://github.com/mgoodric/security-atlas/commit/69238b13c3d45b13a0728a25803b0008b3519af2))
+* **catalog:** Dashboard backend read endpoints ([#066](https://github.com/mgoodric/security-atlas/issues/066)) ([#109](https://github.com/mgoodric/security-atlas/issues/109)) ([786b8a0](https://github.com/mgoodric/security-atlas/commit/786b8a0633e006e8e02d1bba563f0890031e2e37))
+* **controls:** Control-detail backend read endpoints ([#064](https://github.com/mgoodric/security-atlas/issues/064)) ([#102](https://github.com/mgoodric/security-atlas/issues/102)) ([9f42ea8](https://github.com/mgoodric/security-atlas/commit/9f42ea8e9d845301c34d6e6da2fbdec0a442ba8a))
+* **evidence:** evidence freshness + drift detection ([#016](https://github.com/mgoodric/security-atlas/issues/016)) ([#94](https://github.com/mgoodric/security-atlas/issues/94)) ([6a34472](https://github.com/mgoodric/security-atlas/commit/6a34472b57ebb3c52f722044643cbe3420495cfb))
+* **frontend:** control detail view + UCF mini-viz ([#041](https://github.com/mgoodric/security-atlas/issues/041)) ([#93](https://github.com/mgoodric/security-atlas/issues/93)) ([6db7395](https://github.com/mgoodric/security-atlas/commit/6db7395093c7d56dc472cab9b871fb8bd168ea20))
+* **frontend:** Hierarchical risk dashboard view ([#056](https://github.com/mgoodric/security-atlas/issues/056)) ([#107](https://github.com/mgoodric/security-atlas/issues/107)) ([bfdab20](https://github.com/mgoodric/security-atlas/commit/bfdab208d6c7a0210490c3213146bf34a0e5c086))
+* **frontend:** Program dashboard view ([#040](https://github.com/mgoodric/security-atlas/issues/040)) ([#101](https://github.com/mgoodric/security-atlas/issues/101)) ([d5dc32e](https://github.com/mgoodric/security-atlas/commit/d5dc32edcc84e730177082b55ae8610541813c96))
+* **infra:** Helm chart for K8s deployment ([#038](https://github.com/mgoodric/security-atlas/issues/038)) ([#124](https://github.com/mgoodric/security-atlas/issues/124)) ([4c502a5](https://github.com/mgoodric/security-atlas/commit/4c502a54d3ff223ff795506082762b87b832f76a))
+* **risk:** Decision Log CRUD + linkage ([#055](https://github.com/mgoodric/security-atlas/issues/055)) ([#103](https://github.com/mgoodric/security-atlas/issues/103)) ([b842156](https://github.com/mgoodric/security-atlas/commit/b8421569d54d7ace32a2555906b0e054e0d9dea6))
+* **risk:** risk-control linkage + residual derivation ([#020](https://github.com/mgoodric/security-atlas/issues/020)) ([#96](https://github.com/mgoodric/security-atlas/issues/96)) ([841647a](https://github.com/mgoodric/security-atlas/commit/841647aa943fab7f14b9dd2e07651242ef3242c9))
+* **risk:** Risk-hierarchy backend read endpoints ([#067](https://github.com/mgoodric/security-atlas/issues/067)) ([#113](https://github.com/mgoodric/security-atlas/issues/113)) ([b182918](https://github.com/mgoodric/security-atlas/commit/b1829180cbe61e6d4e4488efe7e96f6392c331a4))
+
+
+### Bug Fixes
+
+* **evidence-pipeline:** Schema-registry evidence_kind fix + self-host bundle e2e green ([#068](https://github.com/mgoodric/security-atlas/issues/068)) ([#125](https://github.com/mgoodric/security-atlas/issues/125)) ([39d0c54](https://github.com/mgoodric/security-atlas/commit/39d0c54d76fb39b1071dbc4943106a545b913290))
+* **infra:** self-host bundle P0 fixes (slice 037 follow-up) ([#065](https://github.com/mgoodric/security-atlas/issues/065)) ([#115](https://github.com/mgoodric/security-atlas/issues/115)) ([08404d5](https://github.com/mgoodric/security-atlas/commit/08404d5418f87326592763226a4f80467ad8f99f))
+
+
+### Documentation
+
+* **issues:** add slice 065 — self-host bundle P0 fixes ([#111](https://github.com/mgoodric/security-atlas/issues/111)) ([989abd9](https://github.com/mgoodric/security-atlas/commit/989abd999cc5bdccc023d7f64cfa13d950934fa7))
+* **issues:** add slice 069 — verification suite (Playwright + vitest + Go coverage gate) ([#120](https://github.com/mgoodric/security-atlas/issues/120)) ([79298de](https://github.com/mgoodric/security-atlas/commit/79298dec8d7938d8019a1fafafa39bbb5fd09263))
+* **prompts:** add continuous-batch loop wrapper (07) ([#116](https://github.com/mgoodric/security-atlas/issues/116)) ([9191012](https://github.com/mgoodric/security-atlas/commit/9191012135058099e810e2794d2212bdf1a79212))
+
 ## [Unreleased]
 
 ### Added
