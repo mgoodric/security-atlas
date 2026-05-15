@@ -191,6 +191,19 @@ data is neutral: no maintainer references, no real tenant names, no
 vendor-prefixed credentials. When you edit fixtures, run the recipe to
 regenerate the artifacts and commit both in the same change.
 
+## Test infrastructure
+
+The `Frontend · Playwright e2e` CI job is currently **quarantined**
+(slice 079 — `continue-on-error: true` on the job, since 2026-05-15)
+because the five un-shimmed specs (`admin-bootstrap`, `audit-workspace`,
+`control-detail`, `dashboard`, `risk-hierarchy`) reference fixtures that
+exist on disk but are not applied to the platform at job startup. Runs
+fail predictably; the job is non-required, so the red annotations are
+noise — not your bug. The two route-mocked specs (`first-time-login`,
+`version-footer`) are unaffected. The fix lives in slice 082
+(`Playwright e2e seed-data harness`, status `not-ready`); when it lands,
+the quarantine line comes out and the job again gates the PR.
+
 ## AI-assist boundary
 
 The platform supports AI assistance in narrowly-defined places (see [`CLAUDE.md`](./CLAUDE.md) → "AI-assist boundary"). Contributor-side rules:
