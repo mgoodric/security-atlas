@@ -139,6 +139,43 @@ func (s *Store) IssueAdmin(tenantID string, ttl time.Duration) (Credential, stri
 	return s.issueLocked(tenantID, "", nil, ttl, "", true, true, nil)
 }
 
+// IssueFixedAdmin mints an admin-flagged credential for tenantID whose
+// bearer token is the caller-supplied `token` rather than a freshly
+// generated random one. Slice 037 uses this so the offline
+// atlas-bootstrap container can authenticate control-bundle uploads with
+// a deterministic pre-shared token (ATLAS_BOOTSTRAP_TOKEN) — the existing
+// random-token issuance prints the token to stderr only, which an
+// unattended one-shot container cannot consume.
+//
+// This is a self-host bootstrap convenience, not a production auth path:
+// the token is operator-supplied and the .env.example flags it as a
+// must-rotate value. Returns an error if token is empty.
+func (s *Store) IssueFixedAdmin(tenantID, token string) (Credential, error) {
+	if token == "" {
+		return Credential{}, errors.New("credstore: fixed admin token must not be empty")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id, err := randomHex(16)
+	if err != nil {
+		return Credential{}, err
+	}
+	credID := "key_" + id
+	cred := Credential{
+		ID:         credID,
+		TenantID:   tenantID,
+		IssuedAt:   time.Now().UTC(),
+		Last4:      token[len(token)-min(4, len(token)):],
+		IsAdmin:    true,
+		IsApprover: true,
+		UserID:     credID,
+	}
+	r := &record{cred: cred, tokenHash: hashToken(token), state: stateActive}
+	s.byID[cred.ID] = r
+	s.byTokenHash[r.tokenHash] = r
+	return cred, nil
+}
+
 // IssueApprover mints an approver-flagged credential for tenantID. The
 // approver role gates audit-binding sign-off — most notably the slice-018
 // FrameworkScope `approve` transition (POST /v1/framework-scopes/{id}/approve).

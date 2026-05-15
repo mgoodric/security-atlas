@@ -19,7 +19,7 @@ freshness_class: daily
 evidence_queries:
   - id: edr_running_on_every_managed_endpoint
     language: rego
-    evidence_kind: osquery.host_posture
+    evidence_kind: osquery.host_posture.v1
     description: "Every managed endpoint has EDR / anomaly detection engine running"
     expression: |
       package atlas.controls.soc2.cc7_2

@@ -10,13 +10,13 @@ Build the program dashboard view per `Plans/mockups/dashboard.html`. Real data b
 
 ## Acceptance criteria
 
-- [ ] AC-1: `/dashboard` route renders the full dashboard layout matching the mockup
-- [ ] AC-2: Framework tiles bind to real data per framework; trend arrows reflect actual deltas
-- [ ] AC-3: Top risks aging table renders from `/v1/risks?treatment=mitigate&sort=residual,age`
-- [ ] AC-4: Recent drift panel binds to `/v1/controls/drift?since=7d`
-- [ ] AC-5: Upcoming items reads from exception expiration + policy ack + vendor review + audit period
-- [ ] AC-6: Activity feed paginates with infinite scroll; backed by NATS-driven event stream archive
-- [ ] AC-7: All panels gracefully degrade if any backing API is slow (skeleton loaders); errors surfaced with retry
+- [x] AC-1: `/dashboard` route renders the full dashboard layout matching the mockup
+- [~] AC-2: Framework tiles bind to real data per framework; trend arrows reflect actual deltas — PARTIAL: no per-framework posture endpoint on main; tiles render an endpoint-naming placeholder (see decisions log)
+- [~] AC-3: Top risks aging table renders from `/v1/risks?treatment=mitigate&sort=residual,age` — PARTIAL: `treatment=mitigate` filter bound; `sort=residual,age` is not a server capability (see decisions log)
+- [x] AC-4: Recent drift panel binds to `/v1/controls/drift?since=7d`
+- [~] AC-5: Upcoming items reads from exception expiration + policy ack + vendor review + audit period — PARTIAL: exception expiration bound; no unified upcoming-rollup endpoint for the other categories (see decisions log)
+- [~] AC-6: Activity feed paginates with infinite scroll; backed by NATS-driven event stream archive — PARTIAL: no event-stream archive read endpoint on main; feed renders an endpoint-naming placeholder (see decisions log)
+- [x] AC-7: All panels gracefully degrade if any backing API is slow (skeleton loaders); errors surfaced with retry
 
 ## Constitutional invariants honored
 

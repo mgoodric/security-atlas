@@ -1,0 +1,8 @@
+{
+  "control_id": "acme-soc2-ac-1",
+  "pass_rate": 0.97,
+  "pass_count": 58,
+  "total_count": 60,
+  "window_start": "2026-04-14T00:00:00Z",
+  "window_end": "2026-05-14T00:00:00Z"
+}

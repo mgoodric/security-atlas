@@ -31,32 +31,15 @@
 //     SSO preflight, OR the test points at a known public IdP discovery
 //     doc that returns the four expected fields.
 
-/* eslint-disable @typescript-eslint/no-unused-vars */
+import { test } from "@playwright/test";
 
-// The import is left commented so this file is syntactically valid
-// TypeScript today without Playwright installed. CI's typecheck job
-// ignores `web/e2e/**` via tsconfig include; ESLint ignores via
-// eslint config. When Playwright lands, uncomment the import and
-// remove the export-stub at the bottom.
-//
-// import { test, expect } from "@playwright/test";
+// Slice 069 — Playwright is now installed; the `ifPlaywright` shim that
+// used to wrap this file has been removed. Test bodies that still hold
+// commented assertions are deliberately preserved — turning them on is
+// per-spec follow-up work as the seed-data preconditions in the preamble
+// are established by the test harness.
 
-type Test = (name: string, fn: () => Promise<void> | void) => void;
-type Expect = <T>(actual: T) => {
-  toBeVisible(): Promise<void>;
-  toContainText(substr: string): Promise<void>;
-  toHaveText(s: string | RegExp): Promise<void>;
-};
-
-declare const test: Test;
-declare const expect: Expect;
-
-function ifPlaywright(_fn: () => void) {
-  // No-op shim until Playwright lands. Keeps this file as a static
-  // contract describing the intended assertions.
-}
-
-ifPlaywright(() => {
+test.describe("admin bootstrap", () => {
   test("admin bootstrap end-to-end", async () => {
     // 1. Sign in with the test admin bearer.
     //    await page.goto("/login");
@@ -140,7 +123,3 @@ ifPlaywright(() => {
     //    the role).
   });
 });
-
-// Export to keep this file a module (TS strict mode would otherwise
-// complain about top-level declarations colliding across the e2e dir).
-export {};

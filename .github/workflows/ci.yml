@@ -115,6 +115,15 @@ jobs:
         run: go build ./...
       - name: Run unit tests
         run: go test -race -covermode=atomic -coverprofile=coverage.txt ./...
+      # Slice 069 — Go coverage gate. Reads coverage.txt produced by the
+      # step above + cmd/scripts/coverage-thresholds.json and exits
+      # non-zero if any package's measured coverage falls below its floor.
+      # Floors are derived from a measured-minus-2pp run on main; they
+      # ratchet, never stretch (slice 069 P0-A4). Raise a floor by
+      # writing the missing tests AND lifting the threshold in the same
+      # follow-up PR — never one without the other.
+      - name: Go · coverage gate
+        run: go run ./cmd/scripts/coverage-gate -profile=coverage.txt
       - name: Upload unit coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
@@ -122,6 +131,13 @@ jobs:
           files: ./coverage.txt
           flags: unittests
           fail_ci_if_error: false
+      - name: Upload coverage profile as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-unit-coverage
+          path: coverage.txt
+          if-no-files-found: warn
 
   # Slice 061 stub: posts pass under the SAME required-check name
   # (`Go · build + test`) when the PR touches no code. Mutually exclusive
@@ -262,7 +278,12 @@ jobs:
             ./internal/featureflag/... \
             ./internal/api/features/... \
             ./internal/eval/... \
-            ./internal/api/controlstate/...
+            ./internal/api/controlstate/... \
+            ./internal/decision/... \
+            ./internal/api/dashboard/... \
+            ./internal/api/risks/... \
+            ./internal/authz/... \
+            ./internal/control/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
@@ -417,3 +438,381 @@ jobs:
         run: pre-commit validate-config
       - name: Run all hooks against all files
         run: pre-commit run --all-files --show-diff-on-failure
+
+  # ===========================================================================
+  # Slice 030 — OSCAL bridge (Python). Self-contained job block: lints +
+  # tests the oscal-bridge/ Python service (compliance-trestle + gRPC).
+  # Kept as a clearly-delimited append so parallel branches editing this
+  # file (e.g. slice 065's test-self-host-bundle job) rebase cleanly.
+  # Gated on `changes.code` like the other expensive jobs, with a
+  # mutually-exclusive stub sibling under the same check name.
+  # ===========================================================================
+  oscal-bridge:
+    name: OSCAL bridge · Python (ruff + pytest)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Sync oscal-bridge env
+        working-directory: oscal-bridge
+        run: uv sync --extra test
+      - name: Lint (ruff)
+        run: |
+          uv tool run ruff@0.7.0 check oscal-bridge
+          uv tool run ruff@0.7.0 format --check oscal-bridge
+      - name: Test (pytest — unit + in-process gRPC server)
+        working-directory: oscal-bridge
+        run: PYTHONPATH=. uv run --extra test python -m pytest tests/ -q
+
+  oscal-bridge-stub:
+    name: OSCAL bridge · Python (ruff + pytest)
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+
+  # ====================================================================
+  # Slice 065 — self-host bundle end-to-end test.
+  #
+  # This block is appended as a self-contained job so it rebase-merges
+  # cleanly alongside other in-flight ci.yml edits. It brings the
+  # docker-compose self-host bundle up against a fresh checkout in TWO
+  # deploy shapes and asserts the slice-037 acceptance criteria actually
+  # pass — covering slice 065 AC-7 (bootstrap idempotency on re-run),
+  # AC-9 (bootstrap against a non-superuser / shared Postgres) and AC-12
+  # (end-to-end install in both deploy shapes). The assertion logic lives
+  # in deploy/docker/test-self-host-bundle.sh; this job just runs it once
+  # per matrix mode.
+  #
+  # Gated on the same `changes.code` path filter as the other expensive
+  # jobs (deploy/** and migrations/** are both in the filter, so any PR
+  # that touches the bundle runs this). No slice-061 stub sibling: the
+  # job uses a `matrix`, so GitHub posts per-mode check names
+  # (`... (bundled)` / `... (external)`) that a single-name stub could
+  # not mirror, and this job is intentionally NOT yet in
+  # .github/branch-protection.json's required-checks list — so a
+  # docs-only PR simply skips it with no "waiting for status" hang.
+  # Promote it to a required check (and add the matrix-named stubs) in a
+  # follow-up once it has a few green runs.
+  # ====================================================================
+  test-self-host-bundle:
+    name: Self-host bundle · end-to-end
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [bundled, external]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run self-host bundle smoke test (${{ matrix.mode }})
+        run: deploy/docker/test-self-host-bundle.sh ${{ matrix.mode }}
+      - name: Dump compose logs on failure
+        if: failure()
+        run: |
+          # docker-compose.yml uses `${VAR:?}` required-variable guards
+          # (POSTGRES_PASSWORD, MINIO_ROOT_USER, ...), so a bare
+          # `docker compose ... logs` aborts with "required variable ...
+          # is missing a value" before printing anything — `--env-file`
+          # is required even for `logs`.
+          #
+          # The harness's own `cleanup()` EXIT trap `rm -f`s
+          # deploy/docker/.env.test, so by the time this failure step
+          # runs that file is GONE — we cannot point `--env-file` at it.
+          # The values do not matter for `logs` (compose only needs the
+          # guards satisfied to parse the file), so write a throwaway
+          # stub env file here and use that.
+          cat > /tmp/compose-logs.env <<'STUB'
+          POSTGRES_PASSWORD=x
+          ATLAS_APP_PASSWORD=x
+          MINIO_ROOT_USER=x
+          MINIO_ROOT_PASSWORD=x
+          BEARER_HASH_KEY=x
+          ATLAS_BOOTSTRAP_TOKEN=x
+          ATLAS_DEFAULT_USER_PASSWORD=x
+          DATABASE_URL_APP=x
+          DATABASE_URL_MIGRATE=x
+          STUB
+          docker compose -f deploy/docker/docker-compose.yml \
+            --env-file /tmp/compose-logs.env \
+            -p "sa-selfhost-${{ matrix.mode }}" logs || true
+
+  # Slice 061 stub: posts pass under the SAME check name
+  # (`Self-host bundle · end-to-end`) when the PR touches no code.
+  # Mutually exclusive with `test-self-host-bundle` above via inverted
+  # `if:`. The real job uses a matrix that produces `(bundled)` and
+  # `(external)` expansions when it runs; the stub posts the base name
+  # only — sufficient because this check is non-required and the only
+  # purpose of the stub is to keep the rollup green on docs-only PRs.
+  test-self-host-bundle-stub:
+    name: Self-host bundle · end-to-end
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+
+  # ====================================================================
+  # Slice 038 — Helm chart lint + template.
+  #
+  # Self-contained job block (appended like the slice-030 / slice-065
+  # blocks above) so parallel branches editing ci.yml rebase cleanly.
+  # Runs `helm lint` + `helm template` against deploy/helm/ with BOTH the
+  # solo defaults and values-production.yaml, asserting the chart renders
+  # valid manifests in both shapes. This is slice 038 AC-5.
+  #
+  # Gated on the same `changes.code` path filter as the other expensive
+  # jobs (`deploy/**` is in the filter, so any PR touching the chart runs
+  # this) with a mutually-exclusive stub sibling under the same check
+  # name (slice-061 pattern), so docs-only PRs resolve the check in < 30s.
+  #
+  # NOT yet in .github/branch-protection.json's required-checks list —
+  # like slice 065's `test-self-host-bundle`, it ships non-required and is
+  # promoted to a required check after a few green runs.
+  # ====================================================================
+  helm-lint:
+    name: Helm chart · lint + template
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+      - name: helm lint (default values)
+        run: helm lint deploy/helm
+      - name: helm lint (production values)
+        run: helm lint deploy/helm -f deploy/helm/values-production.yaml
+      - name: helm template (default values)
+        run: helm template ci-default deploy/helm > /dev/null
+      - name: helm template (production values)
+        run: helm template ci-prod deploy/helm -f deploy/helm/values-production.yaml > /dev/null
+
+  helm-lint-stub:
+    name: Helm chart · lint + template
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+
+  # ====================================================================
+  # Slice 069 — Frontend vitest.
+  #
+  # Self-contained job block (appended like slice-030 / slice-038 /
+  # slice-065 blocks above) so parallel branches editing ci.yml rebase
+  # cleanly. Runs the module-level vitest seed (`web/lib/*.test.ts` +
+  # `web/app/api/**/*.test.ts`) and uploads the coverage summary as an
+  # artifact. No coverage gate this slice — the data is collected to
+  # inform a follow-up "raise the bar" slice.
+  #
+  # Gated on the same `changes.code` path filter as the other expensive
+  # jobs with a mutually-exclusive stub sibling under the same check
+  # name (slice-061 pattern), so docs-only PRs resolve the check in <30s.
+  # ====================================================================
+  frontend-vitest:
+    name: Frontend · vitest
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install workspaces
+        working-directory: .
+        run: npm install --no-audit --no-fund
+      - name: Run vitest (with coverage)
+        run: npm run test:coverage
+      - name: Upload coverage summary as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-vitest-coverage
+          path: web/coverage/coverage-summary.json
+          if-no-files-found: warn
+
+  frontend-vitest-stub:
+    name: Frontend · vitest
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+
+  # ====================================================================
+  # Slice 069 — Frontend Playwright e2e.
+  #
+  # Self-contained job block. Brings up postgres 16 + nats 2.10 + minio
+  # as service containers (postgres via the GHA `services:` block; nats
+  # and minio via `docker run` because their official images need
+  # `-js -sd /data` and `server /data` respectively, which `services:`
+  # cannot pass — same pattern as the existing `Go · integration` job).
+  # Then builds atlas + web from source, runs the bootstrap, and invokes
+  # `npx playwright test` headless against the running stack.
+  #
+  # On failure the HTML report + traces + screenshots upload as a
+  # workflow artifact so a maintainer can drag-drop the trace into
+  # `npx playwright show-trace` locally for diagnosis.
+  #
+  # Gated on the same `changes.code` path filter as the other expensive
+  # jobs with a mutually-exclusive stub sibling under the same check
+  # name (slice-061 pattern), so docs-only PRs resolve the check in <30s.
+  # ====================================================================
+  frontend-playwright:
+    name: Frontend · Playwright e2e
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: security_atlas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable
+      ATLAS_APP_PASSWORD: ${{ secrets.CI_ATLAS_APP_PASSWORD || 'ci-ephemeral' }}
+      MINIO_ENDPOINT: http://localhost:9000
+      MINIO_BUCKET: atlas-artifacts-test
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      NATS_URL: nats://localhost:4222
+      ATLAS_HTTP_URL: http://localhost:8080
+      PLATFORM_BASE_URL: http://localhost:3000
+      # Slice 069 — neutral test token (P0-A9). The fixture injects this
+      # value as the session cookie; the platform's bearer-auth path
+      # accepts any token in dev / pre-OIDC mode (slice 005). When the
+      # platform requires a real credential we'll swap to the
+      # TEST_USER_EMAIL / TEST_USER_PASSWORD flow against a seeded user.
+      TEST_BEARER: test-bearer-e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/live; then
+              echo "minio ready"; break
+            fi
+            sleep 2
+          done
+          docker run --rm --network host \
+            -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
+            minio/mc mb -p local/atlas-artifacts-test
+      - name: Start NATS JetStream
+        run: |
+          docker run -d --name nats \
+            -p 4222:4222 \
+            -p 8222:8222 \
+            nats:2.10-alpine -js -sd /data --http_port 8222
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8222/healthz; then
+              echo "nats ready"; break
+            fi
+            sleep 2
+          done
+      - name: Bootstrap Postgres roles + migrations
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
+          for f in migrations/sql/*.sql; do
+            case "$f" in
+              *.down.sql) ;;
+              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
+            esac
+          done
+      - name: Build atlas server
+        run: go build -o /usr/local/bin/atlas ./cmd/atlas
+      - name: Install web workspace
+        working-directory: .
+        run: npm install --no-audit --no-fund
+      - name: Build web workspace
+        working-directory: web
+        run: npm run build
+      - name: Install Playwright chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Start atlas server
+        run: |
+          atlas serve > /tmp/atlas.log 2>&1 &
+          echo "ATLAS_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/health; then
+              echo "atlas ready"; break
+            fi
+            sleep 2
+          done
+      - name: Start web server
+        working-directory: web
+        run: |
+          (PORT=3000 npm start > /tmp/web.log 2>&1) &
+          echo "WEB_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/; then
+              echo "web ready"; break
+            fi
+            sleep 2
+          done
+      - name: Run Playwright tests
+        working-directory: web
+        run: npx playwright test
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report/
+            web/test-results/
+          if-no-files-found: warn
+      - name: Dump server logs on failure
+        if: failure()
+        run: |
+          echo "=== atlas log ==="
+          cat /tmp/atlas.log || true
+          echo "=== web log ==="
+          cat /tmp/web.log || true
+
+  frontend-playwright-stub:
+    name: Frontend · Playwright e2e
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."

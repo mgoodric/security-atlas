@@ -1,0 +1,43 @@
+security-atlas has been installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Components deployed:
+  - atlas server   ({{ .Values.atlas.replicaCount }} replica(s))   gRPC :50051 + HTTP :8080
+  - web frontend   ({{ .Values.web.replicaCount }} replica(s))    HTTP :3000
+  - NATS JetStream (StatefulSet, persistence: {{ .Values.nats.persistence.enabled }})
+{{- if .Values.minio.enabled }}
+  - MinIO          (bundled artifact store — dev/solo only)
+{{- else }}
+  - artifact store: EXTERNAL S3 at {{ .Values.artifacts.s3Endpoint }}
+{{- end }}
+  - Postgres:      EXTERNAL at {{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}
+
+The pre-install Job "{{ include "security-atlas.fullname" . }}-migrate" has applied
+the database migrations, seeded the default tenant/scope/user, imported the SCF
+catalog, and uploaded the SOC 2 control bundles.
+
+{{ if .Values.ingress.enabled -}}
+Access the platform at:
+  http{{ if or .Values.ingress.certManager.enabled .Values.ingress.tls.existingSecret }}s{{ end }}://{{ .Values.ingress.host }}/
+{{- else -}}
+No Ingress was created (ingress.enabled=false). Reach the web frontend with:
+
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "security-atlas.fullname" . }}-web 3000:3000
+
+then open http://localhost:3000
+{{- end }}
+
+{{ if not .Values.oidc.issuer -}}
+OIDC is not configured — the platform is in local-user mode. Sign in with:
+  email:    {{ .Values.bootstrap.defaultUserEmail }}
+  password: (the value of secrets.defaultUserPassword)
+Change this password immediately after first sign-in.
+{{- else -}}
+OIDC is configured against issuer {{ .Values.oidc.issuer }}.
+{{- end }}
+
+{{ if not .Values.secrets.existingSecret -}}
+WARNING: this release rendered an inline Secret from values. Every credential
+defaults to the literal placeholder "changeme". For anything beyond a
+throwaway cluster, pre-create a Kubernetes Secret and set
+`secrets.existingSecret` — see deploy/helm/README.md "Secrets".
+{{- end }}

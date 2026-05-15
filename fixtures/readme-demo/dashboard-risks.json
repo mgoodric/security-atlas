@@ -1,0 +1,67 @@
+{
+  "risks": [
+    {
+      "id": "00000000-0000-0000-0000-000000000201",
+      "title": "Unmanaged third-party access to production data",
+      "description": "Contracted integrators retain credentials post-engagement.",
+      "category": "Third-party",
+      "methodology": "nist_800_30",
+      "inherent_score": { "likelihood": 4, "impact": 4, "ale_band": "100K-1M" },
+      "treatment": "mitigate",
+      "treatment_owner": "demo-operator",
+      "residual_score": {
+        "likelihood": 2,
+        "impact": 4,
+        "ale_band": "10K-100K"
+      },
+      "review_due_at": "2026-06-30T00:00:00Z",
+      "accepted_until": null,
+      "accepter": "",
+      "instrument_reference": "RM-2026-014",
+      "linked_control_ids": ["acme-soc2-ac-1", "acme-soc2-vm-2"],
+      "created_at": "2026-02-01T00:00:00Z",
+      "updated_at": "2026-05-10T00:00:00Z"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000202",
+      "title": "Stale endpoint posture on field workforce",
+      "description": "MDM coverage gap for contractor-owned devices.",
+      "category": "Endpoint",
+      "methodology": "nist_800_30",
+      "inherent_score": {
+        "likelihood": 3,
+        "impact": 3,
+        "ale_band": "10K-100K"
+      },
+      "treatment": "mitigate",
+      "treatment_owner": "demo-operator",
+      "residual_score": { "likelihood": 2, "impact": 3, "ale_band": "1K-10K" },
+      "review_due_at": "2026-06-15T00:00:00Z",
+      "accepted_until": null,
+      "accepter": "",
+      "instrument_reference": "RM-2026-021",
+      "linked_control_ids": ["acme-soc2-ac-7"],
+      "created_at": "2026-03-12T00:00:00Z",
+      "updated_at": "2026-05-08T00:00:00Z"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000203",
+      "title": "Single-region disaster recovery",
+      "description": "RTO/RPO objectives unverified in the past 12 months.",
+      "category": "Resilience",
+      "methodology": "nist_800_30",
+      "inherent_score": { "likelihood": 2, "impact": 5, "ale_band": "100K-1M" },
+      "treatment": "accept",
+      "treatment_owner": "demo-operator",
+      "residual_score": { "likelihood": 2, "impact": 5, "ale_band": "100K-1M" },
+      "review_due_at": "2026-09-01T00:00:00Z",
+      "accepted_until": "2026-12-31T00:00:00Z",
+      "accepter": "demo-cto",
+      "instrument_reference": "RM-2026-027",
+      "linked_control_ids": ["acme-soc2-cc-9"],
+      "created_at": "2026-04-02T00:00:00Z",
+      "updated_at": "2026-05-04T00:00:00Z"
+    }
+  ],
+  "count": 3
+}

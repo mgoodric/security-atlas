@@ -1,0 +1,21 @@
+# Patterns to ignore when building Helm packages.
+# Mirrors `helm create` defaults plus repo-specific editor/CI cruft.
+.DS_Store
+.git/
+.gitignore
+.bzr/
+.bzrignore
+.hg/
+.hgignore
+.svn/
+*.swp
+*.bak
+*.tmp
+*.orig
+*~
+.idea/
+.vscode/
+*.tmproj
+# CI / test scratch
+ci/
+*.tgz

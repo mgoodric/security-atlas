@@ -268,25 +268,50 @@ security-atlas/
 
 ---
 
+## Testing discipline (four enforced surfaces)
+
+Slice 069 ratchets the project's verification surfaces from "tests exist" to "tests gate merges". Every PR resolves four named checks before branch-protection unlocks the merge button.
+
+| Surface             | Entry point                                                                             | What it covers                                                                          | Floor / gate                                                                                     |
+| ------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Go unit             | `go test ./...` (CI: `Go · build + test`)                                               | Per-package Go logic                                                                    | Per-package floor in `cmd/scripts/coverage-thresholds.json`; gate is `cmd/scripts/coverage-gate` |
+| Go integration      | `go test -tags=integration -p 1 ./internal/...` (CI: `Go · integration (Postgres RLS)`) | RLS, migrations, Postgres-backed handlers, real services (NATS + MinIO)                 | No coverage gate yet; presence-of-tests is the gate (CI fails on test failure)                   |
+| Frontend vitest     | `npm run test` from `web/` (CI: `Frontend · vitest`)                                    | Module-level web logic: BFF route handlers, `lib/api.ts`, `lib/api/bff.ts`              | No coverage gate yet; CI uploads `coverage-summary.json` as an artifact to inform follow-up      |
+| Frontend Playwright | `npm run test:e2e` from `web/` (CI: `Frontend · Playwright e2e`)                        | User flows: dashboard, control detail, audit workspace, risk hierarchy, admin bootstrap | CI fails on spec failure; failed runs upload HTML report + traces as artifacts                   |
+
+**Where each lives:**
+
+- Go unit tests: `internal/<pkg>/*_test.go` (no build tags)
+- Go integration tests: `internal/<pkg>/*_test.go` with `//go:build integration`
+- Frontend vitest: `web/lib/**/*.test.ts`, `web/app/api/**/*.test.ts` (vitest config: `web/vitest.config.ts`)
+- Frontend Playwright: `web/e2e/*.spec.ts` (Playwright config: `web/playwright.config.ts`; runner docs: `web/e2e/README.md`)
+- Vitest-vs-Playwright decision matrix: `web/testing.md`
+
+**Raising a coverage floor (Go):** write the missing tests in the SAME PR as the floor lift. Do NOT lift a threshold without writing the tests; do NOT write tests in a PR that does not lift the threshold (the gate is a ratchet — it must monotonically increase).
+
+**Adding a new e2e spec:** see `web/e2e/README.md`. Spec preconditions (seed data, test bearers) must be establishable by the docker-compose bring-up; if a spec needs preconditions the bootstrap cannot provide, file a spillover slice for the seed harness rather than relaxing the spec.
+
+---
+
 ## Open decisions remaining (track and resolve before relevant code lands)
 
 These are explicitly deferred. Do not pick one unilaterally. (Full list: `Plans/canvas/11-open-questions.md`.)
 
-| Decision                                                                   | Decide before…                       |
-| -------------------------------------------------------------------------- | ------------------------------------ |
-| Project license (Apache 2.0 vs AGPL)                                       | First public code push beyond Plans/ |
-| SCF redistribution terms (legal review)                                    | Bundling SCF catalog in releases     |
-| Hosted offering or pure OSS governance                                     | Public launch                        |
-| FrameworkScope ownership workflow UX                                       | PCI/HIPAA modules ship               |
-| Push credential issuance UX (API key rotation, scoping, revocation)        | Push CLI ships                       |
-| Schema-registry governance for community `evidence_kind`s                  | Community connectors land            |
-| AI-assistance boundary in contributor docs                                 | First AI feature lands               |
-| Risk-methodology default lock (NIST 800-30 + 5x5 + dollar-banded vs FAIR)  | Risk module ships                    |
-| Privacy module shape (sibling vs first-class)                              | GDPR support work begins             |
-| Disclosure / breach-notification workflow shape                            | HIPAA / GDPR Art. 33 work            |
-| CCM / FedRAMP elevation timing                                             | When user demand surfaces            |
-| Control catalog governance (community-contributed controls, verified tier) | Public marketplace conversation      |
-| Docs site generator (mkdocs Material vs Docusaurus)                        | Docs site begins                     |
+| Decision                                                                   | Decide before…                                                                                                                                                                                                                                           |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Project license (Apache 2.0 vs AGPL)                                       | First public code push beyond Plans/                                                                                                                                                                                                                     |
+| SCF redistribution terms (legal review)                                    | Bundling SCF catalog in releases                                                                                                                                                                                                                         |
+| Hosted offering or pure OSS governance                                     | Public launch                                                                                                                                                                                                                                            |
+| FrameworkScope ownership workflow UX                                       | PCI/HIPAA modules ship                                                                                                                                                                                                                                   |
+| Push credential issuance UX (API key rotation, scoping, revocation)        | Push CLI ships                                                                                                                                                                                                                                           |
+| Schema-registry governance for community `evidence_kind`s                  | Community connectors land                                                                                                                                                                                                                                |
+| AI-assistance boundary in contributor docs                                 | First AI feature lands                                                                                                                                                                                                                                   |
+| Risk-methodology default lock (NIST 800-30 + 5x5 + dollar-banded vs FAIR)  | Risk module ships                                                                                                                                                                                                                                        |
+| Privacy module shape (sibling vs first-class)                              | GDPR support work begins                                                                                                                                                                                                                                 |
+| Disclosure / breach-notification workflow shape                            | HIPAA / GDPR Art. 33 work                                                                                                                                                                                                                                |
+| CCM / FedRAMP elevation timing                                             | When user demand surfaces                                                                                                                                                                                                                                |
+| Control catalog governance (community-contributed controls, verified tier) | Public marketplace conversation                                                                                                                                                                                                                          |
+| ~~Docs site generator (mkdocs Material vs Docusaurus)~~                    | RESOLVED 2026-05-14 (slice 058): **mkdocs Material**. See [`Plans/canvas/11-open-questions.md`](Plans/canvas/11-open-questions.md) item 20 + [`docs/audit-log/058-user-docs-scaffold-decisions.md`](docs/audit-log/058-user-docs-scaffold-decisions.md). |
 
 ---
 

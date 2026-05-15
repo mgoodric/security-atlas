@@ -28,13 +28,27 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-// Handler bundles the slice-019 routes over a single risk.Store.
+// Handler bundles the slice-019 routes over a single risk.Store. Slice 020
+// adds an optional ResidualDeriver — when set, GET /v1/risks/{id} returns the
+// derived residual + effectiveness breakdown and POST /v1/risks/{id}/controls
+// is served. When nil (a deployment without NATS/eval wired), the risk routes
+// still work and residual_score is whatever was last persisted.
 type Handler struct {
-	store *risk.Store
+	store   *risk.Store
+	deriver *risk.ResidualDeriver
 }
 
-// New constructs a Handler.
+// New constructs a Handler. The ResidualDeriver is attached separately via
+// WithDeriver so the slice-019/053 callers that pass only a Store keep
+// working unchanged.
 func New(store *risk.Store) *Handler { return &Handler{store: store} }
+
+// WithDeriver attaches the slice-020 ResidualDeriver and returns the handler
+// for chaining. httpserver.go calls this when the eval engine is available.
+func (h *Handler) WithDeriver(d *risk.ResidualDeriver) *Handler {
+	h.deriver = d
+	return h
+}
 
 // ----- wire shapes -----
 
@@ -71,6 +85,23 @@ type riskWire struct {
 	LinkedControlIDs    []string        `json:"linked_control_ids"`
 	CreatedAt           time.Time       `json:"created_at"`
 	UpdatedAt           time.Time       `json:"updated_at"`
+	// Slice 067 (AC-2): hierarchy + severity fields surfaced so the
+	// slice-056 org tree and downstream panels can attribute a risk
+	// without a second round-trip. Additive — existing fields and
+	// filters are unchanged.
+	//
+	//	OrgUnitID — the slice-052 org_unit binding; omitempty (nil for an
+	//	            unbound risk, which is valid — smaller orgs may not
+	//	            configure org_units at all).
+	//	Themes    — the slice-053 theme slugs; always an array (never
+	//	            null) so the wire shape is stable.
+	//	Severity  — the 5×5 severity scalar (likelihood × impact, or the
+	//	            explicit aggregate `severity` for a slice-053 parent
+	//	            risk). 0 for a non-5×5 / malformed inherent_score —
+	//	            computed, not stored (risks has no severity column).
+	OrgUnitID *string  `json:"org_unit_id,omitempty"`
+	Themes    []string `json:"themes"`
+	Severity  int      `json:"severity"`
 }
 
 // CreateRisk handles POST /v1/risks (AC-1..AC-5).
@@ -143,16 +174,51 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListRisks handles GET /v1/risks (AC-6).
+//
+// Filters (slice 019): ?treatment= ?category= ?methodology=.
+// Ordering (slice 066, AC-3): ?sort=residual,age ranks the result by
+// residual-score magnitude descending then risk age ascending — the
+// program dashboard's "top risks aging" panel.
+// Filters (slice 067, AC-4): ?theme=<slug> ?org_unit=<uuid> narrow to the
+// risks contributing to one heatmap cell — slice 056's heatmap-cell-click
+// side panel.
+//
+// Every filter and the ?sort= ordering are additive and optional, and all
+// compose: omitting them all keeps the slice-019 default newest-first
+// unfiltered list.
 func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
+	// Slice 067 (AC-6): handler-level program-read guard. Runs FIRST —
+	// before tenant resolution — so an unauthorized role is a clean 403
+	// regardless of tenant context.
+	if !requireProgramRead(w, r) {
+		return
+	}
 	ctx, ok := h.tenantContext(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	sortOrder, err := risk.ParseListSort(r.URL.Query().Get("sort"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	filter := risk.ListFilter{
 		Treatment:   dbx.RiskTreatment(r.URL.Query().Get("treatment")),
 		Category:    dbx.RiskCategory(r.URL.Query().Get("category")),
 		Methodology: dbx.RiskMethodology(r.URL.Query().Get("methodology")),
+		Sort:        sortOrder,
+		Theme:       r.URL.Query().Get("theme"),
+	}
+	// Slice 067 (AC-4): ?org_unit= is an optional UUID. A present-but-
+	// malformed value is a 400 rather than a silently-ignored filter.
+	if raw := r.URL.Query().Get("org_unit"); raw != "" {
+		ouID, perr := uuid.Parse(raw)
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "org_unit must be a UUID")
+			return
+		}
+		filter.OrgUnitID = &ouID
 	}
 	risks, err := h.store.List(ctx, filter)
 	if err != nil {
@@ -164,6 +230,55 @@ func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
 		out[i] = riskWireFrom(rk)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"risks": out, "count": len(out)})
+}
+
+// ThemeHeatmap handles GET /v1/risks/theme-heatmap (slice 067, AC-3) —
+// the themes × org_units aggregation that is slice 056's heatmap panel's
+// central data source. Each populated cell is
+// {theme, theme_builtin, org_unit_id, risk_count, aggregate_severity};
+// cells with zero contributing risks are omitted (the frontend renders
+// the full grid and treats an absent (theme, org_unit) pair as zero).
+//
+// Cells arrive ordered built-in-themes-first, then theme name, then
+// org_unit — matching slice 056 AC-3's rendering contract (defaults
+// ordered left of tenant-private themes). The `theme` field is the theme
+// SLUG (the same identity GET /v1/themes returns and risks.themes stores)
+// — not a UUID; see the slice-067 decisions log.
+//
+// No tenant_id is read from the query or body — the tenant comes solely
+// from the slice-033 middleware (slice 033 D1).
+func (h *Handler) ThemeHeatmap(w http.ResponseWriter, r *http.Request) {
+	if !requireProgramRead(w, r) {
+		return
+	}
+	ctx, ok := h.tenantContext(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	cells, err := h.store.ThemeOrgUnitHeatmap(ctx)
+	if err != nil {
+		writeServerErr(w, "theme heatmap", err)
+		return
+	}
+	type cellWire struct {
+		Theme             string `json:"theme"`
+		ThemeBuiltin      bool   `json:"theme_builtin"`
+		OrgUnitID         string `json:"org_unit_id"`
+		RiskCount         int    `json:"risk_count"`
+		AggregateSeverity int    `json:"aggregate_severity"`
+	}
+	out := make([]cellWire, len(cells))
+	for i, c := range cells {
+		out[i] = cellWire{
+			Theme:             c.Theme,
+			ThemeBuiltin:      c.ThemeBuiltin,
+			OrgUnitID:         c.OrgUnitID.String(),
+			RiskCount:         c.RiskCount,
+			AggregateSeverity: c.AggregateSeverity,
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"cells": out, "count": len(out)})
 }
 
 // GetRisk handles GET /v1/risks/{id}.
@@ -187,7 +302,20 @@ func (h *Handler) GetRisk(w http.ResponseWriter, r *http.Request) {
 		writeServerErr(w, "get risk", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"risk": riskWireFrom(rk)})
+	body := map[string]any{"risk": riskWireFrom(rk)}
+	// Slice 020 (AC-2): when the residual deriver is wired, return the
+	// live-derived residual + the per-linked-control effectiveness breakdown.
+	// Derive is the pure read path — recompute=false, so a GET never triggers
+	// evaluation (the NATS subscriber + scheduler own that).
+	if h.deriver != nil {
+		res, derr := h.deriver.Derive(ctx, id, false)
+		if derr != nil {
+			writeServerErr(w, "derive residual", derr)
+			return
+		}
+		body["residual"] = residualWireFrom(res)
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 // DeleteRisk handles DELETE /v1/risks/{id}.
@@ -304,7 +432,43 @@ func riskWireFrom(r risk.Risk) riskWire {
 	for i, id := range r.LinkedControlIDs {
 		w.LinkedControlIDs[i] = id.String()
 	}
+	// Slice 067 (AC-2): hierarchy + severity fields.
+	if r.OrgUnitID != nil {
+		s := r.OrgUnitID.String()
+		w.OrgUnitID = &s
+	}
+	w.Themes = append([]string{}, r.Themes...) // never null on the wire
+	w.Severity = severityOf(r.InherentScore)
 	return w
+}
+
+// severityOf computes the 5×5 severity scalar from a risk's inherent_score
+// JSONB. Slice 067 (AC-2): severity is NOT a stored column — it is
+// derived. An aggregated parent risk (slice 053) carries an explicit
+// numeric `severity` field, which takes precedence; otherwise severity is
+// likelihood × impact on the 5×5 grid (canvas §6.6). A score missing a
+// numeric severity component yields 0 — the same graceful-degradation
+// posture as the residual-magnitude sort (slice 066): a malformed score
+// ranks as the least severe rather than erroring the response.
+func severityOf(inherentScore []byte) int {
+	if len(inherentScore) == 0 {
+		return 0
+	}
+	var score struct {
+		Likelihood *float64 `json:"likelihood"`
+		Impact     *float64 `json:"impact"`
+		Severity   *float64 `json:"severity"`
+	}
+	if err := json.Unmarshal(inherentScore, &score); err != nil {
+		return 0
+	}
+	if score.Severity != nil {
+		return int(*score.Severity)
+	}
+	if score.Likelihood != nil && score.Impact != nil {
+		return int(*score.Likelihood) * int(*score.Impact)
+	}
+	return 0
 }
 
 func jsonRaw(b []byte) json.RawMessage {

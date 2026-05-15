@@ -21,7 +21,7 @@ freshness_class: daily
 evidence_queries:
   - id: every_endpoint_reported_in_24h
     language: rego
-    evidence_kind: osquery.host_posture
+    evidence_kind: osquery.host_posture.v1
     description: "Every managed endpoint has a posture record observed within 24h"
     expression: |
       package atlas.controls.soc2.cc4_1

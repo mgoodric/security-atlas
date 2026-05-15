@@ -21,7 +21,7 @@ freshness_class: daily
 evidence_queries:
   - id: idp_mfa_policy_enabled
     language: rego
-    evidence_kind: okta.mfa_policy
+    evidence_kind: okta.mfa_policy.v1
     description: "Okta MFA policy is enabled, applies broadly, requires a phishing-resistant factor for admins"
     expression: |
       package atlas.controls.soc2.cc6_1

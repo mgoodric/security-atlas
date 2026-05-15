@@ -19,7 +19,7 @@ freshness_class: quarterly
 evidence_queries:
   - id: every_in_scope_system_reviewed_in_90d
     language: rego
-    evidence_kind: access_review.completion
+    evidence_kind: access_review.completion.v1
     description: "Every in-scope system has a completed access review within 90 days"
     expression: |
       package atlas.controls.soc2.cc6_3_review

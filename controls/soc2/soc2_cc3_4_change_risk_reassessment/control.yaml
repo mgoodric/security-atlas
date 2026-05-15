@@ -21,7 +21,7 @@ freshness_class: daily
 evidence_queries:
   - id: protected_branch_pushes_were_pr_reviewed
     language: rego
-    evidence_kind: github.audit_event
+    evidence_kind: github.audit_event.v1
     description: "Every push to a protected branch had a non-author PR approval"
     expression: |
       package atlas.controls.soc2.cc3_4

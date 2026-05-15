@@ -59,9 +59,16 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	tenant := uuid.NewString()
 	t.Cleanup(func() {
 		ctx := context.Background()
-		// Order matters: delete child rows first.
+		// Delete child rows first, then the controls. The previous
+		// `UPDATE controls SET superseded_by = NULL` pre-step is removed:
+		// it tried to NULL EVERY version of a bundle at once, which makes
+		// two rows share (tenant_id, bundle_id) with superseded_by IS NULL
+		// and trips the controls_one_active_version_per_bundle unique
+		// index (23505). It is also unnecessary —
+		// `controls_superseded_by_fk` is ON DELETE SET NULL, so deleting
+		// the whole tenant's controls in one statement resolves the
+		// self-reference on its own.
 		for _, stmt := range []string{
-			`UPDATE controls SET superseded_by = NULL WHERE tenant_id = $1`,
 			`DELETE FROM evidence_records WHERE tenant_id = $1`,
 			`DELETE FROM controls WHERE tenant_id = $1`,
 		} {
@@ -87,9 +94,14 @@ func seedSCFAnchor(t *testing.T, admin *pgxpool.Pool, code, family string) (uuid
 	`).Scan(&frameworkID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		frameworkID = uuid.New()
+		// frameworks columns: (id, tenant_id, name, slug, issuer,
+		// description, ...). `issuer` is NOT NULL; there is no `source`
+		// column. (This helper had bit-rotted against a pre-slice-002
+		// schema because internal/control was never wired into the CI
+		// integration job — slice 068 wires it in.)
 		if _, err := admin.Exec(ctx, `
-			INSERT INTO frameworks (id, tenant_id, slug, name, source)
-			VALUES ($1, NULL, 'scf', 'Secure Controls Framework', 'platform')
+			INSERT INTO frameworks (id, tenant_id, slug, name, issuer)
+			VALUES ($1, NULL, 'scf', 'Secure Controls Framework', 'Secure Controls Framework Council')
 		`, frameworkID); err != nil {
 			t.Fatalf("insert framework: %v", err)
 		}
@@ -104,10 +116,13 @@ func seedSCFAnchor(t *testing.T, admin *pgxpool.Pool, code, family string) (uuid
 	`, frameworkID).Scan(&versionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		versionID = uuid.New()
+		// framework_versions columns: (id, tenant_id, framework_id,
+		// version, ..., status, ...). The version column is `version`,
+		// not `release_version`; there is no `source` column.
 		if _, err := admin.Exec(ctx, `
 			INSERT INTO framework_versions
-				(id, tenant_id, framework_id, release_version, status, source)
-			VALUES ($1, NULL, $2, 'test-1.0', 'current', 'platform')
+				(id, tenant_id, framework_id, version, status)
+			VALUES ($1, NULL, $2, 'test-1.0', 'current')
 		`, versionID, frameworkID); err != nil {
 			t.Fatalf("insert framework_version: %v", err)
 		}
@@ -217,6 +232,68 @@ func TestUpload_ReuploadSupersedes(t *testing.T) {
 	}
 	if activeCount != 1 {
 		t.Fatalf("expected exactly 1 active row; got %d", activeCount)
+	}
+}
+
+// TestUpload_ReuploadIdenticalIsNoop — slice 068: re-uploading BYTE-IDENTICAL
+// bundle content is a true no-op. It must NOT version-bump, NOT supersede,
+// and NOT insert a second controls row — it returns the existing active row
+// unchanged. This is what makes the docker-compose self-host bundle's
+// bootstrap genuinely idempotent (bootstrap.sh re-runs phase 6 — control
+// upload — on every `docker compose up`); without it a restart would
+// version-bump all 50 SOC 2 controls, doubling the `controls` row count and
+// failing the slice-065 AC-7 idempotency assertion.
+func TestUpload_ReuploadIdenticalIsNoop(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+
+	_, code := seedSCFAnchor(t, admin, "IAC-08", "IAC")
+	tenant := freshTenant(t, admin)
+	store := control.NewStore(app)
+
+	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+
+	// Same manifest body both times — byte-identical content.
+	body := []byte(yamlFor("noop_test", code, "automated"))
+
+	b1, _ := control.FinalizeBundleForHTTP(body)
+	res1, err := store.Upload(ctx, b1, "key_admin")
+	if err != nil {
+		t.Fatalf("first upload: %v", err)
+	}
+	if !res1.IsNewBundle || res1.Version != 1 {
+		t.Fatalf("first upload: expected IsNewBundle=true version=1; got %v %d", res1.IsNewBundle, res1.Version)
+	}
+
+	b2, _ := control.FinalizeBundleForHTTP(body)
+	res2, err := store.Upload(ctx, b2, "key_admin")
+	if err != nil {
+		t.Fatalf("re-upload: %v", err)
+	}
+	// No-op: same control id, same version, nothing new, nothing superseded.
+	if res2.IsNewBundle {
+		t.Fatalf("re-upload of identical content must not be IsNewBundle")
+	}
+	if res2.ControlID != res1.ControlID {
+		t.Fatalf("re-upload should return the existing row: got %s, want %s", res2.ControlID, res1.ControlID)
+	}
+	if res2.Version != 1 {
+		t.Fatalf("re-upload of identical content must not version-bump; got version=%d", res2.Version)
+	}
+	if res2.SupersededID != (uuid.UUID{}) {
+		t.Fatalf("re-upload of identical content must not supersede anything; got SupersededID=%s", res2.SupersededID)
+	}
+
+	// Cross-check: exactly ONE controls row total for this bundle — the
+	// no-op inserted nothing.
+	var total int
+	if err := admin.QueryRow(context.Background(), `
+		SELECT count(*) FROM controls WHERE tenant_id = $1 AND bundle_id = $2
+	`, tenant, "noop_test").Scan(&total); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("expected exactly 1 controls row after identical re-upload; got %d", total)
 	}
 }
 

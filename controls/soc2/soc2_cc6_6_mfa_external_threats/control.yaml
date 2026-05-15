@@ -19,7 +19,7 @@ freshness_class: daily
 evidence_queries:
   - id: mfa_enforced_on_admin_apps
     language: rego
-    evidence_kind: okta.app_assignment
+    evidence_kind: okta.app_assignment.v1
     description: "Every admin/infrastructure app has MFA required at sign-in"
     expression: |
       package atlas.controls.soc2.cc6_6_mfa

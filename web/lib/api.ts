@@ -1,14 +1,37 @@
-// Client-side API helpers for the platform's HTTP endpoints. The bearer
-// token lives in a cookie that the platform reads server-side; client-side
+// API base URL helpers for the platform's HTTP endpoints. The bearer token
+// lives in a cookie that the platform reads server-side; client-side
 // fetches send the cookie via credentials: "include".
 //
-// The base URL points at the platform's HTTP listener (default :8080).
-// `NEXT_PUBLIC_API_BASE_URL` overrides it in dev / staging / prod.
+// Server-side (BFF route handlers, RSC fetches) and client-side (browser)
+// run on different network paths and need different base URLs:
+//
+//   - SERVER: a Next.js API route handler in the `web` container reaches
+//     atlas over the internal Docker network. Default `http://atlas:8080`
+//     (the compose service name); override with `ATLAS_HTTP_URL`.
+//
+//   - CLIENT: the browser reaches atlas through whatever public URL fronts
+//     the deployment. Default empty string = same-origin relative URLs,
+//     which works for any reverse proxy that routes /v1, /health, and
+//     /api under the same hostname as the web frontend (e.g. NPM with
+//     custom locations). Override at build time with
+//     `NEXT_PUBLIC_API_BASE_URL` when the API lives on a different origin.
+//
+// The published `web` image is therefore deployment-agnostic — the
+// compose sets `ATLAS_HTTP_URL` per environment, and the browser uses
+// same-origin URLs through the reverse proxy.
 
-const DEFAULT_BASE = "http://localhost:8080";
+const SERVER_DEFAULT = "http://atlas:8080";
+const CLIENT_DEFAULT = "";
 
 export function apiBaseURL(): string {
-  return process.env.NEXT_PUBLIC_API_BASE_URL || DEFAULT_BASE;
+  if (typeof window === "undefined") {
+    return (
+      process.env.ATLAS_HTTP_URL ||
+      process.env.NEXT_PUBLIC_API_BASE_URL ||
+      SERVER_DEFAULT
+    );
+  }
+  return process.env.NEXT_PUBLIC_API_BASE_URL || CLIENT_DEFAULT;
 }
 
 export type Anchor = {
@@ -667,4 +690,803 @@ export async function patchAdminSSO(
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as AdminSSOConfig;
+}
+
+// ===== Slice 041 — Control detail view =====
+//
+// Binds three already-merged backend slices into the /controls/[id] view:
+//
+//   * Slice 008 — UCF graph traversal
+//       GET /v1/controls/{id}/coverage          control + anchor + requirements[]
+//   * Slice 012 — control state evaluation
+//       GET /v1/controls/{id}/state             per-scope-cell evaluated state
+//       GET /v1/controls/{id}/effectiveness     rolling 30-day pass rate
+//   * Slice 018 — FrameworkScope intersection
+//       GET /v1/controls/{id}/effective-scope?framework_version=<UUID>
+//
+// The `relationship_type` (STRM) field is typed as an OPEN string, not a
+// closed union. The DB enum has five values (equal, subset_of, superset_of,
+// intersects_with, no_relationship — `internal/db/dbx/models.go`); the
+// slice-005 `RequirementWithMapping.strm_type` 3-value union pre-dates the
+// full enum and would silently drop `superset_of`. Rendering the raw string
+// with a known-value style map + neutral fallback is drift-proof and honors
+// the slice's anti-criterion against fabricated mappings.
+//
+// NOTE: there is no `GET /v1/evidence?control_id=...` list endpoint on main
+// (only `POST /v1/evidence:push`). The evidence-stream section of the view
+// renders an empty-state naming that gap; no evidence client fn exists here
+// until that endpoint ships.
+
+// controlWire mirrors `controlWire` in internal/api/ucfcoverage/handlers.go.
+export type ControlWire = {
+  id: string;
+  bundle_id: string;
+  version: number;
+  scf_id?: string;
+  scf_anchor_id?: string;
+  title: string;
+  control_family: string;
+  implementation_type: string;
+  lifecycle_state: string;
+  owner_role: string;
+  freshness_class?: string;
+};
+
+// anchorWire mirrors `anchorWire` in the same handler (bare anchor form).
+export type ControlAnchorWire = {
+  id: string;
+  scf_id: string;
+  family: string;
+  name: string;
+  description?: string;
+};
+
+// requirementForAnchorWire mirrors the same handler's per-requirement row.
+// `relationship_type` is the STRM edge label — open string by design.
+export type CoverageRequirement = {
+  edge_id: string;
+  requirement_id: string;
+  code: string;
+  title: string;
+  body?: string;
+  framework_slug: string;
+  framework_name: string;
+  framework_version: string;
+  framework_version_id: string;
+  framework_version_status: string;
+  relationship_type: string;
+  strength: number;
+  source_attribution: string;
+  rationale?: string;
+};
+
+export type ControlCoverage = {
+  control: ControlWire;
+  anchor: ControlAnchorWire | null;
+  requirements: CoverageRequirement[];
+};
+
+// stateWire mirrors `stateWire` in internal/api/controlstate/handlers.go.
+export type ControlStateEntry = {
+  scope_cell_id: string | null;
+  result: string;
+  freshness_status: string;
+  evidence_count_in_window: number;
+  last_observed_at: string | null;
+  evaluated_at: string;
+  freshness_class: string;
+  trigger: string;
+};
+
+export type ControlStateResponse = {
+  control_id: string;
+  states: ControlStateEntry[];
+  count: number;
+};
+
+// effectivenessWire mirrors `effectivenessWire` in the controlstate handler.
+export type ControlEffectiveness = {
+  control_id: string;
+  pass_rate: number;
+  pass_count: number;
+  total_count: number;
+  window_start: string;
+  window_end: string;
+};
+
+// EffectiveScope response from internal/api/frameworkscopes/handlers.go.
+export type EffectiveScopeCell = {
+  id: string;
+  label: string;
+  dimensions: Record<string, unknown>;
+};
+
+export type EffectiveScopeResponse = {
+  control_id: string;
+  framework_version_id: string;
+  framework_scope_id: string | null;
+  effective_scope: EffectiveScopeCell[];
+  effective_scope_count: number;
+  in_scope: boolean;
+  out_of_scope_reason?: string;
+};
+
+// ----- server-side fns (called by the BFF route handlers) -----
+
+export async function getControlCoverage(
+  bearer: string,
+  controlID: string,
+): Promise<ControlCoverage> {
+  const res = await apiFetch(
+    `/v1/controls/${encodeURIComponent(controlID)}/coverage`,
+    bearer,
+  );
+  return (await res.json()) as ControlCoverage;
+}
+
+export async function getControlState(
+  bearer: string,
+  controlID: string,
+): Promise<ControlStateResponse> {
+  const res = await apiFetch(
+    `/v1/controls/${encodeURIComponent(controlID)}/state`,
+    bearer,
+  );
+  return (await res.json()) as ControlStateResponse;
+}
+
+export async function getControlEffectiveness(
+  bearer: string,
+  controlID: string,
+): Promise<ControlEffectiveness> {
+  const res = await apiFetch(
+    `/v1/controls/${encodeURIComponent(controlID)}/effectiveness`,
+    bearer,
+  );
+  return (await res.json()) as ControlEffectiveness;
+}
+
+export async function getControlEffectiveScope(
+  bearer: string,
+  controlID: string,
+  frameworkVersionID: string,
+): Promise<EffectiveScopeResponse> {
+  const res = await apiFetch(
+    `/v1/controls/${encodeURIComponent(controlID)}/effective-scope` +
+      `?framework_version=${encodeURIComponent(frameworkVersionID)}`,
+    bearer,
+  );
+  return (await res.json()) as EffectiveScopeResponse;
+}
+
+// ----- browser-side fns (hit the BFF under /api/controls/**) -----
+
+async function bffControlFetch<T>(path: string): Promise<T> {
+  const res = await fetch(path);
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // body not JSON — keep the status line
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as T;
+}
+
+export function fetchControlCoverage(
+  controlID: string,
+): Promise<ControlCoverage> {
+  return bffControlFetch<ControlCoverage>(
+    `/api/controls/${encodeURIComponent(controlID)}/coverage`,
+  );
+}
+
+export function fetchControlState(
+  controlID: string,
+): Promise<ControlStateResponse> {
+  return bffControlFetch<ControlStateResponse>(
+    `/api/controls/${encodeURIComponent(controlID)}/state`,
+  );
+}
+
+export function fetchControlEffectiveness(
+  controlID: string,
+): Promise<ControlEffectiveness> {
+  return bffControlFetch<ControlEffectiveness>(
+    `/api/controls/${encodeURIComponent(controlID)}/effectiveness`,
+  );
+}
+
+export function fetchControlEffectiveScope(
+  controlID: string,
+  frameworkVersionID: string,
+): Promise<EffectiveScopeResponse> {
+  return bffControlFetch<EffectiveScopeResponse>(
+    `/api/controls/${encodeURIComponent(controlID)}/effective-scope` +
+      `?framework_version=${encodeURIComponent(frameworkVersionID)}`,
+  );
+}
+
+// ===== Slice 040 — Program dashboard view =====
+//
+// The dashboard at `/dashboard` is the solo-security-leader persona's
+// morning home screen. It binds six panels, each to a real backend
+// endpoint via a thin BFF proxy under `/api/dashboard/**`. No panel
+// fabricates data (anti-criterion P0-1).
+//
+// Endpoint inventory verified against main `internal/api/` at slice time:
+//
+//   * Recent drift       GET /v1/controls/drift?since=7d   (slice 016) — bound
+//   * Evidence freshness GET /v1/evidence/freshness        (slice 016) — bound
+//   * Top risks aging    GET /v1/risks?treatment=mitigate  (slice 019) — bound
+//       The mockup asks for `sort=residual,age`. The ListRisks handler
+//       supports only treatment/category/methodology filters — there is
+//       no `sort` param, and `residual_score` is an opaque json blob with
+//       no exposed `age` field. The panel binds the `treatment=mitigate`
+//       filter (which exists) and renders the returned rows honestly; it
+//       does NOT fabricate a residual/age ordering. The server-side
+//       `sort=residual,age` capability is a follow-up backend gap.
+//   * Upcoming items     GET /v1/exceptions/expiring?within=30d (slice 028) — bound
+//       The mockup's "upcoming" panel also wants board-report-due,
+//       access-review, and questionnaire-due rows. There is no unified
+//       upcoming-rollup endpoint on main; exceptions-expiring is the one
+//       real source and is bound. The other categories are noted as a
+//       labelled gap in the panel rather than fabricated.
+//   * Framework posture  (no endpoint)  — MISSING; tiles render an
+//       endpoint-naming placeholder (slice 041/060 precedent).
+//   * Activity feed      (no endpoint)  — MISSING; feed renders an
+//       endpoint-naming placeholder. There is no NATS event-stream
+//       archive read endpoint on main.
+//
+// See `docs/audit-log/040-program-dashboard-view-decisions.md` for the
+// full gap inventory so a follow-up backend slice can be scoped.
+
+// driftRowWire mirrors `driftRowWire` in internal/api/freshnessdrift/handlers.go.
+export type DriftRow = {
+  control_id: string;
+  last_passing: string;
+  current_result: string;
+};
+
+// DriftReport mirrors the Drift handler's JSON envelope.
+export type DriftReport = {
+  since: string;
+  through: string;
+  delta: number;
+  flipped_out_count: number;
+  flipped_out: DriftRow[];
+};
+
+// freshnessClassBucket mirrors `freshnessClassBucket` in the same handler.
+export type FreshnessBucket = {
+  freshness_class: string;
+  total: number;
+  fresh: number;
+  stale: number;
+};
+
+// FreshnessReport mirrors the Freshness handler's JSON envelope.
+export type FreshnessReport = {
+  bucket: string;
+  buckets: FreshnessBucket[];
+  total: number;
+  total_stale: number;
+};
+
+// DashboardRisk mirrors `riskWire` in internal/api/risks/handlers.go.
+// `inherent_score` / `residual_score` are opaque JSON blobs by design —
+// the dashboard renders them as-is and never parses an ordering out.
+export type DashboardRisk = {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  methodology: string;
+  inherent_score: unknown;
+  treatment: string;
+  treatment_owner: string;
+  residual_score: unknown;
+  review_due_at?: string;
+  accepted_until?: string | null;
+  accepter: string;
+  instrument_reference: string;
+  linked_control_ids: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type RiskListResponse = { risks: DashboardRisk[]; count: number };
+
+// ExpiringException mirrors `exceptionWire` in internal/api/exceptions/handlers.go.
+export type ExpiringException = {
+  id: string;
+  control_id: string;
+  justification: string;
+  compensating_controls: string[];
+  requested_by: string;
+  requested_at: string;
+  approved_by?: string;
+  approved_at?: string;
+  effective_from?: string;
+  expires_at: string;
+  expired_at?: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ExpiringExceptionsResponse = {
+  exceptions: ExpiringException[];
+  count: number;
+  within: string;
+};
+
+// ----- server-side fns (called by the BFF route handlers) -----
+
+export async function getControlDrift(
+  bearer: string,
+  since = "7d",
+): Promise<DriftReport> {
+  const res = await apiFetch(
+    `/v1/controls/drift?since=${encodeURIComponent(since)}`,
+    bearer,
+  );
+  return (await res.json()) as DriftReport;
+}
+
+export async function getEvidenceFreshness(
+  bearer: string,
+): Promise<FreshnessReport> {
+  const res = await apiFetch(`/v1/evidence/freshness`, bearer);
+  return (await res.json()) as FreshnessReport;
+}
+
+export async function getMitigateRisks(
+  bearer: string,
+): Promise<DashboardRisk[]> {
+  const res = await apiFetch(`/v1/risks?treatment=mitigate`, bearer);
+  const body = (await res.json()) as RiskListResponse;
+  return body.risks;
+}
+
+export async function getExpiringExceptions(
+  bearer: string,
+  within = "30d",
+): Promise<ExpiringExceptionsResponse> {
+  const res = await apiFetch(
+    `/v1/exceptions/expiring?within=${encodeURIComponent(within)}`,
+    bearer,
+  );
+  return (await res.json()) as ExpiringExceptionsResponse;
+}
+
+// ----- browser-side fns (hit the BFF under /api/dashboard/**) -----
+
+export function fetchDashboardDrift(): Promise<DriftReport> {
+  return bffControlFetch<DriftReport>(`/api/dashboard/drift`);
+}
+
+export function fetchDashboardFreshness(): Promise<FreshnessReport> {
+  return bffControlFetch<FreshnessReport>(`/api/dashboard/freshness`);
+}
+
+export function fetchDashboardRisks(): Promise<DashboardRisk[]> {
+  return bffControlFetch<RiskListResponse>(`/api/dashboard/risks`).then(
+    (b) => b.risks,
+  );
+}
+
+export function fetchDashboardUpcoming(): Promise<ExpiringExceptionsResponse> {
+  return bffControlFetch<ExpiringExceptionsResponse>(`/api/dashboard/upcoming`);
+}
+
+// ===== Slice 056 — Hierarchical risk dashboard view =====
+//
+// The `/risks/hierarchy` view binds three panels — org tree, theme
+// heatmap, decision timeline — each to a real backend endpoint via a
+// thin BFF proxy under `/api/risks-hierarchy/**`. It extends the slice
+// 040 pattern (`dashboardProxy`, `PanelCard`/`MissingEndpointPanel`,
+// per-panel TanStack Query). No panel fabricates data (anti-criterion
+// P0-1).
+//
+// Endpoint inventory verified against main `internal/api/` at slice
+// time:
+//
+//   * Org tree structure   GET /v1/org_units            (slice 053) — bound
+//       The AC asks for `?include_risk_counts=true`. The ListOrgUnits
+//       handler ignores all query params and the slice-019 `riskWire`
+//       predates slice 052 — there is no `org_unit_id`, `themes`, or a
+//       severity field on a risk-list row, so per-node risk counts
+//       cannot be derived client-side either. The tree STRUCTURE binds
+//       and renders honestly; per-node count chips show a labelled
+//       "pending endpoint" affordance naming `?include_risk_counts=true`
+//       rather than fabricating zeros. AC-2 is PARTIAL.
+//   * Theme vocabulary     GET /v1/themes               (slice 053) — bound
+//       Real heatmap columns (10 default + tenant-private). The
+//       `themes × org_units` cell-aggregation endpoint does NOT exist on
+//       main — the heatmap renders its real axes and overlays a
+//       `MissingEndpointPanel` for cell counts. AC-3/4/5 PARTIAL.
+//   * Aggregation rules    GET /v1/aggregation-rules    (slice 054) — bound
+//       Real `window_days` / `min_risks` / `min_teams` / `target_theme`
+//       metadata so the heatmap cell-hover tooltip ("nearest rule fires
+//       at {threshold}; window {window_days}d") cites real numbers, not
+//       fabricated thresholds.
+//   * Decisions            GET /v1/decisions            (slice 055) — bound
+//   * Overdue decisions    GET /v1/decisions/overdue    (slice 055) — bound
+//       The decision timeline panel is FULLY satisfiable — slice 055 is
+//       merged. AC-6 / AC-7 are PASS.
+//
+// See `docs/audit-log/056-hierarchical-risk-dashboard-decisions.md` for
+// the full missing-endpoint gap inventory so a follow-up backend slice
+// can be scoped.
+
+// OrgUnit mirrors `wire` in internal/api/orgunits/handlers.go.
+export type OrgUnit = {
+  id: string;
+  name: string;
+  parent_id?: string | null;
+  level: string;
+  acceptance_authorities: unknown;
+};
+
+export type OrgUnitListResponse = { org_units: OrgUnit[]; count: number };
+
+// RiskTheme mirrors `themeWire` in internal/api/themes/handlers.go.
+export type RiskTheme = {
+  name: string;
+  description: string;
+  source: "default" | "tenant";
+};
+
+export type RiskThemeListResponse = { themes: RiskTheme[]; count: number };
+
+// AggregationRule mirrors `ruleWire` in
+// internal/api/aggregationrules/handler.go. Only the fields the heatmap
+// tooltip cites are typed strictly; the rest are carried as-is.
+export type AggregationRule = {
+  id: string;
+  rule_id: string;
+  target_theme: string;
+  min_risks: number;
+  min_teams: number;
+  window_days: number;
+  parent_level: string;
+  severity_function: string;
+  title_template: string;
+  status: string;
+  activated_by?: string;
+  activated_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AggregationRuleListResponse = {
+  rules: AggregationRule[];
+  count: number;
+};
+
+// Decision mirrors `decisionWire` in internal/api/decisions/handlers.go.
+export type Decision = {
+  id: string;
+  decision_id: string;
+  title: string;
+  narrative: string;
+  constraints: string[];
+  tradeoffs: string;
+  decision_maker: string;
+  decided_at: string;
+  revisit_by?: string;
+  status: string;
+  superseded_by?: string;
+  audit_narrative_opt_out: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DecisionListResponse = { decisions: Decision[]; count: number };
+
+// DecisionFilter is the client-side filter state for the timeline panel.
+// `status` filters by a single status string upstream; `constraints` and
+// `decision_maker` are applied client-side over the returned rows (the
+// ListDecisions handler exposes only `?status=` and
+// `?revisit_due_within_days=`).
+export type DecisionFilter = {
+  status?: string;
+};
+
+// ----- server-side fns (called by the BFF route handlers) -----
+
+export async function getOrgUnits(bearer: string): Promise<OrgUnit[]> {
+  const res = await apiFetch(`/v1/org_units`, bearer);
+  const body = (await res.json()) as OrgUnitListResponse;
+  return body.org_units;
+}
+
+export async function getRiskThemes(bearer: string): Promise<RiskTheme[]> {
+  const res = await apiFetch(`/v1/themes`, bearer);
+  const body = (await res.json()) as RiskThemeListResponse;
+  return body.themes;
+}
+
+export async function getAggregationRules(
+  bearer: string,
+): Promise<AggregationRule[]> {
+  const res = await apiFetch(`/v1/aggregation-rules`, bearer);
+  const body = (await res.json()) as AggregationRuleListResponse;
+  return body.rules ?? [];
+}
+
+export async function getDecisions(
+  bearer: string,
+  status?: string,
+): Promise<Decision[]> {
+  const suffix = status ? `?status=${encodeURIComponent(status)}` : "";
+  const res = await apiFetch(`/v1/decisions${suffix}`, bearer);
+  const body = (await res.json()) as DecisionListResponse;
+  return body.decisions;
+}
+
+export async function getOverdueDecisions(bearer: string): Promise<Decision[]> {
+  const res = await apiFetch(`/v1/decisions/overdue`, bearer);
+  const body = (await res.json()) as DecisionListResponse;
+  return body.decisions;
+}
+
+// ----- browser-side fns (hit the BFF under /api/risks-hierarchy/**) -----
+
+export function fetchHierarchyOrgUnits(): Promise<OrgUnit[]> {
+  return bffControlFetch<OrgUnitListResponse>(
+    `/api/risks-hierarchy/org-units`,
+  ).then((b) => b.org_units);
+}
+
+export function fetchHierarchyThemes(): Promise<RiskTheme[]> {
+  return bffControlFetch<RiskThemeListResponse>(
+    `/api/risks-hierarchy/themes`,
+  ).then((b) => b.themes);
+}
+
+export function fetchHierarchyAggregationRules(): Promise<AggregationRule[]> {
+  return bffControlFetch<AggregationRuleListResponse>(
+    `/api/risks-hierarchy/aggregation-rules`,
+  ).then((b) => b.rules ?? []);
+}
+
+export function fetchHierarchyDecisions(status?: string): Promise<Decision[]> {
+  const suffix = status ? `?status=${encodeURIComponent(status)}` : "";
+  return bffControlFetch<DecisionListResponse>(
+    `/api/risks-hierarchy/decisions${suffix}`,
+  ).then((b) => b.decisions);
+}
+
+export function fetchHierarchyOverdueDecisions(): Promise<Decision[]> {
+  return bffControlFetch<DecisionListResponse>(
+    `/api/risks-hierarchy/decisions-overdue`,
+  ).then((b) => b.decisions);
+}
+
+// ----- Slice 032: quarterly board pack -----
+//
+// The quarterly board pack has a draft -> published lifecycle. The
+// `content` is a structured map of fixed sections; each section carries a
+// templated narrative, an optional operator override, an approval flag,
+// and structured data. Publish is gated on every section being approved
+// (decision D6). The wire shapes mirror internal/api/board/pack_handlers.go.
+
+export type BoardPackSectionData = {
+  // posture
+  frameworks?: {
+    slug: string;
+    name: string;
+    coverage_pct: number;
+    freshness_pct: number;
+    trend_arrow: string;
+    delta: number;
+    state: string;
+  }[];
+  // top_risks
+  top_risks?: {
+    id: string;
+    title: string;
+    category: string;
+    treatment: string;
+    residual_severity: number;
+    age_days: number;
+  }[];
+  // coverage_trend
+  coverage_pct?: number;
+  baseline_coverage_pct?: number;
+  coverage_delta?: number;
+  // open_findings
+  findings?: {
+    evaluation_id: string;
+    control_id: string;
+    scope_cell_id: string;
+    evaluated_at: string;
+    freshness_status: string;
+  }[];
+  findings_count?: number;
+  // operational_metrics (operator-entered)
+  phishing_pass_rate_pct?: number | null;
+  p1_patch_median_days?: number | null;
+  incident_count?: number | null;
+  vendor_reviews_on_time?: number | null;
+  vendor_reviews_total?: number | null;
+  // investment (operator-entered)
+  spend_usd?: number;
+  cost_per_coverage_point?: number;
+};
+
+export type BoardPackSection = {
+  key: string;
+  title: string;
+  templated_text: string;
+  override_text: string;
+  approved: boolean;
+  data: BoardPackSectionData;
+};
+
+export type BoardPackContent = {
+  period_end: string;
+  generated_at: string;
+  status: string;
+  sections: Record<string, BoardPackSection>;
+};
+
+export type BoardPack = {
+  id: string;
+  period_end: string;
+  status: string;
+  content: BoardPackContent;
+  narrative_md: string;
+  published_by?: string;
+  published_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+// The fixed, ordered section keys (decision D6) — the single source of
+// truth in the UI for "what sections exist and in what order". Mirrors
+// internal/board/pack.go SectionKeys.
+export const BOARD_PACK_SECTION_KEYS: string[] = [
+  "posture",
+  "top_risks",
+  "coverage_trend",
+  "open_findings",
+  "operational_metrics",
+  "investment",
+  "asks",
+];
+
+// Operator-entered structured inputs for the PUT section endpoint
+// (decisions D3 + D5). All fields optional — only populated ones apply.
+export type BoardPackSectionInputs = {
+  phishing_pass_rate_pct?: number;
+  p1_patch_median_days?: number;
+  incident_count?: number;
+  vendor_reviews_on_time?: number;
+  vendor_reviews_total?: number;
+  spend_usd?: number;
+  baseline_coverage_pct?: number;
+};
+
+async function boardPackJSON<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, init);
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body.error) msg = body.error;
+    } catch {
+      // keep the status-line message
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as T;
+}
+
+export function listBoardPacks(): Promise<BoardPack[]> {
+  return boardPackJSON<{ packs: BoardPack[] }>("/api/board-packs").then(
+    (b) => b.packs ?? [],
+  );
+}
+
+export function generateBoardPack(periodEnd: string): Promise<BoardPack> {
+  return boardPackJSON<BoardPack>("/api/board-packs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ period_end: periodEnd }),
+  });
+}
+
+export function getBoardPack(id: string): Promise<BoardPack> {
+  return boardPackJSON<BoardPack>(`/api/board-packs/${encodeURIComponent(id)}`);
+}
+
+export function updateBoardPackSection(
+  id: string,
+  key: string,
+  payload: { override_text?: string; inputs?: BoardPackSectionInputs },
+): Promise<BoardPack> {
+  return boardPackJSON<BoardPack>(
+    `/api/board-packs/${encodeURIComponent(id)}/sections/${encodeURIComponent(
+      key,
+    )}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function approveBoardPackSection(
+  id: string,
+  key: string,
+): Promise<BoardPack> {
+  return boardPackJSON<BoardPack>(
+    `/api/board-packs/${encodeURIComponent(id)}/sections/${encodeURIComponent(
+      key,
+    )}/approve`,
+    { method: "POST" },
+  );
+}
+
+export function publishBoardPack(
+  id: string,
+  publishedBy: string,
+): Promise<BoardPack> {
+  return boardPackJSON<BoardPack>(
+    `/api/board-packs/${encodeURIComponent(id)}/publish`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ published_by: publishedBy }),
+    },
+  );
+}
+
+// ----- Slice 043: export URLs + approver-role probe -----
+//
+// boardPackMarkdownURL / boardPackPdfURL point at the slice-043 BFF
+// passthrough routes, NOT the raw /v1/board-packs/...md and .../pdf
+// endpoints (which require an Authorization header the browser cannot
+// attach to a plain link). The BFF routes read the bearer cookie
+// server-side and stream the binary bytes back.
+
+export function boardPackMarkdownURL(id: string): string {
+  return `/api/board-packs/${encodeURIComponent(id)}/markdown`;
+}
+
+export function boardPackPdfURL(id: string): string {
+  return `/api/board-packs/${encodeURIComponent(id)}/pdf`;
+}
+
+// The approver gate (AC-3) — the UI hides approve + publish controls
+// unless the current bearer is an admin credential. The platform always
+// enforces its own publish gate (every section approved + published_by
+// required); the UI gate is defense-in-depth + clearer affordance.
+//
+// Decision D3 of slice 043: there is no `is_board_approver` role on
+// main; we reuse the slice-060 /api/admin/me probe (is_admin boolean).
+// A finer role is a documented follow-up.
+
+export type SessionMe = {
+  is_admin: boolean;
+};
+
+export async function getSessionMe(): Promise<SessionMe> {
+  const res = await fetch("/api/admin/me", { cache: "no-store" });
+  if (res.status === 401) {
+    return { is_admin: false };
+  }
+  if (!res.ok) {
+    // Don't throw — degrade to "not approver" so the UI stays usable.
+    return { is_admin: false };
+  }
+  const body = (await res.json()) as { is_admin?: boolean };
+  return { is_admin: body.is_admin === true };
 }

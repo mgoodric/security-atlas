@@ -33,6 +33,12 @@ sql:
       - "migrations/sql/20260511000025_walkthroughs.sql"
       - "migrations/sql/20260511000026_aggregation_rules.sql"
       - "migrations/sql/20260511000027_control_evaluations.sql"
+      - "migrations/sql/20260511000028_evidence_freshness_drift.sql"
+      - "migrations/sql/20260511000029_risk_control_links.sql"
+      - "migrations/sql/20260511000030_decisions_audit.sql"
+      - "migrations/sql/20260511000031_board_briefs.sql"
+      - "migrations/sql/20260511000032_board_packs.sql"
+      - "migrations/sql/20260511000033_controls_superseded_fk_deferrable.sql"
     queries: "internal/db/queries"
     gen:
       go:

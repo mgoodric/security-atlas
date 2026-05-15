@@ -67,6 +67,24 @@ bin/
 coverage/
 .coverage
 htmlcov/
+# The `coverage/` rule above is for test-coverage output dirs. The
+# slice-041 BFF route `web/app/api/controls/[id]/coverage/` is a real
+# source dir whose name collides with that rule. Git cannot re-include
+# a path whose parent dir is excluded, so the negation is scoped to the
+# `coverage` dir itself, then its contents. The `[id]` segment is a
+# literal path component here, not a glob — escape the brackets.
+!web/app/api/controls/\[id\]/coverage/
+!web/app/api/controls/\[id\]/coverage/**
 
 ### Tracking / audit
 .agentdiff/
+
+### Docs site (mkdocs Material build output, slice 058)
+docs-site/site/
+
+### Slice 069 — Playwright runner artifacts
+web/playwright-report/
+web/test-results/
+
+### Slice 057 — README capture pipeline bundled artifact
+web/scripts/.capture-readme-screenshots.bundled.js

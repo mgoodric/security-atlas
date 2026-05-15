@@ -14,6 +14,17 @@ The output of the **evaluation stage** (canvas §4.3) — the read-only engine t
 - **Idempotent + replayable.** The computed columns are a deterministic function of the ledger slice; wall clock enters only as the freshness-window cutoff and the `evaluated_at` stamp, never the result. Deleting every `control_evaluations` row and re-running `Replay` reproduces identical computed state.
 - **Live vs period-bounded.** `GET /v1/controls/{id}/state` is the slice-012 **live** entrypoint (per the AuditPeriod note below); `GET /v1/audit-periods/{id}/control-state` is slice 028's period-bounded entrypoint. The two share no SQL.
 
+## Evidence freshness + drift (slice 016)
+
+Two derived **leading indicators** (canvas §7.1) over the evidence pipeline. Read-only consumers of the immutable ledgers — they NEVER write or delete `evidence_records` / `control_evaluations` (invariant 2). Live in `internal/freshness`, `internal/drift`, `internal/freshnessdrift`.
+
+- **`evidence_freshness`** is a materialized **current-state** read model — one row per `(tenant_id, control_id)`, **UPSERTed** on refresh. Carries the freshest evidence `observed_at`, the derived `valid_until` (= freshest `observed_at` + the control's `freshness_class` max-age), and a stored `is_stale` flag. Because it is UPSERTed current state it carries the **four-policy** RLS split.
+- **`control_drift_snapshots`** is an **append-only** daily snapshot ledger — one row per refresh, latest-row-per-`(tenant_id, snapshot_date)` wins on read. Stores `controls_passing` + the `passing_control_ids` set. Append-only → **two-policy** RLS under FORCE (mirrors `control_evaluations` / `evidence_audit_log`).
+- **"A control is passing"** (the drift definition) — worst-cell rollup: a control passes on a day iff EVERY applicable `(control, scope_cell)` tuple's latest evaluation that day is `result='pass'` AND `freshness_status='fresh'`. **Stale evidence does NOT count as passing** — canvas §2.3 says stale evidence drives the drift signal, so a control whose evidence decayed is drifting even with no `fail`. `delta = controls_passing(latest) − controls_passing(earliest)` over the window, signed.
+- **The class → max-age mapping is defined once**, in `internal/eval` (slice 012's `freshnessMaxAgeTable`), exposed via the exported `eval.FreshnessMaxAge(class)`. Slice 016 reuses it — never redefines it.
+- **Refresh triggers** (AC-4): a third durable JetStream consumer (`evidence_freshness_drift_worker`) on the slice-015 ingest stream refreshes on every evidence write; a daily 00:00 UTC `Scheduler` tick refreshes for time-based decay. Both run as the migrator role to enumerate tenants, then each tenant's refresh runs through app-role Stores under the tenant GUC.
+- **Endpoints.** `GET /v1/evidence/freshness?bucket=class` → per-class fresh/stale distribution (`bucket=class` is the only supported bucketing in v1). `GET /v1/controls/drift?since=Nd` → signed delta + the controls that flipped out of passing, each with its last-passing date. Stale records are FLAGGED, never deleted — point-in-time audit replay is preserved (AC-6).
+
 ## Coverage (slice 008)
 
 The graph-traversal result that answers "what is the relationship between a framework requirement and a tenant's controls?" — produced by joining `framework_requirements → fw_to_scf_edges → scf_anchors → controls.scf_anchor_id`. Always:
@@ -65,6 +76,66 @@ No other transitions. `denied` and `expired` are terminal.
 **Segregation of duties** — `approved_by` MUST differ from `requested_by`. The same credential cannot both file and approve an exception.
 
 **Calendar surface** — `GET /v1/exceptions/expiring?within=30d` powers the "Upcoming items" dashboard panel (canvas §6.3, dashboard mockup).
+
+## Decision Log (slice 055)
+
+A **Decision** captures a non-compliance operational or architectural
+tradeoff — "shipping MVP, deferring SAML to v1.2", "skipping IaC because
+the tool sunsets Q3". Distinct from an Exception (canvas §6.7): an
+Exception is a formal, scoped, time-bounded bypass of a specific control;
+a Decision is the broader rationale record. The two are linkable —
+together with Risks and Controls they form the audit narrative chain.
+
+- **Human-authored** — `decision_maker` and `decided_at` are required and
+  human-set. There is no AI auto-creation path (P0 anti-criterion). AI may
+  draft `narrative` / suggest `constraints` tags, but a human owns the
+  record.
+- **`decision_id`** — the tenant-visible identifier, format
+  `DL-YYYY-MM-DD-NNNN` where the date is `decided_at`'s calendar date and
+  `NNNN` is a zero-padded per-tenant, per-day sequence. Unique within
+  tenant (`UNIQUE (tenant_id, decision_id)`).
+- **Linkable** — four separate M:N link tables (`decision_risks`,
+  `decision_controls`, `decision_exceptions`, `decision_scope_predicates`,
+  all from slice 052). Linkage is idempotent. A link to an entity in
+  another tenant returns **404** (existence-leak prevention, P0).
+- **Logged** — every mutation (`PATCH`, supersede, cross-tenant link
+  attempt, overdue-notification emission) writes one row to
+  `decisions_audit` (append-only; slice 055 migration `_030`). The audit
+  row for an `overdue_notified` action is the authoritative
+  "already notified" marker — the daily job checks for it before emitting.
+
+States (`decision_status` enum, slice 052):
+
+- `active` — initial state. Set by `POST /v1/decisions`.
+- `revisited` — reviewed at its `revisit_by` date without being changed.
+- `superseded` — terminal. Pairs with the `superseded_by` FK to the
+  replacement decision. The old decision is **never deleted** (P0
+  anti-criterion) — the auditor trail is preserved.
+- `expired` — terminal. The decision's relevance has lapsed.
+
+**Supersession** — `POST /v1/decisions/{id}/supersede` takes
+`{superseded_by: <existing decision UUID>}`. The replacement decision must
+already exist (a separate `POST` first). Sets the old decision to
+`superseded`, populates `superseded_by`, writes a `decisions_audit` row.
+
+**`revisit_by`** is an optional hint date, not a gate (contrast with the
+Exception's hard `expires_at`). Decisions with `revisit_by < today AND
+status = 'active'` surface in `GET /v1/decisions/overdue`. A daily
+background job emits **one** in-app notification per overdue decision to
+its `decision_maker` — never repeated (P0 anti-criterion).
+
+**`audit_narrative_opt_out`** — a per-decision boolean (slice 055
+migration `_030`, default `false`). When `true`, the decision is excluded
+from OSCAL SSP narrative emission. Per-decision rather than per-tenant
+because opt-out is a per-record judgement; a tenant-config table is not
+warranted by v1.
+
+**OSCAL narrative** — decisions linked to in-scope controls appear in the
+SSP export (slice 030) as `<remarks>` blocks, format:
+`[DL-id] {title} ({decision_maker}, {decided_at}) — Linked risks: {ids}.
+Revisit: {revisit_by or "n/a"}.` Slice 055 ships the emission function
+(`internal/decision` exported, unit-tested); slice 030 calls it. Decisions
+are audit **context**, not compliance artifacts (canvas §6.7, invariant 8).
 
 ## License posture (slice 050)
 

@@ -8,6 +8,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,18 +18,27 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/audit/auditor"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
+	"github.com/mgoodric/security-atlas/internal/auth/oidc"
+	"github.com/mgoodric/security-atlas/internal/auth/sessions"
+	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/decision"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
 	"github.com/mgoodric/security-atlas/internal/exception"
+	"github.com/mgoodric/security-atlas/internal/freshnessdrift"
+	"github.com/mgoodric/security-atlas/internal/oscal"
+	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
 const (
@@ -136,6 +147,43 @@ func main() {
 		fmt.Fprintf(os.Stderr, "atlas: evaluation ingest subscriber ready (slice 012)\n")
 	}
 
+	// Slice 016: the freshness + drift read-model refresh background job
+	// (AC-4). RefreshSubscriber binds a THIRD durable JetStream consumer to
+	// the evidence-ingest stream -- it reacts to each ingested record by
+	// refreshing the affected tenant's freshness + drift read models. It is
+	// independent of slice 015's ledger-writer consumer and slice 012's
+	// evaluation consumer (three durable consumers on a Limits-retention
+	// stream each get every message). Only wired when NATS + the DB pool are
+	// both available.
+	var freshnessDriftSubscriber *freshnessdrift.RefreshSubscriber
+	if streamConn != nil && pool != nil {
+		freshnessDriftSubscriber = freshnessdrift.NewRefreshSubscriber(
+			streamConn.Stream(),
+			streamConn.Cfg().Subject,
+			freshnessdrift.NewRefresherFactory(pool),
+			logger,
+		)
+		fmt.Fprintf(os.Stderr, "atlas: freshness/drift refresh subscriber ready (slice 016)\n")
+	}
+
+	// Slice 020: the residual subscriber binds a FOURTH durable JetStream
+	// consumer to the same evidence-ingest stream. On every ingested record
+	// it recomputes residual risk for every risk linked to the affected
+	// control. It re-evaluates each control from the ledger first (the
+	// EvaluateControl-first race fix), so a just-ingested record is reflected
+	// even before slice 012's own subscriber writes the new evaluation row.
+	// Only wired when NATS + the DB pool are both available.
+	var residualSubscriber *risk.ResidualSubscriber
+	if streamConn != nil && pool != nil {
+		residualSubscriber = risk.NewResidualSubscriber(
+			streamConn.Stream(),
+			streamConn.Cfg().Subject,
+			pool,
+			logger,
+		)
+		fmt.Fprintf(os.Stderr, "atlas: risk residual subscriber ready (slice 020)\n")
+	}
+
 	cfg := api.Config{
 		SchemaRegistry:   schemaSvc,
 		IngestService:    ingestSvc,
@@ -146,6 +194,26 @@ func main() {
 	}
 	srv := api.New(cfg)
 
+	// Slice 065 bug #1 / AC-3 note: the two bootstrap credential-issuance
+	// calls below (IssueBootstrapCredential here, and
+	// IssueBootstrapFixedAdminCredential further down) write into the
+	// IN-MEMORY credstore.Store — NOT the api_keys table. They do not
+	// touch the DB pool at all, so they never hit the
+	// pool.Exec-outside-a-transaction RLS-bypass that bug #1 fixed in the
+	// authz audit writer; there is no BeginTx/ApplyTenant treatment to
+	// apply here. No change is needed on this startup-time issuance path.
+	//
+	// (Slice 068 correction: an earlier revision of this comment claimed
+	// that "phase 6 completing populates api_keys as designed." That is
+	// wrong — nothing in the bootstrap flow writes api_keys. The bootstrap
+	// uploader authenticates with the in-memory fixed-token credential
+	// minted just below, never a DB-backed api_keys row. What slice 065
+	// bug #1 actually unblocked is the OPA authz audit writer's write to
+	// decision_audit_log: every authenticated request — including phase
+	// 6's 50 control-bundle uploads — logs one decision row there, and
+	// the bug's RLS-blind write 500'd those requests. The self-host e2e
+	// harness's assertion 5 was corrected to check decision_audit_log
+	// accordingly.)
 	if bootstrapTenant := os.Getenv("ATLAS_BOOTSTRAP_TENANT"); bootstrapTenant != "" {
 		cred, bearer, err := srv.IssueBootstrapCredential(bootstrapTenant)
 		if err != nil {
@@ -154,6 +222,28 @@ func main() {
 		}
 		fmt.Fprintf(os.Stderr, "atlas: bootstrap credential issued: id=%s tenant=%s bearer=%s\n",
 			cred.ID, cred.TenantID, bearer)
+	}
+
+	// Slice 037: when ATLAS_BOOTSTRAP_TOKEN is set, mint a fixed-token
+	// admin credential for ATLAS_BOOTSTRAP_TENANT. The docker-compose
+	// self-host bundle's one-shot atlas-bootstrap container uses this
+	// deterministic token to authenticate control-bundle uploads — it
+	// cannot consume the random token the block above prints to stderr.
+	// This is a self-host bootstrap convenience; .env.example flags the
+	// token as a must-rotate value.
+	if bootstrapToken := os.Getenv("ATLAS_BOOTSTRAP_TOKEN"); bootstrapToken != "" {
+		bootstrapTenant := os.Getenv("ATLAS_BOOTSTRAP_TENANT")
+		if bootstrapTenant == "" {
+			fmt.Fprintln(os.Stderr, "atlas: ATLAS_BOOTSTRAP_TOKEN set but ATLAS_BOOTSTRAP_TENANT empty — skipping fixed-token credential")
+		} else {
+			cred, err := srv.IssueBootstrapFixedAdminCredential(bootstrapTenant, bootstrapToken)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "atlas: bootstrap fixed-token issue: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Fprintf(os.Stderr, "atlas: fixed-token admin credential issued: id=%s tenant=%s last4=%s\n",
+				cred.ID, cred.TenantID, cred.Last4)
+		}
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -189,6 +279,23 @@ func main() {
 		srv.AttachAPIKeyStore(apikeySvc)
 		fmt.Fprintf(os.Stderr, "atlas: api_keys store wired (BEARER_HASH_KEY ok)\n")
 
+		// Slice 037: wire the user-facing auth routes so /auth/local/login
+		// mounts. The docker-compose self-host bundle is a local-mode
+		// deployment — a default local user signs in with email+password,
+		// no external IdP. The OIDC authenticator is still constructed
+		// (the handler requires a non-nil *oidc.Authenticator) but its
+		// resolver always reports "unknown IdP": OIDC is an opt-in
+		// post-install configuration step, not part of first sign-in.
+		// secureCookies follows ATLAS_SECURE_COOKIES (default false for
+		// the local-HTTP self-host default; operators set it true behind
+		// TLS).
+		userStore := users.NewStore(pool)
+		sessionStore := sessions.NewStore(pool, 0)
+		oidcAuth := oidc.New(localModeIdpResolver{})
+		secureCookies := os.Getenv("ATLAS_SECURE_COOKIES") == "true"
+		srv.AttachAuthHandler(authapi.New(oidcAuth, userStore, sessionStore, secureCookies))
+		fmt.Fprintf(os.Stderr, "atlas: auth handler wired (/auth/local/login mounted, secure_cookies=%t)\n", secureCookies)
+
 		// Slice 035: construct the OPA engine + decision audit writer
 		// once at startup. The engine loads the embedded rego bundle;
 		// failure here is fatal because every API path needs the engine
@@ -207,6 +314,31 @@ func main() {
 		azAudit := authz.NewAuditWriter(pool)
 		srv.AttachAuthz(azEngine, azAudit)
 		fmt.Fprintf(os.Stderr, "atlas: authz OPA engine wired (5 roles + decision audit + auditor attrs)\n")
+
+		// Slice 030: wire the OSCAL export pipeline when the Python
+		// oscal-bridge sidecar is configured. OSCAL_BRIDGE_ADDR is the
+		// gRPC address of the bridge (e.g. 127.0.0.1:50070). When unset,
+		// the export route is simply absent — the bridge is an optional
+		// sidecar, not a hard dependency of the platform binary. The
+		// signing key comes from OSCAL_SIGNING_KEY (hex-encoded ed25519
+		// private key); absent that, a per-process ephemeral key is used
+		// (the public key still travels in every bundle manifest, so the
+		// signature stays verifiable — see the slice-030 decisions log).
+		if bridgeAddr := os.Getenv("OSCAL_BRIDGE_ADDR"); bridgeAddr != "" {
+			bridge, bErr := oscal.DialBridge(bridgeAddr)
+			if bErr != nil {
+				fmt.Fprintf(os.Stderr, "atlas: oscal-bridge dial (%s): %v — OSCAL export disabled\n", bridgeAddr, bErr)
+			} else {
+				signer, sErr := oscalSignerFromEnv()
+				if sErr != nil {
+					fmt.Fprintf(os.Stderr, "atlas: oscal signer: %v — OSCAL export disabled\n", sErr)
+					_ = bridge.Close()
+				} else {
+					srv.AttachOscalExporter(oscal.NewExporter(pool, bridge, signer))
+					fmt.Fprintf(os.Stderr, "atlas: OSCAL export pipeline wired (bridge=%s)\n", bridgeAddr)
+				}
+			}
+		}
 
 		// Import bundled platform schemas at boot. Idempotent — no-op when
 		// every kind is already present in the DB. Requires the connection
@@ -228,12 +360,30 @@ func main() {
 				impPool.Close()
 			}
 			impCancel()
-			// Refresh the app-pool-backed cache so HTTP/gRPC see the new rows.
-			loadCtx, loadCancel := context.WithTimeout(ctx, 10*time.Second)
-			if err := schemaSvc.LoadFromDB(loadCtx); err != nil {
-				fmt.Fprintf(os.Stderr, "atlas: schema cache reload: %v\n", err)
+			// Refresh the app-pool-backed cache so HTTP/gRPC see the new
+			// rows. This MUST succeed before the HTTP listener starts —
+			// `controlsRegistry.IsRegistered` reads this in-memory cache, and
+			// an empty cache makes every control-bundle upload 400 with
+			// "evidence_kind ... is not registered" (the slice-068 symptom).
+			//
+			// Retry with backoff because the app role (atlas_app) may not be
+			// connectable yet at this point: the docker-compose self-host
+			// bundle starts `atlas` in parallel with `atlas-bootstrap`
+			// (depends_on: service_started — slice 065), and atlas_app's
+			// password is set by bootstrap.sh phase 2.5
+			// (`ALTER ROLE atlas_app PASSWORD ...`), which races atlas's
+			// boot. A single attempt loses that race on a scram-sha-256
+			// cluster (external mode) and fails with SQLSTATE 28P01. The
+			// schema rows were already written above via the BYPASSRLS
+			// migrate pool, so we only need to wait for the app pool to
+			// become authenticable — bootstrap sets the password within a
+			// few seconds. ~90s of retries comfortably covers a cold-start
+			// migration apply on the target VM without ever hanging the
+			// process indefinitely.
+			loadErr := retrySchemaCacheLoad(ctx, schemaSvc, 90*time.Second)
+			if loadErr != nil {
+				fmt.Fprintf(os.Stderr, "atlas: schema cache reload: %v\n", loadErr)
 			}
-			loadCancel()
 		}
 	} else {
 		fmt.Fprintln(os.Stderr, "atlas: DATABASE_URL_APP not set — HTTP server will refuse to start")
@@ -290,6 +440,34 @@ func main() {
 		}()
 	}
 
+	// Slice 016: drive the freshness/drift refresh subscriber alongside the
+	// other consumers. Shares the same stop signal so SIGTERM tears it down
+	// with everything else (AC-4: refresh on every ledger write).
+	if freshnessDriftSubscriber != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fmt.Fprintf(os.Stderr, "atlas: freshness/drift refresh subscriber starting\n")
+			if err := freshnessDriftSubscriber.Start(ctx); err != nil {
+				errCh <- fmt.Errorf("freshness/drift refresh subscriber: %w", err)
+			}
+		}()
+	}
+
+	// Slice 020: drive the risk residual subscriber alongside the other
+	// consumers. Shares the same stop signal so SIGTERM tears it down with
+	// everything else (AC-5).
+	if residualSubscriber != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fmt.Fprintf(os.Stderr, "atlas: risk residual subscriber starting\n")
+			if err := residualSubscriber.Start(ctx); err != nil {
+				errCh <- fmt.Errorf("risk residual subscriber: %w", err)
+			}
+		}()
+	}
+
 	// Slice 021: exception auto-expiry tick loop. Runs as the migrator
 	// role (BYPASSRLS) so the sweep can cross tenants -- the per-tenant
 	// transaction inside applies the GUC for RLS-honest writes. Default
@@ -320,6 +498,44 @@ func main() {
 				fmt.Fprintf(os.Stderr, "atlas: exception expirer ticking every %s\n", interval.String())
 				if err := expirer.Run(ctx, interval); err != nil {
 					errCh <- fmt.Errorf("exception expirer: %w", err)
+				}
+			}()
+		}
+	}
+
+	// Slice 055: Decision Log overdue-notification tick loop (AC-6). Runs as
+	// the migrator role (BYPASSRLS) so the sweep can cross tenants -- the
+	// per-tenant transaction inside applies the GUC for RLS-honest writes.
+	// Each tick emits one in-app notification per not-yet-notified overdue
+	// decision to its decision_maker, paired with one `overdue_notified`
+	// row in decisions_audit (the authoritative dedup marker -- P0
+	// anti-criterion: never repeated). Default cadence is 24h;
+	// ATLAS_DECISION_OVERDUE_INTERVAL overrides for dev loops. Only mounts
+	// when the migrator URL is available (the same guard the exception
+	// expirer uses).
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" {
+		overdueCtx, overdueCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		overduePool, err := pgxpool.New(overdueCtx, migratorURL)
+		overdueCancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: decision overdue pool: %v\n", err)
+		} else {
+			interval := decision.DefaultOverdueInterval
+			if raw := os.Getenv("ATLAS_DECISION_OVERDUE_INTERVAL"); raw != "" {
+				if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+					interval = d
+				} else {
+					fmt.Fprintf(os.Stderr, "atlas: ATLAS_DECISION_OVERDUE_INTERVAL=%q invalid: %v\n", raw, perr)
+				}
+			}
+			notifier := decision.NewNotifier(overduePool, logger)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer overduePool.Close()
+				fmt.Fprintf(os.Stderr, "atlas: decision overdue notifier ticking every %s\n", interval.String())
+				if err := notifier.Run(ctx, interval); err != nil {
+					errCh <- fmt.Errorf("decision overdue notifier: %w", err)
 				}
 			}()
 		}
@@ -361,6 +577,42 @@ func main() {
 		}
 	}
 
+	// Slice 016: daily 00:00 UTC freshness + drift read-model recompute
+	// (AC-4, first half). Freshness decays with wall-clock and drift is a
+	// day-over-day delta -- both need a guaranteed daily recompute even when
+	// no new evidence arrives. Runs as the migrator role (BYPASSRLS) to
+	// enumerate tenants; each tenant's refresh runs through app-role Stores
+	// for RLS-honest writes. The scheduler wakes hourly and fires the sweep
+	// the first time it observes a new UTC calendar day. Only mounts when
+	// the migrator URL + the app pool are both available.
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		fdCtx, fdCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		fdPool, err := pgxpool.New(fdCtx, migratorURL)
+		fdCancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: freshness/drift scheduler pool: %v\n", err)
+		} else {
+			tickCheck := freshnessdrift.DefaultDailyTickCheck
+			if raw := os.Getenv("ATLAS_FRESHNESS_DRIFT_TICK_CHECK"); raw != "" {
+				if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+					tickCheck = d
+				} else {
+					fmt.Fprintf(os.Stderr, "atlas: ATLAS_FRESHNESS_DRIFT_TICK_CHECK=%q invalid: %v\n", raw, perr)
+				}
+			}
+			fdScheduler := freshnessdrift.NewScheduler(fdPool, freshnessdrift.NewRefresherFactory(pool), logger)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer fdPool.Close()
+				fmt.Fprintf(os.Stderr, "atlas: freshness/drift scheduler checking every %s\n", tickCheck.String())
+				if err := fdScheduler.Run(ctx, tickCheck); err != nil {
+					errCh <- fmt.Errorf("freshness/drift scheduler: %w", err)
+				}
+			}()
+		}
+	}
+
 	wg.Wait()
 	close(errCh)
 	if streamConn != nil {
@@ -375,9 +627,77 @@ func main() {
 // streambufSubject surfaces the default subject for the boot log line.
 func streambufSubject() string { return streambuf.DefaultSubject }
 
+// retrySchemaCacheLoad calls schemaSvc.LoadFromDB on the app pool, retrying
+// with a fixed 2s backoff until it succeeds or `budget` elapses. The common
+// transient failure is `password authentication failed for user
+// "atlas_app"` (SQLSTATE 28P01) during the docker-compose self-host bundle's
+// parallel atlas / atlas-bootstrap startup window, before bootstrap.sh has
+// run `ALTER ROLE atlas_app PASSWORD ...`. Each LoadFromDB call gets its own
+// 10s timeout. Returns nil on the first success, or the last error if the
+// budget runs out (the caller logs it; boot continues, matching the prior
+// non-fatal behaviour). Respects ctx cancellation so SIGTERM during boot is
+// honoured.
+func retrySchemaCacheLoad(ctx context.Context, schemaSvc *schemaregistry.Service, budget time.Duration) error {
+	deadline := time.Now().Add(budget)
+	attempt := 0
+	for {
+		attempt++
+		loadCtx, loadCancel := context.WithTimeout(ctx, 10*time.Second)
+		err := schemaSvc.LoadFromDB(loadCtx)
+		loadCancel()
+		if err == nil {
+			if attempt > 1 {
+				fmt.Fprintf(os.Stderr, "atlas: schema cache loaded after %d attempt(s)\n", attempt)
+			}
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("gave up after %d attempt(s): %w", attempt, err)
+		}
+		fmt.Fprintf(os.Stderr, "atlas: schema cache reload attempt %d failed (retrying): %v\n", attempt, err)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("cancelled after %d attempt(s): %w", attempt, ctx.Err())
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
 	return fallback
+}
+
+// oscalSignerFromEnv builds the slice-030 export-bundle signer. When
+// OSCAL_SIGNING_KEY is set (hex-encoded 64-byte ed25519 private key) it
+// is loaded; otherwise a fresh per-process ephemeral keypair is
+// generated. The ephemeral path is acceptable because the public key
+// travels in every bundle manifest — the signature stays verifiable;
+// it just is not anchored to a long-lived identity (the cosign-keyless
+// upgrade is the v3 revisit item in the slice-030 decisions log).
+func oscalSignerFromEnv() (*oscal.Signer, error) {
+	raw := os.Getenv("OSCAL_SIGNING_KEY")
+	if raw == "" {
+		return oscal.NewEphemeralSigner()
+	}
+	key, err := hex.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("OSCAL_SIGNING_KEY is not valid hex: %w", err)
+	}
+	return oscal.NewSigner(ed25519.PrivateKey(key))
+}
+
+// localModeIdpResolver is the slice-037 no-op IdP resolver for local-mode
+// self-host deployments. The docker-compose bundle ships local-mode
+// authentication (email + password against a seeded default user); OIDC
+// is an opt-in post-install configuration step. Until an operator
+// configures an IdP, every OIDC resolution reports "unknown IdP" and the
+// /auth/oidc/* routes 400 cleanly — /auth/local/login is the working
+// sign-in path.
+type localModeIdpResolver struct{}
+
+func (localModeIdpResolver) ResolveIdp(_ context.Context, _ uuid.UUID, _ string) (oidc.IdpConfig, error) {
+	return oidc.IdpConfig{}, oidc.ErrUnknownIdp
 }

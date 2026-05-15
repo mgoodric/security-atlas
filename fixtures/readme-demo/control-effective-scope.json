@@ -1,0 +1,27 @@
+{
+  "control_id": "acme-soc2-ac-1",
+  "framework_version_id": "00000000-0000-0000-0000-0000000000s2",
+  "framework_scope_id": "00000000-0000-0000-0000-000000000060",
+  "effective_scope": [
+    {
+      "id": "sc-prod-aws-us",
+      "label": "prod / aws / us-east-1",
+      "dimensions": {
+        "env": "prod",
+        "cloud": "aws",
+        "geo": "us-east-1"
+      }
+    },
+    {
+      "id": "sc-prod-aws-eu",
+      "label": "prod / aws / eu-west-1",
+      "dimensions": {
+        "env": "prod",
+        "cloud": "aws",
+        "geo": "eu-west-1"
+      }
+    }
+  ],
+  "effective_scope_count": 2,
+  "in_scope": true
+}

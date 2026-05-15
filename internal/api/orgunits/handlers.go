@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -44,6 +45,15 @@ type wire struct {
 	ParentID              *string         `json:"parent_id,omitempty"`
 	Level                 string          `json:"level"`
 	AcceptanceAuthorities json.RawMessage `json:"acceptance_authorities"`
+	// RiskCounts is populated ONLY when GET /v1/org_units is called with
+	// ?include_risk_counts=true (slice 067, AC-1). It is a map of severity
+	// scalar (the 5×5 grid product, as a string key) -> count of risks
+	// attributed to this org_unit at that severity. omitempty keeps the
+	// response shape byte-identical to the slice-053 shape when the param
+	// is absent (AC-1: additive, back-compatible). An org_unit with no
+	// attributed risks gets an empty (but non-nil) map when the param is
+	// set — so the field is present and explicitly empty, not missing.
+	RiskCounts map[string]int `json:"risk_counts,omitempty"`
 }
 
 type createReq struct {
@@ -115,7 +125,24 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 // List handles GET /v1/org_units.
+//
+// Slice 067 (AC-1): the ?include_risk_counts=true query param — parsed but
+// ignored by the slice-053 handler — is now honored. With the param, each
+// org_unit node gains a `risk_counts` map (severity scalar -> count of
+// risks attributed to that node). Without it, the response shape is
+// byte-identical to the slice-053 shape (additive, back-compatible).
+//
+// The risk counts come from ONE aggregation query joined to the tree in
+// memory — never one query per node (anti-criterion: no N+1).
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	// Slice 067 (AC-6): handler-level program-read guard, runs FIRST.
+	if !requireProgramRead(w, r) {
+		return
+	}
+	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
+		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
 	rows, err := h.store.ListOrgUnits(r.Context())
 	if err != nil {
 		writeServerErr(w, "list org_units", err)
@@ -125,6 +152,37 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	for i, u := range rows {
 		out[i] = wireFrom(u)
 	}
+
+	// Slice 067 (AC-1): honor ?include_risk_counts=true. The value must be
+	// the literal "true" — any other value (including "1" / "false") is
+	// treated as "not requested", keeping the param contract explicit.
+	if r.URL.Query().Get("include_risk_counts") == "true" {
+		counts, cerr := h.store.RiskCountsByOrgUnit(r.Context())
+		if cerr != nil {
+			writeServerErr(w, "risk counts by org_unit", cerr)
+			return
+		}
+		// Index the one-query result by org_unit id, then attach to each
+		// node. Every node gets a non-nil map — an org_unit with no
+		// attributed risks gets an explicit empty map rather than a
+		// missing field.
+		byUnit := make(map[string]map[string]int, len(counts))
+		for _, c := range counts {
+			m := make(map[string]int, len(c.Counts))
+			for sev, n := range c.Counts {
+				m[strconv.Itoa(sev)] = n
+			}
+			byUnit[c.OrgUnitID.String()] = m
+		}
+		for i := range out {
+			if m, ok := byUnit[out[i].ID]; ok {
+				out[i].RiskCounts = m
+			} else {
+				out[i].RiskCounts = map[string]int{}
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{"org_units": out, "count": len(out)})
 }
 
