@@ -333,7 +333,21 @@ Re-add `Analyze (python)` to `required_status_checks.contexts` in `.github/branc
 
 **Spec reference:** the deadlock + fix are documented inline in `release-please.yml`. The workflow change is safe to merge before the App exists — the `if:` guard skips the token-mint step and falls back to GITHUB_TOKEN until the App vars/secrets are set.
 
-### 10.7 Test-tag cleanup from slice 080 verification
+### 10.7 Enable GitHub Pages (one-time setup for `Docs publish` Deploy job)
+
+**Status:** the `Docs publish` workflow's `Build (mkdocs --strict)` job is green as of slice 080. The downstream `Deploy to GitHub Pages` job will continue to fail with `Error: Failed to create deployment (status: 404). Ensure GitHub Pages has been enabled` until the maintainer enables Pages in repo settings.
+
+**Why orchestrator can't:** repo-settings UI toggle.
+
+**What's needed:**
+
+1. https://github.com/mgoodric/security-atlas/settings/pages → **Source:** GitHub Actions.
+2. Re-trigger the most recent `Docs publish` workflow run, or wait for the next release-tag push: the Deploy job will now succeed.
+3. Confirm: https://mgoodric.github.io/security-atlas/ returns 200 OK and renders the rendered docs.
+
+**Spec reference:** the requirement is already documented at the top of `.github/workflows/docs-publish.yml`. Surfaced here so it doesn't fall out of memory.
+
+### 10.8 Test-tag cleanup from slice 080 verification
 
 **Status:** slice 080 used a test tag (`v0.0.0-slice080-test`) to verify the `release.yml` + `docs-publish.yml` fixes against a real tag push. Both workflows went green; the tag was deleted locally and on the remote during the slice run. If the maintainer later sees an orphan GitHub Release object for `v0.0.0-slice080-test` (GoReleaser will have cut a prerelease Release on the test tag), delete it:
 

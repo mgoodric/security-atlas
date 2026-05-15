@@ -68,7 +68,13 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
         with:
-          cosign-release: "v2.4.1"
+          # cosign 3.x. Bumped from v2.4.1 in slice 080: the pinned 2.4.1
+          # could not verify the bundle format that goreleaser-action@v7
+          # ships its own goreleaser binary with (the action's internal
+          # supply-chain check failed: "bundle does not contain cert for
+          # verification, please provide public key"). cosign 3.x supports
+          # the new Sigstore protobuf-bundle format and unblocks the action.
+          cosign-release: "v3.0.6"
 
       - name: Install syft (SBOM)
         # SBOM generation is best-effort; not gated by ship-gate but useful

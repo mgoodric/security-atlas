@@ -17,19 +17,20 @@ log records why.
 **Slice-doc hypothesis:** `sigstore/cosign-installer@v3` setup is broken;
 the action cannot validate `cosign-release: v2.4.1`; the error message
 quoted in the slice doc was `Unable to validate cosign version: 'v2.4.1'`
-+ `Fetched public key does not match expected digest, exiting` +
-`unsupported OS Linux`. Hypothesised fix paths:
 
-- **A-1:** Bump `cosign-installer` to a newer version.
-- **A-2:** Pin to a different cosign release.
-- **A-3:** Drop cosign signing.
+- `Fetched public key does not match expected digest, exiting` +
+  `unsupported OS Linux`. Hypothesised fix paths:
+
+* **A-1:** Bump `cosign-installer` to a newer version.
+* **A-2:** Pin to a different cosign release.
+* **A-3:** Drop cosign signing.
 
 **What the v1.5.1 GoReleaser run log (`25934259652`) actually shows:**
 
 1. `sigstore/cosign-installer@v3` ran. The job log echoes the action's
    install-script source for traceability. That source includes
    `log_error "unsupported OS Linux"` and `log_error "unsupported os
-   Linux"` strings — but as **string literals inside the unreached
+Linux"` strings — but as **string literals inside the unreached
    branches of the shell script**, not as runtime error output. The
    cosign install step exited successfully and cosign was on PATH.
 2. `anchore/sbom-action/download-syft@v0` ran. Successful.
@@ -71,7 +72,7 @@ restore / mkdocs-material install is corrupt. Hypothesised fix paths:
 
 1. `astral-sh/setup-uv@v7` installed uv 0.11.14 successfully.
 2. Cache restore succeeded (`Cache hit` then `Cache restored
-   successfully`).
+successfully`).
 3. The mkdocs build step ran. It downloaded mkdocs, mkdocs-material,
    babel, pygments, installed 34 packages, and built the site:
 
@@ -126,10 +127,22 @@ the same `tar:` prefix.
   those paths would change nothing.
 
 **Chosen: A-novel.** Smallest fix that addresses the actual root cause.
-Removes 7 lines (the step block) from `release.yml`. Honors P0-A2: the
-cosign signing path stays exactly as authored — `signs:` in
-`.goreleaser.yaml` and the `Install cosign` step in `release.yml` are
-untouched. Honors P0-A4: no `continue-on-error`.
+Removes 7 lines (the step block) from `release.yml`. Honors P0-A4: no
+`continue-on-error`.
+
+**Surface-A follow-on (A-1 also needed):** the test-tag run after the
+A-novel fix surfaced a second failure mode inside `goreleaser-action@v7`
+itself: the action's pre-flight cosign-verify of its own downloaded
+goreleaser binary failed with `bundle does not contain cert for
+verification, please provide public key`. Cause: cosign v2.4.1 (the
+pinned version) does not understand the protobuf-bundle format that
+goreleaser-action@v7 ships its goreleaser binary with. Cosign added
+protobuf-bundle support in v3.x. Fix: bump `cosign-release` from
+`v2.4.1` to `v3.0.6` (Path A-1 from the slice doc — newer cosign).
+The bumped cosign retains backward compatibility for our own
+`sign-blob` / `verify-blob` invocations (the keyless-OIDC flow is the
+canonical path in both v2 and v3). Honors P0-A2: the signing path is
+preserved end-to-end; only the cosign client version moves.
 
 ### 2. Surface B — fix the upload-pages-artifact path
 
@@ -149,6 +162,24 @@ untouched. Honors P0-A4: no `continue-on-error`.
   log proves it. Touching those paths would not help.
 
 **Chosen: B-novel.** Honors P0-A4: no `continue-on-error`.
+
+**Surface-B follow-on observation (NOT slice 080's scope):** the
+test-tag run confirmed the `Build (mkdocs --strict)` job now passes
+end-to-end — `mkdocs build` succeeds, upload-pages-artifact succeeds.
+The downstream `Deploy to GitHub Pages` job (which depends on Build but
+is a different job in the same workflow) then failed with
+`Error: Failed to create deployment (status: 404). Ensure GitHub Pages
+has been enabled`. This is a maintainer-external setup item
+**already documented at the top of `.github/workflows/docs-publish.yml`**:
+"Pages must be enabled in repo settings (Settings → Pages → Source:
+GitHub Actions) before the first deploy can land. This is a one-time
+maintainer step out of band of CI." Slice 080's AC-2 targets the
+`Build (mkdocs --strict)` job specifically; that job is green. Filing
+this as a maintainer-action item in `RELEASE_READINESS.md §10.x` rather
+than spillover-as-slice — it's not a code/config change the orchestrator
+can make. The release-please flow will continue to fail at the Deploy
+job until the maintainer flips the toggle, but the Build job (the
+load-bearing CI signal) is fixed.
 
 ### 3. Cosign signing path — **kept** (honors P0-A2)
 
@@ -223,8 +254,8 @@ be the first tag with green release-tag CI.
   never worked; `goreleaser-action@v7` validates the config inside its
   own `release --clean` invocation. No behavioural regression possible.
 - **Surface B diagnosis**: HIGH. mkdocs's `INFO - Documentation built
-  in 0.34 seconds` line + the tar `Cannot open: No such file or
-  directory` line on `path: site` are mechanically definitive.
+in 0.34 seconds` line + the tar `Cannot open: No such file or
+directory` line on `path: site` are mechanically definitive.
 - **Surface B fix**: HIGH. `docs-site/site` is the path mkdocs literally
   printed in the previous log line as its build target.
 - **Test-tag plan**: MEDIUM-HIGH. The `v0.0.0-slice080-test` tag triggers
@@ -232,17 +263,16 @@ be the first tag with green release-tag CI.
   modes considered: (a) GoReleaser cuts a prerelease GitHub Release —
   handled by maintainer deleting the Release in cleanup; (b) the tag
   shows up in `git log --tags` clutter — mitigated by deleting locally
-  + remote in cleanup.
+  - remote in cleanup.
 
 ## Sources
 
 - `release.yml` failed run for v1.5.1: `25934259652`. Job: `GoReleaser ·
-  build · sign · publish`. Failing step: `GoReleaser check`. Exit code
-  127. Failure line: `goreleaser: command not found`.
+build · sign · publish`. Failing step: `GoReleaser check`. Exit code 127. Failure line: `goreleaser: command not found`.
 - `docs-publish.yml` failed run for v1.5.1: `25934259678`. Job:
   `Build (mkdocs --strict)`. Failing step: `Upload Pages artifact`. Exit
   code 2. Failure line: `tar: site: Cannot open: No such file or
-  directory`.
+directory`.
 - Same failure pattern on `25922538725` (release v1.5.0) and
   `25898793554` (release v1.4.0) for Surface A, and on `25922538717` /
   `25898793507` for Surface B. The fixes are not specific to the v1.5.1
