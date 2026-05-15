@@ -277,3 +277,20 @@ self-host-wipe:
 # Show the status of every self-host service.
 self-host-ps:
     {{_self_host_compose}} ps
+
+# ----- Documentation site (mkdocs Material, slice 058) -----
+#
+# The user-facing docs live at docs-site/. We invoke mkdocs in isolation
+# via `uv tool run --with-requirements` so it never pollutes the
+# monorepo's uv workspace. Dependency pins are in docs-site/requirements.txt.
+
+_docs_uv := "uv tool run --with-requirements docs-site/requirements.txt --with mkdocs-material"
+
+# Serve the docs site locally with live reload at http://127.0.0.1:8000/.
+docs-serve:
+    {{_docs_uv}} --from mkdocs mkdocs serve --config-file docs-site/mkdocs.yml
+
+# Strict build — fails on broken links, missing nav entries, dead pages.
+# .github/workflows/docs-publish.yml runs this same recipe on every PR.
+docs-build:
+    {{_docs_uv}} --from mkdocs mkdocs build --strict --config-file docs-site/mkdocs.yml

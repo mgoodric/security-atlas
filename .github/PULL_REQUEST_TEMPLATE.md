@@ -58,6 +58,18 @@ If this PR is AI-assisted, include a `Co-authored-by:` trailer naming the assist
 - [ ] `Plans/` updated if architecture changed
 - [ ] Slice status flipped in `docs/issues/_STATUS.md` (when opening as `in-review`)
 
+## Docs impact
+
+<!--
+Pick exactly ONE. Advisory gate — reviewer discipline, not a CI hard-block.
+If this PR touches a user-facing surface (frontend view, public API, CLI
+command, configuration), the relevant docs-site/ page should be updated
+in the same PR.
+-->
+
+- [ ] Updated docs pages: <!-- list paths under docs-site/docs/ -->
+- [ ] No doc change needed because: <!-- one-sentence reason -->
+
 ## DCO
 
 - [ ] Every commit carries a `Signed-off-by:` trailer

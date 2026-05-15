@@ -1,0 +1,87 @@
+# mkdocs configuration — security-atlas user documentation.
+#
+# Decided in slice 058: mkdocs Material is the docs generator
+# (Python-only, matches the repo's `uv` toolchain, built-in dark mode
+# and search, no Node dependency). See
+# docs/audit-log/058-user-docs-scaffold-decisions.md.
+
+site_name: security-atlas
+site_description: Open-source, self-hostable, replacement-grade GRC platform.
+site_url: https://mgoodric.github.io/security-atlas/
+repo_url: https://github.com/mgoodric/security-atlas
+repo_name: mgoodric/security-atlas
+edit_uri: edit/main/docs-site/docs/
+
+docs_dir: docs
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.footer
+    - content.action.edit
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+  # Surfaces a "Last updated" date on every page — feeds the
+  # is-this-stale trust signal users look for in self-hosted docs.
+  # `strict: false` keeps untracked-file fallback as a warning but does
+  # NOT abort mkdocs --strict (which we DO want catching broken links
+  # and missing nav entries). `fallback_to_build_date` keeps the date
+  # render sensible until the file lands in git history.
+  - git-revision-date-localized:
+      enable_creation_date: false
+      type: date
+      fallback_to_build_date: true
+      strict: false
+
+nav:
+  - Intro: index.md
+  - Install: install.md
+  - Framework setup: framework-setup.md
+  - First audit: first-audit.md
+  - Board reporting: board-reporting.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/mgoodric/security-atlas

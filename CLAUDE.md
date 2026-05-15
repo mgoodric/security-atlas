@@ -272,21 +272,21 @@ security-atlas/
 
 These are explicitly deferred. Do not pick one unilaterally. (Full list: `Plans/canvas/11-open-questions.md`.)
 
-| Decision                                                                   | Decide before…                       |
-| -------------------------------------------------------------------------- | ------------------------------------ |
-| Project license (Apache 2.0 vs AGPL)                                       | First public code push beyond Plans/ |
-| SCF redistribution terms (legal review)                                    | Bundling SCF catalog in releases     |
-| Hosted offering or pure OSS governance                                     | Public launch                        |
-| FrameworkScope ownership workflow UX                                       | PCI/HIPAA modules ship               |
-| Push credential issuance UX (API key rotation, scoping, revocation)        | Push CLI ships                       |
-| Schema-registry governance for community `evidence_kind`s                  | Community connectors land            |
-| AI-assistance boundary in contributor docs                                 | First AI feature lands               |
-| Risk-methodology default lock (NIST 800-30 + 5x5 + dollar-banded vs FAIR)  | Risk module ships                    |
-| Privacy module shape (sibling vs first-class)                              | GDPR support work begins             |
-| Disclosure / breach-notification workflow shape                            | HIPAA / GDPR Art. 33 work            |
-| CCM / FedRAMP elevation timing                                             | When user demand surfaces            |
-| Control catalog governance (community-contributed controls, verified tier) | Public marketplace conversation      |
-| Docs site generator (mkdocs Material vs Docusaurus)                        | Docs site begins                     |
+| Decision                                                                   | Decide before…                                                                                                                                                                                                                                           |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Project license (Apache 2.0 vs AGPL)                                       | First public code push beyond Plans/                                                                                                                                                                                                                     |
+| SCF redistribution terms (legal review)                                    | Bundling SCF catalog in releases                                                                                                                                                                                                                         |
+| Hosted offering or pure OSS governance                                     | Public launch                                                                                                                                                                                                                                            |
+| FrameworkScope ownership workflow UX                                       | PCI/HIPAA modules ship                                                                                                                                                                                                                                   |
+| Push credential issuance UX (API key rotation, scoping, revocation)        | Push CLI ships                                                                                                                                                                                                                                           |
+| Schema-registry governance for community `evidence_kind`s                  | Community connectors land                                                                                                                                                                                                                                |
+| AI-assistance boundary in contributor docs                                 | First AI feature lands                                                                                                                                                                                                                                   |
+| Risk-methodology default lock (NIST 800-30 + 5x5 + dollar-banded vs FAIR)  | Risk module ships                                                                                                                                                                                                                                        |
+| Privacy module shape (sibling vs first-class)                              | GDPR support work begins                                                                                                                                                                                                                                 |
+| Disclosure / breach-notification workflow shape                            | HIPAA / GDPR Art. 33 work                                                                                                                                                                                                                                |
+| CCM / FedRAMP elevation timing                                             | When user demand surfaces                                                                                                                                                                                                                                |
+| Control catalog governance (community-contributed controls, verified tier) | Public marketplace conversation                                                                                                                                                                                                                          |
+| ~~Docs site generator (mkdocs Material vs Docusaurus)~~                    | RESOLVED 2026-05-14 (slice 058): **mkdocs Material**. See [`Plans/canvas/11-open-questions.md`](Plans/canvas/11-open-questions.md) item 20 + [`docs/audit-log/058-user-docs-scaffold-decisions.md`](docs/audit-log/058-user-docs-scaffold-decisions.md). |
 
 ---
 
