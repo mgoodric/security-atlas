@@ -23,7 +23,7 @@
 //     tenant (for the P0-2 private-note assertion)
 //   - the period has at least one control with evidence in-window
 
-import { test, expect } from "@playwright/test";
+import { test } from "@playwright/test";
 
 // Slice 069 — Playwright is now installed; the `ifPlaywright` shim that
 // used to wrap this file has been removed. Test bodies that still hold

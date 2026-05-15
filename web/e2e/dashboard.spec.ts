@@ -25,7 +25,7 @@
 //     across >=2 freshness classes, and at least one exception
 //     expiring within 30 days (so every bound panel has data)
 
-import { test, expect } from "@playwright/test";
+import { test } from "@playwright/test";
 
 // Slice 069 — Playwright is now installed; the `ifPlaywright` shim that
 // used to wrap this file has been removed. Each test below is a real
