@@ -59,9 +59,16 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	tenant := uuid.NewString()
 	t.Cleanup(func() {
 		ctx := context.Background()
-		// Order matters: delete child rows first.
+		// Delete child rows first, then the controls. The previous
+		// `UPDATE controls SET superseded_by = NULL` pre-step is removed:
+		// it tried to NULL EVERY version of a bundle at once, which makes
+		// two rows share (tenant_id, bundle_id) with superseded_by IS NULL
+		// and trips the controls_one_active_version_per_bundle unique
+		// index (23505). It is also unnecessary —
+		// `controls_superseded_by_fk` is ON DELETE SET NULL, so deleting
+		// the whole tenant's controls in one statement resolves the
+		// self-reference on its own.
 		for _, stmt := range []string{
-			`UPDATE controls SET superseded_by = NULL WHERE tenant_id = $1`,
 			`DELETE FROM evidence_records WHERE tenant_id = $1`,
 			`DELETE FROM controls WHERE tenant_id = $1`,
 		} {
@@ -87,9 +94,14 @@ func seedSCFAnchor(t *testing.T, admin *pgxpool.Pool, code, family string) (uuid
 	`).Scan(&frameworkID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		frameworkID = uuid.New()
+		// frameworks columns: (id, tenant_id, name, slug, issuer,
+		// description, ...). `issuer` is NOT NULL; there is no `source`
+		// column. (This helper had bit-rotted against a pre-slice-002
+		// schema because internal/control was never wired into the CI
+		// integration job — slice 068 wires it in.)
 		if _, err := admin.Exec(ctx, `
-			INSERT INTO frameworks (id, tenant_id, slug, name, source)
-			VALUES ($1, NULL, 'scf', 'Secure Controls Framework', 'platform')
+			INSERT INTO frameworks (id, tenant_id, slug, name, issuer)
+			VALUES ($1, NULL, 'scf', 'Secure Controls Framework', 'Secure Controls Framework Council')
 		`, frameworkID); err != nil {
 			t.Fatalf("insert framework: %v", err)
 		}
@@ -104,10 +116,13 @@ func seedSCFAnchor(t *testing.T, admin *pgxpool.Pool, code, family string) (uuid
 	`, frameworkID).Scan(&versionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		versionID = uuid.New()
+		// framework_versions columns: (id, tenant_id, framework_id,
+		// version, ..., status, ...). The version column is `version`,
+		// not `release_version`; there is no `source` column.
 		if _, err := admin.Exec(ctx, `
 			INSERT INTO framework_versions
-				(id, tenant_id, framework_id, release_version, status, source)
-			VALUES ($1, NULL, $2, 'test-1.0', 'current', 'platform')
+				(id, tenant_id, framework_id, version, status)
+			VALUES ($1, NULL, $2, 'test-1.0', 'current')
 		`, versionID, frameworkID); err != nil {
 			t.Fatalf("insert framework_version: %v", err)
 		}

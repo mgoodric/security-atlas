@@ -232,6 +232,62 @@ upload route demonstrably mounts under the authz middleware, and the
 corrected assertion tests a real, causally-linked post-condition rather
 than an unrelated table.
 
+**4e. Control-bundle RE-upload was never idempotent — wrong supersession
+order + a non-deferrable self-FK, masked by a test that CI never ran.**
+With 4a–4d fixed, the e2e job advanced to its LAST assertion (assertion 6,
+AC-7: re-running `atlas-bootstrap` against the populated DB must exit 0)
+and failed in both modes: phase 6's re-upload of the 50 SOC 2 bundles
+500'd with
+
+```
+persist: insert control version: ERROR: duplicate key value violates
+unique constraint "controls_one_active_version_per_bundle" (SQLSTATE 23505)
+```
+
+Slice 009 shipped, in the same migration, (a) a partial unique index —
+at most one `controls` row per `(tenant_id, bundle_id)` with
+`superseded_by IS NULL` — and (b) the self-FK `controls_superseded_by_fk`
+created NON-deferrable. The slice-009 SQL itself documents the only order
+that satisfies the index: flip the predecessor to superseded BEFORE
+inserting the new active row. But that order is impossible with a
+non-deferrable self-FK (the UPDATE points the predecessor at a row that
+does not exist yet), so `internal/control/store.go::Upload` did
+insert-then-update instead — and insert-then-update is the order the
+unique index rejects, because for one statement-instant both the old and
+the new row have `superseded_by IS NULL`. Net effect: the FIRST upload of
+any bundle worked, every RE-upload 500'd. This shipped on `main` for ~59
+slices.
+
+It went undetected because `internal/control/integration_test.go` already
+HAS the test that catches it (`TestUpload_ReuploadSupersedes`, slice-009
+AC-6) — but the CI integration job's hand-maintained `-coverpkg` package
+list never included `./internal/control/...`, so that test had never run
+in CI. The test had also bit-rotted against ~59 slices of schema drift (it
+referenced a `frameworks.source` column and a `framework_versions.release_version`
+column that no longer exist, and its cleanup helper NULLed every version
+of a bundle at once — itself a 23505).
+
+**Chosen.** Three coordinated changes:
+
+1. New migration `20260511000032_controls_superseded_fk_deferrable.sql`
+   re-creates `controls_superseded_by_fk` as `DEFERRABLE INITIALLY
+DEFERRED` (validated at COMMIT). This is the same pattern slice 002
+   already uses for `frameworks_latest_version_fk` — a sibling
+   "row points at a row created in the same transaction" relationship.
+2. `store.go::Upload` reordered to mark-predecessor-superseded THEN
+   insert-the-new-row — the order slice 009's own SQL prescribes, now
+   possible because the FK check is deferred.
+3. Wired `./internal/control/...` into the CI integration job's package
+   list, and repaired the bit-rotted `seedSCFAnchor` + `freshTenant`
+   helpers, so `TestUpload_ReuploadSupersedes` actually runs and guards
+   this going forward.
+
+**Confidence: high** — verified locally end-to-end: all 33 migrations
+(incl. `_032`) apply clean, the `_032` down/up round-trip flips the
+constraint's deferrability cleanly, and the full
+`internal/control` integration suite — including
+`TestUpload_ReuploadSupersedes` — passes against a CI-parity Postgres.
+
 ## Revisit once in use
 
 - **Decision 3** — if the bare-directory / `.v1`-`x-evidence-kind`

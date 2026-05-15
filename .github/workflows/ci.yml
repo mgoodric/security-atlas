@@ -266,7 +266,8 @@ jobs:
             ./internal/decision/... \
             ./internal/api/dashboard/... \
             ./internal/api/risks/... \
-            ./internal/authz/...
+            ./internal/authz/... \
+            ./internal/control/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@v5
         with:

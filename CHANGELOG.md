@@ -58,6 +58,21 @@ auto-generated notes.
     assertion 5 at `decision_audit_log`, the table slice 065 bug #1 was
     actually about, which every authenticated control-bundle upload
     populates via the OPA authz middleware.
+  - **control-bundle re-upload was never idempotent.** With the above
+    fixed the e2e job reached its last assertion (bootstrap idempotency
+    re-run) and exposed that re-uploading any control bundle 500'd with a
+    `controls_one_active_version_per_bundle` unique-index violation.
+    `internal/control`'s `Upload` inserted the new active row *before*
+    superseding the predecessor — momentarily two active rows per bundle
+    — because the prescribed order (supersede first) was impossible while
+    the `controls_superseded_by_fk` self-FK was non-deferrable. Fix:
+    migration `20260511000032` makes that FK `DEFERRABLE INITIALLY
+    DEFERRED` (the pattern slice 002 already uses for
+    `frameworks_latest_version_fk`) and `Upload` is reordered to
+    supersede-then-insert. The slice-009 test that catches this
+    (`TestUpload_ReuploadSupersedes`) existed but had never run — the CI
+    integration job's package list omitted `internal/control`; it is now
+    wired in and its bit-rotted schema fixtures repaired.
 - **infra:** self-host bundle P0 fixes (#065) — a P0 follow-up to slice
   037 that unbreaks the shipped v1.3.0 `docker compose` self-host bundle,
   which did not bring a fresh deployment to a working state. Five

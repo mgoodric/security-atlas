@@ -127,6 +127,40 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 			freshness = &f
 		}
 
+		// 5. Supersede the predecessor (if any) FIRST, then insert the new
+		//    active row.
+		//
+		//    Ordering matters and is NOT interchangeable. The partial unique
+		//    index `controls_one_active_version_per_bundle` allows at most
+		//    one row per (tenant_id, bundle_id) with superseded_by IS NULL.
+		//    If we inserted the new (superseded_by-NULL) row before flipping
+		//    the predecessor, there would momentarily be TWO active rows for
+		//    the bundle and the INSERT would fail with SQLSTATE 23505 — which
+		//    is exactly the bug that broke every control-bundle RE-upload
+		//    (the self-host bundle's idempotency check surfaced it).
+		//
+		//    Flipping the predecessor first means MarkControlSuperseded sets
+		//    `prior.superseded_by = newID` while `newID` does not yet exist
+		//    as a controls row. That is sound because
+		//    `controls_superseded_by_fk` is DEFERRABLE INITIALLY DEFERRED
+		//    (migration 20260511000032) — the FK is validated at COMMIT, by
+		//    which point the new row below has been inserted. This is the
+		//    order `internal/db/queries/controls.sql` documents.
+		if !isNew {
+			priorID := uuid.UUID(prior.ID.Bytes)
+			if err := q.MarkControlSuperseded(ctx, dbx.MarkControlSupersededParams{
+				TenantID:     pgUUID(tenantID),
+				ID:           pgUUID(priorID),
+				SupersededBy: pgUUID(newID),
+			}); err != nil {
+				return fmt.Errorf("mark superseded: %w", err)
+			}
+			result.SupersededID = priorID
+		}
+
+		// 6. Insert the new active row (superseded_by NULL). After step 5
+		//    the predecessor is no longer NULL, so the partial unique index
+		//    has room for exactly this row.
 		scfPtr := &scfCode
 		row, err := q.InsertControlVersion(ctx, dbx.InsertControlVersionParams{
 			ID:                   pgUUID(newID),
@@ -152,21 +186,6 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		})
 		if err != nil {
 			return fmt.Errorf("insert control version: %w", err)
-		}
-
-		// 5. Supersede the predecessor (if any) in the same tx. The partial
-		//    unique index guarantees this UPDATE runs against exactly one row
-		//    or zero rows.
-		if !isNew {
-			priorID := uuid.UUID(prior.ID.Bytes)
-			if err := q.MarkControlSuperseded(ctx, dbx.MarkControlSupersededParams{
-				TenantID:     pgUUID(tenantID),
-				ID:           pgUUID(priorID),
-				SupersededBy: pgUUID(newID),
-			}); err != nil {
-				return fmt.Errorf("mark superseded: %w", err)
-			}
-			result.SupersededID = priorID
 		}
 
 		result.ControlID = uuid.UUID(row.ID.Bytes)
