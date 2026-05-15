@@ -1,0 +1,56 @@
+{
+  "control": {
+    "id": "acme-soc2-ac-1",
+    "code": "AC-1",
+    "name": "Access provisioning approvals",
+    "family": "Access Control",
+    "framework": "SOC 2"
+  },
+  "samples": [
+    {
+      "id": "sample-001",
+      "evidence_id": "ev-001",
+      "evidence_kind": "iam.provisioning_approval.v1",
+      "observed_at": "2026-04-22T14:08:00Z",
+      "actor_id": "github://acme/access-requests",
+      "selection_reason": "stratified_random",
+      "auditor_state": "accepted"
+    },
+    {
+      "id": "sample-002",
+      "evidence_id": "ev-002",
+      "evidence_kind": "iam.provisioning_approval.v1",
+      "observed_at": "2026-03-14T11:21:00Z",
+      "actor_id": "github://acme/access-requests",
+      "selection_reason": "stratified_random",
+      "auditor_state": "accepted"
+    },
+    {
+      "id": "sample-003",
+      "evidence_id": "ev-003",
+      "evidence_kind": "iam.provisioning_approval.v1",
+      "observed_at": "2026-02-28T09:44:00Z",
+      "actor_id": "github://acme/access-requests",
+      "selection_reason": "stratified_random",
+      "auditor_state": "pending"
+    },
+    {
+      "id": "sample-004",
+      "evidence_id": "ev-004",
+      "evidence_kind": "iam.provisioning_approval.v1",
+      "observed_at": "2026-02-09T16:02:00Z",
+      "actor_id": "github://acme/access-requests",
+      "selection_reason": "stratified_random",
+      "auditor_state": "pending"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "ann-001",
+      "sample_id": "sample-001",
+      "author": "demo-auditor",
+      "body": "Approval recorded in PR #1432. Manager signoff present.",
+      "created_at": "2026-05-13T14:08:00Z"
+    }
+  ]
+}

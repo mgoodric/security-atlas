@@ -1,0 +1,65 @@
+{
+  "controls": [
+    {
+      "id": "acme-soc2-ac-1",
+      "code": "AC-1",
+      "name": "Access provisioning approvals",
+      "family": "Access Control",
+      "framework": "SOC 2",
+      "owner": "demo-operator",
+      "state": "passing",
+      "evidence_count": 4,
+      "scope_cell_count": 2,
+      "anchor_id": "scf-iac-06"
+    },
+    {
+      "id": "acme-soc2-ac-7",
+      "code": "AC-7",
+      "name": "Quarterly access review",
+      "family": "Access Control",
+      "framework": "SOC 2",
+      "owner": "demo-operator",
+      "state": "stale",
+      "evidence_count": 2,
+      "scope_cell_count": 2,
+      "anchor_id": "scf-iac-23"
+    },
+    {
+      "id": "acme-soc2-cm-4",
+      "code": "CM-4",
+      "name": "Change ticket linkage",
+      "family": "Change Management",
+      "framework": "SOC 2",
+      "owner": "demo-operator",
+      "state": "failing",
+      "evidence_count": 3,
+      "scope_cell_count": 2,
+      "anchor_id": "scf-cm-04"
+    },
+    {
+      "id": "acme-soc2-cc-9",
+      "code": "CC-9",
+      "name": "Vendor due diligence",
+      "family": "Common Criteria",
+      "framework": "SOC 2",
+      "owner": "demo-operator",
+      "state": "passing",
+      "evidence_count": 5,
+      "scope_cell_count": 1,
+      "anchor_id": "scf-tpm-04"
+    },
+    {
+      "id": "acme-soc2-vm-2",
+      "code": "VM-2",
+      "name": "Vulnerability scan cadence",
+      "family": "Vulnerability Management",
+      "framework": "SOC 2",
+      "owner": "demo-operator",
+      "state": "passing",
+      "evidence_count": 6,
+      "scope_cell_count": 3,
+      "anchor_id": "scf-vpm-06"
+    }
+  ],
+  "count": 5
+}
