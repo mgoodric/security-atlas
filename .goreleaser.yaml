@@ -110,6 +110,16 @@ signs:
     args:
       - sign-blob
       - "--yes"
+      # cosign v3 defaults to writing a Sigstore protobuf bundle alongside
+      # the signature + certificate. Our consumer flow (the Self-verify
+      # step in release.yml + the verify snippet in the GitHub Release
+      # notes header) uses the legacy `cosign verify-blob --certificate
+      # ... --signature ...` shape, which expects separate .sig / .pem
+      # files, not a bundle. `--new-bundle-format=false` keeps cosign v3
+      # writing the legacy two-file format so the published consumer
+      # docs stay correct. Honors slice 080 P0-A2 (cosign signing path
+      # preserved end-to-end).
+      - "--new-bundle-format=false"
       - "--output-signature=${signature}"
       - "--output-certificate=${certificate}"
       - "${artifact}"

@@ -152,12 +152,28 @@ public key`. Cause: cosign v2.4.1 does not understand the Sigstore
    anchors were never updated for the v3 release. The v3-installer-on-v3
    pairing is non-functional.
 
-3. **Third test-tag run** (this commit → re-tagged, see verification
-   notes below): bumped `sigstore/cosign-installer@v3` →
-   `sigstore/cosign-installer@v4`. cosign-installer v4 is the first
-   release that natively bootstraps cosign v3 binaries (per the
-   installer's release notes for v4.0.0). The v4-installer-on-v3-tool
-   pairing is the canonical combination.
+3. **Third test-tag run** (run `25940915007`): bumped
+   `sigstore/cosign-installer@v3` → `@v4`. Failed at the action-resolution
+   step (5s) with `Unable to resolve action sigstore/cosign-installer@v4`
+   — cosign-installer does not publish a floating `@v4` major tag yet;
+   only point releases (`v4.0.0`, `v4.1.0`, `v4.1.1`, `v4.1.2`) exist.
+   Fix: pin to `sigstore/cosign-installer@v4.1.2`.
+
+4. **Fourth test-tag run** (run `25940949894`): the installer + tool
+   pair now lines up. cosign install ✓, goreleaser-action pre-flight ✓,
+   goreleaser ran for 4m21s building all 10 archives. Then the
+   `sign-blob` step failed with
+   `Error: signing dist/...checksums.txt: create bundle file: open :
+no such file or directory` — cosign v3 defaults to writing a
+   Sigstore protobuf bundle (`--new-bundle-format=true` default in v3)
+   in addition to the legacy `--output-signature` / `--output-certificate`
+   pair. The goreleaser cosign-signing template either passes an empty
+   `--bundle ""` arg or cosign v3 defaults to writing a bundle to an
+   unspecified path. Fix: opt out of the new bundle format by adding
+   `--new-bundle-format=false` to the `signs:` args in `.goreleaser.yaml`.
+   This keeps the published `verify-blob --certificate ... --signature
+...` consumer flow (Self-verify step + Release-notes verify
+   snippet) functioning without docs changes.
 
 **Fix chosen — Path A-1 squared.** Both the installer **and** the
 cosign tool need to be on their newest stable major:
