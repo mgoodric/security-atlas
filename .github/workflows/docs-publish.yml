@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (with full history for git-revision-date plugin)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # mkdocs-git-revision-date-localized-plugin reads each page's
           # last-commit timestamp from git history; shallow clones break
@@ -49,7 +49,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
 
       - name: Build site (strict)
         run: |
@@ -64,7 +64,7 @@ jobs:
         # could upload on every run, but a tag-only upload keeps PR
         # builds lightweight (build-and-discard).
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
@@ -86,4 +86,4 @@ jobs:
     steps:
       - name: Deploy to Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
