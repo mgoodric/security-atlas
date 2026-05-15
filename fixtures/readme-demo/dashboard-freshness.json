@@ -1,0 +1,12 @@
+{
+  "bucket": "by_class",
+  "buckets": [
+    { "freshness_class": "real_time", "total": 14, "fresh": 14, "stale": 0 },
+    { "freshness_class": "daily", "total": 28, "fresh": 27, "stale": 1 },
+    { "freshness_class": "weekly", "total": 19, "fresh": 17, "stale": 2 },
+    { "freshness_class": "monthly", "total": 11, "fresh": 10, "stale": 1 },
+    { "freshness_class": "quarterly", "total": 8, "fresh": 7, "stale": 1 }
+  ],
+  "total": 80,
+  "total_stale": 5
+}

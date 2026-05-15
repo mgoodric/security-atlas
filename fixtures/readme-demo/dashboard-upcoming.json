@@ -1,0 +1,22 @@
+{
+  "exceptions": [
+    {
+      "id": "00000000-0000-0000-0000-000000000301",
+      "control_id": "acme-soc2-ac-7",
+      "control_name": "Quarterly access review",
+      "exception_reason": "Tooling migration window",
+      "expires_at": "2026-05-21T00:00:00Z",
+      "owner": "demo-operator"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000302",
+      "control_id": "acme-soc2-cm-4",
+      "control_name": "Change ticket linkage",
+      "exception_reason": "Pre-prod path under refactor",
+      "expires_at": "2026-05-28T00:00:00Z",
+      "owner": "demo-operator"
+    }
+  ],
+  "count": 2,
+  "within": "30d"
+}

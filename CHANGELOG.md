@@ -9,6 +9,12 @@ Conventional-Commit messages. This file holds pre-release / unreleased
 work and any narrative entries the operator wants alongside the
 auto-generated notes.
 
+## Unreleased
+
+### Features
+
+- **infra:** README screenshots + animated GIFs of core flows ([#057](https://github.com/mgoodric/security-atlas/issues/057)) — On-demand `just refresh-screenshots` recipe captures four core views (dashboard, control detail, audit workspace, board pack preview) in light + dark themes plus an 8-second animated GIF of a representative flow. Uses the merged frontend rendered against a hermetic stub-platform server reading from `fixtures/readme-demo/**`. No CI freshness gate — these are version-controlled artifacts refreshed by humans. Final v1 backlog slice — once merged the v1 binary success test becomes evaluable end-to-end (69/69).
+
 ## [1.4.0](https://github.com/mgoodric/security-atlas/compare/v1.3.0...v1.4.0) (2026-05-15)
 
 
