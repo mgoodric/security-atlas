@@ -294,3 +294,73 @@ docs-serve:
 # .github/workflows/docs-publish.yml runs this same recipe on every PR.
 docs-build:
     {{_docs_uv}} --from mkdocs mkdocs build --strict --config-file docs-site/mkdocs.yml
+
+# ----- README screenshots (slice 057) -----
+#
+# Refreshes the screenshots + animated GIF embedded in README.md from
+# the actually-running app. This is an on-demand recipe — CI does NOT
+# block on screenshot freshness (anti-criterion P0-A4). Run it when
+# the captured views drift visibly from the merged frontend.
+#
+# Prerequisites (one-time):
+#   - `just build-frontend` succeeds (Next.js builds without error)
+#   - `npx playwright install chromium` (Playwright browser binaries)
+#   - `ffmpeg` on PATH (Homebrew: `brew install ffmpeg`)
+#   - `pngquant` on PATH for size optimization (optional but recommended:
+#     `brew install pngquant`)
+#
+# What it does:
+#   1. Builds the web/ workspace (`npm run build` in web/) — produces
+#      the production-mode bundle that the captures render against.
+#   2. Starts `next start` in the background on :3000 with ATLAS_HTTP_URL
+#      pointed at a fixture-driven stub server on :8787 (spun up inside
+#      the Playwright spec via `web/scripts/stub-platform-server.ts`).
+#   3. Runs the capture spec at
+#      `web/scripts/capture-readme-screenshots.spec.ts` — produces 8
+#      PNGs + 1 webm under `docs/images/` + the Playwright `test-results/`
+#      directory.
+#   4. ffmpeg converts the recorded webm → `docs/images/flow-create-control.gif`
+#      with a generated palette (smaller than naive single-pass).
+#   5. pngquant compresses the PNGs in place (lossy palette quantization)
+#      to keep the total weight ≤ 5 MB (anti-criterion P0-A3).
+#
+# Determinism: the stub server replays static JSON fixtures from
+# `fixtures/readme-demo/**`, so every run produces the same captured
+# pixels modulo font rasterization. Fixture content is neutral — no
+# maintainer references, no real tenant data (anti-criterion P0-A2).
+refresh-screenshots:
+    @echo "[1/5] Building web/ (production mode — standalone output)…"
+    cd web && npm run build
+    @echo "[2/5] Copying static assets into the standalone bundle…"
+    cp -R web/.next/static web/.next/standalone/web/.next/static
+    @echo "[3/5] Bundling capture script via esbuild…"
+    ./node_modules/.bin/esbuild \
+        web/scripts/capture-readme-screenshots.ts \
+        --bundle \
+        --platform=node \
+        --target=node20 \
+        --external:playwright \
+        --external:@playwright/test \
+        --outfile=web/scripts/.capture-readme-screenshots.bundled.js
+    @echo "[4/5] Running capture (boots production Next server + stub platform)…"
+    cd web && node scripts/.capture-readme-screenshots.bundled.js
+    @echo "[5/6] Converting recorded webm → optimized GIF via ffmpeg…"
+    WEBM=$(find web/test-results/readme-capture-video -name '*.webm' 2>/dev/null | head -1); \
+        if [ -z "$WEBM" ]; then \
+            echo "no flow-recording webm produced — GIF skipped"; \
+            exit 1; \
+        else \
+            ffmpeg -y -i "$WEBM" \
+                -vf "fps=10,scale=1280:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3" \
+                -loop 0 \
+                docs/images/flow-create-control.gif; \
+        fi
+    @echo "[6/6] Compressing PNGs via pngquant (optional)…"
+    if command -v pngquant >/dev/null 2>&1; then \
+        find docs/images -name '*.png' -exec pngquant --quality=70-90 --speed=1 --force --ext .png {} \; ; \
+    else \
+        echo "pngquant not on PATH — skipping PNG compression"; \
+    fi
+    @echo "Refresh complete. Total weight:"
+    @du -sh docs/images/*.{png,gif} 2>/dev/null | awk '{print "    " $0}'
+    @du -sch docs/images/*.{png,gif} 2>/dev/null | tail -1 | awk '{print "  TOTAL: " $1}'

@@ -5,6 +5,12 @@
 [![codecov](https://codecov.io/gh/mgoodric/security-atlas/graph/badge.svg?token=SI2ZW30LS1)](https://codecov.io/gh/mgoodric/security-atlas)
 [![Latest release](https://img.shields.io/github/v/release/mgoodric/security-atlas?sort=semver)](https://github.com/mgoodric/security-atlas/releases/latest)
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/hero-dashboard-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="./docs/images/hero-dashboard.png">
+  <img alt="security-atlas program dashboard — drift, freshness, top risks, upcoming reviews" src="./docs/images/hero-dashboard.png">
+</picture>
+
 Open-source, self-hostable GRC platform — a control-graph and evidence-pipeline that lets a single security program operate against many frameworks (SOC 2, ISO 27001, NIST CSF, PCI DSS, HIPAA, GDPR) from one source of truth.
 
 The spine is the [Secure Controls Framework](https://securecontrolsframework.com/) (~1,400 controls crosswalked to 200+ frameworks via NIST IR 8477 STRM). The wire format is NIST OSCAL. The target user is the solo security leader at a 50–150-person security-product startup who runs the entire program — risk register, board reporting, SOC 2, vendor reviews, policies, exceptions — alone.
@@ -23,6 +29,48 @@ security-atlas inverts the model:
 - **Append-only evidence ledger.** Ingestion and evaluation are separated stages; evaluation never writes to source-of-truth evidence. Point-in-time replay is always possible.
 - **Self-hostable from day one.** Single mid-size VM runs the whole platform. NATS JetStream (single binary) · Postgres · S3-compatible artifact store.
 - **OSCAL-native.** Ingest catalogs / profiles / component-definitions; export SSP / AP / AR / POA&M.
+
+---
+
+## Screenshots
+
+Captured from the running app with seeded demo data — `just refresh-screenshots` regenerates them. Light and dark variants below; the page selects per `prefers-color-scheme`.
+
+### Control detail — UCF crosswalks
+
+One control, N framework satisfactions. STRM-typed edges through an SCF anchor.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/control-detail-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="./docs/images/control-detail.png">
+  <img alt="control detail view showing SCF anchor and multi-framework requirement mappings" src="./docs/images/control-detail.png">
+</picture>
+
+### Audit workspace — frozen audit period
+
+The auditor's surface. Period header with frozen-at timestamp; sampling, walkthrough, and comments tabs per control.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/audit-workspace-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="./docs/images/audit-workspace.png">
+  <img alt="audit workspace view showing frozen period header and sampling tab for a control" src="./docs/images/audit-workspace.png">
+</picture>
+
+### Board pack preview — the quarterly artifact
+
+The v1 binary success-test artifact. Templated narrative per section, per-section approval, frozen on publish.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/board-pack-preview-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="./docs/images/board-pack-preview.png">
+  <img alt="board pack preview showing the framework posture section with templated narrative" src="./docs/images/board-pack-preview.png">
+</picture>
+
+### What it looks like in motion
+
+Short walk-through: dashboard, then a drill into a control to see UCF coverage.
+
+![dashboard to control detail walk-through](./docs/images/flow-create-control.gif)
 
 ---
 
