@@ -332,3 +332,104 @@ Re-add `Analyze (python)` to `required_status_checks.contexts` in `.github/branc
 5. **Verify** — the next push to `main` runs `release-please.yml`; the "Mint GitHub App token" step now executes (the `if: vars.RELEASE_PLEASE_APP_ID != ''` guard passes), release-please authors the PR with the App token, and the CI matrix runs on the release PR automatically — no more manual close+reopen.
 
 **Spec reference:** the deadlock + fix are documented inline in `release-please.yml`. The workflow change is safe to merge before the App exists — the `if:` guard skips the token-mint step and falls back to GITHUB_TOKEN until the App vars/secrets are set.
+
+### 10.7 Enable GitHub Pages (one-time setup for `Docs publish` Deploy job)
+
+**Status:** the `Docs publish` workflow's `Build (mkdocs --strict)` job is green as of slice 080. The downstream `Deploy to GitHub Pages` job will continue to fail with `Error: Failed to create deployment (status: 404). Ensure GitHub Pages has been enabled` until the maintainer enables Pages in repo settings.
+
+**Why orchestrator can't:** repo-settings UI toggle.
+
+**What's needed:**
+
+1. https://github.com/mgoodric/security-atlas/settings/pages → **Source:** GitHub Actions.
+2. Re-trigger the most recent `Docs publish` workflow run, or wait for the next release-tag push: the Deploy job will now succeed.
+3. Confirm: https://mgoodric.github.io/security-atlas/ returns 200 OK and renders the rendered docs.
+
+**Spec reference:** the requirement is already documented at the top of `.github/workflows/docs-publish.yml`. Surfaced here so it doesn't fall out of memory.
+
+### 10.8 Test-tag cleanup from slice 080 verification
+
+**Status:** slice 080 used a test tag (`v0.0.0-slice080-test`) to verify the `release.yml` + `docs-publish.yml` fixes against a real tag push. Both workflows went green; the tag was deleted locally and on the remote during the slice run. If the maintainer later sees an orphan GitHub Release object for `v0.0.0-slice080-test` (GoReleaser will have cut a prerelease Release on the test tag), delete it:
+
+```sh
+gh release delete v0.0.0-slice080-test --repo mgoodric/security-atlas --yes
+```
+
+If `gh release view v0.0.0-slice080-test --repo mgoodric/security-atlas` returns "not found", the cleanup already happened — no action needed.
+
+---
+
+## 11. Verifying a release shipped (post-tag checklist)
+
+> Added by slice 080 after the diagnosis that v1.4.0 / v1.5.0 / v1.5.1 all tagged without releasing binaries or docs deploys. This subsection is a runbook for the maintainer to confirm — within ~5 minutes of a release-please PR merging — that the release-tag CI actually delivered the artifacts and docs-site update.
+
+After release-please merges a `chore(main): release X.Y.Z` PR to main, the tag `vX.Y.Z` is created and two tag-triggered workflows run:
+
+- `Release` → `GoReleaser · build · sign · publish` → publishes binaries + Homebrew formula + cosign-signed checksums to the GitHub Release.
+- `Docs publish` → `Build (mkdocs --strict)` + `Deploy to GitHub Pages` → publishes the rendered docs site to `mgoodric.github.io/security-atlas/`.
+
+Neither is in `required_status_checks.contexts` (both are tag-triggered, not PR-triggered — slice 080 P0-A3 anti-criterion), so failures are silent unless the maintainer checks. Use this checklist after every release-please merge.
+
+### 11.1 GoReleaser shipped binaries
+
+```sh
+TAG=vX.Y.Z   # set to the just-shipped tag
+REPO=mgoodric/security-atlas
+
+# 1. Workflow finished green.
+gh run list --repo "$REPO" --workflow=release.yml --branch "$TAG" --limit 1
+# expect: a single row with conclusion=success
+
+# 2. GitHub Release exists with the expected assets.
+gh release view "$TAG" --repo "$REPO" --json assets \
+  --jq '.assets[].name' | sort
+# expect: 10 archives (5 OS/arch × {bundle, cli-only} minus 2 windows-arm64
+# ignored entries) + checksums.txt + checksums.txt.pem + checksums.txt.sig.
+# The Homebrew formula update lands on mgoodric/homebrew-tap, not here.
+
+# 3. The checksums file is cosign-verifiable end-to-end.
+VERSION="${TAG#v}"
+TMP=$(mktemp -d)
+cd "$TMP"
+for ext in "" .pem .sig; do
+  curl -fsSL -O "https://github.com/${REPO}/releases/download/${TAG}/security-atlas_${VERSION}_checksums.txt${ext}"
+done
+cosign verify-blob \
+  --certificate-identity-regexp "https://github.com/${REPO}/\\.github/workflows/release\\.yml@.*" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate "security-atlas_${VERSION}_checksums.txt.pem" \
+  --signature  "security-atlas_${VERSION}_checksums.txt.sig" \
+  "security-atlas_${VERSION}_checksums.txt"
+# expect: Verified OK
+cd - >/dev/null && rm -rf "$TMP"
+```
+
+If step 1 is red, open the failed run and read the failing step. The load-bearing post-mortem from slice 080 lives at `docs/audit-log/080-fix-release-tag-infrastructure-decisions.md` and documents the two known failure modes the workflows were vulnerable to.
+
+### 11.2 Docs publish updated the GitHub Pages site
+
+```sh
+TAG=vX.Y.Z
+REPO=mgoodric/security-atlas
+
+# 1. Workflow finished green.
+gh run list --repo "$REPO" --workflow=docs-publish.yml --branch "$TAG" --limit 1
+# expect: a single row with conclusion=success
+
+# 2. Pages site is live and serving the new version.
+curl -sI https://mgoodric.github.io/security-atlas/ | head -1
+# expect: HTTP/2 200
+
+curl -fsSL https://mgoodric.github.io/security-atlas/ | grep -o 'security-atlas [v0-9.]*' | head -1
+# expect: "security-atlas vX.Y.Z" if the theme footer shows the version;
+# otherwise the 200 OK above is sufficient evidence the deploy landed.
+```
+
+If step 1 is red, the most common failure modes (per the slice 080 post-mortem) are:
+
+- **Wrong artifact path** — `actions/upload-pages-artifact` configured with a `path:` that doesn't match where `mkdocs build` actually wrote the site. The fix is one line in `.github/workflows/docs-publish.yml`.
+- **mkdocs `--strict` regression** — a PR landed a broken internal link or a missing nav entry on `main` that the non-strict PR-time build didn't catch. The fix is to land a follow-up PR with the broken link corrected; the next release tag picks up the fix.
+
+### 11.3 If anything is wrong — DO NOT retroactively re-tag
+
+Slice 080's anti-criterion P0-A1 forbids retroactive re-tagging of a released-tag-of-record to "backfill" missing artifacts. The fix is always to land the workflow correction on `main` and let the next real release tag (which release-please will open automatically on the next push) be the first tag that ships clean. The historical tag retains its real `chore(main): release X.Y.Z` commit; the missing artifacts stay missing as a documented observation.
