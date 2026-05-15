@@ -27,13 +27,13 @@ The web workspace has two test surfaces. They cover different things and have di
 
 ## When to reach for each
 
-| Question                                                    | Tool       |
-| ----------------------------------------------------------- | ---------- |
-| "Does `apiBaseURL()` honor `ATLAS_HTTP_URL`?"               | vitest     |
-| "Does the BFF return 401 with no session cookie?"           | vitest     |
-| "Does an upstream 403 translate to `{ is_admin: false }`?"  | vitest     |
-| "Does the dashboard render six panels?"                     | Playwright |
-| "Does a failing endpoint degrade only its own panel?"       | Playwright |
+| Question                                                          | Tool       |
+| ----------------------------------------------------------------- | ---------- |
+| "Does `apiBaseURL()` honor `ATLAS_HTTP_URL`?"                     | vitest     |
+| "Does the BFF return 401 with no session cookie?"                 | vitest     |
+| "Does an upstream 403 translate to `{ is_admin: false }`?"        | vitest     |
+| "Does the dashboard render six panels?"                           | Playwright |
+| "Does a failing endpoint degrade only its own panel?"             | Playwright |
 | "Does the auditor see the private note that the auditee doesn't?" | Playwright |
 
 If a behavior can be expressed as a module input/output, vitest. If it requires a browser viewing a built page hitting a running platform, Playwright. If both, write both — the vitest version catches regressions fast, the Playwright version proves the integration.

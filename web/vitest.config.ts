@@ -30,12 +30,7 @@ export default defineConfig({
     environment: "node",
     globals: false,
     include: ["lib/**/*.test.ts", "app/api/**/*.test.ts"],
-    exclude: [
-      "**/node_modules/**",
-      "**/.next/**",
-      "**/dist/**",
-      "e2e/**",
-    ],
+    exclude: ["**/node_modules/**", "**/.next/**", "**/dist/**", "e2e/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],

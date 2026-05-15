@@ -72,14 +72,16 @@ describe("forwardJSON", () => {
     let capturedInit: RequestInit | undefined;
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-        capturedURL = typeof input === "string" ? input : input.toString();
-        capturedInit = init;
-        return new Response(JSON.stringify({ ok: true }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      });
+      .mockImplementation(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          capturedURL = typeof input === "string" ? input : input.toString();
+          capturedInit = init;
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        },
+      );
 
     const res = await forwardJSON("/v1/audit/notes");
 

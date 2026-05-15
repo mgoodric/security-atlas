@@ -4,14 +4,14 @@ This directory holds the security-atlas web app's Playwright e2e suite. Each spe
 
 ## Files
 
-| File                       | What it covers                                                                                              |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `fixtures.ts`              | Shared `test.extend<{ authedPage }>` — signs in once per worker via `TEST_BEARER` or email/password env     |
-| `dashboard.spec.ts`        | `/dashboard` — six bound panels, framework-posture placeholder, freshness binding, drift, top risks         |
-| `control-detail.spec.ts`   | `/controls/:id` — coverage table, UCF mini-viz, evidence stream, freshness clock, effective-scope, OOS rows |
-| `audit-workspace.spec.ts`  | `/audit` — auditor flow: period bar, control nav, sampling, walkthrough, comments (shared/private)         |
-| `risk-hierarchy.spec.ts`   | `/risks/hierarchy` — org tree, theme heatmap, decision timeline, overdue pills, deep-linked filters        |
-| `admin-bootstrap.spec.ts`  | `/admin/**` — admin tiles, SSO discovery, feature toggle, API key issuance, role matrix                     |
+| File                      | What it covers                                                                                              |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `fixtures.ts`             | Shared `test.extend<{ authedPage }>` — signs in once per worker via `TEST_BEARER` or email/password env     |
+| `dashboard.spec.ts`       | `/dashboard` — six bound panels, framework-posture placeholder, freshness binding, drift, top risks         |
+| `control-detail.spec.ts`  | `/controls/:id` — coverage table, UCF mini-viz, evidence stream, freshness clock, effective-scope, OOS rows |
+| `audit-workspace.spec.ts` | `/audit` — auditor flow: period bar, control nav, sampling, walkthrough, comments (shared/private)          |
+| `risk-hierarchy.spec.ts`  | `/risks/hierarchy` — org tree, theme heatmap, decision timeline, overdue pills, deep-linked filters         |
+| `admin-bootstrap.spec.ts` | `/admin/**` — admin tiles, SSO discovery, feature toggle, API key issuance, role matrix                     |
 
 ## How to run locally
 
@@ -95,11 +95,11 @@ Locally, traces are written to `web/test-results/` automatically on failure (`tr
 
 `e2e/fixtures.ts` exposes a `test.extend<{ authedPage }>` fixture. Its job is to make `authedPage` a `Page` that's already signed in before any `await authedPage.goto(...)` call. It chooses the auth path based on env:
 
-| Env vars set                                | Path taken                                                                                  |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `TEST_BEARER`                               | Inject the bearer as a `sa_session_token` cookie directly. Fastest. Recommended for local.  |
-| `TEST_USER_EMAIL` + `TEST_USER_PASSWORD`    | POST `/auth/login` and let the platform set the session cookie. What CI uses.               |
-| Neither                                     | Fixture throws — there's no sensible default for "not signed in".                            |
+| Env vars set                             | Path taken                                                                                 |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `TEST_BEARER`                            | Inject the bearer as a `sa_session_token` cookie directly. Fastest. Recommended for local. |
+| `TEST_USER_EMAIL` + `TEST_USER_PASSWORD` | POST `/auth/login` and let the platform set the session cookie. What CI uses.              |
+| Neither                                  | Fixture throws — there's no sensible default for "not signed in".                          |
 
 To override per-test, do not modify the fixture — write your own `test.extend(...)` in a sibling file. The shared fixture stays narrow.
 

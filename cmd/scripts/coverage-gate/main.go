@@ -215,7 +215,7 @@ func parseCoverageProfile(path string) (map[string]pkgCoverage, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Aggregate per package.
 	type bucket struct{ covered, total int }
