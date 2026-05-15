@@ -21,11 +21,18 @@ var ErrSCFAnchorUnknown = errors.New("control bundle: scf_anchor_id does not res
 
 // UploadResult is the persistence-side outcome of a bundle upload.
 type UploadResult struct {
-	ControlID    uuid.UUID
-	BundleID     string
-	Version      int32
-	SupersededID uuid.UUID // zero if this was the initial upload.
-	IsNewBundle  bool      // true for an initial upload, false for supersession.
+	ControlID uuid.UUID
+	BundleID  string
+	Version   int32
+	// SupersededID is the predecessor row that was flagged superseded by
+	// this upload. Zero when there was no predecessor (initial upload) OR
+	// when the upload was a byte-identical-content no-op (nothing changed,
+	// so nothing was superseded).
+	SupersededID uuid.UUID
+	// IsNewBundle is true only for an initial upload (no prior active
+	// version existed). It is false both for a content-change version bump
+	// (supersession) and for a byte-identical-content no-op re-upload.
+	IsNewBundle bool
 }
 
 // Store persists parsed bundles to the controls table under RLS.
@@ -94,6 +101,33 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 			return fmt.Errorf("lookup prior version: %w", err)
 		}
 
+		// 3a. Re-upload of BYTE-IDENTICAL content is a true no-op — return
+		//     the existing active row, do not version-bump.
+		//
+		//     `bundle_manifest_hash` is the sha256 of the manifest YAML;
+		//     when the active version's hash equals the incoming bundle's
+		//     hash, nothing about the control changed and creating a
+		//     "version 2" that is identical to "version 1" would be
+		//     meaningless version churn. Slice 009 AC-6 ("re-uploading the
+		//     same bundle id creates a new control row and supersedes the
+		//     prior") is about re-uploading CHANGED content; identical
+		//     content has nothing to supersede.
+		//
+		//     This is also what makes the docker-compose self-host bundle's
+		//     bootstrap genuinely idempotent: `bootstrap.sh` re-runs phase 6
+		//     (control-bundle upload) on every `docker compose up`, and its
+		//     header documents control upload as an upsert. Without this
+		//     guard a restart would version-bump all 50 SOC 2 controls to
+		//     v2, v3, ... on every boot — the slice-065 idempotency
+		//     assertion (AC-7) exists precisely to catch that.
+		if !isNew && prior.BundleManifestHash == b.ManifestHashHex {
+			result.ControlID = uuid.UUID(prior.ID.Bytes)
+			result.BundleID = b.Manifest.BundleID
+			result.Version = prior.Version
+			result.IsNewBundle = false
+			return nil
+		}
+
 		// 4. Insert the new row. version = prior.version + 1 (or 1 for new).
 		newID := uuid.New()
 		nextVersion := int32(1)
@@ -143,7 +177,7 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		//    `prior.superseded_by = newID` while `newID` does not yet exist
 		//    as a controls row. That is sound because
 		//    `controls_superseded_by_fk` is DEFERRABLE INITIALLY DEFERRED
-		//    (migration 20260511000032) — the FK is validated at COMMIT, by
+		//    (migration 20260511000033) — the FK is validated at COMMIT, by
 		//    which point the new row below has been inserted. This is the
 		//    order `internal/db/queries/controls.sql` documents.
 		if !isNew {

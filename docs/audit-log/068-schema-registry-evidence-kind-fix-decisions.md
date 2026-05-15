@@ -267,26 +267,49 @@ referenced a `frameworks.source` column and a `framework_versions.release_versio
 column that no longer exist, and its cleanup helper NULLed every version
 of a bundle at once — itself a 23505).
 
-**Chosen.** Three coordinated changes:
+**Chosen.** Four coordinated changes:
 
-1. New migration `20260511000032_controls_superseded_fk_deferrable.sql`
+1. New migration `20260511000033_controls_superseded_fk_deferrable.sql`
    re-creates `controls_superseded_by_fk` as `DEFERRABLE INITIALLY
 DEFERRED` (validated at COMMIT). This is the same pattern slice 002
    already uses for `frameworks_latest_version_fk` — a sibling
    "row points at a row created in the same transaction" relationship.
+   (Originally drafted at slot `_032`; renumbered to `_033` because
+   slice 032's in-flight `20260511000032_board_packs.sql` (PR #126) had
+   reserved `_032`. `sqlc.yaml` updated to match.)
 2. `store.go::Upload` reordered to mark-predecessor-superseded THEN
    insert-the-new-row — the order slice 009's own SQL prescribes, now
    possible because the FK check is deferred.
-3. Wired `./internal/control/...` into the CI integration job's package
+3. **`store.go::Upload` made a true no-op for byte-identical re-uploads.**
+   The deferrable-FK + reorder (1 + 2) makes a CHANGED-content re-upload
+   correctly version-bump, but a re-upload of UNCHANGED content would
+   still create an identical "version 2" — meaningless version churn,
+   and it still fails the slice-065 idempotency assertion (AC-7), which
+   counts `controls` rows and expects them stable across a bootstrap
+   re-run (50 -> 100 on re-upload). Slice 009 AC-6 ("re-uploading the
+   same bundle id creates a new control row and supersedes the prior")
+   is about CHANGED content; identical content has nothing to supersede.
+   `Upload` now compares the active version's `bundle_manifest_hash`
+   (sha256 of the manifest YAML) to the incoming bundle's hash and, on a
+   match, returns the existing row unchanged (`IsNewBundle=false`,
+   `SupersededID` zero, no INSERT, no UPDATE). This is also what
+   `bootstrap.sh`'s header already claims control upload does ("upsert")
+   — the claim was simply not true before this change. The HTTP handler
+   already maps `!IsNewBundle` to 200; it now also omits `superseded_id`
+   from the response when nothing was superseded.
+4. Wired `./internal/control/...` into the CI integration job's package
    list, and repaired the bit-rotted `seedSCFAnchor` + `freshTenant`
    helpers, so `TestUpload_ReuploadSupersedes` actually runs and guards
    this going forward.
 
 **Confidence: high** — verified locally end-to-end: all 33 migrations
-(incl. `_032`) apply clean, the `_032` down/up round-trip flips the
+(incl. `_033`) apply clean, the `_033` down/up round-trip flips the
 constraint's deferrability cleanly, and the full
 `internal/control` integration suite — including
 `TestUpload_ReuploadSupersedes` — passes against a CI-parity Postgres.
+The byte-identical-no-op path is additionally proven by the new
+`TestUpload_ReuploadIdenticalIsNoop` integration test and confirmed
+green by the self-host e2e job's AC-7 idempotency re-run.
 
 ## Revisit once in use
 

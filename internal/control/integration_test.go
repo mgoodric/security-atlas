@@ -235,6 +235,68 @@ func TestUpload_ReuploadSupersedes(t *testing.T) {
 	}
 }
 
+// TestUpload_ReuploadIdenticalIsNoop — slice 068: re-uploading BYTE-IDENTICAL
+// bundle content is a true no-op. It must NOT version-bump, NOT supersede,
+// and NOT insert a second controls row — it returns the existing active row
+// unchanged. This is what makes the docker-compose self-host bundle's
+// bootstrap genuinely idempotent (bootstrap.sh re-runs phase 6 — control
+// upload — on every `docker compose up`); without it a restart would
+// version-bump all 50 SOC 2 controls, doubling the `controls` row count and
+// failing the slice-065 AC-7 idempotency assertion.
+func TestUpload_ReuploadIdenticalIsNoop(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+
+	_, code := seedSCFAnchor(t, admin, "IAC-08", "IAC")
+	tenant := freshTenant(t, admin)
+	store := control.NewStore(app)
+
+	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+
+	// Same manifest body both times — byte-identical content.
+	body := []byte(yamlFor("noop_test", code, "automated"))
+
+	b1, _ := control.FinalizeBundleForHTTP(body)
+	res1, err := store.Upload(ctx, b1, "key_admin")
+	if err != nil {
+		t.Fatalf("first upload: %v", err)
+	}
+	if !res1.IsNewBundle || res1.Version != 1 {
+		t.Fatalf("first upload: expected IsNewBundle=true version=1; got %v %d", res1.IsNewBundle, res1.Version)
+	}
+
+	b2, _ := control.FinalizeBundleForHTTP(body)
+	res2, err := store.Upload(ctx, b2, "key_admin")
+	if err != nil {
+		t.Fatalf("re-upload: %v", err)
+	}
+	// No-op: same control id, same version, nothing new, nothing superseded.
+	if res2.IsNewBundle {
+		t.Fatalf("re-upload of identical content must not be IsNewBundle")
+	}
+	if res2.ControlID != res1.ControlID {
+		t.Fatalf("re-upload should return the existing row: got %s, want %s", res2.ControlID, res1.ControlID)
+	}
+	if res2.Version != 1 {
+		t.Fatalf("re-upload of identical content must not version-bump; got version=%d", res2.Version)
+	}
+	if res2.SupersededID != (uuid.UUID{}) {
+		t.Fatalf("re-upload of identical content must not supersede anything; got SupersededID=%s", res2.SupersededID)
+	}
+
+	// Cross-check: exactly ONE controls row total for this bundle — the
+	// no-op inserted nothing.
+	var total int
+	if err := admin.QueryRow(context.Background(), `
+		SELECT count(*) FROM controls WHERE tenant_id = $1 AND bundle_id = $2
+	`, tenant, "noop_test").Scan(&total); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("expected exactly 1 controls row after identical re-upload; got %d", total)
+	}
+}
+
 // TestUpload_UnknownAnchor — AC-4 + invariant 7: bundle referencing an SCF
 // anchor that isn't registered must be rejected with ErrSCFAnchorUnknown.
 func TestUpload_UnknownAnchor(t *testing.T) {

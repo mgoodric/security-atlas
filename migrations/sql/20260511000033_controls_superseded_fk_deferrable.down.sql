@@ -1,4 +1,4 @@
--- Reverse of 20260511000032_controls_superseded_fk_deferrable.sql.
+-- Reverse of 20260511000033_controls_superseded_fk_deferrable.sql.
 --
 -- Restores `controls_superseded_by_fk` to its original slice-009 shape:
 -- the same FOREIGN KEY (superseded_by -> controls.id) ON DELETE SET NULL,
