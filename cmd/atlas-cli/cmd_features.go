@@ -32,6 +32,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/mgoodric/security-atlas/cmd/atlas-cli/cmdhttp"
 )
 
 func newFeaturesCmd() *cobra.Command {
@@ -178,7 +180,12 @@ func featuresDoRequest(ctx context.Context, method, url string, body []byte, tok
 	if reqBody != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := http.DefaultClient.Do(req)
+	// Slice 088: explicit per-call timeout via cmdhttp.Client.
+	// Feature-flag list/toggle are small admin reads; 10s is generous.
+	// Q2 2026 security audit (slice 085) flagged the package-level
+	// default client because it has no timeout — a hung server would
+	// stall the CLI indefinitely. See cmd/atlas-cli/cmdhttp/client.go.
+	resp, err := cmdhttp.Client(10 * time.Second).Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("http: %w", err)
 	}

@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/mgoodric/security-atlas/cmd/atlas-cli/cmdhttp"
 	adminv1 "github.com/mgoodric/security-atlas/gen/proto/admin/v1"
 )
 
@@ -145,7 +146,13 @@ func runResetBootstrap(tenant, scope string, kinds []string, ttl time.Duration, 
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("Content-Type", "application/json")
-	httpResp, err := http.DefaultClient.Do(req)
+	// Slice 088: explicit per-call timeout via cmdhttp.Client.
+	// Credential bootstrap-reset may invoke cosign for issuance
+	// signing on the server side, so 30s is the upper bound.
+	// Q2 2026 security audit (slice 085) flagged the package-level
+	// default client because it has no timeout — a hung server would
+	// stall the CLI indefinitely. See cmd/atlas-cli/cmdhttp/client.go.
+	httpResp, err := cmdhttp.Client(30 * time.Second).Do(req)
 	if err != nil {
 		return fmt.Errorf("reset-bootstrap POST: %w", err)
 	}
