@@ -1,4 +1,4 @@
-# 082 — cosign v3 + goreleaser-action@v7 migration
+# 084 — cosign v3 + goreleaser-action@v7 migration
 
 **Cluster:** Infra
 **Estimate:** 0.5d
@@ -25,7 +25,7 @@ This is a real migration — not a single-line bump — and deserves its own sli
 
 ## Acceptance criteria
 
-- [ ] AC-1: A real release tag (or a test tag like `v0.0.0-slice082-test`) produces a green `Release` workflow run on `goreleaser-action@v7` + `cosign-installer@v4.x` + `cosign v3.x`.
+- [ ] AC-1: A real release tag (or a test tag like `v0.0.0-slice084-test`) produces a green `Release` workflow run on `goreleaser-action@v7` + `cosign-installer@v4.x` + `cosign v3.x`.
 - [ ] AC-2: The `Self-verify signed checksums` step in `release.yml` passes against the just-published artifacts.
 - [ ] AC-3: The `cosign verify-blob` snippet in the GitHub Release notes header (rendered from `.goreleaser.yaml` → `release: header:`) is valid against the published artifacts. If the args need to change (e.g., consumers now run `cosign verify-blob --bundle ...` instead of `--certificate ... --signature ...`), update the header snippet + `docs/RELEASE_READINESS.md §11.1` together so the published verify story is internally consistent.
 - [ ] AC-4: Decisions log records (a) which cosign-v3 sign-blob args shape works for our keyless OIDC flow, (b) which goreleaser-action verify-pre-flight is doing internally and which cosign version it expects, (c) whether `--new-bundle-format` is a boolean flag or a value flag in the cosign v3 release we land on.
@@ -62,5 +62,5 @@ This is a real migration — not a single-line bump — and deserves its own sli
 
 - **Read slice 080's decisions log first** — `docs/audit-log/080-fix-release-tag-infrastructure-decisions.md`. The full iteration log of which versions tripped which failure modes is there. Don't re-discover; pick up from the slice 080 hand-off.
 - **The cosign v3 release notes** (https://github.com/sigstore/cosign/releases/tag/v3.0.0) are the canonical source for the breaking changes. The new bundle-format flag set is part of CVE-tracked Sigstore Sigstore-protobuf-bundle work.
-- **Test approach:** same as slice 080 — push a `v0.0.0-slice082-test` tag at the branch tip, observe the workflow, verify the published artifacts cosign-verify cleanly from a clean shell (no environment state from the action), then delete the test tag + the GitHub Release object.
+- **Test approach:** same as slice 080 — push a `v0.0.0-slice084-test` tag at the branch tip, observe the workflow, verify the published artifacts cosign-verify cleanly from a clean shell (no environment state from the action), then delete the test tag + the GitHub Release object.
 - **Maintainer-action note:** the `Self-verify signed checksums` step is the authoritative round-trip test. If it passes against a v3-signed artifact, the migration is complete; if it doesn't, either the args migration is incomplete or the verify-blob args also need updating.

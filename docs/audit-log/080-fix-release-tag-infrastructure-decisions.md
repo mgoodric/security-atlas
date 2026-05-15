@@ -208,9 +208,9 @@ goreleaser-action @v7 → @v6:**
   — no `--new-bundle-format`, no `--bundle`. The legacy two-file output
   is exactly what the consumer docs (Release-notes header + Self-verify
   step + `RELEASE_READINESS §11.1`) use.
-- **File slice 082 — cosign v3 + goreleaser-action@v7 migration** as
+- **File slice 084 — cosign v3 + goreleaser-action@v7 migration** as
   a follow-on (`status: not-ready` until dependabot surfaces both
-  upstream bumps for review together). The slice 082 doc captures the
+  upstream bumps for review together). The slice 084 doc captures the
   full migration scope so the cosign v3 + goreleaser-action v7 +
   signs-args + consumer-docs changes ship as one coordinated PR when
   the maintainer pulls the trigger.
