@@ -20,7 +20,7 @@ freshness_class: weekly
 evidence_queries:
   - id: current_policy_versions_acknowledged
     language: rego
-    evidence_kind: policy.acknowledgment
+    evidence_kind: policy.acknowledgment.v1
     description: "Every active user has acknowledged the current version of each in-scope policy"
     expression: |
       package atlas.controls.soc2.cc5_3

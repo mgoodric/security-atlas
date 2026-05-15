@@ -19,7 +19,7 @@ freshness_class: hourly
 evidence_queries:
   - id: production_capacity_healthy
     language: rego
-    evidence_kind: osquery.host_posture
+    evidence_kind: osquery.host_posture.v1
     description: "Every production host reports capacity headroom on the most recent sample"
     expression: |
       package atlas.controls.soc2.a1_1

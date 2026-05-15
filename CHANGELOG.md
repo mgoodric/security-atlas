@@ -13,6 +13,72 @@ auto-generated notes.
 
 ### Fixed
 
+- **evidence-pipeline:** schema-registry evidence_kind fixes (#068) —
+  unbreaks fresh-deploy control-bundle upload and greens slice 065's
+  `test-self-host-bundle` AC-12 e2e job in both deploy shapes. Three
+  distinct defects:
+  - **evidence_kind identifier drift.** The canonical evidence_kind
+    identifier convention (`Plans/EVIDENCE_SDK.md` §4.5) is a
+    `.v<major>`-suffixed kind identifier (`osquery.host_posture.v1`)
+    paired with a separate `schema_version` semver — and the schema
+    registry, the bundled JSON Schemas' `x-evidence-kind`, all 9
+    first-party connectors, and the push SDK/CLI already honored it. The
+    50 SOC 2 control bundles (`controls/soc2/*/control.yaml`) had drifted
+    to **bare** names, so `internal/control`'s bundle-upload validator
+    probed the registry with a name it did not hold. Fix aligns the 13
+    distinct bundle references (26 control.yaml files) to the canonical
+    `.v1`-suffixed identifier; adds a drift-guard test
+    (`internal/control/evidence_kind_drift_test.go`).
+  - **boot-time schema-cache race (the actual e2e blocker).** Even with
+    the identifiers aligned, the `external` deploy shape still 400'd:
+    `cmd/atlas` imports the bundled schemas into Postgres via the
+    BYPASSRLS migrate pool (succeeds), then hydrates its in-memory cache
+    via the RLS-bound `atlas_app` pool — but the self-host bundle starts
+    `atlas` in parallel with `atlas-bootstrap` (`depends_on:
+    service_started`, slice 065), and `atlas_app`'s password is set by
+    `bootstrap.sh` phase 2.5, which races atlas's boot. A single
+    `LoadFromDB` attempt lost that race on a scram-sha-256 cluster and
+    failed with SQLSTATE 28P01 — leaving the in-memory registry empty so
+    every control-bundle upload 400'd "not registered". Fix: the
+    boot-time cache load now retries with backoff (~90s budget) until the
+    app role is authenticable.
+  - **distroless `/health` false failure.** The slice-065 e2e harness
+    probed atlas liveness with `docker exec atlas wget ...`, but the
+    atlas image is distroless — no shell, no wget — so the probe always
+    failed even when the server was healthy (the `bundled`-mode false
+    failure). Fix: the harness now curls atlas's host-published port from
+    the CI runner. The harness also dumps full compose logs on failure
+    *before* its cleanup trap tears the stack down, so future self-host
+    failures stay diagnosable.
+  - **harness assertion on the wrong table.** Once the above were fixed
+    the e2e job advanced and exposed that its assertion 5 checked
+    `api_keys` for a row the bootstrap flow never writes (the bootstrap
+    uploader authenticates with an in-memory fixed-token credential, not
+    a DB-backed key) — so it could never have passed. Fix: re-points
+    assertion 5 at `decision_audit_log`, the table slice 065 bug #1 was
+    actually about, which every authenticated control-bundle upload
+    populates via the OPA authz middleware.
+  - **control-bundle re-upload was never idempotent.** With the above
+    fixed the e2e job reached its last assertion (bootstrap idempotency
+    re-run) and exposed two coupled defects. First, re-uploading any
+    control bundle 500'd with a `controls_one_active_version_per_bundle`
+    unique-index violation: `internal/control`'s `Upload` inserted the
+    new active row *before* superseding the predecessor — momentarily two
+    active rows per bundle — because the prescribed order (supersede
+    first) was impossible while the `controls_superseded_by_fk` self-FK
+    was non-deferrable. Second, even once that was fixed, re-uploading
+    *byte-identical* content version-bumped instead of being a no-op, so
+    `controls` doubled (50 → 100) on the bootstrap re-run. Fix: migration
+    `20260511000033` makes the self-FK `DEFERRABLE INITIALLY DEFERRED`
+    (the pattern slice 002 already uses for
+    `frameworks_latest_version_fk`), `Upload` is reordered to
+    supersede-then-insert, and `Upload` now short-circuits to a true
+    no-op when the active version's `bundle_manifest_hash` matches the
+    incoming bundle. The slice-009 test that catches the first defect
+    (`TestUpload_ReuploadSupersedes`) existed but had never run — the CI
+    integration job's package list omitted `internal/control`; it is now
+    wired in, its bit-rotted schema fixtures repaired, and a new
+    `TestUpload_ReuploadIdenticalIsNoop` guards the second.
 - **infra:** self-host bundle P0 fixes (#065) — a P0 follow-up to slice
   037 that unbreaks the shipped v1.3.0 `docker compose` self-host bundle,
   which did not bring a fresh deployment to a working state. Five

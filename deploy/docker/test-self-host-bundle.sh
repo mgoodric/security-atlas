@@ -32,8 +32,19 @@
 #   3. atlas-bootstrap exits 0 (migrations + seed + SCF import + the 50
 #      SOC 2 control-bundle uploads all succeeded).
 #   4. `controls` ends up with the 50 seeded control rows.
-#   5. `api_keys` ends up with at least the bootstrap fixed-token row
-#      (proves the audit-writer fix unblocked phase 6 — slice 065 bug #1).
+#   5. `decision_audit_log` ends up with at least one row — every
+#      authenticated control-bundle upload in phase 6 passes through the
+#      OPA authz middleware, which writes one decision row per request.
+#      A populated `decision_audit_log` therefore proves (a) phase 6's
+#      authenticated upload path actually ran, and (b) slice 065 bug #1's
+#      fix held: that bug was an RLS-blind write to THIS table, which
+#      500'd every authenticated request and blocked phase 6 entirely.
+#      (Earlier revisions of this harness asserted on `api_keys` here —
+#      that was a mistaken premise: nothing in the bootstrap flow writes
+#      `api_keys`. The bootstrap uploader authenticates with the IN-MEMORY
+#      fixed-token credential — see cmd/atlas/main.go — never a DB-backed
+#      api_keys row. `decision_audit_log` is the table that actually
+#      records phase 6 running.)
 #   6. A fresh re-run of `docker compose run --rm atlas-bootstrap` exits 0
 #      and does not duplicate seed rows (slice 065 bug #3 idempotency,
 #      AC-7).
@@ -59,7 +70,18 @@ ENV_FILE="${COMPOSE_DIR}/.env.test"
 COMPOSE=(docker compose -f "${COMPOSE_DIR}/docker-compose.yml" --env-file "${ENV_FILE}" -p "sa-selfhost-${MODE}")
 
 log()  { echo "[test-self-host:${MODE}] $*"; }
-fail() { echo "[test-self-host:${MODE}] FAIL: $*" >&2; exit 1; }
+fail() {
+    echo "[test-self-host:${MODE}] FAIL: $*" >&2
+    # Dump full compose logs for EVERY service (especially atlas) to stdout
+    # BEFORE the EXIT trap's cleanup() tears the stack down. Without this,
+    # `cleanup` runs `down -v` first and CI's later "Dump compose logs on
+    # failure" step prints nothing — every self-host e2e failure used to
+    # destroy the atlas server logs before anyone could read them.
+    echo "[test-self-host:${MODE}] ==== compose logs (all services, tail=300) ====" >&2
+    "${COMPOSE[@]}" logs --no-color --tail=300 2>&1 || true
+    echo "[test-self-host:${MODE}] ==== end compose logs ====" >&2
+    exit 1
+}
 
 cleanup() {
     log "tearing down"
@@ -232,13 +254,26 @@ log "atlas-bootstrap exited 0"
 
 # ---------------------------------------------------------------------
 # Assertion 2: atlas /health returns 200.
+#
+# The atlas image is distroless (gcr.io/distroless/static-debian12) — no
+# shell, no wget, no curl. `docker exec atlas wget ...` therefore ALWAYS
+# fails ("executable not found"), which used to read as "/health never
+# returned 200" even when the server was perfectly healthy (the bundled-
+# mode false failure). Probe the HOST-published port instead: compose
+# maps atlas's :8080 to a host port, and the runner has curl. This is the
+# same path a real operator's browser / load balancer takes, so it is
+# also a more faithful smoke test than an in-container loopback probe.
 # ---------------------------------------------------------------------
 log "checking atlas /health"
 ATLAS_CID="$("${COMPOSE[@]}" ps -q atlas)"
 [ -n "${ATLAS_CID}" ] || fail "atlas container not found"
+# `docker compose port` prints e.g. `0.0.0.0:8080`; take the port field.
+ATLAS_HOSTPORT="$("${COMPOSE[@]}" port atlas 8080 2>/dev/null | awk -F: 'NF{print $NF}')"
+[ -n "${ATLAS_HOSTPORT}" ] || fail "could not resolve atlas host-published :8080 port"
+log "atlas /health host port is ${ATLAS_HOSTPORT}"
 HEALTH_OK=""
 for i in $(seq 1 60); do
-    if docker exec "${ATLAS_CID}" wget -q -O /dev/null http://localhost:8080/health 2>/dev/null; then
+    if curl -fsS -o /dev/null "http://127.0.0.1:${ATLAS_HOSTPORT}/health" 2>/dev/null; then
         HEALTH_OK=1
         break
     fi
@@ -264,10 +299,12 @@ CONTROLS="$(db_count 'SELECT count(*) FROM controls')"
 [ "${CONTROLS}" = "50" ] || fail "controls row count = ${CONTROLS}, want 50"
 log "controls table has 50 rows"
 
-# Assertion 5: api_keys has the bootstrap fixed-token row.
-APIKEYS="$(db_count 'SELECT count(*) FROM api_keys')"
-[ "${APIKEYS}" -ge 1 ] 2>/dev/null || fail "api_keys row count = ${APIKEYS}, want >= 1"
-log "api_keys table has ${APIKEYS} row(s)"
+# Assertion 5: decision_audit_log has at least one row — proves phase 6's
+# authenticated control-bundle upload path ran AND slice 065 bug #1's fix
+# (the RLS-blind write to this very table) held. See the header comment.
+AUDITROWS="$(db_count 'SELECT count(*) FROM decision_audit_log')"
+[ "${AUDITROWS}" -ge 1 ] 2>/dev/null || fail "decision_audit_log row count = ${AUDITROWS}, want >= 1"
+log "decision_audit_log table has ${AUDITROWS} row(s)"
 
 # ---------------------------------------------------------------------
 # Assertion 6 (AC-7): a fresh re-run of atlas-bootstrap against the now-

@@ -200,14 +200,20 @@ func main() {
 	// IN-MEMORY credstore.Store — NOT the api_keys table. They do not
 	// touch the DB pool at all, so they never hit the
 	// pool.Exec-outside-a-transaction RLS-bypass that bug #1 fixed in the
-	// audit writer; there is no BeginTx/ApplyTenant treatment to apply
-	// here. The slice-037 symptom "api_keys stays empty on a fresh
-	// install" was a downstream effect of bug #1: the audit-writer 500
-	// blocked bootstrap phase 6 (control-bundle upload), so the
-	// authenticated upload path that DOES persist to api_keys never ran
-	// to completion. With the audit writer fixed, phase 6 completes and
-	// api_keys is populated as designed. No change is needed on this
-	// startup-time issuance path.
+	// authz audit writer; there is no BeginTx/ApplyTenant treatment to
+	// apply here. No change is needed on this startup-time issuance path.
+	//
+	// (Slice 068 correction: an earlier revision of this comment claimed
+	// that "phase 6 completing populates api_keys as designed." That is
+	// wrong — nothing in the bootstrap flow writes api_keys. The bootstrap
+	// uploader authenticates with the in-memory fixed-token credential
+	// minted just below, never a DB-backed api_keys row. What slice 065
+	// bug #1 actually unblocked is the OPA authz audit writer's write to
+	// decision_audit_log: every authenticated request — including phase
+	// 6's 50 control-bundle uploads — logs one decision row there, and
+	// the bug's RLS-blind write 500'd those requests. The self-host e2e
+	// harness's assertion 5 was corrected to check decision_audit_log
+	// accordingly.)
 	if bootstrapTenant := os.Getenv("ATLAS_BOOTSTRAP_TENANT"); bootstrapTenant != "" {
 		cred, bearer, err := srv.IssueBootstrapCredential(bootstrapTenant)
 		if err != nil {
@@ -354,12 +360,30 @@ func main() {
 				impPool.Close()
 			}
 			impCancel()
-			// Refresh the app-pool-backed cache so HTTP/gRPC see the new rows.
-			loadCtx, loadCancel := context.WithTimeout(ctx, 10*time.Second)
-			if err := schemaSvc.LoadFromDB(loadCtx); err != nil {
-				fmt.Fprintf(os.Stderr, "atlas: schema cache reload: %v\n", err)
+			// Refresh the app-pool-backed cache so HTTP/gRPC see the new
+			// rows. This MUST succeed before the HTTP listener starts —
+			// `controlsRegistry.IsRegistered` reads this in-memory cache, and
+			// an empty cache makes every control-bundle upload 400 with
+			// "evidence_kind ... is not registered" (the slice-068 symptom).
+			//
+			// Retry with backoff because the app role (atlas_app) may not be
+			// connectable yet at this point: the docker-compose self-host
+			// bundle starts `atlas` in parallel with `atlas-bootstrap`
+			// (depends_on: service_started — slice 065), and atlas_app's
+			// password is set by bootstrap.sh phase 2.5
+			// (`ALTER ROLE atlas_app PASSWORD ...`), which races atlas's
+			// boot. A single attempt loses that race on a scram-sha-256
+			// cluster (external mode) and fails with SQLSTATE 28P01. The
+			// schema rows were already written above via the BYPASSRLS
+			// migrate pool, so we only need to wait for the app pool to
+			// become authenticable — bootstrap sets the password within a
+			// few seconds. ~90s of retries comfortably covers a cold-start
+			// migration apply on the target VM without ever hanging the
+			// process indefinitely.
+			loadErr := retrySchemaCacheLoad(ctx, schemaSvc, 90*time.Second)
+			if loadErr != nil {
+				fmt.Fprintf(os.Stderr, "atlas: schema cache reload: %v\n", loadErr)
 			}
-			loadCancel()
 		}
 	} else {
 		fmt.Fprintln(os.Stderr, "atlas: DATABASE_URL_APP not set — HTTP server will refuse to start")
@@ -602,6 +626,42 @@ func main() {
 
 // streambufSubject surfaces the default subject for the boot log line.
 func streambufSubject() string { return streambuf.DefaultSubject }
+
+// retrySchemaCacheLoad calls schemaSvc.LoadFromDB on the app pool, retrying
+// with a fixed 2s backoff until it succeeds or `budget` elapses. The common
+// transient failure is `password authentication failed for user
+// "atlas_app"` (SQLSTATE 28P01) during the docker-compose self-host bundle's
+// parallel atlas / atlas-bootstrap startup window, before bootstrap.sh has
+// run `ALTER ROLE atlas_app PASSWORD ...`. Each LoadFromDB call gets its own
+// 10s timeout. Returns nil on the first success, or the last error if the
+// budget runs out (the caller logs it; boot continues, matching the prior
+// non-fatal behaviour). Respects ctx cancellation so SIGTERM during boot is
+// honoured.
+func retrySchemaCacheLoad(ctx context.Context, schemaSvc *schemaregistry.Service, budget time.Duration) error {
+	deadline := time.Now().Add(budget)
+	attempt := 0
+	for {
+		attempt++
+		loadCtx, loadCancel := context.WithTimeout(ctx, 10*time.Second)
+		err := schemaSvc.LoadFromDB(loadCtx)
+		loadCancel()
+		if err == nil {
+			if attempt > 1 {
+				fmt.Fprintf(os.Stderr, "atlas: schema cache loaded after %d attempt(s)\n", attempt)
+			}
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("gave up after %d attempt(s): %w", attempt, err)
+		}
+		fmt.Fprintf(os.Stderr, "atlas: schema cache reload attempt %d failed (retrying): %v\n", attempt, err)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("cancelled after %d attempt(s): %w", attempt, ctx.Err())
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
 
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {

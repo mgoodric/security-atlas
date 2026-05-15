@@ -22,7 +22,7 @@ freshness_class: daily
 evidence_queries:
   - id: all_s3_buckets_encrypted_at_rest
     language: rego
-    evidence_kind: aws.s3.bucket_encryption_state
+    evidence_kind: aws.s3.bucket_encryption_state.v1
     description: "Every S3 bucket has default encryption enabled with SSE-S3 or SSE-KMS"
     expression: |
       package atlas.controls.soc2.cc6_7

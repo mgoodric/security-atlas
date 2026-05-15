@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -131,7 +133,11 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 		Version:     result.Version,
 		IsNewBundle: result.IsNewBundle,
 	}
-	if !result.IsNewBundle {
+	// SupersededID is set only when this upload actually superseded a
+	// predecessor. It is the zero UUID for an initial upload AND for a
+	// byte-identical-content no-op re-upload (nothing changed) — in both
+	// cases leave the field empty so `omitempty` drops it.
+	if result.SupersededID != (uuid.UUID{}) {
 		resp.SupersededID = result.SupersededID.String()
 	}
 	writeJSON(w, status, resp)
