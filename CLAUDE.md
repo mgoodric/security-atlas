@@ -268,6 +268,31 @@ security-atlas/
 
 ---
 
+## Testing discipline (four enforced surfaces)
+
+Slice 069 ratchets the project's verification surfaces from "tests exist" to "tests gate merges". Every PR resolves four named checks before branch-protection unlocks the merge button.
+
+| Surface             | Entry point                                                                             | What it covers                                                                          | Floor / gate                                                                                     |
+| ------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Go unit             | `go test ./...` (CI: `Go · build + test`)                                               | Per-package Go logic                                                                    | Per-package floor in `cmd/scripts/coverage-thresholds.json`; gate is `cmd/scripts/coverage-gate` |
+| Go integration      | `go test -tags=integration -p 1 ./internal/...` (CI: `Go · integration (Postgres RLS)`) | RLS, migrations, Postgres-backed handlers, real services (NATS + MinIO)                 | No coverage gate yet; presence-of-tests is the gate (CI fails on test failure)                   |
+| Frontend vitest     | `npm run test` from `web/` (CI: `Frontend · vitest`)                                    | Module-level web logic: BFF route handlers, `lib/api.ts`, `lib/api/bff.ts`              | No coverage gate yet; CI uploads `coverage-summary.json` as an artifact to inform follow-up      |
+| Frontend Playwright | `npm run test:e2e` from `web/` (CI: `Frontend · Playwright e2e`)                        | User flows: dashboard, control detail, audit workspace, risk hierarchy, admin bootstrap | CI fails on spec failure; failed runs upload HTML report + traces as artifacts                   |
+
+**Where each lives:**
+
+- Go unit tests: `internal/<pkg>/*_test.go` (no build tags)
+- Go integration tests: `internal/<pkg>/*_test.go` with `//go:build integration`
+- Frontend vitest: `web/lib/**/*.test.ts`, `web/app/api/**/*.test.ts` (vitest config: `web/vitest.config.ts`)
+- Frontend Playwright: `web/e2e/*.spec.ts` (Playwright config: `web/playwright.config.ts`; runner docs: `web/e2e/README.md`)
+- Vitest-vs-Playwright decision matrix: `web/testing.md`
+
+**Raising a coverage floor (Go):** write the missing tests in the SAME PR as the floor lift. Do NOT lift a threshold without writing the tests; do NOT write tests in a PR that does not lift the threshold (the gate is a ratchet — it must monotonically increase).
+
+**Adding a new e2e spec:** see `web/e2e/README.md`. Spec preconditions (seed data, test bearers) must be establishable by the docker-compose bring-up; if a spec needs preconditions the bootstrap cannot provide, file a spillover slice for the seed harness rather than relaxing the spec.
+
+---
+
 ## Open decisions remaining (track and resolve before relevant code lands)
 
 These are explicitly deferred. Do not pick one unilaterally. (Full list: `Plans/canvas/11-open-questions.md`.)

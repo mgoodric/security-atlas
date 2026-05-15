@@ -115,6 +115,15 @@ jobs:
         run: go build ./...
       - name: Run unit tests
         run: go test -race -covermode=atomic -coverprofile=coverage.txt ./...
+      # Slice 069 — Go coverage gate. Reads coverage.txt produced by the
+      # step above + cmd/scripts/coverage-thresholds.json and exits
+      # non-zero if any package's measured coverage falls below its floor.
+      # Floors are derived from a measured-minus-2pp run on main; they
+      # ratchet, never stretch (slice 069 P0-A4). Raise a floor by
+      # writing the missing tests AND lifting the threshold in the same
+      # follow-up PR — never one without the other.
+      - name: Go · coverage gate
+        run: go run ./cmd/scripts/coverage-gate -profile=coverage.txt
       - name: Upload unit coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
@@ -122,6 +131,13 @@ jobs:
           files: ./coverage.txt
           flags: unittests
           fail_ci_if_error: false
+      - name: Upload coverage profile as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-unit-coverage
+          path: coverage.txt
+          if-no-files-found: warn
 
   # Slice 061 stub: posts pass under the SAME required-check name
   # (`Go · build + test`) when the PR touches no code. Mutually exclusive
@@ -582,6 +598,219 @@ jobs:
 
   helm-lint-stub:
     name: Helm chart · lint + template
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+
+  # ====================================================================
+  # Slice 069 — Frontend vitest.
+  #
+  # Self-contained job block (appended like slice-030 / slice-038 /
+  # slice-065 blocks above) so parallel branches editing ci.yml rebase
+  # cleanly. Runs the module-level vitest seed (`web/lib/*.test.ts` +
+  # `web/app/api/**/*.test.ts`) and uploads the coverage summary as an
+  # artifact. No coverage gate this slice — the data is collected to
+  # inform a follow-up "raise the bar" slice.
+  #
+  # Gated on the same `changes.code` path filter as the other expensive
+  # jobs with a mutually-exclusive stub sibling under the same check
+  # name (slice-061 pattern), so docs-only PRs resolve the check in <30s.
+  # ====================================================================
+  frontend-vitest:
+    name: Frontend · vitest
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install workspaces
+        working-directory: .
+        run: npm install --no-audit --no-fund
+      - name: Run vitest (with coverage)
+        run: npm run test:coverage
+      - name: Upload coverage summary as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-vitest-coverage
+          path: web/coverage/coverage-summary.json
+          if-no-files-found: warn
+
+  frontend-vitest-stub:
+    name: Frontend · vitest
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v3 (slice 061)."
+
+  # ====================================================================
+  # Slice 069 — Frontend Playwright e2e.
+  #
+  # Self-contained job block. Brings up postgres 16 + nats 2.10 + minio
+  # as service containers (postgres via the GHA `services:` block; nats
+  # and minio via `docker run` because their official images need
+  # `-js -sd /data` and `server /data` respectively, which `services:`
+  # cannot pass — same pattern as the existing `Go · integration` job).
+  # Then builds atlas + web from source, runs the bootstrap, and invokes
+  # `npx playwright test` headless against the running stack.
+  #
+  # On failure the HTML report + traces + screenshots upload as a
+  # workflow artifact so a maintainer can drag-drop the trace into
+  # `npx playwright show-trace` locally for diagnosis.
+  #
+  # Gated on the same `changes.code` path filter as the other expensive
+  # jobs with a mutually-exclusive stub sibling under the same check
+  # name (slice-061 pattern), so docs-only PRs resolve the check in <30s.
+  # ====================================================================
+  frontend-playwright:
+    name: Frontend · Playwright e2e
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: security_atlas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable
+      ATLAS_APP_PASSWORD: ${{ secrets.CI_ATLAS_APP_PASSWORD || 'ci-ephemeral' }}
+      MINIO_ENDPOINT: http://localhost:9000
+      MINIO_BUCKET: atlas-artifacts-test
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      NATS_URL: nats://localhost:4222
+      ATLAS_HTTP_URL: http://localhost:8080
+      PLATFORM_BASE_URL: http://localhost:3000
+      # Slice 069 — neutral test token (P0-A9). The fixture injects this
+      # value as the session cookie; the platform's bearer-auth path
+      # accepts any token in dev / pre-OIDC mode (slice 005). When the
+      # platform requires a real credential we'll swap to the
+      # TEST_USER_EMAIL / TEST_USER_PASSWORD flow against a seeded user.
+      TEST_BEARER: test-bearer-e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/live; then
+              echo "minio ready"; break
+            fi
+            sleep 2
+          done
+          docker run --rm --network host \
+            -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
+            minio/mc mb -p local/atlas-artifacts-test
+      - name: Start NATS JetStream
+        run: |
+          docker run -d --name nats \
+            -p 4222:4222 \
+            -p 8222:8222 \
+            nats:2.10-alpine -js -sd /data --http_port 8222
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8222/healthz; then
+              echo "nats ready"; break
+            fi
+            sleep 2
+          done
+      - name: Bootstrap Postgres roles + migrations
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
+          for f in migrations/sql/*.sql; do
+            case "$f" in
+              *.down.sql) ;;
+              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
+            esac
+          done
+      - name: Build atlas server
+        run: go build -o /usr/local/bin/atlas ./cmd/atlas
+      - name: Install web workspace
+        working-directory: .
+        run: npm install --no-audit --no-fund
+      - name: Build web workspace
+        working-directory: web
+        run: npm run build
+      - name: Install Playwright chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Start atlas server
+        run: |
+          atlas serve > /tmp/atlas.log 2>&1 &
+          echo "ATLAS_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/health; then
+              echo "atlas ready"; break
+            fi
+            sleep 2
+          done
+      - name: Start web server
+        working-directory: web
+        run: |
+          (PORT=3000 npm start > /tmp/web.log 2>&1) &
+          echo "WEB_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/; then
+              echo "web ready"; break
+            fi
+            sleep 2
+          done
+      - name: Run Playwright tests
+        working-directory: web
+        run: npx playwright test
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report/
+            web/test-results/
+          if-no-files-found: warn
+      - name: Dump server logs on failure
+        if: failure()
+        run: |
+          echo "=== atlas log ==="
+          cat /tmp/atlas.log || true
+          echo "=== web log ==="
+          cat /tmp/web.log || true
+
+  frontend-playwright-stub:
+    name: Frontend · Playwright e2e
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
