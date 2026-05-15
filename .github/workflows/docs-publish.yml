@@ -1,0 +1,89 @@
+# Docs publish — security-atlas user documentation (slice 058)
+#
+# Two jobs:
+#   1. build (every PR + every push to main): `mkdocs build --strict`,
+#      uploads the rendered site as a workflow artifact. Strict catches
+#      broken internal links and missing nav entries. NOT a required
+#      status check — docs hygiene is advisory per the slice anti-criterion.
+#   2. deploy (only on release tag push, v*.*.*): publishes the artifact
+#      to GitHub Pages with least-privilege GITHUB_TOKEN.
+#
+# Pages must be enabled in repo settings (Settings → Pages → Source:
+# GitHub Actions) before the first deploy can land. This is a one-time
+# maintainer step out of band of CI.
+
+name: Docs publish
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+    paths:
+      - "docs-site/**"
+      - ".github/workflows/docs-publish.yml"
+  pull_request:
+    paths:
+      - "docs-site/**"
+      - ".github/workflows/docs-publish.yml"
+
+# Default permissions are read-only at the workflow level; jobs widen
+# only what they need.
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (mkdocs --strict)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with full history for git-revision-date plugin)
+        uses: actions/checkout@v4
+        with:
+          # mkdocs-git-revision-date-localized-plugin reads each page's
+          # last-commit timestamp from git history; shallow clones break
+          # the plugin and the --strict build fails.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Build site (strict)
+        run: |
+          uv tool run \
+            --with-requirements docs-site/requirements.txt \
+            --with mkdocs-material \
+            --from mkdocs \
+            mkdocs build --strict --config-file docs-site/mkdocs.yml
+
+      - name: Upload Pages artifact
+        # Only upload on tag push — the deploy job consumes it. We
+        # could upload on every run, but a tag-only upload keeps PR
+        # builds lightweight (build-and-discard).
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    # Tag-only deploy keeps the published site stable: every release
+    # ships a docs revision, and intermediate `main` pushes do not.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      # Least-privilege set — exactly what actions/deploy-pages needs.
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy to Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -13,6 +13,39 @@ auto-generated notes.
 
 ### Added
 
+- **infra:** User docs scaffold + 5 core pages (#058) — `docs-site/`
+  ships a mkdocs Material documentation site with five core pages
+  (Intro, Install, Framework setup, First audit, Board reporting). The
+  site uses the Material theme with a light/dark palette toggle,
+  collapsible navigation, in-site search, edit-on-GitHub links, and a
+  per-page "Last updated" date via the `git-revision-date-localized`
+  plugin. mkdocs is invoked in isolation via
+  `uv tool run --with-requirements docs-site/requirements.txt` so it
+  never pollutes the monorepo's `uv` workspace; dependency pins live in
+  `docs-site/requirements.txt`. Two new `justfile` recipes wrap the
+  local workflow: `just docs-serve` (live-reload dev server) and
+  `just docs-build` (strict build that fails on broken internal links
+  or missing nav entries). A new GitHub Actions workflow
+  `.github/workflows/docs-publish.yml` runs `mkdocs build --strict` on
+  every PR (advisory — never a required check) and deploys the site to
+  GitHub Pages on release-tag push (`v*.*.*`) with a least-privilege
+  `GITHUB_TOKEN` (`contents: read`, `pages: write`, `id-token: write`
+  on the deploy job only). The PR template gains a "Docs impact"
+  section forcing every PR to declare either updated docs pages or a
+  one-sentence reason no doc change is needed — reviewer discipline,
+  not CI hard-block. The global `ship-gate` skill gains an advisory
+  `DOCS-01` check mirroring that gate. Resolves the long-standing
+  "Docs site generator" open decision (CLAUDE.md table row +
+  `Plans/canvas/11-open-questions.md` new item 20) — mkdocs Material
+  chosen over Docusaurus because it is Python-only (matches the repo's
+  `uv` toolchain), lighter, and ships dark mode + search out of the
+  box. Decisions log at
+  `docs/audit-log/058-user-docs-scaffold-decisions.md` captures the
+  11 build-time judgment calls (invocation shape, `docs-site/` vs
+  `docs/` split, slice-057 screenshot TODO placeholders, release-tag-
+  only Pages deploy, etc.) and the post-merge maintainer steps (enable
+  GitHub Pages in repo settings; the first release tag publishes the
+  site).
 - **infra:** Helm chart for Kubernetes deployment (#038) — `deploy/helm/`
   ships a Helm chart that deploys security-atlas to a K8s cluster with one
   `helm install`. Bundles the atlas server Deployment, the web frontend

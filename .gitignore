@@ -78,3 +78,6 @@ htmlcov/
 
 ### Tracking / audit
 .agentdiff/
+
+### Docs site (mkdocs Material build output, slice 058)
+docs-site/site/
