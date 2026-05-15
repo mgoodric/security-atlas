@@ -154,6 +154,18 @@ The same version also renders in the bottom-right of every page in the web UI â€
 
 ---
 
+## Security
+
+security-atlas treats security as a first-class concern. The project ships with:
+
+- **Reporting channel:** see [`SECURITY.md`](./SECURITY.md) for the private vulnerability disclosure process and response timelines. Please **do not** open a public issue for a security finding.
+- **Pipeline hardening:** CodeQL static analysis (Go + JS/TS), GitGuardian secret scanning, and Dependabot version-bump alerts run on every PR.
+- **Audit reports:** maintainer-led security audits live under [`docs/audits/`](./docs/audits/). The first-pass audit is [`2026-Q2-security-audit.md`](./docs/audits/2026-Q2-security-audit.md) (Q2 2026, performed at slice 085).
+- **Audit cadence:** quarterly first-pass review, plus an additional audit after any major change to authentication, authorization, middleware, or evidence-ingestion code paths. First-pass audits are not a substitute for third-party penetration testing â€” they catch the high-yield patterns automated scanners miss.
+- **Remediation tracking:** actionable findings from each audit are filed as discrete remediation slices under [`docs/issues/`](./docs/issues/) and tracked through the normal review/merge process. The audit report's "Remediation status" lines point at the merge commits that resolved each finding.
+
+---
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for dev setup, the Conventional Commits convention, and the DCO sign-off requirement.
