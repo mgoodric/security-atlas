@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"strings"
 	"time"
@@ -78,6 +79,16 @@ type Server struct {
 	// wires it once at startup via Config.VersionFieldsFn (which is
 	// `versionFields` from cmd/atlas/version.go).
 	versionFieldsFn func() VersionFields
+	// Slice 073: platform_status reader/writer + bootstrap-token file
+	// path. Wired by cmd/atlas; unit servers leave them nil and the
+	// install-state routes 503.
+	platformStatus     PlatformStatus
+	platformResetter   PlatformResetter
+	bootstrapTokenPath string
+	// Slice 073: structured logger for non-request-bound events
+	// (bootstrap-token deletion is the first). Falls back to
+	// slog.Default() when nil.
+	logger *slog.Logger
 }
 
 // AttachAuthz wires the slice-035 OPA engine + decision audit writer.
