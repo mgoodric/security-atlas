@@ -9,6 +9,12 @@ Conventional-Commit messages. Each entry links to its slice issue, the
 merging PR, and the squash-merge commit. For richer per-slice narrative
 see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
+## [Unreleased]
+
+### Added
+
+- **infra:** Security HTTP headers middleware ([#087](https://github.com/mgoodric/security-atlas/issues/087)) — new `internal/api/securityheaders/` package applied as the FIRST `root.Use(...)` in the chi chain. Sets HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy on every response (including 401s + auth-exempt `/health` + `/auth/*` + `/login`). CSP ships as `Content-Security-Policy-Report-Only` initially (Next.js inline-script hydration would violate `script-src 'self'` enforcement); the trajectory toward enforced mode is documented in `docs/audit-log/087-security-http-headers-middleware-decisions.md`. Remediates the MEDIUM-HIGH finding from the 2026-Q2 security audit.
+
 ## [1.6.0](https://github.com/mgoodric/security-atlas/compare/v1.5.1...v1.6.0) (2026-05-15)
 
 
