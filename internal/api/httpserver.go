@@ -517,6 +517,21 @@ func (s *Server) httpHandler() http.Handler {
 	boardGen := board.NewGenerator(boardStore, freshnessStore, driftStore)
 	boardH := boardapi.New(boardGen, boardStore)
 	boardH.RegisterRoutes(root)
+	// Slice 032: quarterly board pack. Extends the slice-031 monthly brief
+	// into the full board-meeting artifact — a multi-section report
+	// (posture, top risks, coverage trend, open findings, operational
+	// metrics, investment-vs-coverage, asks of the board) with a
+	// draft -> publish lifecycle. The PackGenerator reuses the same
+	// slice-016 freshness + drift read models plus the board-pack-owned
+	// failing-evaluations read (control_evaluations as of period_end —
+	// decision D4). The narrative is TEMPLATED — no LLM (P0 anti-criterion).
+	// Publish is gated on every section being human-approved (decision D6).
+	// Routes appended per the parallel-batch convention; the literal-suffix
+	// and deeper /sections/... routes are declared before the bare /{id}.
+	boardPackStore := board.NewPackStore(s.dbPool)
+	boardPackGen := board.NewPackGenerator(boardPackStore, freshnessStore, driftStore)
+	boardPackH := boardapi.NewPack(boardPackGen, boardPackStore)
+	boardPackH.RegisterRoutes(root)
 	// Slice 034: admin credentials HTTP API + auth routes. Routes append
 	// per the parallel-batch convention. Admin-credential routes require
 	// the bearer auth middleware (admin gate inside the handler). The

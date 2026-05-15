@@ -1267,3 +1267,184 @@ export function fetchHierarchyOverdueDecisions(): Promise<Decision[]> {
     `/api/risks-hierarchy/decisions-overdue`,
   ).then((b) => b.decisions);
 }
+
+// ----- Slice 032: quarterly board pack -----
+//
+// The quarterly board pack has a draft -> published lifecycle. The
+// `content` is a structured map of fixed sections; each section carries a
+// templated narrative, an optional operator override, an approval flag,
+// and structured data. Publish is gated on every section being approved
+// (decision D6). The wire shapes mirror internal/api/board/pack_handlers.go.
+
+export type BoardPackSectionData = {
+  // posture
+  frameworks?: {
+    slug: string;
+    name: string;
+    coverage_pct: number;
+    freshness_pct: number;
+    trend_arrow: string;
+    delta: number;
+    state: string;
+  }[];
+  // top_risks
+  top_risks?: {
+    id: string;
+    title: string;
+    category: string;
+    treatment: string;
+    residual_severity: number;
+    age_days: number;
+  }[];
+  // coverage_trend
+  coverage_pct?: number;
+  baseline_coverage_pct?: number;
+  coverage_delta?: number;
+  // open_findings
+  findings?: {
+    evaluation_id: string;
+    control_id: string;
+    scope_cell_id: string;
+    evaluated_at: string;
+    freshness_status: string;
+  }[];
+  findings_count?: number;
+  // operational_metrics (operator-entered)
+  phishing_pass_rate_pct?: number | null;
+  p1_patch_median_days?: number | null;
+  incident_count?: number | null;
+  vendor_reviews_on_time?: number | null;
+  vendor_reviews_total?: number | null;
+  // investment (operator-entered)
+  spend_usd?: number;
+  cost_per_coverage_point?: number;
+};
+
+export type BoardPackSection = {
+  key: string;
+  title: string;
+  templated_text: string;
+  override_text: string;
+  approved: boolean;
+  data: BoardPackSectionData;
+};
+
+export type BoardPackContent = {
+  period_end: string;
+  generated_at: string;
+  status: string;
+  sections: Record<string, BoardPackSection>;
+};
+
+export type BoardPack = {
+  id: string;
+  period_end: string;
+  status: string;
+  content: BoardPackContent;
+  narrative_md: string;
+  published_by?: string;
+  published_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+// The fixed, ordered section keys (decision D6) — the single source of
+// truth in the UI for "what sections exist and in what order". Mirrors
+// internal/board/pack.go SectionKeys.
+export const BOARD_PACK_SECTION_KEYS: string[] = [
+  "posture",
+  "top_risks",
+  "coverage_trend",
+  "open_findings",
+  "operational_metrics",
+  "investment",
+  "asks",
+];
+
+// Operator-entered structured inputs for the PUT section endpoint
+// (decisions D3 + D5). All fields optional — only populated ones apply.
+export type BoardPackSectionInputs = {
+  phishing_pass_rate_pct?: number;
+  p1_patch_median_days?: number;
+  incident_count?: number;
+  vendor_reviews_on_time?: number;
+  vendor_reviews_total?: number;
+  spend_usd?: number;
+  baseline_coverage_pct?: number;
+};
+
+async function boardPackJSON<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, init);
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body.error) msg = body.error;
+    } catch {
+      // keep the status-line message
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as T;
+}
+
+export function listBoardPacks(): Promise<BoardPack[]> {
+  return boardPackJSON<{ packs: BoardPack[] }>("/api/board-packs").then(
+    (b) => b.packs ?? [],
+  );
+}
+
+export function generateBoardPack(periodEnd: string): Promise<BoardPack> {
+  return boardPackJSON<BoardPack>("/api/board-packs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ period_end: periodEnd }),
+  });
+}
+
+export function getBoardPack(id: string): Promise<BoardPack> {
+  return boardPackJSON<BoardPack>(`/api/board-packs/${encodeURIComponent(id)}`);
+}
+
+export function updateBoardPackSection(
+  id: string,
+  key: string,
+  payload: { override_text?: string; inputs?: BoardPackSectionInputs },
+): Promise<BoardPack> {
+  return boardPackJSON<BoardPack>(
+    `/api/board-packs/${encodeURIComponent(id)}/sections/${encodeURIComponent(
+      key,
+    )}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function approveBoardPackSection(
+  id: string,
+  key: string,
+): Promise<BoardPack> {
+  return boardPackJSON<BoardPack>(
+    `/api/board-packs/${encodeURIComponent(id)}/sections/${encodeURIComponent(
+      key,
+    )}/approve`,
+    { method: "POST" },
+  );
+}
+
+export function publishBoardPack(
+  id: string,
+  publishedBy: string,
+): Promise<BoardPack> {
+  return boardPackJSON<BoardPack>(
+    `/api/board-packs/${encodeURIComponent(id)}/publish`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ published_by: publishedBy }),
+    },
+  );
+}

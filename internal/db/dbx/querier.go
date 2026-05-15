@@ -465,6 +465,28 @@ type Querier interface {
 	// 404). The returned `content` + `narrative_md` are the verbatim frozen
 	// snapshot — AC-5 (re-fetch returns the original content).
 	GetBoardBriefByID(ctx context.Context, arg GetBoardBriefByIDParams) (BoardBrief, error)
+	// Fetch one quarterly board pack by id (slice 032). RLS scopes the lookup to
+	// the caller's tenant; a cross-tenant id returns ErrNoRows (handler maps to
+	// 404). Works for both draft and published packs.
+	GetBoardPackByID(ctx context.Context, arg GetBoardPackByIDParams) (BoardPack, error)
+	// Append one freshly generated DRAFT quarterly board pack (slice 032).
+	InsertBoardPack(ctx context.Context, arg InsertBoardPackParams) (BoardPack, error)
+	// Enumerate every quarterly board pack for the tenant, newest report-date
+	// first (slice 032).
+	ListBoardPacks(ctx context.Context, tenantID pgtype.UUID) ([]BoardPack, error)
+	// Open-findings source for the quarterly board pack (slice 032 decision D4):
+	// the latest failing control evaluation per (control, scope_cell) as of the
+	// pack's period_end horizon. Board-pack-owned, distinct from slice 030's
+	// AuditPeriod-bound ListFailingEvaluationsAsOf.
+	ListFailingEvaluationsForPack(ctx context.Context, arg ListFailingEvaluationsForPackParams) ([]ListFailingEvaluationsForPackRow, error)
+	// Flip a DRAFT quarterly board pack to PUBLISHED, stamping publish metadata
+	// (slice 032). The status='draft' predicate makes a re-publish a zero-row
+	// no-op that returns ErrNoRows (handler maps to 409).
+	PublishBoardPack(ctx context.Context, arg PublishBoardPackParams) (BoardPack, error)
+	// Mutate a DRAFT quarterly board pack's content + narrative in place (slice
+	// 032). The status='draft' predicate makes an update of a published pack a
+	// zero-row no-op that returns ErrNoRows (handler maps to 409).
+	UpdateBoardPackContent(ctx context.Context, arg UpdateBoardPackContentParams) (BoardPack, error)
 	// Returns the JSON-encoded applicability_expr for a single control. The column
 	// is TEXT (slice 002); slice 017 stores JSON in that text.
 	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)

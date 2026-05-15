@@ -917,6 +917,19 @@ type BoardBrief struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type BoardPack struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	PeriodEnd   pgtype.Date        `json:"period_end"`
+	Status      string             `json:"status"`
+	Content     []byte             `json:"content"`
+	NarrativeMd string             `json:"narrative_md"`
+	PublishedBy *string            `json:"published_by"`
+	PublishedAt pgtype.Timestamptz `json:"published_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Control struct {
 	ID                   pgtype.UUID               `json:"id"`
 	TenantID             pgtype.UUID               `json:"tenant_id"`

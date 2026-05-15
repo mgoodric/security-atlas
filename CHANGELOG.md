@@ -140,6 +140,30 @@ auto-generated notes.
 
 ### Added
 
+- **board:** quarterly board pack + investment-vs-coverage (#032) —
+  extends slice 031's monthly board brief into the full quarterly
+  board-meeting artifact: a multi-section pack (program posture, top
+  risks aging, control coverage trend, open findings, operational
+  metrics, investment-vs-coverage, asks of the board) with a
+  draft→published lifecycle. `POST /v1/board-packs` with a `period_end`
+  generates a DRAFT pack; `PUT /v1/board-packs/{id}/sections/{key}`
+  overrides a section's templated narrative or supplies operator inputs;
+  `POST .../sections/{key}/approve` approves a section; `POST
+  .../publish` freezes the pack — but only when EVERY section is
+  approved (the publish gate). `GET .../{id}.md` and `GET .../{id}/pdf`
+  export Markdown + PDF (the PDF re-renders on demand via the existing
+  chromedp path). The narrative is templated Go `text/template` — no
+  LLM. The new `board_packs` table (migration `_032`) is a single row
+  with a `status` column; published-pack immutability is enforced by a
+  `status = 'draft'`-predicated UPDATE RLS policy paired with a BEFORE
+  UPDATE trigger (defense-in-depth, the slice-028 `audit_periods` freeze
+  precedent). The operational-metrics and investment sections are
+  operator-entered — no v1 data source exists for phishing rates, patch
+  medians, vendor numbers, or spend, so the generator seeds them with a
+  templated placeholder rather than fabricating coverage. The
+  open-findings section reads failing `control_evaluations` as of
+  `period_end` via a board-pack-owned query. See
+  `docs/audit-log/032-quarterly-board-pack-decisions.md`.
 - **risk:** risk-hierarchy backend read endpoints (#067) — fills the
   three binding placeholders slice 056's hierarchical risk dashboard
   shipped, following the 040→066 / 041→064 precedent. `GET /v1/org_units`
