@@ -1,0 +1,22 @@
+{
+  "since": "2026-05-07T00:00:00Z",
+  "through": "2026-05-14T00:00:00Z",
+  "delta": -2,
+  "flipped_out_count": 2,
+  "flipped_out": [
+    {
+      "control_id": "acme-soc2-ac-1",
+      "control_name": "Access provisioning approvals",
+      "framework": "SOC 2",
+      "flipped_at": "2026-05-12T09:14:00Z",
+      "scope_cell": "prod / aws / us-east-1"
+    },
+    {
+      "control_id": "acme-soc2-cm-4",
+      "control_name": "Change ticket linkage",
+      "framework": "SOC 2",
+      "flipped_at": "2026-05-13T16:42:00Z",
+      "scope_cell": "prod / aws / eu-west-1"
+    }
+  ]
+}
