@@ -208,6 +208,36 @@ noise — not your bug. The two route-mocked specs (`first-time-login`,
 (`Playwright e2e seed-data harness`, status `not-ready`); when it lands,
 the quarantine line comes out and the job again gates the PR.
 
+## Open-redirect prevention
+
+The post-login `signIn` server action (`web/app/login/actions.ts`) reads a
+`from` form field that originates from `/login?from=...`. The
+2026-Q2 security audit flagged HIGH that the unvalidated value was passed
+straight to Next.js `redirect()`, enabling phishing-pivot attacks via
+`?from=https://evil.example.com/phish`. Slice 086 introduced a small
+helper at `web/lib/safe-redirect.ts`:
+
+```ts
+import { safeRedirectTarget } from "@/lib/safe-redirect";
+
+// Three checks + fallback: rejects fully-qualified URLs,
+// protocol-relative URLs (`//evil.com`), backslash-prefixed paths
+// (`/\evil.com`), `javascript:` URLs, empty strings, and bare `/`.
+// Returns `/dashboard` on any non-safe input.
+const target = safeRedirectTarget(rawTarget);
+```
+
+**Reviewer-discipline rule:** every redirect target sourced from user
+input MUST flow through `safeRedirectTarget` before reaching
+`redirect()`, `NextResponse.redirect()`, `router.push()`, or any
+equivalent. If you add a new redirect-from-user-input call site, route
+it through the helper and add a case to
+`web/lib/safe-redirect.test.ts` if your call site exposes a new attack
+shape. The unit test is the long-term gate that keeps the helper
+short — extend the test rather than weakening the helper. Open-redirect
+findings outside the signIn flow should be filed as follow-on slices
+(per slice 086 P0-A4 — no in-place scope expansion).
+
 ## AI-assist boundary
 
 The platform supports AI assistance in narrowly-defined places (see [`CLAUDE.md`](./CLAUDE.md) → "AI-assist boundary"). Contributor-side rules:
