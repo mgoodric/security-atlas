@@ -1448,3 +1448,45 @@ export function publishBoardPack(
     },
   );
 }
+
+// ----- Slice 043: export URLs + approver-role probe -----
+//
+// boardPackMarkdownURL / boardPackPdfURL point at the slice-043 BFF
+// passthrough routes, NOT the raw /v1/board-packs/...md and .../pdf
+// endpoints (which require an Authorization header the browser cannot
+// attach to a plain link). The BFF routes read the bearer cookie
+// server-side and stream the binary bytes back.
+
+export function boardPackMarkdownURL(id: string): string {
+  return `/api/board-packs/${encodeURIComponent(id)}/markdown`;
+}
+
+export function boardPackPdfURL(id: string): string {
+  return `/api/board-packs/${encodeURIComponent(id)}/pdf`;
+}
+
+// The approver gate (AC-3) — the UI hides approve + publish controls
+// unless the current bearer is an admin credential. The platform always
+// enforces its own publish gate (every section approved + published_by
+// required); the UI gate is defense-in-depth + clearer affordance.
+//
+// Decision D3 of slice 043: there is no `is_board_approver` role on
+// main; we reuse the slice-060 /api/admin/me probe (is_admin boolean).
+// A finer role is a documented follow-up.
+
+export type SessionMe = {
+  is_admin: boolean;
+};
+
+export async function getSessionMe(): Promise<SessionMe> {
+  const res = await fetch("/api/admin/me", { cache: "no-store" });
+  if (res.status === 401) {
+    return { is_admin: false };
+  }
+  if (!res.ok) {
+    // Don't throw — degrade to "not approver" so the UI stays usable.
+    return { is_admin: false };
+  }
+  const body = (await res.json()) as { is_admin?: boolean };
+  return { is_admin: body.is_admin === true };
+}

@@ -46,6 +46,38 @@ auto-generated notes.
   only Pages deploy, etc.) and the post-merge maintainer steps (enable
   GitHub Pages in repo settings; the first release tag publishes the
   site).
+- **frontend:** Board pack preview/export view (#043) — polished
+  mockup-faithful preview of a quarterly board pack at
+  `/board-packs/[id]`, layered over slice 032's already-merged backend
+  (`internal/board`, `internal/api/board`, migration `_032`). No
+  migration. Seven section cards walk the canonical SectionKeys order
+  (`posture`, `top_risks`, `coverage_trend`, `open_findings`,
+  `operational_metrics`, `investment`, `asks`) with section-specific
+  structured visuals: framework posture tiles, top-risks aging table,
+  coverage-trend baseline/current/delta cards, open-findings list,
+  operational-metrics tiles (operator-entered, no v1 connector),
+  investment vs coverage two-column panel, and a freeform asks
+  textarea. Inline narrative editing + per-section approval are
+  defense-in-depth role-gated by the slice-060 `/api/admin/me`
+  `is_admin` probe — the platform enforces the publish gate
+  server-side (slice 032 decision D6: every fixed section must be
+  approved). A "Templated v1" badge replaces the mockup's
+  "AI-drafted · llama3.1-8b" placeholder — v1 ships templated only
+  (CLAUDE.md AI-assist boundary; slice 032 `pack_narrative.go` imports
+  no inference client), so labeling content "AI-drafted" when no
+  model ran would itself violate the boundary. Two new BFF
+  passthrough routes (`web/app/api/board-packs/[id]/markdown/route.ts`
+  and `.../[id]/pdf/route.ts`) proxy slice 032's existing
+  `GET /v1/board-packs/{id}.md` and `GET /v1/board-packs/{id}/pdf` —
+  binary-safe (PDF uses `arrayBuffer()`, not `forwardJSON`'s JSON
+  re-wrap; Markdown preserves `text/markdown; charset=utf-8`), bearer
+  cookie read server-side and never echoed, `cache: "no-store"` on
+  every upstream fetch. Print CSS (`print:hidden`) hides the export
+  bar and every edit/approve control so `window.print()` produces a
+  clean fallback artifact. A published pack renders read-only — every
+  textarea, save button, approve button, and publish form is hidden
+  (AC-7 immutability). No `web/package.json` change (conflict-safety
+  with parallel slice 069, which adds the vitest runner).
 - **infra:** Helm chart for Kubernetes deployment (#038) — `deploy/helm/`
   ships a Helm chart that deploys security-atlas to a K8s cluster with one
   `helm install`. Bundles the atlas server Deployment, the web frontend
