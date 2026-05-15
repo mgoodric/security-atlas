@@ -143,6 +143,10 @@ If a commit was AI-assisted, also include a `Co-authored-by:` trailer naming the
 4. Resolve every review comment thread before merge.
 5. PRs are squash-merged. The squash commit message is rewritten to Conventional-Commit form by the maintainer.
 
+### Local CI parity
+
+`just install-hooks` installs pre-commit on both the `pre-commit` and `pre-push` stages. The pre-push hook runs the full pre-commit suite against the about-to-push commits — this catches the "prettier reformats `_STATUS.md` after the status-flip commit" pattern that produced 5 of the 62 CI failures observed on 2026-05-15. Emergency bypass remains available via `git push --no-verify`; do not use it casually — the recurring pre-commit-failure data is the reason this hook exists. Once slice 078 unblocks `npm run lint -w web`, the same hook will also run frontend ESLint locally; until then it is limited to the pre-commit suite.
+
 `main` is protected:
 
 - ≥1 approving review required

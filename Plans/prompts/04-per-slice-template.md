@@ -22,6 +22,7 @@ Workflow:
 8. changelog-generator entry for the slice
 8b. If the slice is `Type: JUDGMENT` — write the decisions log at `docs/audit-log/<NNN>-<slug>-decisions.md` (Decisions made · Revisit once in use · Confidence per decision — see "Slice types" below). Commit it with the slice. It does NOT block merge.
 9. Status flip — append a `chore(status): <NNN> -> in-review` commit to the slice branch flipping `_STATUS.md` row <NNN>, push to the PR branch
+9a. **Run `pre-commit run --all-files` one more time after the status-flip commit.** If prettier auto-fixes anything, amend the status-flip commit (`git commit --amend --no-edit -s`) before push. This catches the "prettier re-pads `_STATUS.md` after step 9" pattern that has caused 5+ CI fixups in recent batches. Slice 081 installs a pre-push hook that runs this automatically on engineer-installed setups (`just install-hooks`); this manual step is the belt-and-suspenders safety net for sessions running without the hook (fresh worktree, agent-driven push, etc.).
 
 Honor every anti-criterion (P0 — block merge).
 

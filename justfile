@@ -66,10 +66,11 @@ fmt-frontend:
 fmt-python:
     ruff format .
 
-# Install pre-commit hooks
+# Install pre-commit hooks (commit + push stages)
 install-hooks:
     pre-commit install --install-hooks
-    @echo "pre-commit hooks installed. Bad-format commits will be rejected locally."
+    pre-commit install --hook-type pre-push --install-hooks
+    @echo "pre-commit hooks installed (commit + push). Bad-format commits and pushes will be rejected locally."
 
 # Run pre-commit against the whole tree
 hooks-run:
