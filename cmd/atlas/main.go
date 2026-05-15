@@ -38,6 +38,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/freshnessdrift"
 	"github.com/mgoodric/security-atlas/internal/oscal"
+	"github.com/mgoodric/security-atlas/internal/platform"
 	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
@@ -248,6 +249,24 @@ func main() {
 			}
 			fmt.Fprintf(os.Stderr, "atlas: fixed-token admin credential issued: id=%s tenant=%s last4=%s\n",
 				cred.ID, cred.TenantID, cred.Last4)
+
+			// Slice 073 — emit the grep-friendly stdout line + write the
+			// bootstrap-token file (mode 0600) so a self-host operator
+			// has three orthogonal ways to find the token: stderr,
+			// `docker compose logs atlas | grep BOOTSTRAP_TOKEN`, and the
+			// file at ${ATLAS_DATA_DIR}/bootstrap-token. The file is
+			// atomically deleted on first successful sign-in by the
+			// /v1/install/mark-first-signin handler (load-bearing P0-A1).
+			fmt.Println(platform.SanitizeTokenForLogStdout(bootstrapToken))
+			tokenPath := platform.BootstrapTokenPath(os.Getenv("ATLAS_DATA_DIR"))
+			if writeErr := platform.WriteBootstrapToken(tokenPath, bootstrapToken); writeErr != nil {
+				// Non-fatal: the file is a convenience, not a hard dep.
+				// The operator can still find the token in stderr or via
+				// `docker compose logs`. Log and continue.
+				fmt.Fprintf(os.Stderr, "atlas: bootstrap-token file write skipped: %v\n", writeErr)
+			} else {
+				fmt.Fprintf(os.Stderr, "atlas: bootstrap-token file written at %s (mode 0600)\n", tokenPath)
+			}
 		}
 	}
 
@@ -283,6 +302,19 @@ func main() {
 		apikeySvc := apikeystore.NewStore(pool, authPool, hasher, 0)
 		srv.AttachAPIKeyStore(apikeySvc)
 		fmt.Fprintf(os.Stderr, "atlas: api_keys store wired (BEARER_HASH_KEY ok)\n")
+
+		// Slice 073: platform_status reader/writer. Read pool is the
+		// RLS-bound app pool (public_read RLS policy is USING (true));
+		// write pool is the BYPASSRLS migrate pool (atlas_app has no
+		// UPDATE policy under FORCE ROW LEVEL SECURITY by design).
+		// When authPool is nil (DATABASE_URL not set) the write path is
+		// disabled — the public read endpoint still works.
+		platformStatus := platform.NewStatus(pool, authPool)
+		srv.AttachPlatformStatus(platformStatus)
+		srv.AttachPlatformResetter(platformStatus)
+		srv.AttachBootstrapTokenPath(platform.BootstrapTokenPath(os.Getenv("ATLAS_DATA_DIR")))
+		srv.AttachLogger(logger)
+		fmt.Fprintf(os.Stderr, "atlas: platform_status wired (install-state endpoint ready)\n")
 
 		// Slice 037: wire the user-facing auth routes so /auth/local/login
 		// mounts. The docker-compose self-host bundle is a local-mode

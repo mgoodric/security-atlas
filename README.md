@@ -91,6 +91,16 @@ just build
 
 Detailed local dev setup, prerequisites, and the full `just` recipe surface live in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
+### Your first sign-in (self-host)
+
+The platform mints a one-time bootstrap admin bearer at startup. The `/login` page detects fresh-install state and shows three orthogonal ways to find the token:
+
+- **docker-compose:** `docker compose logs atlas 2>&1 | grep BOOTSTRAP_TOKEN`
+- **Helm:** `kubectl logs deploy/atlas --tail=200 2>&1 | grep BOOTSTRAP_TOKEN`
+- **Filesystem:** `cat ${ATLAS_DATA_DIR:-/var/lib/atlas}/bootstrap-token` (mode 0600)
+
+The bootstrap-token file is **deleted atomically on first successful sign-in**. If you get stuck (token rolled out of the log buffer; the file was already consumed but no session was established), see the [first-time login troubleshooting page](./docs-site/docs/troubleshooting/first-login.md) — it documents the `atlas-cli credentials issue --reset-bootstrap --force` recovery path.
+
 ---
 
 ## Quickstart — first evidence in 5 minutes

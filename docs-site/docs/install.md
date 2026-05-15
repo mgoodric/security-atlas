@@ -85,6 +85,17 @@ Open <http://localhost:3000> and sign in with the
 `.env`. This is **local mode** — no external IdP required for first
 sign-in. OIDC is a later configuration step, not a prerequisite.
 
+<!-- prettier-ignore-start -->
+!!! info "First-time sign-in"
+
+    The `/login` page detects fresh-install state and shows three
+    orthogonal ways to find the bootstrap admin token (container logs,
+    Helm logs, and the file at `${ATLAS_DATA_DIR}/bootstrap-token`,
+    mode 0600). The file is atomically deleted on first successful
+    sign-in. If you get stuck, see
+    [Troubleshooting → First-time login](troubleshooting/first-login.md).
+<!-- prettier-ignore-end -->
+
 ## What's seeded for you
 
 - A default tenant. (security-atlas is multi-tenant from day one; the UI

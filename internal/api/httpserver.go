@@ -107,7 +107,10 @@ func (s *Server) httpHandler() http.Handler {
 	// binary (Version/Commit/BuildTime/GoVersion), NOT tenant data. The
 	// auth-bypass is documented at api.NewVersionHandler. Same precedent
 	// as /health from slice 037.
-	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health", "/v1/version"))
+	// Slice 073: /v1/install-state is added to the bearer-exempt set for
+	// the same reason — public metadata about whether this is a fresh
+	// install (P0-A4). The login page reads it SSR before any auth exists.
+	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health", "/v1/version", "/v1/install-state"))
 	// Slice 033: lift the authenticated credential's tenant id onto the
 	// request context so every downstream handler — and every database
 	// transaction it opens — runs under the right `app.current_tenant`
@@ -124,7 +127,9 @@ func (s *Server) httpHandler() http.Handler {
 	if s.authzEngine != nil {
 		// Slice 072: /v1/version is added to the authz-exempt set for the
 		// same reason as /health — a metadata probe shouldn't reach OPA.
-		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/v1/version"))
+		// Slice 073: /v1/install-state is added too — public metadata, same
+		// reasoning as the bearer-exempt above.
+		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/v1/version", "/v1/install-state"))
 	}
 	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
 	// tenancy / authz so the cache lives inside the same request-context
@@ -152,6 +157,14 @@ func (s *Server) httpHandler() http.Handler {
 	if s.versionFieldsFn != nil {
 		root.Method(http.MethodGet, "/v1/version", NewVersionHandler(s.versionFieldsFn))
 	}
+	// Slice 073: public install-state metadata + elevated mark-first-signin
+	// write. GET /v1/install-state is intentionally bearer-exempt — same
+	// precedent as /health and /v1/version (P0-A4). POST
+	// /v1/install/mark-first-signin requires a bearer (the user who just
+	// signed in proxies through the BFF route); the bearer-auth middleware
+	// above gates the path because /v1/install/* is NOT in the exempt list.
+	root.Get("/v1/install-state", s.handleInstallState)
+	root.Post("/v1/install/mark-first-signin", s.handleMarkFirstSignin)
 	// Slice 008: UCF graph traversal HTTP API. Three read endpoints
 	// query the requirement-anchor-control graph through the SCF spine
 	// (canvas §3 / Plans/UCF_GRAPH_MODEL.md). Routes are appended
@@ -559,6 +572,12 @@ func (s *Server) httpHandler() http.Handler {
 		root.Get("/v1/admin/credentials", admincredsH.List)
 		root.Post("/v1/admin/credentials/{id}/rotate", admincredsH.Rotate)
 		root.Post("/v1/admin/credentials/{id}/revoke", admincredsH.Revoke)
+	}
+	// Slice 073: admin-only bootstrap-token reset endpoint. Used by
+	// `atlas-cli credentials issue --reset-bootstrap`. Mounts only when
+	// the platform_status resetter is attached.
+	if s.platformResetter != nil {
+		root.Post("/v1/admin/install/reset-bootstrap", s.handleResetBootstrap)
 	}
 	if s.authHandler != nil {
 		root.Get("/auth/oidc/login", s.authHandler.OIDCLogin)

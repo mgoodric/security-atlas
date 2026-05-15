@@ -80,6 +80,8 @@ nav:
   - Framework setup: framework-setup.md
   - First audit: first-audit.md
   - Board reporting: board-reporting.md
+  - Troubleshooting:
+      - First-time login: troubleshooting/first-login.md
 
 extra:
   social:
