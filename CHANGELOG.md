@@ -15,6 +15,14 @@ auto-generated notes.
 
 - **infra:** README screenshots + animated GIFs of core flows ([#057](https://github.com/mgoodric/security-atlas/issues/057)) — On-demand `just refresh-screenshots` recipe captures four core views (dashboard, control detail, audit workspace, board pack preview) in light + dark themes plus an 8-second animated GIF of a representative flow. Uses the merged frontend rendered against a hermetic stub-platform server reading from `fixtures/readme-demo/**`. No CI freshness gate — these are version-controlled artifacts refreshed by humans. Final v1 backlog slice — once merged the v1 binary success test becomes evaluable end-to-end (69/69).
 
+## [1.5.0](https://github.com/mgoodric/security-atlas/compare/v1.4.0...v1.5.0) (2026-05-15)
+
+
+### Features
+
+* **infra:** README screenshots + animated GIFs of core flows ([#057](https://github.com/mgoodric/security-atlas/issues/057)) ([#139](https://github.com/mgoodric/security-atlas/issues/139)) ([1903818](https://github.com/mgoodric/security-atlas/commit/19038186830a0301ec3bb578e5f4297b626fd5e9))
+* **infra:** verification suite — Playwright + vitest + Go coverage gate ([#069](https://github.com/mgoodric/security-atlas/issues/069)) ([#132](https://github.com/mgoodric/security-atlas/issues/132)) ([9824bc5](https://github.com/mgoodric/security-atlas/commit/9824bc525ced2877665f59933e5a692f31a15108))
+
 ## [1.4.0](https://github.com/mgoodric/security-atlas/compare/v1.3.0...v1.4.0) (2026-05-15)
 
 
