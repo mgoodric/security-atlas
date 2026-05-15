@@ -54,6 +54,7 @@ Test procedure + result:
 3. Created `docs/AC5_DELIBERATE_TEST.md` with trailing whitespace (3 spaces before `\n` on line 3, verified via `od -c`).
 4. `git commit --no-verify -s -m "test: AC-5 deliberate prettier-breakable fixture"` — commit succeeded (--no-verify skipped pre-commit so the commit could land with the bad content).
 5. `git push --dry-run origin HEAD:refs/test/081-prepush-deliberate` — output:
+
    ```
    trim trailing whitespace.................................................Failed
    - hook id: trailing-whitespace
@@ -64,7 +65,9 @@ Test procedure + result:
    ...
    error: failed to push some refs to 'https://github.com/mgoodric/security-atlas.git'
    ```
+
    **Hook blocked the push as designed.** Error message is clear, names the offending hook, names the offending file, points the engineer at the fix.
+
 6. `--no-verify` bypass verified: `git push --no-verify --dry-run origin HEAD:refs/test/081-prepush-bypass` skipped the hook entirely and reached the network layer (`* [new reference]   HEAD -> refs/test/081-prepush-bypass`). **`--no-verify` works exactly as required by P0-A1.**
 7. Cleanup: `git reset --soft HEAD~1` + delete the test fixture + restore `core.hooksPath`. Working tree clean of test artifacts.
 
@@ -85,11 +88,11 @@ The narrative footnote mentions "`_STATUS.md` re-pad after merge-queue rebases �
 
 ## Confidence
 
-| Decision | Confidence |
-| -------- | ---------- |
-| D1 — pre-commit-framework `pre-push` stage | high |
-| D2 — hook path `.git/hooks/pre-push` (chained legacy) | high |
-| D3 — `npm run lint -w web` deferred (slice 078) | high (status); medium (re-enable mechanism) |
-| D4 — `--no-verify` preserved + documented | high |
-| D5 — AC-5 trailing-whitespace test design | high |
-| D6 — post-rebase re-pad covered by same hook | medium |
+| Decision                                              | Confidence                                  |
+| ----------------------------------------------------- | ------------------------------------------- |
+| D1 — pre-commit-framework `pre-push` stage            | high                                        |
+| D2 — hook path `.git/hooks/pre-push` (chained legacy) | high                                        |
+| D3 — `npm run lint -w web` deferred (slice 078)       | high (status); medium (re-enable mechanism) |
+| D4 — `--no-verify` preserved + documented             | high                                        |
+| D5 — AC-5 trailing-whitespace test design             | high                                        |
+| D6 — post-rebase re-pad covered by same hook          | medium                                      |

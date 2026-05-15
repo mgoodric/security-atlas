@@ -17,7 +17,7 @@ Once slice 078 lands, the pre-push hook should ALSO run `npm run lint -w web` lo
   - Option A: add a `local` `repos:` entry to `.pre-commit-config.yaml` with `stages: [pre-push]`, `entry: npm run lint -w web`, `pass_filenames: false`
   - Option B: write a thin wrapper script invoked from the pre-commit-framework hook
   - Option C: split the `just install-hooks` recipe to install lint as a separate pre-push hook
-  Engineer picks the smallest viable option at slice-run-time.
+    Engineer picks the smallest viable option at slice-run-time.
 - [ ] AC-3: Test locally: introduce a deliberate ESLint-breakable change (`web/app/page.tsx` has an unused variable, for example), attempt `git push`, confirm the hook blocks. Record the result in the decisions log.
 - [ ] AC-4: CONTRIBUTING.md "Local CI parity" subsection updated: drop the "until then it is limited to the pre-commit suite" caveat, replace with "and `npm run lint -w web` for frontend ESLint."
 - [ ] AC-5: `docs/audit-log/082-pre-push-hook-add-lint-decisions.md` records the option chosen (A/B/C) + rationale + AC-3 test result.
