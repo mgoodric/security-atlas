@@ -50,7 +50,12 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, readdir, stat, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type Page,
+} from "playwright";
 
 import { startStubServer } from "./stub-platform-server";
 
@@ -80,10 +85,7 @@ function log(msg: string): void {
   console.log(`[capture] ${msg}`);
 }
 
-async function waitForPort(
-  port: number,
-  timeoutMs: number,
-): Promise<void> {
+async function waitForPort(port: number, timeoutMs: number): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
@@ -167,7 +169,10 @@ async function captureOne(
     const page = await context.newPage();
     await applyTheme(page, theme);
     log(`  ${target.name}${suffix}.png ← ${target.path}`);
-    await page.goto(`${baseURL}${target.path}`, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    await page.goto(`${baseURL}${target.path}`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    });
     // Re-apply dark theme after React hydration may have rewritten the
     // root className. Idempotent for light theme.
     await reapplyThemeAfterHydration(page, theme);
@@ -188,7 +193,10 @@ async function captureOne(
   }
 }
 
-async function recordFlowVideo(browser: Browser, baseURL: string): Promise<string> {
+async function recordFlowVideo(
+  browser: Browser,
+  baseURL: string,
+): Promise<string> {
   await mkdir(VIDEO_DIR, { recursive: true });
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
@@ -200,11 +208,16 @@ async function recordFlowVideo(browser: Browser, baseURL: string): Promise<strin
     await applyTheme(page, "light");
 
     // 1. Dashboard.
-    await page.goto(`${baseURL}/dashboard`, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    await page.goto(`${baseURL}/dashboard`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    });
     await page.waitForTimeout(1200);
 
     // 2. Slow scroll down then back up.
-    await page.evaluate(() => window.scrollTo({ top: 220, behavior: "smooth" }));
+    await page.evaluate(() =>
+      window.scrollTo({ top: 220, behavior: "smooth" }),
+    );
     await page.waitForTimeout(1500);
     await page.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
     await page.waitForTimeout(1200);
@@ -217,7 +230,9 @@ async function recordFlowVideo(browser: Browser, baseURL: string): Promise<strin
     await page.waitForTimeout(1500);
 
     // 4. Scroll within the control to show UCF coverage.
-    await page.evaluate(() => window.scrollTo({ top: 300, behavior: "smooth" }));
+    await page.evaluate(() =>
+      window.scrollTo({ top: 300, behavior: "smooth" }),
+    );
     await page.waitForTimeout(1500);
 
     await page.close();

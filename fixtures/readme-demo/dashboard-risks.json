@@ -28,7 +28,11 @@
       "description": "MDM coverage gap for contractor-owned devices.",
       "category": "Endpoint",
       "methodology": "nist_800_30",
-      "inherent_score": { "likelihood": 3, "impact": 3, "ale_band": "10K-100K" },
+      "inherent_score": {
+        "likelihood": 3,
+        "impact": 3,
+        "ale_band": "10K-100K"
+      },
       "treatment": "mitigate",
       "treatment_owner": "demo-operator",
       "residual_score": { "likelihood": 2, "impact": 3, "ale_band": "1K-10K" },
