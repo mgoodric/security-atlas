@@ -11,7 +11,14 @@ version: 0.1.0
 
 # appVersion tracks the security-atlas platform release the chart's default
 # image tags point at. Keep in sync with the published container tags.
-appVersion: "0.1.0"
+#
+# Slice 072 bumped this to 1.5.0 to match the released atlas binary. The
+# chart's _helpers.tpl already wires this into the standard
+# `app.kubernetes.io/version` label on every rendered Deployment / Pod —
+# so the K8s surface, the OCI image annotation, the Go binary's
+# /v1/version response, and the UI footer all report the same value
+# (single source of truth: Go ldflags at build time).
+appVersion: "1.5.0"
 
 home: https://github.com/mgoodric/security-atlas
 sources:

@@ -113,6 +113,24 @@ just build-go
 
 For a connector-driven walkthrough (AWS S3 encryption posture, GitHub branch-protection, osquery host posture), see [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md).
 
+### Verifying your install
+
+The build version, commit, and build time are baked into the binary at release time and surface in three places. All three report the same value (single source of truth: Go ldflags).
+
+```sh
+# Server binary — JSON, suitable for scripts
+curl -s http://localhost:8080/v1/version
+
+# CLI — human-readable banner
+./bin/atlas-cli version
+
+# Docker image — OCI image annotations
+docker inspect ghcr.io/mgoodric/security-atlas:latest \
+  --format '{{ index .Config.Labels "org.opencontainers.image.version" }}'
+```
+
+The same version also renders in the bottom-right of every page in the web UI — click the trigger to expand a small panel showing `commit`, `build_time`, and `go_version`. No phone-home; no "check for updates" — the value is read once at app boot and cached for the session.
+
 ---
 
 ## Documentation

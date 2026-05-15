@@ -8,6 +8,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { VersionFooter } from "@/components/version-footer";
 
 import { signIn } from "./actions";
 
@@ -58,6 +59,10 @@ export default async function LoginPage({
           </form>
         </CardContent>
       </Card>
+      {/* Slice 072: VersionFooter renders fixed-bottom-right and does
+        not affect the centered Card layout. Lets self-hosted operators
+        verify what they're running before sign-in. */}
+      <VersionFooter />
     </div>
   );
 }

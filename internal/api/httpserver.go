@@ -102,7 +102,12 @@ func (s *Server) httpHandler() http.Handler {
 	// bundle's healthcheck and the atlas-bootstrap readiness poll both hit
 	// it with no credential. (The /health *route* is registered below,
 	// after every .Use() — chi requires all middleware before any route.)
-	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health"))
+	// Slice 072: /v1/version is added to the bearer-exempt set. The
+	// endpoint is intentionally public — it returns metadata about the
+	// binary (Version/Commit/BuildTime/GoVersion), NOT tenant data. The
+	// auth-bypass is documented at api.NewVersionHandler. Same precedent
+	// as /health from slice 037.
+	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health", "/v1/version"))
 	// Slice 033: lift the authenticated credential's tenant id onto the
 	// request context so every downstream handler — and every database
 	// transaction it opens — runs under the right `app.current_tenant`
@@ -117,7 +122,9 @@ func (s *Server) httpHandler() http.Handler {
 	// Exempt prefixes mirror the bearer-auth exempt set; /health is
 	// added because a liveness probe shouldn't require credentials.
 	if s.authzEngine != nil {
-		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health"))
+		// Slice 072: /v1/version is added to the authz-exempt set for the
+		// same reason as /health — a metadata probe shouldn't reach OPA.
+		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/v1/version"))
 	}
 	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
 	// tenancy / authz so the cache lives inside the same request-context
@@ -136,6 +143,15 @@ func (s *Server) httpHandler() http.Handler {
 	// panic. It is bearer- and authz-exempt via the exemption lists
 	// passed to the middleware above, so it answers with no credential.
 	root.Get("/health", s.handleHealth)
+	// Slice 072: GET /v1/version. Public metadata endpoint — bearer- and
+	// authz-exempt above. Registered directly on the root chi router (not
+	// via a second Mount("/")) to avoid the double-mount panic. Only
+	// mounted when cmd/atlas has wired in Config.VersionFieldsFn; unit
+	// servers that leave it nil simply don't get the route, which is fine
+	// for slice-013-style fallback paths that don't need the endpoint.
+	if s.versionFieldsFn != nil {
+		root.Method(http.MethodGet, "/v1/version", NewVersionHandler(s.versionFieldsFn))
+	}
 	// Slice 008: UCF graph traversal HTTP API. Three read endpoints
 	// query the requirement-anchor-control graph through the SCF spine
 	// (canvas §3 / Plans/UCF_GRAPH_MODEL.md). Routes are appended

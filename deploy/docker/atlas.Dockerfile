@@ -31,11 +31,19 @@ COPY . .
 
 # CGO_ENABLED=0 → static binary, no libc dependency, runs on distroless/static.
 # -trimpath + -ldflags "-s -w" → smaller, reproducible binary.
+#
+# Slice 072: bake all three version fields into the binary so
+# GET /v1/version reports build metadata. Single source of truth for the
+# JSON endpoint, the atlas-cli `version` subcommand, the human-readable
+# banner, AND the OCI image labels below.
 ARG VERSION=dev
+ARG COMMIT=none
+ARG BUILD_TIME=unknown
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux \
-    go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+    go build -trimpath \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${BUILD_TIME}" \
     -o /out/atlas ./cmd/atlas
 
 # ----- Stage 2: runtime -----
@@ -44,7 +52,23 @@ FROM gcr.io/distroless/static-debian12:nonroot
 # distroless/static-debian12:nonroot runs as uid 65532 (no root, no shell).
 COPY --from=builder /out/atlas /usr/local/bin/atlas
 
-# gRPC (Evidence + Admin + Connectors) and HTTP (anchors/frameworks + /health).
+# Slice 072: OCI image annotations. Standard names from
+# https://github.com/opencontainers/image-spec/blob/main/annotations.md
+# so every registry browser and image scanner reads them without bespoke
+# knowledge of security-atlas. Same values that get baked into the
+# binary's ldflags above — single source of truth.
+ARG VERSION
+ARG COMMIT
+ARG BUILD_TIME
+LABEL org.opencontainers.image.title="security-atlas"
+LABEL org.opencontainers.image.description="Open-source GRC platform — control graph + evidence pipeline"
+LABEL org.opencontainers.image.source="https://github.com/mgoodric/security-atlas"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.revision="${COMMIT}"
+LABEL org.opencontainers.image.created="${BUILD_TIME}"
+
+# gRPC (Evidence + Admin + Connectors) and HTTP (anchors/frameworks + /health + /v1/version).
 EXPOSE 8080 50051
 
 ENTRYPOINT ["/usr/local/bin/atlas"]

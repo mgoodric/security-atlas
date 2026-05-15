@@ -188,6 +188,11 @@ func main() {
 		SchemaRegistry:   schemaSvc,
 		IngestService:    ingestSvc,
 		EvidencePushRate: 100, // 100 records/sec default per EVIDENCE_SDK §4.6
+		// Slice 072: wire the build-time-injected version metadata
+		// callback into the HTTP server. Mounts GET /v1/version as a
+		// public, no-auth metadata endpoint (see api.NewVersionHandler
+		// for the documented intent).
+		VersionFieldsFn: versionFields,
 	}
 	if streamPub != nil {
 		cfg.EvidencePublisher = streamPub
