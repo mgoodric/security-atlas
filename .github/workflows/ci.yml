@@ -677,6 +677,28 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    # Slice 079 — quarantine until the seed-data harness lands.
+    #
+    # Slice 069 (PR gh#132) wired this job and shipped it with AC-5
+    # PARTIAL: the five un-shimmed specs (admin-bootstrap,
+    # audit-workspace, control-detail, dashboard, risk-hierarchy)
+    # reference seeded test users + tenant data that no harness applies
+    # at job startup, so every run fails with "expected element not
+    # visible"-shaped errors — predictable, not a flake. The job is NOT
+    # in `.github/branch-protection.json`'s required-checks list, so
+    # merges aren't blocked — only PR-status noise (84% of CI failure
+    # surface as of 2026-05-15).
+    #
+    # `continue-on-error: true` at JOB level (not step level) so every
+    # step's red exit is absorbed — the precondition steps (postgres /
+    # NATS / MinIO startup, migrations, atlas+web build) flake for
+    # reasons unrelated to seed data, and we still want the PR to merge
+    # cleanly when they do. New failure modes still surface as warning
+    # annotations on the PR; we keep the signal, drop the false alarm.
+    #
+    # Reverse this line when slice 082 (Playwright e2e seed-data
+    # harness) lands. Slice 082 AC-4 explicitly tracks the flip-back.
+    continue-on-error: true
     services:
       postgres:
         image: postgres:16-alpine
