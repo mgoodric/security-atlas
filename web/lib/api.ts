@@ -104,6 +104,34 @@ export async function getAnchorRequirements(
   return (await res.json()) as AnchorDetail;
 }
 
+// ----- Slice 098: /controls list view (browser-side BFF call) -----
+//
+// The page at `web/app/(authed)/controls/page.tsx` calls this from the
+// browser; the BFF handler at `web/app/api/controls/route.ts` is the
+// server-side counterpart that injects the bearer cookie. Per slice
+// 098 §spillover, per-anchor state is NOT joined in v1 — spillover 104
+// adds the backend `?include=state` extension. Today the BFF returns
+// the anchor catalog only.
+
+export type ControlsListResponse = {
+  anchors: Anchor[];
+};
+
+export async function fetchControlsList(): Promise<ControlsListResponse> {
+  const res = await fetch(`/api/controls`);
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // body not JSON — keep the status line
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as ControlsListResponse;
+}
+
 // ----- Slice 024: vendor lite -----
 
 export type VendorCriticality = "low" | "medium" | "high";
