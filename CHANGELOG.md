@@ -9,6 +9,23 @@ Conventional-Commit messages. Each entry links to its slice issue, the
 merging PR, and the squash-merge commit. For richer per-slice narrative
 see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
+## [1.8.0](https://github.com/mgoodric/security-atlas/compare/v1.7.0...v1.8.0) (2026-05-16)
+
+
+### Features
+
+* **frontend:** compliance calendar with ICS export ([#094](https://github.com/mgoodric/security-atlas/issues/094)) ([#218](https://github.com/mgoodric/security-atlas/issues/218)) ([6c9c9ab](https://github.com/mgoodric/security-atlas/commit/6c9c9ab07d73ef6f5fdecdecacc0a817468367b3))
+* **frontend:** metrics dashboard + cascade-tree view ([#097](https://github.com/mgoodric/security-atlas/issues/097)) ([#214](https://github.com/mgoodric/security-atlas/issues/214)) ([6324060](https://github.com/mgoodric/security-atlas/commit/6324060209bc59690ac44b48474c1a08f8a5738c))
+* **frontend:** mockups for 6 missing top-level pages ([#093](https://github.com/mgoodric/security-atlas/issues/093)) ([#215](https://github.com/mgoodric/security-atlas/issues/215)) ([de45de0](https://github.com/mgoodric/security-atlas/commit/de45de0676f30c040a6edc17ecdf3c1892c86662))
+* **frontend:** root-route redirect replaces create-next-app template ([#091](https://github.com/mgoodric/security-atlas/issues/091)) ([#210](https://github.com/mgoodric/security-atlas/issues/210)) ([9db6bec](https://github.com/mgoodric/security-atlas/commit/9db6beccb561c99813d8589c0273034baa6125ed))
+* **infra:** pre-push hook adds npm run lint -w web ([#083](https://github.com/mgoodric/security-atlas/issues/083)) ([#209](https://github.com/mgoodric/security-atlas/issues/209)) ([08a69ef](https://github.com/mgoodric/security-atlas/commit/08a69efa19445afb9a71d841b6a17a4a75c4e0ee))
+* **skills:** add project-local /idea-to-slice skill (with required threat-model phase) ([#190](https://github.com/mgoodric/security-atlas/issues/190)) ([86ae4d9](https://github.com/mgoodric/security-atlas/commit/86ae4d94983c24ffe1f9880f36a6a540ace1530c))
+
+
+### Bug Fixes
+
+* **infra:** version display end-to-end (build-args + middleware exempt) ([#092](https://github.com/mgoodric/security-atlas/issues/092)) ([#208](https://github.com/mgoodric/security-atlas/issues/208)) ([5637b53](https://github.com/mgoodric/security-atlas/commit/5637b535e262696a6cbd48279fb05d99d964daa4))
+
 ## [1.7.0](https://github.com/mgoodric/security-atlas/compare/v1.6.0...v1.7.0) (2026-05-16)
 
 
