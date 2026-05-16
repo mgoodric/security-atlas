@@ -875,9 +875,13 @@ jobs:
           go-version: "1.26"
           cache: true
       # Pinned version (not @latest) for reproducibility. Bump in a
-      # dedicated PR so the diff is auditable. See decisions log D3.
+      # dedicated PR so the diff is auditable. See slice 089 decisions
+      # log D3 + slice 090 (which bumped v1.1.3 → v1.1.4 because the
+      # v1.1.3 pin's transitive x/tools@v0.23.0 dependency contained a
+      # constant-folding pattern Go 1.26 rejects — silent install
+      # failure on every PR until the bump).
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.3
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
       # govulncheck exits non-zero ONLY when a vulnerability is reachable
       # from the analyzed binary's call graph — call-graph filtering is
       # the highest signal-to-noise property of the tool. There is no
