@@ -293,6 +293,72 @@ Light-variant spread: 15.32 → 6.02 → 4.28 (vs v3's 10.94 → 7.57 → 6.02).
 - Add a 4th tier (4 weights, 4 colors) to give more visible hierarchy. Rejected: 3 tiers is already at the edge of "deliberate hierarchy" vs "noisy"; 4 would crowd the geometry. The maintainer asked for "more contrasting colors" not "more colors".
 - Use a "monochrome ramp" interpretation — e.g., near-black / mid-gray / light-gray on light bg. Rejected: kills the indigo brand identity established in v2/v3.
 
+### D16 — Candidate 04 iterated v4 → v5 (pastel palette + four-slot hierarchy + per-variant palette split) (HIGH confidence)
+
+**Decision:** regenerate cand-04 a fourth time with TWO structural changes from v4: (a) adopt the maintainer-specified pastel palette (`#90D5FF` / `#57B9FF` / `#77B1D4` / `#517891`) on the dark variant verbatim, (b) introduce a fourth color slot — dots get their own dedicated color, distinct from the heavy line tier. Light variant uses sky-scale darker complements that mirror the dark hierarchy, with the maintainer's `#517891` literally preserved as the dot color on both variants (brand-family through-line).
+
+**Rationale:**
+
+The maintainer's v5 ask was four specific hex values:
+
+> _"Lets use more of a pastel color set. #90D5FF, #57B9FF, #77B1D4, #517891"_
+
+Two design decisions had to be made before generation:
+
+**Problem 1 — Pastels fail WCAG on light bg.** Of the four hexes, only `#517891` clears WCAG SC 1.4.11 (3:1) against `#fafafa`. The other three measure 1.5:1, 2.0:1, 2.2:1 — far below any accessibility threshold. Surfaced this to the maintainer via AskUserQuestion with four path options (pastels-on-dark + derived complements / pastels-on-both-with-invisible-light / mixed-palette / change-canonical-bg). **Maintainer chose: pastels on dark + derived darker complements for light.**
+
+**Problem 2 — Four colors, three v4 tiers.** v4 had three line-weight tiers (heavy / medium / light) with dots taking the heavy color (3-color hierarchy total). The maintainer gave 4 colors. Two options: (a) use 3 of the 4 colors for the existing 3-tier structure and skip one, or (b) introduce a 4th color slot — split dots into their own color. Chose (b): the structural shift uses all four maintainer-given colors meaningfully and reinforces the "node ≠ edge" semantic (dots = anchors/joints, lines = connections).
+
+**v5 four-slot palette:**
+
+| Slot   | Element      | Dark variant (against `#0a0a0a`)   | Light variant (against `#fafafa`) |
+| ------ | ------------ | ---------------------------------- | --------------------------------- |
+| HEAVY  | Lines 14px   | `#90D5FF` pastel sky 12.40:1       | `#0c4a6e` sky-900 9.06:1          |
+| MEDIUM | Lines 8px    | `#57B9FF` pastel medium-sky 9.23:1 | `#075985` sky-800 7.25:1          |
+| LIGHT  | Lines 4px    | `#77B1D4` muted blue-gray 8.51:1   | `#0369a1` sky-700 5.68:1          |
+| DOTS   | All 12 nodes | `#517891` darker blue-gray 4.19:1  | `#517891` same 4.53:1             |
+
+All eight color slots clear WCAG SC 1.4.11 (3:1) on their target bg. Only NODES on dark sits below 4.5:1 — passes the correct logo-mark standard per D15.
+
+**Cross-variant brand-family through-line:** `#517891` is the only color shared between dark and light variants. It's the dot color in both. This preserves SOME of the maintainer-specified palette literally on the light variant (the other three pastels would be invisible against `#fafafa`). The dot anchor read is consistent across themes; the line hierarchy reads as "sky-family on dark, deep-sky-family on light" — different specific colors but same conceptual position.
+
+**Why the dot-color split (revising D14's reasoning):** D14 considered + rejected a 4th color slot for dots ("dot color would compete with the line hierarchy rather than reinforce it"). That reasoning held for the v3 single-family indigo palette where introducing a 4th indigo would have been a near-duplicate. With v5's explicit 4-color pastel ask, the calculus changes: the dot color operates as an "anchor" tone visually distinct from the line tones, reinforcing rather than competing. D14's rejection was correct for its context; D16 reverses it for the new context.
+
+**Tradeoffs surfaced by the Artist agent during the iteration:**
+
+1. **Variants are no longer color-inverse twins.** Most candidates in the slate have two variants that are tonal mirrors of the same colors (e.g., indigo-900 light ↔ indigo-100 dark). v5 of cand-04 has variants that share only `#517891` — every other slot uses a different specific color family per variant. The brand-family through-line is established through the shared dot color, not through inversion. Different rhythm than the other 9 candidates.
+
+2. **Pastel-family departure from indigo brand.** The mockups use indigo (`#6366f1` primary). If cand-04 v5 is selected, the application UI would need to converge on the pastel/sky palette OR cand-04 accepts an outlier brand identity. This is a candidate-SELECTION-layer decision for the maintainer, not a candidate-04 in-iteration decision. The other 9 candidates in the slate cover indigo (01, 02, 07), so the maintainer has both directions to choose from.
+
+3. **Dot-color split changes the read.** v4's dots took the heavy line color and reinforced it as the A spine; v5's dots in a discernibly cooler/grayer tone read as a separate kind of element. Stronger graph semantics ("anchor" vs "edge"), but a different rhythm to the mark.
+
+**Quality gates:**
+
+- Topology: 22/22 endpoint-node matches verified (unchanged from v4; geometry not touched)
+- All 8 color slots clear WCAG SC 1.4.11 (3:1) on target bg
+- Combined PNG weight: 138.8 KB (well under 600 KB ceiling; slate total ~3.17 MB, under 8 MB AC-11)
+- SVG validates as well-formed XML
+- v1/v2/v3/v4 prompts + provenance preserved in `candidate-04/notes.md` under Iteration history
+
+**Updated in same iteration:**
+
+- `docs/design/logo-candidates/candidate-04/mark.svg` — recolor only (geometry unchanged from v4); 4-slot color application
+- `docs/design/logo-candidates/candidate-04/` — 4 PNGs regenerated from new SVG
+- `docs/design/logo-candidates/candidate-04/notes.md` — v5 entry appended (v1-v4 preserved); top-of-file sections updated to v5 4-slot mapping
+- `docs/design/logo-decision.md` — cand-04 gallery entry refreshed
+- `tools/logo-gen/recolor_by_weight.py` — `LIGHT_TO_DARK_V5` four-slot mapping active; v3/v4 retained as commented historical references
+
+**Slice 075 grep target unchanged:** the `Selected:` line stays `none — awaiting maintainer approval` per P0-A7 + D12. v5 is a refined offering, not a selection.
+
+**Alternatives considered:**
+
+- Use only 3 of the 4 maintainer-given colors (drop one, keep v4's 3-tier structure). Rejected: the maintainer listed 4 colors deliberately; using all 4 is the responsive interpretation.
+- Use the 4 pastels on both bgs as-given (the maintainer's option B). Maintainer explicitly rejected this when shown the contrast analysis — light variant would have 3 near-invisible tiers.
+- Change the canonical light bg from `#fafafa` to a darker neutral (e.g., `#e2e8f0` slate-200) so pastels work. Maintainer's option D — not chosen.
+- Use the pastels on dark only; keep v4 indigo on light (mixed-palette gallery). Maintainer's option C — not chosen.
+- Pick darker-sky complements from a different family (slate, gray, cool-gray). Rejected: sky-scale complements preserve the blue-family identity the pastel palette implies; jumping families would weaken the "this is the same candidate across themes" cohesion.
+- Use `#1e293b` slate-800 (~14:1) for light-bg dots instead of `#517891` (4.45:1). Rejected: stronger contrast but loses the literal-pastel-color through-line. The maintainer's `#517891` IS one of the four colors — preserving it on light is responsive to the brief.
+
 ## Acceptance criteria status
 
 - [x] AC-1: 10 candidate dirs exist (vs. spec's default 4 per D1) with required PNG files

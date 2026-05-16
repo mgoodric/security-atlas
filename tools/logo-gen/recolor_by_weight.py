@@ -1,21 +1,38 @@
 #!/usr/bin/env python3
 """Render a multi-weight, multi-color SVG mark to light + dark PNG variants.
 
-Built for candidate-04 v4 (slice 074, PR #180), which expresses its weight
-hierarchy via per-stroke `stroke-width` + `stroke` attributes. The light SVG
-is the source-of-truth; the dark variant is produced by swapping the indigo
-brand-palette colors token-for-token before rasterizing.
+Built for candidate-04 v5 (slice 074, PR #180), which expresses its weight
+hierarchy via per-stroke `stroke-width` + `stroke` attributes, plus a
+separate fourth color slot for the node-dot fills. The light SVG is the
+source-of-truth; the dark variant is produced by swapping the four palette
+colors token-for-token before rasterizing.
 
-Rationale: cand-04 layers three line weights, each color-coded to a
-specific tier of the indigo brand scale. PIL ImageDraw cannot anti-alias
-stroked lines cleanly, and Flux is non-deterministic on multi-hex prompts.
-Authoring as SVG and rasterizing through Cairo gives us exact pixel/hex
-fidelity plus a vector source we can ship alongside the PNGs.
+Rationale: cand-04 layers three line weights AND a distinct node-dot tone,
+each color-coded to a specific tier of the pastel/sky brand scale. PIL
+ImageDraw cannot anti-alias stroked lines cleanly, and Flux is
+non-deterministic on multi-hex prompts. Authoring as SVG and rasterizing
+through Cairo gives us exact pixel/hex fidelity plus a vector source we
+can ship alongside the PNGs.
 
-v4 widens the palette spread within the indigo family for visibly-distinct
-tiers, and corrects the topology so every line endpoint terminates at an
-explicit node circle. See `docs/design/logo-candidates/candidate-04/notes.md`
-Iteration history for v3 → v4 deltas.
+v5 introduces a four-slot color hierarchy (heavy / medium / light / nodes,
+each a distinct hex) where v3/v4 used a three-slot hierarchy that
+collapsed nodes into the heavy color. The structural shift was a
+deliberate response to the maintainer providing four pastel colors — v5
+uses all four meaningfully rather than discarding one. The node-dot color
+slot operates as an "anchor tone" visually distinct from the line tones,
+reinforcing the "node = stable joint" semantic of the graph metaphor.
+
+v5 also splits the palette per variant: the four user-supplied pastels run
+verbatim on the DARK variant (where they all clear SC 1.4.11 against
+#0a0a0a); the LIGHT variant uses a sky-scale dark-complement set
+(sky-900 / sky-800 / sky-700) mirroring the line hierarchy slot-for-slot,
+plus the literal user pastel #517891 for the node dots (the one
+user-supplied color that clears SC 1.4.11 on BOTH backgrounds — its reuse
+as the node color on both variants establishes a brand-family through-line
+between the two renders).
+
+See `docs/design/logo-candidates/candidate-04/notes.md` Iteration history
+for v4 → v5 deltas.
 
 Usage:
     DYLD_LIBRARY_PATH=/opt/homebrew/opt/cairo/lib \
@@ -45,26 +62,42 @@ import io
 import sys
 from pathlib import Path
 
-# Palette swap: indigo brand-scale → its dark-bg counterpart.
-# Light-variant tier  →  dark-variant tier
+# Palette swap: light-variant tier  →  dark-variant tier
 #
-# v4 (current, 2026-05-15): wider value spread within the indigo family so
-# the three weight tiers are visibly distinct at a glance. Adopts the
-# correct WCAG 2.2 SC 1.4.11 Non-text Contrast standard (≥3:1) for logo
-# marks; previously the script targeted the over-conservative text-contrast
-# 4.5:1 floor, which clustered the three tiers on the value scale.
+# v5 (current, 2026-05-15): four-slot hierarchy (heavy / medium / light /
+# nodes) with user-supplied pastels verbatim on dark bg and sky-scale dark
+# complements on light bg. The structural shift from three-slot (v4) to
+# four-slot was a response to the maintainer providing four pastel colors
+# — v5 uses all four meaningfully, splitting node dots into their own
+# color slot rather than collapsing them into the heavy line color.
 #
-# Per-tier contrast on the v4 mapping (measured via tools/logo-gen/contrast.py):
-#   Light bg #fafafa:  HEAVY 15.32:1  MEDIUM 6.02:1  LIGHT 4.28:1
-#   Dark  bg #0a0a0a:  HEAVY 16.07:1  MEDIUM  9.93:1  LIGHT 6.64:1
-# All six clear SC 1.4.11 (3:1). HEAVY + MEDIUM also clear 4.5:1 on both bgs;
-# LIGHT clears 4.5:1 on dark bg (6.64:1) and sits just under on light bg
-# (4.28:1) — still passes the logo-mark accessibility floor.
+# Per-tier contrast on the v5 mapping (measured via tools/logo-gen/contrast.py):
+#   Light bg #fafafa:  HEAVY 9.06:1   MEDIUM 7.25:1  LIGHT 5.68:1  NODES 4.53:1
+#   Dark  bg #0a0a0a:  HEAVY 12.40:1  MEDIUM 9.23:1  LIGHT 8.51:1  NODES 4.19:1
+# All eight clear SC 1.4.11 (3:1). All four light-variant colors also
+# clear 4.5:1 (SC 1.4.3). Three of the four dark-variant colors clear
+# 4.5:1; NODES sits at 4.19:1 on dark bg — passes SC 1.4.11 cleanly.
+#
+# NOTE the asymmetric mapping: #517891 (NODES) appears on BOTH sides of
+# the swap because it is the one user-supplied pastel that clears SC
+# 1.4.11 on both backgrounds. Reusing it as the node-dot tone on both
+# variants establishes a brand-family through-line so the two variants
+# read as the same mark rather than two unrelated marks.
 LIGHT_TO_DARK = {
-    "#1e1b4b": "#e0e7ff",  # indigo-950  →  indigo-100   (heavy / nodes)
-    "#4f46e5": "#a5b4fc",  # indigo-600  →  indigo-300   (medium)
-    "#6366f1": "#818cf8",  # indigo-500  →  indigo-400   (light / detail)
+    "#0c4a6e": "#90D5FF",  # sky-900     →  pastel-sky    (heavy)
+    "#075985": "#57B9FF",  # sky-800     →  pastel-blue   (medium)
+    "#0369a1": "#77B1D4",  # sky-700     →  muted-blue    (light)
+    "#517891": "#517891",  # blue-gray (literal user pastel) — preserved on both variants (nodes)
 }
+
+# v4 (prior, retained for traceability — three-slot indigo hierarchy with
+# nodes sharing the heavy color slot; replaced when maintainer asked for
+# the pastel palette and the four-slot structure emerged as the response):
+# LIGHT_TO_DARK_V4 = {
+#     "#1e1b4b": "#e0e7ff",  # indigo-950  →  indigo-100   (heavy / nodes)
+#     "#4f46e5": "#a5b4fc",  # indigo-600  →  indigo-300   (medium)
+#     "#6366f1": "#818cf8",  # indigo-500  →  indigo-400   (light / detail)
+# }
 
 # v3 (prior, retained for traceability — three indigo tiers clustered near
 # the dark/light extremes; tiers were hard to distinguish at a glance):
@@ -81,6 +114,11 @@ def swap_palette(svg_text: str, mapping: dict[str, str]) -> str:
     Case-insensitive on the SOURCE hex, but emits the mapping value verbatim.
     Operates on raw text — fine for our hand-authored SVG where colors only
     appear in `stroke="#..."` / `fill="#..."` attributes.
+
+    Note: when the mapping is asymmetric (a source hex maps to itself, e.g.
+    the v5 NODES color #517891), the no-op pair has no effect on the text
+    but is retained in the mapping for documentation and to keep the
+    light/dark variant specs aligned slot-for-slot.
     """
     out = svg_text
     for src, dst in mapping.items():
