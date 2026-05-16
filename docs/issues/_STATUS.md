@@ -3,7 +3,21 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-16 (slice 090 → `in-review` · govulncheck pin v1.1.3 → v1.1.4 for Go 1.26 compat)
+**Last reconciled:** 2026-05-16 (slice 090 merged · govulncheck v1.1.4 = SUCCESS · CI signal restored)
+
+## Drift detected — 2026-05-16 (slice 090 merged · govulncheck pin bump = outcome a)
+
+Slice 090 (govulncheck pin v1.1.3 → v1.1.4) merged at `d26f052` (PR #192).
+
+**Outcome a (slice 090 D2 / AC-3):** `v1.1.4` installs cleanly under Go 1.26 and the scan exits SUCCESS — no reachable HIGH/CRITICAL vulnerabilities in the current Go dependency graph. The `Go · govulncheck` CI job now produces a meaningful green signal on every PR (was silently red since slice 089 shipped). The Q2 audit's MEDIUM finding remediation is now fully functional, not just structurally present.
+
+This closes the post-slice-089 follow-on. D2 in the decisions log can be considered HIGH-confidence (was HIGH-pending-CI-observation at filing).
+
+| Row | Transition             | Evidence                                                                                                                                                              |
+| --- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 090 | `in-review` → `merged` | PR #192 squashed at `d26f052` · `v1.1.4` install + scan SUCCESS on the PR's own CI run · no reachable CVEs · Playwright failure is post-079 quarantine (non-blocking) |
+
+**Counts delta:** in-review −1 · merged +1 (79 → 80).
 
 ## Drift detected — 2026-05-16 (slice 090 → `in-review` · govulncheck pin bump)
 
@@ -1478,8 +1492,8 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 
 | Status        | Count  |
 | ------------- | ------ |
-| `merged`      | 79     |
-| `in-review`   | 1      |
+| `merged`      | 80     |
+| `in-review`   | 0      |
 | `in-progress` | 3      |
 | `ready`       | 4      |
 | `blocked`     | 0      |
@@ -1593,7 +1607,7 @@ Legal values (use exactly these strings):
 | 087 | Security HTTP headers middleware                                    | `merged`    | infra/087-security-http-headers-middleware              | gh#171 | 2026-05-15 | 2026-05-15 | batch 31 · AFK · ~0.5d · **MEDIUM-HIGH severity** (from slice 085 audit) · new `internal/api/securityheaders` package · HSTS / X-Content-Type-Options / X-Frame-Options / Referrer-Policy / CSP applied as first chi middleware before bearer-auth · CSP ships report-only (Next.js inline-script hydration would violate enforced `script-src 'self'`); enforcement trajectory in decisions log §D1 · README ## Security one-line · 7 unit tests + 3 integration tests + Playwright spec · commit `f7afbec`                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 088 | CLI `http.Client` explicit timeout                                  | `merged`    | infra/088-cli-http-client-timeout                       | gh#173 | 2026-05-15 | 2026-05-15 | batch 31 · AFK · ~0.25d · **MEDIUM severity** (from slice 085 audit) · `cmd/atlas-cli/cmd_features.go:181` + `cmd/atlas-cli/cmd_credentials.go:148` no longer use `http.DefaultClient.Do` (no timeout) · new `cmdhttp.Client(timeout)` constructor + AC-4 grep gate clean in `cmd/atlas-cli/` · README ## Security one-line · 100% test coverage on cmdhttp · coverage-thresholds floor 98 · 7 decisions D1-D7 high-confidence · commit `8304071`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 089 | Dependency vulnerability scanning (govulncheck + npm audit + Trivy) | `merged`    | infra/089-dependency-vulnerability-scanning             | gh#177 | 2026-05-15 | 2026-05-15 | iter 8/8 solo · AFK · ~0.5d · **MEDIUM severity** (from slice 085 audit) · 3 new CI jobs (`Go · govulncheck` + `Frontend · npm audit` + `Container · Trivy scan`) · slice-069 stub-job pattern (informational, NOT required-checks initially) · complements Dependabot · pinned `govulncheck@v1.1.3` + `aquasecurity/trivy-action@0.28.0` · HIGH+CRITICAL unified threshold · 7 decisions D1-D7 high-confidence · branch-protection.json untouched (P0-A1 verified) · AC-8 first-run Trivy action-pin hot-fix in same PR · **closes Q2 audit campaign 5/5** · commit `9baeb7d`                                                                                                                                                                                                                                                                                                                                                                                    |
-| 090 | Bump `govulncheck` pin for Go 1.26 toolchain compatibility          | `in-review` | backlog/090-govulncheck-pin                             | —      | 2026-05-16 | —          | AFK · ~0.25d · pin `@v1.1.3` → `@v1.1.4` (the only newer stable release on `golang/vuln`; v1.2.x doesn't exist) · inline-iteration solo · 4 decisions D1-D4 (3 HIGH · 1 HIGH-pending-CI-observation) · slice 089's AC-8 entry already corrected in slice 090's original filing PR (#179) · v1.1.4 install + scan outcome observed at PR open (3 paths: green / red-with-findings / red-with-install-error → follow-on slice 095 if (c))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 090 | Bump `govulncheck` pin for Go 1.26 toolchain compatibility          | `merged`    | backlog/090-govulncheck-pin                             | gh#192 | 2026-05-16 | 2026-05-16 | AFK · ~0.25d · pin `@v1.1.3` → `@v1.1.4` (the only newer stable release on `golang/vuln`; v1.2.x doesn't exist) · inline-iteration solo · 4 decisions D1-D4 (all HIGH) · slice 089's AC-8 entry already corrected in slice 090's original filing PR (#179) · **v1.1.4 install + scan = SUCCESS (outcome a)** — govulncheck runs cleanly under Go 1.26, no reachable HIGH/CRITICAL vulns in current Go deps · `Go · govulncheck` CI job now green on every PR (was silently red since slice 089) · commit `d26f052`                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 ## Ready set right now
 
