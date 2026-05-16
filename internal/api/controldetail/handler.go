@@ -30,6 +30,8 @@ func New(store *Store) *Handler { return &Handler{store: store} }
 // placeholders to (the frontend re-pointing is the documented follow-up).
 
 // evidenceWire is the AC-1 row shape: one evidence-ledger record.
+// Slice 106 adds the `Result` field — the column has always existed on
+// `evidence_records.result` but the slice-064 wire shape omitted it.
 type evidenceWire struct {
 	EvidenceID   string          `json:"evidence_id"`
 	EvidenceKind *string         `json:"evidence_kind"`
@@ -37,6 +39,7 @@ type evidenceWire struct {
 	Source       json.RawMessage `json:"source"`
 	ContentHash  string          `json:"content_hash"`
 	ScopeCell    *string         `json:"scope_cell"`
+	Result       string          `json:"result"`
 }
 
 // policyWire is the AC-2 row shape: one linked policy.
@@ -67,19 +70,31 @@ type historyWire struct {
 
 // ===== AC-1: GET /v1/evidence?control_id=<id> =====
 
-// Evidence handles GET /v1/evidence?control_id=<id> — paginated
-// evidence-ledger records resolved for one control.
+// Evidence handles GET /v1/evidence[?control_id=<id>] — paginated
+// evidence-ledger records. Slice 106 made control_id OPTIONAL: when
+// absent the handler dispatches to the tenant-wide ledger window.
 //
 // Query params:
-//   - control_id  (required) the control UUID. 400 if absent or non-UUID.
-//   - since/until (optional) RFC3339 observed_at window. Default window is
-//     the last 30 days (AC-1).
-//   - cursor      (optional) opaque keyset cursor. Omit for the first page.
-//   - limit       (optional) page size, default 50, max 200.
+//   - control_id        (optional, slice 106) the control UUID. 400 if
+//     present but non-UUID. When absent the handler returns the tenant-
+//     wide ledger window (RLS continues to scope the tenant).
+//   - kind              (optional, slice 106) narrows to one evidence_kind.
+//   - result            (optional, slice 106) narrows to one evidence_result
+//     enum value (pass/fail/na/inconclusive). 400 on an invalid value.
+//   - source_actor_type (optional, slice 106) JSONB predicate on
+//     source_attribution->>'actor_type'.
+//   - source_actor_id   (optional, slice 106) JSONB predicate on
+//     source_attribution->>'actor_id'.
+//   - since/until       (optional) RFC3339 observed_at window. Default is
+//     the last 30 days.
+//   - cursor            (optional) opaque keyset cursor.
+//   - limit             (optional) page size, default 50, max 200.
 //
-// Resolution reuses slice 012's control->evidence path: the underlying query
-// matches (control_id = $ OR control_ref = $). No tenant_id is read from the
-// query or body — the tenant comes solely from the slice-033 middleware.
+// Per-control resolution reuses slice 012's control->evidence path
+// (control_id = $ OR control_ref = $). Tenant-wide resolution is over a
+// tenant_id-scoped predicate plus optional filters. No tenant_id is ever
+// read from the client — the tenant comes solely from the slice-033
+// middleware (anti-criterion P0-A4).
 func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 	if !requireControlRead(w, r) {
 		return
@@ -90,39 +105,84 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rawControlID := r.URL.Query().Get("control_id")
-	if rawControlID == "" {
-		writeError(w, http.StatusBadRequest, "control_id query parameter is required")
-		return
+	q := r.URL.Query()
+
+	// control_id is OPTIONAL post-slice-106. When present, it must parse.
+	var (
+		controlID    uuid.UUID
+		hasControlID bool
+	)
+	if raw := q.Get("control_id"); raw != "" {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "control_id must be a uuid")
+			return
+		}
+		controlID = parsed
+		hasControlID = true
 	}
-	controlID, err := uuid.Parse(rawControlID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "control_id must be a uuid")
+
+	// ?result= must be one of the evidence_result enum values when present.
+	// Validated BEFORE the SQL round-trip so a typo is a clean 400.
+	resultFilter := q.Get("result")
+	if !isValidResult(resultFilter) {
+		writeError(w, http.StatusBadRequest, "result must be one of: pass, fail, na, inconclusive")
 		return
 	}
 
 	now := time.Now().UTC()
-	since, err := parseRFC3339(r.URL.Query().Get("since"), now.Add(-defaultWindow))
+	since, err := parseRFC3339(q.Get("since"), now.Add(-defaultWindow))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "since "+errBadTime.Error())
 		return
 	}
-	until, err := parseRFC3339(r.URL.Query().Get("until"), now)
+	until, err := parseRFC3339(q.Get("until"), now)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "until "+errBadTime.Error())
 		return
 	}
-	cursor, err := decodeCursor(r.URL.Query().Get("cursor"))
+	cursor, err := decodeCursor(q.Get("cursor"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	pageRows, err := parseLimit(r.URL.Query().Get("limit"))
+	pageRows, err := parseLimit(q.Get("limit"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
+	if !hasControlID {
+		// Slice 106 tenant-wide path.
+		rows, err := h.store.EvidencePaged(ctx, evidenceListPage{
+			since:           since,
+			until:           until,
+			kind:            q.Get("kind"),
+			result:          resultFilter,
+			sourceActorType: q.Get("source_actor_type"),
+			sourceActorID:   q.Get("source_actor_id"),
+			cursor:          cursor,
+			pageRows:        pageRows,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		page, next := splitEvidenceListPage(rows, pageRows)
+		out := make([]evidenceWire, len(page))
+		for i, rec := range page {
+			out[i] = evidenceWireFromListRow(rec)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"control_id":  "",
+			"evidence":    out,
+			"count":       len(out),
+			"next_cursor": next,
+		})
+		return
+	}
+
+	// Per-control path (slice 064 behavior, preserved verbatim).
 	rows, err := h.store.EvidenceForControl(ctx, controlID, evidencePage{
 		since:    since,
 		until:    until,
@@ -277,6 +337,17 @@ func splitEvidencePage(rows []dbx.ListEvidenceForControlPagedRow, pageRows int32
 	return page, encodeCursor(keyset{ts: last.ObservedAt.Time.UTC(), id: last.ID.Bytes})
 }
 
+// splitEvidenceListPage is splitEvidencePage's twin for the tenant-wide
+// ledger result set (slice 106). Same +1 probe-row idiom.
+func splitEvidenceListPage(rows []dbx.ListEvidencePagedRow, pageRows int32) ([]dbx.ListEvidencePagedRow, string) {
+	if int32(len(rows)) <= pageRows {
+		return rows, ""
+	}
+	page := rows[:pageRows]
+	last := page[len(page)-1]
+	return page, encodeCursor(keyset{ts: last.ObservedAt.Time.UTC(), id: last.ID.Bytes})
+}
+
 // splitHistoryPage is splitEvidencePage's twin for the history result set.
 func splitHistoryPage(rows []dbx.ListControlEvaluationHistoryPagedRow, pageRows int32) ([]dbx.ListControlEvaluationHistoryPagedRow, string) {
 	if int32(len(rows)) <= pageRows {
@@ -287,10 +358,12 @@ func splitHistoryPage(rows []dbx.ListControlEvaluationHistoryPagedRow, pageRows 
 	return page, encodeCursor(keyset{ts: last.EvaluatedAt.Time.UTC(), id: last.ID.Bytes})
 }
 
-// evidenceWireFrom maps a sqlc evidence row to the AC-1 wire shape. The
-// `source` field carries the provenance JSONB verbatim (canvas §2.3:
-// connector id, source system id, query hash, runner id); `scope_cell`
-// carries the nullable scope_id.
+// evidenceWireFrom maps a sqlc per-control evidence row to the AC-1 wire
+// shape. The `source` field carries the provenance JSONB verbatim (canvas
+// §2.3: connector id, source system id, query hash, runner id);
+// `scope_cell` carries the nullable scope_id. Slice 106 surfaces
+// `result` from the evidence_records.result column (always present in
+// the DB; the slice-064 shape omitted it).
 func evidenceWireFrom(rec dbx.ListEvidenceForControlPagedRow) evidenceWire {
 	return evidenceWire{
 		EvidenceID:   uuidString(rec.ID),
@@ -299,6 +372,23 @@ func evidenceWireFrom(rec dbx.ListEvidenceForControlPagedRow) evidenceWire {
 		Source:       jsonOrNull(rec.Provenance),
 		ContentHash:  rec.Hash,
 		ScopeCell:    uuidPtr(rec.ScopeID),
+		Result:       string(rec.Result),
+	}
+}
+
+// evidenceWireFromListRow is evidenceWireFrom's twin for the tenant-wide
+// query row type (slice 106). The two row types are structurally
+// identical — sqlc emits them as separate types because they come from
+// distinct named queries.
+func evidenceWireFromListRow(rec dbx.ListEvidencePagedRow) evidenceWire {
+	return evidenceWire{
+		EvidenceID:   uuidString(rec.ID),
+		EvidenceKind: rec.EvidenceKind,
+		ObservedAt:   tsString(rec.ObservedAt),
+		Source:       jsonOrNull(rec.Provenance),
+		ContentHash:  rec.Hash,
+		ScopeCell:    uuidPtr(rec.ScopeID),
+		Result:       string(rec.Result),
 	}
 }
 

@@ -89,7 +89,7 @@ func (q *Queries) ListControlEvaluationHistoryPaged(ctx context.Context, arg Lis
 const listEvidenceForControlPaged = `-- name: ListEvidenceForControlPaged :many
 
 SELECT id, tenant_id, control_id, control_ref, scope_id,
-       observed_at, evidence_kind, provenance, hash
+       observed_at, evidence_kind, provenance, hash, result
 FROM evidence_records
 WHERE tenant_id = $1
   AND (control_id = $2 OR control_ref = $3)
@@ -124,6 +124,7 @@ type ListEvidenceForControlPagedRow struct {
 	EvidenceKind *string            `json:"evidence_kind"`
 	Provenance   []byte             `json:"provenance"`
 	Hash         string             `json:"hash"`
+	Result       EvidenceResult     `json:"result"`
 }
 
 // Slice 064 — control-detail backend read endpoints.
@@ -187,6 +188,117 @@ func (q *Queries) ListEvidenceForControlPaged(ctx context.Context, arg ListEvide
 			&i.EvidenceKind,
 			&i.Provenance,
 			&i.Hash,
+			&i.Result,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// Slice 106 — tenant-wide evidence ledger query with optional filters.
+//
+// Hand-extension to control_detail.sql.go. We can't `sqlc generate` against
+// this query in isolation — a global regen against sqlc v1.31.1 silently
+// downgrades enum types across many unrelated files (RelationshipType,
+// EvidenceResult, ControlImplementationType, etc.) because the committed
+// dbx code was produced by a sqlc build that emits typed enum SELECTs the
+// v1.31.1 binary now emits as `interface{}`. Until the toolchain drift is
+// resolved (filed as a spillover slice), this query is the single hand-
+// authored extension to control_detail.sql.go. Mirrors the sqlc-generated
+// shape exactly so the next clean regen is a no-op against this code.
+//
+// The SQL is the canonical-form sqlc would emit for the query
+// `ListEvidencePaged` in internal/db/queries/control_detail.sql.
+const listEvidencePaged = `-- name: ListEvidencePaged :many
+SELECT id, tenant_id, control_id, control_ref, scope_id,
+       observed_at, evidence_kind, provenance, hash, result
+FROM evidence_records
+WHERE tenant_id = $1
+  AND observed_at >= $2
+  AND observed_at <= $3
+  AND ($4::text IS NULL
+       OR evidence_kind = $4::text)
+  AND ($5::text IS NULL
+       OR result::text = $5::text)
+  AND ($6::text IS NULL
+       OR source_attribution->>'actor_type' = $6::text)
+  AND ($7::text IS NULL
+       OR source_attribution->>'actor_id' = $7::text)
+  AND (
+        observed_at < $8
+        OR (observed_at = $8 AND id < $9)
+      )
+ORDER BY observed_at DESC, id DESC
+LIMIT $10
+`
+
+type ListEvidencePagedParams struct {
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	ObservedAt      pgtype.Timestamptz `json:"observed_at"`
+	ObservedAt_2    pgtype.Timestamptz `json:"observed_at_2"`
+	Kind            *string            `json:"kind"`
+	ResultFilter    *string            `json:"result_filter"`
+	SourceActorType *string            `json:"source_actor_type"`
+	SourceActorID   *string            `json:"source_actor_id"`
+	CursorTs        pgtype.Timestamptz `json:"cursor_ts"`
+	CursorID        pgtype.UUID        `json:"cursor_id"`
+	RowLimit        int32              `json:"row_limit"`
+}
+
+type ListEvidencePagedRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	ControlID    pgtype.UUID        `json:"control_id"`
+	ControlRef   string             `json:"control_ref"`
+	ScopeID      pgtype.UUID        `json:"scope_id"`
+	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
+	EvidenceKind *string            `json:"evidence_kind"`
+	Provenance   []byte             `json:"provenance"`
+	Hash         string             `json:"hash"`
+	Result       EvidenceResult     `json:"result"`
+}
+
+// ListEvidencePaged returns the tenant-wide evidence ledger window with
+// optional filters. RLS still scopes reads on top of the explicit tenant_id
+// predicate (canvas invariant #6). All four filter args (kind, result,
+// source_actor_type, source_actor_id) are nil-skipped via the established
+// NULL-skip pattern (see internal/db/queries/vendors.sql:50).
+func (q *Queries) ListEvidencePaged(ctx context.Context, arg ListEvidencePagedParams) ([]ListEvidencePagedRow, error) {
+	rows, err := q.db.Query(ctx, listEvidencePaged,
+		arg.TenantID,
+		arg.ObservedAt,
+		arg.ObservedAt_2,
+		arg.Kind,
+		arg.ResultFilter,
+		arg.SourceActorType,
+		arg.SourceActorID,
+		arg.CursorTs,
+		arg.CursorID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEvidencePagedRow
+	for rows.Next() {
+		var i ListEvidencePagedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ControlID,
+			&i.ControlRef,
+			&i.ScopeID,
+			&i.ObservedAt,
+			&i.EvidenceKind,
+			&i.Provenance,
+			&i.Hash,
+			&i.Result,
 		); err != nil {
 			return nil, err
 		}

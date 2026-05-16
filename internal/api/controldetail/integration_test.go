@@ -548,12 +548,14 @@ func TestEvidence_RejectsBadInput(t *testing.T) {
 		path string
 		want int
 	}{
-		{"/v1/evidence", http.StatusBadRequest},                                               // missing control_id
+		// Slice 106: ?control_id missing is now LEGAL (tenant-wide path) —
+		// the case `{"/v1/evidence", 400}` was removed.
 		{"/v1/evidence?control_id=not-a-uuid", http.StatusBadRequest},                         // non-uuid control_id
 		{"/v1/evidence?control_id=" + ctrlID.String() + "&limit=999", http.StatusBadRequest},  // limit over cap
 		{"/v1/evidence?control_id=" + ctrlID.String() + "&limit=abc", http.StatusBadRequest},  // non-int limit
 		{"/v1/evidence?control_id=" + ctrlID.String() + "&cursor=@@@", http.StatusBadRequest}, // malformed cursor
 		{"/v1/evidence?control_id=" + ctrlID.String() + "&since=not-a-time", http.StatusBadRequest},
+		{"/v1/evidence?result=unknown", http.StatusBadRequest}, // slice 106: invalid ?result= enum value
 		{"/v1/controls/not-a-uuid/policies", http.StatusBadRequest},
 		{"/v1/controls/not-a-uuid/risks", http.StatusBadRequest},
 		{"/v1/controls/not-a-uuid/history", http.StatusBadRequest},
@@ -563,5 +565,230 @@ func TestEvidence_RejectsBadInput(t *testing.T) {
 		if resp.StatusCode != c.want {
 			t.Fatalf("GET %s — status %d, want %d", c.path, resp.StatusCode, c.want)
 		}
+	}
+}
+
+// ===== Slice 106 — tenant-wide ledger + filters + result on wire =====
+
+// seedEvidenceWithResult is seedEvidence's twin that lets the caller pin
+// the result column. Tests that exercise the ?result= filter need rows
+// that aren't all 'pass'.
+func seedEvidenceWithResult(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.UUID, kind, result string, observedAt time.Time) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO evidence_records (
+			id, tenant_id, control_id, control_ref, observed_at, ingested_at,
+			provenance, result, payload, hash, evidence_kind, source_attribution
+		)
+		VALUES ($1, $2, $3, $4, $5, now(), $6, $7::evidence_result, '{}'::jsonb, $8, $9,
+		        '{"actor_type":"connector","actor_id":"slice106-test-connector"}'::jsonb)
+	`, id, tenant, ctrlID, ctrlID.String(), observedAt,
+		`{"connector_id":"test-connector"}`, result,
+		"hash-106-"+id.String()[:8], kind); err != nil {
+		t.Fatalf("seed evidence: %v", err)
+	}
+	return id
+}
+
+// ISC: tenant-wide list returns ALL of caller-tenant's evidence when no
+// control_id is supplied. Verifies AC-1 of slice 106 + that the wire
+// shape now carries `result`.
+func TestEvidence_TenantWideNoControlID(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	a := seedControl(t, admin, tenant)
+	b := seedControl(t, admin, tenant)
+	seedEvidenceWithResult(t, admin, tenant, a, "aws.s3.encryption_status.v1", "pass", time.Now().UTC().Add(-1*24*time.Hour))
+	seedEvidenceWithResult(t, admin, tenant, b, "github.repo_settings.v1", "fail", time.Now().UTC().Add(-2*24*time.Hour))
+	seedEvidenceWithResult(t, admin, tenant, b, "github.repo_settings.v1", "inconclusive", time.Now().UTC().Add(-3*24*time.Hour))
+
+	resp, body := get(t, env, "/v1/evidence")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/evidence: status %d, want 200; body %v", resp.StatusCode, body)
+	}
+	rows, _ := body["evidence"].([]any)
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 tenant-wide rows, got %d", len(rows))
+	}
+	// Wire shape now carries `result`. Confirm on the first row.
+	first := rows[0].(map[string]any)
+	if first["result"] == nil {
+		t.Fatalf("evidence row missing `result` field — slice 106 AC-5 regressed")
+	}
+	for _, field := range []string{"evidence_id", "evidence_kind", "observed_at", "source", "content_hash", "scope_cell", "result"} {
+		if _, ok := first[field]; !ok {
+			t.Fatalf("evidence row missing field %q", field)
+		}
+	}
+}
+
+// ISC: ?kind= narrows the tenant-wide list.
+func TestEvidence_TenantWideKindFilter(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	a := seedControl(t, admin, tenant)
+	seedEvidenceWithResult(t, admin, tenant, a, "aws.s3.encryption_status.v1", "pass", time.Now().UTC().Add(-1*24*time.Hour))
+	seedEvidenceWithResult(t, admin, tenant, a, "github.repo_settings.v1", "pass", time.Now().UTC().Add(-2*24*time.Hour))
+	seedEvidenceWithResult(t, admin, tenant, a, "github.repo_settings.v1", "pass", time.Now().UTC().Add(-3*24*time.Hour))
+
+	resp, body := get(t, env, "/v1/evidence?kind=github.repo_settings.v1")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200; body %v", resp.StatusCode, body)
+	}
+	rows, _ := body["evidence"].([]any)
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 github.repo_settings.v1 rows, got %d", len(rows))
+	}
+	for _, r := range rows {
+		row := r.(map[string]any)
+		if k, _ := row["evidence_kind"].(string); k != "github.repo_settings.v1" {
+			t.Fatalf("row evidence_kind = %q, want github.repo_settings.v1", k)
+		}
+	}
+}
+
+// ISC: ?result=fail narrows the tenant-wide list.
+func TestEvidence_TenantWideResultFilter(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	a := seedControl(t, admin, tenant)
+	seedEvidenceWithResult(t, admin, tenant, a, "kind.x", "pass", time.Now().UTC().Add(-1*24*time.Hour))
+	seedEvidenceWithResult(t, admin, tenant, a, "kind.x", "fail", time.Now().UTC().Add(-2*24*time.Hour))
+	seedEvidenceWithResult(t, admin, tenant, a, "kind.x", "fail", time.Now().UTC().Add(-3*24*time.Hour))
+	seedEvidenceWithResult(t, admin, tenant, a, "kind.x", "inconclusive", time.Now().UTC().Add(-4*24*time.Hour))
+
+	resp, body := get(t, env, "/v1/evidence?result=fail")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200; body %v", resp.StatusCode, body)
+	}
+	rows, _ := body["evidence"].([]any)
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 fail rows, got %d", len(rows))
+	}
+	for _, r := range rows {
+		row := r.(map[string]any)
+		if got, _ := row["result"].(string); got != "fail" {
+			t.Fatalf("row result = %q, want fail", got)
+		}
+	}
+}
+
+// ISC: composed filters narrow with AND semantics.
+func TestEvidence_TenantWideComposedFilters(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	a := seedControl(t, admin, tenant)
+	// Match: kind=k1 AND result=fail.
+	seedEvidenceWithResult(t, admin, tenant, a, "k1", "fail", time.Now().UTC().Add(-1*24*time.Hour))
+	// Miss: kind=k1 but result=pass.
+	seedEvidenceWithResult(t, admin, tenant, a, "k1", "pass", time.Now().UTC().Add(-2*24*time.Hour))
+	// Miss: kind=k2 even if result=fail.
+	seedEvidenceWithResult(t, admin, tenant, a, "k2", "fail", time.Now().UTC().Add(-3*24*time.Hour))
+
+	resp, body := get(t, env, "/v1/evidence?kind=k1&result=fail")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200; body %v", resp.StatusCode, body)
+	}
+	rows, _ := body["evidence"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 AND-narrowed row, got %d", len(rows))
+	}
+}
+
+// ISC: ?source_actor_type / ?source_actor_id narrow on JSONB.
+func TestEvidence_TenantWideSourceActorFilter(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	ctrlID := seedControl(t, admin, tenant)
+	seedEvidenceWithResult(t, admin, tenant, ctrlID, "k1", "pass", time.Now().UTC().Add(-1*24*time.Hour))
+	// All seedEvidenceWithResult rows carry actor_type=connector + actor_id=slice106-test-connector.
+
+	resp, body := get(t, env, "/v1/evidence?source_actor_type=connector&source_actor_id=slice106-test-connector")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200; body %v", resp.StatusCode, body)
+	}
+	rows, _ := body["evidence"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row matching the source-actor filter, got %d", len(rows))
+	}
+
+	// Now narrow to a non-existent actor_id — expect zero.
+	resp, body = get(t, env, "/v1/evidence?source_actor_id=does-not-exist")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200; body %v", resp.StatusCode, body)
+	}
+	rows, _ = body["evidence"].([]any)
+	if len(rows) != 0 {
+		t.Fatalf("expected 0 rows for a no-match actor_id, got %d", len(rows))
+	}
+}
+
+// ISC: RLS isolates the tenant-wide list across tenants. Tenant A seeds
+// evidence; tenant B's bearer must see zero rows under
+// /v1/evidence (no filters narrowing). This is the critical security
+// gate for slice 106 — the optional-control_id branch must NOT bypass
+// RLS.
+func TestEvidence_TenantWideRLSIsolation(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+
+	tenantA := freshTenant(t, admin)
+	tenantB := freshTenant(t, admin)
+
+	ctrlA := seedControl(t, admin, tenantA)
+	seedEvidenceWithResult(t, admin, tenantA, ctrlA, "k1", "pass", time.Now().UTC().Add(-1*24*time.Hour))
+	seedEvidenceWithResult(t, admin, tenantA, ctrlA, "k1", "fail", time.Now().UTC().Add(-2*24*time.Hour))
+
+	// Tenant B's bearer — no controls, no evidence.
+	envB := testServer(t, app, tenantB)
+
+	resp, body := get(t, envB, "/v1/evidence")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200; body %v", resp.StatusCode, body)
+	}
+	rows, _ := body["evidence"].([]any)
+	if len(rows) != 0 {
+		t.Fatalf("RLS REGRESSION: tenant B saw %d cross-tenant rows under tenant-wide /v1/evidence", len(rows))
+	}
+}
+
+// ISC: backwards compatibility — the slice-064 ?control_id= shape still
+// works and now also surfaces `result` on each row.
+func TestEvidence_PerControlBackwardsCompatibleWithResult(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	ctrlID := seedControl(t, admin, tenant)
+	seedEvidenceWithResult(t, admin, tenant, ctrlID, "k.v1", "fail", time.Now().UTC().Add(-1*24*time.Hour))
+
+	resp, body := get(t, env, "/v1/evidence?control_id="+ctrlID.String())
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200; body %v", resp.StatusCode, body)
+	}
+	rows, _ := body["evidence"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 per-control row, got %d", len(rows))
+	}
+	first := rows[0].(map[string]any)
+	if got, _ := first["result"].(string); got != "fail" {
+		t.Fatalf("per-control row result = %q, want fail", got)
 	}
 }

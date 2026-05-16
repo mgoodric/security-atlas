@@ -1,50 +1,31 @@
 "use client";
 
-// Slice 099 — /evidence list view.
+// Slice 099 + 106 — /evidence list view.
 //
-// Today `/evidence` 404'd in the sidebar (audit finding F-4 in
-// `Plans/canvas/13-ui-mockup-audit-2026-05-16.md`). This page ships the
-// missing list view per the design captured in slice 093
-// (`Plans/mockups/evidence.html` + `Plans/canvas/12-ui-fill-in-design-
-// decisions.md` §2/3/7/8).
+// Slice 099 originally shipped a control-pill-driven UX with a "Pick a
+// control" prompt as the empty-state, because the upstream
+// `GET /v1/evidence` REQUIRED `control_id`. Slice 106 makes that param
+// optional and adds four filter axes (kind, result, source_actor_type,
+// source_actor_id) plus the `result` column on the wire shape. The page
+// now defaults to the tenant-wide ledger window with five filter pills.
 //
-// The page consumes the shared `web/components/list/*` shell — the
-// reusable primitives that slice 098 extracted and that the four
-// remaining list-view slices (100/101/102 already shipped + 099 here)
-// also consume.
-//
-// Data source resolution (slice 099 D1):
+// Data source (slice 106 D1):
 //   Row source is `evidenceWire` in
-//   `internal/api/controldetail/handler.go` — the row shape the
-//   upstream `GET /v1/evidence?control_id=` returns. The slice text
-//   cites `recordWire` from `internal/api/evidence/http.go`, but that
-//   is the PUSH wire shape; the existing GET shape is `evidenceWire`
-//   (a strict subset). We bind to what the backend actually returns
-//   today.
-//
-// Control-id is REQUIRED today (slice 099 D2):
-//   The upstream handler at `internal/api/controldetail/handler.go`
-//   Evidence requires `control_id`. The page renders the "Pick a
-//   control" prompt as the empty state until the user selects one via
-//   the Control filter pill. When a control is selected, the page
-//   calls `fetchEvidenceList(controlId)` and renders the row list.
-//   Spillover slice 106 files the backend extension to make
-//   `control_id` optional + add `?kind=` / `?result=` for a true
-//   tenant-wide ledger view.
+//   `internal/api/controldetail/handler.go` — the same wire shape on
+//   both code paths (per-control + tenant-wide). The page binds to
+//   `EvidenceRecord` from `web/lib/api.ts`.
 //
 // Constitutional invariants honored:
-//   - Invariant 6 (tenant isolation): the BFF at /api/evidence
-//     forwards the bearer cookie to /v1/evidence; the platform
-//     enforces tenant isolation via RLS. The UI does not pass
-//     tenant_id.
+//   - Invariant 6 (tenant isolation): the BFF at /api/evidence forwards
+//     the bearer cookie; the platform enforces tenant isolation via RLS
+//     on the tenant_id predicate plus FORCE ROW LEVEL SECURITY. The UI
+//     does NOT pass tenant_id.
 //
 // Anti-criteria honored (P0):
 //   - P0-A1: NO invented columns — every column is derived from
-//            `evidenceWire`. The slice design doc §7 lists a `result`
-//            column, but that field is NOT on `evidenceWire` today
-//            (it lives only on the PUSH `recordWire`). We OMIT the
-//            column rather than fabricate one. Slice 106 will surface
-//            it on the GET shape and a follow-on can add the cell.
+//            `EvidenceRecord`. Slice 106 now surfaces `result` on the
+//            wire, so the page renders the REAL `result` cell (the
+//            slice-099 em-dash placeholder is gone).
 //   - P0-A2: hash rendered as 8-character prefix ONLY; full hash on
 //            copy-click.
 //   - P0-A3: horizontal pill filter row ONLY — no left filter sidebar.
@@ -82,12 +63,16 @@ import {
 } from "@/lib/api";
 
 import {
+  ALL,
+  NONE,
   buildControlOptions,
+  buildKindOptions,
+  buildResultOptions,
   clearFilters,
   DEFAULT_FILTERS,
-  isNoneSelected,
-  NONE,
+  isDefault,
   setFilter,
+  toFetchOptions,
   type EvidenceFilters,
 } from "./filters";
 import {
@@ -98,38 +83,55 @@ import {
   sourceSummary,
 } from "./format";
 
-const URL_KEY = "control_id";
+// URL parameter names mirror the upstream + BFF FORWARD_PARAMS so the
+// browser URL is a faithful echo of the request that the BFF will
+// dispatch upstream. Bookmarkable + shareable.
+const URL_KEYS: Record<keyof EvidenceFilters, string> = {
+  controlId: "control_id",
+  kind: "kind",
+  result: "result",
+  sourceActorType: "source_actor_type",
+  sourceActorId: "source_actor_id",
+};
 
 function EvidencePageInner() {
   const router = useRouter();
   const search = useSearchParams();
 
   // URL-driven filter state — mirrors the slice 098 / 102 pattern so
-  // the selected control is shareable / bookmarkable. Default = NONE
-  // (no control selected → "Pick a control" prompt).
+  // every active filter is shareable / bookmarkable.
   const filters: EvidenceFilters = useMemo(() => {
     const out = { ...DEFAULT_FILTERS };
-    const v = search.get(URL_KEY);
-    if (v) out.controlId = v;
+    const cid = search.get(URL_KEYS.controlId);
+    if (cid) out.controlId = cid;
+    const k = search.get(URL_KEYS.kind);
+    if (k) out.kind = k;
+    const r = search.get(URL_KEYS.result);
+    if (r) out.result = r;
+    const sat = search.get(URL_KEYS.sourceActorType);
+    if (sat) out.sourceActorType = sat;
+    const sai = search.get(URL_KEYS.sourceActorId);
+    if (sai) out.sourceActorId = sai;
     return out;
   }, [search]);
 
   const updateFilter = (key: keyof EvidenceFilters, value: string) => {
     const next = setFilter(filters, key, value);
     const sp = new URLSearchParams(search.toString());
-    if (next[key] === NONE) {
-      sp.delete(URL_KEY);
+    const urlKey = URL_KEYS[key];
+    const sentinel = key === "controlId" ? NONE : ALL;
+    if (next[key] === sentinel) {
+      sp.delete(urlKey);
     } else {
-      sp.set(URL_KEY, next[key]);
+      sp.set(urlKey, next[key]);
     }
     router.replace(`/evidence?${sp.toString()}`);
   };
 
   const clearAll = () => {
     const cleared = clearFilters();
-    const sp = new URLSearchParams(search.toString());
-    if (cleared.controlId === NONE) sp.delete(URL_KEY);
-    router.replace(`/evidence?${sp.toString()}`);
+    void cleared;
+    router.replace(`/evidence`);
   };
 
   // Anchor catalog — drives the Control pill option list. The fetch
@@ -140,19 +142,23 @@ function EvidencePageInner() {
   });
   const anchors = useMemo(() => anchorsQ.data?.anchors ?? [], [anchorsQ.data]);
   const controlOptions = useMemo(() => buildControlOptions(anchors), [anchors]);
+  const resultOptions = useMemo(() => buildResultOptions(), []);
 
-  // Evidence ledger query — gated on a real control_id. When the
-  // user hasn't selected one yet, we don't fire the fetch (the
-  // upstream would 400). The page renders the "pick a control"
-  // prompt instead.
+  // Evidence ledger query — slice 106 always runs (no more gating on a
+  // control_id presence). The filter translator drops sentinel values
+  // so the URL query string only carries narrowing predicates.
+  const fetchOpts = useMemo(() => toFetchOptions(filters), [filters]);
   const evidenceQ = useQuery<EvidenceListResponse>({
-    queryKey: ["evidence", "list", filters.controlId],
-    queryFn: () => fetchEvidenceList(filters.controlId),
-    enabled: !isNoneSelected(filters),
+    queryKey: ["evidence", "list", fetchOpts],
+    queryFn: () => fetchEvidenceList(fetchOpts),
   });
   const records: EvidenceRecord[] = useMemo(
     () => evidenceQ.data?.evidence ?? [],
     [evidenceQ.data],
+  );
+  const kindOptions = useMemo(
+    () => buildKindOptions(records.map((r) => r.evidence_kind ?? "")),
+    [records],
   );
 
   // Row drawer state — clicking a row opens an inline Dialog showing
@@ -193,14 +199,24 @@ function EvidencePageInner() {
     {
       id: "controlId",
       label: "Control",
-      value: filters.controlId,
+      value: filters.controlId === NONE ? NONE : filters.controlId,
       options: controlOptions,
+    },
+    {
+      id: "kind",
+      label: "Kind",
+      value: filters.kind,
+      options: kindOptions,
+    },
+    {
+      id: "result",
+      label: "Result",
+      value: filters.result,
+      options: resultOptions,
     },
   ];
 
-  const meta = isNoneSelected(filters) ? (
-    <span>Select a control to load its evidence ledger</span>
-  ) : (
+  const meta = (
     <span>
       Showing{" "}
       <span className="text-foreground font-medium">{records.length}</span>{" "}
@@ -235,15 +251,15 @@ function EvidencePageInner() {
       ),
     },
     {
-      id: "control_id",
-      header: "Control",
-      cell: () => (
+      id: "result",
+      header: "Result",
+      cell: (row) => (
         <span
-          className="font-mono text-xs text-muted-foreground"
-          title={filters.controlId}
-          data-testid="evidence-row-control-id"
+          className="font-mono text-xs"
+          data-testid="evidence-row-result"
+          title={row.result}
         >
-          {filters.controlId.slice(0, 8)}…
+          {row.result}
         </span>
       ),
     },
@@ -300,36 +316,10 @@ function EvidencePageInner() {
     </>
   );
 
-  // Custom no-control-selected prompt (we use a custom block instead
-  // of <EmptyState> because we want two CTAs — and the shared shell
-  // <EmptyState> intentionally only takes one CTA so we can't extend
-  // it without modifying the slice 098 shell).
-  const pickControlPrompt = (
-    <div
-      data-testid="list-empty-state"
-      className="rounded-xl border bg-card py-16 px-6 text-center"
-    >
-      <div className="mx-auto mb-3 text-muted-foreground">
-        <EvidenceLedgerIcon />
-      </div>
-      <div
-        className="text-sm font-semibold text-foreground mb-1"
-        data-testid="evidence-pick-control-title"
-      >
-        Pick a control to see its evidence ledger
-      </div>
-      <div className="text-xs text-muted-foreground mb-4">
-        Evidence records are scoped to a control today. Choose one from the
-        Control filter above to load its ledger window.
-      </div>
-    </div>
-  );
-
-  // True-empty state: a control IS selected, but the upstream
-  // returned zero rows. Per design doc §2 + slice 099 AC-5, this
-  // empty state surfaces TWO actions: "Clear filters" + "Set up a
-  // connector →". The shared `<EmptyState>` shell only takes one CTA,
-  // so we render a custom block (same shape, just two buttons).
+  // True-empty state: a filter is in play (or not) and the upstream
+  // returned zero rows. Surfaces TWO actions: "Clear filters" + "Set
+  // up a connector →". Custom block (the shared `<EmptyState>` shell
+  // only takes one CTA).
   const noRecordsEmptyState = (
     <div
       data-testid="list-empty-state"
@@ -345,13 +335,15 @@ function EvidencePageInner() {
         No evidence records match these filters
       </div>
       <div className="text-xs text-muted-foreground mb-4">
-        Try a wider time window, or push a record via CLI or connector.
+        Try a wider time window, clear filters, or push a record via CLI or
+        connector.
       </div>
       <div className="flex items-center gap-2 justify-center">
         <Button
           variant="outline"
           size="sm"
           onClick={clearAll}
+          disabled={isDefault(filters)}
           data-testid="evidence-empty-clear"
         >
           Clear filters
@@ -403,27 +395,7 @@ function EvidencePageInner() {
     );
   }
 
-  // No control selected → "pick a control" prompt.
-  if (isNoneSelected(filters)) {
-    return (
-      <ListPage
-        title="Evidence ledger"
-        subtitle="Append-only · ingestion separated from evaluation · point-in-time replay always possible"
-        actions={actions}
-        filterRow={
-          <FilterPills
-            pills={pills}
-            onChange={(id, v) => updateFilter(id as keyof EvidenceFilters, v)}
-            meta={meta}
-          />
-        }
-      >
-        {pickControlPrompt}
-      </ListPage>
-    );
-  }
-
-  // Control selected — evidence query is in flight.
+  // Evidence query in flight.
   if (evidenceQ.isLoading) {
     return (
       <ListPage
@@ -525,6 +497,17 @@ function EvidencePageInner() {
                     data-testid="evidence-drawer-full-hash"
                   >
                     {drawerRecord.content_hash}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
+                    Result
+                  </div>
+                  <div
+                    className="font-mono text-xs"
+                    data-testid="evidence-drawer-result"
+                  >
+                    {drawerRecord.result}
                   </div>
                 </div>
                 <div>

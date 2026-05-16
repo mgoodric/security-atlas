@@ -1,10 +1,10 @@
-// Slice 099 — BFF proxy for `/evidence` list view.
+// Slice 099 + 106 — BFF proxy for `/evidence` list view.
 //
 // Reads the bearer cookie server-side and calls
-// `GET /v1/evidence?control_id=<uuid>[&since=&cursor=&limit=]` upstream.
-// The bearer never reaches the browser. Mirrors the slice 098 controls
-// + slice 102 audits BFF pattern so the BFF shape stays predictable
-// across the list-view slices (098/099/100/101/102).
+// `GET /v1/evidence[?control_id=&kind=&result=&source_actor_type=&source_actor_id=&since=&cursor=&limit=]`
+// upstream. The bearer never reaches the browser. Mirrors the slice 098
+// controls + slice 102 audits BFF pattern so the BFF shape stays
+// predictable across the list-view slices (098/099/100/101/102).
 //
 // Tenant isolation (Invariant 6): the platform derives the tenant from
 // the bearer; this BFF never reads or forwards a tenant_id from the
@@ -12,18 +12,12 @@
 // explicitly whitelists the query params it forwards — arbitrary
 // caller-supplied keys (`tenant_id`, `debug`, etc.) are dropped.
 //
-// Why this calls the existing `/v1/evidence?control_id=` shape (not a
-// tenant-wide ledger endpoint):
-//
-//   The upstream `internal/api/controldetail/handler.go` Evidence
-//   handler REQUIRES `control_id`. The slice text explicitly says
-//   "preferred path is to extend the existing endpoint over adding a
-//   new one" and "If the GET /v1/evidence?... endpoint shape needs an
-//   extension, file as a backend follow-on slice rather than expanding
-//   this PR." The v1 UI therefore selects a control via the filter pill
-//   and reads its evidence ledger window. Spillover slice 106 files the
-//   backend extension to make `control_id` optional + add `kind`/`result`
-//   filter params for a true tenant-wide ledger view.
+// Slice 106 changes:
+//   * `control_id` is no longer required. When absent, the upstream
+//     returns the tenant-wide ledger window (RLS continues to scope).
+//     The BFF therefore drops the required-control_id 400 guard.
+//   * FORWARD_PARAMS gains `kind`, `result`, `source_actor_type`,
+//     `source_actor_id` — the four new optional filter keys.
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
@@ -35,7 +29,17 @@ import { SESSION_COOKIE } from "@/lib/auth";
 // upstream. Anything else (e.g. `tenant_id`, `debug`) is dropped so a
 // malicious or buggy caller cannot leak a privilege-escalation hint
 // through this proxy.
-const FORWARD_PARAMS = ["control_id", "since", "until", "cursor", "limit"];
+const FORWARD_PARAMS = [
+  "control_id",
+  "kind",
+  "result",
+  "source_actor_type",
+  "source_actor_id",
+  "since",
+  "until",
+  "cursor",
+  "limit",
+];
 
 export async function GET(req: Request): Promise<Response> {
   const jar = await cookies();
@@ -45,13 +49,6 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   const url = new URL(req.url);
-  const controlID = url.searchParams.get("control_id");
-  if (!controlID) {
-    return NextResponse.json(
-      { error: "control_id query parameter is required" },
-      { status: 400 },
-    );
-  }
 
   const out = new URLSearchParams();
   for (const key of FORWARD_PARAMS) {
@@ -59,8 +56,9 @@ export async function GET(req: Request): Promise<Response> {
     if (v) out.set(key, v);
   }
 
+  const qs = out.toString();
   const upstream = await fetch(
-    `${apiBaseURL()}/v1/evidence?${out.toString()}`,
+    qs ? `${apiBaseURL()}/v1/evidence?${qs}` : `${apiBaseURL()}/v1/evidence`,
     {
       headers: { Authorization: `Bearer ${bearer}` },
       cache: "no-store",

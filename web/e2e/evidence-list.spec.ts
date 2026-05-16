@@ -30,30 +30,38 @@
 import { test } from "@playwright/test";
 
 test.describe("/evidence list view", () => {
-  test("AC-1: /evidence renders the pick-a-control prompt by default", async () => {
+  test("AC-1: /evidence renders the tenant-wide ledger by default (slice 106)", async () => {
     //    await page.goto("/login");
     //    await page.fill('input[name="token"]', process.env.TEST_BEARER!);
     //    await page.click("button[type=submit]");
     //    await page.goto("/evidence");
     //    await expect(page.getByRole("heading", { name: /Evidence ledger/ })).toBeVisible();
     //    await expect(page.getByTestId("list-page")).toBeVisible();
-    //    // No control selected yet -> the pick-a-control prompt.
-    //    await expect(page.getByTestId("evidence-pick-control-title")).toBeVisible();
+    //    // Slice 106: the tenant-wide ledger renders immediately (no
+    //    // pick-a-control gate). The pre-106 `evidence-pick-control-title`
+    //    // testid was retired.
+    //    await expect(page.getByTestId("list-table-wrap")).toBeVisible();
   });
 
-  test("AC-3: selecting a control loads its evidence ledger", async () => {
+  test("AC-3: selecting a control narrows the ledger (slice 106 — filter, not gate)", async () => {
     //    await page.goto("/evidence");
     //    const controlPill = page.getByLabel("Control");
     //    // Select the first non-sentinel option (the harness-seeded anchor
-    //    // with evidence rows).
-    //    const opts = await controlPill.locator("option").all();
+    //    // with evidence rows). Slice 106: this NARROWS the tenant-wide
+    //    // list to that control rather than unlocking the data fetch.
     //    await controlPill.selectOption({ index: 1 });
     //    await page.waitForLoadState("networkidle");
-    //    // The pick-a-control prompt disappears, the table renders rows.
-    //    await expect(page.getByTestId("evidence-pick-control-title")).toHaveCount(0);
     //    await expect(page.getByTestId("list-table-wrap")).toBeVisible();
     //    const rowCount = await page.getByTestId("list-table-row").count();
     //    expect(rowCount).toBeGreaterThan(0);
+  });
+
+  test("AC-5 result-cell: each row renders its result enum value (slice 106)", async () => {
+    //    await page.goto("/evidence");
+    //    const resultCell = page.getByTestId("evidence-row-result").first();
+    //    const text = await resultCell.innerText();
+    //    // The cell renders one of pass / fail / na / inconclusive.
+    //    expect(["pass", "fail", "na", "inconclusive"]).toContain(text.trim());
   });
 
   test("AC-3 hash: hash cell renders as 8-char prefix only", async () => {
