@@ -234,10 +234,13 @@ func (h *Handler) GetCascade(w http.ResponseWriter, r *http.Request) {
 	if level == "" {
 		level = "board"
 	}
-	depth := DefaultCascadeDepth
+	// Parse depth with explicit 32-bit range so CodeQL doesn't flag
+	// the int→int32 conversion below (the upper bound is enforced by
+	// MaxCascadeDepth = 6, but CodeQL's local data-flow can't see it).
+	var depth int32 = DefaultCascadeDepth
 	if raw := r.URL.Query().Get("depth"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			depth = n
+		if n, err := strconv.ParseInt(raw, 10, 32); err == nil && n > 0 {
+			depth = int32(n)
 		}
 	}
 	truncated := false
@@ -247,7 +250,7 @@ func (h *Handler) GetCascade(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := dbx.New(h.pool).GetMetricCascade(r.Context(), dbx.GetMetricCascadeParams{
 		Level:      level,
-		DepthLimit: int32(depth),
+		DepthLimit: depth,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "cascade: "+err.Error())
