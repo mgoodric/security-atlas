@@ -359,6 +359,88 @@ All eight color slots clear WCAG SC 1.4.11 (3:1) on their target bg. Only NODES 
 - Pick darker-sky complements from a different family (slate, gray, cool-gray). Rejected: sky-scale complements preserve the blue-family identity the pastel palette implies; jumping families would weaken the "this is the same candidate across themes" cohesion.
 - Use `#1e293b` slate-800 (~14:1) for light-bg dots instead of `#517891` (4.45:1). Rejected: stronger contrast but loses the literal-pastel-color through-line. The maintainer's `#517891` IS one of the four colors — preserving it on light is responsive to the brief.
 
+### D17 — Candidate 04 iterated v5 → v6 (16 lines + 8-color temperature gradient + uniform stroke) (HIGH confidence)
+
+**Decision:** regenerate cand-04 a fifth time with THREE structural changes from v5: (a) increase line count from 11 to 16 (return some of v1's density without v1's dense-mesh feel), (b) adopt the maintainer's new 8-color spectrum (warm pink → pale → cool blue), (c) abandon the per-line weight hierarchy in favor of uniform 6px stroke + positional color as the hierarchy signal. Light variant uses Tailwind 700-800 dark complements in matching color families (rose/pink/orange/amber/emerald/sky/sky/blue).
+
+**Rationale:**
+
+The maintainer's v6 ask layered three changes:
+
+> _"After thinking a bit more, I would like to add more lines, similair to how the logo was originally (not quite as many, but more. Maybe use a more wide ranging color pallete like: #f2a2b3 #f9c3c3 #f7d4c0 #f9e6c1 #d1e7e0 #a0d1e8 #7ab8e1 #4b8db5"_
+
+Three explicit design calls:
+
+**Change 1 — More lines (16 target).** v1 had ~15 lines in a dense triangular mesh. v5 had 11. v6 targets ~16: between v5 and v1, returning some of the visual texture v1 had without v1's "engineering truss" density. Sub-pieces of the A composition expanded: more crossbar detail, more apex tessellation, more foot-detail at each leg base, more internal scaffolding lines. Achieved exactly 16.
+
+**Change 2 — 8-color spectrum.** A wider chromatic range than v5's 4-pastel + sky-complement scheme. The maintainer specified a temperature gradient (warm pink at one end, cool deep blue at the other) — a deliberate compositional element, not just "more colors". The right interpretation is to apply colors POSITIONALLY through the mark (not by line-weight or by role), so the gradient reads as movement/energy through the A composition.
+
+**Change 3 (consequential) — Uniform stroke weight.** v3-v5 used 3 line-weight tiers (14/8/4 px) with color reinforcing the weight hierarchy. v6 has 16 lines across 8 colors; layering 3 stroke weights on top would produce visual confetti (the eye loses the weight-as-hierarchy signal). The Artist agent's call: uniform stroke (6 px) lets color carry the hierarchy alone. **Tradeoff acknowledged:** the weight-tier reading is gone; the mark no longer has a "heavy backbone vs light scaffolding" semantic. v6 reads as "16 equal-weight edges with positional color" rather than "structured graph with line-weight hierarchy".
+
+**Color application — positional gradient with sister-color pairing:**
+
+The A shape has a natural top (apex) and bottom (foot-points). Lines are colored by the y-coordinate of their midpoint:
+
+- Upper third (y_mid < 390): warm pinks (`#f2a2b3` / `#f9c3c3` / `#f7d4c0`)
+- Middle third (390-620): warm-to-neutral transition (`#f9e6c1` cream / `#d1e7e0` mint)
+- Lower third (y_mid > 620): cool blues (`#a0d1e8` / `#7ab8e1` / `#4b8db5`)
+
+Sister-paired: L/R lines that mirror each other (the A's two legs, symmetric crossbar pieces) share a color, so the gradient reads symmetric and intentional rather than random. Without this rule, the colors would scatter visually like confetti.
+
+**Light variant dark complement set (DERIVED):**
+
+Each pastel maps to a darker sibling in the same color family. Tailwind 700-800 weights chosen for contrast headroom:
+
+| Position in gradient | Dark variant pastel | Light variant complement | Family  |
+| -------------------- | ------------------- | ------------------------ | ------- |
+| Apex warm            | `#f2a2b3`           | `#9f1239` rose-800       | rose    |
+| Apex pale            | `#f9c3c3`           | `#be185d` pink-700       | pink    |
+| Upper-mid peach      | `#f7d4c0`           | `#9a3412` orange-800     | orange  |
+| Mid cream            | `#f9e6c1`           | `#854d0e` amber-700      | amber   |
+| Mid mint             | `#d1e7e0`           | `#065f46` emerald-800    | emerald |
+| Lower pale sky       | `#a0d1e8`           | `#075985` sky-800        | sky     |
+| Lower med sky        | `#7ab8e1`           | `#0369a1` sky-700        | sky     |
+| Foundation deep blue | `#4b8db5`           | `#1e40af` blue-800       | blue    |
+
+Both variants traverse the same temperature gradient (warm → cool) — variant inversion is by VALUE not by HUE family.
+
+**All 16 v6 color slots clear BOTH WCAG SC 1.4.11 (3:1) AND SC 1.4.3 (4.5:1).** Dark variant range: 5.45:1 (deep blue) → 16.14:1 (cream). Light variant range: 5.68:1 (sky-700) → 8.36:1 (blue-800). This is cleaner accessibility than v5 (whose NODES at 4.19:1 on dark passed 1.4.11 but failed 1.4.3).
+
+**Quality gates:**
+
+- Topology: 32/32 endpoint-node matches verified within 0.5 px (16 lines × 2 endpoints, 14 nodes, 0 broken)
+- Combined PNG weight: 173.2 KB (well under 600 KB ceiling; slate total now ~3.20 MB, under 8 MB AC-11)
+- All 16 color slots WCAG SC 1.4.11 AND SC 1.4.3 compliant
+- SVG validates as well-formed XML
+- v1-v5 prompts + provenance preserved in `candidate-04/notes.md` under Iteration history
+
+**Tradeoffs surfaced by the Artist agent during the iteration:**
+
+1. **Weight-tier hierarchy abandoned.** v3-v5 used 3 stroke-width tiers (14/8/4 px). v6 uses uniform 6 px because layering 3 weights × 8 colors × 16 lines = visual chaos. Viewers who read "thick = important, thin = decorative" lose that depth cue. Color now IS the hierarchy.
+2. **No shared-color brand through-line.** v5's `#517891` was used for nodes on BOTH variants (the one color that cleared SC 1.4.11 on both bgs). v6 has no color with that property — node color is variant-specific (`#1e40af` blue-800 on light, `#4b8db5` deep-blue on dark; same family, not same hex). The cross-variant cohesion is via temperature-gradient mirroring, not literal color preservation.
+3. **Brand-personality shift toward "soft/friendly".** The warm half of the palette (pinks/peach/cream) is a notable departure from typical security-tool aesthetics. Could be deliberate counter-positioning ("approachable GRC platform") or a brand mismatch for serious-compliance use cases. Maintainer's selection-layer call.
+4. **Tool name is now historical.** `tools/logo-gen/recolor_by_weight.py` originally recolored by stroke weight (v3-v5 mapping). v6 recolors by line midpoint position. The tool's internals were updated; the filename wasn't (renaming would break references in v5/v4 git blame). Docstring updated to note the v6 structural change. Future iterations may want to rename to `recolor_palette.py` or similar.
+
+**Updated in same iteration:**
+
+- `docs/design/logo-candidates/candidate-04/mark.svg` — rewritten with 16 lines + 14 nodes + positional color mapping
+- `docs/design/logo-candidates/candidate-04/` — 4 PNGs regenerated from new SVG
+- `docs/design/logo-candidates/candidate-04/notes.md` — v6 entry appended (v1-v5 preserved); top-of-file sections updated to v6 spec
+- `docs/design/logo-decision.md` — cand-04 gallery entry refreshed (new title, gradient + line-count callout, tradeoffs noted)
+- `tools/logo-gen/recolor_by_weight.py` — `LIGHT_TO_DARK_V6` 8-entry positional mapping; v3-v5 retained as commented-out historical references; docstring updated to note v6's structural shift from weight-driven to position-driven
+
+**Slice 075 grep target unchanged:** the `Selected:` line stays `none — awaiting maintainer approval` per P0-A7 + D12. v6 is a refined offering, not a selection.
+
+**Process flag (from Artist's report):** branch-context drift detected mid-run — bash agent's cwd reset jumped to other branches twice during execution. Artist recovered via stash dance (`git stash push` on working tree, `git checkout backlog/074-logo-design-candidates`, `git stash pop`). All v6 artifacts ended up on the correct branch. Pattern to watch in future Artist runs that touch many files across a long execution: bash cwd-reset can silently shift the branch context. Orchestrator should verify branch state before committing.
+
+**Alternatives considered:**
+
+- Apply colors by line ROLE (spine = blue, crossbar = cream, apex = pink, feet = sky) instead of by position. Rejected: less elegant than gradient; would require the Artist to pre-classify every line into a role, increasing cognitive overhead with no compositional gain.
+- Random color assignment with 8 hues × 16 lines. Rejected: explicitly flagged as "confetti" risk — gradient + sister-pairing is intentional.
+- Keep the 3-weight stroke hierarchy AND apply 8 colors. Rejected: visual chaos — too many simultaneous design dimensions.
+- Use only 4 of the 8 colors (pick the 2 lightest warm + 2 darkest cool for hierarchy). Rejected: doesn't honor the maintainer's explicit 8-color spec.
+- Use the 8 colors as bg fills behind 8 sub-regions of the mark (color-block A composition) rather than as line colors. Considered, deferred: would require a totally different geometric approach (filled polygons vs lines + dots); reserved as a v7+ direction if the maintainer wants it.
+
 ## Acceptance criteria status
 
 - [x] AC-1: 10 candidate dirs exist (vs. spec's default 4 per D1) with required PNG files
