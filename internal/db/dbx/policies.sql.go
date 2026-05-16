@@ -414,14 +414,18 @@ type ListPoliciesWithAckRateRow struct {
 	PublishedBy                 *string            `json:"published_by"`
 	SupersededAt                pgtype.Timestamptz `json:"superseded_at"`
 	NextReviewAt                pgtype.Timestamptz `json:"next_review_at"`
-	// AckDenominator is the count of users whose roles intersect the policy's
-	// acknowledgment_required_roles (mirrors CountRequiredRoleUsersForVersion).
-	// NULL when status != 'published' (the wire layer renders ack_rate: null).
+	// AckDenominator + AckNumerator are hand-narrowed from sqlc's
+	// inferred `interface{}` back to `pgtype.Int8` (slice 109).
+	// Why: sqlc v1.31.1 cannot type a `CASE WHEN ... THEN (scalar
+	// subquery)::bigint END` expression — it falls back to
+	// `interface{}` and the slice-107 handler depends on the
+	// `.Valid` / `.Int64` API (null = "policy not published, no
+	// rate denominator"). Override config + COALESCE/NULLIF
+	// typing-hint rewrites were both attempted and both broke
+	// other things; the targeted hand-narrow is the smallest
+	// honest fix. See `docs/audit-log/109-sqlc-toolchain-pin-decisions.md`.
 	AckDenominator pgtype.Int8 `json:"ack_denominator"`
-	// AckNumerator is the count of distinct users who have acknowledged the
-	// policy with a fresh ack (mirrors CountFreshAcksForVersion). NULL when
-	// status != 'published'.
-	AckNumerator pgtype.Int8 `json:"ack_numerator"`
+	AckNumerator   pgtype.Int8 `json:"ack_numerator"`
 }
 
 // Slice 107 — paginated policy list LEFT JOINed to the per-policy

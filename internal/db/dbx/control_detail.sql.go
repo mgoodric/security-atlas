@@ -160,6 +160,10 @@ type ListEvidenceForControlPagedRow struct {
 // is the same keyset semantics: ties on observed_at fall back to id. A
 // sentinel cursor (cursor_ts = 'infinity', cursor_id = max-uuid) selects
 // the first page. The handler computes all cutoff values in Go.
+//
+// Slice 106: the SELECT projects `result` so the wire shape `evidenceWire`
+// can surface it (the column has always been on evidence_records; the slice
+// 064 wire shape simply omitted it).
 func (q *Queries) ListEvidenceForControlPaged(ctx context.Context, arg ListEvidenceForControlPagedParams) ([]ListEvidenceForControlPagedRow, error) {
 	rows, err := q.db.Query(ctx, listEvidenceForControlPaged,
 		arg.TenantID,
@@ -200,20 +204,6 @@ func (q *Queries) ListEvidenceForControlPaged(ctx context.Context, arg ListEvide
 	return items, nil
 }
 
-// Slice 106 — tenant-wide evidence ledger query with optional filters.
-//
-// Hand-extension to control_detail.sql.go. We can't `sqlc generate` against
-// this query in isolation — a global regen against sqlc v1.31.1 silently
-// downgrades enum types across many unrelated files (RelationshipType,
-// EvidenceResult, ControlImplementationType, etc.) because the committed
-// dbx code was produced by a sqlc build that emits typed enum SELECTs the
-// v1.31.1 binary now emits as `interface{}`. Until the toolchain drift is
-// resolved (filed as a spillover slice), this query is the single hand-
-// authored extension to control_detail.sql.go. Mirrors the sqlc-generated
-// shape exactly so the next clean regen is a no-op against this code.
-//
-// The SQL is the canonical-form sqlc would emit for the query
-// `ListEvidencePaged` in internal/db/queries/control_detail.sql.
 const listEvidencePaged = `-- name: ListEvidencePaged :many
 SELECT id, tenant_id, control_id, control_ref, scope_id,
        observed_at, evidence_kind, provenance, hash, result
@@ -263,11 +253,25 @@ type ListEvidencePagedRow struct {
 	Result       EvidenceResult     `json:"result"`
 }
 
-// ListEvidencePaged returns the tenant-wide evidence ledger window with
-// optional filters. RLS still scopes reads on top of the explicit tenant_id
-// predicate (canvas invariant #6). All four filter args (kind, result,
-// source_actor_type, source_actor_id) are nil-skipped via the established
-// NULL-skip pattern (see internal/db/queries/vendors.sql:50).
+// Slice 106: tenant-wide evidence ledger window with optional filters. Used
+// when GET /v1/evidence is called WITHOUT a control_id — returns the
+// caller-tenant's whole evidence stream (RLS still scopes it on top of the
+// explicit tenant_id predicate, defense-in-depth per canvas invariant #6).
+//
+// All four filter args are optional. The
+//
+//	(sqlc.narg('x')::T IS NULL OR col = sqlc.narg('x')::T)
+//
+// pattern is the established NULL-skip shape — see
+// internal/db/queries/vendors.sql:50 — and keeps the query plan stable while
+// letting sqlc emit nullable Go parameters. The source-actor filters drill
+// into the JSONB source_attribution column (slice 013 enforces the
+// {actor_type, actor_id, session_id} shape there).
+//
+// Keyset pagination mirrors ListEvidenceForControlPaged exactly: same
+// decomposed (observed_at, id) predicate, same +1 probe-row idiom.
+// Window default (last 30 days) is still applied by the handler, not the
+// query — the handler passes the resolved cutoff timestamps verbatim.
 func (q *Queries) ListEvidencePaged(ctx context.Context, arg ListEvidencePagedParams) ([]ListEvidencePagedRow, error) {
 	rows, err := q.db.Query(ctx, listEvidencePaged,
 		arg.TenantID,
