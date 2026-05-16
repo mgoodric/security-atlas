@@ -1710,6 +1710,71 @@ export async function fetchRisksList(): Promise<RisksListResponse> {
   return (await res.json()) as RisksListResponse;
 }
 
+// ----- Slice 105: risk-create wire shape -----
+//
+// `RiskCreateInput` mirrors `createReq` in
+// `internal/api/risks/handlers.go` exactly. The form binds directly to
+// this shape — no invented fields per P0-A4. `inherent_score` /
+// `residual_score` stay opaque JSON blobs by design (canvas §2.2 — 5x5
+// today, FAIR/dollar-banded tomorrow). The slice-105 form constructs
+// `{likelihood, impact}` for the 5x5 case because that is what
+// `severityOf()` reads downstream.
+//
+// Optional fields (review_due_at, accepted_until, accepter,
+// instrument_reference, linked_control_ids, residual_score, description)
+// are NOT enumerated in the slice-105 AC list — the form omits them
+// rather than invent UI for them. The wire shape carries them for the
+// future slice that adds the richer editor.
+
+export type RiskCreateInput = {
+  title: string;
+  description?: string;
+  category: string;
+  methodology?: string;
+  inherent_score?: unknown;
+  treatment?: string;
+  treatment_owner?: string;
+  residual_score?: unknown;
+  review_due_at?: string | null;
+  accepted_until?: string | null;
+  accepter?: string;
+  instrument_reference?: string;
+  linked_control_ids?: string[];
+};
+
+export type RiskCreatedResponse = {
+  risk: Risk;
+};
+
+// Server-side fn: hit the platform directly with the bearer. Mirrors
+// `createVendor`'s shape (slice 024). The form goes through the BFF at
+// `POST /api/risks` instead so the bearer stays httpOnly.
+export async function createRisk(
+  bearer: string,
+  body: RiskCreateInput,
+): Promise<Risk> {
+  const res = await fetch(`${apiBaseURL()}/v1/risks`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // body not JSON — keep the status line
+    }
+    throw new APIError(res.status, msg);
+  }
+  const decoded = (await res.json()) as RiskCreatedResponse;
+  return decoded.risk;
+}
+
 // ----- Slice 102: /audits list view (browser-side BFF call) -----
 //
 // Row source: `periodWire` in `internal/api/auditperiods/handlers.go`
