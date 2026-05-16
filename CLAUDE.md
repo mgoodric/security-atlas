@@ -2,7 +2,7 @@
 
 > Read this first when starting any session in this repo.
 
-**Status:** Pre-implementation ideation. No application code yet. The system of record is the canvas under `Plans/`.
+**Status:** v1 backlog fully merged on `main` (69/69 v1 slices; v2 follow-ons in progress). The system of record for design intent is still the canvas under `Plans/`; the system of record for implementation is `main` plus the merge trail in `docs/issues/_STATUS.md`.
 
 ---
 
@@ -109,35 +109,35 @@ Schema-level enforcement: `ai_assisted=true` records cannot have `human_approved
 
 ## Tech stack (locked-in)
 
-| Layer                       | Choice                                                                                                    | Notes                                                                                                               |
-| --------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **Backend language**        | Go (platform core)                                                                                        | Static binary, low operational overhead, strong concurrency for evidence streams                                    |
-| **Secondary language**      | Python (connector SDK reference + OSCAL bridge via compliance-trestle)                                    | Bridged from Go via stable gRPC contract                                                                            |
-| **Database**                | PostgreSQL 16+                                                                                            | RLS for tenancy, JSONB for evolving evidence, recursive CTEs for UCF graph traversal                                |
-| **DB access**               | **sqlc + Atlas**                                                                                          | Type-safe Go from SQL; declarative migrations. Recursive CTEs and JSONB are first-class. No ORM impedance mismatch. |
-| **Object storage**          | S3-compatible                                                                                             | For evidence artifacts > 1 MB                                                                                       |
-| **Analytics (optional v2)** | ClickHouse                                                                                                | Behind a read-model interface. Only when evidence-record volume crosses ~10⁹.                                       |
-| **Event/queue**             | NATS JetStream                                                                                            | Single binary; durable streams; replay for evidence reprocessing                                                    |
-| **IPC**                     | gRPC                                                                                                      | Connector SDK contract + Python OSCAL bridge                                                                        |
-| **Push API**                | REST `POST /v1/evidence:push` + gRPC streaming + CLI + per-language SDKs (Go, Python, TypeScript, Java)   | See `Plans/EVIDENCE_SDK.md`                                                                                         |
-| **Auth (AuthN)**            | OIDC (relying party only — we are not an IdP)                                                             | Every credible IdP speaks it                                                                                        |
-| **Auth (AuthZ)**            | RBAC (coarse roles) + ABAC (fine cuts) via OPA                                                            | Same OPA engine evaluates control queries and authorization decisions                                               |
-| **OPA deployment**          | Embedded Go library (v1)                                                                                  | Sidecar / central server is a v2 option                                                                             |
-| **Frontend**                | **Next.js 15 App Router + shadcn/ui + Tailwind 4 + TanStack Query**                                       | Server Components for data-heavy dashboards; shadcn/ui aligns with mockups                                          |
-| **Schema registry**         | In-tree Go service (v1), backed by Postgres                                                               | Apicurio / external is a v3 option                                                                                  |
-| **Vector store**            | pgvector (v2 when AI-assist lands)                                                                        | Qdrant is a v3 option for large corpora                                                                             |
-| **AI inference**            | Local Ollama default (`llama3.1:8b-instruct-q5` baseline)                                                 | Cloud LLM opt-in per-tenant                                                                                         |
-| **Evidence integrity**      | sha256 content-hash per record (v1) + cosign signing of audit-export bundles                              | Full Sigstore transparency-log in v3                                                                                |
-| **Observability**           | OTEL native (traces + metrics + logs); default docker-compose bundles Prometheus + Grafana + Tempo + Loki | Production users route OTEL to their own stack                                                                      |
-| **Build runner**            | `just` (justfile at root)                                                                                 | Cross-language; cleaner than Make                                                                                   |
-| **Go tooling**              | Go modules · `gofmt` · `goimports` · `golangci-lint` (strict)                                             | Enforced via pre-commit + CI                                                                                        |
-| **Python tooling**          | `uv` (env + deps) · `ruff` (format + lint)                                                                | Modern Python toolchain                                                                                             |
-| **TS tooling**              | `npm` workspaces · `prettier` · `eslint` · `tsc --strict`                                                 |                                                                                                                     |
-| **CI/CD**                   | GitHub Actions                                                                                            | Free for OSS; OIDC token issuance for push credentials                                                              |
-| **Container**               | Distroless base images; multi-stage builds                                                                |                                                                                                                     |
-| **Deployment**              | docker-compose (self-host solo) · Helm chart (K8s SaaS)                                                   | Single VM is the target for v1 self-host                                                                            |
-| **Repo shape**              | **Monorepo** (single repo, all components, all languages)                                                 | Cross-cutting changes are one PR                                                                                    |
-| **Mockup framework**        | Plain HTML + Tailwind via CDN                                                                             | Iteration-1 only. Graduate to shadcn/ui React when frontend code begins.                                            |
+| Layer                       | Choice                                                                                                                                              | Notes                                                                                                               |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **Backend language**        | Go (platform core)                                                                                                                                  | Static binary, low operational overhead, strong concurrency for evidence streams                                    |
+| **Secondary language**      | Python (connector SDK reference + OSCAL bridge via compliance-trestle)                                                                              | Bridged from Go via stable gRPC contract                                                                            |
+| **Database**                | PostgreSQL 16+                                                                                                                                      | RLS for tenancy, JSONB for evolving evidence, recursive CTEs for UCF graph traversal                                |
+| **DB access**               | **sqlc + Atlas**                                                                                                                                    | Type-safe Go from SQL; declarative migrations. Recursive CTEs and JSONB are first-class. No ORM impedance mismatch. |
+| **Object storage**          | S3-compatible                                                                                                                                       | For evidence artifacts > 1 MB                                                                                       |
+| **Analytics (optional v2)** | ClickHouse                                                                                                                                          | Behind a read-model interface. Only when evidence-record volume crosses ~10⁹.                                       |
+| **Event/queue**             | NATS JetStream                                                                                                                                      | Single binary; durable streams; replay for evidence reprocessing                                                    |
+| **IPC**                     | gRPC                                                                                                                                                | Connector SDK contract + Python OSCAL bridge                                                                        |
+| **Push API**                | REST `POST /v1/evidence:push` + gRPC streaming + CLI + per-language SDKs (Go, Python, TypeScript, Java)                                             | See `Plans/EVIDENCE_SDK.md`                                                                                         |
+| **Auth (AuthN)**            | OIDC (relying party only — we are not an IdP)                                                                                                       | Every credible IdP speaks it                                                                                        |
+| **Auth (AuthZ)**            | RBAC (coarse roles) + ABAC (fine cuts) via OPA                                                                                                      | Same OPA engine evaluates control queries and authorization decisions                                               |
+| **OPA deployment**          | Embedded Go library (v1)                                                                                                                            | Sidecar / central server is a v2 option                                                                             |
+| **Frontend**                | **Next.js 16 App Router + shadcn/ui + Tailwind 4 + TanStack Query** (verified 2026-05-15: `next@16.2.6`, `react@19.2.6`, `eslint@^9` per slice 078) | Server Components for data-heavy dashboards; shadcn/ui aligns with mockups                                          |
+| **Schema registry**         | In-tree Go service (v1), backed by Postgres                                                                                                         | Apicurio / external is a v3 option                                                                                  |
+| **Vector store**            | pgvector (v2 when AI-assist lands)                                                                                                                  | Qdrant is a v3 option for large corpora                                                                             |
+| **AI inference**            | Local Ollama default (`llama3.1:8b-instruct-q5` baseline)                                                                                           | Cloud LLM opt-in per-tenant                                                                                         |
+| **Evidence integrity**      | sha256 content-hash per record (v1) + cosign signing of audit-export bundles                                                                        | Full Sigstore transparency-log in v3                                                                                |
+| **Observability**           | OTEL native (traces + metrics + logs); default docker-compose bundles Prometheus + Grafana + Tempo + Loki                                           | Production users route OTEL to their own stack                                                                      |
+| **Build runner**            | `just` (justfile at root)                                                                                                                           | Cross-language; cleaner than Make                                                                                   |
+| **Go tooling**              | Go modules · `gofmt` · `goimports` · `golangci-lint` (strict)                                                                                       | Enforced via pre-commit + CI                                                                                        |
+| **Python tooling**          | `uv` (env + deps) · `ruff` (format + lint)                                                                                                          | Modern Python toolchain                                                                                             |
+| **TS tooling**              | `npm` workspaces · `prettier` · `eslint` · `tsc --strict`                                                                                           |                                                                                                                     |
+| **CI/CD**                   | GitHub Actions                                                                                                                                      | Free for OSS; OIDC token issuance for push credentials                                                              |
+| **Container**               | Distroless base images; multi-stage builds                                                                                                          |                                                                                                                     |
+| **Deployment**              | docker-compose (self-host solo) · Helm chart (K8s SaaS)                                                                                             | Single VM is the target for v1 self-host                                                                            |
+| **Repo shape**              | **Monorepo** (single repo, all components, all languages)                                                                                           | Cross-cutting changes are one PR                                                                                    |
+| **Mockup framework**        | Plain HTML + Tailwind via CDN                                                                                                                       | Iteration-1 only. Graduate to shadcn/ui React when frontend code begins.                                            |
 
 ---
 
@@ -229,21 +229,22 @@ security-atlas/
 
 ## Working norms in this repo
 
-### Pre-implementation phase (now)
+### Editing `Plans/` vs editing code
 
-1. **Default to editing `Plans/`.** Most changes are markdown.
-2. **Write to the canvas split files**, not the hub. The hub (`Plans/ARCHITECTURE_CANVAS.md`) is an index — only edit it for executive summary / navigation / load-bearing-decisions changes.
-3. **Companion docs** (`UCF_GRAPH_MODEL.md`, `EVIDENCE_SDK.md`) stay at `Plans/` root, not under `canvas/`.
-4. **Mockups in `Plans/mockups/`** are iteration-1 HTML. Don't refactor them into a build system yet. When real frontend code begins, the mockups become reference, not production code.
-5. **No code commits without explicit user approval to start scaffolding.** Even small ones. Ask first.
+1. **Canvas (`Plans/canvas/*.md`) edits** — write to the split files, not the hub. The hub (`Plans/ARCHITECTURE_CANVAS.md`) is an index — only edit it for executive summary / navigation / load-bearing-decisions changes.
+2. **Companion docs** (`UCF_GRAPH_MODEL.md`, `EVIDENCE_SDK.md`) stay at `Plans/` root, not under `canvas/`.
+3. **Mockups in `Plans/mockups/`** were iteration-1 HTML; the production frontend now lives at `web/`. Treat the mockups as reference, not production code.
+4. **New architectural decisions** land as ADRs under `docs/adr/NNNN-*.md` (per the documentation discipline); the canvas captures the resolved invariant, the ADR captures the trade-off context.
 
-### When code begins
+### Spine ordering (already executed; left as the historical record)
 
-1. Bootstrap the monorepo skeleton in one PR (justfile + go.work + package.json + pyproject.toml + empty directory structure + CI workflows).
-2. Land migrations and the schema for the six primitives (Control, Risk, Evidence, Scope, Framework, Policy) + FrameworkScope before any feature work.
-3. Build the Evidence SDK contract (proto definitions + Go push client + CLI) before any connector.
-4. First connector: AWS (deepest demand, well-documented APIs).
-5. Frontend bootstraps after the platform has a real API to talk to.
+The v1 spine was built in this order — preserved here so future contributors understand the dependency shape:
+
+1. Bootstrap the monorepo skeleton (slice 001 — `justfile` + `go.work` + `package.json` + `pyproject.toml` + empty directory structure + CI workflows).
+2. Schema + migrations for the six primitives (Control, Risk, Evidence, Scope, Framework, Policy) + FrameworkScope before any feature work (slice 002).
+3. Evidence SDK contract — proto definitions + Go push client + CLI (slice 003) — before any connector.
+4. First connector: AWS, deepest demand, well-documented APIs (slice 004).
+5. Frontend bootstrap (slice 005) after the platform had a real API to talk to.
 
 ### Style
 
