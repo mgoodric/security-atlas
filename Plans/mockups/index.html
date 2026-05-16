@@ -31,8 +31,9 @@
       </div>
       <h1 class="text-4xl font-semibold tracking-tight text-slate-900 mb-3">UI mockups</h1>
       <p class="text-slate-600 max-w-2xl">
-        Four screens covering the v1 high-leverage workflows for a solo security leader running their entire program
-        from one tool. Click into any screen, then iterate via the canvas docs and the source files in
+        Ten screens covering the v1 high-leverage workflows for a solo security leader running their entire program
+        from one tool — four iteration-1 deep workflows plus six v1 fill-in pages added in slice 093. Click into any
+        screen, then iterate via the canvas docs and the source files in
         <code class="mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Plans/mockups/</code>.
       </p>
     </header>
@@ -164,6 +165,101 @@
           </p>
         </div>
       </a>
+    </div>
+
+    <!-- ============ v1 FILL-IN PAGES (slice 093) ============ -->
+    <div class="mt-12">
+      <div class="flex items-baseline justify-between mb-4">
+        <h2 class="text-lg font-semibold tracking-tight">v1 fill-in pages</h2>
+        <span class="text-xs text-slate-500 mono">slice 093 · design only · implementation pending</span>
+      </div>
+      <p class="text-sm text-slate-600 mb-5 max-w-3xl">
+        Six top-level list-view pages the user naturally tries from the top-nav. Backend handlers exist for all six;
+        these wireframes unblock the per-page implementation slices that follow. See
+        <a href="../canvas/12-ui-fill-in-design-decisions.md" class="text-brand-600 hover:text-brand-700">design decisions</a>
+        for top-nav order, empty-state / loading-skeleton patterns, and the /settings vs /admin scope decision.
+      </p>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+
+        <a href="controls.html" class="group block bg-white rounded-xl border border-slate-200 hover:border-brand-300 hover:shadow-md transition-all overflow-hidden">
+          <div class="p-4 border-b border-slate-100 flex items-center gap-2">
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 mono text-[10px] font-semibold bg-amber-50 text-amber-700 rounded">design only — implementation pending</span>
+          </div>
+          <div class="p-5">
+            <div class="flex items-baseline justify-between mb-1">
+              <h3 class="font-semibold text-slate-900">Controls · list view</h3>
+              <span class="mono text-xs text-slate-400">/controls</span>
+            </div>
+            <p class="text-sm text-slate-600">Filterable list of SCF anchors × framework satisfactions. Row click navigates to the existing control detail.</p>
+          </div>
+        </a>
+
+        <a href="evidence.html" class="group block bg-white rounded-xl border border-slate-200 hover:border-brand-300 hover:shadow-md transition-all overflow-hidden">
+          <div class="p-4 border-b border-slate-100 flex items-center gap-2">
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 mono text-[10px] font-semibold bg-amber-50 text-amber-700 rounded">design only — implementation pending</span>
+          </div>
+          <div class="p-5">
+            <div class="flex items-baseline justify-between mb-1">
+              <h3 class="font-semibold text-slate-900">Evidence ledger · list view</h3>
+              <span class="mono text-xs text-slate-400">/evidence</span>
+            </div>
+            <p class="text-sm text-slate-600">Append-only record stream filterable by control + kind + result + source + scope + time window.</p>
+          </div>
+        </a>
+
+        <a href="risks.html" class="group block bg-white rounded-xl border border-slate-200 hover:border-brand-300 hover:shadow-md transition-all overflow-hidden">
+          <div class="p-4 border-b border-slate-100 flex items-center gap-2">
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 mono text-[10px] font-semibold bg-amber-50 text-amber-700 rounded">design only — implementation pending</span>
+          </div>
+          <div class="p-5">
+            <div class="flex items-baseline justify-between mb-1">
+              <h3 class="font-semibold text-slate-900">Risk register · list view</h3>
+              <span class="mono text-xs text-slate-400">/risks</span>
+            </div>
+            <p class="text-sm text-slate-600">Flat list of risks with treatment, owner, residual, severity, review_due_at. Distinct from /risks/hierarchy.</p>
+          </div>
+        </a>
+
+        <a href="policies.html" class="group block bg-white rounded-xl border border-slate-200 hover:border-brand-300 hover:shadow-md transition-all overflow-hidden">
+          <div class="p-4 border-b border-slate-100 flex items-center gap-2">
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 mono text-[10px] font-semibold bg-amber-50 text-amber-700 rounded">design only — implementation pending</span>
+          </div>
+          <div class="p-5">
+            <div class="flex items-baseline justify-between mb-1">
+              <h3 class="font-semibold text-slate-900">Policy library · list view</h3>
+              <span class="mono text-xs text-slate-400">/policies</span>
+            </div>
+            <p class="text-sm text-slate-600">Versioned policies with publish status and per-version acknowledgment rate against the required-role population.</p>
+          </div>
+        </a>
+
+        <a href="audits.html" class="group block bg-white rounded-xl border border-slate-200 hover:border-brand-300 hover:shadow-md transition-all overflow-hidden">
+          <div class="p-4 border-b border-slate-100 flex items-center gap-2">
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 mono text-[10px] font-semibold bg-amber-50 text-amber-700 rounded">design only — implementation pending</span>
+          </div>
+          <div class="p-5">
+            <div class="flex items-baseline justify-between mb-1">
+              <h3 class="font-semibold text-slate-900">Audit periods · list view</h3>
+              <span class="mono text-xs text-slate-400">/audits</span>
+            </div>
+            <p class="text-sm text-slate-600">Period index (plural) with framework, dates, sample size, frozen status. Distinct from per-control /audit/[controlId].</p>
+          </div>
+        </a>
+
+        <a href="settings.html" class="group block bg-white rounded-xl border border-slate-200 hover:border-brand-300 hover:shadow-md transition-all overflow-hidden">
+          <div class="p-4 border-b border-slate-100 flex items-center gap-2">
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 mono text-[10px] font-semibold bg-amber-50 text-amber-700 rounded">design only — implementation pending</span>
+          </div>
+          <div class="p-5">
+            <div class="flex items-baseline justify-between mb-1">
+              <h3 class="font-semibold text-slate-900">Settings · personal</h3>
+              <span class="mono text-xs text-slate-400">/settings</span>
+            </div>
+            <p class="text-sm text-slate-600">User-facing only: profile, theme, notifications, personal API tokens. Tenant settings live at /admin.</p>
+          </div>
+        </a>
+
+      </div>
     </div>
 
     <div class="mt-10 text-sm text-slate-500 max-w-3xl">

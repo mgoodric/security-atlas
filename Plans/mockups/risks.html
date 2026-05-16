@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Risks · security-atlas</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared/shell.css" />
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          brand: { 50:'#eef2ff', 100:'#e0e7ff', 200:'#c7d2fe', 500:'#6366f1', 600:'#4f46e5', 700:'#4338ca', 900:'#312e81' }
+        }
+      }
+    }
+  }
+</script>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+
+<header class="sticky top-0 z-20 bg-white border-b border-slate-200">
+  <div class="flex items-center h-12 px-4">
+    <a href="index.html" class="flex items-center gap-2 pr-4 border-r border-slate-200 mr-4">
+      <svg class="w-5 h-5 text-brand-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2 4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6l-8-4z" stroke-linejoin="round"/>
+        <path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="text-sm font-semibold tracking-tight">security-atlas</span>
+    </a>
+    <nav class="flex items-center gap-1 text-xs text-slate-500">
+      <span>Sentinel Labs</span>
+      <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg>
+      <span class="text-slate-900 font-medium">Risks</span>
+    </nav>
+    <div class="ml-auto flex items-center gap-3">
+      <div class="flex items-center gap-2 px-2.5 py-1 bg-amber-50 border border-amber-200 rounded-full">
+        <span class="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse"></span>
+        <span class="text-xs font-medium text-amber-800">SOC 2 Type II · Q2 2026 in progress</span>
+      </div>
+      <div class="relative">
+        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+        <input type="text" placeholder="Search controls, evidence, risks…" class="pl-8 pr-3 py-1.5 w-64 text-sm bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-brand-500 focus:bg-white"/>
+        <kbd class="absolute right-2 top-1/2 -translate-y-1/2 mono text-[10px] text-slate-400 bg-white border border-slate-200 px-1 rounded">⌘K</kbd>
+      </div>
+      <div class="flex items-center gap-2 pl-3 border-l border-slate-200">
+        <div class="w-7 h-7 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-xs font-semibold">MG</div>
+        <span class="text-sm text-slate-700">Sam</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="flex">
+
+<nav class="w-56 border-r border-slate-200 bg-white min-h-[calc(100vh-3rem)] py-4 px-3 text-sm">
+  <div class="space-y-0.5">
+    <a href="dashboard.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"/></svg>
+      Dashboard
+    </a>
+    <a href="controls.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
+      Controls
+      <span class="ml-auto mono text-[10px] text-slate-400">82</span>
+    </a>
+    <a href="evidence.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/><path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5z" clip-rule="evenodd"/></svg>
+      Evidence
+    </a>
+    <a href="risks.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-slate-100 text-slate-900 font-medium">
+      <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>
+      Risks
+      <span class="ml-auto mono text-[10px] text-rose-500">3</span>
+    </a>
+    <a href="audits.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v3.586l-1.293-1.293a1 1 0 10-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 11.586V8z" clip-rule="evenodd"/></svg>
+      Audits
+    </a>
+    <a href="policies.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/></svg>
+      Policies
+    </a>
+    <a href="#" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z"/></svg>
+      Vendors
+    </a>
+    <a href="board-pack.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/></svg>
+      Board Packs
+    </a>
+    <a href="settings.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/></svg>
+      Settings
+    </a>
+    <a href="#" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+      Admin
+    </a>
+  </div>
+</nav>
+
+<main class="flex-1 min-w-0">
+  <div class="max-w-7xl mx-auto px-8 py-7">
+
+    <div class="flex items-baseline justify-between mb-6">
+      <div>
+        <div class="flex items-baseline gap-3">
+          <h1 class="text-2xl font-semibold tracking-tight">Risk register</h1>
+          <span class="text-sm text-slate-500">47 risks · 3 above appetite</span>
+        </div>
+        <p class="text-sm text-slate-500 mt-0.5">Flat list of all risks · for the org-tree view see <a href="#" class="text-brand-600 hover:text-brand-700">Risks → Hierarchy</a></p>
+      </div>
+      <div class="flex items-center gap-2">
+        <a href="#" class="px-3 py-1.5 text-sm text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50">Hierarchy view →</a>
+        <button class="px-3 py-1.5 text-sm text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50">Export CSV</button>
+        <button class="px-3 py-1.5 text-sm text-white bg-brand-600 rounded-md hover:bg-brand-700 flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd"/></svg>
+          New risk
+        </button>
+      </div>
+    </div>
+
+    <!-- filter row -->
+    <div class="flex items-center gap-2 mb-4 flex-wrap">
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-xs">
+        <span class="text-slate-500">Category</span>
+        <select class="bg-transparent text-slate-900 font-medium focus:outline-none">
+          <option>All categories</option>
+          <option>Operational</option>
+          <option>Compliance</option>
+          <option>Third-party</option>
+          <option>Strategic</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-xs">
+        <span class="text-slate-500">Treatment</span>
+        <select class="bg-transparent text-slate-900 font-medium focus:outline-none">
+          <option>All treatments</option>
+          <option>mitigate</option>
+          <option>transfer</option>
+          <option>accept</option>
+          <option>avoid</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-xs">
+        <span class="text-slate-500">Methodology</span>
+        <select class="bg-transparent text-slate-900 font-medium focus:outline-none">
+          <option>All</option>
+          <option>nist_800_30</option>
+          <option>fair</option>
+          <option>five_by_five</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-xs">
+        <span class="text-slate-500">Org unit</span>
+        <select class="bg-transparent text-slate-900 font-medium focus:outline-none">
+          <option>All units</option>
+          <option>Platform</option>
+          <option>Customer success</option>
+          <option>Corporate IT</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-xs">
+        <span class="text-slate-500">Owner</span>
+        <select class="bg-transparent text-slate-900 font-medium focus:outline-none">
+          <option>All owners</option>
+          <option>Sam Rivera</option>
+          <option>Dana Kim</option>
+          <option>unassigned</option>
+        </select>
+      </div>
+      <div class="ml-auto text-xs text-slate-500">
+        Showing <span class="text-slate-900 font-medium">7</span> of <span class="mono">47</span> risks
+      </div>
+    </div>
+
+    <!-- table -->
+    <div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500">
+          <tr>
+            <th class="text-left px-5 py-2.5 font-medium">ID</th>
+            <th class="text-left px-5 py-2.5 font-medium">Title</th>
+            <th class="text-left px-5 py-2.5 font-medium">Category</th>
+            <th class="text-left px-5 py-2.5 font-medium">Treatment</th>
+            <th class="text-left px-5 py-2.5 font-medium">Owner</th>
+            <th class="text-left px-5 py-2.5 font-medium">Residual</th>
+            <th class="text-left px-5 py-2.5 font-medium">Severity</th>
+            <th class="text-left px-5 py-2.5 font-medium">Review due</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          <tr class="hover:bg-slate-50 cursor-pointer">
+            <td class="px-5 py-3 mono text-xs text-slate-700">RISK-0014</td>
+            <td class="px-5 py-3 text-slate-900">Vendor concentration · CI/CD</td>
+            <td class="px-5 py-3 text-xs text-slate-600">Third-party</td>
+            <td class="px-5 py-3"><span class="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-rose-50 text-rose-700">mitigate</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">Sam Rivera</td>
+            <td class="px-5 py-3 mono text-xs"><span class="text-rose-700 font-semibold">0.71</span></td>
+            <td class="px-5 py-3"><span class="inline-flex items-center justify-center w-6 h-6 text-[11px] font-semibold rounded bg-rose-100 text-rose-700">20</span></td>
+            <td class="px-5 py-3 text-xs text-rose-600">2026-04-30 · 16d overdue</td>
+          </tr>
+          <tr class="hover:bg-slate-50 cursor-pointer">
+            <td class="px-5 py-3 mono text-xs text-slate-700">RISK-0021</td>
+            <td class="px-5 py-3 text-slate-900">Unmanaged contractor laptops · privileged access</td>
+            <td class="px-5 py-3 text-xs text-slate-600">Operational</td>
+            <td class="px-5 py-3"><span class="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-rose-50 text-rose-700">mitigate</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">Sam Rivera</td>
+            <td class="px-5 py-3 mono text-xs"><span class="text-rose-700 font-semibold">0.68</span></td>
+            <td class="px-5 py-3"><span class="inline-flex items-center justify-center w-6 h-6 text-[11px] font-semibold rounded bg-rose-100 text-rose-700">16</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">2026-06-15</td>
+          </tr>
+          <tr class="hover:bg-slate-50 cursor-pointer">
+            <td class="px-5 py-3 mono text-xs text-slate-700">RISK-0009</td>
+            <td class="px-5 py-3 text-slate-900">Customer data export endpoints · PII exposure</td>
+            <td class="px-5 py-3 text-xs text-slate-600">Compliance</td>
+            <td class="px-5 py-3"><span class="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-amber-50 text-amber-700">mitigate</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">Dana Kim</td>
+            <td class="px-5 py-3 mono text-xs"><span class="text-amber-700 font-semibold">0.52</span></td>
+            <td class="px-5 py-3"><span class="inline-flex items-center justify-center w-6 h-6 text-[11px] font-semibold rounded bg-amber-100 text-amber-700">12</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">2026-07-02</td>
+          </tr>
+          <tr class="hover:bg-slate-50 cursor-pointer">
+            <td class="px-5 py-3 mono text-xs text-slate-700">RISK-0033</td>
+            <td class="px-5 py-3 text-slate-900">Single-tenant prod DB · noisy-neighbor + DR</td>
+            <td class="px-5 py-3 text-xs text-slate-600">Operational</td>
+            <td class="px-5 py-3"><span class="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-sky-50 text-sky-700">accept</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">Sam Rivera</td>
+            <td class="px-5 py-3 mono text-xs"><span class="text-amber-700 font-semibold">0.41</span></td>
+            <td class="px-5 py-3"><span class="inline-flex items-center justify-center w-6 h-6 text-[11px] font-semibold rounded bg-amber-100 text-amber-700">9</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">2026-09-01 · accepted_until</td>
+          </tr>
+          <tr class="hover:bg-slate-50 cursor-pointer">
+            <td class="px-5 py-3 mono text-xs text-slate-700">RISK-0028</td>
+            <td class="px-5 py-3 text-slate-900">Insider threat · departing employees retain SaaS access</td>
+            <td class="px-5 py-3 text-xs text-slate-600">Operational</td>
+            <td class="px-5 py-3"><span class="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-amber-50 text-amber-700">mitigate</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">Dana Kim</td>
+            <td class="px-5 py-3 mono text-xs"><span class="text-amber-700 font-semibold">0.38</span></td>
+            <td class="px-5 py-3"><span class="inline-flex items-center justify-center w-6 h-6 text-[11px] font-semibold rounded bg-amber-100 text-amber-700">8</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">2026-08-12</td>
+          </tr>
+          <tr class="hover:bg-slate-50 cursor-pointer">
+            <td class="px-5 py-3 mono text-xs text-slate-700">RISK-0041</td>
+            <td class="px-5 py-3 text-slate-900">Backup restore not tested in &gt;180 days</td>
+            <td class="px-5 py-3 text-xs text-slate-600">Operational</td>
+            <td class="px-5 py-3"><span class="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-emerald-50 text-emerald-700">transfer</span></td>
+            <td class="px-5 py-3 text-xs text-slate-500 italic">unassigned</td>
+            <td class="px-5 py-3 mono text-xs"><span class="text-emerald-700 font-semibold">0.22</span></td>
+            <td class="px-5 py-3"><span class="inline-flex items-center justify-center w-6 h-6 text-[11px] font-semibold rounded bg-emerald-100 text-emerald-700">6</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">2026-09-30</td>
+          </tr>
+          <tr class="hover:bg-slate-50 cursor-pointer">
+            <td class="px-5 py-3 mono text-xs text-slate-700">RISK-0007</td>
+            <td class="px-5 py-3 text-slate-900">Schrems II · EU data transfers without SCCs</td>
+            <td class="px-5 py-3 text-xs text-slate-600">Compliance</td>
+            <td class="px-5 py-3"><span class="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-slate-100 text-slate-600">avoid</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">Sam Rivera</td>
+            <td class="px-5 py-3 mono text-xs"><span class="text-emerald-700 font-semibold">0.18</span></td>
+            <td class="px-5 py-3"><span class="inline-flex items-center justify-center w-6 h-6 text-[11px] font-semibold rounded bg-emerald-100 text-emerald-700">4</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">2026-11-01</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="border-t border-slate-200 px-5 py-2.5 flex items-center justify-between text-xs text-slate-500 bg-slate-50">
+        <span>Showing 1–7 of 47</span>
+        <div class="flex items-center gap-2">
+          <button class="px-2 py-1 border border-slate-200 rounded text-slate-500" disabled>Previous</button>
+          <button class="px-2 py-1 border border-slate-200 rounded bg-white text-slate-700 hover:bg-slate-100">Next</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- loading skeleton -->
+    <div class="mt-10 p-4 bg-slate-50 border border-dashed border-slate-300 rounded-lg">
+      <div class="text-xs uppercase tracking-wider text-slate-500 font-medium mb-2">Loading skeleton (3 shimmer rows · matches table layout)</div>
+      <div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div class="bg-slate-50 border-b border-slate-200 px-5 py-2.5">
+          <div class="h-3 bg-slate-200 rounded w-1/3 animate-pulse"></div>
+        </div>
+        <div class="divide-y divide-slate-100">
+          <div class="px-5 py-4 flex items-center gap-4">
+            <div class="h-3 bg-slate-200 rounded w-20 animate-pulse"></div>
+            <div class="h-3 bg-slate-200 rounded flex-1 animate-pulse"></div>
+            <div class="h-5 bg-slate-200 rounded-md w-16 animate-pulse"></div>
+            <div class="h-3 bg-slate-200 rounded w-20 animate-pulse"></div>
+          </div>
+          <div class="px-5 py-4 flex items-center gap-4">
+            <div class="h-3 bg-slate-200 rounded w-20 animate-pulse"></div>
+            <div class="h-3 bg-slate-200 rounded flex-1 animate-pulse"></div>
+            <div class="h-5 bg-slate-200 rounded-md w-16 animate-pulse"></div>
+            <div class="h-3 bg-slate-200 rounded w-20 animate-pulse"></div>
+          </div>
+          <div class="px-5 py-4 flex items-center gap-4">
+            <div class="h-3 bg-slate-200 rounded w-20 animate-pulse"></div>
+            <div class="h-3 bg-slate-200 rounded flex-1 animate-pulse"></div>
+            <div class="h-5 bg-slate-200 rounded-md w-16 animate-pulse"></div>
+            <div class="h-3 bg-slate-200 rounded w-20 animate-pulse"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- empty state -->
+    <div class="mt-6 p-4 bg-slate-50 border border-dashed border-slate-300 rounded-lg">
+      <div class="text-xs uppercase tracking-wider text-slate-500 font-medium mb-2">Empty state (no risks)</div>
+      <div class="bg-white border border-slate-200 rounded-xl py-16 px-6 text-center">
+        <svg class="w-12 h-12 mx-auto text-slate-300 mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="text-sm font-semibold text-slate-900 mb-1">No risks logged yet</div>
+        <div class="text-xs text-slate-500 mb-4">Start a register with one or two known operational risks — you can refine methodology later.</div>
+        <button class="px-3 py-1.5 text-xs text-white bg-brand-600 rounded-md hover:bg-brand-700">Add first risk</button>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+</div>
+
+</body>
+</html>

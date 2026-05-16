@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Evidence · security-atlas</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared/shell.css" />
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          brand: { 50:'#eef2ff', 100:'#e0e7ff', 200:'#c7d2fe', 500:'#6366f1', 600:'#4f46e5', 700:'#4338ca', 900:'#312e81' }
+        }
+      }
+    }
+  }
+</script>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+
+<header class="sticky top-0 z-20 bg-white border-b border-slate-200">
+  <div class="flex items-center h-12 px-4">
+    <a href="index.html" class="flex items-center gap-2 pr-4 border-r border-slate-200 mr-4">
+      <svg class="w-5 h-5 text-brand-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2 4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6l-8-4z" stroke-linejoin="round"/>
+        <path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="text-sm font-semibold tracking-tight">security-atlas</span>
+    </a>
+    <nav class="flex items-center gap-1 text-xs text-slate-500">
+      <span>Sentinel Labs</span>
+      <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg>
+      <span class="text-slate-900 font-medium">Evidence</span>
+    </nav>
+    <div class="ml-auto flex items-center gap-3">
+      <div class="flex items-center gap-2 px-2.5 py-1 bg-amber-50 border border-amber-200 rounded-full">
+        <span class="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse"></span>
+        <span class="text-xs font-medium text-amber-800">SOC 2 Type II · Q2 2026 in progress</span>
+      </div>
+      <div class="relative">
+        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+        <input type="text" placeholder="Search controls, evidence, risks…" class="pl-8 pr-3 py-1.5 w-64 text-sm bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-brand-500 focus:bg-white"/>
+        <kbd class="absolute right-2 top-1/2 -translate-y-1/2 mono text-[10px] text-slate-400 bg-white border border-slate-200 px-1 rounded">⌘K</kbd>
+      </div>
+      <div class="flex items-center gap-2 pl-3 border-l border-slate-200">
+        <div class="w-7 h-7 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-xs font-semibold">MG</div>
+        <span class="text-sm text-slate-700">Sam</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="flex">
+
+<nav class="w-56 border-r border-slate-200 bg-white min-h-[calc(100vh-3rem)] py-4 px-3 text-sm">
+  <div class="space-y-0.5">
+    <a href="dashboard.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"/></svg>
+      Dashboard
+    </a>
+    <a href="controls.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
+      Controls
+      <span class="ml-auto mono text-[10px] text-slate-400">82</span>
+    </a>
+    <a href="evidence.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-slate-100 text-slate-900 font-medium">
+      <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/><path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5z" clip-rule="evenodd"/></svg>
+      Evidence
+    </a>
+    <a href="risks.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>
+      Risks
+      <span class="ml-auto mono text-[10px] text-rose-500">3</span>
+    </a>
+    <a href="audits.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v3.586l-1.293-1.293a1 1 0 10-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 11.586V8z" clip-rule="evenodd"/></svg>
+      Audits
+    </a>
+    <a href="policies.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/></svg>
+      Policies
+    </a>
+    <a href="#" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z"/></svg>
+      Vendors
+    </a>
+    <a href="board-pack.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/></svg>
+      Board Packs
+    </a>
+    <a href="settings.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/></svg>
+      Settings
+    </a>
+    <a href="#" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+      Admin
+    </a>
+  </div>
+</nav>
+
+<main class="flex-1 min-w-0">
+  <div class="max-w-7xl mx-auto px-8 py-7">
+
+    <div class="flex items-baseline justify-between mb-6">
+      <div>
+        <div class="flex items-baseline gap-3">
+          <h1 class="text-2xl font-semibold tracking-tight">Evidence ledger</h1>
+          <span class="text-sm text-slate-500">append-only · 14,712 records · 7 connectors</span>
+        </div>
+        <p class="text-sm text-slate-500 mt-0.5">Every ingested record · ingestion is separate from evaluation · point-in-time replay always possible</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="px-3 py-1.5 text-sm text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50">Export JSONL</button>
+        <button class="px-3 py-1.5 text-sm text-white bg-brand-600 rounded-md hover:bg-brand-700 flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M5.5 13a3.5 3.5 0 01-.369-6.98 4 4 0 117.753-1.977A4.5 4.5 0 0113.5 13H11V9.413l1.293 1.293a1 1 0 001.414-1.414l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V13H5.5z"/><path d="M9 13h2v5a1 1 0 11-2 0v-5z"/></svg>
+          Push evidence
+        </button>
+      </div>
+    </div>
+
+    <!-- filter row -->
+    <div class="flex items-center gap-2 mb-4 flex-wrap">
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-xs">
+        <span class="text-slate-500">Control</span>
+        <select class="bg-transparent text-slate-900 font-medium focus:outline-none">
+          <option>All controls</option>
+          <option>SCF:IAC-06 · MFA</option>
+          <option>SCF:CRY-04 · Encryption at rest</option>
+          <option>SCF:VPM-04 · Vuln remediation</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-xs">
+        <span class="text-slate-500">Kind</span>
+        <select class="bg-transparent text-slate-900 font-medium focus:outline-none">
+          <option>All evidence_kinds</option>
+          <option>aws.s3.encryption_status.v1</option>
+          <option>okta.mfa_enrollment.v1</option>
+          <option>sast.scan_result.v1</option>
+          <option>access_review.completion.v1</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-xs">
+        <span class="text-slate-500">Result</span>
+        <select class="bg-transparent text-slate-900 font-medium focus:outline-none">
+          <option>All results</option>
+          <option>pass</option>
+          <option>fail</option>
+          <option>not_applicable</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-xs">
+        <span class="text-slate-500">Source</span>
+        <select class="bg-transparent text-slate-900 font-medium focus:outline-none">
+          <option>All sources</option>
+          <option>aws-connector</option>
+          <option>okta-connector</option>
+          <option>gitlab-ci</option>
+          <option>manual</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-xs">
+        <span class="text-slate-500">Scope</span>
+        <select class="bg-transparent text-slate-900 font-medium focus:outline-none">
+          <option>All scopes</option>
+          <option>env=prod</option>
+          <option>cloud=aws,region=us-east-1</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-xs">
+        <span class="text-slate-500">Since</span>
+        <select class="bg-transparent text-slate-900 font-medium focus:outline-none">
+          <option>Last 7 days</option>
+          <option>Last 24 hours</option>
+          <option>Last 30 days</option>
+          <option>Audit period Q2 2026</option>
+        </select>
+      </div>
+      <div class="ml-auto text-xs text-slate-500">
+        Showing <span class="text-slate-900 font-medium">12</span> of <span class="mono">14,712</span> records
+      </div>
+    </div>
+
+    <!-- table -->
+    <div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500">
+          <tr>
+            <th class="text-left px-5 py-2.5 font-medium">Observed</th>
+            <th class="text-left px-5 py-2.5 font-medium">Evidence kind</th>
+            <th class="text-left px-5 py-2.5 font-medium">Control</th>
+            <th class="text-left px-5 py-2.5 font-medium">Result</th>
+            <th class="text-left px-5 py-2.5 font-medium">Source</th>
+            <th class="text-left px-5 py-2.5 font-medium">Scope</th>
+            <th class="text-left px-5 py-2.5 font-medium">Hash</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          <tr class="hover:bg-slate-50 cursor-pointer">
+            <td class="px-5 py-3 mono text-xs text-slate-700">2026-05-16T09:42Z</td>
+            <td class="px-5 py-3"><span class="mono text-xs text-slate-700">aws.s3.encryption_status.v1</span></td>
+            <td class="px-5 py-3"><a href="control.html" class="mono text-xs text-brand-700">SCF:CRY-04</a></td>
+            <td class="px-5 py-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium rounded-md bg-emerald-50 text-emerald-700"><span class="w-1.5 h-1.5 dot-pass rounded-full"></span>pass</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">aws-connector · pull</td>
+            <td class="px-5 py-3 text-xs text-slate-500 mono">cloud=aws · env=prod</td>
+            <td class="px-5 py-3 mono text-[10px] text-slate-400">7a4f…b2c1</td>
+          </tr>
+          <tr class="hover:bg-slate-50 cursor-pointer">
+            <td class="px-5 py-3 mono text-xs text-slate-700">2026-05-16T09:24Z</td>
+            <td class="px-5 py-3"><span class="mono text-xs text-slate-700">okta.mfa_enrollment.v1</span></td>
+            <td class="px-5 py-3"><a href="control.html" class="mono text-xs text-brand-700">SCF:IAC-06</a></td>
+            <td class="px-5 py-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium rounded-md bg-emerald-50 text-emerald-700"><span class="w-1.5 h-1.5 dot-pass rounded-full"></span>pass</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">okta-connector · pull</td>
+            <td class="px-5 py-3 text-xs text-slate-500 mono">workspace=corp</td>
+            <td class="px-5 py-3 mono text-[10px] text-slate-400">3b91…e8a7</td>
+          </tr>
+          <tr class="hover:bg-slate-50 cursor-pointer">
+            <td class="px-5 py-3 mono text-xs text-slate-700">2026-05-16T08:11Z</td>
+            <td class="px-5 py-3"><span class="mono text-xs text-slate-700">sast.scan_result.v1</span></td>
+            <td class="px-5 py-3"><a href="control.html" class="mono text-xs text-brand-700">SCF:VPM-04</a></td>
+            <td class="px-5 py-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium rounded-md bg-rose-50 text-rose-700"><span class="w-1.5 h-1.5 dot-fail rounded-full"></span>fail</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">gitlab-ci · push</td>
+            <td class="px-5 py-3 text-xs text-slate-500 mono">repo=atlas-core</td>
+            <td class="px-5 py-3 mono text-[10px] text-slate-400">c2d6…1f5a</td>
+          </tr>
+          <tr class="hover:bg-slate-50 cursor-pointer">
+            <td class="px-5 py-3 mono text-xs text-slate-700">2026-05-16T07:33Z</td>
+            <td class="px-5 py-3"><span class="mono text-xs text-slate-700">aws.iam.access_review.v1</span></td>
+            <td class="px-5 py-3"><a href="control.html" class="mono text-xs text-brand-700">SCF:IAC-22</a></td>
+            <td class="px-5 py-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium rounded-md bg-emerald-50 text-emerald-700"><span class="w-1.5 h-1.5 dot-pass rounded-full"></span>pass</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">aws-connector · pull</td>
+            <td class="px-5 py-3 text-xs text-slate-500 mono">cloud=aws · env=prod</td>
+            <td class="px-5 py-3 mono text-[10px] text-slate-400">9e02…44b8</td>
+          </tr>
+          <tr class="hover:bg-slate-50 cursor-pointer">
+            <td class="px-5 py-3 mono text-xs text-slate-700">2026-05-15T22:08Z</td>
+            <td class="px-5 py-3"><span class="mono text-xs text-slate-700">tabletop.completion.v1</span></td>
+            <td class="px-5 py-3"><a href="control.html" class="mono text-xs text-brand-700">SCF:IRO-04</a></td>
+            <td class="px-5 py-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium rounded-md bg-emerald-50 text-emerald-700"><span class="w-1.5 h-1.5 dot-pass rounded-full"></span>pass</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">manual · Sam R.</td>
+            <td class="px-5 py-3 text-xs text-slate-500 mono">tenant-global</td>
+            <td class="px-5 py-3 mono text-[10px] text-slate-400">5fa8…3d10</td>
+          </tr>
+          <tr class="hover:bg-slate-50 cursor-pointer">
+            <td class="px-5 py-3 mono text-xs text-slate-700">2026-05-15T19:51Z</td>
+            <td class="px-5 py-3"><span class="mono text-xs text-slate-700">jamf.disk_encryption.v1</span></td>
+            <td class="px-5 py-3"><a href="control.html" class="mono text-xs text-brand-700">SCF:END-08</a></td>
+            <td class="px-5 py-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium rounded-md bg-rose-50 text-rose-700"><span class="w-1.5 h-1.5 dot-fail rounded-full"></span>fail</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">jamf-connector · pull</td>
+            <td class="px-5 py-3 text-xs text-slate-500 mono">device=contractor-laptop</td>
+            <td class="px-5 py-3 mono text-[10px] text-slate-400">b1e4…7c22</td>
+          </tr>
+          <tr class="hover:bg-slate-50 cursor-pointer">
+            <td class="px-5 py-3 mono text-xs text-slate-700">2026-05-15T16:04Z</td>
+            <td class="px-5 py-3"><span class="mono text-xs text-slate-700">github.branch_protection.v1</span></td>
+            <td class="px-5 py-3"><a href="control.html" class="mono text-xs text-brand-700">SCF:CHG-04</a></td>
+            <td class="px-5 py-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium rounded-md bg-emerald-50 text-emerald-700"><span class="w-1.5 h-1.5 dot-pass rounded-full"></span>pass</span></td>
+            <td class="px-5 py-3 text-xs text-slate-600">github-connector · pull</td>
+            <td class="px-5 py-3 text-xs text-slate-500 mono">repo=*</td>
+            <td class="px-5 py-3 mono text-[10px] text-slate-400">28cf…9e51</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="border-t border-slate-200 px-5 py-2.5 flex items-center justify-between text-xs text-slate-500 bg-slate-50">
+        <span>Showing 1–7 of 12 (last 7d) · 14,712 total in ledger</span>
+        <div class="flex items-center gap-2">
+          <button class="px-2 py-1 border border-slate-200 rounded text-slate-500" disabled>Previous</button>
+          <button class="px-2 py-1 border border-slate-200 rounded bg-white text-slate-700 hover:bg-slate-100">Next</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- loading skeleton -->
+    <div class="mt-10 p-4 bg-slate-50 border border-dashed border-slate-300 rounded-lg">
+      <div class="text-xs uppercase tracking-wider text-slate-500 font-medium mb-2">Loading skeleton (3 shimmer rows · matches table layout)</div>
+      <div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div class="bg-slate-50 border-b border-slate-200 px-5 py-2.5">
+          <div class="h-3 bg-slate-200 rounded w-1/3 animate-pulse"></div>
+        </div>
+        <div class="divide-y divide-slate-100">
+          <div class="px-5 py-4 flex items-center gap-4">
+            <div class="h-3 bg-slate-200 rounded w-32 animate-pulse"></div>
+            <div class="h-3 bg-slate-200 rounded flex-1 animate-pulse"></div>
+            <div class="h-3 bg-slate-200 rounded w-20 animate-pulse"></div>
+            <div class="h-5 bg-slate-200 rounded-md w-14 animate-pulse"></div>
+          </div>
+          <div class="px-5 py-4 flex items-center gap-4">
+            <div class="h-3 bg-slate-200 rounded w-32 animate-pulse"></div>
+            <div class="h-3 bg-slate-200 rounded flex-1 animate-pulse"></div>
+            <div class="h-3 bg-slate-200 rounded w-20 animate-pulse"></div>
+            <div class="h-5 bg-slate-200 rounded-md w-14 animate-pulse"></div>
+          </div>
+          <div class="px-5 py-4 flex items-center gap-4">
+            <div class="h-3 bg-slate-200 rounded w-32 animate-pulse"></div>
+            <div class="h-3 bg-slate-200 rounded flex-1 animate-pulse"></div>
+            <div class="h-3 bg-slate-200 rounded w-20 animate-pulse"></div>
+            <div class="h-5 bg-slate-200 rounded-md w-14 animate-pulse"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- empty state -->
+    <div class="mt-6 p-4 bg-slate-50 border border-dashed border-slate-300 rounded-lg">
+      <div class="text-xs uppercase tracking-wider text-slate-500 font-medium mb-2">Empty state (no records)</div>
+      <div class="bg-white border border-slate-200 rounded-xl py-16 px-6 text-center">
+        <svg class="w-12 h-12 mx-auto text-slate-300 mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="text-sm font-semibold text-slate-900 mb-1">No evidence records match these filters</div>
+        <div class="text-xs text-slate-500 mb-4">Try a wider time window, or push a record via CLI or connector.</div>
+        <div class="flex items-center gap-2 justify-center">
+          <button class="px-3 py-1.5 text-xs text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50">Clear filters</button>
+          <a href="#" class="px-3 py-1.5 text-xs text-white bg-brand-600 rounded-md hover:bg-brand-700">Set up a connector →</a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+</div>
+
+</body>
+</html>
