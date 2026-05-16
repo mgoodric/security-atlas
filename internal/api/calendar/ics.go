@@ -60,13 +60,12 @@ func renderICS(rows []dbx.ListCalendarEventsRow, calName string, now time.Time) 
 		writeLine(&b, "UID:"+uid)
 		writeLine(&b, "DTSTAMP:"+formatUTC(now))
 		writeLine(&b, "DTSTART:"+formatUTC(row.StartsAt.Time))
+		// All-day-style fallback: VEVENTs without DTEND default to the same
+		// instant as DTSTART, which most calendar clients render as a single
+		// point. Acceptable for a deadline-style reminder. Only emit DTEND
+		// when an explicit end is present.
 		if row.EndsAt.Valid {
 			writeLine(&b, "DTEND:"+formatUTC(row.EndsAt.Time))
-		} else {
-			// All-day-style fallback: VEVENTs without DTEND default to
-			// the same instant as DTSTART, which most calendar clients
-			// render as a single point. Acceptable for a deadline-style
-			// reminder.
 		}
 		writeLine(&b, "SUMMARY:"+escapeText(row.Title))
 		desc := buildDescription(row)
