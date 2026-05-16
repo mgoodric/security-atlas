@@ -1,0 +1,135 @@
+# security-atlas — observability backplane (OTel Collector + Prometheus + Tempo).
+#
+# Sits alongside the existing Loki + Promtail + Grafana on Unraid (or any
+# Docker host with the `personal-ai` external network). atlas pushes OTLP
+# to `otel-collector:4317`; the collector fans out to Prometheus (metrics
+# via pull) and Tempo (traces via OTLP).
+#
+# Path on Unraid: /mnt/user/appdata/observability/
+# Bring up:        docker compose up -d
+# Verify:          curl http://192.168.1.246:9090/-/ready    # Prometheus
+#                  curl http://192.168.1.246:3200/ready      # Tempo
+#                  curl http://192.168.1.246:13133/          # OTel Collector
+# Stop:            docker compose down
+#
+# Architecture:
+#
+#   atlas (Go OTel SDK)
+#     │
+#     │ OTLP gRPC :4317
+#     ▼
+#   otel-collector
+#     │  ┌──────────────┐
+#     │  │ pipelines    │
+#     │  │  traces  ────┼──▶ tempo:4317 (OTLP gRPC)
+#     │  │  metrics ────┼──▶ prometheus exporter :8889 (pull scrape)
+#     │  └──────────────┘
+#     │
+#   prometheus (pulls :8889 every 15s; pulls itself :9090)
+#   tempo      (stores traces locally; HTTP query :3200)
+#
+# Grafana data sources to configure (Phase D after this stack is up):
+#   - Prometheus: http://prometheus:9090
+#   - Tempo:      http://tempo:3200
+#   - Loki:       http://GrafanaLoki:3100  (already exists)
+#
+# Watchtower discipline: NONE of these services carry the
+# `com.centurylinklabs.watchtower.enable=true` label. All three are
+# stateful (Prometheus has TSDB files, Tempo has WAL/blocks, OTel
+# Collector has buffered data). Upgrade them manually after reading
+# release notes — auto-upgrade on this tier is dangerous.
+
+name: security-atlas-observability
+
+services:
+  # --------------------------------------------------------------------
+  # OpenTelemetry Collector — single OTLP receive endpoint for atlas.
+  # Fans out to Prometheus (metrics) + Tempo (traces).
+  # --------------------------------------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.113.0
+    container_name: otel-collector
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    networks:
+      - personal-ai
+    ports:
+      - "4317:4317" # OTLP gRPC (atlas pushes here)
+      - "4318:4318" # OTLP HTTP (alt path; web BFF could push here)
+      - "8889:8889" # Prometheus exporter scrape endpoint
+      - "13133:13133" # health_check extension
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:13133/"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+    # Stateful enough that auto-upgrade is unsafe: dropping in-flight
+    # spans/metrics during a restart is fine, but a config-incompatible
+    # version bump (collector breaking changes happen) would silently
+    # stop receiving telemetry. Manual upgrade only.
+
+  # --------------------------------------------------------------------
+  # Prometheus — scrapes the OTel Collector's metrics exporter. Single-
+  # node, local filesystem TSDB. 30-day retention by default.
+  # --------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    container_name: prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle" # POST /-/reload
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom-data:/prometheus
+    networks:
+      - personal-ai
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------
+  # Tempo — trace storage. Local filesystem backend; 7-day retention.
+  # Receives OTLP from the OTel Collector at otel-collector:4317.
+  # --------------------------------------------------------------------
+  tempo:
+    image: grafana/tempo:2.6.1
+    container_name: tempo
+    command: ["-config.file=/etc/tempo/config.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo/config.yaml:ro
+      - tempo-data:/var/tempo
+    networks:
+      - personal-ai
+    ports:
+      - "3200:3200" # Tempo HTTP query (Grafana datasource points here)
+      - "9095:9095" # Tempo gRPC (internal; not strictly needed externally)
+    user: "0:0" # Tempo writes to /var/tempo; the image's default user often hits ENOENT on first boot
+    healthcheck:
+      test:
+        ["CMD-SHELL", "wget -qO- http://localhost:3200/ready | grep -q ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 12 # Tempo takes ~30s to declare ready on first boot
+      start_period: 45s
+    restart: unless-stopped
+
+networks:
+  personal-ai:
+    external: true
+
+volumes:
+  prom-data:
+  tempo-data:

@@ -1,0 +1,59 @@
+# Tempo single-node config — homelab-shaped.
+#
+# Local filesystem backend, 7-day retention, OTLP receiver only (we
+# expect the OTel Collector to be the only producer pushing here).
+
+server:
+  http_listen_port: 3200
+  grpc_listen_port: 9095
+  log_level: info
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  # Smaller window than default (5m) to flush blocks faster on a low-
+  # volume homelab; reduces "where's my trace?" surprises.
+  max_block_duration: 2m
+
+compactor:
+  compaction:
+    # Default 14d; 7d for the homelab tier.
+    block_retention: 168h
+
+metrics_generator:
+  # Off by default. Turn on if you want Tempo to derive RED metrics
+  # (request rate / errors / duration) from traces — handy when atlas
+  # doesn't yet emit those metrics directly.
+  registry:
+    external_labels:
+      source: tempo
+      cluster: homelab
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://prometheus:9090/api/v1/write
+        send_exemplars: true
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+    pool:
+      max_workers: 100
+      queue_depth: 10000
+
+overrides:
+  defaults:
+    # Single-node: keep everything in-process.
+    metrics_generator:
+      processors: [service-graphs, span-metrics]

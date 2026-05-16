@@ -1,0 +1,49 @@
+# Prometheus scrape config.
+#
+# Single-node homelab setup. Scrapes:
+#   - the OTel Collector's prometheus exporter (the path atlas's
+#     metrics arrive on)
+#   - itself (Prometheus has its own /metrics)
+#   - the OTel Collector's own telemetry (collector internals — queue
+#     depth, dropped spans, etc.)
+#
+# Add direct atlas scrape under `scrape_configs` if/when atlas exposes a
+# /metrics Prometheus endpoint as a fallback for the OTel pipeline being
+# down (see the atlas-OTel slice's optional AC).
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    deployment: homelab
+    host: unraid
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: otel-collector-app-metrics
+    # Metrics atlas pushed via OTLP — the collector re-exposes them
+    # under this scrape endpoint with the `atlas_` namespace prefix.
+    static_configs:
+      - targets: ["otel-collector:8889"]
+    metric_relabel_configs:
+      # Drop the unit suffix prom-exporter auto-appends (atlas_http_server_duration_seconds → atlas_http_server_duration)
+      # if you find it noisy. Commented out by default; uncomment to apply.
+      # - source_labels: [__name__]
+      #   regex: '(.+)_seconds$'
+      #   target_label: __name__
+      #   replacement: '${1}'
+
+  - job_name: otel-collector-internal
+    # The collector's own telemetry (queue health, dropped spans).
+    static_configs:
+      - targets: ["otel-collector:8888"]
+
+  # Future: direct atlas scrape (fallback if OTel pipeline is down).
+  # Uncomment once the atlas-OTel slice adds a /metrics endpoint.
+  # - job_name: atlas-direct
+  #   static_configs:
+  #     - targets: ['security-atlas-atlas:8080']
+  #   metrics_path: /metrics
