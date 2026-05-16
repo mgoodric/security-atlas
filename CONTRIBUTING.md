@@ -148,7 +148,7 @@ If a commit was AI-assisted, also include a `Co-authored-by:` trailer naming the
 
 ### Local CI parity
 
-`just install-hooks` installs pre-commit on both the `pre-commit` and `pre-push` stages. The pre-push hook runs the full pre-commit suite against the about-to-push commits — this catches the "prettier reformats `_STATUS.md` after the status-flip commit" pattern that produced 5 of the 62 CI failures observed on 2026-05-15. Emergency bypass remains available via `git push --no-verify`; do not use it casually — the recurring pre-commit-failure data is the reason this hook exists. Once slice 078 unblocks `npm run lint -w web`, the same hook will also run frontend ESLint locally; until then it is limited to the pre-commit suite.
+`just install-hooks` installs pre-commit on both the `pre-commit` and `pre-push` stages. The pre-push hook runs the full pre-commit suite against the about-to-push commits and `npm run lint -w web` for frontend ESLint. This catches the "prettier reformats `_STATUS.md` after the status-flip commit" pattern that produced 5 of the 62 CI failures observed on 2026-05-15. Emergency bypass remains available via `git push --no-verify`; do not use it casually — the recurring pre-commit-failure data is the reason this hook exists.
 
 `main` is protected:
 
