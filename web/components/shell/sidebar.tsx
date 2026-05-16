@@ -9,8 +9,13 @@ import { cn } from "@/lib/utils";
 // Post-093 additions kept (see Plans/canvas/13-ui-mockup-audit-2026-05-16.md
 // F-2): Calendar (094) + Metrics (097) cluster with Dashboard as the cross-
 // business "at-a-glance" group; Catalog · SCF sits after the core-5 as a
-// reference-content top-level. Risk hierarchy stays in nav until slice 101
-// ships /risks (which lifts hierarchy to a page-header link there).
+// reference-content top-level.
+//
+// Slice 100 closure of audit F-3 (Plans/canvas/13-ui-mockup-audit-2026-05-16.md):
+// the `/risks/hierarchy` top-nav entry was REMOVED. The flat /risks list is
+// the canonical default per design doc §5, and the hierarchy stays
+// reachable via the `Hierarchy view ->` page-header link on /risks plus the
+// reciprocal `List view ->` link on /risks/hierarchy.
 const NAV = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/calendar", label: "Calendar" },
@@ -18,7 +23,6 @@ const NAV = [
   { href: "/controls", label: "Controls" },
   { href: "/evidence", label: "Evidence" },
   { href: "/risks", label: "Risks" },
-  { href: "/risks/hierarchy", label: "Risk hierarchy" },
   { href: "/audits", label: "Audits" },
   { href: "/policies", label: "Policies" },
   { href: "/vendors", label: "Vendors" },
