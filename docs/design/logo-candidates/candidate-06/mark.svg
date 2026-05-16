@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>security-atlas SA monogram</title>
+  <style>
+    @font-face {
+      font-family: "Inter";
+      font-weight: 900;
+      src: url("https://rsms.me/inter/font-files/Inter-Black.woff2") format("woff2");
+    }
+    .mark {
+      font-family: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-weight: 900;
+      font-size: 680px;
+      letter-spacing: -38px;
+      fill: #0f172a;
+    }
+  </style>
+  <text x="512" y="700" text-anchor="middle" class="mark">SA</text>
+</svg>
