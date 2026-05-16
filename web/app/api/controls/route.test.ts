@@ -1,8 +1,11 @@
-// Slice 098 — vitest coverage for web/app/api/controls/route.ts.
+// Slice 098 + 104 — vitest coverage for web/app/api/controls/route.ts.
 //
 // The route guarantees:
 //   * 401 when the bearer cookie is missing.
 //   * Forwards the bearer as `Authorization: Bearer <token>` to upstream.
+//   * Slice 104: calls `/v1/anchors?include=state` (the joined endpoint)
+//     and passes the joined `{anchors:[{...,state}]}` shape through
+//     verbatim.
 //   * Upstream JSON body passes through verbatim on success.
 //   * Upstream error status passes through as the response status.
 //
@@ -75,6 +78,9 @@ describe("GET /api/controls", () => {
               family: "AAA",
               name: "test anchor one",
               description: "",
+              // Slice 104: state is populated when a tenant control
+              // satisfies this anchor; null otherwise.
+              state: null,
             },
           ],
         }),
@@ -84,15 +90,52 @@ describe("GET /api/controls", () => {
 
     const res = await GET();
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { anchors: unknown[] };
+    const body = (await res.json()) as {
+      anchors: { state: unknown | null }[];
+    };
     expect(body.anchors).toHaveLength(1);
+    // Slice 104: the joined shape passes through verbatim.
+    expect(body.anchors[0].state).toBeNull();
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
-    expect(calledURL).toContain("/v1/anchors");
+    // Slice 104: we hit the joined endpoint, not the bare /v1/anchors.
+    expect(calledURL).toContain("/v1/anchors?include=state");
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     const headers = init?.headers as Record<string, string> | undefined;
     expect(headers?.Authorization).toBe("Bearer test-bearer-098");
+  });
+
+  test("slice 104: forwards populated state shape verbatim", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-104" });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          anchors: [
+            {
+              id: "00000000-0000-0000-0000-000000000002",
+              scf_id: "IAC-06",
+              family: "IAC",
+              name: "Multi-Factor Authentication (MFA)",
+              description: "",
+              state: {
+                result: "fail",
+                freshness_status: "fresh",
+                last_observed_at: "2026-05-15T09:30:00Z",
+                evaluated_at: "2026-05-16T10:00:00Z",
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      anchors: { state: { result: string } | null }[];
+    };
+    expect(body.anchors[0].state?.result).toBe("fail");
   });
 
   test("propagates upstream error status", async () => {

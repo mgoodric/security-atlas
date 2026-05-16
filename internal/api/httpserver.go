@@ -157,7 +157,11 @@ func (s *Server) httpHandler() http.Handler {
 	root.Use(featureflag.CacheMiddleware)
 
 	queries := dbx.New(s.dbPool)
-	root.Mount("/", anchors.New(queries).Routes())
+	// Slice 104: the anchors handler needs the pool (not just the
+	// pre-bound queries) to open per-request tenant-GUC transactions
+	// when `?include=state` is set. The non-state paths continue to use
+	// the pre-bound `queries`.
+	root.Mount("/", anchors.NewWithPool(queries, s.dbPool).Routes())
 
 	// Slice 037: /health liveness probe. Registered after the root Mount
 	// and alongside the other direct routes below — chi panics if a route

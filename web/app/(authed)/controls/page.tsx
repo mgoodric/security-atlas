@@ -1,6 +1,6 @@
 "use client";
 
-// Slice 098 — /controls list view.
+// Slice 098 + 104 — /controls list view.
 //
 // Today `/controls` 404'd in the sidebar (audit finding F-4 in
 // `Plans/canvas/13-ui-mockup-audit-2026-05-16.md`). This page ships the
@@ -10,31 +10,29 @@
 //
 // The page consumes the shared `web/components/list/*` shell — the
 // reusable primitives that the next four list-view slices
-// (099/100/101/102) will also consume. The shell is intentionally
-// generic; this page is the first concrete consumer.
+// (099/100/101/102) will also consume.
 //
-// Data source resolution (slice 098 D1):
-//   AnchorWire is the row source. There's no `GET /v1/controls` list
-//   endpoint on `main` — only per-control reads. The slice text reads
-//   "renders the tenant's anchor library as a table" — intentional.
-//   State columns (result / freshness_status / last_observed_at) render
-//   "—" honestly. The backend extension (`?include=state` or a
-//   dedicated `GET /v1/controls`) files as spillover slice 104.
-//
-// Per-row state fan-out is explicitly rejected by the slice text itself
-// ("if `GET /v1/anchors` returns ~1,400 anchors per tenant and each
-// state call adds latency, surface the `?include=state` extension as
-// a backend follow-on slice rather than making 1,400 calls").
+// Data source resolution:
+//   * Slice 098: shipped against `GET /v1/anchors` with state cells
+//     rendered as `—` (no backend join existed).
+//   * Slice 104 (this PR): the BFF now calls
+//     `GET /v1/anchors?include=state`. State columns render real
+//     result / freshness / last_observed_at when the tenant has a
+//     control instantiated for the anchor; `—` for the null branch
+//     (anchor in catalog, no tenant control). Per-row state fan-out
+//     remains explicitly avoided — the join is one query, not 1,400.
 //
 // Constitutional invariants honored:
 //   - Invariant 6 (tenant isolation): the BFF at /api/controls forwards
-//     the bearer cookie to /v1/anchors; the platform enforces tenant
-//     isolation via RLS. The UI does not pass tenant_id.
+//     the bearer cookie to /v1/anchors?include=state; the platform
+//     enforces tenant isolation via RLS. The UI does not pass tenant_id.
 //
 // Anti-criteria honored (P0):
 //   - P0-A1: NO invented columns — every column is derived from
-//     anchorWire (id, scf_id, family, name) or rendered as `—` when
-//     the optional state cell is absent.
+//     anchorWire (id, scf_id, family, name) or the slice-104 joined
+//     state cell (result, freshness_status, last_observed_at). When
+//     the tenant has no control for an anchor, the state cells render
+//     `—` honestly.
 //   - P0-A2: horizontal pill filter row ONLY — no left filter sidebar.
 //   - P0-A3: skeleton rows ONLY (via `<ListLoadingSkeleton>`) — no
 //     centered spinner.
@@ -59,7 +57,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   fetchControlsList,
-  type Anchor,
+  type AnchorWithState,
   type ControlsListResponse,
 } from "@/lib/api";
 
@@ -149,12 +147,25 @@ function ControlsPageInner() {
   });
 
   // Convert the anchor wire payload into the join-ready row shape used
-  // by the filter logic + table renderer. `state` is `null` for every
-  // row in v1 (spillover 104 attaches it). Splitting the shape now so
-  // 104 can slot in without page rework.
+  // by the filter logic + table renderer. Slice 104 attaches a real
+  // state cell per anchor (or `null` when the tenant has no control
+  // instantiated for the anchor). The shape was split in slice 098 for
+  // exactly this hand-off — no page-level rework needed.
   const rows: AnchorRow[] = useMemo(() => {
-    const anchors: Anchor[] = anchorsQ.data?.anchors ?? [];
-    return anchors.map<AnchorRow>((a) => ({ anchor: a, state: null }));
+    const anchors: AnchorWithState[] = anchorsQ.data?.anchors ?? [];
+    return anchors.map<AnchorRow>((a) => {
+      const { state, ...anchor } = a;
+      return {
+        anchor,
+        state: state
+          ? {
+              result: state.result,
+              freshness_status: state.freshness_status,
+              last_observed_at: state.last_observed_at,
+            }
+          : null,
+      };
+    });
   }, [anchorsQ.data]);
 
   const visible = useMemo(() => applyFilters(rows, filters), [rows, filters]);

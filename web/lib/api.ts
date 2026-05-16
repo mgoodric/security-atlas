@@ -93,6 +93,34 @@ export async function listAnchors(bearer: string): Promise<Anchor[]> {
   return body.anchors;
 }
 
+// ----- Slice 104: anchors with optional joined state -----
+//
+// `AnchorState` mirrors `anchorStateCellWire` in
+// internal/api/anchors/handlers.go — the slice-104 backend extension
+// returns one rollup cell per anchor when `?include=state` is set.
+// The shape is INTENTIONALLY a subset of the slice-012 `stateWire` —
+// only the columns slice 098's design doc pins to the /controls table
+// (result, freshness_status, last_observed_at) plus `evaluated_at` for
+// staleness display.
+export type AnchorState = {
+  result: string;
+  freshness_status: string;
+  last_observed_at: string | null;
+  evaluated_at: string;
+};
+
+export type AnchorWithState = Anchor & {
+  state: AnchorState | null;
+};
+
+export async function listAnchorsWithState(
+  bearer: string,
+): Promise<AnchorWithState[]> {
+  const res = await apiFetch("/v1/anchors?include=state", bearer);
+  const body = (await res.json()) as { anchors: AnchorWithState[] };
+  return body.anchors;
+}
+
 export async function getAnchorRequirements(
   bearer: string,
   id: string,
@@ -104,17 +132,21 @@ export async function getAnchorRequirements(
   return (await res.json()) as AnchorDetail;
 }
 
-// ----- Slice 098: /controls list view (browser-side BFF call) -----
+// ----- Slice 098 + 104: /controls list view (browser-side BFF call) -----
 //
 // The page at `web/app/(authed)/controls/page.tsx` calls this from the
 // browser; the BFF handler at `web/app/api/controls/route.ts` is the
-// server-side counterpart that injects the bearer cookie. Per slice
-// 098 §spillover, per-anchor state is NOT joined in v1 — spillover 104
-// adds the backend `?include=state` extension. Today the BFF returns
-// the anchor catalog only.
+// server-side counterpart that injects the bearer cookie.
+//
+// Slice 098 shipped this view bound to the catalog (anchorWire only,
+// state columns rendered as `—`). Slice 104 lifts the BFF to the
+// joined `?include=state` shape — every row now carries either a real
+// state cell or `state: null` (anchor has no tenant control). The
+// frontend table renders the populated rows and the `—` placeholder
+// stays for the null branch (slice 098 P0-A1 — no fabrication).
 
 export type ControlsListResponse = {
-  anchors: Anchor[];
+  anchors: AnchorWithState[];
 };
 
 export async function fetchControlsList(): Promise<ControlsListResponse> {

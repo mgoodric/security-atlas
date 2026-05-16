@@ -1254,8 +1254,19 @@ type Querier interface {
 	// Paginated anchor list for a specific framework_version. Caller supplies
 	// limit + offset; default at the call site.
 	ListSCFAnchorsForVersion(ctx context.Context, arg ListSCFAnchorsForVersionParams) ([]ScfAnchor, error)
+	// Slice 104: version-scoped sibling to ListSCFAnchorsLatestWithState.
+	// Same CTE shape; the only difference is the WHERE clause filters
+	// scf_anchors to the caller-supplied framework_version_id instead of
+	// the current SCF version. Kept as two queries (rather than one with
+	// a NULL sentinel) so the planner can inline the simpler predicate
+	// and so the parameter types stay tight for sqlc codegen.
+	ListSCFAnchorsForVersionWithState(ctx context.Context, arg ListSCFAnchorsForVersionWithStateParams) ([]ListSCFAnchorsForVersionWithStateRow, error)
 	// Paginated anchor list for the latest current SCF framework_version.
 	ListSCFAnchorsLatest(ctx context.Context, arg ListSCFAnchorsLatestParams) ([]ScfAnchor, error)
+	// Slice 104: paginated anchor list for the latest current SCF
+	// framework_version, LEFT JOINed to the worst-state-wins per-anchor
+	// rollup over the tenant's `control_evaluations` ledger.
+	ListSCFAnchorsLatestWithState(ctx context.Context, arg ListSCFAnchorsLatestWithStateParams) ([]ListSCFAnchorsLatestWithStateRow, error)
 	ListSampleAnnotations(ctx context.Context, arg ListSampleAnnotationsParams) ([]SampleAnnotation, error)
 	ListSampleAuditLog(ctx context.Context, arg ListSampleAuditLogParams) ([]SampleAuditLog, error)
 	ListSampleEvidence(ctx context.Context, arg ListSampleEvidenceParams) ([]ListSampleEvidenceRow, error)

@@ -1,23 +1,23 @@
-// Slice 098 — BFF proxy for `/controls` list view.
+// Slice 098 + 104 — BFF proxy for `/controls` list view.
 //
-// Reads the bearer cookie server-side and calls `/v1/anchors` upstream.
-// The bearer never reaches the browser. Mirrors the slice 094 calendar
-// route pattern (cookie → bearer → upstream call). The slice's row
-// source is `internal/api/anchors/handlers.go` (`anchorWire`) per
-// design doc `12-ui-fill-in-design-decisions.md` §7.
+// Reads the bearer cookie server-side and calls `/v1/anchors?include=state`
+// upstream (slice 104 backend extension). The bearer never reaches the
+// browser. Mirrors the slice 094 calendar route pattern
+// (cookie → bearer → upstream call). The slice 104 join attaches a
+// per-anchor `state` cell (or `null` when no tenant control is
+// instantiated for that anchor).
 //
 // Why a `/api/controls` route when `/api/anchors` already exists:
 // 1. URL-shape parity with the page — `/controls` consumes `/api/controls`.
-// 2. Forward-compatibility — when spillover slice 104 lands the
-//    `?include=state` extension (or a dedicated `GET /v1/controls`
-//    list endpoint), this route gets the upgrade in one place.
+// 2. Forward-compatibility — when a dedicated `GET /v1/controls` list
+//    endpoint ships, this route gets the upgrade in one place.
 // 3. The 4 sibling list-view slices (099/100/101/102) follow the same
 //    one-route-per-page convention so the BFF shape stays predictable.
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { listAnchors } from "@/lib/api";
+import { listAnchorsWithState } from "@/lib/api";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 export async function GET(): Promise<Response> {
@@ -27,7 +27,7 @@ export async function GET(): Promise<Response> {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
   try {
-    const anchors = await listAnchors(bearer);
+    const anchors = await listAnchorsWithState(bearer);
     return NextResponse.json({ anchors });
   } catch (err) {
     const e = err as { status?: number; message?: string };

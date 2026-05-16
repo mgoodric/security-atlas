@@ -10,29 +10,54 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // Handler exposes the /v1/anchors + /v1/frameworks routes. Auth is enforced
 // by middleware mounted at the router root.
+//
+// Slice 104: when `?include=state` is set, the listAnchors handler reads
+// from `control_evaluations` (RLS-protected). That path requires a
+// transaction with `app.current_tenant` GUC set via
+// `tenancy.ApplyTenant`. The handler holds a *pgxpool.Pool for that
+// case; for the existing non-state paths, the pre-bound `q` over the
+// pool keeps the slice-006 read shape unchanged.
 type Handler struct {
 	q            *dbx.Queries
+	pool         *pgxpool.Pool
 	defaultLimit int32
 	maxLimit     int32
 }
 
 // New constructs a Handler. q must be a non-nil sqlc Queries.
+//
+// Backwards-compatible: callers that do not need the slice-104 joined
+// state path can still pass only `q` (pool=nil); the `?include=state`
+// query parameter will then respond 500 with a clear "pool not wired"
+// error. Production wiring (cmd/atlas + internal/api/httpserver.go)
+// passes the pool via NewWithPool.
 func New(q *dbx.Queries) *Handler {
 	return &Handler{q: q, defaultLimit: 100, maxLimit: 500}
+}
+
+// NewWithPool is the slice-104 constructor. The pool is used ONLY for
+// the `?include=state` path's tenant-GUC-bearing transaction; every
+// other read continues through `q`.
+func NewWithPool(q *dbx.Queries, pool *pgxpool.Pool) *Handler {
+	return &Handler{q: q, pool: pool, defaultLimit: 100, maxLimit: 500}
 }
 
 // Routes returns a chi router with the slice-005 + slice-006 + slice-007 endpoints.
@@ -60,14 +85,44 @@ func (h *Handler) Routes() chi.Router {
 
 // listAnchors returns the SCF anchor catalog. Paginated via ?limit= and
 // ?offset=; ?framework_version_id= optionally narrows the list.
+//
+// Slice 104 — `?include=state` (additive): when set, the response shape
+// becomes `{ anchors: [{ ...anchorWire, state: stateWire | null }] }`.
+// The state column is computed by a single CTE+join SQL query that picks
+// the latest control_evaluations row per (control, scope_cell) and
+// aggregates worst-state-wins per anchor (see decisions D1/D2/D4 in
+// docs/audit-log/104-anchors-include-state-decisions.md). There is NO
+// per-anchor loop calling the eval engine (slice 104 P0 anti-criterion).
+//
+// Unknown `include` values are silently ignored (slice 094 precedent —
+// additive query params are not errors).
 func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 	limit, offset := h.pagination(r)
 	ctx := r.Context()
+	withState := includesState(r)
 
 	if fvID := r.URL.Query().Get("framework_version_id"); fvID != "" {
 		uid, err := uuid.Parse(fvID)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "framework_version_id must be a UUID")
+			return
+		}
+		if withState {
+			var rows []dbx.ListSCFAnchorsForVersionWithStateRow
+			err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+				var inner error
+				rows, inner = q.ListSCFAnchorsForVersionWithState(ctx, dbx.ListSCFAnchorsForVersionWithStateParams{
+					FrameworkVersionID: pgtype.UUID{Bytes: uid, Valid: true},
+					Limit:              limit,
+					Offset:             offset,
+				})
+				return inner
+			})
+			if err != nil {
+				writeServerErr(w, "list anchors for version (with state)", err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"anchors": forVersionRowsToStateWire(rows)})
 			return
 		}
 		rows, err := h.q.ListSCFAnchorsForVersion(ctx, dbx.ListSCFAnchorsForVersionParams{
@@ -83,6 +138,24 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if withState {
+		var rows []dbx.ListSCFAnchorsLatestWithStateRow
+		err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+			var inner error
+			rows, inner = q.ListSCFAnchorsLatestWithState(ctx, dbx.ListSCFAnchorsLatestWithStateParams{
+				Limit:  limit,
+				Offset: offset,
+			})
+			return inner
+		})
+		if err != nil {
+			writeServerErr(w, "list anchors latest (with state)", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"anchors": latestRowsToStateWire(rows)})
+		return
+	}
+
 	rows, err := h.q.ListSCFAnchorsLatest(ctx, dbx.ListSCFAnchorsLatestParams{
 		Limit:  limit,
 		Offset: offset,
@@ -92,6 +165,53 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"anchors": rowsToWire(rows)})
+}
+
+// inTenantTx opens a tx on the pool, sets the `app.current_tenant` GUC
+// from the request context's tenant binding (slice-033 middleware
+// wired this), runs fn, and commits. Mirrors the ucfcoverage pattern.
+// Required for the slice-104 `?include=state` join — control_evaluations
+// + controls are tenant-scoped under FORCE ROW LEVEL SECURITY, so RLS
+// denies on unset GUC.
+func (h *Handler) inTenantTx(ctx context.Context, fn func(context.Context, *dbx.Queries) error) error {
+	if h.pool == nil {
+		return fmt.Errorf("anchors: pool not wired; ?include=state requires NewWithPool")
+	}
+	if _, err := tenancy.TenantFromContext(ctx); err != nil {
+		return err
+	}
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("anchors: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		return err
+	}
+	if err := fn(ctx, dbx.New(tx)); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("anchors: commit tx: %w", err)
+	}
+	return nil
+}
+
+// includesState returns true when the request asked for the joined state
+// column via `?include=state`. The query string accepts a CSV list per
+// the OpenAPI `?include=` convention (e.g. `?include=state,coverage`),
+// so the helper splits and matches token-by-token. Unknown tokens are
+// ignored — they are NOT errors (slice 094 calendar precedent: additive
+// query params don't break the caller).
+func includesState(r *http.Request) bool {
+	for _, v := range r.URL.Query()["include"] {
+		for _, tok := range strings.Split(v, ",") {
+			if strings.TrimSpace(tok) == "state" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // getAnchor returns one anchor. `:id` may be a UUID or an scf_id
@@ -338,6 +458,133 @@ func rowsToWire[R anchorRow](rows []R) []anchorWire {
 	out := make([]anchorWire, len(rows))
 	for i, r := range rows {
 		out[i] = anchorWireFromRow(r)
+	}
+	return out
+}
+
+// ---- slice 104: anchors with optional joined state ----
+
+// anchorStateCellWire is the per-anchor state rollup the `?include=state`
+// extension attaches to each anchor. The field names mirror the slice-012
+// `stateWire` (internal/api/controlstate/handlers.go) so the frontend can
+// reuse the existing `ControlStateEntry` shape minus the engine-internal
+// `scope_cell_id` / `evaluated_at` / `freshness_class` / `trigger` fields
+// — those are per-cell evaluation provenance, not part of the rollup.
+type anchorStateCellWire struct {
+	Result          string  `json:"result"`
+	FreshnessStatus string  `json:"freshness_status"`
+	LastObservedAt  *string `json:"last_observed_at"`
+	EvaluatedAt     string  `json:"evaluated_at"`
+}
+
+// anchorWithStateWire is the JSON shape returned by ?include=state.
+// `State` is nil when no tenant control satisfies the anchor.
+type anchorWithStateWire struct {
+	anchorWire
+	State *anchorStateCellWire `json:"state"`
+}
+
+// stateRowMeta is the subset of fields the wire-encoding step needs from
+// the sqlc-generated row type. Declaring it as an interface keeps the
+// state-conversion logic unit-testable without standing up sqlc fixtures.
+type stateRowMeta interface {
+	StateValid() bool
+	StateResult() string
+	StateFreshness() string
+	StateLastObservedAt() (time.Time, bool)
+	StateEvaluatedAt() time.Time
+}
+
+// anchorStateWireFrom converts a state row's nullable columns into the
+// JSON-ready cell. Returns nil when the LEFT JOIN produced no state row
+// (anchor has no tenant control); otherwise returns a fully-populated
+// cell. Pure function — unit-tested without DB fixtures.
+func anchorStateWireFrom(meta stateRowMeta) *anchorStateCellWire {
+	if !meta.StateValid() {
+		return nil
+	}
+	cell := &anchorStateCellWire{
+		Result:          meta.StateResult(),
+		FreshnessStatus: meta.StateFreshness(),
+		EvaluatedAt:     meta.StateEvaluatedAt().UTC().Format(time.RFC3339Nano),
+	}
+	if t, ok := meta.StateLastObservedAt(); ok {
+		s := t.UTC().Format(time.RFC3339Nano)
+		cell.LastObservedAt = &s
+	}
+	return cell
+}
+
+// latestStateRow / forVersionStateRow adapt the two sqlc row types to the
+// stateRowMeta interface. The two row types share an identical column
+// shape (the SQL CTEs differ only in the WHERE clause) so the adapters
+// are byte-identical except for the underlying type — keeping them
+// separate preserves type-safety at the call site.
+
+type latestStateRow struct {
+	r dbx.ListSCFAnchorsLatestWithStateRow
+}
+
+func (l latestStateRow) StateValid() bool       { return l.r.StateResult.Valid }
+func (l latestStateRow) StateResult() string    { return string(l.r.StateResult.EvidenceResult) }
+func (l latestStateRow) StateFreshness() string { return l.r.StateFreshnessStatus.String }
+func (l latestStateRow) StateEvaluatedAt() time.Time {
+	return l.r.StateEvaluatedAt.Time
+}
+func (l latestStateRow) StateLastObservedAt() (time.Time, bool) {
+	if !l.r.StateLastObservedAt.Valid {
+		return time.Time{}, false
+	}
+	return l.r.StateLastObservedAt.Time, true
+}
+
+type forVersionStateRow struct {
+	r dbx.ListSCFAnchorsForVersionWithStateRow
+}
+
+func (f forVersionStateRow) StateValid() bool       { return f.r.StateResult.Valid }
+func (f forVersionStateRow) StateResult() string    { return string(f.r.StateResult.EvidenceResult) }
+func (f forVersionStateRow) StateFreshness() string { return f.r.StateFreshnessStatus.String }
+func (f forVersionStateRow) StateEvaluatedAt() time.Time {
+	return f.r.StateEvaluatedAt.Time
+}
+func (f forVersionStateRow) StateLastObservedAt() (time.Time, bool) {
+	if !f.r.StateLastObservedAt.Valid {
+		return time.Time{}, false
+	}
+	return f.r.StateLastObservedAt.Time, true
+}
+
+func latestRowsToStateWire(rows []dbx.ListSCFAnchorsLatestWithStateRow) []anchorWithStateWire {
+	out := make([]anchorWithStateWire, len(rows))
+	for i, r := range rows {
+		out[i] = anchorWithStateWire{
+			anchorWire: anchorWire{
+				ID:          uuidStr(r.ID),
+				SCFID:       r.ScfID,
+				Family:      r.Family,
+				Name:        r.Title,
+				Description: r.Description,
+			},
+			State: anchorStateWireFrom(latestStateRow{r: r}),
+		}
+	}
+	return out
+}
+
+func forVersionRowsToStateWire(rows []dbx.ListSCFAnchorsForVersionWithStateRow) []anchorWithStateWire {
+	out := make([]anchorWithStateWire, len(rows))
+	for i, r := range rows {
+		out[i] = anchorWithStateWire{
+			anchorWire: anchorWire{
+				ID:          uuidStr(r.ID),
+				SCFID:       r.ScfID,
+				Family:      r.Family,
+				Name:        r.Title,
+				Description: r.Description,
+			},
+			State: anchorStateWireFrom(forVersionStateRow{r: r}),
+		}
 	}
 	return out
 }
