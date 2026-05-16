@@ -854,6 +854,11 @@ type Querier interface {
 	// (verifies that period_created + period_frozen rows landed).
 	ListAuditPeriodLog(ctx context.Context, arg ListAuditPeriodLogParams) ([]AuditPeriodAuditLog, error)
 	ListAuditPeriodsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]AuditPeriod, error)
+	// ListCalendarEvents is slice 094's compliance-calendar aggregation. ONE
+	// UNION ALL across audit_periods + exceptions + policies + controls
+	// (with a LEFT JOIN LATERAL onto control_evaluations for last_evaluated_at).
+	// See internal/db/queries/calendar.sql for the full query.
+	ListCalendarEvents(ctx context.Context, arg ListCalendarEventsParams) ([]ListCalendarEventsRow, error)
 	// Returns every assignment the user holds in the current tenant, joined with
 	// the period metadata so the /v1/me/audit-period(s) endpoint can render the
 	// full picture in one round trip.

@@ -4,6 +4,10 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard" },
+  // Slice 094: cross-business compliance calendar. Placed immediately
+  // after Dashboard for the shortest scanning path — see decision D8
+  // in docs/audit-log/094-compliance-calendar-decisions.md.
+  { href: "/calendar", label: "Calendar" },
   { href: "/dashboards/metrics", label: "Metrics" },
   { href: "/catalog/scf", label: "Catalog · SCF" },
   { href: "/controls", label: "Controls" },
