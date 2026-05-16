@@ -75,8 +75,8 @@ WHERE tenant_id = $1
   AND observed_at <= $3
   AND (sqlc.narg('kind')::text IS NULL
        OR evidence_kind = sqlc.narg('kind')::text)
-  AND (sqlc.narg('result_filter')::evidence_result IS NULL
-       OR result = sqlc.narg('result_filter')::evidence_result)
+  AND (sqlc.narg('result_filter')::text IS NULL
+       OR result::text = sqlc.narg('result_filter')::text)
   AND (sqlc.narg('source_actor_type')::text IS NULL
        OR source_attribution->>'actor_type' = sqlc.narg('source_actor_type')::text)
   AND (sqlc.narg('source_actor_id')::text IS NULL

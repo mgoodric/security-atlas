@@ -10,7 +10,7 @@ Thanks for your interest in contributing. This document covers the local dev set
 - Node.js 20+
 - Python 3.11+ (for `oscal-bridge` and ruff)
 - Postgres 16+ (for migrations + integration tests) — `brew install postgresql@16` or via Docker
-- [`sqlc`](https://docs.sqlc.dev) — `brew install sqlc`
+- [`sqlc v1.31.1`](https://github.com/sqlc-dev/sqlc/releases/tag/v1.31.1) — `brew install sqlc` (the pinned version lives in `justfile` as `SQLC_VERSION`; `just sqlc-version-check` asserts your local binary matches). Running `sqlc generate` with a different version produces drift across `internal/db/dbx/*.go` that no committer intended — see slice 109.
 - [`just`](https://just.systems) — `brew install just`
 - [`pre-commit`](https://pre-commit.com) — `pip install pre-commit`
 - [`golangci-lint`](https://golangci-lint.run) — `brew install golangci-lint`
@@ -149,6 +149,8 @@ If a commit was AI-assisted, also include a `Co-authored-by:` trailer naming the
 ### Local CI parity
 
 `just install-hooks` installs pre-commit on both the `pre-commit` and `pre-push` stages. The pre-push hook runs the full pre-commit suite against the about-to-push commits and `npm run lint -w web` for frontend ESLint. This catches the "prettier reformats `_STATUS.md` after the status-flip commit" pattern that produced 5 of the 62 CI failures observed on 2026-05-15. Emergency bypass remains available via `git push --no-verify`; do not use it casually — the recurring pre-commit-failure data is the reason this hook exists.
+
+When you touch any file under `internal/db/queries/`, run `just sqlc-generate` (which version-checks first) and commit the regenerated `internal/db/dbx/*.go` in the same commit as the query edit. Do NOT hand-edit `internal/db/dbx/*.go` outside of the two documented hand-narrows (`policies.sql.go` `AckDenominator`/`AckNumerator`, `scf_anchors.sql.go` `StateResult`/`StateFreshnessStatus`) — both are annotated in place and explained in slice 109's decisions log. New queries should regen cleanly; if the regen also rewrites unrelated files, your local sqlc binary is the wrong version (compare against `SQLC_VERSION` in `justfile`).
 
 `main` is protected:
 

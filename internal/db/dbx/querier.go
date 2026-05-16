@@ -302,6 +302,10 @@ type Querier interface {
 	// inactive row and the audit story stays legible.
 	DeactivateAggregationRule(ctx context.Context, arg DeactivateAggregationRuleParams) (AggregationRule, error)
 	DeleteAggregationRule(ctx context.Context, arg DeleteAggregationRuleParams) error
+	// The seeder calls this once per boot before re-applying the YAML edges
+	// so a deleted YAML edge is reflected in the DB. Safe because cascade
+	// edges are derived content (catalogs/metrics/*.yaml is the source).
+	DeleteAllMetricCascadeEdges(ctx context.Context) error
 	DeleteDecision(ctx context.Context, arg DeleteDecisionParams) error
 	// Used by tests + cleanup paths. Production deployments will rarely delete
 	// a scope (supersession is the lifecycle exit); the row is preserved as
@@ -465,28 +469,10 @@ type Querier interface {
 	// 404). The returned `content` + `narrative_md` are the verbatim frozen
 	// snapshot — AC-5 (re-fetch returns the original content).
 	GetBoardBriefByID(ctx context.Context, arg GetBoardBriefByIDParams) (BoardBrief, error)
-	// Fetch one quarterly board pack by id (slice 032). RLS scopes the lookup to
-	// the caller's tenant; a cross-tenant id returns ErrNoRows (handler maps to
-	// 404). Works for both draft and published packs.
+	// Fetch one pack by id. RLS scopes the lookup to the caller's tenant — a
+	// cross-tenant id returns ErrNoRows (the handler maps that to 404). Works
+	// for both draft and published packs.
 	GetBoardPackByID(ctx context.Context, arg GetBoardPackByIDParams) (BoardPack, error)
-	// Append one freshly generated DRAFT quarterly board pack (slice 032).
-	InsertBoardPack(ctx context.Context, arg InsertBoardPackParams) (BoardPack, error)
-	// Enumerate every quarterly board pack for the tenant, newest report-date
-	// first (slice 032).
-	ListBoardPacks(ctx context.Context, tenantID pgtype.UUID) ([]BoardPack, error)
-	// Open-findings source for the quarterly board pack (slice 032 decision D4):
-	// the latest failing control evaluation per (control, scope_cell) as of the
-	// pack's period_end horizon. Board-pack-owned, distinct from slice 030's
-	// AuditPeriod-bound ListFailingEvaluationsAsOf.
-	ListFailingEvaluationsForPack(ctx context.Context, arg ListFailingEvaluationsForPackParams) ([]ListFailingEvaluationsForPackRow, error)
-	// Flip a DRAFT quarterly board pack to PUBLISHED, stamping publish metadata
-	// (slice 032). The status='draft' predicate makes a re-publish a zero-row
-	// no-op that returns ErrNoRows (handler maps to 409).
-	PublishBoardPack(ctx context.Context, arg PublishBoardPackParams) (BoardPack, error)
-	// Mutate a DRAFT quarterly board pack's content + narrative in place (slice
-	// 032). The status='draft' predicate makes an update of a published pack a
-	// zero-row no-op that returns ErrNoRows (handler maps to 409).
-	UpdateBoardPackContent(ctx context.Context, arg UpdateBoardPackContentParams) (BoardPack, error)
 	// Returns the JSON-encoded applicability_expr for a single control. The column
 	// is TEXT (slice 002); slice 017 stores JSON in that text.
 	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)
@@ -561,6 +547,18 @@ type Querier interface {
 	// refresh to decide whether today already has a snapshot, and by tests.
 	GetLatestDriftSnapshotForDay(ctx context.Context, arg GetLatestDriftSnapshotForDayParams) (ControlDriftSnapshot, error)
 	GetLocalCredentialByUserID(ctx context.Context, arg GetLocalCredentialByUserIDParams) (LocalCredential, error)
+	// Recursive walk starting at every catalog metric with the supplied
+	// level, descending through parent → child edges up to depth_limit
+	// levels. Returns one row per (descendant, parent, depth). The API
+	// handler reassembles the tree client-side; the recursive CTE caps at
+	// depth_limit to prevent runaway traversal on a content bug. depth_limit
+	// defaults to 3 at the call site.
+	GetMetricCascade(ctx context.Context, arg GetMetricCascadeParams) ([]GetMetricCascadeRow, error)
+	// Fetch one catalog metric by id (the text slug). Returns ErrNoRows if
+	// the id doesn't exist.
+	GetMetricCatalog(ctx context.Context, id string) (MetricsCatalog, error)
+	// Returns the tenant's target row for one metric. ErrNoRows when unset.
+	GetMetricTarget(ctx context.Context, metricID string) (MetricTarget, error)
 	GetOidcIdpConfigByName(ctx context.Context, arg GetOidcIdpConfigByNameParams) (OidcIdpConfig, error)
 	GetOrgThemeByID(ctx context.Context, id pgtype.UUID) (OrgTheme, error)
 	GetOrgUnitByID(ctx context.Context, arg GetOrgUnitByIDParams) (OrgUnit, error)
@@ -642,6 +640,27 @@ type Querier interface {
 	// `_031`): there is no UPDATE/DELETE path. A re-generation for the same
 	// period_end is a NEW row with a NEW id — never an edit (AC anti-criterion).
 	InsertBoardBrief(ctx context.Context, arg InsertBoardBriefParams) (BoardBrief, error)
+	// Slice 032: quarterly board pack queries.
+	//
+	// The quarterly board pack (canvas §7.5) has a DRAFT -> PUBLISHED lifecycle
+	// on a SINGLE row with a stable id (decision D1). These queries are: one
+	// INSERT (draft generation), two reads (fetch by id, list), one content
+	// UPDATE guarded to draft packs, one publish UPDATE that flips the status,
+	// and the board-pack-owned failing-evaluations read that feeds the open
+	// findings section (decision D4).
+	//
+	// Tenant scoping: `board_packs` and `control_evaluations` are tenant-scoped —
+	// every query runs inside the request's `app.current_tenant` GUC set by
+	// tenancy.Middleware; RLS does the filtering and the `tenant_id = $1` WHERE
+	// clause is the primary correctness guarantee (canvas invariant #6). Every
+	// timestamp cutoff is computed in Go and passed as an explicit parameter —
+	// never a single-placeholder expression that would trip pgx type inference
+	// (SQLSTATE 42P08).
+	// Append one freshly generated DRAFT pack. The pack is created in `draft`
+	// status with NULL publish metadata (the status-coherence CHECK enforces
+	// that). A re-generation for the same period_end is a NEW row with a NEW id
+	// — never an edit of an existing pack.
+	InsertBoardPack(ctx context.Context, arg InsertBoardPackParams) (BoardPack, error)
 	// Slice 012 — control state evaluation engine queries.
 	//
 	// `control_evaluations` is the append-only output table of the evaluation
@@ -690,6 +709,15 @@ type Querier interface {
 	// surface (no UpdateEvidenceRecord, no DeleteEvidenceRecord exists).
 	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
 	InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error)
+	// Append one manual entry. The fn_metric_inputs_replicate trigger fires
+	// AFTER INSERT and writes a matching metric_observations row so the
+	// read API serves both shapes from one series. Idempotency boundary is
+	// the HTTP handler upstream (the trigger is unconditional).
+	InsertMetricInput(ctx context.Context, arg InsertMetricInputParams) (MetricInput, error)
+	// Write one observation row. Runs in the caller's tenant context
+	// (atlas_app pool + tenancy GUC). The source string distinguishes
+	// 'evaluator:<name>' from 'manual:<user-uuid>' provenance.
+	InsertMetricObservation(ctx context.Context, arg InsertMetricObservationParams) (MetricObservation, error)
 	// Slice 023 — policy acknowledgment queries.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -802,6 +830,9 @@ type Querier interface {
 	// atlas_migrate. Returns every row regardless of tenant. Never reachable
 	// through the app role under RLS.
 	ListAllEvidenceKindSchemas(ctx context.Context) ([]EvidenceKindSchema, error)
+	// Used by the seeder to compare existing edges + by the docs reference
+	// generator.
+	ListAllMetricCascadeEdges(ctx context.Context) ([]ListAllMetricCascadeEdgesRow, error)
 	// Defaults + tenant-private themes in one query. Order: defaults first, then
 	// tenant themes alphabetically. Used by slice 053's "available themes for
 	// this tenant" picker.
@@ -854,17 +885,58 @@ type Querier interface {
 	// (verifies that period_created + period_frozen rows landed).
 	ListAuditPeriodLog(ctx context.Context, arg ListAuditPeriodLogParams) ([]AuditPeriodAuditLog, error)
 	ListAuditPeriodsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]AuditPeriod, error)
-	// ListCalendarEvents is slice 094's compliance-calendar aggregation. ONE
-	// UNION ALL across audit_periods + exceptions + policies + controls
-	// (with a LEFT JOIN LATERAL onto control_evaluations for last_evaluated_at).
-	// See internal/db/queries/calendar.sql for the full query.
-	ListCalendarEvents(ctx context.Context, arg ListCalendarEventsParams) ([]ListCalendarEventsRow, error)
 	// Returns every assignment the user holds in the current tenant, joined with
 	// the period metadata so the /v1/me/audit-period(s) endpoint can render the
 	// full picture in one round trip.
 	ListAuditorAssignmentsForUser(ctx context.Context, arg ListAuditorAssignmentsForUserParams) ([]ListAuditorAssignmentsForUserRow, error)
 	// Enumerate every brief for the tenant, newest report-date first.
 	ListBoardBriefs(ctx context.Context, tenantID pgtype.UUID) ([]BoardBrief, error)
+	// Enumerate every pack for the tenant, newest report-date first.
+	ListBoardPacks(ctx context.Context, tenantID pgtype.UUID) ([]BoardPack, error)
+	// Slice 094 — compliance calendar backend read query.
+	//
+	// ONE UNION ALL across four event sources:
+	//
+	//   1. audit_periods           — period_end is the audit's "report due" date
+	//   2. exceptions              — expires_at is the waiver-lapse date
+	//   3. policies                — next_review_at is the next review date
+	//   4. controls + control_evaluations — periodic-review controls whose
+	//      cadence (derived from freshness_class) places their next review
+	//      between $from and $to. last_evaluated_at = MAX(evaluated_at) over
+	//      the append-only control_evaluations ledger.
+	//
+	// All four are tenant-scoped; RLS fires on each underlying SELECT, and the
+	// explicit tenant_id predicates are the primary guarantee.
+	//
+	// Date filter is a half-open window [from, to). The window is computed in
+	// application code (default 90d forward from now()) and passed in as
+	// timestamptz bounds.
+	//
+	// Type filter (`type_filter`) is a CSV string. Empty string ('') means
+	// "all four sources." A non-empty filter narrows to the subset by checking
+	// membership on the per-branch literal type discriminator.
+	//
+	// Cadence math for the controls branch:
+	//   - The control's freshness_class is mapped to a max-acceptable-age
+	//     interval. The mapping is the same one `internal/eval/state.go`
+	//     `FreshnessMaxAge` exposes (realtime 24h, daily 7d, weekly 30d,
+	//     monthly 90d, quarterly 120d, annual 400d). We replicate the mapping
+	//     here as a CASE expression so the SQL is self-contained.
+	//   - next_due_at = last_evaluated_at + cadence, OR now() when the
+	//     control has never been evaluated (LEFT JOIN -> NULL).
+	//   - status: 'overdue' when next_due_at < now(); 'due-soon' when
+	//     next_due_at <= now() + 14d; otherwise 'upcoming'.
+	//   - Only `manual_periodic` and `manual_attested` controls are included
+	//     (the periodic-review IN-vs-OUT filter from the slice narrative).
+	//   - Controls with NULL freshness_class are excluded (no cadence ->
+	//     no scheduled review).
+	//
+	// Result is ordered by starts_at ascending, then by event_id ascending for
+	// a deterministic order.
+	//
+	// Returns at most `row_limit` rows so the handler can detect the
+	// truncation at the 500-event threshold with a +1 probe.
+	ListCalendarEvents(ctx context.Context, arg ListCalendarEventsParams) ([]ListCalendarEventsRow, error)
 	// ===== candidate-risk read (engine) =====
 	// The engine's candidate-risk query. Returns risks for the tenant that:
 	//   - carry the rule's target_theme (the text[] column `themes` contains
@@ -881,6 +953,9 @@ type Querier interface {
 	// sqlc.arg keeps sqlc from inferring it as text[] just because it appears
 	// inside an ARRAY[] constructor.
 	ListCandidateRisksForRule(ctx context.Context, arg ListCandidateRisksForRuleParams) ([]Risk, error)
+	// Every catalog metric whose compute_strategy is 'computed'. The 15-min
+	// cron iterates this list per tenant.
+	ListComputedCatalog(ctx context.Context) ([]MetricsCatalog, error)
 	// AC-4: the control's evaluation history from slice 012's control_eval-
 	// uations append-only ledger, newest-first, keyset-paginated. The keyset
 	// predicate is decomposed (not a ROW(...) comparison) for the same
@@ -1004,12 +1079,11 @@ type Querier interface {
 	// is the same keyset semantics: ties on observed_at fall back to id. A
 	// sentinel cursor (cursor_ts = 'infinity', cursor_id = max-uuid) selects
 	// the first page. The handler computes all cutoff values in Go.
+	//
+	// Slice 106: the SELECT projects `result` so the wire shape `evidenceWire`
+	// can surface it (the column has always been on evidence_records; the slice
+	// 064 wire shape simply omitted it).
 	ListEvidenceForControlPaged(ctx context.Context, arg ListEvidenceForControlPagedParams) ([]ListEvidenceForControlPagedRow, error)
-	// Slice 106: tenant-wide evidence ledger window with optional filters
-	// (kind, result, source_actor_type, source_actor_id). RLS continues to
-	// scope reads on top of the explicit tenant_id predicate. Keyset
-	// pagination mirrors ListEvidenceForControlPaged.
-	ListEvidencePaged(ctx context.Context, arg ListEvidencePagedParams) ([]ListEvidencePagedRow, error)
 	// AC-3: control-state read for a period. Returns evidence records for one
 	// control bounded by the period's frozen_at horizon (or live when the
 	// period is still 'open', in which case the caller passes NULL and the
@@ -1041,6 +1115,24 @@ type Querier interface {
 	// list endpoint pages with limit/offset; ordering by (kind, major DESC,
 	// minor DESC, patch DESC) puts the newest versions first within each kind.
 	ListEvidenceKindSchemasGlobal(ctx context.Context, arg ListEvidenceKindSchemasGlobalParams) ([]EvidenceKindSchema, error)
+	// Slice 106: tenant-wide evidence ledger window with optional filters. Used
+	// when GET /v1/evidence is called WITHOUT a control_id — returns the
+	// caller-tenant's whole evidence stream (RLS still scopes it on top of the
+	// explicit tenant_id predicate, defense-in-depth per canvas invariant #6).
+	//
+	// All four filter args are optional. The
+	//     (sqlc.narg('x')::T IS NULL OR col = sqlc.narg('x')::T)
+	// pattern is the established NULL-skip shape — see
+	// internal/db/queries/vendors.sql:50 — and keeps the query plan stable while
+	// letting sqlc emit nullable Go parameters. The source-actor filters drill
+	// into the JSONB source_attribution column (slice 013 enforces the
+	// {actor_type, actor_id, session_id} shape there).
+	//
+	// Keyset pagination mirrors ListEvidenceForControlPaged exactly: same
+	// decomposed (observed_at, id) predicate, same +1 probe-row idiom.
+	// Window default (last 30 days) is still applied by the handler, not the
+	// query — the handler passes the resolved cutoff timestamps verbatim.
+	ListEvidencePaged(ctx context.Context, arg ListEvidencePagedParams) ([]ListEvidencePagedRow, error)
 	// Replay-friendly read for evaluation (slice 012+). Append-only ordering
 	// on observed_at lets the evaluator stream historical state without
 	// worrying about UPDATEs since slice 002.
@@ -1068,6 +1160,20 @@ type Querier interface {
 	// A failing control evaluation IS a finding for v1 — there is no separate
 	// findings table. See docs/audit-log/030-oscal-ssp-poam-export-decisions.md.
 	ListFailingEvaluationsAsOf(ctx context.Context, arg ListFailingEvaluationsAsOfParams) ([]ListFailingEvaluationsAsOfRow, error)
+	// Open-findings source for the quarterly board pack (decision D4). The
+	// latest evaluation per (control, scope_cell) whose result is 'fail',
+	// bounded by the pack's `period_end` horizon. DISTINCT ON collapses the
+	// append-only control_evaluations history to the current row per cell as
+	// of $2 (the pack's period_end), then the outer filter keeps only the
+	// failing ones.
+	//
+	// This is BOARD-PACK-OWNED — deliberately NOT the slice-030
+	// `ListFailingEvaluationsAsOf` in oscal_export.sql — because the board pack
+	// is a calendar-quarter artifact pinned to `period_end`, NOT an
+	// AuditPeriod-bound export pinned to a frozen_at horizon. Same data
+	// semantics as slice 030 (a failing control evaluation IS a finding for
+	// v1), but a distinct, conflict-free query surface.
+	ListFailingEvaluationsForPack(ctx context.Context, arg ListFailingEvaluationsForPackParams) ([]ListFailingEvaluationsForPackRow, error)
 	// AC-10 read accessor. Returns every audit-log row for the tenant, newest
 	// first. The application paginates in-memory when needed (audit-log
 	// cardinality is small -- 12 flags, low toggle frequency).
@@ -1106,6 +1212,29 @@ type Querier interface {
 	// signed delta and the flipped-to-fail control set. `since_date` is computed
 	// in Go (today - N days) and passed explicitly.
 	ListLatestDriftSnapshotsSince(ctx context.Context, arg ListLatestDriftSnapshotsSinceParams) ([]ControlDriftSnapshot, error)
+	// Children of a single metric (one level). Used by GET /v1/metrics/{id}.
+	ListMetricCatalogChildren(ctx context.Context, parentID string) ([]MetricsCatalog, error)
+	// Parents of a single metric (one level). Used by GET /v1/metrics/{id}
+	// to render the metric's cascade context.
+	ListMetricCatalogParents(ctx context.Context, childID string) ([]MetricsCatalog, error)
+	// The audit-trail read. Used by the per-metric inputs view (post-v1) and
+	// by integration tests verifying the insert trigger semantics.
+	ListMetricInputs(ctx context.Context, arg ListMetricInputsParams) ([]MetricInput, error)
+	// The series read for GET /v1/metrics/{id}/observations. Keyset
+	// pagination via (observed_at, id) — the index over (tenant, metric,
+	// observed_at DESC) lets the descending scan land contiguously.
+	// Window bounds are optional; pass +/- infinity from the call site
+	// when the caller omits them.
+	ListMetricObservations(ctx context.Context, arg ListMetricObservationsParams) ([]MetricObservation, error)
+	// Slice 076 — metrics catalog + cascade + observation store.
+	//
+	// The catalog + cascade reads are platform-shared (singleton, tenant-
+	// agnostic). The observation / target / input reads + writes are
+	// tenant-scoped through RLS.
+	// List catalog metrics filtered by optional level + category. Pass
+	// empty string ('') for "no filter" -- the WHERE clause shortcut
+	// avoids null-typed parameter inference issues with sqlc v1.31.x.
+	ListMetricsCatalog(ctx context.Context, arg ListMetricsCatalogParams) ([]MetricsCatalog, error)
 	// Recipient-scoped list. Unread first (NULLS FIRST on read_at), then
 	// newest first within each read-status bucket. The index
 	// idx_notifications_recipient_unread_first directly serves this order.
@@ -1173,9 +1302,39 @@ type Querier interface {
 	// Slice 107 — paginated policy list LEFT JOINed to the per-policy
 	// acknowledgment-rate cell. Single query; the handler MUST NOT loop
 	// per-policy (anti-criterion P0 -- the whole point of the extension).
-	// Mirrors the predicates in CountRequiredRoleUsersForVersion (denominator)
-	// and CountFreshAcksForVersion (numerator); see policies.sql for full
-	// docs.
+	//
+	// Shape:
+	//   1. The base policies SELECT is identical to ListPolicies (same
+	//      columns, same WHERE, same ORDER BY) so the result row's
+	//      first N columns scan into the existing dbx.Policy struct
+	//      verbatim.
+	//   2. Two scalar subqueries compute the denominator + numerator
+	//      ONLY for rows with status = 'published'. A CASE WHEN wraps
+	//      the subqueries so non-published rows return NULL for both
+	//      columns (the handler renders `ack_rate: null`).
+	//   3. The denominator subquery mirrors CountRequiredRoleUsersForVersion
+	//      verbatim (distinct issued_by in api_keys whose owner_roles
+	//      intersect the policy's acknowledgment_required_roles, OR is_admin).
+	//      Revoked keys excluded.
+	//   4. The numerator subquery mirrors CountFreshAcksForVersion verbatim
+	//      (distinct user_ids in policy_acknowledgments for THIS policy
+	//      version, acknowledged_at >= freshness_cutoff, gated on the same
+	//      role-intersect EXISTS predicate). The freshness cutoff is a
+	//      parameter so tests inject without time-bombing.
+	//
+	// Constitutional invariants:
+	//   #6 RLS: policies + api_keys + policy_acknowledgments are tenant-scoped
+	//      under FORCE ROW LEVEL SECURITY. The tenant GUC the slice-033
+	//      middleware sets filters every table this query touches.
+	//   #9 Manual evidence first-class: this query is uniform whether the
+	//      policy was manually authored or imported from a vendor template.
+	//
+	// See policy_acknowledgments.sql `CountRequiredRoleUsersForVersion` and
+	// `CountFreshAcksForVersion` for the canonical predicates this query
+	// mirrors -- they MUST stay in sync. The HTTP handler GET
+	// /v1/policies/{id}/acknowledgment-rate calls those queries directly
+	// per-policy; this slice runs the same math in one round-trip for the
+	// list view.
 	ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesWithAckRateParams) ([]ListPoliciesWithAckRateRow, error)
 	// Returns the version chain for a policy id by walking predecessor_id.
 	// Recursive CTE keeps the query inside Postgres rather than client-side
@@ -1278,6 +1437,34 @@ type Querier interface {
 	// Slice 104: paginated anchor list for the latest current SCF
 	// framework_version, LEFT JOINed to the worst-state-wins per-anchor
 	// rollup over the tenant's `control_evaluations` ledger.
+	//
+	// Shape:
+	//   1. `latest_eval` CTE picks the latest control_evaluations row per
+	//      (tenant, control_id, scope_cell_id) via DISTINCT ON — the same
+	//      pattern slice 012's ListLatestControlEvaluations uses for one
+	//      control. This honors slice 012's append-only ledger semantics
+	//      (we never lose history; we pick the current state).
+	//   2. `worst_per_anchor` aggregates across every cell of every
+	//      tenant-instantiated control that satisfies one anchor:
+	//        result rank: fail (4) > inconclusive (3) > pass (2) > na (1)
+	//        freshness  : expired (4) > stale (3) > no_evidence (2) > fresh (1)
+	//   3. Outer SELECT joins scf_anchors LEFT JOIN worst_per_anchor — an
+	//      anchor with no tenant control returns NULLs for every state
+	//      column (the handler renders `state: null`).
+	//
+	// Constitutional invariants:
+	//   #6 RLS: `controls` and `control_evaluations` are tenant-scoped under
+	//      FORCE ROW LEVEL SECURITY. The tenant GUC set by `tenancymw`
+	//      filters those rows; the global `scf_anchors` rows
+	//      (`tenant_id IS NULL`) are visible to every tenant by design.
+	//   #2 Engine is sole writer of control_evaluations: this is a pure read
+	//      over the engine's output table, never a parallel computation.
+	//   #1 One control, N framework satisfactions: state is rolled up per
+	//      ANCHOR (the catalog spine node), not per framework.
+	//
+	// NOTE: the matching Go method lives in internal/db/dbx/scf_anchors.sql.go
+	// (hand-maintained to keep the rest of the dbx tree HEAD-blessed per the
+	// regen-on-rebase note in MEMORY.md). Keep the two in sync.
 	ListSCFAnchorsLatestWithState(ctx context.Context, arg ListSCFAnchorsLatestWithStateParams) ([]ListSCFAnchorsLatestWithStateRow, error)
 	ListSampleAnnotations(ctx context.Context, arg ListSampleAnnotationsParams) ([]SampleAnnotation, error)
 	ListSampleAuditLog(ctx context.Context, arg ListSampleAuditLogParams) ([]SampleAuditLog, error)
@@ -1290,6 +1477,18 @@ type Querier interface {
 	// Tenant-private themes only. Caller composes with ListDefaultThemes when a
 	// full visible vocabulary is needed.
 	ListTenantThemes(ctx context.Context, tenantID pgtype.UUID) ([]OrgTheme, error)
+	// The 15-min cron enumerates tenants from the migrator pool (BYPASSRLS)
+	// so it can iterate every tenant; each evaluator then runs through the
+	// app pool with tenancy.WithTenant applied. Same shape as
+	// ListTenantsWithActiveControls (slice 016) but scoped to "tenants that
+	// have any presence in the platform" — for now, the union of every
+	// tenant_id appearing in metrics-relevant primitives.
+	//
+	// Implementation: union the tenant_id columns across controls,
+	// evidence_records, and risks — the cheapest broad signal that a
+	// tenant exists. A tenant with zero rows in all three has nothing to
+	// measure and is skipped.
+	ListTenantsForMetricsScheduler(ctx context.Context) ([]pgtype.UUID, error)
 	// The scheduled time-based recompute (AC-2) runs as the migrator role
 	// (BYPASSRLS) so it can enumerate every tenant; the per-tenant evaluation
 	// then applies the GUC inside its own transaction for RLS-honest writes.
@@ -1413,6 +1612,13 @@ type Querier interface {
 	// first version). Sets status -> published, populates effective_date,
 	// published_at, published_by. Predecessor_id stays NULL.
 	PublishApprovedPolicy(ctx context.Context, arg PublishApprovedPolicyParams) (Policy, error)
+	// Flip a DRAFT pack to PUBLISHED, stamping the publish metadata. The
+	// `status = 'draft'` predicate makes this idempotent-safe: a second publish
+	// of an already-published pack matches zero rows and returns pgx.ErrNoRows
+	// (the handler maps that to 409). The frozen content + narrative are passed
+	// explicitly so the publish writes the final, operator-reviewed snapshot in
+	// the same UPDATE that flips the status — one atomic transition.
+	PublishBoardPack(ctx context.Context, arg PublishBoardPackParams) (BoardPack, error)
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
 	// Slice 067: risk-hierarchy backend read endpoints. Two read-only
@@ -1518,6 +1724,13 @@ type Querier interface {
 	// The application writes a 'threshold_changed' aggregation_rule_audit_log
 	// row alongside this call.
 	UpdateAggregationRuleThresholds(ctx context.Context, arg UpdateAggregationRuleThresholdsParams) (AggregationRule, error)
+	// Mutate a DRAFT pack's content + re-rendered narrative in place. The
+	// `status = 'draft'` predicate is belt-and-suspenders behind the
+	// tenant_update RLS policy (which already gates on status = 'draft') and
+	// the BEFORE UPDATE trigger: an UPDATE targeting a published pack matches
+	// zero rows here and returns pgx.ErrNoRows, which the handler maps to 409.
+	// `updated_at` is bumped to now() so the row reflects the last edit.
+	UpdateBoardPackContent(ctx context.Context, arg UpdateBoardPackContentParams) (BoardPack, error)
 	UpdateDecision(ctx context.Context, arg UpdateDecisionParams) (Decision, error)
 	// Patch the predicate. The BEFORE UPDATE trigger
 	// (framework_scopes_bounce_on_predicate_change_trg) ensures that if this row
@@ -1600,6 +1813,15 @@ type Querier interface {
 	// Set or overwrite the argon2id hash for a user. Idempotent so password-change
 	// and initial-provisioning go through the same path.
 	UpsertLocalCredential(ctx context.Context, arg UpsertLocalCredentialParams) error
+	// Platform-seeded cascade-edge upsert. Runs as atlas_migrate (BYPASSRLS).
+	UpsertMetricCascadeEdge(ctx context.Context, arg UpsertMetricCascadeEdgeParams) error
+	// Platform-seeded global catalog upsert. The seeder runs as atlas_migrate
+	// (BYPASSRLS) at boot so the tenant_id NULL row is permitted.
+	UpsertMetricCatalogGlobal(ctx context.Context, arg UpsertMetricCatalogGlobalParams) error
+	// Idempotent upsert keyed on (tenant_id, metric_id). The tenant_id is
+	// passed explicitly so the WITH CHECK clauses can verify against the
+	// caller's GUC.
+	UpsertMetricTarget(ctx context.Context, arg UpsertMetricTargetParams) (MetricTarget, error)
 	// One annotation per (sample, evidence_record). Re-annotating overwrites
 	// result + notes (the audit log still captures every attempt via
 	// WriteSampleAuditLog).
