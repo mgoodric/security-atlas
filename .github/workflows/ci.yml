@@ -955,6 +955,63 @@ jobs:
     steps:
       - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
+  # ====================================================================
+  # sqlc drift check — informational only, NOT in required-checks.
+  #
+  # Installs the pinned sqlc version from SQLC_VERSION (defined in
+  # justfile) and runs `sqlc generate`. If the generated tree differs
+  # from what's committed, fails with the diff in the log so the
+  # contributor can re-run locally and commit the regen.
+  #
+  # Why informational (not required): the sqlc binary install via `go
+  # install` may differ slightly from the brew-distributed binary in
+  # edge cases (build tags, embedded version string). Until the install
+  # paths are proven byte-identical across both, this job stays out of
+  # branch protection. Promotion to required-checks is a future-slice
+  # decision per slice 109 anti-criterion P0-A3.
+  # ====================================================================
+  sqlc-drift:
+    name: Go · sqlc generate diff
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: Read SQLC_VERSION from justfile
+        id: pin
+        run: |
+          version=$(grep -E '^SQLC_VERSION\s*:=' justfile | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -z "$version" ]; then
+            echo "could not read SQLC_VERSION from justfile" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Pinned sqlc version: $version"
+      - name: Install pinned sqlc
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@${{ steps.pin.outputs.version }}
+      - name: Run sqlc generate
+        run: sqlc generate
+      - name: Assert no drift in internal/db/dbx/
+        run: |
+          if ! git diff --exit-code -- internal/db/dbx/; then
+            echo "::warning::sqlc generate produced drift against committed internal/db/dbx/. Run 'just sqlc-generate' locally and commit the diff."
+            exit 1
+          fi
+          echo "sqlc generate produced no drift — committed dbx tree matches the pinned-binary output."
+
+  sqlc-drift-stub:
+    name: Go · sqlc generate diff
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
+
   npm-audit:
     name: Frontend · npm audit
     needs: changes

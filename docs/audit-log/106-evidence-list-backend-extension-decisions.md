@@ -180,8 +180,16 @@ slice 069 `$how_to_extend` rule).
 
 ## Spillover
 
-- **sqlc-toolchain-drift** (not yet filed): pin the sqlc binary
-  version that produced the committed dbx files so future
-  `sqlc generate` runs are clean across the whole tree. The slice 106
-  hand-extension to `control_detail.sql.go` will then be re-emittable
-  via a single `sqlc generate` invocation.
+- **sqlc-toolchain-drift** — **CLOSED** by slice 109 ("sqlc toolchain
+  pin + regen reset", merged via PR `chore(infra): pin sqlc toolchain
+  - regen reset (#109)`). Slice 109 pins sqlc to v1.31.1 in `justfile`,
+retires the slice-106 hand-extension of `ListEvidencePaged`(the
+natural sqlc-emitted form is now canonical), and resolves the deeper
+root cause: slice 065's idempotent`DO $$ BEGIN ... END $$;`blocks
+around`CREATE TYPE`are invisible to sqlc's schema parser, so
+every typed enum was silently degrading to`interface{}` on regen.
+Slice 109 added a sqlc-tooling-only schema file
+(`internal/db/sqlc-schema/\_enums.sql`) that declares bare enums for
+sqlc's benefit; production migrations are untouched. Full
+root-cause + design analysis at
+[`docs/audit-log/109-sqlc-toolchain-pin-decisions.md`](./109-sqlc-toolchain-pin-decisions.md).

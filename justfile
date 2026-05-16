@@ -142,8 +142,31 @@ db-up:
 db-down:
     docker rm -f security-atlas-pg
 
-# Generate sqlc code from the migration schema + queries
-sqlc-generate:
+# Pinned sqlc version. The committed `internal/db/dbx/*.go` files were
+# emitted by sqlc v1.31.1; running `sqlc generate` with any other version
+# will produce drift that no committer intended. The pin lives here as the
+# single source of truth; CONTRIBUTING.md and CLAUDE.md reference it.
+# Bump via a dedicated `chore(sqlc):` slice so the regen diff is auditable
+# (slice 109 was the first such regen reset).
+SQLC_VERSION := "v1.31.1"
+
+# Verify the installed sqlc matches the pin. Used by `sqlc-generate` and
+# the CI drift-check job. Fails with an actionable message when the
+# binary version doesn't match the SQLC_VERSION pin.
+sqlc-version-check:
+    @installed=$(sqlc version 2>/dev/null || echo "missing"); \
+    if [ "$installed" != "{{SQLC_VERSION}}" ]; then \
+        echo "sqlc version mismatch: installed=$installed pinned={{SQLC_VERSION}}"; \
+        echo "Install the pinned version: 'brew install sqlc' on macOS, or download from https://github.com/sqlc-dev/sqlc/releases/tag/{{SQLC_VERSION}}"; \
+        exit 1; \
+    fi
+
+# Generate sqlc code from the migration schema + queries. The version
+# check ensures byte-stable generation across contributors — without it,
+# each contributor's local sqlc emits subtly different bytes (typed enums
+# vs `interface{}`, alphabetization, comment hoisting) and PRs spuriously
+# touch the whole `internal/db/dbx/` tree.
+sqlc-generate: sqlc-version-check
     sqlc generate
 
 # Generate the metrics-reference docs page from catalogs/metrics/*.yaml.
