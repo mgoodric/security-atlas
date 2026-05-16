@@ -3,7 +3,21 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-16 (slice 076 merged · metrics catalog backbone · 5 tables · 40 metrics · 8 evaluators · slice 097 filed)
+**Last reconciled:** 2026-05-16 (slice 096 → `in-review` · 47/47 stale worktrees removed cleanly · 1-worktree end state)
+
+## Drift detected — 2026-05-16 (slice 096 claim-stake + execute + `in-review` · 47/47 worktrees removed)
+
+Slice 096 (Repo cleanup deletion candidates · follow-on to slice 071) flipped `not-ready` → `in-progress` → `in-review` in one orchestrator-resolved pass after the maintainer issued blanket verbal per-row approval ("You can clear the stale worktrees"). The slice doc captures the execution detail in its new "Execution record (2026-05-16)" section.
+
+Ground truth at slice start: 47 stale worktrees on disk, not 49 as the slice doc had tabulated (rows 45 `security-atlas-074` + placeholder row 49 didn't materialize; 075/076 worktrees from this session also already absent). Clean-tree audit (AC-2) confirmed every entry reported `git status --short` empty. `git worktree remove` succeeded without `--force` on all 47; no uncommitted work discarded.
+
+Final state per AC-5: single-worktree (`main` only), matching the "executed from the main worktree" branch of the AC-5 expected end states. `git worktree prune -v` followed; output empty (no orphan metadata). Per P0-A5 the 47 associated branches were NOT deleted — they remain in the local clone as recoverable references; branch hygiene is out of scope.
+
+| Row | Transition                                              | Evidence                                                                                                                                                                                                                                                                                          |
+| --- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 096 | `not-ready` → `in-progress` → `in-review` (single pass) | branch `infra/096-repo-cleanup-deletions` · AFK · ~0.5d · 47/47 worktrees removed cleanly (no `--force`, no `defer`, no `rejected`) · `git worktree prune` silent · final state 1-worktree (main only) · slice doc updated with Execution record + per-row tally · awaits PR opening + CI + merge |
+
+**Counts delta:** not-ready −1 · in-review +1.
 
 ## Drift detected — 2026-05-16 (slice 076 merged · metrics catalog backbone shipped)
 
@@ -1698,11 +1712,11 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 | Status        | Count  |
 | ------------- | ------ |
 | `merged`      | 84     |
-| `in-review`   | 0      |
+| `in-review`   | 1      |
 | `in-progress` | 3      |
 | `ready`       | 0      |
 | `blocked`     | 0      |
-| `not-ready`   | 3      |
+| `not-ready`   | 2      |
 | **Total**     | **90** |
 
 🎯 **v1 backlog 69/69 complete.** Every slice in the v1 plan is merged on `main`. The binary v1 success test — "does the solo security leader run their next SOC 2 audit out of security-atlas, generate the next board pack from it, and not reach for Vanta or a Google Sheet to fill a gap?" — is evaluable end-to-end.
@@ -1813,6 +1827,7 @@ Legal values (use exactly these strings):
 | 088 | CLI `http.Client` explicit timeout                                  | `merged`    | infra/088-cli-http-client-timeout                       | gh#173 | 2026-05-15 | 2026-05-15 | batch 31 · AFK · ~0.25d · **MEDIUM severity** (from slice 085 audit) · `cmd/atlas-cli/cmd_features.go:181` + `cmd/atlas-cli/cmd_credentials.go:148` no longer use `http.DefaultClient.Do` (no timeout) · new `cmdhttp.Client(timeout)` constructor + AC-4 grep gate clean in `cmd/atlas-cli/` · README ## Security one-line · 100% test coverage on cmdhttp · coverage-thresholds floor 98 · 7 decisions D1-D7 high-confidence · commit `8304071`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 089 | Dependency vulnerability scanning (govulncheck + npm audit + Trivy) | `merged`    | infra/089-dependency-vulnerability-scanning             | gh#177 | 2026-05-15 | 2026-05-15 | iter 8/8 solo · AFK · ~0.5d · **MEDIUM severity** (from slice 085 audit) · 3 new CI jobs (`Go · govulncheck` + `Frontend · npm audit` + `Container · Trivy scan`) · slice-069 stub-job pattern (informational, NOT required-checks initially) · complements Dependabot · pinned `govulncheck@v1.1.3` + `aquasecurity/trivy-action@0.28.0` · HIGH+CRITICAL unified threshold · 7 decisions D1-D7 high-confidence · branch-protection.json untouched (P0-A1 verified) · AC-8 first-run Trivy action-pin hot-fix in same PR · **closes Q2 audit campaign 5/5** · commit `9baeb7d`                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 090 | Bump `govulncheck` pin for Go 1.26 toolchain compatibility          | `merged`    | backlog/090-govulncheck-pin                             | gh#192 | 2026-05-16 | 2026-05-16 | AFK · ~0.25d · pin `@v1.1.3` → `@v1.1.4` (the only newer stable release on `golang/vuln`; v1.2.x doesn't exist) · inline-iteration solo · 4 decisions D1-D4 (all HIGH) · slice 089's AC-8 entry already corrected in slice 090's original filing PR (#179) · **v1.1.4 install + scan = SUCCESS (outcome a)** — govulncheck runs cleanly under Go 1.26, no reachable HIGH/CRITICAL vulns in current Go deps · `Go · govulncheck` CI job now green on every PR (was silently red since slice 089) · commit `d26f052`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 096 | Repo cleanup deletions (follow-on to slice 071)                     | `in-review` | infra/096-repo-cleanup-deletions                        | —      | 2026-05-16 | —          | v2 backlog · AFK · ~0.5d · 47/47 stale worktrees removed cleanly (no `--force`, no `defer`, no `rejected`) · maintainer blanket approval per AC-1 · clean-tree audit per AC-2 confirmed all 47 reported `git status --short` empty · `git worktree prune -v` silent (no orphan metadata) · final state 1-worktree (main) per AC-5 · branches NOT deleted per P0-A5 · slice doc updated with Execution record + per-row tally · awaits PR + CI + merge                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 ## Ready set right now
 
