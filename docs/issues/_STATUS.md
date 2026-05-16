@@ -3,7 +3,26 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-16 (batch 34 build complete · 094 → in-review · PR gh#218)
+**Last reconciled:** 2026-05-16 (batch 34 merged · 094 on main · 93/96 slices on main · queue exhausted)
+
+## Drift detected — 2026-05-16 (batch 34 merged · 094 compliance calendar shipped end-to-end)
+
+Continuous-loop batch 34 closed. Single-pick (094 compliance calendar) shipped end-to-end. The last ready slice in the v2 queue is now merged.
+
+| Row | Transition             | Evidence                                                                                                                                                                                                                                                                                  |
+| --- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 094 | `in-review` → `merged` | PR [#218](https://github.com/mgoodric/security-atlas/pull/218) squashed at commit `6c9c9ab` · 19/20 ACs PASS + AC-16 defer + AC-20 quarantined · 27 files (new `internal/api/calendar/` Go package · 2 BFF routes · 5 React components · 2 migrations · ICS export · sqlc query) · 8 decisions logged |
+
+**Batch notes:**
+
+- Zero subagent stalls (third consecutive batch without grill-stall — pattern looks broken).
+- Single mechanical CI fix post-push: `staticcheck SA9003 empty else branch` at `internal/api/calendar/ics.go:65` (the else only carried a comment; lifted to a leading block-comment before the if-statement).
+- 8 design decisions captured in the decisions log (cadence column reuse via `controls.freshness_class`, rolling-window default, per-user opaque ICS URL token via existing `credstore.Issue` scoped to `AllowedKinds=[calendar.read.v1]`, scope-expanded migration for `policies.next_review_at`, route-append pattern, no calendar library, `next_from` truncation cursor, nav slot immediately after Dashboard).
+- No spillover slices created.
+
+**Queue state after this batch:** EMPTY. All 4 v2-ready slices that started this session (082/093/094/097) are now merged. The 3 remaining `not-ready` slices (082, 084, 095) are gated on external triggers: maintainer staffing decision (082), Dependabot upstream proposals (084), upstream `eslint-plugin-react` ESLint-10 compat (095). Next loop iteration will fire **GUARD-1 (queue empty)** and exit cleanly.
+
+**Counts delta:** in-progress −1 · merged +1.
 
 ## Drift detected — 2026-05-16 (batch 34 build complete · 094 → in-review)
 
@@ -1836,9 +1855,9 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 
 | Status        | Count  |
 | ------------- | ------ |
-| `merged`      | 92     |
+| `merged`      | 93     |
 | `in-review`   | 0      |
-| `in-progress` | 1      |
+| `in-progress` | 0      |
 | `ready`       | 0      |
 | `blocked`     | 0      |
 | `not-ready`   | 3      |
@@ -1951,7 +1970,7 @@ Legal values (use exactly these strings):
 | 091 | Root-route `/` → `/dashboard` redirect                              | `merged`    | frontend/091-root-route-redirect                        | gh#210 | 2026-05-16 | 2026-05-16 | batch 32 · AFK · ~0.5d · deps 005/034/040 all merged · `web/app/page.tsx` is now a 7-line server-component redirect (`SESSION_COOKIE` → `/dashboard`, else `/login?from=/`) · new spec `web/e2e/root-redirect.spec.ts` asserts 307 on both branches + navigation-follow case · stock SVGs already absent from `web/public/` at slice start (AC-6 no-op) · live `curl -I` confirms 307 to `/login?from=%2F` (unauth) and `/dashboard` (authed) · vitest 35/35 · tsc clean · ESLint 0 errors · commit `9db6bec`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 092 | Version display end-to-end fix                                      | `merged`    | infra/092-version-display-end-to-end                    | gh#208 | 2026-05-16 | 2026-05-16 | batch 32 · AFK · ~0.5d · dep 037 merged · `container-publish.yml` build-args patch + `web/proxy.ts` (Next.js 16 renamed `middleware.ts` → `proxy.ts`, recorded as D1 in the decisions log) exempts exactly `/api/version` via `pathname === "/api/version"` (P0-A1 honored — equality, not startsWith) · preserves existing 5-min `Cache-Control: public` value · vitest 10 cases + Playwright e2e cover both the exempt path and the AC-7 negative `/api/admin/me`-still-307s assertion · AC-3 + AC-9 reduce to "verify on first release after merge" per the slice's documented fallback · commit `5637b53`                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 093 | Mockups for 6 missing top-level pages                               | `merged`    | frontend/093-mockups-missing-pages                      | gh#215 | 2026-05-16 | 2026-05-16 | batch 33 · AFK · ~1d · 11/11 ACs · 6 HTML wireframes (controls/evidence/risks/policies/audits/settings) + `Plans/canvas/12-ui-fill-in-design-decisions.md` + `Plans/mockups/index.html` v1-fill-in section · dashboard sidebar reordered to canonical nav · 5 design decisions logged (top-nav order, /settings scope, /risks list-vs-hierarchy, /audits plural-vs-singular, AC-9 sidebar-less mockups no-op) · 6 follow-up implementation slices enumerated in §9 of the design doc · commit `de45de0`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| 094 | Compliance calendar                                                 | `in-review` | frontend/094-compliance-calendar                        | gh#218 | 2026-05-16 | —          | batch 34 · AFK · ~1d shipped · PR gh#218 · 19/20 ACs PASS + AC-16 defer + AC-20 quarantined (slice-079 pattern) · 7/7 integration tests against real Postgres + RLS · 8 decisions logged in `docs/audit-log/094-compliance-calendar-decisions.md` (cadence column reuse, rolling-window default, per-user opaque ICS token + AllowedKinds=[calendar.read.v1], policies.next_review_at column add, route-append, no calendar library, next_from cursor, nav placement) · ICS auth: per-user URL token hashed in api_keys via credstore.Issue, /v1/calendar.ics exempt from upstream Bearer middleware with inline scope-restricted authentication · pre-commit clean                                                                                                                                                                                                                                                                                                                                                                    |
+| 094 | Compliance calendar                                                 | `merged`    | frontend/094-compliance-calendar                        | gh#218 | 2026-05-16 | 2026-05-16 | batch 34 · AFK · ~1d shipped (3d estimate) · PR gh#218 squashed at commit `6c9c9ab` · 19/20 ACs PASS + AC-16 defer + AC-20 quarantined (slice-079 pattern) · 7/7 integration tests against real Postgres + RLS · 8 decisions logged in `docs/audit-log/094-compliance-calendar-decisions.md` (cadence column reuse, rolling-window default, per-user opaque ICS token + AllowedKinds=[calendar.read.v1], policies.next_review_at column add, route-append, no calendar library, next_from cursor, nav placement) · ICS auth: per-user URL token hashed in api_keys via credstore.Issue, /v1/calendar.ics exempt from upstream Bearer middleware with inline scope-restricted authentication · post-CI lint fix: empty else branch in ics.go:65 removed (staticcheck SA9003) · pre-commit clean                                                                                                                                                                                                                                          |
 | 095 | Re-upgrade ESLint to 10.x once eslint-plugin-react ships compat     | `not-ready` | —                                                       | —      | —          | —          | v2 backlog · AFK · ~0.25d · pre-flight `npm view eslint-plugin-react@latest peerDependencies` on 2026-05-16 returns `{ eslint: '^3 \|\| ^4 \|\| ^5 \|\| ^6 \|\| ^7 \|\| ^8 \|\| ^9.7' }` — upstream still caps at `^9.7` · follow-on to slice 078's Path B pin                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 097 | Metrics dashboard + cascade-tree visualization                      | `merged`    | frontend/097-metrics-dashboard-cascade-view             | gh#214 | 2026-05-16 | 2026-05-16 | batch 33 · JUDGMENT · ~2-3d · 17/18 ACs (AC-17 N/A no new docs page) · 6 BFF routes + 7 dashboard components + 1 shadcn Dialog primitive + 22 vitest cases + quarantined Playwright spec · consumes slice 076's 7 endpoints additively (no backend changes) · 23 files / 2,566 insertions · 3 JUDGMENT decisions: vertical indent-and-rule cascade tree (D1), inline-SVG charts no chart library (D2), admin gate via slice-043 `getSessionMe().is_admin` reuse (D3) · commit `6324060`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 085 | Security audit Q2 2026 + tracking slice                             | `merged`    | backlog/085-security-audit-readme                       | gh#168 | 2026-05-15 | 2026-05-15 | v2 backlog · JUDGMENT · ~0.5d · solo iteration (no batch per P0-A4) · ACs 1-3 shipped via PR #167 (audit report + 4 remediation slices + drift section) · ACs 4-5 shipped via PR #168 (README.md `## Security` section between Documentation and Contributing — 5 bullets: reporting / pipeline-hardening / audit-reports / cadence / remediation-tracking + decisions log with 5 high-confidence calls) · commit e09ebfb                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -1964,23 +1983,21 @@ Legal values (use exactly these strings):
 
 ## Ready set right now
 
-| #   | Title               | Cluster         | Est (d) | Notes                                                                                                                                                                            |
-| --- | ------------------- | --------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 094 | Compliance calendar | Frontend / data | 3       | Aggregates review cadences across controls/policies/exceptions/audits. Reads `last_evaluated_at` per control from slice 012's evaluation engine. The last large remaining slice. |
+**EMPTY.** All 4 v2-ready slices that started this session (082/093/094/097) are now merged.
 
-**1 slice ready** (094). Recommended next: dispatch 094 as a JUDGMENT-shaped solo slice — full-stack (Go + sqlc + Next.js), 3d, multiple subjective UX calls around cadence visualization. Better treated as a focused-build than a batch pair.
+The 3 remaining `not-ready` slices are gated on external triggers:
 
-**Not-ready (gated):**
-
-- **082** — Playwright e2e seed-data harness. Slice file frontmatter is `not-ready` with explicit "Not-ready until staffed" — maintainer's staffing decision is the gate, not just the upstream dep.
+- **082** — Playwright e2e seed-data harness. Slice file frontmatter is `not-ready` with explicit "Not-ready until staffed" — maintainer's staffing decision is the gate.
 - **084** — coordinated `goreleaser-action@v7` + `cosign-installer@v4` migration. Waits on Dependabot to surface both bumps in one cohort.
 - **095** — re-upgrade ESLint to 10.x. Waits on upstream `eslint-plugin-react` shipping ESLint-10 compat.
 
+**Next continuous-loop invocation will fire GUARD-1 (queue empty) and exit cleanly.** To resume meaningful loop work: (a) staff 082, (b) wait on upstream for 084/095, OR (c) file new slices.
+
 ## In-flight (1 PR open)
 
-- PR pending — this batch-33 final-reconcile sweep. Touches `_STATUS.md` only. Awaits CI + maintainer review.
+- PR pending — this batch-34 final-reconcile sweep. Touches `_STATUS.md` only. Awaits CI + maintainer review.
 
-Stale worktrees on disk: **0** (slice 096 cleanup remains in effect). The batch-33 worktrees (`-093`, `-097`) were removed at merge-time.
+Stale worktrees on disk: **0** (slice 096 cleanup remains in effect). The batch-34 worktree (`-094`) was removed at merge-time.
 
 ## Notes
 
