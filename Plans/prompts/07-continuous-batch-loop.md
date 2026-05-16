@@ -6,7 +6,7 @@ Wraps `05-parallel-batch.md` in `/loop` dynamic mode so batches run unattended u
 
 Prompt `05-parallel-batch.md` is the unit of work — one orchestration cycle that picks ≤ 3 conflict-safe slices, builds them in parallel worktrees, and squash-merges them to `main`. Historically you've re-run that prompt by hand every ~2 hours.
 
-This file wraps that loop. Five guards decide whether each iteration runs at all; two amendments adapt `05` for unattended operation; spillover-as-slice is reinforced so out-of-scope finds become future iterations' input automatically.
+This file wraps that loop. Four guards decide whether each iteration runs at all; two amendments adapt `05` for unattended operation; spillover-as-slice is reinforced so out-of-scope finds become future iterations' input automatically.
 
 The loop is **stateless across invocations** — state lives in `docs/issues/_STATUS.md` (source of truth for the queue) and one local audit trail (`~/.claude/MEMORY/LEARNING/REFLECTIONS/continuous-batch.jsonl`). Restart is just `/loop <prompt body>` again.
 
@@ -40,7 +40,7 @@ context. Working directory is /Users/gmoney/Development/security-atlas; if it's
 not the cwd, cd there first.
 
 ═══════════════════════════════════════════════════════════════════════════════
-ITERATION GUARDS — run all five FIRST, before any work. Each guard that fires
+ITERATION GUARDS — run all four FIRST, before any work. Each guard that fires
 ends THIS iteration immediately AND does NOT call ScheduleWakeup, so the loop
 terminates cleanly until the human restarts it.
 ═══════════════════════════════════════════════════════════════════════════════
@@ -81,41 +81,30 @@ GUARD-2 · OPEN-PR CEILING (human-authored only)
   generated changelog PRs, etc.). Keep human reviewers and AI Engineer
   subagents in the count — both consume the same review budget.
 
-GUARD-3 · DAILY ITERATION CAP
-  Path: ~/.claude/MEMORY/STATE/continuous-batch.json
-  Schema: {"date":"YYYY-MM-DD","iterations_today":<N>}
-  If the file is missing OR the stored date != today's UTC date, treat as 0
-  iterations today and rewrite with today's date.
-  If iterations_today >= 8:
-    - Print: "GUARD-3 fired: daily cap (8 iterations) reached — pausing loop"
-    - Append-to-audit-trail
-    - Exit without ScheduleWakeup
-  Otherwise: increment iterations_today, persist, continue.
-
-GUARD-4 · MAINTAINER STOP FILE
+GUARD-3 · MAINTAINER STOP FILE
   Check for /Users/gmoney/Development/security-atlas/.STOP_LOOP
   If it exists:
-    - Print: "GUARD-4 fired: .STOP_LOOP present — loop terminated"
+    - Print: "GUARD-3 fired: .STOP_LOOP present — loop terminated"
     - Append-to-audit-trail
     - Exit without ScheduleWakeup
   This is the maintainer's clean-stop primitive. The file persists across
   iterations until they remove it; resume = `rm .STOP_LOOP` then `/loop ...`.
 
-GUARD-5 · UNEXPECTED-COMMIT DRIFT
+GUARD-4 · UNEXPECTED-COMMIT DRIFT
   In the main worktree, run:
     git fetch origin main
     drift=$(git log HEAD..origin/main --oneline | wc -l | tr -d ' ')
   If drift > 0 AND no batch from THIS iteration could have produced those
   commits (since we haven't done any work yet this iteration, drift > 0 always
   means external):
-    - Print: "GUARD-5 fired: <drift> external commit(s) on origin/main — pausing for maintainer review"
+    - Print: "GUARD-4 fired: <drift> external commit(s) on origin/main — pausing for maintainer review"
     - Append-to-audit-trail
     - Exit without ScheduleWakeup
   Rationale: an external push (maintainer, hotfix bot, or another session)
   invalidates this iteration's view of the world. Resume after the human
   reconciles.
 
-If ALL five guards pass, proceed to the WORK PHASE.
+If ALL four guards pass, proceed to the WORK PHASE.
 
 ═══════════════════════════════════════════════════════════════════════════════
 WORK PHASE — execute Plans/prompts/05-parallel-batch.md verbatim, with the
@@ -228,8 +217,7 @@ JSONL line to:
 Schema:
   {
     "ts": "<ISO-8601 UTC>",
-    "iteration_today": <N from GUARD-3>,
-    "outcome": "<merged | guard_1 | guard_2 | guard_3 | guard_4 | guard_5
+    "outcome": "<merged | guard_1 | guard_2 | guard_3 | guard_4
                   | escalated_E1 | escalated_E2 | escalated_E3
                   | escalated_E4 | escalated_E5>",
     "slices_picked": [<NNN>, ...] or null,
@@ -244,7 +232,7 @@ Also overwrite (single line):
   ~/.claude/MEMORY/STATE/continuous-batch-latest.txt
 
 Format:
-  <ISO-8601> · iter <N>/8 · <outcome> · merged: <NNN1,NNN2,NNN3 | none> ·
+  <ISO-8601> · <outcome> · merged: <NNN1,NNN2,NNN3 | none> ·
   spillover: <NNN4,NNN5 | none>
 
 The maintainer can `cat` continuous-batch-latest.txt for one-line status
@@ -276,16 +264,16 @@ HARD RULES (continuous-loop-specific, supplement 05's)
 - Audit trail: one JSONL line per iteration in `~/.claude/MEMORY/LEARNING/REFLECTIONS/continuous-batch.jsonl`
 - One-line status: `~/.claude/MEMORY/STATE/continuous-batch-latest.txt` (overwritten each iteration)
 - Escalation context (when it fires): `~/.claude/MEMORY/STATE/continuous-batch-escalation.md`
-- Daily cap of 8 iterations ≈ 16-24 slices/day theoretical max
+- Theoretical max throughput is bounded by GUARD-2 (5 open human-authored PRs) plus per-batch wall-clock (~2-3hr) — at three slices per iteration that's ~24-36 slices/day if you keep approving merges fast enough to stay under the open-PR ceiling
 - Spillover slices accumulate in `docs/issues/`; future iterations pick them up automatically once their deps merge
 
 ## How to stop the loop mid-run
 
 Three primitives, in order of preference:
 
-1. `touch /Users/gmoney/Development/security-atlas/.STOP_LOOP` — GUARD-4 fires at the start of the next iteration. Most graceful (current iteration finishes, no abrupt interrupt).
+1. `touch /Users/gmoney/Development/security-atlas/.STOP_LOOP` — GUARD-3 fires at the start of the next iteration. Most graceful (current iteration finishes, no abrupt interrupt).
 2. Direct Ctrl-C on the `/loop` session if you're at the terminal.
-3. Wait — the daily cap (GUARD-3) hits at 8, the queue-empty guard (GUARD-1) hits when nothing's ready, the open-PR ceiling (GUARD-2) hits if you've stalled CI/review.
+3. Wait — the queue-empty guard (GUARD-1) hits when nothing's ready, the open-PR ceiling (GUARD-2) hits if you've stalled CI/review.
 
 ## How to resume
 
@@ -297,12 +285,11 @@ Three primitives, in order of preference:
 
 The ceilings + caps in the prompt body are picked from current scale:
 
-| Knob                          | Default               | When to lower                                          | When to raise                                                                                                                                                         |
-| ----------------------------- | --------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Open-PR ceiling (GUARD-2)     | 5 human-authored      | If review backlog is hurting                           | If you have parallel reviewers. Bot PRs (Dependabot/Renovate) are excluded by default — edit the jq filter in the prompt to include or exclude additional bot logins. |
-| Daily iteration cap (GUARD-3) | 8                     | If you want a "drain morning, review afternoon" rhythm | If you trust the loop and have deep queue                                                                                                                             |
-| ScheduleWakeup delaySeconds   | 300                   | Don't — < 300 races CI                                 | Raise to 1200-1800 for "check back hourly" feel                                                                                                                       |
-| Conflict-safe subset cap N    | 3 (inherited from 05) | If predictions are uncertain (per 05's guidance)       | Don't — N=4+ is 05's documented anti-pattern                                                                                                                          |
+| Knob                        | Default               | When to lower                                    | When to raise                                                                                                                                                         |
+| --------------------------- | --------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Open-PR ceiling (GUARD-2)   | 5 human-authored      | If review backlog is hurting                     | If you have parallel reviewers. Bot PRs (Dependabot/Renovate) are excluded by default — edit the jq filter in the prompt to include or exclude additional bot logins. |
+| ScheduleWakeup delaySeconds | 300                   | Don't — < 300 races CI                           | Raise to 1200-1800 for "check back hourly" feel                                                                                                                       |
+| Conflict-safe subset cap N  | 3 (inherited from 05) | If predictions are uncertain (per 05's guidance) | Don't — N=4+ is 05's documented anti-pattern                                                                                                                          |
 
 Edit those numbers in the prompt body directly. The wrapper is yours to tune; `05-parallel-batch.md` should stay untouched (it's the unit of work — version it independently).
 
