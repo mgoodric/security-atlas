@@ -154,6 +154,41 @@ Selected: candidate-<NN>
 
 **Revisit condition:** if the maintainer is unavailable for an extended period and a logo is genuinely blocking work (e.g., a launch event needs the logo on a slide), the right move is NOT to auto-select — it's to either (a) ship a text-only treatment for the deadline-driven surface, or (b) make the selection out-of-band and record it via the normal `Selected:` line edit.
 
+### D13 — Candidate 04 iterated v1 → v2 per maintainer review on PR #180 (HIGH confidence)
+
+**Decision:** regenerate ONLY candidate-04 in-place on the slice-074 branch, replacing the dense burnt-amber wireframe-A (v1) with a sparse indigo node-and-edge graph (v2) that has visible dots at line intersections. v1 binaries are overwritten in the worktree; v1 prompt + provenance is preserved in `candidate-04/notes.md` under "Iteration history" so the design trajectory is auditable.
+
+**Rationale:** the maintainer surfaced three specific refinements during PR #180 review:
+
+1. _"Use dots on the points where the lines intersect to show the graph like nature of what the product is and how everything connects"_ — v1 was a pure wireframe; the graph-with-visible-nodes reading was implicit at best. v2 makes the node-and-edge semantics explicit, directly evoking the control-graph data model (canvas §3 — one control, N framework satisfactions via STRM-typed edges through SCF anchors).
+2. _"Possibly slightly fewer lines"_ — v1 had ~12-15 line segments forming a dense mesh; v2 has ~10 segments with open negative space inside the A.
+3. _"Aligning the colors more with the colors of the application we have chosen"_ — v1 used burnt-amber (`#bc4808` / `#fdba74`), which was out-of-band with the indigo brand palette (`#6366f1` / `#4f46e5` / `#4338ca` / `#a5b4fc`) used across `Plans/mockups/*.html`. v2 ships in the indigo family.
+
+**Iteration process:** Artist agent ran 3 Flux 1.1 Pro passes for v2. v1-of-iteration selected as the best balance of A-suggestion + graph-character + color fidelity. v2-of-iteration over-rendered the A as a near-outlined letterform (drifted toward literal typography — violated P0 implicit constraint "the A emerges from geometry, NOT from drawing the letter A as typography"). v3-of-iteration leaned too far abstract and lost A-readability. First-pass success on the dot-emphasis (no re-prompting needed for that aspect).
+
+**Quality gates verified by Artist:**
+
+- Light variant against `#fafafa`: 16.94:1 PASS (massive headroom over 4.5:1 floor)
+- Dark variant against `#0a0a0a`: 9.93:1 PASS
+- Combined PNG weight: 536.1 KB (under 600 KB iteration ceiling; total slate now ~3.36 MB, still under 8 MB AC-11 ceiling)
+- Other 9 candidates untouched (clean diff scope)
+- `tools/logo-gen/make_dark_variants.py` `DARK_VARIANT_COLOR["04"]` map flipped `#fdba74` → `#a5b4fc` so future re-runs stay aligned with v2
+
+**Color-fidelity caveat (recorded but not blocking):** Flux's "indigo" attractor rendered the light variant darker than the prompted `#4f46e5` (came in around `#000065`, which sits near `brand-900` `#312e81` on the application scale). Still in-band with the indigo family — and arguably more distinctive at the darker end since most candidates that use indigo cluster around indigo-500/600. If tighter brand-hex fidelity is required for v3, the path is Nano Banana (which respects hex more literally) OR post-generation recoloring via the existing `make_dark_variants.py`-style alpha-preserving pipeline.
+
+**Updated in same iteration:**
+
+- `docs/design/logo-candidates/candidate-04/` — 4 PNGs overwritten, `notes.md` updated with v2 prompt + iteration history section preserving v1 details
+- `docs/design/logo-decision.md` — cand-04 gallery entry updated (new title "Node-graph A (indigo, v2)", new concept paragraph, new strengths/weaknesses)
+- `tools/logo-gen/make_dark_variants.py` — dark-variant color map updated for cand-04
+
+**Slice 075 grep target unchanged:** the `Selected:` line at the bottom of `docs/design/logo-decision.md` stays `none — awaiting maintainer approval` per P0-A7 + D12. v2 of cand-04 is a refined offering; the selection event is still a separate maintainer act.
+
+**Alternatives considered:**
+
+- Add cand-04-v2 as a NEW candidate (candidate-11) and keep cand-04-v1 in the slate. Rejected: would expand the slate beyond the maintainer's requested 10 (D1); v1 was explicitly flagged for replacement, not for side-by-side comparison.
+- Swap Flux for Nano Banana to nail the exact `#4f46e5` hex. Rejected for this iteration: the Flux output reads cleanly and falls in-band; spending another iteration cycle to gain ±15% color-purity isn't a load-bearing improvement at this stage. Recorded as a future-iteration option if the maintainer wants tighter color fidelity.
+
 ## Acceptance criteria status
 
 - [x] AC-1: 10 candidate dirs exist (vs. spec's default 4 per D1) with required PNG files

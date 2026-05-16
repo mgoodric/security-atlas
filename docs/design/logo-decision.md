@@ -67,18 +67,18 @@ Central vertical spine with 4-6 branches forking outward — a dendrogram or evi
 
 ---
 
-## Candidate 04 — Lattice mesh "A"
+## Candidate 04 — Node-graph "A" (indigo, v2)
 
 | Light variant                                                      | Dark variant                                                           |
 | ------------------------------------------------------------------ | ---------------------------------------------------------------------- |
 | ![candidate-04 light](./logo-candidates/candidate-04/mark-512.png) | ![candidate-04 dark](./logo-candidates/candidate-04/mark-512-dark.png) |
 
-Triangular wireframe lattice that resolves into an abstract "A" letterform via emergent geometry — the lattice IS the letter, not a separate stamp on top of one. Evokes structural integrity (engineering, framework) without invoking security clichés.
+Sparse node-and-edge graph (~10 lines, ~10 visible dots at intersections) whose silhouette implies a stylized capital A. The visible nodes make the "graph" reading explicit — directly evokes the platform's control-graph data model (one control, N framework satisfactions via STRM-typed edges through SCF anchors). The A-ness emerges from network topology, not typography. Indigo palette aligns with the mockups (`Plans/mockups/*.html`).
 
-**Wordmark:** none — mark-only · **Model:** Flux 1.1 Pro · **SVG:** raster-only
+**Wordmark:** none — mark-only · **Model:** Flux 1.1 Pro · **SVG:** raster-only · **Iteration:** v2 (replaces v1 burnt-amber wireframe per maintainer feedback)
 
-- **Strengths:** distinctive (no comparable mark in GRC tooling that I can find); reads as "scaffolding" / "framework"
-- **Weaknesses:** the "A" emergence is subtle — may need explanation to land; the lattice could read as wireframe-3D rather than structural
+- **Strengths:** the only candidate that explicitly reads as a node-and-edge graph (dots at intersections make the connection-topology unmistakable); directly evokes the control-graph data model; indigo aligns with application palette; sparser than v1, breathing room inside the A
+- **Weaknesses:** the A-suggestion is subtler than the graph scaffold (viewers may read "network triangle" before "A"); Flux rendered the indigo darker than the prompted `#4f46e5` (came in near `#000065` — still in-band with the brand-900 indigo family); node-density may not survive favicon-scale cleanly
 
 [→ full notes](./logo-candidates/candidate-04/notes.md)
 

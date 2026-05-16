@@ -28,7 +28,7 @@ DARK_VARIANT_COLOR = {
     "01": "#a5b4fc",  # indigo-300 — lifts indigo onto dark
     "02": "#5eead4",  # teal-300 — lifts teal
     "03": "#6ee7b7",  # emerald-300 — lifts emerald
-    "04": "#fdba74",  # orange-300 — lifts amber
+    "04": "#a5b4fc",  # indigo-300 — lifts indigo (v2 brief aligns with brand palette)
     "05": "#cbd5e1",  # slate-300 — lifts slate
     "06": "#f8fafc",  # slate-50 — flip near-black to near-white
     "07": "#e2e8f0",  # slate-200 — flip slate
