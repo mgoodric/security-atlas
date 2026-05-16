@@ -44,6 +44,31 @@ export default async function LoginPage({
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
       <div className="w-full max-w-md space-y-4">
+        {/* Slice 075 — logo header above the sign-in card. AC-5 of slice
+          075 specifies the logo renders identically on /login (where
+          the user is not yet authed) and the (authed) routes. The login
+          page does not use the TopBar component, so the logo is placed
+          directly here with the same <picture> theme-aware semantics. */}
+        <div className="flex justify-center pb-2">
+          <picture>
+            <source
+              media="(prefers-color-scheme: dark)"
+              srcSet="/logo-dark.svg"
+            />
+            <source
+              media="(prefers-color-scheme: light)"
+              srcSet="/logo-light.svg"
+            />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo-light.svg"
+              alt="security-atlas"
+              width={64}
+              height={64}
+              className="h-16 w-16"
+            />
+          </picture>
+        </div>
         {firstInstall ? <FirstInstallGuidance /> : null}
         <Card>
           <CardHeader>

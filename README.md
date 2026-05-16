@@ -1,10 +1,10 @@
-<!--
-  Logo TBD — slice 074 (logo design candidates) shipped a 10-candidate slate at
-  docs/design/logo-decision.md. Slice 075 will integrate the maintainer-selected
-  candidate into a hero <picture> element here. The current text-only treatment
-  is intentional and trackable until the Selected: line in docs/design/logo-decision.md
-  is edited from "none — awaiting maintainer approval" to a real candidate ID.
--->
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/images/logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="./docs/images/logo-light.png">
+    <img alt="security-atlas — node-graph A mark" src="./docs/images/logo-light.png" width="160" height="160">
+  </picture>
+</p>
 
 # security-atlas
 

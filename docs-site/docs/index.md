@@ -1,3 +1,11 @@
+<p align="center" markdown>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="assets/logo-light.svg">
+    <img alt="security-atlas — node-graph A mark" src="assets/logo-light.svg" width="180" height="180">
+  </picture>
+</p>
+
 # security-atlas
 
 > Open-source, self-hostable, replacement-grade GRC. Run SOC 2, ISO 27001,
