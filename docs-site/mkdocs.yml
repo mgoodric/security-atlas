@@ -89,6 +89,9 @@ nav:
   - Framework setup: framework-setup.md
   - First audit: first-audit.md
   - Board reporting: board-reporting.md
+  - Measuring your program:
+      - Overview: metrics.md
+      - Reference: metrics-reference.md
   - Walkthroughs:
       - Overview: walkthroughs/index.md
       - Evaluation pipeline: walkthroughs/evaluation-pipeline.md

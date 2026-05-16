@@ -1,0 +1,81 @@
+# Board metric: Open risk financial exposure
+#
+# Sum of Annualized Loss Expectancy (ALE) for risks where treatment !=
+# accept. Canvas §7.5 calls out dollar-banded ALE as the board-trusted
+# format. Reads slice 019's risk register.
+
+metrics:
+  - id: open_risk_financial_exposure
+    level: board
+    category: risk
+    name: Open risk financial exposure
+    description: |
+      Sum of ALE (Annualized Loss Expectancy) for risks where
+      treatment != 'accept'. The board-pack dollar figure for "what is
+      our open risk worth?".
+    unit: dollars_ale
+    cadence: weekly
+    compute_strategy: computed
+    compute_evaluator: open_risk_financial_exposure
+    source_slices: ["019"]
+    notes: |
+      ALE assumes the risk's annualized_loss field is set; risks with
+      a null ALE are excluded from the sum and counted separately as a
+      data-quality signal in the risk_treatment_progress child.
+
+  - id: risk_treatment_progress
+    level: program
+    category: risk
+    name: Risk treatment progress
+    description: |
+      Fraction of open risks whose treatment_plan has progressed in
+      the last quarter (measured via decision_audit_log writes touching
+      the risk's treatment field, slice 035).
+    unit: percent
+    cadence: monthly
+    compute_strategy: manual_input
+    source_slices: ["019", "035"]
+    notes: |
+      Manual roll-up until the decision_audit_log query for "treatment
+      touched in window" lands. Pattern-matched to the v1 persona's
+      quarterly risk review cadence.
+    parents:
+      - parent_id: open_risk_financial_exposure
+        weight: 1.0
+
+  - id: top_risks_residual
+    level: program
+    category: risk
+    name: Top-N risks by residual
+    description: |
+      The five highest-residual open risks. Dimensions carry the
+      risk id list. Drives the board pack's "top risks aging" section.
+    unit: count
+    cadence: weekly
+    compute_strategy: manual_input
+    source_slices: ["019", "020"]
+    notes: |
+      Dimensions['risk_ids'] holds the top-5 list; the numeric_value
+      is the sum of their residuals as a single-number summary.
+    parents:
+      - parent_id: open_risk_financial_exposure
+        weight: 1.0
+
+  - id: risk_treatment_plan_completeness
+    level: team
+    category: risk
+    name: Risk-treatment plan completeness rate
+    description: |
+      Fraction of open risks whose treatment_plan field is non-empty
+      AND linked to a control or compensating action. A risk without a
+      treatment plan is a board narrative hole.
+    unit: percent
+    cadence: quarterly
+    compute_strategy: manual_input
+    source_slices: ["019", "020"]
+    notes: |
+      The v1 persona reviews this each quarter as part of the risk
+      register clean-up sweep.
+    parents:
+      - parent_id: risk_treatment_progress
+        weight: 1.0
