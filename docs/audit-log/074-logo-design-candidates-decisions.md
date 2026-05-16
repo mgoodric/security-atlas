@@ -441,6 +441,46 @@ Both variants traverse the same temperature gradient (warm → cool) — variant
 - Use only 4 of the 8 colors (pick the 2 lightest warm + 2 darkest cool for hierarchy). Rejected: doesn't honor the maintainer's explicit 8-color spec.
 - Use the 8 colors as bg fills behind 8 sub-regions of the mark (color-block A composition) rather than as line colors. Considered, deferred: would require a totally different geometric approach (filled polygons vs lines + dots); reserved as a v7+ direction if the maintainer wants it.
 
+### D18 — Selection: candidate-04 + post-selection cleanup of unused assets (HIGH confidence)
+
+**Decision:** the maintainer selects candidate-04 (v6). All nine unselected candidates' files (candidate-01, -02, -03, -05, -06, -07, -08, -09, -10) and the initial-generation tooling (`batch_assemble.py`, `compose_logo.py`, `make_dark_variants.py`, `fix_light_variants.py`, the Inter font files at `tools/logo-gen/fonts/`) are removed from the repo in the same commit as the selection. The `Selected:` line at the bottom of `docs/design/logo-decision.md` is updated to `Selected: candidate-04` (greppable per D7). Slice 075's gating condition #2 is now satisfied; condition #1 (slice 074 merged) satisfies once PR #180 lands.
+
+**Rationale:**
+
+The maintainer's direction was explicit:
+
+> _"Lets go with what we have for now. Lets not check in any files we do not plan on using or referencing going forward. Update the follow up story with our selections as well."_
+
+Three actions packaged into one PR commit:
+
+1. **Selection edit.** The greppable `Selected: candidate-04` line at the bottom of `docs/design/logo-decision.md` is the load-bearing artifact for slice 075's pre-flight check (per D7 and slice 075 AC-1). This single edit unblocks slice 075 to proceed once PR #180 merges to `main`.
+
+2. **Cleanup of unused candidate files.** The original slate of 10 candidates served its purpose — the maintainer reviewed all 10, iterated on cand-04 through 6 versions, and chose cand-04. The other 9 candidates' files (PNGs + notes.md + SVGs for the typographic ones) are vestigial — they will not be referenced or integrated by slice 075 or any future work. The maintainer explicitly said "Lets not check in any files we do not plan on using or referencing going forward." Removing them now (rather than later) reduces repo size + cognitive overhead for future contributors browsing `docs/design/`. The decisions log + git history at PR #180's earlier commits preserve the full slate as a design trajectory record — nothing is permanently lost.
+
+3. **Cleanup of unused tooling.** Five Python scripts in `tools/logo-gen/` were written during slice 074 to support the initial 10-candidate generation; only two are useful going forward:
+   - **Removed:** `batch_assemble.py` (orchestration for the initial 10-candidate Flux + Nano Banana run), `compose_logo.py` (Inter-text compositing for the typographic-only candidates 06/07/08), `make_dark_variants.py` (initial-pass dark-variant recoloring for candidates 02/03/09), `fix_light_variants.py` (one-off v1 contrast fix for cand-04 + others), `tools/logo-gen/fonts/Inter-Black.ttf` + `Inter-Bold.ttf` + `LICENSE-OFL.txt` (Inter font files used only for the typographic candidates that no longer exist).
+   - **Kept:** `recolor_by_weight.py` (used for v3-v6 of cand-04; slice 075 references its `LIGHT_TO_DARK_V6` palette mapping even if slice 075 implements its own variant generator in TypeScript), `contrast.py` (WCAG SC 1.4.11/SC 1.4.3 measurement helper — useful for slice 075 verification + any future logo work).
+
+**Cleanup discipline applied:** the "files we do not plan on using or referencing going forward" filter is the threshold. Everything kept is referenced explicitly by slice 075 (per the slice doc updates committed in this same PR) OR provides ongoing measurement value (contrast.py).
+
+**Slice 075 updates folded into this PR:**
+
+- Slice 075 narrative now states cand-04 is selected + names the canonical SVG source path
+- Slice 075 calls out the v6 8-color palettes (both variants) verbatim for engineer reference
+- Slice 075 AC-2 updated to reflect SVG-native derivation (was raster-generic before)
+- Slice 075 AC-10 updated: image-toolchain simplifies to Sharp (bundled with Next.js) for SVG → PNG/ICO; no Python dependency needed in the npm-side build pipeline
+- Slice 075 Notes for implementing agent: added the favicon-scale consideration (uniform 6px stroke collapses at 16px; recommend a simplified favicon variant in the SVG source — single backbone + foundation node + accent color)
+
+**Followup that ships once slice 074 merges:** the maintainer (or the continuous-batch loop) flips slice 075's `_STATUS.md` row from `not-ready` to `ready` after PR #180 merges. Slice 075's AC-1 pre-flight check then verifies both gating conditions and the integration work begins.
+
+**Alternatives considered:**
+
+- Keep all 10 candidate files as historical reference, only delete tooling. Rejected: maintainer was explicit ("files we do not plan on using or referencing"). The git history at PR #180 preserves the slate; on-disk preservation is duplication.
+- Keep `compose_logo.py` for future typographic-logo experiments. Rejected: speculative. If a future slice needs typographic compositing, it can author its own helper or restore from git history.
+- Keep the Inter fonts under `tools/logo-gen/fonts/` for future text-rendering needs. Rejected: same speculation logic; system Inter is fine, and the rsms/inter v4.0 release ZIP is one curl away.
+- Defer the cleanup to a follow-on slice. Rejected: the maintainer asked for it in this PR; deferring would leave a known-stale file set on `main` between slice 074's merge and the cleanup slice's merge.
+- Leave `recolor_by_weight.py` only and remove `contrast.py`. Rejected: contrast measurement is an ongoing accessibility-verification tool; slice 075 explicitly references it for verifying derived assets. Both belong.
+
 ## Acceptance criteria status
 
 - [x] AC-1: 10 candidate dirs exist (vs. spec's default 4 per D1) with required PNG files
@@ -465,4 +505,4 @@ Both variants traverse the same temperature gradient (warm → cool) — variant
 
 ## Confidence summary
 
-11 of 12 decisions HIGH confidence. D9 + D10 are MEDIUM (prompt-engineering insights generalize imperfectly; rate-limit thresholds change without notice). The HIGH-confidence calls are all directly grounded in: (a) the slice doc's constraints, (b) the maintainer's explicit AskUserQuestion answers, or (c) measurable technical facts (WCAG ratios, image weights, model licensing).
+17 of 18 decisions HIGH confidence (D1-D8, D11-D18). D9 + D10 are MEDIUM (prompt-engineering insights generalize imperfectly; rate-limit thresholds change without notice). The HIGH-confidence calls are all directly grounded in: (a) the slice doc's constraints, (b) the maintainer's explicit AskUserQuestion answers or direct iteration feedback, or (c) measurable technical facts (WCAG ratios, image weights, model licensing, SVG topology verification). D13-D17 cover the six rounds of candidate-04 iteration (v1 → v6); D18 records the maintainer's selection of candidate-04 + the post-selection cleanup of the nine unselected candidates and the initial-generation tooling.

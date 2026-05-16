@@ -1,17 +1,11 @@
-# Logo design — candidates and selection
+# Logo design — selected candidate
 
-security-atlas's logo selection lives in the repo, not in the docs site, because the 10 candidate marks ship as binary images (~3 MB total) that don't benefit from re-publication through the mkdocs build pipeline.
+security-atlas's logo selection lives in the repo, not in the docs site, because the source assets ship as binary images that don't benefit from re-publication through the mkdocs build pipeline.
 
-**Candidates + decision page:** [`docs/design/logo-decision.md`](https://github.com/mgoodric/security-atlas/blob/main/docs/design/logo-decision.md) on the repo (GitHub renders the gallery inline).
+**Selected:** candidate-04 — node-graph "A" with a warm→cool 8-color temperature gradient. Hand-authored SVG source-of-truth at [`docs/design/logo-candidates/candidate-04/mark.svg`](https://github.com/mgoodric/security-atlas/blob/main/docs/design/logo-candidates/candidate-04/mark.svg). Dual-variant raster outputs (light + dark, 1024 + 512 each) accompany it. View the gallery + per-candidate notes inline at [`docs/design/logo-decision.md`](https://github.com/mgoodric/security-atlas/blob/main/docs/design/logo-decision.md).
 
-**Selection mechanism:** the maintainer edits the `Selected:` line at the bottom of that file to a real candidate ID (e.g. `Selected: candidate-04`) and commits on `main`. The follow-on integration slice ([075](https://github.com/mgoodric/security-atlas/blob/main/docs/issues/075-logo-integration.md)) detects the edit and integrates the selected logo across the README hero, this docs site's `theme.logo`, the web UI top-nav, the favicon set, and the social-share preview cards.
+**Integration:** slice 075 picks up the selected candidate and propagates it across the README hero, this docs site's `theme.logo`, the web UI top-nav, the favicon set, and the social-share preview cards. The integration starts as soon as slice 074 merges to `main`.
 
-**Why two slices:**
+**Provenance:** the candidate originally came from the `Media:Art` PAI skill (initial direction via Flux 1.1 Pro). Subsequent iterations (v2-v6) refined the design as hand-authored SVG with deterministic rasterization — no image-model regeneration after the v1 direction landed. Full prompts + design calls + per-version contrast measurements live at `docs/design/logo-candidates/candidate-04/notes.md`.
 
-- 074 ships only the candidate slate + this decision-pending page. Mechanical (image generation + side-by-side gallery).
-- 075 takes the approved candidate and propagates it to six integration surfaces. Mechanical (resize, recolor, composite, declare in Next.js Metadata API).
-- The split is "ask before destructive operations": brand identity is hard to reverse, so the human-approval gate is a single, deliberate `Selected:` line edit rather than an inline batch.
-
-**Candidate provenance:** every candidate's image came from the `Media:Art` PAI skill (Flux 1.1 Pro or Nano Banana via Replicate, all commercial-use-OK). Wordmark text was composited separately using Inter (SIL OFL) — no image-model-rendered text in any mark. Full per-candidate provenance lives in the repo at `docs/design/logo-candidates/candidate-NN/notes.md`.
-
-**Slice decisions log:** [`docs/audit-log/074-logo-design-candidates-decisions.md`](https://github.com/mgoodric/security-atlas/blob/main/docs/audit-log/074-logo-design-candidates-decisions.md) records the 12 judgment calls made during candidate generation, including the WCAG dual-variant trajectory, prompt-engineering escapes from the Flux "security clichés" attractor, and the model substitution from GPT-Image-1 to Flux for two candidates.
+**Slice decisions log:** [`docs/audit-log/074-logo-design-candidates-decisions.md`](https://github.com/mgoodric/security-atlas/blob/main/docs/audit-log/074-logo-design-candidates-decisions.md) records the 18 judgment calls made across the slice — the original 10-candidate slate generation, the six rounds of candidate-04 iteration, the WCAG SC 1.4.11 standard adoption for logo marks, and the post-selection cleanup of unused candidate files.
