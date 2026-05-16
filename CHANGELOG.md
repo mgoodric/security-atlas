@@ -9,6 +9,39 @@ Conventional-Commit messages. Each entry links to its slice issue, the
 merging PR, and the squash-merge commit. For richer per-slice narrative
 see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
+## [1.7.0](https://github.com/mgoodric/security-atlas/compare/v1.6.0...v1.7.0) (2026-05-16)
+
+
+### Features
+
+* **catalog:** metrics catalog + cascade + observation store + 8 evaluators ([#076](https://github.com/mgoodric/security-atlas/issues/076)) ([#203](https://github.com/mgoodric/security-atlas/issues/203)) ([e736a7a](https://github.com/mgoodric/security-atlas/commit/e736a7aa07589a85906f31ce69485aaf6ba22cbe))
+* **infra:** dependency vulnerability scanning (govulncheck + npm audit + Trivy) ([#089](https://github.com/mgoodric/security-atlas/issues/089)) ([#177](https://github.com/mgoodric/security-atlas/issues/177)) ([9baeb7d](https://github.com/mgoodric/security-atlas/commit/9baeb7d2f11e70337ac609a68096db3a6b11643a))
+* **infra:** integrate approved logo across README, docs, web UI, favicon, and social cards ([#075](https://github.com/mgoodric/security-atlas/issues/075)) ([#189](https://github.com/mgoodric/security-atlas/issues/189)) ([c37a614](https://github.com/mgoodric/security-atlas/commit/c37a61478ffdc32043e36a9dbfc88acf98f97fbd))
+* **infra:** logo design candidates — 10-candidate slate via Media:Art ([#074](https://github.com/mgoodric/security-atlas/issues/074)) ([#180](https://github.com/mgoodric/security-atlas/issues/180)) ([f3d95d4](https://github.com/mgoodric/security-atlas/commit/f3d95d4ef1b6cab9307c9f540e169702caaff6df))
+* **infra:** onboarding walkthroughs — 5 showboat-generated docs ([#070](https://github.com/mgoodric/security-atlas/issues/070)) ([#200](https://github.com/mgoodric/security-atlas/issues/200)) ([51fce80](https://github.com/mgoodric/security-atlas/commit/51fce80cb1b5777a6c26bece7659ec76893a9274))
+* **infra:** security HTTP headers middleware ([#087](https://github.com/mgoodric/security-atlas/issues/087)) ([#171](https://github.com/mgoodric/security-atlas/issues/171)) ([f7afbec](https://github.com/mgoodric/security-atlas/commit/f7afbeca3e1f33152ed746ca72b0e7f22ec2ea7c))
+
+
+### Bug Fixes
+
+* **auth:** validate signIn redirect target ([#086](https://github.com/mgoodric/security-atlas/issues/086)) ([#172](https://github.com/mgoodric/security-atlas/issues/172)) ([f74a083](https://github.com/mgoodric/security-atlas/commit/f74a083f122c0eb1f279b534eae2a23a6dd3ee9b))
+* **infra:** atlas-cli explicit http.Client timeout ([#088](https://github.com/mgoodric/security-atlas/issues/088)) ([#173](https://github.com/mgoodric/security-atlas/issues/173)) ([8304071](https://github.com/mgoodric/security-atlas/commit/83040712804ad0dda08de71edbb900bf2e5b2159))
+* **infra:** bump govulncheck pin v1.1.3 → v1.1.4 (Go 1.26 compat) ([#090](https://github.com/mgoodric/security-atlas/issues/090)) ([#192](https://github.com/mgoodric/security-atlas/issues/192)) ([d26f052](https://github.com/mgoodric/security-atlas/commit/d26f0520e1676ae705e03677beb2392db3b4f37a))
+* **infra:** unblock npm run lint via ESLint ^9 pin + new Frontend · lint CI ([#078](https://github.com/mgoodric/security-atlas/issues/078)) ([#194](https://github.com/mgoodric/security-atlas/issues/194)) ([0d5f4fb](https://github.com/mgoodric/security-atlas/commit/0d5f4fba4d16f18b9ee3a9e4919b5480058a247d))
+
+
+### Documentation
+
+* **backlog:** file slice 090 + correct slice 089 AC-8 outcome ([#179](https://github.com/mgoodric/security-atlas/issues/179)) ([734d731](https://github.com/mgoodric/security-atlas/commit/734d731ddac391fba929826e2db474c815116024))
+* **issues:** add slice 091 — root-route redirect (replace stock create-next-app template) ([#181](https://github.com/mgoodric/security-atlas/issues/181)) ([d7b1b62](https://github.com/mgoodric/security-atlas/commit/d7b1b62086921756167c9b80146b0d101d505f8c))
+* **issues:** add slice 092 — version display end-to-end fix (publish-arg + middleware exemption) ([#182](https://github.com/mgoodric/security-atlas/issues/182)) ([26a33d6](https://github.com/mgoodric/security-atlas/commit/26a33d6b9e3aa881db9b8cc69c329183c46e145f))
+* **issues:** add slice 093 — mockups for missing top-level pages ([#183](https://github.com/mgoodric/security-atlas/issues/183)) ([826b929](https://github.com/mgoodric/security-atlas/commit/826b929e655d71acd1dc015031a55abab5d556c4))
+* **issues:** add slice 094 — compliance calendar (cross-business view) ([#186](https://github.com/mgoodric/security-atlas/issues/186)) ([61ee8df](https://github.com/mgoodric/security-atlas/commit/61ee8df8eec0563cee24a625a4c3102d8f4f26f2))
+* **prompts:** add prompt 08 — Dependabot PR review (per-PR upgrade-safety analyzer) ([#187](https://github.com/mgoodric/security-atlas/issues/187)) ([1887812](https://github.com/mgoodric/security-atlas/commit/1887812704609a64a6ca0fd1cd69fd9349d8479a))
+* **prompts:** remove GUARD-3 daily iteration cap from continuous-batch loop ([#184](https://github.com/mgoodric/security-atlas/issues/184)) ([50a004d](https://github.com/mgoodric/security-atlas/commit/50a004ddb231eabfb822c6851e68024398523a1a))
+* **security:** add README Security section (slice 085 AC-4) ([#168](https://github.com/mgoodric/security-atlas/issues/168)) ([e09ebfb](https://github.com/mgoodric/security-atlas/commit/e09ebfb210c302c545a32710a859f5cb0cf706ed))
+* **status:** reconcile slice 085 → merged (PR [#168](https://github.com/mgoodric/security-atlas/issues/168) e09ebfb) ([#169](https://github.com/mgoodric/security-atlas/issues/169)) ([ffee86f](https://github.com/mgoodric/security-atlas/commit/ffee86fc0220a29d9be51f9fd7645d4b8de5f7ff))
+
 ## [Unreleased]
 
 ### Added
