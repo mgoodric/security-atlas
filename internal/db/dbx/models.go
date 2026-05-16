@@ -764,7 +764,7 @@ func (ns NullVendorReviewCadence) Value() (driver.Value, error) {
 	return string(ns.VendorReviewCadence), nil
 }
 
-// Slice 062 — unified read across the seven per-domain audit-log tables. RLS-aware: each source-table tenant_read policy fires under the caller's app.current_tenant GUC. Append-only by construction (no INSERT path).
+// Slice 062 — unified read across the seven per-domain audit-log tables. RLS-aware: each source-table tenant_read policy fires under the caller's app.current_tenant GUC. Append-only by construction (no INSERT path). Slice 108 extends the view with an eighth branch (me_audit_log).
 type AdminAuditLogV struct {
 	TenantID     pgtype.UUID        `json:"tenant_id"`
 	Ts           pgtype.Timestamptz `json:"ts"`
@@ -1258,6 +1258,16 @@ type LocalCredential struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type MeAuditLog struct {
+	ID         pgtype.UUID        `json:"id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
+	UserID     pgtype.UUID        `json:"user_id"`
+	Action     string             `json:"action"`
+	Before     []byte             `json:"before"`
+	After      []byte             `json:"after"`
+}
+
 type MetricCascadeEdge struct {
 	ParentID  string             `json:"parent_id"`
 	ChildID   string             `json:"child_id"`
@@ -1568,6 +1578,16 @@ type User struct {
 	IdpSubject  string             `json:"idp_subject"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	TimeZone    string             `json:"time_zone"`
+}
+
+type UserNotificationPreference struct {
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Event     string             `json:"event"`
+	Channel   string             `json:"channel"`
+	Enabled   bool               `json:"enabled"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type UserRole struct {

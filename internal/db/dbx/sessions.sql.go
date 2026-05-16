@@ -87,6 +87,80 @@ func (q *Queries) GetSessionByID(ctx context.Context, arg GetSessionByIDParams) 
 	return i, err
 }
 
+const listSessionsForUser = `-- name: ListSessionsForUser :many
+SELECT id, tenant_id, user_id, idp_issuer, idp_subject, issued_at, expires_at, last_seen_at, revoked_at
+FROM sessions
+WHERE tenant_id = $1
+  AND user_id = $2
+  AND revoked_at IS NULL
+  AND expires_at > now()
+ORDER BY last_seen_at DESC
+`
+
+type ListSessionsForUserParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+// Slice 108: GET /v1/me/sessions. Returns the caller's currently-valid sessions
+// (revoked_at IS NULL AND expires_at > now()). Tenant scoped via RLS + explicit filter.
+func (q *Queries) ListSessionsForUser(ctx context.Context, arg ListSessionsForUserParams) ([]Session, error) {
+	rows, err := q.db.Query(ctx, listSessionsForUser, arg.TenantID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Session
+	for rows.Next() {
+		var i Session
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.UserID,
+			&i.IdpIssuer,
+			&i.IdpSubject,
+			&i.IssuedAt,
+			&i.ExpiresAt,
+			&i.LastSeenAt,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const revokeOtherSessionsForUser = `-- name: RevokeOtherSessionsForUser :execrows
+UPDATE sessions
+SET revoked_at = now()
+WHERE tenant_id = $1
+  AND user_id = $2
+  AND id <> $3
+  AND revoked_at IS NULL
+`
+
+type RevokeOtherSessionsForUserParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+	ID       string      `json:"id"`
+}
+
+// Slice 108: DELETE /v1/me/sessions (no {id}). Revokes every valid session for the
+// caller EXCEPT the one identified by $3 (the "current" session id). When the caller
+// has no current-session cookie, pass an empty string to revoke ALL sessions for the
+// user — there is no way to keep the request alive past this point anyway.
+func (q *Queries) RevokeOtherSessionsForUser(ctx context.Context, arg RevokeOtherSessionsForUserParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeOtherSessionsForUser, arg.TenantID, arg.UserID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const revokeSession = `-- name: RevokeSession :exec
 UPDATE sessions
 SET revoked_at = now()
@@ -101,6 +175,31 @@ type RevokeSessionParams struct {
 func (q *Queries) RevokeSession(ctx context.Context, arg RevokeSessionParams) error {
 	_, err := q.db.Exec(ctx, revokeSession, arg.TenantID, arg.ID)
 	return err
+}
+
+const revokeSessionForUser = `-- name: RevokeSessionForUser :execrows
+UPDATE sessions
+SET revoked_at = COALESCE(revoked_at, now())
+WHERE tenant_id = $1 AND id = $2 AND user_id = $3
+`
+
+type RevokeSessionForUserParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       string      `json:"id"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+// Slice 108: DELETE /v1/me/sessions/{id}. Atomic ownership-guard via the WHERE clause:
+// the row is only updated when (tenant_id, id, user_id) all match. RowsAffected = 0
+// means "no such session under this user" — the handler returns 404 (not 403) to avoid
+// the existence-oracle on cross-user ids. Idempotent: re-revoking an already-revoked
+// row is a no-op but still returns 1 row affected (the row still matches the WHERE).
+func (q *Queries) RevokeSessionForUser(ctx context.Context, arg RevokeSessionForUserParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeSessionForUser, arg.TenantID, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const touchSession = `-- name: TouchSession :exec

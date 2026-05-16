@@ -39,8 +39,12 @@ type User struct {
 	Status      string
 	IdpIssuer   string
 	IdpSubject  string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// TimeZone is an IANA timezone name (e.g. "America/Los_Angeles") or
+	// "" (empty = browser-derived; the backend never invents a timezone).
+	// Slice 108 added the column via an additive ALTER on users.
+	TimeZone  string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Store wraps pgx + sqlc with tenancy plumbing.
@@ -215,6 +219,46 @@ func (s *Store) GetByID(ctx context.Context, tenantID, id uuid.UUID) (User, erro
 	return userFromRow(row), nil
 }
 
+// UpdateProfileInput captures the mutable subset of a user profile. Email and
+// idp_subject are read-only (managed by the IdP).
+type UpdateProfileInput struct {
+	TenantID    uuid.UUID
+	ID          uuid.UUID
+	DisplayName string
+	TimeZone    string
+}
+
+// UpdateProfile writes the slice 108 PATCH /v1/me mutation. Returns the resulting
+// User row. The caller (HTTP handler) computes the diff and decides whether to write
+// an audit-log entry; this method is the storage primitive only.
+func (s *Store) UpdateProfile(ctx context.Context, in UpdateProfileInput) (User, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return User{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		return User{}, err
+	}
+	q := dbx.New(tx)
+	row, err := q.UpdateUserProfile(ctx, dbx.UpdateUserProfileParams{
+		TenantID:    pgtype.UUID{Bytes: in.TenantID, Valid: true},
+		ID:          pgtype.UUID{Bytes: in.ID, Valid: true},
+		DisplayName: in.DisplayName,
+		TimeZone:    in.TimeZone,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return User{}, ErrNotFound
+		}
+		return User{}, fmt.Errorf("users: update profile: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return User{}, err
+	}
+	return userFromRow(row), nil
+}
+
 func userFromRow(row dbx.User) User {
 	return User{
 		ID:          uuid.UUID(row.ID.Bytes),
@@ -224,6 +268,7 @@ func userFromRow(row dbx.User) User {
 		Status:      row.Status,
 		IdpIssuer:   row.IdpIssuer,
 		IdpSubject:  row.IdpSubject,
+		TimeZone:    row.TimeZone,
 		CreatedAt:   row.CreatedAt.Time,
 		UpdatedAt:   row.UpdatedAt.Time,
 	}
