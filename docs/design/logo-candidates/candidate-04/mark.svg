@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  security-atlas candidate-04 mark — v3
+  Sparse node-and-edge graph implying a stylized capital A.
+
+  Three-tier weight hierarchy with palette-aligned color mapping:
+    - HEAVY (sw=14) : indigo-900 #312e81 — primary A backbone (left leg, right leg, cross-bar)
+    - MEDIUM (sw=8) : indigo-700 #4338ca — secondary connectors (lower triangle + side diagonals)
+    - LIGHT (sw=4)  : indigo-600 #4f46e5 — detail scaffolding (outer brace lines)
+    - NODES         : indigo-900 #312e81 — filled circles at intersections (4th visual tier)
+
+  Dark-bg variant flips the palette (indigo-200/300/400):
+    HEAVY=indigo-200 #c7d2fe · MEDIUM=indigo-300 #a5b4fc · LIGHT=indigo-400 #818cf8 · NODES=indigo-200
+
+  All six tier colors clear WCAG 2.2 AA (≥4.5:1) on their target background.
+
+  Coordinate system: 1024x1024 viewBox.
+  Geometry derived from v2 Flux output: apex node top-center, two side
+  shoulder nodes, two leg-base nodes, two outer outrigger nodes, central
+  cross-bar midpoint. Lines classified by their structural role in the A.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <g id="mark-light" stroke-linecap="round" stroke-linejoin="round" fill="none">
+
+    <!-- LIGHT weight (sw=4, indigo-600): outer scaffolding braces / detail lines -->
+    <!-- left outrigger brace (apex shoulder to outer-left detail) -->
+    <line x1="320" y1="250" x2="170" y2="380" stroke="#4f46e5" stroke-width="4"/>
+    <!-- right outrigger brace -->
+    <line x1="704" y1="250" x2="854" y2="380" stroke="#4f46e5" stroke-width="4"/>
+    <!-- subtle apex tangent (small detail dot above apex implied) -->
+    <line x1="380" y1="210" x2="644" y2="210" stroke="#4f46e5" stroke-width="4"/>
+
+    <!-- MEDIUM weight (sw=8, indigo-700): secondary connectors and lower triangle -->
+    <!-- lower base line connecting the two leg-base nodes through the middle -->
+    <line x1="220" y1="780" x2="804" y2="780" stroke="#4338ca" stroke-width="8"/>
+    <!-- inner lower-left support (cross-bar mid → left base) -->
+    <line x1="512" y1="600" x2="220" y2="780" stroke="#4338ca" stroke-width="8"/>
+    <!-- inner lower-right support (cross-bar mid → right base) -->
+    <line x1="512" y1="600" x2="804" y2="780" stroke="#4338ca" stroke-width="8"/>
+    <!-- outer left base brace (left base out to outrigger) -->
+    <line x1="220" y1="780" x2="100" y2="850" stroke="#4338ca" stroke-width="8"/>
+    <!-- outer right base brace -->
+    <line x1="804" y1="780" x2="924" y2="850" stroke="#4338ca" stroke-width="8"/>
+
+    <!-- HEAVY weight (sw=14, indigo-900): primary A backbone -->
+    <!-- left leg of A: apex down through left shoulder to left base -->
+    <line x1="512" y1="160" x2="220" y2="780" stroke="#312e81" stroke-width="14"/>
+    <!-- right leg of A: apex down through right shoulder to right base -->
+    <line x1="512" y1="160" x2="804" y2="780" stroke="#312e81" stroke-width="14"/>
+    <!-- cross-bar of A (the defining horizontal stroke) -->
+    <line x1="320" y1="600" x2="704" y2="600" stroke="#312e81" stroke-width="14"/>
+
+    <!-- NODE DOTS (indigo-900): filled circles at structurally significant intersections -->
+    <!-- Large primary nodes (r=18) at the A-backbone vertices -->
+    <circle cx="512" cy="160" r="20" fill="#312e81"/>  <!-- apex -->
+    <circle cx="320" cy="600" r="18" fill="#312e81"/>  <!-- cross-bar left -->
+    <circle cx="704" cy="600" r="18" fill="#312e81"/>  <!-- cross-bar right -->
+    <circle cx="220" cy="780" r="20" fill="#312e81"/>  <!-- left base -->
+    <circle cx="804" cy="780" r="20" fill="#312e81"/>  <!-- right base -->
+    <circle cx="512" cy="600" r="14" fill="#312e81"/>  <!-- cross-bar midpoint -->
+    <!-- Smaller secondary nodes (r=10) at scaffold/medium endpoints -->
+    <circle cx="170" cy="380" r="10" fill="#312e81"/>
+    <circle cx="854" cy="380" r="10" fill="#312e81"/>
+    <circle cx="100" cy="850" r="10" fill="#312e81"/>
+    <circle cx="924" cy="850" r="10" fill="#312e81"/>
+    <!-- Smallest detail nodes (r=6) on the apex tangent -->
+    <circle cx="380" cy="210" r="6" fill="#312e81"/>
+    <circle cx="644" cy="210" r="6" fill="#312e81"/>
+  </g>
+</svg>

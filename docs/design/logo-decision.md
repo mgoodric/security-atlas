@@ -67,20 +67,20 @@ Central vertical spine with 4-6 branches forking outward — a dendrogram or evi
 
 ---
 
-## Candidate 04 — Node-graph "A" (indigo, v2)
+## Candidate 04 — Node-graph "A" (indigo, v3 — three-weight hierarchy)
 
 | Light variant                                                      | Dark variant                                                           |
 | ------------------------------------------------------------------ | ---------------------------------------------------------------------- |
 | ![candidate-04 light](./logo-candidates/candidate-04/mark-512.png) | ![candidate-04 dark](./logo-candidates/candidate-04/mark-512-dark.png) |
 
-Sparse node-and-edge graph (~10 lines, ~10 visible dots at intersections) whose silhouette implies a stylized capital A. The visible nodes make the "graph" reading explicit — directly evokes the platform's control-graph data model (one control, N framework satisfactions via STRM-typed edges through SCF anchors). The A-ness emerges from network topology, not typography. Indigo palette aligns with the mockups (`Plans/mockups/*.html`).
+Layered node-and-edge graph implying a stylized capital A, with **three line-weight tiers** color-coded to the indigo brand scale. Heavy backbone (`indigo-900` light / `indigo-200` dark, 14px) defines the A's primary spine; medium connectors (`indigo-700` / `indigo-300`, 8px) carry the structural framing; light scaffolding (`indigo-600` / `indigo-400`, 4px) adds detail without crowding. The visual hierarchy lets the eye walk from primary structure → secondary connections → detail.
 
-**Wordmark:** none — mark-only · **Model:** Flux 1.1 Pro · **SVG:** raster-only · **Iteration:** v2 (replaces v1 burnt-amber wireframe per maintainer feedback)
+**Wordmark:** none — mark-only · **Source:** hand-authored SVG (cand-04 is the only SVG-native mark in the slate) · **Render path:** `tools/logo-gen/recolor_by_weight.py` (deterministic — bit-perfect hex per weight tier) · **Iteration:** v3 (replaces v2's single-color version per maintainer feedback for weight-hierarchy)
 
-- **Strengths:** the only candidate that explicitly reads as a node-and-edge graph (dots at intersections make the connection-topology unmistakable); directly evokes the control-graph data model; indigo aligns with application palette; sparser than v1, breathing room inside the A
-- **Weaknesses:** the A-suggestion is subtler than the graph scaffold (viewers may read "network triangle" before "A"); Flux rendered the indigo darker than the prompted `#4f46e5` (came in near `#000065` — still in-band with the brand-900 indigo family); node-density may not survive favicon-scale cleanly
+- **Strengths:** the only candidate that explicitly reads as a layered node-and-edge graph with visual hierarchy via line weight + color; bit-perfect indigo brand-palette fidelity (six exact-hex tiers across light + dark variants, all WCAG AA); SVG-native (scales perfectly to any size including favicon); 132 KB combined (smallest in the slate); deterministic re-render via the new `recolor_by_weight.py` tool
+- **Weaknesses:** the three-weight hierarchy may compress at favicon-scale (16-32px) — the LIGHT tier (4px) likely drops out, leaving an effective two-tier mark at very small sizes; A-suggestion still emerges from topology, not typography (some viewers may read "network diagram" before "A")
 
-[→ full notes](./logo-candidates/candidate-04/notes.md)
+[→ full notes](./logo-candidates/candidate-04/notes.md) · [→ source SVG](./logo-candidates/candidate-04/mark.svg)
 
 ---
 

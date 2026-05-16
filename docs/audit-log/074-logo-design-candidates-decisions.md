@@ -189,6 +189,55 @@ Selected: candidate-<NN>
 - Add cand-04-v2 as a NEW candidate (candidate-11) and keep cand-04-v1 in the slate. Rejected: would expand the slate beyond the maintainer's requested 10 (D1); v1 was explicitly flagged for replacement, not for side-by-side comparison.
 - Swap Flux for Nano Banana to nail the exact `#4f46e5` hex. Rejected for this iteration: the Flux output reads cleanly and falls in-band; spending another iteration cycle to gain ±15% color-purity isn't a load-bearing improvement at this stage. Recorded as a future-iteration option if the maintainer wants tighter color fidelity.
 
+### D14 — Candidate 04 iterated v2 → v3 (three-weight hierarchy, Path C SVG) (HIGH confidence)
+
+**Decision:** regenerate cand-04 a second time. v3 ships a **three-tier line-weight hierarchy** (14 / 8 / 4 px) with **each weight mapped to a distinct indigo color**, hand-authored as SVG (Path C from the iteration brief) for bit-perfect hex fidelity. v2 is preserved in the notes.md iteration history; v3 binaries overwrite v2 binaries in-place.
+
+**Rationale:** the maintainer's v3 ask was explicit:
+
+> _"This is getting really close. Lets do another iteration. Lets have more than 2 different line thicknesses with different colors for each weight of line that are aligned with the color pallet of the app."_
+
+v2 was a single color, single line-weight (modulo the dot-vs-line size difference). v3 introduces visual hierarchy via two dimensions (thickness + color), color-coded to the application's indigo brand scale so the gradation reads as "depth of structure" rather than "stylistic variation".
+
+**Why Path C (hand-authored SVG) over Path A (pure Flux multi-color) or Path B (Flux + PIL post-recolor):**
+
+- **Path A rejected:** Flux's known "indigo darker than prompted" attractor (D13) would amplify on a six-hex multi-color spec — Flux can't reliably hold six distinct hex values across two variants. Color fidelity is the load-bearing requirement of the v3 ask; Path A's failure mode kills the brief.
+- **Path B rejected:** morphological-erosion-by-stroke-width is fragile on anti-aliased rasters (sub-pixel artifacts at edges); the v2 geometry's organic line endings make thickness-classification unreliable. Would likely need multiple iterations + tuning to get the per-weight masks clean.
+- **Path C chosen:** the v2 geometry is sparse enough (~10 lines + ~10 nodes) to hand-trace into SVG. Result: every line has an exact `stroke` + `stroke-width` attribute; both variants render deterministically from one source; the SVG ships in-repo so future re-renders (resize, theme-swap, derived assets in slice 075) are mechanical.
+
+**Per-tier color mapping (verified WCAG AA):**
+
+| Weight       | Light hex            | vs `#fafafa` | Dark hex             | vs `#0a0a0a` |
+| ------------ | -------------------- | ------------ | -------------------- | ------------ |
+| Heavy (14px) | `#312e81` indigo-900 | 10.94:1 PASS | `#c7d2fe` indigo-200 | 13.27:1 PASS |
+| Medium (8px) | `#4338ca` indigo-700 | 7.57:1 PASS  | `#a5b4fc` indigo-300 | 9.93:1 PASS  |
+| Light (4px)  | `#4f46e5` indigo-600 | 6.02:1 PASS  | `#818cf8` indigo-400 | 6.64:1 PASS  |
+
+**Mid-iteration adjustment:** first attempt used `#6366f1` indigo-500 for the LIGHT tier (matches the mockup primary brand color), but it measured 4.28:1 against `#fafafa` — just below the WCAG AA 4.5:1 floor. Shifted the entire light-variant palette one rung darker (500→600, 700→700, 900→900) so all three tiers clear the floor while preserving distinct hierarchy. The dark-variant palette didn't need adjustment.
+
+**Cand-04 is now SVG-native** (the only candidate in the slate with a `mark.svg` source-of-truth). v1/v2 were Flux-rendered raster-only; v3 is hand-authored SVG → PNG. Two consequences:
+
+1. The gallery entry's `· **SVG:** raster-only` line changed to `**Source:** hand-authored SVG`.
+2. Slice 075 (logo integration) can use the SVG directly for the web UI top-nav (no resize artifacts at any size) and the favicon. Slice 075's `scripts/regen-logo-variants.ts` becomes simpler for cand-04: SVG → ICO/PNG conversion is well-trodden, no recoloring step needed.
+
+**New tooling shipped with v3:** `tools/logo-gen/recolor_by_weight.py` — a small Python helper that takes the SVG source + a hex map for light vs dark and produces both rasterizations (1024 + 512 each). Requires `DYLD_LIBRARY_PATH=/opt/homebrew/opt/cairo/lib` on macOS (cairosvg dependency). Documented in the candidate-04 `notes.md`.
+
+**Quality gates:**
+
+- Combined PNG weight: 132 KB (smallest in the slate; well under the 600 KB per-iteration ceiling and the 8 MB slate-total ceiling — slate total ~3.16 MB after the swap)
+- All six tier colors clear WCAG AA on their target background
+- SVG validates as well-formed XML; renders identically in browsers + cairosvg
+- v1 and v2 prompts + provenance preserved in `candidate-04/notes.md` under "Iteration history" — no design history lost
+
+**Slice 075 grep target unchanged:** the `Selected:` line stays `none — awaiting maintainer approval` per P0-A7 + D12. v3 is a refined offering, not a pre-selection.
+
+**Alternatives considered:**
+
+- Stop at v2 ("good enough"). Rejected per explicit maintainer ask — the weight-hierarchy is a meaningful visual depth signal, not cosmetic polish.
+- 4 weight tiers instead of 3. Rejected: at 1024 px the third tier (4 px) is already at the bottom of what reads as "deliberate thin line" vs "scaffolding accident"; a 4th tier under 4px would either be invisible or pixel-snap to the same rendered thickness.
+- Use the indigo-500 mockup primary for the LIGHT tier (matches the mockup hero color) even though it fails WCAG by 0.22:1. Rejected: WCAG ≥4.5:1 is non-negotiable per AC-4 + the constitutional accessibility constraint. Shifted to indigo-600 (passes 6.02:1) instead.
+- Add a 4th color tier just for the dots (e.g., indigo-900 dots on indigo-700/600/500 lines). Considered, deferred: the current dots take the heavy color, which already gives them visual emphasis; a separate dot color would compete with the line hierarchy rather than reinforce it.
+
 ## Acceptance criteria status
 
 - [x] AC-1: 10 candidate dirs exist (vs. spec's default 4 per D1) with required PNG files
