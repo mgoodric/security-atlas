@@ -3,7 +3,28 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-16 (slice 070 claim-stake — onboarding walkthroughs · showboat-generated)
+**Last reconciled:** 2026-05-16 (slice 070 → `in-review` · 5 walkthroughs · mkdocs strict green)
+
+## Drift detected — 2026-05-16 (slice 070 → `in-review` · 5 showboat-generated walkthroughs + fixtures + recipe + mkdocs nav)
+
+Slice 070 (Onboarding walkthroughs — showboat-generated) flipped `in-progress` → `in-review` with PR #200 open. JUDGMENT slice executed end-to-end in a single agent turn.
+
+**Deliverables:**
+
+- Five walkthroughs at `docs/walkthroughs/` (231-348 lines each, under the 5000-word ceiling): `evaluation-pipeline.md`, `audit-period-freezing.md`, `rls-tenant-isolation.md`, `schema-registry-seed-and-validate.md`, `oscal-ssp-export.md`
+- Every captured output block is a real `uvx showboat exec` capture from a live local Postgres (P0-A4 honored)
+- Each walkthrough's header carries the slice-027 disambiguation block-quote (PAI Walkthrough skill, not `internal/audit/walkthrough`)
+- `fixtures/walkthroughs/` ships base seed + 5 per-walkthrough SQL files, deterministic UUIDs with semantic hex prefixes (`...d3a0` demo-tenant / `...a17e` alt-tenant), neutrality constraints matched to `fixtures/readme-demo/`
+- `docs-site/mkdocs.yml` gains "Walkthroughs" nav section; sync-with-sed-rewrite path keeps canonical `docs/walkthroughs/` + mkdocs-friendly `docs-site/docs/walkthroughs/` copies in step; `mkdocs build --strict` passes
+- `justfile` gains `walkthroughs-refresh` recipe (parameterized via `PG_CONTAINER` so any migrated Postgres works for development; production refresh path docs the canonical `just self-host-up` first)
+- `CONTRIBUTING.md` "Refreshing walkthroughs" subsection + repo-layout cells + just-recipes table cell
+- Decisions log at [`docs/audit-log/070-onboarding-walkthroughs-decisions.md`](../audit-log/070-onboarding-walkthroughs-decisions.md) — 8 HIGH-confidence calls; substantive ones are D1 (environmental strategy: existing pg-030 vs fresh self-host bring-up), D2 (two-location storage + sed rewrite), D3 (OSCAL bridge not invoked live; integration-test citation), D7 (manual walkthrough re-capture step is intentional)
+
+| Row | Transition                  | Evidence                                                                                                                                                                                                                |
+| --- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 070 | `in-progress` → `in-review` | branch `backlog/070-onboarding-walkthroughs` · PR #200 · JUDGMENT · 5 walkthroughs · `walkthroughs-refresh` recipe · mkdocs strict green · `fixtures/walkthroughs/` deterministic seed · 8 decisions HIGH · 0 spillover |
+
+**Counts delta:** in-progress −1 · in-review +1.
 
 ## Drift detected — 2026-05-16 (slice 070 claim-stake — `ready` → `in-progress`)
 

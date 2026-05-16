@@ -386,3 +386,78 @@ refresh-screenshots:
     @echo "Refresh complete. Total weight:"
     @du -sh docs/images/*.{png,gif} 2>/dev/null | awk '{print "    " $0}'
     @du -sch docs/images/*.{png,gif} 2>/dev/null | tail -1 | awk '{print "  TOTAL: " $1}'
+
+# ----- Onboarding walkthroughs (slice 070) -----
+#
+# Regenerates the five executable onboarding walkthroughs under
+# docs/walkthroughs/ from a fresh slice-037 docker-compose self-host
+# bundle. Like refresh-screenshots, this is on-demand only — CI does
+# NOT block on walkthrough freshness (anti-criterion P0-A2 / AC-9). Run
+# it when the underlying surface materially drifts.
+#
+# Walkthrough vs slice 027: the walkthroughs this recipe generates are
+# PAI Walkthrough skill documents (`uvx showboat` driven). They are
+# UNRELATED to slice 027's `internal/audit/walkthrough` package — that
+# one is auditor evidence capture against controls. See each
+# walkthrough doc's header for the full disambiguation.
+#
+# Prerequisites (one-time):
+#   - `uvx` on PATH (Homebrew: `brew install uv`). Showboat installs
+#     via `uvx showboat` at first use.
+#   - `just self-host-up` succeeds. The recipe assumes a running stack
+#     at the canonical ports (Postgres on 5432, atlas-server on 8080).
+#     For the dev fast-path the recipe can also be pointed at any
+#     migrated Postgres via the PG_CONTAINER env var (defaults to the
+#     self-host bundle's postgres container).
+#
+# What it does:
+#   1. Verifies the local stack is reachable via `just self-host-ps`.
+#   2. Applies `fixtures/walkthroughs/00-seed.sql` (base seed) then each
+#      per-walkthrough SQL in the order the walkthroughs run them.
+#   3. Replays each walkthrough's `uvx showboat init/note/exec` sequence
+#      (the canonical pattern is captured in each .md file; the recipe
+#      is the operator's re-execution harness).
+#   4. Rewrites the docs-site/docs/walkthroughs/ copies' relative paths
+#      to GitHub URLs so `mkdocs build --strict` passes.
+#   5. Runs `just docs-build` to confirm the walkthroughs render.
+#
+# Determinism: the fixtures are static SQL with deterministic UUIDs, so
+# every run produces byte-identical output (modulo the showboat
+# timestamp + UUID header per file). A large diff on the output blocks
+# is a real drift signal — the underlying surface changed and the
+# walkthrough needs review.
+PG_CONTAINER := env_var_or_default("PG_CONTAINER", "security-atlas-pg-030")
+
+walkthroughs-refresh:
+    @echo "[1/4] Verifying local Postgres reachable via docker exec…"
+    docker exec {{PG_CONTAINER}} pg_isready -U postgres > /dev/null \
+        || (echo "Postgres container {{PG_CONTAINER}} not reachable. Run 'just self-host-up' or set PG_CONTAINER." && exit 1)
+    @echo "[2/4] Applying fixtures…"
+    @for f in fixtures/walkthroughs/00-seed.sql \
+              fixtures/walkthroughs/rls-isolation.sql \
+              fixtures/walkthroughs/schema-registry.sql \
+              fixtures/walkthroughs/audit-period.sql \
+              fixtures/walkthroughs/evaluation-pipeline.sql \
+              fixtures/walkthroughs/oscal-export.sql; do \
+        docker cp "$f" {{PG_CONTAINER}}:/tmp/$(basename $f); \
+        docker exec {{PG_CONTAINER}} psql -U postgres -d security_atlas -v ON_ERROR_STOP=1 -f /tmp/$(basename $f); \
+    done
+    @echo "[3/4] Walkthrough re-capture is a manual operator workflow."
+    @echo "      For each docs/walkthroughs/*.md file, replay its bash blocks"
+    @echo "      via the canonical showboat shape:"
+    @echo "        uvx showboat init <file> '<title>'"
+    @echo "        uvx showboat note <file> '<prose>'"
+    @echo "        uvx showboat exec <file> bash '<cmd>'"
+    @echo "      The fixtures in step 2 establish the data preconditions."
+    @echo "      See CONTRIBUTING.md 'Refreshing walkthroughs' for the full workflow."
+    @echo "[4/4] Sync docs-site/docs/walkthroughs/ from docs/walkthroughs/…"
+    @cp docs/walkthroughs/*.md docs-site/docs/walkthroughs/
+    @for f in docs-site/docs/walkthroughs/audit-period-freezing.md \
+              docs-site/docs/walkthroughs/evaluation-pipeline.md \
+              docs-site/docs/walkthroughs/oscal-ssp-export.md \
+              docs-site/docs/walkthroughs/rls-tenant-isolation.md \
+              docs-site/docs/walkthroughs/schema-registry-seed-and-validate.md; do \
+        sed -i.bak -E 's|\(\.\./\.\./([^)]+)\)|(https://github.com/mgoodric/security-atlas/blob/main/\1)|g; s|\(\.\./issues/([^)]+)\)|(https://github.com/mgoodric/security-atlas/blob/main/docs/issues/\1)|g; s|\(\.\./adr/([^)]+)\)|(https://github.com/mgoodric/security-atlas/blob/main/docs/adr/\1)|g' "$f"; \
+        rm -f "$f.bak"; \
+    done
+    @echo "Refresh complete. Verify via 'just docs-build'."

@@ -89,6 +89,13 @@ nav:
   - Framework setup: framework-setup.md
   - First audit: first-audit.md
   - Board reporting: board-reporting.md
+  - Walkthroughs:
+      - Overview: walkthroughs/index.md
+      - Evaluation pipeline: walkthroughs/evaluation-pipeline.md
+      - Audit-period freezing: walkthroughs/audit-period-freezing.md
+      - RLS tenant isolation: walkthroughs/rls-tenant-isolation.md
+      - Schema registry seed + validate: walkthroughs/schema-registry-seed-and-validate.md
+      - OSCAL SSP export: walkthroughs/oscal-ssp-export.md
   - Troubleshooting:
       - First-time login: troubleshooting/first-login.md
   - Design decisions:

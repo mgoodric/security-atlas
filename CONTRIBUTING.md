@@ -34,57 +34,60 @@ After `just install-hooks`, commits with malformed Go (or unformatted YAML / JSO
 
 ## Task surface (`just`)
 
-| Recipe                     | What it does                                                              |
-| -------------------------- | ------------------------------------------------------------------------- |
-| `just`                     | List all recipes                                                          |
-| `just db-up`               | Start a local Postgres 16 in Docker                                       |
-| `just db-down`             | Tear down the local Postgres                                              |
-| `just migrate-up`          | Bootstrap roles + apply forward SQL migrations (requires `$DATABASE_URL`) |
-| `just migrate-down`        | Apply the latest reverse migration                                        |
-| `just sqlc-generate`       | Run `sqlc generate` against the schema                                    |
-| `just test-integration`    | Run integration tests (requires `$DATABASE_URL_APP`)                      |
-| `just build`               | Build all components (Go + frontend)                                      |
-| `just build-go`            | Build Go binaries only                                                    |
-| `just build-frontend`      | Build the `web/` workspace                                                |
-| `just test`                | Run all tests                                                             |
-| `just test-go`             | Run Go tests (`go test -race ./...` in CI)                                |
-| `just test-frontend`       | Run frontend tests                                                        |
-| `just lint`                | Run all linters (Go + frontend + Python)                                  |
-| `just lint-go`             | `golangci-lint run ./...`                                                 |
-| `just lint-frontend`       | `npm run lint` in `web/`                                                  |
-| `just lint-python`         | `ruff check .`                                                            |
-| `just fmt`                 | Format all code (in-place)                                                |
-| `just fmt-go`              | `gofmt -w` + `goimports -w -local github.com/mgoodric/security-atlas`     |
-| `just fmt-python`          | `ruff format .`                                                           |
-| `just install-hooks`       | Install pre-commit hooks (one-time)                                       |
-| `just hooks-run`           | Run pre-commit against the whole tree                                     |
-| `just tidy`                | `go mod tidy` and fail if `go.mod` / `go.sum` change                      |
-| `just ci`                  | Run what CI runs (lint + test + build)                                    |
-| `just refresh-screenshots` | Re-capture README screenshots + animated GIF (slice 057)                  |
+| Recipe                      | What it does                                                               |
+| --------------------------- | -------------------------------------------------------------------------- |
+| `just`                      | List all recipes                                                           |
+| `just db-up`                | Start a local Postgres 16 in Docker                                        |
+| `just db-down`              | Tear down the local Postgres                                               |
+| `just migrate-up`           | Bootstrap roles + apply forward SQL migrations (requires `$DATABASE_URL`)  |
+| `just migrate-down`         | Apply the latest reverse migration                                         |
+| `just sqlc-generate`        | Run `sqlc generate` against the schema                                     |
+| `just test-integration`     | Run integration tests (requires `$DATABASE_URL_APP`)                       |
+| `just build`                | Build all components (Go + frontend)                                       |
+| `just build-go`             | Build Go binaries only                                                     |
+| `just build-frontend`       | Build the `web/` workspace                                                 |
+| `just test`                 | Run all tests                                                              |
+| `just test-go`              | Run Go tests (`go test -race ./...` in CI)                                 |
+| `just test-frontend`        | Run frontend tests                                                         |
+| `just lint`                 | Run all linters (Go + frontend + Python)                                   |
+| `just lint-go`              | `golangci-lint run ./...`                                                  |
+| `just lint-frontend`        | `npm run lint` in `web/`                                                   |
+| `just lint-python`          | `ruff check .`                                                             |
+| `just fmt`                  | Format all code (in-place)                                                 |
+| `just fmt-go`               | `gofmt -w` + `goimports -w -local github.com/mgoodric/security-atlas`      |
+| `just fmt-python`           | `ruff format .`                                                            |
+| `just install-hooks`        | Install pre-commit hooks (one-time)                                        |
+| `just hooks-run`            | Run pre-commit against the whole tree                                      |
+| `just tidy`                 | `go mod tidy` and fail if `go.mod` / `go.sum` change                       |
+| `just ci`                   | Run what CI runs (lint + test + build)                                     |
+| `just refresh-screenshots`  | Re-capture README screenshots + animated GIF (slice 057)                   |
+| `just walkthroughs-refresh` | Apply walkthrough fixtures + sync docs-site walkthrough copies (slice 070) |
 
 ---
 
 ## Repository layout
 
-| Path                                        | What it is                                                                                                | First slice that fills it           |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| [`Plans/`](./Plans)                         | Design canvas, mockups, deep-dive docs                                                                    | (already populated)                 |
-| [`docs/issues/`](./docs/issues)             | v1 backlog (69 issues, all merged) + index + dep graph + post-v1 follow-on slices (070+)                  | (already populated)                 |
-| [`CLAUDE.md`](./CLAUDE.md)                  | Constitutional principles + AI-assist boundary + tech stack lock                                          | (already populated)                 |
-| `cmd/atlas/`                                | Platform server binary                                                                                    | slice 013 + ongoing                 |
-| `cmd/atlas-cli/`                            | CLI binary                                                                                                | slice 003                           |
-| `cmd/atlas-oscal/`                          | OSCAL bridge binary (Python via gRPC)                                                                     | slice 030                           |
-| `internal/`                                 | Private Go packages (catalog, evidence, eval, ucf, scope, risk, policy, audit, board, auth, tenancy, api) | slices 002+                         |
-| `pkg/sdk-go/`                               | Public Go SDK (evidence push)                                                                             | slice 003                           |
-| `connectors/`                               | Per-connector implementations (AWS, GitHub, Okta, 1Password, osquery, Jira/Linear, manual-upload)         | slices 004, 044–049                 |
-| `sdk/python/` `sdk/typescript/` `sdk/java/` | Non-Go SDKs                                                                                               | slice 003 (Python + TS); Java in v2 |
-| `web/`                                      | Next.js 16 frontend                                                                                       | slice 005                           |
-| `oscal-bridge/`                             | Python service wrapping `compliance-trestle`                                                              | slice 030                           |
-| `proto/`                                    | gRPC protobuf definitions                                                                                 | slice 003                           |
-| `schemas/`                                  | JSON Schemas for `evidence_kind`                                                                          | slice 014                           |
-| `migrations/`                               | Versioned SQL migrations + role bootstrap                                                                 | slice 002                           |
-| `policies/`                                 | OPA Rego (authz + control policies)                                                                       | slice 035                           |
-| `deploy/docker/` `deploy/helm/`             | Deployment artifacts                                                                                      | slices 037, 038                     |
+| Path                                                | What it is                                                                                                | First slice that fills it           |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| [`Plans/`](./Plans)                                 | Design canvas, mockups, deep-dive docs                                                                    | (already populated)                 |
+| [`docs/issues/`](./docs/issues)                     | v1 backlog (69 issues, all merged) + index + dep graph + post-v1 follow-on slices (070+)                  | (already populated)                 |
+| [`docs/walkthroughs/`](./docs/walkthroughs)         | Executable onboarding walkthroughs (showboat-generated; canonical copies)                                 | slice 070                           |
+| [`fixtures/walkthroughs/`](./fixtures/walkthroughs) | Deterministic seed data the walkthroughs run against                                                      | slice 070                           |
+| [`CLAUDE.md`](./CLAUDE.md)                          | Constitutional principles + AI-assist boundary + tech stack lock                                          | (already populated)                 |
+| `cmd/atlas/`                                        | Platform server binary                                                                                    | slice 013 + ongoing                 |
+| `cmd/atlas-cli/`                                    | CLI binary                                                                                                | slice 003                           |
+| `cmd/atlas-oscal/`                                  | OSCAL bridge binary (Python via gRPC)                                                                     | slice 030                           |
+| `internal/`                                         | Private Go packages (catalog, evidence, eval, ucf, scope, risk, policy, audit, board, auth, tenancy, api) | slices 002+                         |
+| `pkg/sdk-go/`                                       | Public Go SDK (evidence push)                                                                             | slice 003                           |
+| `connectors/`                                       | Per-connector implementations (AWS, GitHub, Okta, 1Password, osquery, Jira/Linear, manual-upload)         | slices 004, 044–049                 |
+| `sdk/python/` `sdk/typescript/` `sdk/java/`         | Non-Go SDKs                                                                                               | slice 003 (Python + TS); Java in v2 |
+| `web/`                                              | Next.js 16 frontend                                                                                       | slice 005                           |
+| `oscal-bridge/`                                     | Python service wrapping `compliance-trestle`                                                              | slice 030                           |
+| `proto/`                                            | gRPC protobuf definitions                                                                                 | slice 003                           |
+| `schemas/`                                          | JSON Schemas for `evidence_kind`                                                                          | slice 014                           |
+| `migrations/`                                       | Versioned SQL migrations + role bootstrap                                                                 | slice 002                           |
+| `policies/`                                         | OPA Rego (authz + control policies)                                                                       | slice 035                           |
+| `deploy/docker/` `deploy/helm/`                     | Deployment artifacts                                                                                      | slices 037, 038                     |
 
 ---
 
@@ -194,6 +197,55 @@ Fixture constraints — see `fixtures/readme-demo/README.md`. All seed
 data is neutral: no maintainer references, no real tenant names, no
 vendor-prefixed credentials. When you edit fixtures, run the recipe to
 regenerate the artifacts and commit both in the same change.
+
+## Refreshing walkthroughs
+
+`docs/walkthroughs/` ships five executable onboarding documents (slice
+070): `evaluation-pipeline.md`, `audit-period-freezing.md`,
+`rls-tenant-isolation.md`, `schema-registry-seed-and-validate.md`,
+`oscal-ssp-export.md`. Each one is generated by the PAI Walkthrough
+skill (`uvx showboat`) against a live local stack. They are
+version-controlled artifacts refreshed on demand — CI does NOT block on
+walkthrough freshness (same anti-criterion as the README screenshots).
+When the underlying surface materially drifts, regenerate:
+
+```sh
+# Bring up the slice-037 self-host bundle (or set PG_CONTAINER to any
+# already-migrated Postgres on your machine).
+just self-host-up
+
+# Apply fixtures + sync the docs-site copies. The bash blocks in each
+# walkthrough are replayed against the seeded stack via uvx showboat.
+just walkthroughs-refresh
+
+# Confirm the walkthroughs render under mkdocs.
+just docs-build
+```
+
+The recipe (1) verifies the local Postgres is reachable, (2) applies
+`fixtures/walkthroughs/*.sql` in canonical order, (3) prompts you to
+replay each walkthrough's `uvx showboat exec` sequence (manual step —
+the bash blocks are visible in the `.md` files), and (4) syncs the
+canonical `docs/walkthroughs/*.md` copies into
+`docs-site/docs/walkthroughs/`, rewriting `../../` relative paths to
+GitHub URLs so `mkdocs build --strict` continues to pass.
+
+Determinism: the fixtures use deterministic UUIDs, so a clean re-run
+produces byte-identical captured output (modulo each walkthrough's
+showboat timestamp + UUID header). A large diff on the captured blocks
+is a real drift signal — the underlying surface changed and the
+walkthrough needs review.
+
+Fixture constraints — see `fixtures/walkthroughs/README.md`. All seed
+data is neutral: no maintainer references, no real tenant names, no
+vendor-prefixed credentials. When you edit fixtures, run the recipe to
+regenerate the captured output and commit both in the same change.
+
+**Walkthrough vs slice 027 (load-bearing disambiguation):** the
+walkthroughs this recipe generates are PAI Walkthrough skill documents
+(showboat-driven). They are unrelated to slice 027's
+`internal/audit/walkthrough` package, which records auditor evidence
+capture against controls. Every walkthrough doc's header restates this.
 
 ## Test infrastructure
 
