@@ -3,7 +3,35 @@
 **Cluster:** Infra
 **Estimate:** 0.5d
 **Type:** AFK (mechanical execution after maintainer approval)
-**Status:** `not-ready`
+**Status:** `in-review` (PR open · 47/47 worktrees removed cleanly · awaiting CI + merge)
+
+## Execution record (2026-05-16)
+
+Maintainer issued blanket per-row approval verbally: _"You can clear the stale worktrees."_ Per AC-1, the verbal blanket approval satisfies the per-row gate; all rows in §Category 15 below are treated as `[x] approve`.
+
+Pre-flight ground truth: `git worktree list` at slice start surfaced 47 stale worktrees on disk, not 49. The slice doc's row 45 (`security-atlas-074`) was already manually removed prior to slice execution; the row-49 placeholder did not materialize. Worktrees for slices 075, 076 (merged this session) were also already absent.
+
+Clean-tree audit (AC-2): all 47 reported `git status --short` empty. No removals required `--force`; no uncommitted work was discarded.
+
+| Result        | Count | Notes                                                                    |
+| ------------- | ----- | ------------------------------------------------------------------------ |
+| Removed clean | 47    | `git worktree remove <path>` succeeded without `--force` on every entry. |
+| Skipped       | 2     | `security-atlas-074` (already gone), placeholder row 49 (never existed). |
+| Force-removed | 0     | Per AC-3, no entry required `--force`.                                   |
+| Deferred      | 0     | No rows marked `defer to slice NNN`.                                     |
+| Rejected      | 0     | No rows rejected by maintainer.                                          |
+
+`git worktree prune -v` followed the removal sweep (AC-4); output was empty (no orphan `.git/worktrees/` metadata).
+
+Final `git worktree list` state (AC-5):
+
+```
+/Users/gmoney/Development/security-atlas 6e25202 [infra/096-repo-cleanup-deletions]
+```
+
+1-worktree state (main only), the AC-5 expected end state when executed from the main worktree.
+
+Branches associated with the removed worktrees were NOT deleted, per P0-A5. The branches remain in the local clone as a recoverable reference; cleanup is out of scope.
 
 ## Narrative
 
