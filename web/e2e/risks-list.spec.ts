@@ -1,0 +1,85 @@
+// Slice 100 — Playwright E2E for the /risks list view.
+//
+// Runner status (post-slice-069 / 079 audit):
+// Playwright IS installed in `web/`. This spec is quarantined behind
+// slice 082 (the seed-data harness) per slice 079's decision; when that
+// harness lands, the un-commented assertions below become the gate. The
+// test bodies are preserved verbatim as a reviewable contract per the
+// slice 040 / 042 / 056 / 060 / 064 / 071 / 094 / 098 precedent.
+//
+// Run locally:
+//   cd web
+//   npx playwright install chromium     # once per machine
+//   npx playwright test e2e/risks-list.spec.ts
+//
+// Pre-conditions the seed-data harness (slice 082) must establish
+// before the commented assertions are turned on:
+//   - PLATFORM_BASE_URL points at a running platform instance.
+//   - TEST_BEARER carries a credential in a tenant that has at least
+//     three risks seeded across at least two treatment values and two
+//     owner strings, so the filter pills have something to narrow.
+//   - At least one risk has a 5x5 inherent_score so the severity pill
+//     "high" band returns a non-empty result.
+//
+// AC-10 coverage targets: list renders, filter narrows results, the
+// hierarchy page-header link navigates, and the reciprocal `List view`
+// link on /risks/hierarchy navigates back.
+
+import { test } from "@playwright/test";
+
+test.describe("/risks list view", () => {
+  test("AC-1: /risks renders the risk table for any signed-in user", async () => {
+    //    await page.goto("/login");
+    //    await page.fill('input[name="token"]', process.env.TEST_BEARER!);
+    //    await page.click("button[type=submit]");
+    //    await page.goto("/risks");
+    //    await expect(page.getByRole("heading", { name: /Risk register/ })).toBeVisible();
+    //    await expect(page.getByTestId("list-page")).toBeVisible();
+    //    await expect(page.getByTestId("list-table-wrap")).toBeVisible();
+  });
+
+  test("AC-3: horizontal pill filter row narrows the result set", async () => {
+    //    await page.goto("/risks");
+    //    const initial = await page.getByTestId("list-table-row").count();
+    //    const treatmentPill = page.getByLabel("Treatment");
+    //    await treatmentPill.selectOption({ value: "mitigate" });
+    //    await page.waitForLoadState("networkidle");
+    //    const filtered = await page.getByTestId("list-table-row").count();
+    //    expect(filtered).toBeLessThanOrEqual(initial);
+    // The filter row is horizontal (P0-A2) — verify NO left sidebar.
+    //    await expect(page.getByTestId("list-filter-pills")).toBeVisible();
+  });
+
+  test("AC-4: empty state surfaces when filters return zero rows", async () => {
+    //    // Pick a (treatment, owner) combination unlikely to be seeded.
+    //    await page.goto("/risks?treatment=avoid&owner=DOES-NOT-EXIST");
+    //    await expect(page.getByTestId("list-empty-state")).toBeVisible();
+    //    await expect(
+    //      page.getByText("No risks match these filters"),
+    //    ).toBeVisible();
+    // The CTA reads "Clear filters" on a filter-induced empty state.
+    //    await page.getByTestId("list-empty-state-cta").click();
+    //    await expect(page.getByTestId("list-table-wrap")).toBeVisible();
+  });
+
+  test("AC-6: page-header `Hierarchy view ->` link navigates to /risks/hierarchy", async () => {
+    //    await page.goto("/risks");
+    //    await page.getByTestId("risks-hierarchy-link").click();
+    //    await expect(page).toHaveURL(/\/risks\/hierarchy/);
+    //    // Reciprocal AC-8 wiring: the hierarchy page exposes a `List view ->`
+    //    // link back to /risks.
+    //    await expect(page.getByTestId("risk-hierarchy-list-view-link")).toBeVisible();
+    //    await page.getByTestId("risk-hierarchy-list-view-link").click();
+    //    await expect(page).toHaveURL(/\/risks(\?.*)?$/);
+  });
+
+  test("AC-8: sidebar no longer exposes /risks/hierarchy as a top-level entry", async () => {
+    //    await page.goto("/dashboard");
+    //    // The /risks entry stays.
+    //    await expect(page.getByRole("link", { name: "Risks" })).toBeVisible();
+    //    // The /risks/hierarchy entry was REMOVED (audit F-3 closure).
+    //    await expect(
+    //      page.getByRole("link", { name: "Risk hierarchy" }),
+    //    ).toHaveCount(0);
+  });
+});

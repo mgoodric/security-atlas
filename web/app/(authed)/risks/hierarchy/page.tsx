@@ -29,8 +29,11 @@
 // boundary in the App Router, hence the wrapper component).
 
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo } from "react";
+
+import { buttonVariants } from "@/components/ui/button";
 
 import { OrgTreePanel } from "@/components/risk-hierarchy/org-tree-panel";
 import { ThemeHeatmapPanel } from "@/components/risk-hierarchy/theme-heatmap-panel";
@@ -146,14 +149,27 @@ function HierarchyView() {
 
   return (
     <div className="space-y-6" data-testid="risk-hierarchy-dashboard">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Risk hierarchy
-        </h1>
-        <p className="mt-0.5 text-sm text-muted-foreground">
-          Navigate risks by org_unit and level, watch theme patterns emerge, and
-          track decision-revisit dates.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Risk hierarchy
+          </h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Navigate risks by org_unit and level, watch theme patterns emerge,
+            and track decision-revisit dates.
+          </p>
+        </div>
+        {/* Slice 100 AC-8: reciprocal page-header link to the flat list. The
+            hierarchy was lifted out of the sidebar in slice 100 to close
+            audit F-3; this link is how a user pivots back to the flat
+            register without re-entering through the sidebar. */}
+        <Link
+          href="/risks"
+          data-testid="risk-hierarchy-list-view-link"
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
+          List view →
+        </Link>
       </header>
 
       {/* Three-panel layout: tree | heatmap | timeline. Stacks to a
