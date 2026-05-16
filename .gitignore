@@ -6,7 +6,16 @@
 *.swo
 
 ### Local config / secrets
-.claude/
+# .claude/ holds two kinds of content: (a) user-local config + state
+# (settings.local.json, scheduled_tasks.lock, worktrees/) which is
+# per-clone and MUST be ignored, and (b) project-level Claude Code
+# skills (.claude/skills/) which SHIP with the repo so every clone
+# can invoke them. Git can't re-include children of an ignored
+# parent directory, so list the specific (a) entries instead of the
+# whole .claude/.
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
 .envrc
 .env
 .env.local
