@@ -146,6 +146,12 @@ db-down:
 sqlc-generate:
     sqlc generate
 
+# Generate the metrics-reference docs page from catalogs/metrics/*.yaml.
+# Slice 076 AC-18 — the reference page is auto-generated so it never
+# drifts from the YAML catalog. Run before `mkdocs build --strict`.
+metrics-reference:
+    ./scripts/gen-metrics-reference.sh
+
 # Audit every public-schema table with a `tenant_id` column. Fails if any
 # such table lacks an RLS policy or FORCE ROW LEVEL SECURITY. Constitutional
 # invariant 6 enforcement — see docs/architecture/rls.md. Requires

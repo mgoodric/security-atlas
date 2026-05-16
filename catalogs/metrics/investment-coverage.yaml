@@ -1,0 +1,180 @@
+# Board metric: Investment vs coverage
+#
+# Per canvas §7.5: "Manually entered tool/headcount cost vs. control
+# coverage delta. Critical for board narrative; no GRC tool does this
+# today." Manual-input only in v1 — automating cost ingestion is its own
+# multi-quarter exercise (finance integration).
+
+metrics:
+  - id: investment_vs_coverage
+    level: board
+    category: program
+    name: Investment vs coverage
+    description: |
+      Quarterly security spend (USD) divided by the quarter-over-quarter
+      delta in program_effectiveness. The "are we getting value out of
+      what we spend?" board number.
+    unit: dollars_ale
+    cadence: quarterly
+    compute_strategy: manual_input
+    source_slices: []
+    notes: |
+      Manual-only by design — canvas §7.5 names this as a critical
+      board-narrative metric, AND notes that no GRC tool does this
+      today, partly because the cost side is finance data and the
+      coverage delta side is platform data. v1 is the maintainer
+      filling both sides quarterly.
+
+  - id: customer_trust_scorecard
+    level: board
+    category: program
+    name: Customer-trust scorecard
+    description: |
+      Composite 0..1 score the maintainer enters quarterly summarising
+      open customer-diligence questions, blocking deals, security
+      questionnaire backlog, and DPA-renewal cadence.
+    unit: percent
+    cadence: quarterly
+    compute_strategy: manual_input
+    source_slices: []
+    notes: |
+      Manual-only. The v1 persona keeps the underlying spreadsheet;
+      the catalog metric is the single-number rollup that makes the
+      board pack.
+
+  - id: regulatory_exposure_score
+    level: board
+    category: program
+    name: Regulatory-exposure score
+    description: |
+      0..1 score summarising the maintainer's read on regulatory
+      exposure: open regulator inquiries, pending breach-notification
+      windows, certification renewals due in the next quarter.
+    unit: percent
+    cadence: quarterly
+    compute_strategy: manual_input
+    source_slices: []
+    notes: |
+      Manual-only. Pattern-matched to the v1 persona's read of "what
+      will the regulator do to us if we get unlucky this quarter".
+      Pair with risk_treatment_progress to show context for any dip.
+
+  - id: quarterly_access_review_completion
+    level: team
+    category: people
+    name: Quarterly access review completion
+    description: |
+      Fraction of in-scope systems whose quarterly access review has
+      been completed on time. A direct SOC 2 CC6.3 evidence input.
+    unit: percent
+    cadence: quarterly
+    compute_strategy: manual_input
+    source_slices: ["012"]
+    notes: |
+      Pattern-matched to SOC 2's quarterly review cadence. Manual
+      until an access-review-platform connector lands as a follow-on.
+    parents:
+      - parent_id: investment_vs_coverage
+        weight: 1.0
+
+  - id: patch_window_adherence
+    level: team
+    category: posture
+    name: Patch-window adherence
+    description: |
+      Fraction of endpoints / servers patched within the policy-defined
+      window for their severity bucket (P0: 7d, P1: 30d, P2: 90d).
+    unit: percent
+    cadence: weekly
+    compute_strategy: external_integration
+    source_slices: []
+    notes: |
+      External integration placeholder (endpoint-management connector —
+      Jamf / Intune / osquery / Fleet). v1 manual entry.
+    parents:
+      - parent_id: customer_trust_scorecard
+        weight: 1.0
+
+  - id: mttd
+    level: program
+    category: posture
+    name: Mean time to detect
+    description: |
+      Median time from event-of-interest to detection event in the
+      SIEM / monitoring stack. A direct IR readiness metric.
+    unit: days
+    cadence: monthly
+    compute_strategy: external_integration
+    source_slices: []
+    notes: |
+      External integration placeholder (SIEM connector — Datadog /
+      Splunk / Sumo / Panther). v1 manual entry.
+
+  - id: mttr
+    level: program
+    category: posture
+    name: Mean time to remediate
+    description: |
+      Median time from finding-created (ticketing) to finding-closed
+      for security incidents. Pairs with MTTD for the full IR window.
+    unit: days
+    cadence: monthly
+    compute_strategy: external_integration
+    source_slices: []
+    notes: |
+      External integration placeholder (ticketing connector — Jira /
+      Linear / PagerDuty). v1 manual entry.
+
+  - id: board_attendance_pct
+    level: team
+    category: people
+    name: Board attendance %
+    description: |
+      Fraction of board members present at security-update sessions.
+      A trust-side metric — when this dips the board is checking out.
+    unit: percent
+    cadence: quarterly
+    compute_strategy: manual_input
+    source_slices: []
+    notes: |
+      Manual entry. The v1 persona reads attendance off the calendar
+      invite responses.
+    parents:
+      - parent_id: regulatory_exposure_score
+        weight: 1.0
+
+  - id: board_attestation_completed
+    level: team
+    category: people
+    name: Board attestation completed
+    description: |
+      Binary 1.0 / 0.0 — has the board sign-off on the security program
+      summary for the current quarter been completed?
+    unit: percent
+    cadence: quarterly
+    compute_strategy: manual_input
+    source_slices: []
+    notes: |
+      Manual entry. The v1 persona records this once the board chair
+      signs the quarterly memo.
+    parents:
+      - parent_id: board_attendance_pct
+        weight: 1.0
+
+  - id: nist_fire_drill_outcome
+    level: team
+    category: posture
+    name: NIST FIRE drill outcome
+    description: |
+      0..1 outcome score for the most recent NIST CSF function-level
+      drill. The v1 persona's regulatory-prep muscle.
+    unit: percent
+    cadence: quarterly
+    compute_strategy: manual_input
+    source_slices: []
+    notes: |
+      Manual entry. Pairs with incident_response_drill_outcome to show
+      whether IR readiness is matched by framework alignment.
+    parents:
+      - parent_id: regulatory_exposure_score
+        weight: 1.0

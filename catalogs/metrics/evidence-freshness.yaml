@@ -1,0 +1,65 @@
+# Board metric: Evidence freshness
+#
+# A leading indicator — when this dips, the audit-readiness lag follows
+# in 30-60 days. Reads slice 016's evidence_freshness materialized view.
+
+metrics:
+  - id: evidence_freshness_pct
+    level: board
+    category: posture
+    name: Evidence freshness
+    description: |
+      Fraction of (control, scope_cell) tuples whose latest evidence is
+      inside the control's freshness window (slice 016). The most
+      load-bearing leading indicator — when this dips the audit-readiness
+      lag follows in 30-60 days.
+    unit: percent
+    cadence: realtime
+    compute_strategy: computed
+    compute_evaluator: evidence_freshness_pct
+    source_slices: ["013", "016"]
+    notes: |
+      Realtime cadence because evidence_freshness refreshes on every
+      ledger write (slice 016 AC-4). The 15-min cron's contribution is
+      a daily floor capture for trend storage; the read API serves
+      the live freshness view directly.
+
+  - id: drift_events_7d
+    level: program
+    category: posture
+    name: Drift events (7d)
+    description: |
+      Count of controls that flipped from passing to failing in the
+      last 7 days (slice 016 drift snapshots, day-over-day delta).
+    unit: count
+    cadence: daily
+    compute_strategy: manual_input
+    source_slices: ["016"]
+    notes: |
+      Drift events are the operational signal that something changed
+      in the environment without a corresponding control update — a
+      classic IAM-policy-drift or expired-cert pattern.
+    parents:
+      - parent_id: evidence_freshness_pct
+        weight: 1.0
+
+  - id: stale_anchor_mappings
+    level: team
+    category: posture
+    name: Stale SCF anchor mappings
+    description: |
+      Count of framework requirements whose mapping to SCF anchors
+      has not been confirmed within the cadence the maintainer chose
+      (typically annually). A stale mapping risks an auditor finding
+      "control X is mapped to a requirement that no longer applies".
+    unit: count
+    cadence: quarterly
+    compute_strategy: manual_input
+    source_slices: ["006", "008"]
+    notes: |
+      Manual confirmation pattern because the SCF release cycle is
+      annual and mappings rarely change mid-version. The v1 persona
+      reads this once a quarter as a hygiene check.
+    parents:
+      - parent_id: drift_events_7d
+        weight: 1.0

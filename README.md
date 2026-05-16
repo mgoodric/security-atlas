@@ -156,6 +156,7 @@ The same version also renders in the bottom-right of every page in the web UI �
 - **Design canvas** — [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) (vision, primitives, UCF, evidence engine, scope, risk, metrics, audit workflow, tech stack, roadmap, open questions)
 - **Constitutional principles** — [`CLAUDE.md`](./CLAUDE.md) (10 architecture invariants, anti-patterns we reject, AI-assist boundary, licensing constraints)
 - **Self-hosting guide** — [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md)
+- **Measuring your program** — slice 076 lands a curated 40-metric catalog (board / program / team cascades) + the read/write API + a 15-minute evaluator cron. See the [metrics docs](./docs-site/docs/metrics.md) for what's in the catalog, how the cascade composes, and how to interpret a dip.
 - **ADRs** — [`docs/adr/`](./docs/adr/)
 - **Release readiness** — [`docs/RELEASE_READINESS.md`](./docs/RELEASE_READINESS.md)
 - **Slice backlog** — [`docs/issues/_INDEX.md`](./docs/issues/_INDEX.md)

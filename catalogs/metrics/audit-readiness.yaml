@@ -1,0 +1,104 @@
+# Board metric: Audit readiness
+#
+# The "are we ready for the next audit?" composite. Reads framework_scopes
+# (slice 017/018) + audit_periods (slice 028) + evidence_freshness
+# (slice 016). When this dips the cascade lets the owner click down to
+# the per-framework + freshness + period-currency child metrics.
+
+metrics:
+  - id: audit_readiness_score
+    level: board
+    category: audit
+    name: Audit readiness
+    description: |
+      Composite score: % of in-scope frameworks with current SSP +
+      AuditPeriod freshness <90d + zero stale-evidence-controls in the
+      P0/P1 bucket. The single "can we go to audit tomorrow?" number.
+    unit: percent
+    cadence: daily
+    compute_strategy: computed
+    compute_evaluator: audit_readiness_score
+    source_slices: ["016", "018", "028"]
+    notes: |
+      A dip in this metric is the most common board-meeting "explain
+      yourself" trigger. The cascade lets the owner navigate from the
+      composite to the responsible per-framework breakdown without
+      hunting through multiple screens.
+
+  - id: framework_coverage_pct
+    level: program
+    category: audit
+    name: Per-framework coverage
+    description: |
+      For each in-scope FrameworkScope, the percentage of required
+      controls that have at least one fresh passing evidence record.
+      Dimensions carry the framework slug.
+    unit: percent
+    cadence: daily
+    compute_strategy: manual_input
+    source_slices: ["006", "018"]
+    notes: |
+      The cascade child the v1 persona drills into when audit_readiness
+      dips. Per-framework dimensions ('soc2', 'iso27001', etc.) make
+      this single metric serve every framework.
+    parents:
+      - parent_id: audit_readiness_score
+        weight: 1.0
+
+  - id: audit_period_currency
+    level: program
+    category: audit
+    name: AuditPeriod currency
+    description: |
+      Days since the latest non-frozen AuditPeriod's period_end. A
+      currency above the auditor-agreed window (typically 90d) means
+      the next audit will need a new period and a fresh evidence sweep.
+    unit: days
+    cadence: daily
+    compute_strategy: manual_input
+    source_slices: ["028"]
+    notes: |
+      Pairs with audit_readiness_score to disambiguate "we're prepared"
+      from "we're prepared but the period is stale".
+    parents:
+      - parent_id: audit_readiness_score
+        weight: 1.0
+
+  - id: ssp_currency
+    level: program
+    category: audit
+    name: SSP currency by framework
+    description: |
+      For each in-scope framework, days since the SSP (system security
+      plan) was last regenerated via the OSCAL export pipeline
+      (slice 030). A current SSP is the artifact the auditor reads first.
+    unit: days
+    cadence: weekly
+    compute_strategy: manual_input
+    source_slices: ["030"]
+    notes: |
+      Stays manual_input until the OSCAL export pipeline emits a
+      "last export timestamp" hook a connector can consume.
+    parents:
+      - parent_id: audit_readiness_score
+        weight: 1.0
+
+  - id: walkthrough_completion_rate
+    level: team
+    category: audit
+    name: Walkthrough completion rate
+    description: |
+      Within the latest AuditPeriod, the fraction of in-scope controls
+      that have at least one finalised walkthrough (slice 027) attached.
+      A control without a walkthrough is an audit-day surprise.
+    unit: percent
+    cadence: weekly
+    compute_strategy: manual_input
+    source_slices: ["027", "028"]
+    notes: |
+      Per the v1 persona's pattern, walkthroughs cluster in the two
+      weeks before audit fieldwork — this metric flags the long-tail
+      controls that get skipped year after year.
+    parents:
+      - parent_id: framework_coverage_pct
+        weight: 1.0

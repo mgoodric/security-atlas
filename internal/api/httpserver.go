@@ -36,6 +36,7 @@ import (
 	fwscopesapi "github.com/mgoodric/security-atlas/internal/api/frameworkscopes"
 	freshnessdriftapi "github.com/mgoodric/security-atlas/internal/api/freshnessdrift"
 	meapi "github.com/mgoodric/security-atlas/internal/api/me"
+	metricsapi "github.com/mgoodric/security-atlas/internal/api/metrics"
 	orgunitsapi "github.com/mgoodric/security-atlas/internal/api/orgunits"
 	oscalexportapi "github.com/mgoodric/security-atlas/internal/api/oscalexport"
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
@@ -620,6 +621,21 @@ func (s *Server) httpHandler() http.Handler {
 	root.Patch("/v1/admin/users/{id}/roles", usersH.PatchRoles)
 	auditLogH := adminauditlog.New(s.dbPool)
 	root.Get("/v1/admin/audit-log", auditLogH.List)
+	// Slice 076: metrics catalog + cascade + observation store. Routes
+	// appended per the parallel-batch convention (chi.Mux rejects two
+	// Mounts at "/"). The literal-segment route /v1/metrics/cascade is
+	// declared BEFORE /v1/metrics/{id} so chi's declaration-order match
+	// keeps the cascade route ahead of the generic /{id} route. The
+	// /{id}/observations + /{id}/inputs + /{id}/target sub-routes are
+	// distinct path shapes, no shadowing.
+	metricsH := metricsapi.New(s.dbPool)
+	root.Get("/v1/metrics", metricsH.ListCatalog)
+	root.Get("/v1/metrics/cascade", metricsH.GetCascade)
+	root.Get("/v1/metrics/{id}", metricsH.GetCatalog)
+	root.Get("/v1/metrics/{id}/observations", metricsH.ListObservations)
+	root.Post("/v1/metrics/{id}/inputs", metricsH.CreateInput)
+	root.Get("/v1/metrics/{id}/target", metricsH.GetTarget)
+	root.Put("/v1/metrics/{id}/target", metricsH.UpsertTarget)
 	return root
 }
 
