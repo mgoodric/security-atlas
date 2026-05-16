@@ -17,6 +17,15 @@ docs_dir: docs
 theme:
   name: material
   language: en
+  # Slice 075 — theme logo + favicon, generated from the canonical
+  # candidate-04 SVG via `just regen-logo`. The logo file is the LIGHT
+  # variant; mkdocs Material's theme block does not expose a per-scheme
+  # logo slot, so the docs-site/docs/index.md hero uses a <picture>
+  # element instead to serve both variants. The favicon uses the
+  # simplified favicon variant (slice 075 D4 — uniform 6px stroke
+  # collapses at 16px).
+  logo: assets/logo-light.svg
+  favicon: assets/favicon.png
   features:
     - navigation.instant
     - navigation.tracking

@@ -79,6 +79,27 @@ hooks-run:
 # What CI runs (lint + test + build)
 ci: lint test build
 
+# Regenerate every derived logo asset from the canonical candidate-04
+# SVG. On-demand, NOT a CI gate (slice 075 P0-A5 — generated assets are
+# committed; freshness is a maintainer act tied to logo updates).
+#
+# Reads:
+#   docs/design/logo-candidates/candidate-04/mark.svg          (canonical, full mark)
+#   docs/design/logo-candidates/candidate-04/mark-favicon.svg  (simplified favicon variant)
+#
+# Writes (overwrites in place):
+#   web/public/{logo-light,logo-dark}.{svg,png}
+#   web/public/{favicon.ico,apple-touch-icon.png,icon-192.png,icon-512.png}
+#   web/public/{og-image.png,twitter-card.png}
+#   docs-site/docs/assets/{logo-light.svg,logo-dark.svg,favicon.png}
+#   docs/images/{logo-light.png,logo-dark.png}
+#
+# Toolchain: Sharp (transitive of next@^16; npm install must have run
+# at the workspace root). No new image-processing dependency added per
+# slice 075 AC-10 + P0.
+regen-logo:
+    node scripts/regen-logo-variants.mjs
+
 # Tidy Go modules and verify no diff
 tidy:
     go mod tidy
