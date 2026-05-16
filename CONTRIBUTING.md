@@ -208,6 +208,22 @@ noise — not your bug. The two route-mocked specs (`first-time-login`,
 (`Playwright e2e seed-data harness`, status `not-ready`); when it lands,
 the quarantine line comes out and the job again gates the PR.
 
+## Linting
+
+Run lint locally against the frontend workspace:
+
+```sh
+npm run lint -w web
+```
+
+**Current state (slice 078, 2026-05-16):** `web/package.json` pins `eslint: ^9` (not `^10`) because `eslint-plugin-react@7.37.5` (latest stable) caps its peerDeps at `^9.7` and crashes under ESLint 10 with `TypeError: contextOrFilename.getFilename is not a function`. The `next` dist-tag is stale at `7.8.0-rc.0`. Path B per slice 078 — pin ESLint to `^9` until upstream ships a 10-compat release.
+
+**Where the pin lives:** [`web/package.json`](./web/package.json) `devDependencies.eslint`. The decision rationale (including why a direct downgrade instead of a pure `overrides` block) lives in [`docs/audit-log/078-eslint-10-react-plugin-incompat-decisions.md`](./docs/audit-log/078-eslint-10-react-plugin-incompat-decisions.md) D2.
+
+**Re-upgrade path:** when `npm view eslint-plugin-react@latest peerDependencies` returns a value listing `^10` (or higher), [`docs/issues/095-eslint-10-re-upgrade.md`](./docs/issues/095-eslint-10-re-upgrade.md) becomes `ready` and flips the pin back. ~5-minute slice.
+
+**CI gate:** the `Frontend · lint` job runs `npm run lint -w web` on every PR that touches code paths (slice-061 path-filter pattern). It's informational only — NOT in required-checks — because lint regressions on every dep bump would flake the merge queue. Promote-to-required is a future cadence-stability slice.
+
 ## Open-redirect prevention
 
 The post-login `signIn` server action (`web/app/login/actions.ts`) reads a
