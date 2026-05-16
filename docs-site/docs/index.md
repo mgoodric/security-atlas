@@ -11,8 +11,11 @@
 > Open-source, self-hostable, replacement-grade GRC. Run SOC 2, ISO 27001,
 > NIST CSF, PCI DSS, HIPAA, and GDPR from **one** source of truth.
 
-<!-- TODO(slice-057): hero screenshot from docs/images/hero-dashboard.png
-     once slice 057 merges. Placeholder reference only — do not embed yet. -->
+<!-- Slice 057 shipped the hero screenshot at docs/images/hero-dashboard.png.
+     The docs-site does NOT embed it: the canonical README on GitHub renders
+     it inline and the mkdocs site links to the README via the canvas link
+     below. Keeping this as a pointer rather than duplicating ~250 KB of
+     PNGs into docs-site/docs/. -->
 
 <!-- prettier-ignore-start -->
 !!! info "What you'll learn"

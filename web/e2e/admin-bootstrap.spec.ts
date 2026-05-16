@@ -1,16 +1,19 @@
 // Slice 060 — AC-10 Playwright E2E for the admin bootstrap flow.
 //
-// This spec lives ahead of the Playwright runner — as of slice 060,
-// Playwright is NOT installed in `web/`. Adding @playwright/test +
-// `web/playwright.config.ts` is the first follow-up after the admin
-// section grows beyond stub state (i.e. when slice 060.5 lands the
-// missing SSO / users / audit-log endpoints and we have a real
-// end-to-end flow to assert).
+// Runner status (post-slice-069, verified 2026-05-15 by slice 071 audit):
+// Playwright IS installed in `web/` (`@playwright/test` in devDeps;
+// `web/playwright.config.ts` present; `npm run test:e2e` runs the suite;
+// CI runs the `Frontend · Playwright e2e` job). The job is currently
+// quarantined per slice 079 (`continue-on-error: true`) because the
+// five un-shimmed specs reference seed-data preconditions that the
+// docker-compose bring-up does not yet establish. The seed-data harness
+// is slice 082 (`Playwright e2e seed-data harness`, status `not-ready`);
+// when it lands, the quarantine line comes out and the un-commented
+// assertions below become the gate.
 //
-// To run today (manual smoke):
+// Run locally:
 //   cd web
-//   npm install --save-dev @playwright/test
-//   npx playwright install chromium
+//   npx playwright install chromium     # once per machine
 //   npx playwright test e2e/admin-bootstrap.spec.ts
 //
 // The test asserts the bootstrap flow described in AC-10:
@@ -23,7 +26,8 @@
 //   6. Visits /admin/users and confirms the role-permission matrix
 //      renders
 //
-// Pre-conditions to wire when Playwright is installed:
+// Pre-conditions the seed-data harness (slice 082) must establish
+// before the commented assertions are turned on:
 //   - PLATFORM_BASE_URL env points at a running platform instance
 //   - TEST_ADMIN_BEARER env carries an admin credential
 //   - The platform was seeded with at least one feature flag
@@ -33,11 +37,9 @@
 
 import { test } from "@playwright/test";
 
-// Slice 069 — Playwright is now installed; the `ifPlaywright` shim that
-// used to wrap this file has been removed. Test bodies that still hold
-// commented assertions are deliberately preserved — turning them on is
-// per-spec follow-up work as the seed-data preconditions in the preamble
-// are established by the test harness.
+// Per the preamble above: assertions are deliberately commented pending
+// the slice-082 seed-data harness. The test body is preserved verbatim
+// as a reviewable contract.
 
 test.describe("admin bootstrap", () => {
   test("admin bootstrap end-to-end", async () => {

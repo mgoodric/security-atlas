@@ -23,7 +23,7 @@ Open-source, self-hostable GRC platform — a control-graph and evidence-pipelin
 
 The spine is the [Secure Controls Framework](https://securecontrolsframework.com/) (~1,400 controls crosswalked to 200+ frameworks via NIST IR 8477 STRM). The wire format is NIST OSCAL. The target user is the solo security leader at a 50–150-person security-product startup who runs the entire program — risk register, board reporting, SOC 2, vendor reviews, policies, exceptions — alone.
 
-**Early implementation.** 32 of 58 v1 slices are merged on `main`. See [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) for the design canvas and [`docs/issues/_INDEX.md`](./docs/issues/_INDEX.md) for the slice backlog.
+**v1 complete.** All 69 v1 slices are merged on `main`; v2 follow-on work is tracked under `docs/issues/` (slices numbered 070+). See [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) for the design canvas, [`docs/issues/_INDEX.md`](./docs/issues/_INDEX.md) for the v1 backlog, and [`docs/issues/_STATUS.md`](./docs/issues/_STATUS.md) for the live merge trail.
 
 ---
 

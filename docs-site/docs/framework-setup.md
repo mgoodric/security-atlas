@@ -1,7 +1,9 @@
 # Framework setup — SCF + SOC 2
 
-<!-- TODO(slice-057): dashboard screenshot from
-     docs/images/control-detail.png once slice 057 merges. -->
+<!-- Slice 057 shipped the control-detail screenshot at
+     docs/images/control-detail.png. Kept out of the docs-site to
+     avoid duplicating ~250 KB; the canonical render is in the README
+     "Screenshots" section. -->
 
 <!-- prettier-ignore-start -->
 !!! info "What you'll learn"

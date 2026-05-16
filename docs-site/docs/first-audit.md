@@ -1,7 +1,9 @@
 # First audit — AuditPeriod to OSCAL SSP
 
-<!-- TODO(slice-057): audit workspace screenshot from
-     docs/images/audit-workspace.png once slice 057 merges. -->
+<!-- Slice 057 shipped the audit-workspace screenshot at
+     docs/images/audit-workspace.png. Kept out of the docs-site to
+     avoid duplicating ~250 KB; the canonical render is in the README
+     "Screenshots" section. -->
 
 <!-- prettier-ignore-start -->
 !!! info "What you'll learn"

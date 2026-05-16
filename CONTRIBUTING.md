@@ -6,7 +6,7 @@ Thanks for your interest in contributing. This document covers the local dev set
 
 ## Prerequisites
 
-- Go 1.25+
+- Go 1.26+ (matches `go.mod`; slice 089/090 hardened the govulncheck pin under Go 1.26)
 - Node.js 20+
 - Python 3.11+ (for `oscal-bridge` and ruff)
 - Postgres 16+ (for migrations + integration tests) — `brew install postgresql@16` or via Docker
@@ -69,7 +69,7 @@ After `just install-hooks`, commits with malformed Go (or unformatted YAML / JSO
 | Path                                        | What it is                                                                                                | First slice that fills it           |
 | ------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------- |
 | [`Plans/`](./Plans)                         | Design canvas, mockups, deep-dive docs                                                                    | (already populated)                 |
-| [`docs/issues/`](./docs/issues)             | v1 backlog (58 issues + index + dep graph + review)                                                       | (already populated)                 |
+| [`docs/issues/`](./docs/issues)             | v1 backlog (69 issues, all merged) + index + dep graph + post-v1 follow-on slices (070+)                  | (already populated)                 |
 | [`CLAUDE.md`](./CLAUDE.md)                  | Constitutional principles + AI-assist boundary + tech stack lock                                          | (already populated)                 |
 | `cmd/atlas/`                                | Platform server binary                                                                                    | slice 013 + ongoing                 |
 | `cmd/atlas-cli/`                            | CLI binary                                                                                                | slice 003                           |

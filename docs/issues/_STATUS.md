@@ -3,7 +3,36 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-16 (slice 071 claim-stake — 16-category repo cleanup audit)
+**Last reconciled:** 2026-05-16 (slice 071 → `in-review` — 16-category repo cleanup audit + slice 096 filed)
+
+## Drift detected — 2026-05-16 (slice 071 → `in-review` · 16-category audit + 23 in-place doc fixes + slice 096 filed)
+
+Slice 071 (Repo cleanup audit + in-place updates) flipped `in-progress` → `in-review` with PR #197 open. JUDGMENT slice executed end-to-end in a single agent turn.
+
+**Audit deliverable:** [`docs/audits/2026-Q2-repo-cleanup.md`](../audits/2026-Q2-repo-cleanup.md) — 16 categories, one section each per the slice doc. Findings totals: 23 in-place doc fixes / 49 deletion candidates / 0 spillover.
+
+**In-place fixes touched 21 files across 8 surfaces:**
+
+- `CLAUDE.md` — status header re-cast (no longer "Pre-implementation ideation"); working-norms updated to reflect v1-executed; tech-stack table Next.js 15 → 16
+- `Plans/canvas/09-tech-stack.md` — §9.6 CI job inventory enumerated (16 path-filtered jobs)
+- `Plans/canvas/11-open-questions.md` — 5 new `RESOLVED YYYY-MM-DD` blockquotes (items 1, 3, 8, 16, 18) matching items 4/13/19/20 format
+- `docs/issues/_INDEX.md` — new "Index policy" header paragraph codifying that this is the v1 spec snapshot; post-v1 slices (059+) deliberately not listed; live tracker is `_STATUS.md`. (AC-6 judgment call recorded as decisions log D1.)
+- `README.md` — "Early implementation. 32 of 58 v1 slices merged" → "v1 complete. All 69 v1 slices merged"
+- `CONTRIBUTING.md` — Go 1.25 → 1.26 prerequisite; v1-backlog repo-layout cell refreshed
+- 4 `docs-site/docs/*.md` pages — `TODO(slice-057)` screenshot stubs rewritten (slice 057 merged)
+- 3 `docs/adr/000N-*.md` records — Status headers gain `Honored (verified 2026-05-15 by slice 071 audit ...)` suffix
+- 5 `web/e2e/*.spec.ts` preambles — rewritten to post-slice-069 reality (Playwright IS installed; slice 079 quarantine; slice 082 seed-data harness pointer)
+
+**Follow-on slice 096 filed `not-ready`** ([`docs/issues/096-repo-cleanup-deletions.md`](./096-repo-cleanup-deletions.md)) — carries 49 deletion candidates (all stale git worktrees on disk; every branch already merged to `main`). Gating condition: slice 071 merged AND maintainer per-row approval on the slice 096 PR. Dep listed as "071 merged + maintainer approval".
+
+**Decisions log** ([`docs/audit-log/071-repo-cleanup-audit-decisions.md`](../audit-log/071-repo-cleanup-audit-decisions.md)) — 10 entries, all HIGH confidence. The substantive AC-6 judgment call (D1) chose the lower-touch "Index policy" paragraph over a 37-row backfill; rationale + alternatives documented.
+
+| Row | Transition                  | Evidence                                                                                                                                                                            |
+| --- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 071 | `in-progress` → `in-review` | branch `backlog/071-repo-cleanup-audit` · PR #197 · JUDGMENT · 23 in-place fixes / 49 deletion candidates / 0 spillover · 10 decisions HIGH · follow-on slice 096 filed `not-ready` |
+| 096 | (new) → `not-ready`         | AFK · 0.5d · execute approved deletions from slice 071 audit (49 stale-worktree removals) · gated on `071 merged + maintainer per-row approval`                                     |
+
+**Counts delta:** in-progress −1 · in-review +1 · not-ready +1 (096) · total +1.
 
 ## Drift detected — 2026-05-16 (slice 071 claim-stake — `ready` → `in-progress`)
 
