@@ -209,21 +209,28 @@ function writeAsset(path, data) {
   console.log(`  wrote ${rel}  ${kb.toFixed(1)} KB`);
 }
 
-async function main() {
-  if (!statSync(CANONICAL_SVG, { throwIfNoEntry: false })) {
-    console.error(`error: canonical SVG not found at ${CANONICAL_SVG}`);
-    process.exit(2);
+// readSource reads a required SVG source file, exiting with a friendly error
+// if missing. Single-step (no separate existsSync/statSync pre-check) to avoid
+// the TOCTOU pattern CodeQL's js/file-system-race flags.
+function readSource(path, label) {
+  try {
+    return readFileSync(path, "utf-8");
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      console.error(`error: ${label} not found at ${path}`);
+      process.exit(2);
+    }
+    throw err;
   }
-  if (!statSync(FAVICON_SVG, { throwIfNoEntry: false })) {
-    console.error(`error: favicon-simplified SVG not found at ${FAVICON_SVG}`);
-    process.exit(2);
-  }
+}
 
+async function main() {
   console.log("Reading canonical SVG sources...");
-  const lightSvg = readFileSync(CANONICAL_SVG, "utf-8");
+  const lightSvg = readSource(CANONICAL_SVG, "canonical SVG");
   const darkSvg = swapPalette(lightSvg, LIGHT_TO_DARK);
-  const faviconLightSvg = readFileSync(FAVICON_SVG, "utf-8");
-  const faviconDarkSvg = swapPalette(faviconLightSvg, LIGHT_TO_DARK);
+  const faviconLightSvg = readSource(FAVICON_SVG, "favicon-simplified SVG");
+  // Favicons don't ship a dark variant — they render against tab/dock
+  // chrome which varies; the simplified single-color mark works against both.
 
   // ---------- 1. SVG variants ----------
   console.log("\nVariant SVGs:");
