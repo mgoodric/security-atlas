@@ -9,11 +9,11 @@
 
 Continuous-loop batch 32 closed. All three small AFK slices merged in single-iteration order: 083 → 091 → 092.
 
-| Row | Transition             | Evidence                                                                                                                              |
-| --- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| 083 | `in-review` → `merged` | PR [#209](https://github.com/mgoodric/security-atlas/pull/209) squashed at commit `08a69ef` · 5/5 ACs · pre-push hook blocks ESLint   |
-| 091 | `in-review` → `merged` | PR [#210](https://github.com/mgoodric/security-atlas/pull/210) squashed at commit `9db6bec` · 8/8 ACs · stock template gone           |
-| 092 | `in-review` → `merged` | PR [#208](https://github.com/mgoodric/security-atlas/pull/208) squashed at commit `5637b53` · 7/9 PASS + 2 documented release-defer   |
+| Row | Transition             | Evidence                                                                                                                            |
+| --- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 083 | `in-review` → `merged` | PR [#209](https://github.com/mgoodric/security-atlas/pull/209) squashed at commit `08a69ef` · 5/5 ACs · pre-push hook blocks ESLint |
+| 091 | `in-review` → `merged` | PR [#210](https://github.com/mgoodric/security-atlas/pull/210) squashed at commit `9db6bec` · 8/8 ACs · stock template gone         |
+| 092 | `in-review` → `merged` | PR [#208](https://github.com/mgoodric/security-atlas/pull/208) squashed at commit `5637b53` · 7/9 PASS + 2 documented release-defer |
 
 **Batch notes:**
 
@@ -22,7 +22,7 @@ Continuous-loop batch 32 closed. All three small AFK slices merged in single-ite
 - 092 surfaced **D1** in its decisions log: Next.js 16 renamed `middleware.ts` to `proxy.ts`. The exemption landed in `web/proxy.ts` accordingly.
 - 092's AC-3 + AC-9 reduce to "verify on first release after merge" per the slice's documented fallback (no in-PR post-publish smoke step).
 - One CHANGELOG conflict during 091's rebase on main (post-083-merge). Resolved by merging both bullets into `[Unreleased] / Changed`.
-- One _STATUS.md conflict during 092's rebase on main (post-091-merge). Resolved by keeping 091's `in-review` row from main + 092's `in-review` flip.
+- One \_STATUS.md conflict during 092's rebase on main (post-091-merge). Resolved by keeping 091's `in-review` row from main + 092's `in-review` flip.
 - All 3 PRs went CLEAN→UNSTABLE (Playwright e2e showed FAILURE on the real-run job, SKIPPED on the stub-run twin; the SKIPPED entry satisfied the required-check by name).
 
 **Counts delta:** in-progress −3 · merged +3.
