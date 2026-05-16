@@ -1,6 +1,6 @@
 # ADR 0002 — Bearer-token storage: HMAC-SHA256 keyed with server secret
 
-**Status:** Accepted
+**Status:** Accepted · Honored (verified 2026-05-15 by slice 071 audit — slice 034 shipped both schemes per spec: argon2id for `local_credentials.password_hash` + HMAC-SHA256-with-server-secret for `api_keys.token_hash`; `BEARER_HASH_KEY` env-var refuse-to-start guard present)
 
 **Date:** 2026-05-12
 

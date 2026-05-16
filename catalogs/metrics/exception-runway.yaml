@@ -1,0 +1,82 @@
+# Board metric: Exception expiration runway
+#
+# Count of exceptions expiring in the next 30 days (canvas §6.3 +
+# slice 021). A direct workload signal — every expiring exception is
+# a forced re-decision.
+
+metrics:
+  - id: exception_expiration_runway
+    level: board
+    category: risk
+    name: Exception expiration runway
+    description: |
+      Count of active exceptions whose expires_at falls inside the
+      next 30 days. Each is a forced re-decision (canvas §6.3
+      "Auto-renewal forbidden"); a stacked-up runway means real work
+      coming.
+    unit: count
+    cadence: weekly
+    compute_strategy: computed
+    compute_evaluator: exception_expiration_runway
+    source_slices: ["021"]
+    notes: |
+      The 30-day window matches canvas §6.3's first-class
+      expiration-calendar dashboard. A spike here predicts a
+      compliance-pause if not pre-worked.
+
+  - id: backup_restore_validation
+    level: team
+    category: posture
+    name: Backup restore validation
+    description: |
+      Fraction of in-scope backup destinations that have a successful
+      restore-validation within the last 90 days. Industry-standard
+      "your backups aren't valid until you've restored from them" rule.
+    unit: percent
+    cadence: quarterly
+    compute_strategy: manual_input
+    source_slices: []
+    notes: |
+      Manual quarterly drill. No connector source candidate for v1 —
+      restore-validation results live in operational runbooks.
+    parents:
+      - parent_id: exception_expiration_runway
+        weight: 1.0
+
+  - id: incident_response_drill_outcome
+    level: team
+    category: posture
+    name: Incident response readiness drill outcome
+    description: |
+      Pass / fail outcome of the most-recent quarterly IR readiness
+      drill, recorded as a numeric (1.0 = pass, 0.0 = fail).
+    unit: percent
+    cadence: quarterly
+    compute_strategy: manual_input
+    source_slices: []
+    notes: |
+      Binary score because the maintainer's quarterly IR drill is
+      pass/fail; partial scoring is a tabletop concern, not a drill
+      concern. Pair with tabletop_exercise_outcome.
+    parents:
+      - parent_id: exception_expiration_runway
+        weight: 1.0
+
+  - id: tabletop_exercise_outcome
+    level: team
+    category: posture
+    name: Tabletop exercise outcomes
+    description: |
+      Rolling-quarter average of tabletop exercise scoring (0..1).
+      Tabletops are the slow-burn IR muscle; this is where partial
+      credit lives.
+    unit: percent
+    cadence: quarterly
+    compute_strategy: manual_input
+    source_slices: []
+    notes: |
+      Manual entry. Pattern-matched to the v1 persona's quarterly
+      cadence of one tabletop per quarter.
+    parents:
+      - parent_id: exception_expiration_runway
+        weight: 1.0

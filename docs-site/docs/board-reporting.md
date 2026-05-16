@@ -1,7 +1,9 @@
 # Board reporting — monthly brief and quarterly pack
 
-<!-- TODO(slice-057): board pack preview screenshot from
-     docs/images/board-pack-preview.png once slice 057 merges. -->
+<!-- Slice 057 shipped the board-pack-preview screenshot at
+     docs/images/board-pack-preview.png. Kept out of the docs-site to
+     avoid duplicating ~250 KB; the canonical render is in the README
+     "Screenshots" section. -->
 
 <!-- prettier-ignore-start -->
 !!! info "What you'll learn"

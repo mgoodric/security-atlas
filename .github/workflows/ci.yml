@@ -653,6 +653,42 @@ jobs:
     steps:
       - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
+  # ─── Frontend · lint (slice 078) ─────────────────────────────────────
+  # Runs `npm run lint -w web` against PRs that touch code paths.
+  # Informational only — NOT added to required-checks per slice 078 P0-A4
+  # (lint regressions on every dep bump would flake the merge queue).
+  # Promote-to-required is a future slice once the cadence proves stable.
+  # See docs/audit-log/078-eslint-10-react-plugin-incompat-decisions.md
+  # for the path-B rationale (ESLint pinned to ^9 until eslint-plugin-react
+  # ships ESLint-10 support — tracked at docs/issues/095-eslint-10-re-upgrade.md).
+  frontend-lint:
+    name: Frontend · lint
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install workspaces
+        working-directory: .
+        run: npm install --no-audit --no-fund
+      - name: Run eslint
+        run: npm run lint
+
+  frontend-lint-stub:
+    name: Frontend · lint
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
+
   # ====================================================================
   # Slice 069 — Frontend Playwright e2e.
   #
@@ -875,9 +911,13 @@ jobs:
           go-version: "1.26"
           cache: true
       # Pinned version (not @latest) for reproducibility. Bump in a
-      # dedicated PR so the diff is auditable. See decisions log D3.
+      # dedicated PR so the diff is auditable. See slice 089 decisions
+      # log D3 + slice 090 (which bumped v1.1.3 → v1.1.4 because the
+      # v1.1.3 pin's transitive x/tools@v0.23.0 dependency contained a
+      # constant-folding pattern Go 1.26 rejects — silent install
+      # failure on every PR until the bump).
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.3
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
       # govulncheck exits non-zero ONLY when a vulnerability is reachable
       # from the analyzed binary's call graph — call-graph filtering is
       # the highest signal-to-noise property of the tool. There is no

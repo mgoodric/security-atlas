@@ -31,12 +31,15 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
+	metricscatalog "github.com/mgoodric/security-atlas/internal/catalog/metrics"
 	"github.com/mgoodric/security-atlas/internal/decision"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/freshnessdrift"
+	metricseval "github.com/mgoodric/security-atlas/internal/metrics/eval"
+	metricsscheduler "github.com/mgoodric/security-atlas/internal/metrics/scheduler"
 	"github.com/mgoodric/security-atlas/internal/oscal"
 	"github.com/mgoodric/security-atlas/internal/platform"
 	"github.com/mgoodric/security-atlas/internal/risk"
@@ -645,6 +648,50 @@ func main() {
 				fmt.Fprintf(os.Stderr, "atlas: freshness/drift scheduler checking every %s\n", tickCheck.String())
 				if err := fdScheduler.Run(ctx, tickCheck); err != nil {
 					errCh <- fmt.Errorf("freshness/drift scheduler: %w", err)
+				}
+			}()
+		}
+	}
+
+	// Slice 076: metrics catalog seeder (boot-time, runs once) + 15-min
+	// evaluator scheduler. The seeder embeds catalogs/metrics/*.yaml; the
+	// scheduler enumerates tenants from the migrator pool and runs each
+	// computed-metric evaluator under the app pool with tenancy.WithTenant.
+	// ATLAS_METRICS_INTERVAL overrides the 15-min cadence for dev loops.
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		mctx, mcancel := context.WithTimeout(context.Background(), 10*time.Second)
+		mPool, err := pgxpool.New(mctx, migratorURL)
+		mcancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: metrics scheduler pool: %v\n", err)
+		} else {
+			registry := metricseval.NewRegistry(pool)
+			seeder := metricscatalog.NewSeeder(mPool)
+			seedCtx, seedCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			report, serr := seeder.SeedFromEmbedded(seedCtx, registry)
+			seedCancel()
+			if serr != nil {
+				fmt.Fprintf(os.Stderr, "atlas: metrics seeder: %v\n", serr)
+			} else {
+				fmt.Fprintf(os.Stderr, "atlas: metrics catalog seeded (%d metrics, %d edges)\n",
+					report.MetricsApplied, report.EdgesApplied)
+			}
+			interval := metricsscheduler.DefaultInterval
+			if raw := os.Getenv("ATLAS_METRICS_INTERVAL"); raw != "" {
+				if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+					interval = d
+				} else {
+					fmt.Fprintf(os.Stderr, "atlas: ATLAS_METRICS_INTERVAL=%q invalid: %v\n", raw, perr)
+				}
+			}
+			ms := metricsscheduler.New(mPool, pool, registry, logger)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer mPool.Close()
+				fmt.Fprintf(os.Stderr, "atlas: metrics scheduler ticking every %s\n", interval.String())
+				if err := ms.Run(ctx, interval); err != nil {
+					errCh <- fmt.Errorf("metrics scheduler: %w", err)
 				}
 			}()
 		}

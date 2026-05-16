@@ -1,23 +1,22 @@
 // Slice 056 — Playwright E2E for the hierarchical risk dashboard view.
 //
-// Like slice 040's dashboard.spec.ts and slice 041's
-// control-detail.spec.ts, this spec lives AHEAD of the Playwright
-// runner — `web/` has no @playwright/test installed yet (adding it
-// touches web/package.json, a spine file, and is a shared follow-up
-// across the frontend slices). The spec is written under the same
-// `ifPlaywright` shim so:
-//   * `npm run typecheck` stays green (e2e/ is in tsconfig "exclude")
-//   * `npm run lint` stays green (eslint ignores e2e/)
-//   * the file is a precise, reviewable contract of the intended
-//     end-to-end assertions, one test per acceptance criterion
+// Runner status (post-slice-069, verified 2026-05-15 by slice 071 audit):
+// Playwright IS installed in `web/` (`@playwright/test` in devDeps;
+// `web/playwright.config.ts` present; CI runs `Frontend · Playwright
+// e2e`). The job is currently quarantined per slice 079 because the
+// five un-shimmed specs reference seed-data preconditions the
+// docker-compose bring-up does not yet establish. Slice 082
+// (`Playwright e2e seed-data harness`, status `not-ready`) is the fix;
+// when it lands, the quarantine drops and the un-commented assertions
+// below become the gate.
 //
-// To run once Playwright lands (manual smoke today):
+// Run locally:
 //   cd web
-//   npm install --save-dev @playwright/test
-//   npx playwright install chromium
+//   npx playwright install chromium     # once per machine
 //   npx playwright test e2e/risk-hierarchy.spec.ts
 //
-// Pre-conditions to wire when Playwright is installed:
+// Pre-conditions the seed-data harness (slice 082) must establish
+// before the commented assertions are turned on:
 //   - PLATFORM_BASE_URL points at a running platform instance
 //   - TEST_BEARER carries a credential in a tenant that has: at least
 //     two org_units in a parent/child relationship, the 10 default
@@ -29,11 +28,9 @@
 
 import { test } from "@playwright/test";
 
-// Slice 069 — Playwright is now installed; the `ifPlaywright` shim that
-// used to wrap this file has been removed. Test bodies that still hold
-// commented assertions are deliberately preserved — turning them on is
-// per-spec follow-up work as the seed-data preconditions in the preamble
-// are established by the test harness.
+// Per the preamble above: assertions are deliberately commented pending
+// the slice-082 seed-data harness. The test body is preserved verbatim
+// as a reviewable contract.
 
 test.describe("risk hierarchy view", () => {
   test("AC-9a: loading the page with seeded data renders the three panels", async () => {

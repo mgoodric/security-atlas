@@ -1,0 +1,42 @@
+# Board metric: Vendor risk concentration
+#
+# Top-5 vendors ranked by data_sensitivity × access_scope (slice 024).
+# A concentration metric, not a count — surfaces where vendor exposure
+# is unhealthy.
+
+metrics:
+  - id: vendor_risk_concentration
+    level: board
+    category: vendor
+    name: Vendor risk concentration
+    description: |
+      Score = sum of (data_sensitivity * access_scope) for the top-5
+      vendors. A higher score means risk is concentrated in fewer
+      vendors, which is harder to absorb if any one defaults.
+    unit: count
+    cadence: monthly
+    compute_strategy: computed
+    compute_evaluator: vendor_risk_concentration
+    source_slices: ["024"]
+    notes: |
+      The metric is intentionally a single number rather than a list
+      so the board pack has a comparable trend. The top-5 list is
+      surfaced separately in the vendor module.
+
+  - id: vendor_reviews_due
+    level: program
+    category: vendor
+    name: Vendor reviews due
+    description: |
+      Count of vendors whose next_review_due falls inside the next
+      30 days. A leading indicator for vendor-management workload.
+    unit: count
+    cadence: weekly
+    compute_strategy: manual_input
+    source_slices: ["024"]
+    notes: |
+      Manual until the vendor module's burndown query is exposed as a
+      single-aggregate roll-up.
+    parents:
+      - parent_id: vendor_risk_concentration
+        weight: 1.0

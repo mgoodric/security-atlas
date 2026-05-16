@@ -1,10 +1,10 @@
-<!--
-  Logo TBD — slice 074 (logo design candidates) shipped a 10-candidate slate at
-  docs/design/logo-decision.md. Slice 075 will integrate the maintainer-selected
-  candidate into a hero <picture> element here. The current text-only treatment
-  is intentional and trackable until the Selected: line in docs/design/logo-decision.md
-  is edited from "none — awaiting maintainer approval" to a real candidate ID.
--->
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/images/logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="./docs/images/logo-light.png">
+    <img alt="security-atlas — node-graph A mark" src="./docs/images/logo-light.png" width="160" height="160">
+  </picture>
+</p>
 
 # security-atlas
 
@@ -23,7 +23,7 @@ Open-source, self-hostable GRC platform — a control-graph and evidence-pipelin
 
 The spine is the [Secure Controls Framework](https://securecontrolsframework.com/) (~1,400 controls crosswalked to 200+ frameworks via NIST IR 8477 STRM). The wire format is NIST OSCAL. The target user is the solo security leader at a 50–150-person security-product startup who runs the entire program — risk register, board reporting, SOC 2, vendor reviews, policies, exceptions — alone.
 
-**Early implementation.** 32 of 58 v1 slices are merged on `main`. See [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) for the design canvas and [`docs/issues/_INDEX.md`](./docs/issues/_INDEX.md) for the slice backlog.
+**v1 complete.** All 69 v1 slices are merged on `main`; v2 follow-on work is tracked under `docs/issues/` (slices numbered 070+). See [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) for the design canvas, [`docs/issues/_INDEX.md`](./docs/issues/_INDEX.md) for the v1 backlog, and [`docs/issues/_STATUS.md`](./docs/issues/_STATUS.md) for the live merge trail.
 
 ---
 
@@ -156,6 +156,7 @@ The same version also renders in the bottom-right of every page in the web UI �
 - **Design canvas** — [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) (vision, primitives, UCF, evidence engine, scope, risk, metrics, audit workflow, tech stack, roadmap, open questions)
 - **Constitutional principles** — [`CLAUDE.md`](./CLAUDE.md) (10 architecture invariants, anti-patterns we reject, AI-assist boundary, licensing constraints)
 - **Self-hosting guide** — [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md)
+- **Measuring your program** — slice 076 lands a curated 40-metric catalog (board / program / team cascades) + the read/write API + a 15-minute evaluator cron. See the [metrics docs](./docs-site/docs/metrics.md) for what's in the catalog, how the cascade composes, and how to interpret a dip.
 - **ADRs** — [`docs/adr/`](./docs/adr/)
 - **Release readiness** — [`docs/RELEASE_READINESS.md`](./docs/RELEASE_READINESS.md)
 - **Slice backlog** — [`docs/issues/_INDEX.md`](./docs/issues/_INDEX.md)

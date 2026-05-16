@@ -1,6 +1,6 @@
 # ADR 0003 — Audit period freeze hash: content-only inputs
 
-**Status:** Accepted
+**Status:** Accepted · Honored (verified 2026-05-15 by slice 071 audit — slice 028 ships `frozen_hash` over content-only inputs; `frozen_at` lives alongside the hash, not inside it; canonical-JSON serialization with sorted keys is in place)
 
 **Date:** 2026-05-13
 

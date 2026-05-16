@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  security-atlas candidate-04 mark — FAVICON-SIMPLIFIED variant.
+
+  Authored by slice 075 per the favicon-scale consideration recorded in
+  slice 074 D17/D18 (and slice 075's Notes section):
+
+    "Favicon-scale consideration: cand-04 v6 uses uniform 6px stroke at
+    the 1024px native size. Direct downscale to 16px favicon will
+    collapse the line detail. Consider authoring a simplified favicon
+    variant in the SVG source — fewer lines (perhaps just the heaviest
+    3-4 backbone lines + the foundation node), single accent color (the
+    deep blue #4b8db5 / #1e40af). Record the decision in the decisions
+    log."
+
+  At 16x16 the canonical 16-line mark collapses to an indistinct blob.
+  This simplified variant preserves the cand-04 reading at favicon scale
+  by reducing the geometry to: the A's two outer legs, the main
+  crossbar, and the apex + 2 base + 1 mid-crossbar nodes (4 lines + 4
+  nodes). Single accent color, value-locked per variant:
+
+    Light bg favicon: #1e40af blue-800   (= canonical NODE color, light)
+    Dark bg favicon:  #4b8db5 deep blue  (= canonical NODE color, dark)
+
+  Stroke weight increased to sw=12 (from the canonical sw=6) so the
+  remaining lines render visibly at 16px. Node radii increased
+  proportionally.
+
+  The favicon-variant SVG is authored ONLY for the favicon.ico target
+  (multi-resolution 16/32/48). The apple-touch-icon (180x180), icon-192,
+  and icon-512 use the canonical full-mark SVG because at those sizes
+  the 16-line gradient reads cleanly.
+
+  Coordinate system: matches the canonical mark.svg (1024x1024 viewBox)
+  so the visual center stays consistent across favicon and full mark.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <g id="mark-favicon-light" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- left leg: APEX → LEFT_BASE -->
+    <line x1="512" y1="160" x2="220" y2="780" stroke="#1e40af" stroke-width="12"/>
+    <!-- right leg: APEX → RIGHT_BASE -->
+    <line x1="512" y1="160" x2="804" y2="780" stroke="#1e40af" stroke-width="12"/>
+    <!-- main crossbar: CROSS_LEFT → CROSS_RIGHT -->
+    <line x1="320" y1="600" x2="704" y2="600" stroke="#1e40af" stroke-width="12"/>
+    <!-- base line: LEFT_BASE → RIGHT_BASE -->
+    <line x1="220" y1="780" x2="804" y2="780" stroke="#1e40af" stroke-width="12"/>
+
+    <!-- 4 backbone nodes (enlarged for favicon scale) -->
+    <circle cx="512" cy="160" r="48" fill="#1e40af"/>  <!-- APEX -->
+    <circle cx="220" cy="780" r="44" fill="#1e40af"/>  <!-- LEFT_BASE -->
+    <circle cx="804" cy="780" r="44" fill="#1e40af"/>  <!-- RIGHT_BASE -->
+    <circle cx="512" cy="600" r="36" fill="#1e40af"/>  <!-- CROSS_MID -->
+  </g>
+</svg>

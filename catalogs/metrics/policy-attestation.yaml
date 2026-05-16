@@ -1,0 +1,99 @@
+# Board metric: Policy attestation rate
+#
+# Per canvas §7.1, "% required acknowledgments completed in window".
+# Reads slice 023's policy_acknowledgments table.
+
+metrics:
+  - id: policy_attestation_rate
+    level: board
+    category: people
+    name: Policy attestation rate
+    description: |
+      Fraction of required policy-version acknowledgments completed
+      by the assigned staff within the current attestation window
+      (typically annually + on-change).
+    unit: percent
+    cadence: monthly
+    compute_strategy: computed
+    compute_evaluator: policy_attestation_rate
+    source_slices: ["023"]
+    notes: |
+      Denominator is "required acknowledgments outstanding now";
+      numerator is "completed acknowledgments for the same policy
+      version". A new policy version resets the denominator without
+      losing prior-version evidence.
+
+  - id: training_completion_rate
+    level: team
+    category: people
+    name: Security training completion rate
+    description: |
+      Fraction of staff with current security-training completion
+      (annual cadence). Manual input until a training-platform
+      connector lands (Lessonly / KnowBe4 / etc.).
+    unit: percent
+    cadence: quarterly
+    compute_strategy: external_integration
+    source_slices: []
+    notes: |
+      External integration placeholder; v1 treats it like manual_input.
+      The maintainer enters the rollup quarterly until the connector
+      lands as a follow-on slice.
+    parents:
+      - parent_id: policy_attestation_rate
+        weight: 1.0
+
+  - id: phishing_simulation_ctr
+    level: team
+    category: people
+    name: Phishing simulation click-through
+    description: |
+      Fraction of staff who clicked the most-recent phishing
+      simulation's payload link. Lower is better.
+    unit: percent
+    cadence: monthly
+    compute_strategy: external_integration
+    source_slices: []
+    notes: |
+      External integration placeholder; v1 takes manual export from the
+      training platform monthly.
+    parents:
+      - parent_id: policy_attestation_rate
+        weight: 1.0
+
+  - id: hire_onboarding_completion
+    level: team
+    category: people
+    name: Hire-onboarding completion rate
+    description: |
+      Fraction of new hires whose security-onboarding checklist is
+      complete within the policy-defined window (typically 30 days).
+    unit: percent
+    cadence: monthly
+    compute_strategy: external_integration
+    source_slices: []
+    notes: |
+      External integration placeholder (HRIS connector — Rippling /
+      BambooHR / Workday); v1 manual entry.
+    parents:
+      - parent_id: policy_attestation_rate
+        weight: 1.0
+
+  - id: offboarding_completion
+    level: team
+    category: people
+    name: Offboarding completion rate
+    description: |
+      Fraction of departed staff whose access-revocation checklist is
+      complete within the policy-defined window (typically 1 day).
+    unit: percent
+    cadence: monthly
+    compute_strategy: external_integration
+    source_slices: []
+    notes: |
+      Lower-window cadence than onboarding because a slow offboarding
+      is a direct security incident. v1 manual entry; HRIS connector
+      follow-on.
+    parents:
+      - parent_id: policy_attestation_rate
+        weight: 1.0
