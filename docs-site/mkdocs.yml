@@ -82,6 +82,8 @@ nav:
   - Board reporting: board-reporting.md
   - Troubleshooting:
       - First-time login: troubleshooting/first-login.md
+  - Design decisions:
+      - Logo selection: design/logo-decision.md
 
 extra:
   social:

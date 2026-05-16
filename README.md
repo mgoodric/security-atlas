@@ -1,3 +1,11 @@
+<!--
+  Logo TBD — slice 074 (logo design candidates) shipped a 10-candidate slate at
+  docs/design/logo-decision.md. Slice 075 will integrate the maintainer-selected
+  candidate into a hero <picture> element here. The current text-only treatment
+  is intentional and trackable until the Selected: line in docs/design/logo-decision.md
+  is edited from "none — awaiting maintainer approval" to a real candidate ID.
+-->
+
 # security-atlas
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
