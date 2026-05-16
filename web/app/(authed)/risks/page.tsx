@@ -27,9 +27,10 @@
 // Anti-criteria honored (P0):
 //   - P0-A1: ZERO content edits to /risks/hierarchy beyond the
 //     `List view ->` page-header link.
-//   - P0-A2: read-only list — Add first risk CTA links to the existing
-//     admin/credentials surface as a placeholder until a dedicated
-//     risk-create UI lands (spillover slice).
+//   - P0-A2: read-only list — Add first risk CTA links to the dedicated
+//     risk-create UI at `/risks/new` (slice 105). The placeholder
+//     `/admin` link from slice 100's original ship was lifted when
+//     slice 105 landed.
 //   - P0-A3: NO invented columns — every column derives from `riskWire`
 //     (id, title, category, treatment, treatment_owner, residual_score,
 //     severity, review_due_at).
@@ -331,10 +332,9 @@ function RisksPageInner() {
 
   // AC-4: empty-state copy "No risks logged yet" with `Add first risk`
   // primary CTA (per design doc §2 — true zero-state). Most installs
-  // start with zero risks; the CTA points at the existing admin
-  // surface as a placeholder until a dedicated risk-create UI lands
-  // (spillover slice 106). When filters narrow to zero results on a
-  // populated tenant, the CTA changes to `Clear filters`.
+  // start with zero risks; the CTA routes to the dedicated risk-create
+  // form at `/risks/new` (slice 105). When filters narrow to zero
+  // results on a populated tenant, the CTA changes to `Clear filters`.
   const isFilterEmpty = rows.length > 0 && visible.length === 0;
   const emptyState = (
     <EmptyState
@@ -366,12 +366,10 @@ function RisksPageInner() {
         isFilterEmpty
           ? { label: "Clear filters", onClick: clearAll }
           : {
-              // True zero-state CTA — no risk-create UI yet, so we
-              // route the admin to the admin landing where they can
-              // bootstrap the program. Spillover slice 106 files the
-              // dedicated risk-create surface.
+              // True zero-state CTA — routes to the dedicated
+              // risk-create form added by slice 105.
               label: "Add first risk",
-              onClick: () => router.push("/admin"),
+              onClick: () => router.push("/risks/new"),
             }
       }
     />
