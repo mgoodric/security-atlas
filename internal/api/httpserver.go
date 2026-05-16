@@ -24,6 +24,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
 	boardapi "github.com/mgoodric/security-atlas/internal/api/board"
+	calendarapi "github.com/mgoodric/security-atlas/internal/api/calendar"
 	controldetailapi "github.com/mgoodric/security-atlas/internal/api/controldetail"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	controlstateapi "github.com/mgoodric/security-atlas/internal/api/controlstate"
@@ -120,7 +121,14 @@ func (s *Server) httpHandler() http.Handler {
 	// Slice 073: /v1/install-state is added to the bearer-exempt set for
 	// the same reason — public metadata about whether this is a fresh
 	// install (P0-A4). The login page reads it SSR before any auth exists.
-	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health", "/v1/version", "/v1/install-state"))
+	// Slice 094: /v1/calendar.ics is exempted from the upstream Bearer-header
+	// auth because calendar clients (Google / Apple / Outlook) cannot
+	// carry an Authorization header — they fetch with no auth metadata
+	// beyond what's in the URL. The calendar.ics handler authenticates
+	// inline via the `?token=` URL parameter, scope-restricted to
+	// AllowedKinds=[calendar.read.v1]. See decision D3 in
+	// docs/audit-log/094-compliance-calendar-decisions.md.
+	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health", "/v1/version", "/v1/install-state", "/v1/calendar.ics"))
 	// Slice 033: lift the authenticated credential's tenant id onto the
 	// request context so every downstream handler — and every database
 	// transaction it opens — runs under the right `app.current_tenant`
@@ -139,7 +147,7 @@ func (s *Server) httpHandler() http.Handler {
 		// same reason as /health — a metadata probe shouldn't reach OPA.
 		// Slice 073: /v1/install-state is added too — public metadata, same
 		// reasoning as the bearer-exempt above.
-		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/v1/version", "/v1/install-state"))
+		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/v1/version", "/v1/install-state", "/v1/calendar.ics"))
 	}
 	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
 	// tenancy / authz so the cache lives inside the same request-context
@@ -541,6 +549,21 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/frameworks/posture", dashboardH.FrameworkPosture)
 	root.Get("/v1/activity", dashboardH.Activity)
 	root.Get("/v1/upcoming", dashboardH.Upcoming)
+	// Slice 094: compliance calendar. Read-only aggregation across four
+	// existing source tables (audit_periods + exceptions + policies +
+	// controls + control_evaluations) plus an iCalendar (RFC 5545) export.
+	// Tenant isolation is enforced at the DB layer via RLS (slice 033).
+	// ICS auth is a per-user opaque URL token, hashed in api_keys and
+	// scope-restricted to AllowedKinds=[calendar.read.v1] — a leaked
+	// calendar URL token cannot be used as a general bearer. Routes
+	// appended per the parallel-batch convention (chi rejects two
+	// Mounts at "/"). See docs/audit-log/094-compliance-calendar-decisions.md
+	// decisions D1-D8 for the design calls the implementing agent made.
+	calendarH := calendarapi.New(
+		calendarapi.NewStore(s.dbPool),
+		s.credStore,
+	)
+	calendarH.RegisterRoutes(root)
 	// Slice 031: monthly board brief. Generates a single-page, board-ready
 	// posture snapshot (per-framework posture + 30-day drift + top-3 risks
 	// aging) and persists it as a PINNED, IMMUTABLE snapshot (canvas §7.5).

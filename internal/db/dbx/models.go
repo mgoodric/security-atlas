@@ -1325,6 +1325,7 @@ type Policy struct {
 	PublishedAt                 pgtype.Timestamptz `json:"published_at"`
 	PublishedBy                 *string            `json:"published_by"`
 	SupersededAt                pgtype.Timestamptz `json:"superseded_at"`
+	NextReviewAt                pgtype.Timestamptz `json:"next_review_at"`
 }
 
 type PolicyAcknowledgment struct {

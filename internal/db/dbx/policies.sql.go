@@ -20,7 +20,7 @@ SET status = 'approved',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'under_review'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
 `
 
 type ApprovePolicyParams struct {
@@ -58,6 +58,7 @@ func (q *Queries) ApprovePolicy(ctx context.Context, arg ApprovePolicyParams) (P
 		&i.PublishedAt,
 		&i.PublishedBy,
 		&i.SupersededAt,
+		&i.NextReviewAt,
 	)
 	return i, err
 }
@@ -78,7 +79,7 @@ VALUES (
     $9, $10,
     'draft', $11, $12
 )
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
 `
 
 type CreatePolicyParams struct {
@@ -150,12 +151,13 @@ func (q *Queries) CreatePolicy(ctx context.Context, arg CreatePolicyParams) (Pol
 		&i.PublishedAt,
 		&i.PublishedBy,
 		&i.SupersededAt,
+		&i.NextReviewAt,
 	)
 	return i, err
 }
 
 const getPolicyByID = `-- name: GetPolicyByID :one
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
 FROM policies
 WHERE tenant_id = $1 AND id = $2
 `
@@ -192,6 +194,7 @@ func (q *Queries) GetPolicyByID(ctx context.Context, arg GetPolicyByIDParams) (P
 		&i.PublishedAt,
 		&i.PublishedBy,
 		&i.SupersededAt,
+		&i.NextReviewAt,
 	)
 	return i, err
 }
@@ -213,7 +216,7 @@ VALUES (
     'published', $11, $12,
     $13, now(), $14
 )
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
 `
 
 type InsertPublishedPolicyParams struct {
@@ -280,12 +283,13 @@ func (q *Queries) InsertPublishedPolicy(ctx context.Context, arg InsertPublished
 		&i.PublishedAt,
 		&i.PublishedBy,
 		&i.SupersededAt,
+		&i.NextReviewAt,
 	)
 	return i, err
 }
 
 const listPolicies = `-- name: ListPolicies :many
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
 FROM policies
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC
@@ -326,6 +330,7 @@ func (q *Queries) ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Pol
 			&i.PublishedAt,
 			&i.PublishedBy,
 			&i.SupersededAt,
+			&i.NextReviewAt,
 		); err != nil {
 			return nil, err
 		}
@@ -340,18 +345,18 @@ func (q *Queries) ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Pol
 const listPolicyVersionChain = `-- name: ListPolicyVersionChain :many
 WITH RECURSIVE chain AS (
     -- Anchor: the policy itself.
-    SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at
+    SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
     FROM policies p0
     WHERE p0.tenant_id = $1 AND p0.id = $2
 
     UNION ALL
 
     -- Walk forward: any row whose predecessor_id is the current chain tip.
-    SELECT p.id, p.tenant_id, p.title, p.version, p.effective_date, p.body_md, p.acknowledgment_required_roles, p.status, p.created_at, p.updated_at, p.predecessor_id, p.owner_role, p.approver_role, p.linked_control_ids, p.source_attribution, p.created_by, p.submitted_at, p.submitted_by, p.approved_at, p.approved_by, p.published_at, p.published_by, p.superseded_at
+    SELECT p.id, p.tenant_id, p.title, p.version, p.effective_date, p.body_md, p.acknowledgment_required_roles, p.status, p.created_at, p.updated_at, p.predecessor_id, p.owner_role, p.approver_role, p.linked_control_ids, p.source_attribution, p.created_by, p.submitted_at, p.submitted_by, p.approved_at, p.approved_by, p.published_at, p.published_by, p.superseded_at, p.next_review_at
     FROM policies p
     INNER JOIN chain c ON p.predecessor_id = c.id AND p.tenant_id = c.tenant_id
 )
-SELECT chain.id, chain.tenant_id, chain.title, chain.version, chain.effective_date, chain.body_md, chain.acknowledgment_required_roles, chain.status, chain.created_at, chain.updated_at, chain.predecessor_id, chain.owner_role, chain.approver_role, chain.linked_control_ids, chain.source_attribution, chain.created_by, chain.submitted_at, chain.submitted_by, chain.approved_at, chain.approved_by, chain.published_at, chain.published_by, chain.superseded_at
+SELECT chain.id, chain.tenant_id, chain.title, chain.version, chain.effective_date, chain.body_md, chain.acknowledgment_required_roles, chain.status, chain.created_at, chain.updated_at, chain.predecessor_id, chain.owner_role, chain.approver_role, chain.linked_control_ids, chain.source_attribution, chain.created_by, chain.submitted_at, chain.submitted_by, chain.approved_at, chain.approved_by, chain.published_at, chain.published_by, chain.superseded_at, chain.next_review_at
 FROM chain
 ORDER BY chain.created_at ASC, chain.id ASC
 `
@@ -385,6 +390,7 @@ type ListPolicyVersionChainRow struct {
 	PublishedAt                 pgtype.Timestamptz `json:"published_at"`
 	PublishedBy                 *string            `json:"published_by"`
 	SupersededAt                pgtype.Timestamptz `json:"superseded_at"`
+	NextReviewAt                pgtype.Timestamptz `json:"next_review_at"`
 }
 
 // Returns the version chain for a policy id by walking predecessor_id.
@@ -424,6 +430,7 @@ func (q *Queries) ListPolicyVersionChain(ctx context.Context, arg ListPolicyVers
 			&i.PublishedAt,
 			&i.PublishedBy,
 			&i.SupersededAt,
+			&i.NextReviewAt,
 		); err != nil {
 			return nil, err
 		}
@@ -445,7 +452,7 @@ SET status = 'published',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'approved'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
 `
 
 type PublishApprovedPolicyParams struct {
@@ -490,6 +497,7 @@ func (q *Queries) PublishApprovedPolicy(ctx context.Context, arg PublishApproved
 		&i.PublishedAt,
 		&i.PublishedBy,
 		&i.SupersededAt,
+		&i.NextReviewAt,
 	)
 	return i, err
 }
@@ -503,7 +511,7 @@ SET status = 'under_review',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'draft'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
 `
 
 type SubmitPolicyForReviewParams struct {
@@ -540,6 +548,7 @@ func (q *Queries) SubmitPolicyForReview(ctx context.Context, arg SubmitPolicyFor
 		&i.PublishedAt,
 		&i.PublishedBy,
 		&i.SupersededAt,
+		&i.NextReviewAt,
 	)
 	return i, err
 }
@@ -552,7 +561,7 @@ SET status = 'superseded',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'published'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
 `
 
 type SupersedePolicyAtPublishParams struct {
@@ -593,6 +602,7 @@ func (q *Queries) SupersedePolicyAtPublish(ctx context.Context, arg SupersedePol
 		&i.PublishedAt,
 		&i.PublishedBy,
 		&i.SupersededAt,
+		&i.NextReviewAt,
 	)
 	return i, err
 }
