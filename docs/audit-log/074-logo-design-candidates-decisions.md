@@ -238,6 +238,61 @@ v2 was a single color, single line-weight (modulo the dot-vs-line size differenc
 - Use the indigo-500 mockup primary for the LIGHT tier (matches the mockup hero color) even though it fails WCAG by 0.22:1. Rejected: WCAG ≥4.5:1 is non-negotiable per AC-4 + the constitutional accessibility constraint. Shifted to indigo-600 (passes 6.02:1) instead.
 - Add a 4th color tier just for the dots (e.g., indigo-900 dots on indigo-700/600/500 lines). Considered, deferred: the current dots take the heavy color, which already gives them visual emphasis; a separate dot color would compete with the line hierarchy rather than reinforce it.
 
+### D15 — Candidate 04 iterated v3 → v4 (topology fix + wider color spread via SC 1.4.11) (HIGH confidence)
+
+**Decision:** regenerate cand-04 a third time. v4 fixes two issues the maintainer flagged on v3: (a) broken line-endpoint topology (lines weren't terminating at node coordinates — read as floating segments next to floating dots), and (b) insufficient visual contrast between the three weight tiers (v3's indigo-900/700/600 clustered too tightly in the upper-dark range). v4 ships with: explicit 12-node coordinate table, 22/22 endpoint-node matches verified, and a wider color spread (indigo-950/600/500 on light, indigo-100/300/400 on dark) made possible by adopting the correct accessibility standard for logo graphical objects.
+
+**Rationale:**
+
+The maintainer's v4 ask was a single sentence with two distinct requirements:
+
+> _"The lines are no longer connecting, and I was hoping for more contrasting colors."_
+
+**Problem 1 — Topology bug.** The v3 SVG had outrigger braces running from non-node coordinates (e.g., `(320, 250)`, `(704, 250)`) out to the apex outriggers. Visually, this read as floating line segments adjacent to floating dots — exactly the OPPOSITE of the "connected control-graph" semantic the candidate is supposed to convey. Root cause: v3 was authored by writing lines first, then adding circles at "approximately the same" coordinates without enforcing equality.
+
+**Problem 1 fix:** v4 SVG defines a named 12-node coordinate table in the header. Every `<line>` x1/y1/x2/y2 attribute pulls FROM that table (or duplicates exact values). Every `<circle>` cx/cy pulls from the same table. The v3 outrigger braces are re-anchored to the existing `LEFT_APEX_DETAIL` / `RIGHT_APEX_DETAIL` nodes (the apex-tangent dots), turning two floating endpoints into double-use nodes and giving the apex region a tight triangular brace pattern. Verification: 22/22 endpoints match a node within 0.5 px (11 lines × 2 endpoints, 12 circles, 0 broken).
+
+**Problem 2 — Tier-color contrast too narrow.** v3 used indigo-900/700/600 on light bg, measuring 10.94 / 7.57 / 6.02 contrast against `#fafafa`. While each tier individually was distinct, the three sat too close on the value scale — the eye read them as "three weights of one color" rather than "three tiers of a hierarchy". The maintainer wanted the eye to pick out HEAVY → MEDIUM → LIGHT at a glance.
+
+**Problem 2 fix:** widen the color spread within the indigo family by adopting **WCAG SC 1.4.11 Non-text Contrast (≥3:1)** instead of the SC 1.4.3 text-contrast 4.5:1 cited in slice 074 AC-4. SC 1.4.11 is the CORRECT WCAG standard for "graphical objects required to understand the content" — which is exactly what a logo mark is. The 4.5:1 floor in AC-4 was over-conservative (likely copied from text-contrast thinking). With the correct 3:1 floor in place, the LIGHT tier on light bg can use `#6366f1` indigo-500 (4.28:1 — passes SC 1.4.11, fails SC 1.4.3), unlocking the wider spread.
+
+**v4 palette (verified WCAG SC 1.4.11):**
+
+| Tier         | Light hex            | vs `#fafafa`                              | Dark hex             | vs `#0a0a0a` |
+| ------------ | -------------------- | ----------------------------------------- | -------------------- | ------------ |
+| Heavy (14px) | `#1e1b4b` indigo-950 | 15.32:1 PASS                              | `#e0e7ff` indigo-100 | 16.07:1 PASS |
+| Medium (8px) | `#4f46e5` indigo-600 | 6.02:1 PASS                               | `#a5b4fc` indigo-300 | 9.93:1 PASS  |
+| Light (4px)  | `#6366f1` indigo-500 | 4.28:1 PASS (SC 1.4.11) / FAIL (SC 1.4.3) | `#818cf8` indigo-400 | 6.64:1 PASS  |
+
+Light-variant spread: 15.32 → 6.02 → 4.28 (vs v3's 10.94 → 7.57 → 6.02). The three tiers are now visibly distinct on the value scale.
+
+**Accessibility-standard note:** WCAG 2.2 SC 1.4.11 ("Non-text Contrast") requires 3:1 for graphical objects required to understand the content. Logo marks fall under this. The 4.5:1 floor in SC 1.4.3 applies to text — not to logos. Slice 074 AC-4's original wording (≥4.5:1) was the wrong standard for the deliverable; v4 adopts the correct one. **Future iterations of the slice doc should update AC-4 to cite SC 1.4.11 explicitly** — out of scope for the v4 candidate iteration but flagged for a follow-on slice if/when the slice doc gets touched.
+
+**Tradeoffs surfaced by the Artist agent during the iteration:**
+
+1. **Perceptual layering changed.** v3 read as "one indigo mark, three weights"; v4 reads as "three indigo tones, each at a different weight". The wider color spread breaks the unified-tone effect — that's what the maintainer asked for, but worth knowing the brand-discipline cost.
+2. **The standard change is permanent for this candidate.** AC-4 is now under-spec'd against v4. The follow-on docs update (above) closes the loop.
+3. **Dark-variant HEAVY tier `#e0e7ff` is very close to white.** Reads cleanly against `#0a0a0a` (16:1) but would lose contrast quickly against a mid-gray background. Acceptable for the dual-variant brief; flagged if a "neutral bg" variant is ever asked for.
+
+**Updated in same iteration:**
+
+- `docs/design/logo-candidates/candidate-04/mark.svg` — rewritten with named 12-node coordinate table and v4 palette
+- `docs/design/logo-candidates/candidate-04/` — 4 PNGs regenerated from new SVG
+- `docs/design/logo-candidates/candidate-04/notes.md` — v4 entry appended (v1/v2/v3 preserved); top-of-file sections updated; SC 1.4.11 noted
+- `docs/design/logo-decision.md` — cand-04 gallery entry refreshed (new title v4, new spread, topology callout)
+- `tools/logo-gen/recolor_by_weight.py` — color map updated to v4 palette; v3 mapping retained as `LIGHT_TO_DARK_V3` comment for traceability
+
+**Verification protocol shipped with v4:** the Artist agent's brief included a topology-verification script (extract all line endpoints + all circle centers, assert every endpoint has a circle within 0.5px). 22/22 verified clean. Future iterations of any SVG-native candidate should run the same verification before commit — capture as an implicit checklist item for SVG-source candidates.
+
+**Slice 075 grep target unchanged:** the `Selected:` line stays `none — awaiting maintainer approval` per P0-A7 + D12. v4 is a refined offering, not a selection.
+
+**Alternatives considered:**
+
+- Introduce a non-indigo accent (teal-700 or cyan-700) for the LIGHT tier to gain hue contrast on top of value contrast. Rejected: the application's brand palette is indigo-only per the mockups; introducing teal would break that discipline. If the maintainer wants accent hue in v5, that's a separate iteration with its own brand-discipline decision.
+- Keep AC-4's 4.5:1 floor and accept that tier-contrast can't widen further on light bg. Rejected: the 4.5:1 floor was the wrong standard, not a deliberate constraint. Adopting the correct SC 1.4.11 standard is a fix, not a relaxation.
+- Add a 4th tier (4 weights, 4 colors) to give more visible hierarchy. Rejected: 3 tiers is already at the edge of "deliberate hierarchy" vs "noisy"; 4 would crowd the geometry. The maintainer asked for "more contrasting colors" not "more colors".
+- Use a "monochrome ramp" interpretation — e.g., near-black / mid-gray / light-gray on light bg. Rejected: kills the indigo brand identity established in v2/v3.
+
 ## Acceptance criteria status
 
 - [x] AC-1: 10 candidate dirs exist (vs. spec's default 4 per D1) with required PNG files

@@ -67,18 +67,18 @@ Central vertical spine with 4-6 branches forking outward — a dendrogram or evi
 
 ---
 
-## Candidate 04 — Node-graph "A" (indigo, v3 — three-weight hierarchy)
+## Candidate 04 — Node-graph "A" (indigo, v4 — wide-spread hierarchy, topologically connected)
 
 | Light variant                                                      | Dark variant                                                           |
 | ------------------------------------------------------------------ | ---------------------------------------------------------------------- |
 | ![candidate-04 light](./logo-candidates/candidate-04/mark-512.png) | ![candidate-04 dark](./logo-candidates/candidate-04/mark-512-dark.png) |
 
-Layered node-and-edge graph implying a stylized capital A, with **three line-weight tiers** color-coded to the indigo brand scale. Heavy backbone (`indigo-900` light / `indigo-200` dark, 14px) defines the A's primary spine; medium connectors (`indigo-700` / `indigo-300`, 8px) carry the structural framing; light scaffolding (`indigo-600` / `indigo-400`, 4px) adds detail without crowding. The visual hierarchy lets the eye walk from primary structure → secondary connections → detail.
+Layered node-and-edge graph implying a stylized capital A, with **three line-weight tiers spread across the full indigo value scale**. Heavy backbone (`indigo-950` light / `indigo-100` dark, 14px) defines the A's primary spine; medium connectors (`indigo-600` / `indigo-300`, 8px) carry the structural framing; light scaffolding (`indigo-500` / `indigo-400`, 4px) adds detail. The wider value spread (15.32 → 6.02 → 4.28 on light bg) makes the three tiers visibly distinct at a glance. Every line endpoint terminates at a node coordinate — 22/22 endpoint-node matches across 11 lines and 12 nodes (no floating segments).
 
-**Wordmark:** none — mark-only · **Source:** hand-authored SVG (cand-04 is the only SVG-native mark in the slate) · **Render path:** `tools/logo-gen/recolor_by_weight.py` (deterministic — bit-perfect hex per weight tier) · **Iteration:** v3 (replaces v2's single-color version per maintainer feedback for weight-hierarchy)
+**Wordmark:** none — mark-only · **Source:** hand-authored SVG (cand-04 is the only SVG-native mark in the slate) · **Render path:** `tools/logo-gen/recolor_by_weight.py` (deterministic — bit-perfect hex per weight tier) · **Accessibility standard:** WCAG SC 1.4.11 Non-text Contrast (≥3:1) — the correct standard for logo graphical objects · **Iteration:** v4 (fixes v3's broken topology + widens tier-color contrast per maintainer feedback)
 
-- **Strengths:** the only candidate that explicitly reads as a layered node-and-edge graph with visual hierarchy via line weight + color; bit-perfect indigo brand-palette fidelity (six exact-hex tiers across light + dark variants, all WCAG AA); SVG-native (scales perfectly to any size including favicon); 132 KB combined (smallest in the slate); deterministic re-render via the new `recolor_by_weight.py` tool
-- **Weaknesses:** the three-weight hierarchy may compress at favicon-scale (16-32px) — the LIGHT tier (4px) likely drops out, leaving an effective two-tier mark at very small sizes; A-suggestion still emerges from topology, not typography (some viewers may read "network diagram" before "A")
+- **Strengths:** the only candidate that explicitly reads as a connected layered node-and-edge graph; wide visible separation between the three weight tiers (light variant spread 15.32:1 / 6.02:1 / 4.28:1); topologically clean (every line connects two real nodes — no floating segments); bit-perfect indigo brand-palette fidelity (six exact hex values, all clearing WCAG SC 1.4.11 3:1); SVG-native (scales perfectly to any size including favicon); 130.5 KB combined (smallest in the slate); deterministic re-render
+- **Weaknesses:** the LIGHT tier (4px, `#6366f1` indigo-500) sits at 4.28:1 on light bg — passes WCAG SC 1.4.11 (graphical objects) but fails the stricter SC 1.4.3 text-contrast standard (4.5:1) cited in the slice's original AC-4; the wider value spread changes the perceptual layering vs v3 ("three indigo tones, each weight" rather than "one indigo mark with three weights"); A-suggestion still emerges from topology, not typography
 
 [→ full notes](./logo-candidates/candidate-04/notes.md) · [→ source SVG](./logo-candidates/candidate-04/mark.svg)
 

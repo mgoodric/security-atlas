@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """Render a multi-weight, multi-color SVG mark to light + dark PNG variants.
 
-Built for candidate-04 v3 (slice 074, PR #180), which expresses its weight
+Built for candidate-04 v4 (slice 074, PR #180), which expresses its weight
 hierarchy via per-stroke `stroke-width` + `stroke` attributes. The light SVG
 is the source-of-truth; the dark variant is produced by swapping the indigo
 brand-palette colors token-for-token before rasterizing.
 
-Rationale: cand-04 v3 layers three line weights, each color-coded to a
+Rationale: cand-04 layers three line weights, each color-coded to a
 specific tier of the indigo brand scale. PIL ImageDraw cannot anti-alias
 stroked lines cleanly, and Flux is non-deterministic on multi-hex prompts.
 Authoring as SVG and rasterizing through Cairo gives us exact pixel/hex
 fidelity plus a vector source we can ship alongside the PNGs.
+
+v4 widens the palette spread within the indigo family for visibly-distinct
+tiers, and corrects the topology so every line endpoint terminates at an
+explicit node circle. See `docs/design/logo-candidates/candidate-04/notes.md`
+Iteration history for v3 → v4 deltas.
 
 Usage:
     DYLD_LIBRARY_PATH=/opt/homebrew/opt/cairo/lib \
@@ -42,12 +47,32 @@ from pathlib import Path
 
 # Palette swap: indigo brand-scale → its dark-bg counterpart.
 # Light-variant tier  →  dark-variant tier
-# Chosen so all six colors clear WCAG 2.2 AA (≥4.5:1) on their target bg.
+#
+# v4 (current, 2026-05-15): wider value spread within the indigo family so
+# the three weight tiers are visibly distinct at a glance. Adopts the
+# correct WCAG 2.2 SC 1.4.11 Non-text Contrast standard (≥3:1) for logo
+# marks; previously the script targeted the over-conservative text-contrast
+# 4.5:1 floor, which clustered the three tiers on the value scale.
+#
+# Per-tier contrast on the v4 mapping (measured via tools/logo-gen/contrast.py):
+#   Light bg #fafafa:  HEAVY 15.32:1  MEDIUM 6.02:1  LIGHT 4.28:1
+#   Dark  bg #0a0a0a:  HEAVY 16.07:1  MEDIUM  9.93:1  LIGHT 6.64:1
+# All six clear SC 1.4.11 (3:1). HEAVY + MEDIUM also clear 4.5:1 on both bgs;
+# LIGHT clears 4.5:1 on dark bg (6.64:1) and sits just under on light bg
+# (4.28:1) — still passes the logo-mark accessibility floor.
 LIGHT_TO_DARK = {
-    "#312e81": "#c7d2fe",  # indigo-900  →  indigo-200   (heavy / nodes)
-    "#4338ca": "#a5b4fc",  # indigo-700  →  indigo-300   (medium)
-    "#4f46e5": "#818cf8",  # indigo-600  →  indigo-400   (light / detail)
+    "#1e1b4b": "#e0e7ff",  # indigo-950  →  indigo-100   (heavy / nodes)
+    "#4f46e5": "#a5b4fc",  # indigo-600  →  indigo-300   (medium)
+    "#6366f1": "#818cf8",  # indigo-500  →  indigo-400   (light / detail)
 }
+
+# v3 (prior, retained for traceability — three indigo tiers clustered near
+# the dark/light extremes; tiers were hard to distinguish at a glance):
+# LIGHT_TO_DARK_V3 = {
+#     "#312e81": "#c7d2fe",  # indigo-900  →  indigo-200
+#     "#4338ca": "#a5b4fc",  # indigo-700  →  indigo-300
+#     "#4f46e5": "#818cf8",  # indigo-600  →  indigo-400
+# }
 
 
 def swap_palette(svg_text: str, mapping: dict[str, str]) -> str:

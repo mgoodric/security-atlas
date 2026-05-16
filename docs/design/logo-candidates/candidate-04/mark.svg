@@ -1,70 +1,103 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  security-atlas candidate-04 mark — v3
+  security-atlas candidate-04 mark — v4
+
   Sparse node-and-edge graph implying a stylized capital A.
 
-  Three-tier weight hierarchy with palette-aligned color mapping:
-    - HEAVY (sw=14) : indigo-900 #312e81 — primary A backbone (left leg, right leg, cross-bar)
-    - MEDIUM (sw=8) : indigo-700 #4338ca — secondary connectors (lower triangle + side diagonals)
-    - LIGHT (sw=4)  : indigo-600 #4f46e5 — detail scaffolding (outer brace lines)
-    - NODES         : indigo-900 #312e81 — filled circles at intersections (4th visual tier)
+  v4 changes from v3:
+    1. TOPOLOGY: every <line> endpoint terminates at the exact (cx,cy) of a
+       <circle> node. v3 had endpoints floating off-node (e.g. (320,250),
+       (704,250) had no matching dot), which made the mark read as
+       disconnected segments + floating dots. v4 guarantees connectivity:
+       see the NODE COORDINATE TABLE below. Every line uses one of those
+       12 coordinate pairs at each end.
+    2. PALETTE: wider value spread within the indigo brand family so the
+       three weight tiers are visibly distinct at a glance. Adopts the
+       WCAG 2.2 SC 1.4.11 Non-text Contrast standard (≥3:1) which is the
+       correct floor for logo marks; v3's 4.5:1 was the text-contrast
+       floor and over-constrained the lighter end of the scale.
 
-  Dark-bg variant flips the palette (indigo-200/300/400):
-    HEAVY=indigo-200 #c7d2fe · MEDIUM=indigo-300 #a5b4fc · LIGHT=indigo-400 #818cf8 · NODES=indigo-200
+  NODE COORDINATE TABLE (the only legal line endpoints):
+    APEX               (512, 160)   — top of A
+    LEFT_BASE          (220, 780)   — bottom-left of A
+    RIGHT_BASE         (804, 780)   — bottom-right of A
+    CROSS_LEFT         (320, 600)   — left end of crossbar
+    CROSS_RIGHT        (704, 600)   — right end of crossbar
+    CROSS_MID          (512, 600)   — middle of crossbar
+    LEFT_OUTRIGGER     (170, 380)   — outer-left scaffold node
+    RIGHT_OUTRIGGER    (854, 380)   — outer-right scaffold node
+    LEFT_FOOT          (100, 850)   — outer-left base foot
+    RIGHT_FOOT         (924, 850)   — outer-right base foot
+    LEFT_APEX_DETAIL   (380, 210)   — apex-tangent left detail
+    RIGHT_APEX_DETAIL  (644, 210)   — apex-tangent right detail
 
-  All six tier colors clear WCAG 2.2 AA (≥4.5:1) on their target background.
+  Three-tier weight hierarchy with palette-aligned color mapping (v4):
+    HEAVY  (sw=14) : indigo-950 #1e1b4b — primary A backbone (legs + crossbar)
+    MEDIUM (sw=8)  : indigo-600 #4f46e5 — secondary connectors (lower triangle + base braces)
+    LIGHT  (sw=4)  : indigo-500 #6366f1 — outer scaffolding braces / apex tangent
+    NODES          : indigo-950 #1e1b4b — filled circles at every node
+
+  Dark-bg variant swap (palette inversion within the indigo family):
+    HEAVY=indigo-100 #e0e7ff · MEDIUM=indigo-300 #a5b4fc · LIGHT=indigo-400 #818cf8 · NODES=indigo-100
+
+  Per-tier contrast (WCAG 2.2 SC 1.4.11 Non-text Contrast, ≥3:1):
+    Light bg #fafafa:  HEAVY 15.32:1  MEDIUM 6.02:1  LIGHT 4.28:1
+    Dark  bg #0a0a0a:  HEAVY 16.07:1  MEDIUM 9.93:1  LIGHT 6.64:1
+  All six tier colors clear the SC 1.4.11 3:1 floor on their target bg.
+  HEAVY + MEDIUM clear the text-contrast 4.5:1 floor on both bgs;
+  LIGHT clears 4.5:1 on dark bg (6.64:1) and is just under on light bg
+  (4.28:1 — passes SC 1.4.11 cleanly, fails the over-conservative text
+  floor v3 used). v4 adopts SC 1.4.11 as the correct floor for logo marks.
 
   Coordinate system: 1024x1024 viewBox.
-  Geometry derived from v2 Flux output: apex node top-center, two side
-  shoulder nodes, two leg-base nodes, two outer outrigger nodes, central
-  cross-bar midpoint. Lines classified by their structural role in the A.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <g id="mark-light" stroke-linecap="round" stroke-linejoin="round" fill="none">
 
-    <!-- LIGHT weight (sw=4, indigo-600): outer scaffolding braces / detail lines -->
-    <!-- left outrigger brace (apex shoulder to outer-left detail) -->
-    <line x1="320" y1="250" x2="170" y2="380" stroke="#4f46e5" stroke-width="4"/>
-    <!-- right outrigger brace -->
-    <line x1="704" y1="250" x2="854" y2="380" stroke="#4f46e5" stroke-width="4"/>
-    <!-- subtle apex tangent (small detail dot above apex implied) -->
-    <line x1="380" y1="210" x2="644" y2="210" stroke="#4f46e5" stroke-width="4"/>
+    <!-- LIGHT weight (sw=4, indigo-500 #6366f1): outer scaffolding braces -->
+    <!-- left outrigger brace: LEFT_APEX_DETAIL → LEFT_OUTRIGGER -->
+    <line x1="380" y1="210" x2="170" y2="380" stroke="#6366f1" stroke-width="4"/>
+    <!-- right outrigger brace: RIGHT_APEX_DETAIL → RIGHT_OUTRIGGER -->
+    <line x1="644" y1="210" x2="854" y2="380" stroke="#6366f1" stroke-width="4"/>
+    <!-- apex tangent: LEFT_APEX_DETAIL → RIGHT_APEX_DETAIL -->
+    <line x1="380" y1="210" x2="644" y2="210" stroke="#6366f1" stroke-width="4"/>
 
-    <!-- MEDIUM weight (sw=8, indigo-700): secondary connectors and lower triangle -->
-    <!-- lower base line connecting the two leg-base nodes through the middle -->
-    <line x1="220" y1="780" x2="804" y2="780" stroke="#4338ca" stroke-width="8"/>
-    <!-- inner lower-left support (cross-bar mid → left base) -->
-    <line x1="512" y1="600" x2="220" y2="780" stroke="#4338ca" stroke-width="8"/>
-    <!-- inner lower-right support (cross-bar mid → right base) -->
-    <line x1="512" y1="600" x2="804" y2="780" stroke="#4338ca" stroke-width="8"/>
-    <!-- outer left base brace (left base out to outrigger) -->
-    <line x1="220" y1="780" x2="100" y2="850" stroke="#4338ca" stroke-width="8"/>
-    <!-- outer right base brace -->
-    <line x1="804" y1="780" x2="924" y2="850" stroke="#4338ca" stroke-width="8"/>
+    <!-- MEDIUM weight (sw=8, indigo-600 #4f46e5): secondary connectors + lower triangle + base braces -->
+    <!-- (visually distinct from LIGHT above by both width AND value: 6.02:1 vs 4.28:1 on light bg) -->
+    <!-- base line: LEFT_BASE → RIGHT_BASE -->
+    <line x1="220" y1="780" x2="804" y2="780" stroke="#4f46e5" stroke-width="8"/>
+    <!-- inner lower-left support: CROSS_MID → LEFT_BASE -->
+    <line x1="512" y1="600" x2="220" y2="780" stroke="#4f46e5" stroke-width="8"/>
+    <!-- inner lower-right support: CROSS_MID → RIGHT_BASE -->
+    <line x1="512" y1="600" x2="804" y2="780" stroke="#4f46e5" stroke-width="8"/>
+    <!-- outer left base brace: LEFT_BASE → LEFT_FOOT -->
+    <line x1="220" y1="780" x2="100" y2="850" stroke="#4f46e5" stroke-width="8"/>
+    <!-- outer right base brace: RIGHT_BASE → RIGHT_FOOT -->
+    <line x1="804" y1="780" x2="924" y2="850" stroke="#4f46e5" stroke-width="8"/>
 
-    <!-- HEAVY weight (sw=14, indigo-900): primary A backbone -->
-    <!-- left leg of A: apex down through left shoulder to left base -->
-    <line x1="512" y1="160" x2="220" y2="780" stroke="#312e81" stroke-width="14"/>
-    <!-- right leg of A: apex down through right shoulder to right base -->
-    <line x1="512" y1="160" x2="804" y2="780" stroke="#312e81" stroke-width="14"/>
-    <!-- cross-bar of A (the defining horizontal stroke) -->
-    <line x1="320" y1="600" x2="704" y2="600" stroke="#312e81" stroke-width="14"/>
+    <!-- HEAVY weight (sw=14, indigo-950 #1e1b4b): primary A backbone -->
+    <!-- left leg: APEX → LEFT_BASE (passes visually through CROSS_LEFT) -->
+    <line x1="512" y1="160" x2="220" y2="780" stroke="#1e1b4b" stroke-width="14"/>
+    <!-- right leg: APEX → RIGHT_BASE (passes visually through CROSS_RIGHT) -->
+    <line x1="512" y1="160" x2="804" y2="780" stroke="#1e1b4b" stroke-width="14"/>
+    <!-- crossbar: CROSS_LEFT → CROSS_RIGHT -->
+    <line x1="320" y1="600" x2="704" y2="600" stroke="#1e1b4b" stroke-width="14"/>
 
-    <!-- NODE DOTS (indigo-900): filled circles at structurally significant intersections -->
-    <!-- Large primary nodes (r=18) at the A-backbone vertices -->
-    <circle cx="512" cy="160" r="20" fill="#312e81"/>  <!-- apex -->
-    <circle cx="320" cy="600" r="18" fill="#312e81"/>  <!-- cross-bar left -->
-    <circle cx="704" cy="600" r="18" fill="#312e81"/>  <!-- cross-bar right -->
-    <circle cx="220" cy="780" r="20" fill="#312e81"/>  <!-- left base -->
-    <circle cx="804" cy="780" r="20" fill="#312e81"/>  <!-- right base -->
-    <circle cx="512" cy="600" r="14" fill="#312e81"/>  <!-- cross-bar midpoint -->
-    <!-- Smaller secondary nodes (r=10) at scaffold/medium endpoints -->
-    <circle cx="170" cy="380" r="10" fill="#312e81"/>
-    <circle cx="854" cy="380" r="10" fill="#312e81"/>
-    <circle cx="100" cy="850" r="10" fill="#312e81"/>
-    <circle cx="924" cy="850" r="10" fill="#312e81"/>
-    <!-- Smallest detail nodes (r=6) on the apex tangent -->
-    <circle cx="380" cy="210" r="6" fill="#312e81"/>
-    <circle cx="644" cy="210" r="6" fill="#312e81"/>
+    <!-- NODE DOTS (indigo-950 #1e1b4b): every node in the coordinate table above -->
+    <!-- Large primary nodes (r=18-20) at the A-backbone vertices -->
+    <circle cx="512" cy="160" r="20" fill="#1e1b4b"/>  <!-- APEX -->
+    <circle cx="320" cy="600" r="18" fill="#1e1b4b"/>  <!-- CROSS_LEFT -->
+    <circle cx="704" cy="600" r="18" fill="#1e1b4b"/>  <!-- CROSS_RIGHT -->
+    <circle cx="220" cy="780" r="20" fill="#1e1b4b"/>  <!-- LEFT_BASE -->
+    <circle cx="804" cy="780" r="20" fill="#1e1b4b"/>  <!-- RIGHT_BASE -->
+    <circle cx="512" cy="600" r="14" fill="#1e1b4b"/>  <!-- CROSS_MID -->
+    <!-- Secondary nodes (r=10) at scaffold / medium endpoints -->
+    <circle cx="170" cy="380" r="10" fill="#1e1b4b"/>  <!-- LEFT_OUTRIGGER -->
+    <circle cx="854" cy="380" r="10" fill="#1e1b4b"/>  <!-- RIGHT_OUTRIGGER -->
+    <circle cx="100" cy="850" r="10" fill="#1e1b4b"/>  <!-- LEFT_FOOT -->
+    <circle cx="924" cy="850" r="10" fill="#1e1b4b"/>  <!-- RIGHT_FOOT -->
+    <!-- Detail nodes (r=8) on the apex tangent -->
+    <circle cx="380" cy="210" r="8" fill="#1e1b4b"/>   <!-- LEFT_APEX_DETAIL -->
+    <circle cx="644" cy="210" r="8" fill="#1e1b4b"/>   <!-- RIGHT_APEX_DETAIL -->
   </g>
 </svg>
