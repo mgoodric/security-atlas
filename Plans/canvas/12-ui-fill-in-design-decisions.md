@@ -8,7 +8,16 @@
 
 ## 1. Top-nav order (the v2 canonical order)
 
-**Decision:** Dashboard · Controls · Evidence · Risks · Audits · Policies · Vendors · Board Packs · Settings · Admin.
+**Decision (slice 093, extended 2026-05-16 post-094 / post-097):**
+
+Dashboard · **Calendar · Metrics** · Controls · Evidence · Risks · _Risk hierarchy_ · Audits · Policies · Vendors · Board Packs · **Catalog · SCF** · Settings · Admin.
+
+**Post-093 additions (recorded here per audit `Plans/canvas/13-ui-mockup-audit-2026-05-16.md` F-2):**
+
+- **Calendar** (slice 094) — cross-business compliance calendar. Sits immediately after Dashboard per slice 094 decision D8: shortest scanning path for the cross-business at-a-glance cluster.
+- **Metrics** (slice 097) — board cascade metrics dashboard. Clusters with Dashboard + Calendar as the cross-business "at-a-glance" group.
+- **Catalog · SCF** — reference content (~1,400 SCF anchors). Sits after Vendors + Board Packs as a reference top-level; not in the core-5 cluster because it's not per-tenant data.
+- _Risk hierarchy_ stays italicized in the list because it's a **transitional** entry: slice 101 (`/risks` list view) is expected to remove it from the sidebar and instead link to it from the `/risks` page header per §5. Until slice 101 lands, removing it would orphan the org-tree view.
 
 **Rationale:**
 

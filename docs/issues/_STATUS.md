@@ -3,7 +3,36 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-16 (batch 34 merged · 094 on main · 93/96 slices on main · queue exhausted)
+**Last reconciled:** 2026-05-16 (UI audit + 6 fill-in slices filed · 098-103 added as `ready` · sidebar realigned)
+
+## Drift detected — 2026-05-16 (UI audit + 6 mockup-impl slices filed · sidebar realignment)
+
+Slice 093's mockup design has landed; the UI now needs implementations. One-pass audit (`Plans/canvas/13-ui-mockup-audit-2026-05-16.md`) surfaced two HIGH findings + one MEDIUM + one LOW + one PASS:
+
+- **F-1 (HIGH)**: sidebar order didn't match design doc §1. Audits was at position 11 (after Vendors), should be position 5 (after Risks). Board Packs was missing entirely. **Fixed in-place** this PR.
+- **F-2 (MEDIUM)**: design doc §1 didn't reflect Calendar (094), Metrics (097), or Catalog · SCF. **Fixed in-place** — design doc §1 extended.
+- **F-3 (LOW)**: Risk hierarchy exposed at top-nav contradicts design doc §5. **Deferred to slice 100** (`/risks` list view) — removing it now would orphan the org-tree view.
+- **F-4 (HIGH)**: 6 sidebar entries 404 today (`/controls`, `/evidence`, `/risks`, `/policies`, `/audits`, `/settings`). **Resolved by slices 098-103 filed below.**
+- **F-5 (PASS)**: `/dashboard` implementation matches `dashboard.html` conceptually. No action required.
+
+Six new `ready` slices filed per design doc §"Next steps":
+
+| Row | Transition      | Evidence                                                                                                                                               |
+| --- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 098 | (new) → `ready` | `/controls` list view · 1-2d · AFK · consumes `GET /v1/anchors` + `/v1/controls/{id}/state` per design doc §7 · shared list-shell extraction candidate |
+| 099 | (new) → `ready` | `/evidence` list view · 1-2d · AFK · consumes `GET /v1/evidence?...` (may need `?include=` extension) · 8-char hash prefix with copy-on-click          |
+| 100 | (new) → `ready` | `/risks` list view · 1d · AFK · consumes `GET /v1/risks` · closes audit F-3 by removing `/risks/hierarchy` from top-nav + adding page-header link      |
+| 101 | (new) → `ready` | `/policies` list view · 1-2d · AFK · consumes `GET /v1/policies` + ack-rate · backend extension preferred over client fan-out                          |
+| 102 | (new) → `ready` | `/audits` list view · 1d · AFK · consumes `GET /v1/audit-periods` · disambiguation from singular `/audit/[controlId]` (slice 042) explicit             |
+| 103 | (new) → `ready` | `/settings` user-facing page · 2d · AFK · profile + appearance + notifications + API tokens + sessions · admin lives at /admin (design doc §4)         |
+
+**Counts delta:** new rows +6 · ready +6 · total +6 (96 → 102).
+
+**In-place fixes shipped this PR** (no slice — direct audit + edits):
+
+- `web/components/shell/sidebar.tsx`: reordered to canonical sequence per design doc §1, added Board Packs entry. Leading block-comment explains the canonical order + post-093 additions.
+- `Plans/canvas/12-ui-fill-in-design-decisions.md` §1: extended to include Calendar / Metrics / Catalog · SCF with placement rationale.
+- New: `Plans/canvas/13-ui-mockup-audit-2026-05-16.md` — the audit document.
 
 ## Drift detected — 2026-05-16 (batch 34 merged · 094 compliance calendar shipped end-to-end)
 
@@ -1853,15 +1882,15 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 
 ## Counts
 
-| Status        | Count  |
-| ------------- | ------ |
-| `merged`      | 93     |
-| `in-review`   | 0      |
-| `in-progress` | 0      |
-| `ready`       | 0      |
-| `blocked`     | 0      |
-| `not-ready`   | 3      |
-| **Total**     | **96** |
+| Status        | Count   |
+| ------------- | ------- |
+| `merged`      | 93      |
+| `in-review`   | 0       |
+| `in-progress` | 0       |
+| `ready`       | 6       |
+| `blocked`     | 0       |
+| `not-ready`   | 3       |
+| **Total**     | **102** |
 
 🎯 **v1 backlog 69/69 complete.** Every slice in the v1 plan is merged on `main`. The binary v1 success test — "does the solo security leader run their next SOC 2 audit out of security-atlas, generate the next board pack from it, and not reach for Vanta or a Google Sheet to fill a gap?" — is evaluable end-to-end.
 
@@ -1973,6 +2002,12 @@ Legal values (use exactly these strings):
 | 094 | Compliance calendar                                                 | `merged`    | frontend/094-compliance-calendar                        | gh#218 | 2026-05-16 | 2026-05-16 | batch 34 · AFK · ~1d shipped (3d estimate) · PR gh#218 squashed at commit `6c9c9ab` · 19/20 ACs PASS + AC-16 defer + AC-20 quarantined (slice-079 pattern) · 7/7 integration tests against real Postgres + RLS · 8 decisions logged in `docs/audit-log/094-compliance-calendar-decisions.md` (cadence column reuse, rolling-window default, per-user opaque ICS token + AllowedKinds=[calendar.read.v1], policies.next_review_at column add, route-append, no calendar library, next_from cursor, nav placement) · ICS auth: per-user URL token hashed in api_keys via credstore.Issue, /v1/calendar.ics exempt from upstream Bearer middleware with inline scope-restricted authentication · post-CI lint fix: empty else branch in ics.go:65 removed (staticcheck SA9003) · pre-commit clean                                                                                                                                                                                                                                         |
 | 095 | Re-upgrade ESLint to 10.x once eslint-plugin-react ships compat     | `not-ready` | —                                                       | —      | —          | —          | v2 backlog · AFK · ~0.25d · pre-flight `npm view eslint-plugin-react@latest peerDependencies` on 2026-05-16 returns `{ eslint: '^3 \|\| ^4 \|\| ^5 \|\| ^6 \|\| ^7 \|\| ^8 \|\| ^9.7' }` — upstream still caps at `^9.7` · follow-on to slice 078's Path B pin                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 097 | Metrics dashboard + cascade-tree visualization                      | `merged`    | frontend/097-metrics-dashboard-cascade-view             | gh#214 | 2026-05-16 | 2026-05-16 | batch 33 · JUDGMENT · ~2-3d · 17/18 ACs (AC-17 N/A no new docs page) · 6 BFF routes + 7 dashboard components + 1 shadcn Dialog primitive + 22 vitest cases + quarantined Playwright spec · consumes slice 076's 7 endpoints additively (no backend changes) · 23 files / 2,566 insertions · 3 JUDGMENT decisions: vertical indent-and-rule cascade tree (D1), inline-SVG charts no chart library (D2), admin gate via slice-043 `getSessionMe().is_admin` reuse (D3) · commit `6324060`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 098 | /controls list view (per slice 093 mockup)                          | `ready`     | —                                                       | —      | —          | —          | v2 backlog · AFK · ~1-2d · deps 093/005/006/008/012 all merged · consumes `GET /v1/anchors` + `/v1/controls/{id}/state` joined per row · horizontal pill filter row · empty + loading per design doc · candidate for shared `<ListView>` shell extraction reused by 099/100/101/102                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 099 | /evidence list view (per slice 093 mockup)                          | `ready`     | —                                                       | —      | —          | —          | v2 backlog · AFK · ~1-2d · deps 093/005/013/016 all merged · consumes `GET /v1/evidence?control_id=&kind=&result=&since=` (may need backend `?include=` extension; surface as design Q) · 8-char hash prefix with copy-on-click · empty state surfaces "Set up a connector →" path                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 100 | /risks list view (per slice 093 mockup)                             | `ready`     | —                                                       | —      | —          | —          | v2 backlog · AFK · ~1d · deps 093/005/019/056 all merged · consumes `GET /v1/risks` · ALSO closes audit F-3 (removes /risks/hierarchy from top-nav, adds reciprocal page-header `Hierarchy view ↔ List view` links per design doc §5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 101 | /policies list view (per slice 093 mockup)                          | `ready`     | —                                                       | —      | —          | —          | v2 backlog · AFK · ~1-2d · deps 093/005/022/023 all merged · consumes `GET /v1/policies` + per-row ack rate (PREFER backend `?include=ack_rate` extension over client fan-out; spillover slice if needed) · progress bars with semantic thresholds (≥95% green, 70-94% amber, <70% red)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 102 | /audits list view (per slice 093 mockup)                            | `ready`     | —                                                       | —      | —          | —          | v2 backlog · AFK · ~1d · deps 093/005/020/021/028 all merged · consumes `GET /v1/audit-periods` · explicit disambiguation from singular `/audit/[controlId]` (slice 042) preserved · frozen periods render with lock icon + tooltip                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 103 | /settings user-facing page (per slice 093 mockup)                   | `ready`     | —                                                       | —      | —          | —          | v2 backlog · AFK · ~2d · deps 093/005/034/035/051 all merged · 5 sections: profile + appearance + notifications + API tokens + active sessions · admin lives at /admin (design doc §4 non-negotiable) · API token plaintext-shown-once invariant is security-critical (P0-A2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 085 | Security audit Q2 2026 + tracking slice                             | `merged`    | backlog/085-security-audit-readme                       | gh#168 | 2026-05-15 | 2026-05-15 | v2 backlog · JUDGMENT · ~0.5d · solo iteration (no batch per P0-A4) · ACs 1-3 shipped via PR #167 (audit report + 4 remediation slices + drift section) · ACs 4-5 shipped via PR #168 (README.md `## Security` section between Documentation and Contributing — 5 bullets: reporting / pipeline-hardening / audit-reports / cadence / remediation-tracking + decisions log with 5 high-confidence calls) · commit e09ebfb                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 086 | Fix open redirect on signIn `from` parameter                        | `merged`    | auth/086-fix-open-redirect-signin-from                  | gh#172 | 2026-05-15 | 2026-05-15 | batch 31 · AFK · ~0.25d · **HIGH severity** (from slice 085 audit) · `web/lib/safe-redirect.ts` helper rejecting fully-qualified / protocol-relative / `javascript:` / backslash-prefixed paths + bare-`/` → `/dashboard` · single-point validation in `web/app/login/actions.ts` covers both call sites · 9-case vitest (35/35 pass) + Playwright spec (post-079 quarantined, `TEST_BEARER`-gated) · `CONTRIBUTING.md` "Open-redirect prevention" subsection · `docs/audits/2026-Q2-security-audit.md` remediation status line · 9 decisions logged (8 high · 1 medium) · commit `f74a083`                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | 087 | Security HTTP headers middleware                                    | `merged`    | infra/087-security-http-headers-middleware              | gh#171 | 2026-05-15 | 2026-05-15 | batch 31 · AFK · ~0.5d · **MEDIUM-HIGH severity** (from slice 085 audit) · new `internal/api/securityheaders` package · HSTS / X-Content-Type-Options / X-Frame-Options / Referrer-Policy / CSP applied as first chi middleware before bearer-auth · CSP ships report-only (Next.js inline-script hydration would violate enforced `script-src 'self'`); enforcement trajectory in decisions log §D1 · README ## Security one-line · 7 unit tests + 3 integration tests + Playwright spec · commit `f7afbec`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -1983,21 +2018,34 @@ Legal values (use exactly these strings):
 
 ## Ready set right now
 
-**EMPTY.** All 4 v2-ready slices that started this session (082/093/094/097) are now merged.
+| #   | Title                      | Cluster  | Est (d) | Notes                                                                                                                                      |
+| --- | -------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 100 | /risks list view           | Frontend | 1       | Closes audit F-3 (removes /risks/hierarchy from top-nav). Consumes `GET /v1/risks`.                                                        |
+| 102 | /audits list view          | Frontend | 1       | Plural period index. Consumes `GET /v1/audit-periods`. Disambiguated from singular `/audit/[controlId]`.                                   |
+| 098 | /controls list view        | Frontend | 1-2     | Largest list — joins anchors + state per row. **Shared list-shell extraction candidate** — recommend running FIRST so 099-102 reuse shell. |
+| 099 | /evidence list view        | Frontend | 1-2     | Consumes `GET /v1/evidence?...`. May need backend `?include=` extension.                                                                   |
+| 101 | /policies list view        | Frontend | 1-2     | Consumes `GET /v1/policies` + ack rate. Backend extension preferred over client fan-out.                                                   |
+| 103 | /settings user-facing page | Frontend | 2       | 5 sections; admin lives at /admin. Plaintext-token-shown-once is security-critical (P0-A2).                                                |
 
-The 3 remaining `not-ready` slices are gated on external triggers:
+**6 slices ready** (098-103 — the slice 093 mockup-implementation suite). **Recommended sequencing:**
 
-- **082** — Playwright e2e seed-data harness. Slice file frontmatter is `not-ready` with explicit "Not-ready until staffed" — maintainer's staffing decision is the gate.
-- **084** — coordinated `goreleaser-action@v7` + `cosign-installer@v4` migration. Waits on Dependabot to surface both bumps in one cohort.
-- **095** — re-upgrade ESLint to 10.x. Waits on upstream `eslint-plugin-react` shipping ESLint-10 compat.
+1. **Run 098 FIRST as a solo slice** so it extracts a shared `web/components/list/*.tsx` shell. The remaining 4 list-views (099/100/101/102) all reuse it.
+2. **Then batch-of-three** of 099 + 100 + 102 (file-disjoint: web/app/(authed)/{evidence,risks,audits}/).
+3. **Then 101 + 103** as a final pair (101 may need backend extension; 103 is form-driven, distinct surface from the list-views).
 
-**Next continuous-loop invocation will fire GUARD-1 (queue empty) and exit cleanly.** To resume meaningful loop work: (a) staff 082, (b) wait on upstream for 084/095, OR (c) file new slices.
+Total wall-clock estimate: ~3-4 calendar days at batch-of-three throughput per design doc §"Next steps".
+
+**Not-ready (gated, unchanged):**
+
+- **082** — Playwright e2e seed-data harness. Maintainer staffing decision.
+- **084** — coordinated `goreleaser-action@v7` + `cosign-installer@v4` migration. Waits on Dependabot.
+- **095** — re-upgrade ESLint to 10.x. Waits on upstream `eslint-plugin-react` ESLint-10 compat.
 
 ## In-flight (1 PR open)
 
-- PR pending — this batch-34 final-reconcile sweep. Touches `_STATUS.md` only. Awaits CI + maintainer review.
+- PR pending — this UI audit + 6-slice-filing PR. Touches `Plans/canvas/`, `web/components/shell/sidebar.tsx`, `docs/issues/_STATUS.md`, and adds 6 new slice files + 1 new canvas doc. Awaits CI + maintainer review.
 
-Stale worktrees on disk: **0** (slice 096 cleanup remains in effect). The batch-34 worktree (`-094`) was removed at merge-time.
+Stale worktrees on disk: **0** (slice 096 cleanup remains in effect).
 
 ## Notes
 
