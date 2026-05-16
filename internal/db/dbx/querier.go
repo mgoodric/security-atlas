@@ -1165,6 +1165,13 @@ type Querier interface {
 	// ordering. The policy library is small per the canvas v1 scope, so this
 	// endpoint is not paginated.
 	ListPoliciesLinkedToControl(ctx context.Context, arg ListPoliciesLinkedToControlParams) ([]ListPoliciesLinkedToControlRow, error)
+	// Slice 107 — paginated policy list LEFT JOINed to the per-policy
+	// acknowledgment-rate cell. Single query; the handler MUST NOT loop
+	// per-policy (anti-criterion P0 -- the whole point of the extension).
+	// Mirrors the predicates in CountRequiredRoleUsersForVersion (denominator)
+	// and CountFreshAcksForVersion (numerator); see policies.sql for full
+	// docs.
+	ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesWithAckRateParams) ([]ListPoliciesWithAckRateRow, error)
 	// Returns the version chain for a policy id by walking predecessor_id.
 	// Recursive CTE keeps the query inside Postgres rather than client-side
 	// traversal. Returns oldest-first so the chain reads naturally

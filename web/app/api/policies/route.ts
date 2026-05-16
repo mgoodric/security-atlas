@@ -7,10 +7,10 @@
 // design doc `Plans/canvas/12-ui-fill-in-design-decisions.md` §7.
 //
 // Why a `/api/policies` route: per the BFF-per-page convention slices
-// 098/099/100/101/102 follow, keeping the URL shape predictable. When
-// the backend `?include=ack_rate` extension lands (spillover slice
-// 107), this route gets the upgrade in one place — the page does not
-// have to change.
+// 098/099/100/101/102 follow, keeping the URL shape predictable. The
+// slice 107 `?include=ack_rate` extension is hard-coded inside
+// `listPolicies` (web/lib/api.ts) — the BFF forwards verbatim. Mirrors
+// slice 104's hard-coded `?include=state` for anchors.
 //
 // Per slice 101 P0-A4 the list is read-only: the BFF only exposes GET.
 // Policy create / update / publish remain on the existing

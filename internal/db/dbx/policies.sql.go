@@ -342,6 +342,172 @@ func (q *Queries) ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Pol
 	return items, nil
 }
 
+const listPoliciesWithAckRate = `-- name: ListPoliciesWithAckRate :many
+SELECT
+    p.id, p.tenant_id, p.title, p.version, p.effective_date, p.body_md,
+    p.acknowledgment_required_roles, p.status, p.created_at, p.updated_at,
+    p.predecessor_id, p.owner_role, p.approver_role, p.linked_control_ids,
+    p.source_attribution, p.created_by, p.submitted_at, p.submitted_by,
+    p.approved_at, p.approved_by, p.published_at, p.published_by,
+    p.superseded_at, p.next_review_at,
+    CASE WHEN p.status = 'published' THEN (
+        SELECT COUNT(DISTINCT k.issued_by)::bigint
+        FROM api_keys k
+        WHERE k.tenant_id = p.tenant_id
+          AND k.revoked_at IS NULL
+          AND k.issued_by IS NOT NULL
+          AND (
+              k.is_admin = true
+              OR k.owner_roles && p.acknowledgment_required_roles
+          )
+    ) END AS ack_denominator,
+    CASE WHEN p.status = 'published' THEN (
+        SELECT COUNT(DISTINCT pa.user_id)::bigint
+        FROM policy_acknowledgments pa
+        WHERE pa.tenant_id = p.tenant_id
+          AND pa.policy_version_id = p.id
+          AND pa.acknowledged_at >= $2::timestamptz
+          AND EXISTS (
+              SELECT 1
+              FROM api_keys k
+              WHERE k.tenant_id = pa.tenant_id
+                AND k.issued_by = pa.user_id
+                AND k.revoked_at IS NULL
+                AND (
+                    k.is_admin = true
+                    OR k.owner_roles && p.acknowledgment_required_roles
+                )
+          )
+    ) END AS ack_numerator
+FROM policies p
+WHERE p.tenant_id = $1
+ORDER BY p.created_at DESC, p.id ASC
+`
+
+type ListPoliciesWithAckRateParams struct {
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	FreshnessCutoff pgtype.Timestamptz `json:"freshness_cutoff"`
+}
+
+type ListPoliciesWithAckRateRow struct {
+	ID                          pgtype.UUID        `json:"id"`
+	TenantID                    pgtype.UUID        `json:"tenant_id"`
+	Title                       string             `json:"title"`
+	Version                     string             `json:"version"`
+	EffectiveDate               pgtype.Date        `json:"effective_date"`
+	BodyMd                      string             `json:"body_md"`
+	AcknowledgmentRequiredRoles []string           `json:"acknowledgment_required_roles"`
+	Status                      string             `json:"status"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                   pgtype.Timestamptz `json:"updated_at"`
+	PredecessorID               pgtype.UUID        `json:"predecessor_id"`
+	OwnerRole                   string             `json:"owner_role"`
+	ApproverRole                string             `json:"approver_role"`
+	LinkedControlIds            []pgtype.UUID      `json:"linked_control_ids"`
+	SourceAttribution           string             `json:"source_attribution"`
+	CreatedBy                   string             `json:"created_by"`
+	SubmittedAt                 pgtype.Timestamptz `json:"submitted_at"`
+	SubmittedBy                 *string            `json:"submitted_by"`
+	ApprovedAt                  pgtype.Timestamptz `json:"approved_at"`
+	ApprovedBy                  *string            `json:"approved_by"`
+	PublishedAt                 pgtype.Timestamptz `json:"published_at"`
+	PublishedBy                 *string            `json:"published_by"`
+	SupersededAt                pgtype.Timestamptz `json:"superseded_at"`
+	NextReviewAt                pgtype.Timestamptz `json:"next_review_at"`
+	// AckDenominator is the count of users whose roles intersect the policy's
+	// acknowledgment_required_roles (mirrors CountRequiredRoleUsersForVersion).
+	// NULL when status != 'published' (the wire layer renders ack_rate: null).
+	AckDenominator pgtype.Int8 `json:"ack_denominator"`
+	// AckNumerator is the count of distinct users who have acknowledged the
+	// policy with a fresh ack (mirrors CountFreshAcksForVersion). NULL when
+	// status != 'published'.
+	AckNumerator pgtype.Int8 `json:"ack_numerator"`
+}
+
+// Slice 107 — paginated policy list LEFT JOINed to the per-policy
+// acknowledgment-rate cell. Single query; the handler MUST NOT loop
+// per-policy (anti-criterion P0 -- the whole point of the extension).
+//
+// Shape:
+//  1. The base policies SELECT is identical to ListPolicies (same
+//     columns, same WHERE, same ORDER BY) so the result row's
+//     first N columns scan into the existing dbx.Policy struct
+//     verbatim.
+//  2. Two scalar subqueries compute the denominator + numerator
+//     ONLY for rows with status = 'published'. A CASE WHEN wraps
+//     the subqueries so non-published rows return NULL for both
+//     columns (the handler renders `ack_rate: null`).
+//  3. The denominator subquery mirrors CountRequiredRoleUsersForVersion
+//     verbatim (distinct issued_by in api_keys whose owner_roles
+//     intersect the policy's acknowledgment_required_roles, OR is_admin).
+//     Revoked keys excluded.
+//  4. The numerator subquery mirrors CountFreshAcksForVersion verbatim
+//     (distinct user_ids in policy_acknowledgments for THIS policy
+//     version, acknowledged_at >= freshness_cutoff, gated on the same
+//     role-intersect EXISTS predicate). The freshness cutoff is a
+//     parameter so tests inject without time-bombing.
+//
+// Constitutional invariants:
+//
+//	#6 RLS: policies + api_keys + policy_acknowledgments are tenant-scoped
+//	   under FORCE ROW LEVEL SECURITY. The tenant GUC the slice-033
+//	   middleware sets filters every table this query touches.
+//	#9 Manual evidence first-class: this query is uniform whether the
+//	   policy was manually authored or imported from a vendor template.
+//
+// See policy_acknowledgments.sql `CountRequiredRoleUsersForVersion` and
+// `CountFreshAcksForVersion` for the canonical predicates this query
+// mirrors -- they MUST stay in sync. The HTTP handler GET
+// /v1/policies/{id}/acknowledgment-rate calls those queries directly
+// per-policy; this slice runs the same math in one round-trip for the
+// list view.
+func (q *Queries) ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesWithAckRateParams) ([]ListPoliciesWithAckRateRow, error) {
+	rows, err := q.db.Query(ctx, listPoliciesWithAckRate, arg.TenantID, arg.FreshnessCutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPoliciesWithAckRateRow
+	for rows.Next() {
+		var i ListPoliciesWithAckRateRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Title,
+			&i.Version,
+			&i.EffectiveDate,
+			&i.BodyMd,
+			&i.AcknowledgmentRequiredRoles,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PredecessorID,
+			&i.OwnerRole,
+			&i.ApproverRole,
+			&i.LinkedControlIds,
+			&i.SourceAttribution,
+			&i.CreatedBy,
+			&i.SubmittedAt,
+			&i.SubmittedBy,
+			&i.ApprovedAt,
+			&i.ApprovedBy,
+			&i.PublishedAt,
+			&i.PublishedBy,
+			&i.SupersededAt,
+			&i.NextReviewAt,
+			&i.AckDenominator,
+			&i.AckNumerator,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPolicyVersionChain = `-- name: ListPolicyVersionChain :many
 WITH RECURSIVE chain AS (
     -- Anchor: the policy itself.

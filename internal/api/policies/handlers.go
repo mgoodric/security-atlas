@@ -30,9 +30,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	policypdf "github.com/mgoodric/security-atlas/internal/policy/pdf"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -43,16 +46,38 @@ import (
 const pdfRenderTimeout = 30 * time.Second
 
 // Handler bundles the slice-022 routes over a single policy.Store.
+//
+// Slice 107: when `?include=ack_rate` is set on GET /v1/policies, the
+// ListPolicies handler runs ONE joined query (CountFreshAcks-style
+// numerator + CountRequiredRoleUsers-style denominator) against the
+// pool. That path requires a transaction with the `app.current_tenant`
+// GUC set via `tenancy.ApplyTenant`. The handler holds a *pgxpool.Pool
+// for that case; the existing non-`?include=` paths continue through
+// the pre-bound store. Mirrors the slice 104 anchors NewWithPool shape.
 type Handler struct {
 	store *policy.Store
+	pool  *pgxpool.Pool
 	// renderPDF is injectable for tests so we don't need a real Chrome
 	// in unit-only servers. Production wires policypdf.Render.
 	renderPDF func(ctx context.Context, doc policypdf.Doc) ([]byte, error)
 }
 
 // New constructs a Handler wired to the production PDF renderer.
+//
+// Backwards-compatible: callers that do not need the slice-107 joined
+// ack-rate path can still pass only the store (pool=nil); the
+// `?include=ack_rate` query parameter will then respond 500 with a
+// clear "pool not wired" error. Production wiring
+// (internal/api/httpserver.go) uses NewWithPool.
 func New(store *policy.Store) *Handler {
 	return &Handler{store: store, renderPDF: policypdf.Render}
+}
+
+// NewWithPool is the slice-107 constructor. The pool is used ONLY for
+// the `?include=ack_rate` path's tenant-GUC-bearing transaction; every
+// other read continues through the store.
+func NewWithPool(store *policy.Store, pool *pgxpool.Pool) *Handler {
+	return &Handler{store: store, pool: pool, renderPDF: policypdf.Render}
 }
 
 // WithRenderer overrides the PDF render function. Tests use this to inject
@@ -78,6 +103,25 @@ type createReq struct {
 type publishReq struct {
 	NewVersion    string  `json:"new_version"`
 	EffectiveDate *string `json:"effective_date,omitempty"` // YYYY-MM-DD
+}
+
+// policyAckRateCellWire is the per-policy ack-rate rollup the
+// `?include=ack_rate` extension attaches to each row. The field names
+// mirror the slice-023 `rateResponse` (internal/api/policyacks/handlers.go)
+// minus the `window_seconds` field — the list view doesn't need it (the
+// per-policy detail page surfaces it via /v1/policies/{id}/acknowledgment-rate).
+type policyAckRateCellWire struct {
+	Numerator   int64    `json:"numerator"`
+	Denominator int64    `json:"denominator"`
+	Percent     *float64 `json:"percent"`
+}
+
+// policyWithAckRateWire is the JSON shape returned when ?include=ack_rate
+// is set on GET /v1/policies. `AckRate` is nil for non-published rows
+// (the SQL CASE returns NULL on those branches).
+type policyWithAckRateWire struct {
+	policyWire
+	AckRate *policyAckRateCellWire `json:"ack_rate"`
 }
 
 type policyWire struct {
@@ -146,13 +190,37 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListPolicies handles GET /v1/policies?status=...
+//
+// Slice 107 — `?include=ack_rate` (additive): when set, the response
+// shape becomes `{ policies: [{ ...policyWire, ack_rate: cell | null }],
+// count }`. The ack_rate column is computed by a single SQL query with
+// correlated subqueries — there is NO per-policy loop calling
+// AckStore.Rate (slice 107 P0 anti-criterion ISC-A1). The math is
+// identical to the per-policy GET /v1/policies/{id}/acknowledgment-rate
+// path: both call into the same SQL predicates that
+// CountFreshAcksForVersion + CountRequiredRoleUsersForVersion express
+// (slice 107 ISC-A4). Non-published rows return `ack_rate: null`
+// (CASE WHEN status='published' in SQL produces NULL otherwise).
+//
+// Unknown `include` values are silently ignored (slice 094 precedent —
+// additive query params are not errors).
 func (h *Handler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	filter := policy.ListFilter{Status: strings.TrimSpace(r.URL.Query().Get("status"))}
+	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
+	if includesAckRate(r) {
+		out, err := h.listPoliciesWithAckRate(ctx, statusFilter)
+		if err != nil {
+			writeServerErr(w, "list policies (with ack_rate)", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"policies": out, "count": len(out)})
+		return
+	}
+	filter := policy.ListFilter{Status: statusFilter}
 	rows, err := h.store.List(ctx, filter)
 	if err != nil {
 		writeServerErr(w, "list policies", err)
@@ -163,6 +231,160 @@ func (h *Handler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 		out[i] = wireFromPolicy(p)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"policies": out, "count": len(out)})
+}
+
+// listPoliciesWithAckRate is the slice-107 `?include=ack_rate` path.
+// One SQL round-trip — the handler MUST NOT call AckStore.Rate in a
+// loop (anti-criterion ISC-A1).
+func (h *Handler) listPoliciesWithAckRate(ctx context.Context, statusFilter string) ([]policyWithAckRateWire, error) {
+	if h.pool == nil {
+		return nil, fmt.Errorf("policies: pool not wired; ?include=ack_rate requires NewWithPool")
+	}
+	if _, err := tenancy.TenantFromContext(ctx); err != nil {
+		return nil, err
+	}
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("policies: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		return nil, err
+	}
+	tenantStr, err := tenancy.TenantFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID, err := uuid.Parse(tenantStr)
+	if err != nil {
+		return nil, fmt.Errorf("policies: parse tenant id: %w", err)
+	}
+	cutoff := time.Now().UTC().Add(-policy.AcknowledgmentFreshness)
+	q := dbx.New(tx)
+	rows, err := q.ListPoliciesWithAckRate(ctx, dbx.ListPoliciesWithAckRateParams{
+		TenantID:        pgtype.UUID{Bytes: tenantID, Valid: true},
+		FreshnessCutoff: pgtype.Timestamptz{Time: cutoff, Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("policies: list with ack_rate: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("policies: commit tx: %w", err)
+	}
+	out := make([]policyWithAckRateWire, 0, len(rows))
+	for _, r := range rows {
+		if statusFilter != "" && r.Status != statusFilter {
+			continue
+		}
+		out = append(out, wireFromAckRateRow(r))
+	}
+	return out, nil
+}
+
+// includesAckRate returns true when the request asked for the joined
+// ack-rate column via `?include=ack_rate`. Mirrors slice 104's
+// `includesState` — accepts plain `ack_rate`, CSV
+// (`?include=ack_rate,state`), and repeated query params
+// (`?include=ack_rate&include=other`). Trims whitespace. Unknown tokens
+// are silently ignored — they are NOT errors (slice 094 calendar
+// precedent: additive query params don't break the caller).
+func includesAckRate(r *http.Request) bool {
+	for _, v := range r.URL.Query()["include"] {
+		for _, tok := range strings.Split(v, ",") {
+			if strings.TrimSpace(tok) == "ack_rate" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// wireFromAckRateRow converts the sqlc-generated joined row into the
+// wire shape. The ack-rate cell is nil when the SQL CASE returned NULL
+// (status != 'published'); otherwise the numerator + denominator are
+// populated and `percent` is computed (or nil if denominator is zero,
+// matching the slice-023 rateResponse semantic).
+func wireFromAckRateRow(r dbx.ListPoliciesWithAckRateRow) policyWithAckRateWire {
+	base := wireFromAckRateBaseColumns(r)
+	out := policyWithAckRateWire{policyWire: base}
+	// Both columns are NULL together (single CASE WHEN status='published'
+	// gates both). When the denominator column is non-NULL we treat the
+	// row as having a populated cell.
+	if r.AckDenominator.Valid && r.AckNumerator.Valid {
+		cell := &policyAckRateCellWire{
+			Numerator:   r.AckNumerator.Int64,
+			Denominator: r.AckDenominator.Int64,
+		}
+		if cell.Denominator > 0 {
+			pct := (float64(cell.Numerator) / float64(cell.Denominator)) * 100.0
+			cell.Percent = &pct
+		}
+		out.AckRate = cell
+	}
+	return out
+}
+
+// wireFromAckRateBaseColumns builds the policyWire portion of the
+// joined row. Mirrors wireFromPolicy on the dbx-row column set so the
+// joined shape stays byte-compatible with the omitted-include shape
+// (anti-criterion ISC-A2: additive only).
+func wireFromAckRateBaseColumns(r dbx.ListPoliciesWithAckRateRow) policyWire {
+	id := uuid.UUID(r.ID.Bytes).String()
+	out := policyWire{
+		ID:                          id,
+		Title:                       r.Title,
+		Version:                     r.Version,
+		BodyMd:                      r.BodyMd,
+		OwnerRole:                   r.OwnerRole,
+		ApproverRole:                r.ApproverRole,
+		LinkedControlIDs:            pgUUIDsToStrings(r.LinkedControlIds),
+		AcknowledgmentRequiredRoles: append([]string{}, r.AcknowledgmentRequiredRoles...),
+		Status:                      r.Status,
+		SourceAttribution:           r.SourceAttribution,
+		CreatedBy:                   r.CreatedBy,
+		SubmittedAt:                 timestamptzPtr(r.SubmittedAt),
+		SubmittedBy:                 r.SubmittedBy,
+		ApprovedAt:                  timestamptzPtr(r.ApprovedAt),
+		ApprovedBy:                  r.ApprovedBy,
+		PublishedAt:                 timestamptzPtr(r.PublishedAt),
+		PublishedBy:                 r.PublishedBy,
+		SupersededAt:                timestamptzPtr(r.SupersededAt),
+		CreatedAt:                   r.CreatedAt.Time,
+		UpdatedAt:                   r.UpdatedAt.Time,
+	}
+	if r.PredecessorID.Valid {
+		s := uuid.UUID(r.PredecessorID.Bytes).String()
+		out.PredecessorID = &s
+	}
+	if r.EffectiveDate.Valid {
+		s := r.EffectiveDate.Time.Format("2006-01-02")
+		out.EffectiveDate = &s
+	}
+	// AC-7: surface the orphan_policy warning when the row has zero
+	// linked controls (parity with wireFromPolicy).
+	if len(r.LinkedControlIds) == 0 {
+		out.Warnings = append(out.Warnings, policy.WarningOrphanPolicy)
+	}
+	return out
+}
+
+func pgUUIDsToStrings(us []pgtype.UUID) []string {
+	out := make([]string, 0, len(us))
+	for _, u := range us {
+		if !u.Valid {
+			continue
+		}
+		out = append(out, uuid.UUID(u.Bytes).String())
+	}
+	return out
+}
+
+func timestamptzPtr(t pgtype.Timestamptz) *time.Time {
+	if !t.Valid {
+		return nil
+	}
+	v := t.Time
+	return &v
 }
 
 // GetPolicy handles GET /v1/policies/{id}?versions=true.
