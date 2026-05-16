@@ -477,3 +477,258 @@ func (q *Queries) UpsertFrameworkVersion(ctx context.Context, arg UpsertFramewor
 	)
 	return i, err
 }
+
+// ---------------------------------------------------------------------------
+// Slice 104 — anchors with worst-state-wins state rollup
+// ---------------------------------------------------------------------------
+//
+// These two methods are sqlc-generated equivalents that we maintain by hand
+// (alongside the original sqlc-generated file) to avoid re-emitting the
+// entire dbx tree on every regen. The SQL lives in
+// internal/db/queries/scf_anchors.sql as `ListSCFAnchorsLatestWithState`
+// and `ListSCFAnchorsForVersionWithState`; this file mirrors them. If you
+// regen via `sqlc generate`, expect this file to be re-emitted with the
+// same shapes — re-apply only your intended SQL diff and revert the rest
+// (the parallel-batch regen-on-rebase note in MEMORY.md).
+
+const listSCFAnchorsLatestWithState = `-- name: ListSCFAnchorsLatestWithState :many
+WITH latest_eval AS (
+    SELECT DISTINCT ON (ce.tenant_id, ce.control_id, ce.scope_cell_id)
+        ce.tenant_id,
+        ce.control_id,
+        ce.scope_cell_id,
+        ce.result,
+        ce.freshness_status,
+        ce.last_observed_at,
+        ce.evaluated_at
+    FROM control_evaluations ce
+    ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
+),
+worst_per_anchor AS (
+    SELECT
+        c.scf_anchor_id AS anchor_id,
+        CASE MAX(CASE le.result
+                    WHEN 'fail'         THEN 4
+                    WHEN 'inconclusive' THEN 3
+                    WHEN 'pass'         THEN 2
+                    WHEN 'na'           THEN 1
+                    ELSE 0
+                 END)
+            WHEN 4 THEN 'fail'
+            WHEN 3 THEN 'inconclusive'
+            WHEN 2 THEN 'pass'
+            WHEN 1 THEN 'na'
+        END::evidence_result AS result,
+        CASE MAX(CASE le.freshness_status
+                    WHEN 'expired'     THEN 4
+                    WHEN 'stale'       THEN 3
+                    WHEN 'no_evidence' THEN 2
+                    WHEN 'fresh'       THEN 1
+                    ELSE 0
+                 END)
+            WHEN 4 THEN 'expired'
+            WHEN 3 THEN 'stale'
+            WHEN 2 THEN 'no_evidence'
+            WHEN 1 THEN 'fresh'
+        END AS freshness_status,
+        MAX(le.last_observed_at) AS last_observed_at,
+        MAX(le.evaluated_at)     AS evaluated_at
+    FROM controls c
+    JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
+    WHERE c.superseded_by IS NULL
+      AND c.scf_anchor_id IS NOT NULL
+    GROUP BY c.scf_anchor_id
+)
+SELECT
+    a.id, a.framework_version_id, a.scf_id, a.family, a.title,
+    a.description, a.subtopics, a.created_at, a.updated_at,
+    wpa.result::evidence_result       AS state_result,
+    wpa.freshness_status::text        AS state_freshness_status,
+    wpa.last_observed_at::timestamptz AS state_last_observed_at,
+    wpa.evaluated_at::timestamptz     AS state_evaluated_at
+FROM scf_anchors a
+JOIN framework_versions fv ON fv.id = a.framework_version_id
+JOIN frameworks f ON f.id = fv.framework_id
+LEFT JOIN worst_per_anchor wpa ON wpa.anchor_id = a.id
+WHERE f.slug = 'scf' AND fv.status = 'current' AND f.tenant_id IS NULL
+ORDER BY a.scf_id
+LIMIT $1 OFFSET $2
+`
+
+type ListSCFAnchorsLatestWithStateParams struct {
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+// ListSCFAnchorsLatestWithStateRow — anchor row plus optional state rollup.
+// State columns are nullable (LEFT JOIN): when the tenant has no control
+// instantiated for the anchor, every state_* column is NULL and the handler
+// renders `state: null`. NullEvidenceResult / pgtype.Text / pgtype.Timestamptz
+// each carry a `.Valid bool` field; the handler keys off StateResult.Valid.
+type ListSCFAnchorsLatestWithStateRow struct {
+	ID                   pgtype.UUID        `json:"id"`
+	FrameworkVersionID   pgtype.UUID        `json:"framework_version_id"`
+	ScfID                string             `json:"scf_id"`
+	Family               string             `json:"family"`
+	Title                string             `json:"title"`
+	Description          string             `json:"description"`
+	Subtopics            []byte             `json:"subtopics"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	StateResult          NullEvidenceResult `json:"state_result"`
+	StateFreshnessStatus pgtype.Text        `json:"state_freshness_status"`
+	StateLastObservedAt  pgtype.Timestamptz `json:"state_last_observed_at"`
+	StateEvaluatedAt     pgtype.Timestamptz `json:"state_evaluated_at"`
+}
+
+func (q *Queries) ListSCFAnchorsLatestWithState(ctx context.Context, arg ListSCFAnchorsLatestWithStateParams) ([]ListSCFAnchorsLatestWithStateRow, error) {
+	rows, err := q.db.Query(ctx, listSCFAnchorsLatestWithState, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSCFAnchorsLatestWithStateRow
+	for rows.Next() {
+		var i ListSCFAnchorsLatestWithStateRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.FrameworkVersionID,
+			&i.ScfID,
+			&i.Family,
+			&i.Title,
+			&i.Description,
+			&i.Subtopics,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.StateResult,
+			&i.StateFreshnessStatus,
+			&i.StateLastObservedAt,
+			&i.StateEvaluatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSCFAnchorsForVersionWithState = `-- name: ListSCFAnchorsForVersionWithState :many
+WITH latest_eval AS (
+    SELECT DISTINCT ON (ce.tenant_id, ce.control_id, ce.scope_cell_id)
+        ce.tenant_id,
+        ce.control_id,
+        ce.scope_cell_id,
+        ce.result,
+        ce.freshness_status,
+        ce.last_observed_at,
+        ce.evaluated_at
+    FROM control_evaluations ce
+    ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
+),
+worst_per_anchor AS (
+    SELECT
+        c.scf_anchor_id AS anchor_id,
+        CASE MAX(CASE le.result
+                    WHEN 'fail'         THEN 4
+                    WHEN 'inconclusive' THEN 3
+                    WHEN 'pass'         THEN 2
+                    WHEN 'na'           THEN 1
+                    ELSE 0
+                 END)
+            WHEN 4 THEN 'fail'
+            WHEN 3 THEN 'inconclusive'
+            WHEN 2 THEN 'pass'
+            WHEN 1 THEN 'na'
+        END::evidence_result AS result,
+        CASE MAX(CASE le.freshness_status
+                    WHEN 'expired'     THEN 4
+                    WHEN 'stale'       THEN 3
+                    WHEN 'no_evidence' THEN 2
+                    WHEN 'fresh'       THEN 1
+                    ELSE 0
+                 END)
+            WHEN 4 THEN 'expired'
+            WHEN 3 THEN 'stale'
+            WHEN 2 THEN 'no_evidence'
+            WHEN 1 THEN 'fresh'
+        END AS freshness_status,
+        MAX(le.last_observed_at) AS last_observed_at,
+        MAX(le.evaluated_at)     AS evaluated_at
+    FROM controls c
+    JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
+    WHERE c.superseded_by IS NULL
+      AND c.scf_anchor_id IS NOT NULL
+    GROUP BY c.scf_anchor_id
+)
+SELECT
+    a.id, a.framework_version_id, a.scf_id, a.family, a.title,
+    a.description, a.subtopics, a.created_at, a.updated_at,
+    wpa.result::evidence_result       AS state_result,
+    wpa.freshness_status::text        AS state_freshness_status,
+    wpa.last_observed_at::timestamptz AS state_last_observed_at,
+    wpa.evaluated_at::timestamptz     AS state_evaluated_at
+FROM scf_anchors a
+LEFT JOIN worst_per_anchor wpa ON wpa.anchor_id = a.id
+WHERE a.framework_version_id = $1
+ORDER BY a.scf_id
+LIMIT $2 OFFSET $3
+`
+
+type ListSCFAnchorsForVersionWithStateParams struct {
+	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
+	Limit              int32       `json:"limit"`
+	Offset             int32       `json:"offset"`
+}
+
+type ListSCFAnchorsForVersionWithStateRow struct {
+	ID                   pgtype.UUID        `json:"id"`
+	FrameworkVersionID   pgtype.UUID        `json:"framework_version_id"`
+	ScfID                string             `json:"scf_id"`
+	Family               string             `json:"family"`
+	Title                string             `json:"title"`
+	Description          string             `json:"description"`
+	Subtopics            []byte             `json:"subtopics"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	StateResult          NullEvidenceResult `json:"state_result"`
+	StateFreshnessStatus pgtype.Text        `json:"state_freshness_status"`
+	StateLastObservedAt  pgtype.Timestamptz `json:"state_last_observed_at"`
+	StateEvaluatedAt     pgtype.Timestamptz `json:"state_evaluated_at"`
+}
+
+func (q *Queries) ListSCFAnchorsForVersionWithState(ctx context.Context, arg ListSCFAnchorsForVersionWithStateParams) ([]ListSCFAnchorsForVersionWithStateRow, error) {
+	rows, err := q.db.Query(ctx, listSCFAnchorsForVersionWithState, arg.FrameworkVersionID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSCFAnchorsForVersionWithStateRow
+	for rows.Next() {
+		var i ListSCFAnchorsForVersionWithStateRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.FrameworkVersionID,
+			&i.ScfID,
+			&i.Family,
+			&i.Title,
+			&i.Description,
+			&i.Subtopics,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.StateResult,
+			&i.StateFreshnessStatus,
+			&i.StateLastObservedAt,
+			&i.StateEvaluatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
