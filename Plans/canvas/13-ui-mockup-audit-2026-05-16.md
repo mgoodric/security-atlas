@@ -49,7 +49,7 @@ Out of scope:
 
 **Fix in this slice:** extend §1 with three new entries + rationale for their placement.
 
-### F-3 · Risk hierarchy exposed at top-nav, contradicting design doc §5 (LOW · deferred to slice 101)
+### F-3 · Risk hierarchy exposed at top-nav, contradicting design doc §5 (LOW · deferred to slice 100)
 
 **Observed:** the sidebar has both `/risks` AND `/risks/hierarchy` as top-level entries.
 
@@ -73,12 +73,12 @@ Out of scope:
 
 ## Counts
 
-| Finding | Severity | Fix location                                        |
-| ------- | -------- | --------------------------------------------------- |
-| F-1     | HIGH     | This slice — sidebar.tsx reorder + Board Packs add  |
-| F-2     | MEDIUM   | This slice — design doc §1 extension                |
-| F-3     | LOW      | Deferred to slice 101 (`/risks` list view)         |
+| Finding | Severity | Fix location                                       |
+| ------- | -------- | -------------------------------------------------- |
+| F-1     | HIGH     | This slice — sidebar.tsx reorder + Board Packs add |
+| F-2     | MEDIUM   | This slice — design doc §1 extension               |
+| F-3     | LOW      | Deferred to slice 100 (`/risks` list view)         |
 | F-4     | HIGH     | Slices 098–103 (one per missing page)              |
-| F-5     | PASS     | None — no drift                                     |
+| F-5     | PASS     | None — no drift                                    |
 
 **Net actions this PR:** 2 in-place fixes (F-1, F-2) + 6 new ready slices filed (F-4).
