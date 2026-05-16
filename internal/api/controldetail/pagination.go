@@ -129,9 +129,57 @@ type evidencePage struct {
 	pageRows int32
 }
 
+// evidenceListPage is the resolved parameter set for the tenant-wide
+// ledger query (slice 106). Carries the same window + cursor + pageRows
+// as evidencePage, plus the four optional filters. Empty-string filter
+// values mean "no filter on this column" and are translated to nil via
+// optString at the store boundary.
+type evidenceListPage struct {
+	since           time.Time
+	until           time.Time
+	kind            string
+	result          string
+	sourceActorType string
+	sourceActorID   string
+	cursor          keyset
+	pageRows        int32
+}
+
 // historyPage is the resolved parameter set for one history page read.
 // pageRows carries the same probe-row contract as evidencePage.
 type historyPage struct {
 	cursor   keyset
 	pageRows int32
+}
+
+// optString returns nil for an empty string, &s otherwise. The sqlc
+// narg-based filter columns expect *string at the Go boundary; nil
+// means "skip this predicate".
+func optString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+// validResults is the canonical evidence_result enum value set. Matches
+// dbx.EvidenceResult* constants in internal/db/dbx/models.go. Used by the
+// handler to 400 on a malformed ?result= query param before we even open
+// a transaction.
+var validResults = map[string]struct{}{
+	"pass":         {},
+	"fail":         {},
+	"na":           {},
+	"inconclusive": {},
+}
+
+// isValidResult reports whether s is a valid evidence_result enum value.
+// Empty string is reported as valid because the absence of a ?result=
+// query param is legal (no filter).
+func isValidResult(s string) bool {
+	if s == "" {
+		return true
+	}
+	_, ok := validResults[s]
+	return ok
 }

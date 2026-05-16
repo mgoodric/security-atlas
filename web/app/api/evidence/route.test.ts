@@ -1,11 +1,16 @@
-// Slice 099 — vitest coverage for web/app/api/evidence/route.ts.
+// Slice 099 + 106 — vitest coverage for web/app/api/evidence/route.ts.
 //
 // The route guarantees:
 //   * 401 when the bearer cookie is missing.
-//   * 400 when control_id query param is missing (the upstream
-//     `GET /v1/evidence` handler requires it — see
-//     `internal/api/controldetail/handler.go` Evidence handler).
 //   * Forwards the bearer as `Authorization: Bearer <token>` to upstream.
+//   * Forwards the WHITELISTED query params (control_id, kind, result,
+//     source_actor_type, source_actor_id, since, until, cursor, limit) —
+//     and ONLY those.
+//   * Slice 106: control_id is OPTIONAL. The BFF passes whatever the
+//     caller sent (or nothing) and lets upstream decide. The previous
+//     "400 when control_id missing" guard was removed because
+//     `internal/api/controldetail/handler.go` now serves the tenant-
+//     wide ledger window in that case.
 //   * Upstream JSON body passes through verbatim on success.
 //   * Upstream error status passes through as the response status.
 //
@@ -73,12 +78,56 @@ describe("GET /api/evidence", () => {
     expect(body.error).toBe("unauthenticated");
   });
 
-  test("400 when control_id query param missing", async () => {
+  test("tenant-wide list when control_id absent (slice 106)", async () => {
     mockCookieGet.mockReturnValue({ value: "test-bearer-099" });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          control_id: "",
+          evidence: [],
+          count: 0,
+          next_cursor: "",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
     const res = await GET(makeRequest("http://localhost/api/evidence"));
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error?: string };
-    expect(body.error).toMatch(/control_id/);
+    expect(res.status).toBe(200);
+
+    // No control_id should reach upstream (it was absent on the request).
+    const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
+    expect(calledURL).toContain("/v1/evidence");
+    expect(calledURL).not.toContain("control_id=");
+  });
+
+  test("forwards new slice-106 filters (kind, result, source_actor_*)", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-099" });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          control_id: "",
+          evidence: [],
+          count: 0,
+          next_cursor: "",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await GET(
+      makeRequest(
+        "http://localhost/api/evidence?kind=aws.s3.encryption_status.v1&result=fail&source_actor_type=connector&source_actor_id=aws-connector",
+      ),
+    );
+
+    const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
+    expect(calledURL).toContain("kind=aws.s3.encryption_status.v1");
+    expect(calledURL).toContain("result=fail");
+    expect(calledURL).toContain("source_actor_type=connector");
+    expect(calledURL).toContain("source_actor_id=aws-connector");
   });
 
   test("forwards bearer + control_id + returns upstream evidence on success", async () => {

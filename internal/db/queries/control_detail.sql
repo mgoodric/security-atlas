@@ -31,13 +31,56 @@
 -- is the same keyset semantics: ties on observed_at fall back to id. A
 -- sentinel cursor (cursor_ts = 'infinity', cursor_id = max-uuid) selects
 -- the first page. The handler computes all cutoff values in Go.
+--
+-- Slice 106: the SELECT projects `result` so the wire shape `evidenceWire`
+-- can surface it (the column has always been on evidence_records; the slice
+-- 064 wire shape simply omitted it).
 SELECT id, tenant_id, control_id, control_ref, scope_id,
-       observed_at, evidence_kind, provenance, hash
+       observed_at, evidence_kind, provenance, hash, result
 FROM evidence_records
 WHERE tenant_id = $1
   AND (control_id = $2 OR control_ref = $3)
   AND observed_at >= $4
   AND observed_at <= $5
+  AND (
+        observed_at < sqlc.arg(cursor_ts)
+        OR (observed_at = sqlc.arg(cursor_ts) AND id < sqlc.arg(cursor_id))
+      )
+ORDER BY observed_at DESC, id DESC
+LIMIT sqlc.arg(row_limit);
+
+-- name: ListEvidencePaged :many
+-- Slice 106: tenant-wide evidence ledger window with optional filters. Used
+-- when GET /v1/evidence is called WITHOUT a control_id — returns the
+-- caller-tenant's whole evidence stream (RLS still scopes it on top of the
+-- explicit tenant_id predicate, defense-in-depth per canvas invariant #6).
+--
+-- All four filter args are optional. The
+--     (sqlc.narg('x')::T IS NULL OR col = sqlc.narg('x')::T)
+-- pattern is the established NULL-skip shape — see
+-- internal/db/queries/vendors.sql:50 — and keeps the query plan stable while
+-- letting sqlc emit nullable Go parameters. The source-actor filters drill
+-- into the JSONB source_attribution column (slice 013 enforces the
+-- {actor_type, actor_id, session_id} shape there).
+--
+-- Keyset pagination mirrors ListEvidenceForControlPaged exactly: same
+-- decomposed (observed_at, id) predicate, same +1 probe-row idiom.
+-- Window default (last 30 days) is still applied by the handler, not the
+-- query — the handler passes the resolved cutoff timestamps verbatim.
+SELECT id, tenant_id, control_id, control_ref, scope_id,
+       observed_at, evidence_kind, provenance, hash, result
+FROM evidence_records
+WHERE tenant_id = $1
+  AND observed_at >= $2
+  AND observed_at <= $3
+  AND (sqlc.narg('kind')::text IS NULL
+       OR evidence_kind = sqlc.narg('kind')::text)
+  AND (sqlc.narg('result_filter')::evidence_result IS NULL
+       OR result = sqlc.narg('result_filter')::evidence_result)
+  AND (sqlc.narg('source_actor_type')::text IS NULL
+       OR source_attribution->>'actor_type' = sqlc.narg('source_actor_type')::text)
+  AND (sqlc.narg('source_actor_id')::text IS NULL
+       OR source_attribution->>'actor_id' = sqlc.narg('source_actor_id')::text)
   AND (
         observed_at < sqlc.arg(cursor_ts)
         OR (observed_at = sqlc.arg(cursor_ts) AND id < sqlc.arg(cursor_id))

@@ -1830,20 +1830,26 @@ export async function fetchAuditPeriods(): Promise<AuditPeriodsListResponse> {
   return (await res.json()) as AuditPeriodsListResponse;
 }
 
-// ----- Slice 099: /evidence list view (browser-side BFF call) -----
+// ----- Slice 099 + 106: /evidence list view (browser-side BFF call) -----
 //
 // Row source: `evidenceWire` in `internal/api/controldetail/handler.go`
-// (the row shape `GET /v1/evidence?control_id=` returns). The page at
+// (the row shape `GET /v1/evidence` returns — both per-control and
+// tenant-wide paths use the same wire shape). The page at
 // `web/app/(authed)/evidence/page.tsx` calls `fetchEvidenceList` from
 // the browser; the BFF at `web/app/api/evidence/route.ts` is the
 // server-side counterpart that injects the bearer cookie (slice 094
-// pattern) and forwards the `control_id` query param.
+// pattern) and forwards the whitelisted query params.
 //
-// `result` is NOT on `evidenceWire` today (the field is only on the
-// PUSH wire shape `recordWire`). The page renders a `—` placeholder
-// for the result column until spillover slice 106 surfaces it on the
-// GET shape. This honors slice 099 P0-A1 (no invented columns) over
-// design-doc §7 verbatim fidelity — better to omit than fabricate.
+// Slice 106 changes:
+//   * `result` is now on the GET wire shape (the column has always
+//     existed on `evidence_records.result`; slice 064 omitted it).
+//     The page renders the real result cell — no more em-dash
+//     placeholder.
+//   * `fetchEvidenceList` accepts an optional filter object. When
+//     `controlID` is omitted the BFF + upstream serve the tenant-wide
+//     ledger window (RLS continues to scope tenancy).
+
+export type EvidenceResultEnum = "pass" | "fail" | "na" | "inconclusive";
 
 export type EvidenceRecord = {
   evidence_id: string;
@@ -1855,23 +1861,59 @@ export type EvidenceRecord = {
   source: Record<string, unknown> | null;
   content_hash: string;
   scope_cell: string | null;
+  /**
+   * Slice 106: the `evidence_records.result` enum, surfaced on the GET
+   * wire shape. One of pass | fail | na | inconclusive. Always set —
+   * the column is NOT NULL on the table.
+   */
+  result: EvidenceResultEnum;
 };
 
 export type EvidenceListResponse = {
+  // Empty string when the request was tenant-wide (no control_id).
   control_id: string;
   evidence: EvidenceRecord[];
   count: number;
   next_cursor: string;
 };
 
+/**
+ * Filter options for `fetchEvidenceList`. All fields are optional — an
+ * empty object yields the tenant-wide ledger window.
+ */
+export type EvidenceListFilters = {
+  controlID?: string;
+  kind?: string;
+  result?: EvidenceResultEnum;
+  sourceActorType?: string;
+  sourceActorID?: string;
+  cursor?: string;
+  limit?: number;
+};
+
 // Browser-side fetcher used by the slice-099 page. Hits the BFF at
-// `/api/evidence?control_id=<uuid>` which forwards the bearer cookie
-// to upstream `/v1/evidence?control_id=<uuid>`.
+// `/api/evidence[?...]` which forwards the bearer cookie to upstream
+// `/v1/evidence[?...]`. Slice 106: signature changed from
+// `fetchEvidenceList(controlID: string)` to
+// `fetchEvidenceList(filters: EvidenceListFilters)` — when `controlID`
+// is omitted the request returns the tenant-wide window.
 export async function fetchEvidenceList(
-  controlID: string,
+  filters: EvidenceListFilters = {},
 ): Promise<EvidenceListResponse> {
-  const qs = new URLSearchParams({ control_id: controlID });
-  const res = await fetch(`/api/evidence?${qs.toString()}`);
+  const qs = new URLSearchParams();
+  if (filters.controlID) qs.set("control_id", filters.controlID);
+  if (filters.kind) qs.set("kind", filters.kind);
+  if (filters.result) qs.set("result", filters.result);
+  if (filters.sourceActorType)
+    qs.set("source_actor_type", filters.sourceActorType);
+  if (filters.sourceActorID) qs.set("source_actor_id", filters.sourceActorID);
+  if (filters.cursor) qs.set("cursor", filters.cursor);
+  if (filters.limit) qs.set("limit", String(filters.limit));
+
+  const url = qs.toString()
+    ? `/api/evidence?${qs.toString()}`
+    : `/api/evidence`;
+  const res = await fetch(url);
   if (!res.ok) {
     let msg = `${res.status} ${res.statusText}`;
     try {

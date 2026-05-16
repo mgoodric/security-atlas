@@ -1005,6 +1005,11 @@ type Querier interface {
 	// sentinel cursor (cursor_ts = 'infinity', cursor_id = max-uuid) selects
 	// the first page. The handler computes all cutoff values in Go.
 	ListEvidenceForControlPaged(ctx context.Context, arg ListEvidenceForControlPagedParams) ([]ListEvidenceForControlPagedRow, error)
+	// Slice 106: tenant-wide evidence ledger window with optional filters
+	// (kind, result, source_actor_type, source_actor_id). RLS continues to
+	// scope reads on top of the explicit tenant_id predicate. Keyset
+	// pagination mirrors ListEvidenceForControlPaged.
+	ListEvidencePaged(ctx context.Context, arg ListEvidencePagedParams) ([]ListEvidencePagedRow, error)
 	// AC-3: control-state read for a period. Returns evidence records for one
 	// control bounded by the period's frozen_at horizon (or live when the
 	// period is still 'open', in which case the caller passes NULL and the
