@@ -111,7 +111,7 @@ Alternatives rejected:
 - **Connecting sqlc to a live Postgres at generate time**: would
   pick up the enums correctly (because the DO blocks fire), but adds
   a Postgres dependency to every contributor's local `just
-  sqlc-generate` and to CI. Rejected on slice-019-style "no new
+sqlc-generate` and to CI. Rejected on slice-019-style "no new
   hosted dependency" grounds — the bare-enum file is a 1-file static
   alternative with the same effect.
 
