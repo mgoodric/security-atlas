@@ -29,13 +29,17 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: false,
-    include: ["lib/**/*.test.ts", "app/api/**/*.test.ts"],
+    // Slice 092: proxy.test.ts lives at the web root because Next.js 16
+    // requires `proxy.ts` (the renamed middleware) to sit at the
+    // workspace root, alongside next.config.ts. The test mirrors that
+    // placement so it stays colocated with its subject.
+    include: ["lib/**/*.test.ts", "app/api/**/*.test.ts", "proxy.test.ts"],
     exclude: ["**/node_modules/**", "**/.next/**", "**/dist/**", "e2e/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
       reportsDirectory: "./coverage",
-      include: ["lib/**/*.ts", "app/api/**/*.ts"],
+      include: ["lib/**/*.ts", "app/api/**/*.ts", "proxy.ts"],
       exclude: [
         "**/*.test.ts",
         "**/*.d.ts",
