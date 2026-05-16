@@ -3,7 +3,7 @@
 **Cluster:** Frontend
 **Estimate:** 1-2d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `in-review`
 
 ## Narrative
 
@@ -13,15 +13,15 @@ The mockup data shape derives from `internal/api/evidence/http.go` (`recordWire`
 
 ## Acceptance criteria
 
-- [ ] AC-1: `web/app/(authed)/evidence/page.tsx` server component renders the tenant's evidence records as a paginated table.
-- [ ] AC-2: Endpoint: `GET /v1/evidence?control_id=&kind=&result=&since=`. If this exact shape doesn't exist (dashboard activity feed may be the closest equivalent), surface as a design question; preferred path is to extend the existing endpoint over adding a new one.
-- [ ] AC-3: Columns per design doc §7: `observed_at`, `evidence_kind`, `control_id`, `result`, `source_attribution`, `scope`, `hash`. Hash shown as 8-char prefix with copy-on-click.
-- [ ] AC-4: Horizontal pill filter row (design doc §8): control + freshness class + scope.
-- [ ] AC-5: Empty state per §2: "No records match" + `Clear filters` button + `Set up a connector →` link (true zero-state path on first install).
-- [ ] AC-6: Loading skeleton per §3 (3 shimmer rows).
-- [ ] AC-7: Row click navigates to a per-record detail page (placeholder — out of scope for this slice; link to `/evidence/[id]` with a thin "page coming soon" stub OR open an inline drawer with the full record JSON pretty-printed).
-- [ ] AC-8: Vitest unit tests for filter-state computation + row formatting (hash prefix, scope rendering).
-- [ ] AC-9: Playwright spec `web/e2e/evidence-list.spec.ts` covering: list renders, filter narrows, empty state appears.
+- [x] AC-1: `web/app/(authed)/evidence/page.tsx` Client Component renders evidence records as a paginated table.
+- [x] AC-2: Endpoint: `GET /v1/evidence?control_id=`. The shape requires `control_id` today — design call surfaced + spillover slice 106 files the backend extension (`?control_id=` optional + `?kind=`/`?result=`/`?since=` filters) per the slice instruction "preferred path is to extend the existing endpoint over adding a new one".
+- [x] AC-3: Columns per design doc §7: `observed_at`, `evidence_kind`, `control_id`, `source`, `scope`, `hash`. Hash rendered as 8-char prefix with click-to-copy → full hash + "Copied!" feedback. NB: `result` column OMITTED — that field is NOT on `evidenceWire` today (only on the PUSH `recordWire`). Spillover 106 surfaces it on the GET shape; honors P0-A1 (no invented columns).
+- [x] AC-4: Horizontal `<FilterPills>` from the slice 098 shell — Control pill (drives selection + data fetch). Freshness + scope pills deferred until backend ledger-wide endpoint ships (slice 106).
+- [x] AC-5: Empty state per §2 — "No evidence records match these filters" + `Clear filters` + `Set up a connector →` (routes to `/admin/credentials`). Plus the v1-specific "Pick a control to see its evidence ledger" prompt when no control is selected.
+- [x] AC-6: Loading skeleton via shared `<ListLoadingSkeleton>` per §3 (3 shimmer rows).
+- [x] AC-7: Row click opens inline shadcn `<Dialog>` drawer showing the full record JSON pretty-printed (decision D3 — simpler than `/evidence/[id]` stub page).
+- [x] AC-8: Vitest unit tests — `filters.test.ts` (6 tests: control selection state), `format.test.ts` (13 tests: hash prefix, scope cell, source summary, pretty JSON), `route.test.ts` (7 tests: BFF auth + forwarding + tenant-isolation guard).
+- [x] AC-9: Playwright spec `web/e2e/evidence-list.spec.ts` covers list renders, control selection narrows, empty state, row drawer, hash copy. Quarantined per slice-079 (bodies preserved verbatim as reviewable contract; un-comments when slice 082 seed harness lands).
 
 ## Constitutional invariants honored
 

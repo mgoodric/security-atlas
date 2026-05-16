@@ -1829,3 +1829,58 @@ export async function fetchAuditPeriods(): Promise<AuditPeriodsListResponse> {
   }
   return (await res.json()) as AuditPeriodsListResponse;
 }
+
+// ----- Slice 099: /evidence list view (browser-side BFF call) -----
+//
+// Row source: `evidenceWire` in `internal/api/controldetail/handler.go`
+// (the row shape `GET /v1/evidence?control_id=` returns). The page at
+// `web/app/(authed)/evidence/page.tsx` calls `fetchEvidenceList` from
+// the browser; the BFF at `web/app/api/evidence/route.ts` is the
+// server-side counterpart that injects the bearer cookie (slice 094
+// pattern) and forwards the `control_id` query param.
+//
+// `result` is NOT on `evidenceWire` today (the field is only on the
+// PUSH wire shape `recordWire`). The page renders a `—` placeholder
+// for the result column until spillover slice 106 surfaces it on the
+// GET shape. This honors slice 099 P0-A1 (no invented columns) over
+// design-doc §7 verbatim fidelity — better to omit than fabricate.
+
+export type EvidenceRecord = {
+  evidence_id: string;
+  evidence_kind: string | null;
+  observed_at: string;
+  // `source` is the slice-013 provenance JSONB verbatim. Shape varies
+  // by connector — we render a summary client-side. `null` when the row
+  // has no provenance metadata recorded.
+  source: Record<string, unknown> | null;
+  content_hash: string;
+  scope_cell: string | null;
+};
+
+export type EvidenceListResponse = {
+  control_id: string;
+  evidence: EvidenceRecord[];
+  count: number;
+  next_cursor: string;
+};
+
+// Browser-side fetcher used by the slice-099 page. Hits the BFF at
+// `/api/evidence?control_id=<uuid>` which forwards the bearer cookie
+// to upstream `/v1/evidence?control_id=<uuid>`.
+export async function fetchEvidenceList(
+  controlID: string,
+): Promise<EvidenceListResponse> {
+  const qs = new URLSearchParams({ control_id: controlID });
+  const res = await fetch(`/api/evidence?${qs.toString()}`);
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* body not JSON — keep the status line */
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as EvidenceListResponse;
+}
