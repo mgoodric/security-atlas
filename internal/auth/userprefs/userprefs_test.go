@@ -57,8 +57,8 @@ func TestIsAllowedChannel(t *testing.T) {
 
 // TestPreferencesTypeShape is a compile-time guard: Preferences must be a map
 // of map of bool so the JSON encoder produces the documented wire shape.
-func TestPreferencesTypeShape(t *testing.T) {
-	var _ Preferences = Preferences{
+func TestPreferencesTypeShape(_ *testing.T) {
+	_ = Preferences{
 		"audit_period_assignment": {"in_app": true, "email": false},
 	}
 }
