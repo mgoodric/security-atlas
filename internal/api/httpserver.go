@@ -471,7 +471,11 @@ func (s *Server) httpHandler() http.Handler {
 	// declaration-order match keeps the literal-segment routes first
 	// within the same method. Approve + Publish enforce IsApprover at the
 	// handler (slice 034 credential flag).
-	policiesH := policiesapi.New(policy.NewStore(s.dbPool))
+	// Slice 107: NewWithPool wires the *pgxpool.Pool the
+	// `?include=ack_rate` path uses (it opens a tenant-GUC-bearing tx
+	// for the joined query). Backwards-compatible: callers without the
+	// extension continue through the store as before.
+	policiesH := policiesapi.NewWithPool(policy.NewStore(s.dbPool), s.dbPool)
 	root.Post("/v1/policies", policiesH.CreatePolicy)
 	root.Get("/v1/policies", policiesH.ListPolicies)
 	root.Patch("/v1/policies/{id}/submit", policiesH.Submit)

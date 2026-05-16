@@ -1947,15 +1947,22 @@ export type PoliciesListResponse = {
 };
 
 // Server-side fetcher used by the slice 101 BFF route. Hits the
-// upstream `/v1/policies` with the bearer.
+// upstream `/v1/policies?include=ack_rate` with the bearer.
+//
+// Slice 107: the `?include=ack_rate` query parameter is hard-coded on
+// the BFF (mirrors slice 104's hard-coded `?include=state` for anchors)
+// — every list-view caller wants the joined cell. The upstream returns
+// `ack_rate: null` for non-published rows and a populated cell for
+// published rows; the page renders accordingly.
 export async function listPolicies(bearer: string): Promise<Policy[]> {
-  const res = await apiFetch("/v1/policies", bearer);
+  const res = await apiFetch("/v1/policies?include=ack_rate", bearer);
   const body = (await res.json()) as { policies: Policy[]; count: number };
   return body.policies;
 }
 
 // Browser-side fetcher used by the slice 101 page. Hits the BFF at
-// `/api/policies` which forwards the bearer cookie to upstream.
+// `/api/policies` which forwards the bearer cookie to upstream and
+// hard-codes `?include=ack_rate` (slice 107).
 export async function fetchPoliciesList(): Promise<PoliciesListResponse> {
   const res = await fetch(`/api/policies`);
   if (!res.ok) {

@@ -100,6 +100,10 @@ describe("GET /api/policies", () => {
     expect(fetchSpy).toHaveBeenCalledOnce();
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
     expect(calledURL).toContain("/v1/policies");
+    // Slice 107: the BFF hard-codes `?include=ack_rate` so the
+    // /policies page can render real ack-rate cells in one round trip
+    // (anti-criterion P0-A2 — no client-side per-row fan-out).
+    expect(calledURL).toContain("include=ack_rate");
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     const headers = init?.headers as Record<string, string> | undefined;
     expect(headers?.Authorization).toBe("Bearer test-bearer-101");

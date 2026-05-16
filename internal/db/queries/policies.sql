@@ -41,6 +41,83 @@ FROM policies
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC;
 
+-- name: ListPoliciesWithAckRate :many
+-- Slice 107 — paginated policy list LEFT JOINed to the per-policy
+-- acknowledgment-rate cell. Single query; the handler MUST NOT loop
+-- per-policy (anti-criterion P0 -- the whole point of the extension).
+--
+-- Shape:
+--   1. The base policies SELECT is identical to ListPolicies (same
+--      columns, same WHERE, same ORDER BY) so the result row's
+--      first N columns scan into the existing dbx.Policy struct
+--      verbatim.
+--   2. Two scalar subqueries compute the denominator + numerator
+--      ONLY for rows with status = 'published'. A CASE WHEN wraps
+--      the subqueries so non-published rows return NULL for both
+--      columns (the handler renders `ack_rate: null`).
+--   3. The denominator subquery mirrors CountRequiredRoleUsersForVersion
+--      verbatim (distinct issued_by in api_keys whose owner_roles
+--      intersect the policy's acknowledgment_required_roles, OR is_admin).
+--      Revoked keys excluded.
+--   4. The numerator subquery mirrors CountFreshAcksForVersion verbatim
+--      (distinct user_ids in policy_acknowledgments for THIS policy
+--      version, acknowledged_at >= freshness_cutoff, gated on the same
+--      role-intersect EXISTS predicate). The freshness cutoff is a
+--      parameter so tests inject without time-bombing.
+--
+-- Constitutional invariants:
+--   #6 RLS: policies + api_keys + policy_acknowledgments are tenant-scoped
+--      under FORCE ROW LEVEL SECURITY. The tenant GUC the slice-033
+--      middleware sets filters every table this query touches.
+--   #9 Manual evidence first-class: this query is uniform whether the
+--      policy was manually authored or imported from a vendor template.
+--
+-- See policy_acknowledgments.sql `CountRequiredRoleUsersForVersion` and
+-- `CountFreshAcksForVersion` for the canonical predicates this query
+-- mirrors -- they MUST stay in sync. The HTTP handler GET
+-- /v1/policies/{id}/acknowledgment-rate calls those queries directly
+-- per-policy; this slice runs the same math in one round-trip for the
+-- list view.
+SELECT
+    p.id, p.tenant_id, p.title, p.version, p.effective_date, p.body_md,
+    p.acknowledgment_required_roles, p.status, p.created_at, p.updated_at,
+    p.predecessor_id, p.owner_role, p.approver_role, p.linked_control_ids,
+    p.source_attribution, p.created_by, p.submitted_at, p.submitted_by,
+    p.approved_at, p.approved_by, p.published_at, p.published_by,
+    p.superseded_at, p.next_review_at,
+    CASE WHEN p.status = 'published' THEN (
+        SELECT COUNT(DISTINCT k.issued_by)::bigint
+        FROM api_keys k
+        WHERE k.tenant_id = p.tenant_id
+          AND k.revoked_at IS NULL
+          AND k.issued_by IS NOT NULL
+          AND (
+              k.is_admin = true
+              OR k.owner_roles && p.acknowledgment_required_roles
+          )
+    ) END AS ack_denominator,
+    CASE WHEN p.status = 'published' THEN (
+        SELECT COUNT(DISTINCT pa.user_id)::bigint
+        FROM policy_acknowledgments pa
+        WHERE pa.tenant_id = p.tenant_id
+          AND pa.policy_version_id = p.id
+          AND pa.acknowledged_at >= sqlc.arg('freshness_cutoff')::timestamptz
+          AND EXISTS (
+              SELECT 1
+              FROM api_keys k
+              WHERE k.tenant_id = pa.tenant_id
+                AND k.issued_by = pa.user_id
+                AND k.revoked_at IS NULL
+                AND (
+                    k.is_admin = true
+                    OR k.owner_roles && p.acknowledgment_required_roles
+                )
+          )
+    ) END AS ack_numerator
+FROM policies p
+WHERE p.tenant_id = $1
+ORDER BY p.created_at DESC, p.id ASC;
+
 -- name: ListPolicyVersionChain :many
 -- Returns the version chain for a policy id by walking predecessor_id.
 -- Recursive CTE keeps the query inside Postgres rather than client-side

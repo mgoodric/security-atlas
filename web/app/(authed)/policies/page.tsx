@@ -12,13 +12,16 @@
 // 098 — the reusable primitives that the other list-view slices
 // (098/099/100/102) also consume.
 //
-// Data source resolution (slice 101):
-//   `GET /v1/policies` (slice 022 `policyWire`) is the row source. The
-//   ack-rate column requires `?include=ack_rate` which does NOT exist
-//   on main — spillover slice 107 files the backend extension. Per
-//   slice 101 D1 + slice 098 D1 precedent, ack-rate cells render `—`
-//   honestly until that lands; per-row fan-out is explicitly forbidden
-//   by P0-A2.
+// Data source resolution (slice 101 / 107):
+//   `GET /v1/policies?include=ack_rate` (slice 022 `policyWire` +
+//   slice 107 joined ack-rate cell) is the row source. The BFF
+//   hard-codes the include param in `web/lib/api.ts` (mirrors slice
+//   104's hard-coded `?include=state` for anchors). Published rows
+//   carry a populated `ack_rate` cell; non-published rows carry
+//   `ack_rate: null` and the cell renders an em-dash.
+//
+//   Per-row fan-out remains explicitly forbidden by P0-A2 — the
+//   joined endpoint is the only ack-rate source for the list view.
 //
 // Constitutional invariants honored:
 //   - Invariant 6 (tenant isolation): the BFF at /api/policies forwards
@@ -248,9 +251,12 @@ function PoliciesPageInner() {
       id: "ack_rate",
       header: "Acknowledgment",
       cell: (row) => {
-        // Slice 101 D1: render em-dash honestly when the backend hasn't
-        // joined the ack-rate cell. The <Progress> primitive is wired
-        // for when spillover slice 107 (?include=ack_rate) lands.
+        // Slice 107: the backend now joins the ack-rate cell via
+        // `?include=ack_rate`. Non-published rows return `ack_rate:
+        // null`; published rows with zero denominator (no required-role
+        // users) return a cell with `percent: null`. Both cases render
+        // em-dash honestly (slice 098 D1 precedent — labelled empty,
+        // not fabricated).
         const rate = row.ack_rate ?? null;
         if (rate == null || rate.percent == null) {
           return (
@@ -258,7 +264,7 @@ function PoliciesPageInner() {
               className="text-xs text-muted-foreground italic"
               data-testid="policies-ack-rate-missing"
             >
-              awaiting publish or ack-rate join
+              {rate == null ? "—" : "no required-role users"}
             </span>
           );
         }
