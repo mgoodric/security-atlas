@@ -3,7 +3,50 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-15 (slice 089 status flip — `in-progress` → `in-review`, PR #177)
+**Last reconciled:** 2026-05-15 (slice 090 added — post-merge govulncheck pin observation)
+
+## Drift detected — 2026-05-15 (slice 090 added — govulncheck pin bump follow-on to slice 089)
+
+Post-merge inspection of slice 089's CI scanner jobs revealed `Go · govulncheck` is silently broken on `main`: the pinned `govulncheck@v1.1.3` fails to compile under the runner's Go 1.26 toolchain (transitive `x/tools@v0.23.0` has a constant-folding pattern Go 1.26 rejects). The job exits non-zero before ever running a scan — every PR will see a red `Go · govulncheck` check with no actual scanning happening.
+
+This is the worst possible failure mode for a security tool: visible red signal, zero information value, conditions reviewers to ignore the result. Filed as slice 090 (AFK, ~0.25d).
+
+Slice 089's decisions log AC-8 entry got an appended correction note pointing at slice 090.
+
+The other two scanner jobs from slice 089 confirmed clean:
+
+- **`Frontend · npm audit`** — GREEN on first run. Zero HIGH/CRITICAL in `web` runtime tree.
+- **`Container · Trivy scan`** — GREEN on second run (after the AC-8 action-pin hot-fix). Zero HIGH/CRITICAL OS-package CVEs in the atlas image.
+
+| Row | Transition      | Evidence                                                                                                                                                                                  |
+| --- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 090 | (new) → `ready` | AFK, ~0.25d. Follow-on to slice 089 (govulncheck pin v1.1.3 install-fails under Go 1.26). One-line workflow edit + decisions log + correction note on 089's AC-8 entry. Deps: 089 merged. |
+
+**Counts delta:** ready +1 · total +1.
+
+## Drift detected — 2026-05-15 (slice 089 merged — Q2 audit-remediation campaign complete)
+
+Slice 089 (Dependency vulnerability scanning) merged at `9baeb7d` (PR #177). **The Q2 2026 security-audit remediation campaign is now fully complete**: all 5 slices (085 tracker + 086 HIGH + 087 MEDIUM-HIGH + 088 MEDIUM + 089 MEDIUM) landed today.
+
+- **089** (`9baeb7d` / PR #177) — three new informational CI jobs: `Go · govulncheck`, `Frontend · npm audit`, `Container · Trivy scan`. All use slice-069 stub-job pattern (NOT in required-checks per AC-4 — first-run cleanup phase). Pinned versions: `govulncheck@v1.1.3` + `aquasecurity/trivy-action@0.28.0`. HIGH+CRITICAL unified threshold across all three. 7 decisions D1-D7 high-confidence. AC-8 first-run hot-fix landed in same PR (Trivy action pin needed v-prefixed tag).
+
+Audit-campaign rollup (all 5 slices merged today, 2026-05-15):
+
+| Slice | Severity    | Commit  | PR   |
+| ----- | ----------- | ------- | ---- |
+| 085   | tracker     | e09ebfb | #168 |
+| 086   | HIGH        | f74a083 | #172 |
+| 087   | MEDIUM-HIGH | f7afbec | #171 |
+| 088   | MEDIUM      | 8304071 | #173 |
+| 089   | MEDIUM      | 9baeb7d | #177 |
+
+Spillover: none. AC-8's govulncheck failure on existing deps was acknowledged in the decisions log; engineer's grill decided to keep the job informational rather than block this PR.
+
+| Row | Transition             | Evidence                                                                                                                                                  |
+| --- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 089 | `in-review` → `merged` | PR #177 squashed at `9baeb7d` · 3 informational CI jobs + decisions log · AC-4 verified (branch-protection.json untouched) · closes Q2 audit campaign 5/5 |
+
+**Counts delta:** in-progress −1 · merged +1 (76 → 77).
 
 ## Drift detected — 2026-05-15 (slice 089 claim-stake · last allowed iter 8/8 today · audit-remediation finale)
 
@@ -1339,13 +1382,13 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 
 | Status        | Count  |
 | ------------- | ------ |
-| `merged`      | 76     |
+| `merged`      | 77     |
 | `in-review`   | 0      |
-| `in-progress` | 4      |
-| `ready`       | 5      |
+| `in-progress` | 3      |
+| `ready`       | 6      |
 | `blocked`     | 0      |
 | `not-ready`   | 1      |
-| **Total**     | **86** |
+| **Total**     | **87** |
 
 🎯 **v1 backlog 69/69 complete.** Every slice in the v1 plan is merged on `main`. The binary v1 success test — "does the solo security leader run their next SOC 2 audit out of security-atlas, generate the next board pack from it, and not reach for Vanta or a Google Sheet to fill a gap?" — is evaluable end-to-end.
 
@@ -1453,7 +1496,8 @@ Legal values (use exactly these strings):
 | 086 | Fix open redirect on signIn `from` parameter                        | `merged`    | auth/086-fix-open-redirect-signin-from                  | gh#172 | 2026-05-15 | 2026-05-15 | batch 31 · AFK · ~0.25d · **HIGH severity** (from slice 085 audit) · `web/lib/safe-redirect.ts` helper rejecting fully-qualified / protocol-relative / `javascript:` / backslash-prefixed paths + bare-`/` → `/dashboard` · single-point validation in `web/app/login/actions.ts` covers both call sites · 9-case vitest (35/35 pass) + Playwright spec (post-079 quarantined, `TEST_BEARER`-gated) · `CONTRIBUTING.md` "Open-redirect prevention" subsection · `docs/audits/2026-Q2-security-audit.md` remediation status line · 9 decisions logged (8 high · 1 medium) · commit `f74a083`                                                                                                                                                                                                                                                                                                                                                                       |
 | 087 | Security HTTP headers middleware                                    | `merged`    | infra/087-security-http-headers-middleware              | gh#171 | 2026-05-15 | 2026-05-15 | batch 31 · AFK · ~0.5d · **MEDIUM-HIGH severity** (from slice 085 audit) · new `internal/api/securityheaders` package · HSTS / X-Content-Type-Options / X-Frame-Options / Referrer-Policy / CSP applied as first chi middleware before bearer-auth · CSP ships report-only (Next.js inline-script hydration would violate enforced `script-src 'self'`); enforcement trajectory in decisions log §D1 · README ## Security one-line · 7 unit tests + 3 integration tests + Playwright spec · commit `f7afbec`                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 088 | CLI `http.Client` explicit timeout                                  | `merged`    | infra/088-cli-http-client-timeout                       | gh#173 | 2026-05-15 | 2026-05-15 | batch 31 · AFK · ~0.25d · **MEDIUM severity** (from slice 085 audit) · `cmd/atlas-cli/cmd_features.go:181` + `cmd/atlas-cli/cmd_credentials.go:148` no longer use `http.DefaultClient.Do` (no timeout) · new `cmdhttp.Client(timeout)` constructor + AC-4 grep gate clean in `cmd/atlas-cli/` · README ## Security one-line · 100% test coverage on cmdhttp · coverage-thresholds floor 98 · 7 decisions D1-D7 high-confidence · commit `8304071`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 089 | Dependency vulnerability scanning (govulncheck + npm audit + Trivy) | `in-review` | infra/089-dependency-vulnerability-scanning             | gh#177 | 2026-05-15 | 2026-05-15 | iter 8/8 solo · AFK · ~0.5d · **MEDIUM severity** (from slice 085 audit) · 3 new CI jobs (`Go · govulncheck` + `Frontend · npm audit` + `Container · Trivy scan`) · slice-069 stub-job pattern (informational, NOT required-checks initially) · complements Dependabot (which catches upgrade-available; these catch known-CVE-on-current-version) · closes Q2 audit-remediation campaign · pinned `govulncheck@v1.1.3` + `aquasecurity/trivy-action@0.28.0` · HIGH+CRITICAL unified threshold · 7 decisions D1-D7 high-confidence · branch-protection.json untouched (P0-A1 verified) · PR #177                                                                                                                                                                                                                                                                                                                                                                  |
+| 089 | Dependency vulnerability scanning (govulncheck + npm audit + Trivy) | `merged`    | infra/089-dependency-vulnerability-scanning             | gh#177 | 2026-05-15 | 2026-05-15 | iter 8/8 solo · AFK · ~0.5d · **MEDIUM severity** (from slice 085 audit) · 3 new CI jobs (`Go · govulncheck` + `Frontend · npm audit` + `Container · Trivy scan`) · slice-069 stub-job pattern (informational, NOT required-checks initially) · complements Dependabot · pinned `govulncheck@v1.1.3` + `aquasecurity/trivy-action@0.28.0` · HIGH+CRITICAL unified threshold · 7 decisions D1-D7 high-confidence · branch-protection.json untouched (P0-A1 verified) · AC-8 first-run Trivy action-pin hot-fix in same PR · **closes Q2 audit campaign 5/5** · commit `9baeb7d`                                                                                                                                                                                                                                                                                                                                                                                    |
+| 090 | Bump `govulncheck` pin for Go 1.26 toolchain compatibility          | `ready`     | —                                                       | —      | —          | —          | follow-on to slice 089 surfaced post-merge · AFK · ~0.25d · slice 089's `govulncheck@v1.1.3` install fails under Go 1.26 (transitive `x/tools@v0.23.0` constant-overflow) · job appears red on every PR with no scanning happening · bump pin to compat version (no `@latest` per slice 089 D2) · AC-5 appends correction to slice 089 decisions log                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 ## Ready set right now
 
@@ -1469,7 +1513,7 @@ Legal values (use exactly these strings):
 | 088 | CLI `http.Client` explicit timeout                                  | infra   | 0.25    | v2 · AFK · **MEDIUM** from Q2 audit · `cmd_features.go:181` + `cmd_credentials.go:148` use `http.DefaultClient.Do` (no timeout) · new `cmdhttp.Client(timeout)` constructor + 2 call-site updates                                                                  |
 | 089 | Dependency vulnerability scanning (govulncheck + npm audit + Trivy) | infra   | 0.5     | v2 · AFK · **MEDIUM** from Q2 audit · 3 new CI jobs · slice-069 stub-job pattern (informational, not required-checks) · complements Dependabot                                                                                                                     |
 
-**6 slices ready** (070, 071, 074, 076, 078, 089). Slices 086/087/088 are `in-progress` (batch 31 — security remediation from Q2 audit). Slice 075 (logo integration) is `not-ready` pending 074 merged + the `Selected:` line edit. **Recommended next batch (after 086+087+088 merge):** 089 (independent CI-scanner-jobs slice) + a pick from 070/071/078, or hold for batch 32 selection.
+**6 slices ready** (070, 071, 074, 076, 078, 090). The Q2 2026 audit-remediation campaign closed today: 085+086+087+088+089 all on main. Slice 090 is a follow-on AFK (~0.25d) bumping the broken `govulncheck@v1.1.3` pin from slice 089. Slice 075 (logo integration) remains `not-ready` pending 074 merged + the `Selected:` line edit. **Recommended next batch:** 090 (smallest, fixes a silently-broken security check) + 078 (npm-lint unblock, also a CI-pipeline fix) + a JUDGMENT pick from 070/071/076 for the bigger work. **Counts note:** the table shows `in-progress: 3` which is stale carry-over from the 079/080/081 batch reconcile — no slices are actually in-progress on disk. Future reconcile PR can correct (merged 77 → 80, in-progress 3 → 0).
 
 ## In-flight (0 worktrees building)
 
