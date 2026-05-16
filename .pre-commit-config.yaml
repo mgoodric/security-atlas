@@ -45,3 +45,20 @@ repos:
       - id: prettier
         types_or: [javascript, jsx, ts, tsx, json, yaml, markdown]
         exclude: ^(Plans/mockups/|package-lock\.json|deploy/helm/templates/)
+
+  # Frontend ESLint on pre-push (slice 083 — follow-on to 081 D3).
+  # Pre-push stage only: lint is slower than the pre-commit suite and
+  # blocking every commit would feel punitive. Pre-push catches it before
+  # CI's informational `Frontend · lint` job (slice 078) does.
+  # `files: ^web/` scopes the trigger; `pass_filenames: false` runs the
+  # full workspace lint (npm run lint -w web ignores the framework's
+  # per-file list and runs ESLint against its own configured globs).
+  - repo: local
+    hooks:
+      - id: npm-lint-web
+        name: npm-lint-web
+        entry: npm run lint -w web
+        language: system
+        stages: [pre-push]
+        files: ^web/
+        pass_filenames: false
