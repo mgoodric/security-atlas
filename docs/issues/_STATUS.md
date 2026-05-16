@@ -3,7 +3,23 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-16 (slice 075 merged — logo integration complete · cand-04 across 6 surfaces)
+**Last reconciled:** 2026-05-16 (slice 090 → `in-review` · govulncheck pin v1.1.3 → v1.1.4 for Go 1.26 compat)
+
+## Drift detected — 2026-05-16 (slice 090 → `in-review` · govulncheck pin bump)
+
+Slice 090 (Bump govulncheck pin for Go 1.26 toolchain compat) flipped `ready` → `in-review` (skipping the transient `in-progress` state — inline-iteration solo, single PR). Bumps `.github/workflows/ci.yml` govulncheck install pin from `@v1.1.3` to `@v1.1.4` (the only newer stable release on `golang/vuln`; v1.2.x speculated in the slice doc doesn't exist on upstream).
+
+Closes the silently-broken `Go · govulncheck` CI job that's been red on every PR since slice 089 shipped — `v1.1.3` install fails under Go 1.26 (transitive `x/tools@v0.23.0` has a constant-folding pattern Go 1.26 rejects).
+
+Verification happens via this slice's own PR's `Go · govulncheck` job (per slice 090 AC-3) with three valid outcomes: green / red-with-findings / red-with-new-install-error → follow-on slice 095 if the third.
+
+4 decisions D1-D4 logged (3 HIGH + 1 HIGH-pending-CI-observation; D2 will be appended with the actual outcome after CI runs).
+
+| Row | Transition            | Evidence                                                                                                                                                                                                                                         |
+| --- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 090 | `ready` → `in-review` | branch `backlog/090-govulncheck-pin` · AFK · ~0.25d · one-line workflow YAML edit + decisions log · inline-iteration solo (size doesn't warrant Engineer subagent) · slice 089's AC-8 correction already shipped in slice 090's filing PR (#179) |
+
+**Counts delta:** ready −1 · in-review +1.
 
 ## Drift detected — 2026-05-16 (slice 075 merged — logo integration complete)
 
@@ -1463,9 +1479,9 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 | Status        | Count  |
 | ------------- | ------ |
 | `merged`      | 79     |
-| `in-review`   | 0      |
+| `in-review`   | 1      |
 | `in-progress` | 3      |
-| `ready`       | 5      |
+| `ready`       | 4      |
 | `blocked`     | 0      |
 | `not-ready`   | 0      |
 | **Total**     | **87** |
@@ -1577,7 +1593,7 @@ Legal values (use exactly these strings):
 | 087 | Security HTTP headers middleware                                    | `merged`    | infra/087-security-http-headers-middleware              | gh#171 | 2026-05-15 | 2026-05-15 | batch 31 · AFK · ~0.5d · **MEDIUM-HIGH severity** (from slice 085 audit) · new `internal/api/securityheaders` package · HSTS / X-Content-Type-Options / X-Frame-Options / Referrer-Policy / CSP applied as first chi middleware before bearer-auth · CSP ships report-only (Next.js inline-script hydration would violate enforced `script-src 'self'`); enforcement trajectory in decisions log §D1 · README ## Security one-line · 7 unit tests + 3 integration tests + Playwright spec · commit `f7afbec`                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 088 | CLI `http.Client` explicit timeout                                  | `merged`    | infra/088-cli-http-client-timeout                       | gh#173 | 2026-05-15 | 2026-05-15 | batch 31 · AFK · ~0.25d · **MEDIUM severity** (from slice 085 audit) · `cmd/atlas-cli/cmd_features.go:181` + `cmd/atlas-cli/cmd_credentials.go:148` no longer use `http.DefaultClient.Do` (no timeout) · new `cmdhttp.Client(timeout)` constructor + AC-4 grep gate clean in `cmd/atlas-cli/` · README ## Security one-line · 100% test coverage on cmdhttp · coverage-thresholds floor 98 · 7 decisions D1-D7 high-confidence · commit `8304071`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 089 | Dependency vulnerability scanning (govulncheck + npm audit + Trivy) | `merged`    | infra/089-dependency-vulnerability-scanning             | gh#177 | 2026-05-15 | 2026-05-15 | iter 8/8 solo · AFK · ~0.5d · **MEDIUM severity** (from slice 085 audit) · 3 new CI jobs (`Go · govulncheck` + `Frontend · npm audit` + `Container · Trivy scan`) · slice-069 stub-job pattern (informational, NOT required-checks initially) · complements Dependabot · pinned `govulncheck@v1.1.3` + `aquasecurity/trivy-action@0.28.0` · HIGH+CRITICAL unified threshold · 7 decisions D1-D7 high-confidence · branch-protection.json untouched (P0-A1 verified) · AC-8 first-run Trivy action-pin hot-fix in same PR · **closes Q2 audit campaign 5/5** · commit `9baeb7d`                                                                                                                                                                                                                                                                                                                                                                                    |
-| 090 | Bump `govulncheck` pin for Go 1.26 toolchain compatibility          | `ready`     | —                                                       | —      | —          | —          | follow-on to slice 089 surfaced post-merge · AFK · ~0.25d · slice 089's `govulncheck@v1.1.3` install fails under Go 1.26 (transitive `x/tools@v0.23.0` constant-overflow) · job appears red on every PR with no scanning happening · bump pin to compat version (no `@latest` per slice 089 D2) · AC-5 appends correction to slice 089 decisions log                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 090 | Bump `govulncheck` pin for Go 1.26 toolchain compatibility          | `in-review` | backlog/090-govulncheck-pin                             | —      | 2026-05-16 | —          | AFK · ~0.25d · pin `@v1.1.3` → `@v1.1.4` (the only newer stable release on `golang/vuln`; v1.2.x doesn't exist) · inline-iteration solo · 4 decisions D1-D4 (3 HIGH · 1 HIGH-pending-CI-observation) · slice 089's AC-8 entry already corrected in slice 090's original filing PR (#179) · v1.1.4 install + scan outcome observed at PR open (3 paths: green / red-with-findings / red-with-install-error → follow-on slice 095 if (c))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 ## Ready set right now
 
