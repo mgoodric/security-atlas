@@ -3,9 +3,27 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-16 (batch 39 in-review · 109 → in-review · PR gh#243)
+**Last reconciled:** 2026-05-16 (batch 39 merged · 109 on main · sqlc toolchain pinned · 104/108 slices on main)
 
-## Drift detected — 2026-05-16 (batch 39 in-review · 109 → in-review · PR gh#243)
+## Drift detected — 2026-05-16 (batch 39 merged · 109 sqlc toolchain pin shipped)
+
+Continuous-loop batch 39 closed. Single-pick (109 sqlc toolchain pin + regen reset) shipped end-to-end. The dbx codegen is now reproducible across contributors.
+
+| Row | Transition             | Evidence                                                                                                                                                                                                                                                                                            |
+| --- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 109 | `in-review` → `merged` | PR [#243](https://github.com/mgoodric/security-atlas/pull/243) squashed · 26/26 ACs PASS · pin v1.31.1 · NEW `internal/db/sqlc-schema/_enums.sql` (closes DO-block parsing gap) · `models_metrics.go` consolidated into `models.go` · 4 hand-narrows preserved · informational drift-check CI added |
+
+**Batch notes:**
+
+- Zero subagent stalls (8th consecutive clean batch).
+- The agent surfaced a deeper structural issue (sqlc's DO-block parser invisibility to bare enum types) and solved it by extracting bare enums into `_enums.sql` — significantly more than the "pin + regen + done" scope the orchestrator predicted. That's good engineering, not scope creep.
+- 4 hand-narrows preserved on `policies` (AckDenom/AckNum) + `scf_anchors` (StateResult/StateFreshness): sqlc loses Go type info on regen for these typed-enum/nullable fields, so manual restoration is required after each regen. Documented in the decisions log.
+- The new `Go · sqlc generate diff` informational CI job failed on its first run on the very PR that introduced it — possibly because the CI runner's sqlc isn't using the pinned version yet. Non-blocking (informational only) and will self-resolve once the runner consistently uses the pin. If the failure persists across batches, file a follow-up slice to wire `just sqlc-install` into the CI job's setup phase.
+- Slice 106's hand-extension of `control_detail.sql.go` was retired by the regen (now generated cleanly from the source SQL).
+
+**Counts delta:** in-progress −1 · merged +1 · ready unchanged (108 still ready).
+
+After batch 40 (which can now safely run 108), the v2 backlog enters a true vacuum until 082/084/095 gates clear or new slices file.
 
 Continuous-loop batch 39 in-review. Slice 109 PR opened at gh#243. Root cause turned out to be deeper than the spillover narrative: slice 065 wrapped `CREATE TYPE` in DO blocks for self-host idempotency, but sqlc v1.31.1 cannot parse `CREATE TYPE` inside `DO $$ BEGIN ... END $$;` — so every recent dbx-touching slice (076 metric types, 106 evidence list, 107 ack-rate join) had to hand-edit around silently-dropped typed enums. Slice 109 fix is structural: pin v1.31.1 + new tool-input-only `internal/db/sqlc-schema/_enums.sql` declares bare enums sqlc CAN parse, listed FIRST in `sqlc.yaml`'s schema. NEVER applied to a live DB. Retires `models_metrics.go` hand-split (slice 076 workaround obsolete); retires slice-106 hand-extension of `ListEvidencePaged`; preserves 2 narrow hand-narrows (4 fields total, vs 6 pre-slice-109) with in-place annotations pointing to `docs/audit-log/109-sqlc-toolchain-pin-decisions.md`. `go test ./...` passes with zero test edits.
 
@@ -2113,9 +2131,9 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 
 | Status        | Count   |
 | ------------- | ------- |
-| `merged`      | 103     |
+| `merged`      | 104     |
 | `in-review`   | 0       |
-| `in-progress` | 1       |
+| `in-progress` | 0       |
 | `ready`       | 1       |
 | `blocked`     | 0       |
 | `not-ready`   | 3       |
@@ -2249,21 +2267,17 @@ Legal values (use exactly these strings):
 | 106 | `GET /v1/evidence` extension (control_id optional + filters)        | `merged`    | backend/106-evidence-list-backend-extension             | gh#240 | 2026-05-16 | 2026-05-16 | batch 38 · backend · AFK · ~50min shipped (1d est) · PR gh#240 squashed at commit `860c10a` · 10/10 ACs PASS · 17 files · single SQL query reuses `idx_evidence_tenant_control_observed` index · 9 unit + 7 integration tests · sqlc hand-extension over clean regen due to toolchain drift (spillover slice 109 filed by orchestrator) · CHANGELOG entry                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 107 | `GET /v1/policies?include=ack_rate` extension                       | `merged`    | backend/107-policies-include-ack-rate                   | gh#239 | 2026-05-16 | 2026-05-16 | batch 38 · backend · AFK · ~30min shipped (1d est) · spillover from 101 · single SQL join (CountFreshAcks + CountRequiredRoleUsers predicates mirrored verbatim) under tenancy.ApplyTenant tx · 6 unit + 5 integration tests (RLS round-trip + cross-check vs per-policy handler) · frontend hard-codes `?include=ack_rate` mirroring slice 104                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | 108 | `/v1/me/*` profile + preferences + sessions endpoints               | `ready`     | —                                                       | —      | —          | —          | spillover from 103 · backend · 2-3d · AFK · deps 034 merged · `GET /v1/me` + `GET/PATCH /v1/me/preferences` + `GET /v1/me/sessions` + `DELETE /v1/me/sessions/{id}` cohesive surface · closes localStorage-fallback banners shipped in slice 103                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| 109 | sqlc toolchain pin + regen reset                                    | `in-review` | infra/109-sqlc-toolchain-pin                            | gh#243 | 2026-05-16 | 2026-05-16 | batch 39 · infra · AFK · 0.25d · PR gh#243 opened · pin sqlc v1.31.1 in justfile + sqlc-schema bare-enums (closes slice 065 DO-block invisibility to sqlc) + retire models_metrics.go + 2 narrow hand-narrows preserved (policies AckDenom/Num + scf_anchors StateResult/StateFreshness) + slice-106 hand-extension retired · informational `Go · sqlc generate diff` CI added (continue-on-error: true; NOT required-checks per P0-A3) · `go test ./...` green                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 109 | sqlc toolchain pin + regen reset                                    | `merged`    | infra/109-sqlc-toolchain-pin                            | gh#243 | 2026-05-16 | 2026-05-16 | batch 39 · infra · AFK · ~50min shipped (0.25d est) · PR gh#243 squashed · 26/26 ACs PASS · pin sqlc v1.31.1 in justfile · NEW `internal/db/sqlc-schema/_enums.sql` (17 bare enums — closes DO-block invisibility) + retired `models_metrics.go` (consolidated into models.go) · 4 hand-narrows preserved on policies + scf_anchors for typed-enum/nullable Go types · slice-106 hand-extension retired (regen replaces it) · informational `Go · sqlc generate diff` CI job added (continue-on-error: true; NOT required-checks per P0-A3) · `go test ./...` green                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 ## Ready set right now
 
-| #   | Title                                                 | Cluster       | Est (d) | Notes                                                                                                                                        |
-| --- | ----------------------------------------------------- | ------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| 109 | sqlc toolchain pin + regen reset                      | Infra         | 0.25    | Spillover from 106. Pin sqlc version in justfile + regen reset + optional informational drift-check CI job. Tiny, infrastructural.           |
-| 108 | `/v1/me/*` profile + preferences + sessions endpoints | Backend / API | 2-3     | Spillover from 103. Closes the localStorage-fallback banners shipped in /settings. `GET /v1/me` + `GET/PATCH /v1/me/preferences` + sessions. |
+| #   | Title                                                 | Cluster       | Est (d) | Notes                                                                                                                                                                                        |
+| --- | ----------------------------------------------------- | ------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 108 | `/v1/me/*` profile + preferences + sessions endpoints | Backend / API | 2-3     | Spillover from 103. Closes the localStorage-fallback banners in /settings. `GET /v1/me` + `GET/PATCH /v1/me/preferences` + sessions. Now can land safely on the clean post-109 dbx baseline. |
 
-**2 slices ready** (109 + 108 — ordered ascending by estimate). **Recommended next continuous-batch sweep:**
+**1 slice ready** (108). **Recommended next continuous-batch sweep:** 108 solo. After that lands, the v2 backlog enters a true vacuum until 082/084/095 gates clear or new slices file.
 
-- **Batch 39**: 109 solo (tiny infra change) OR 109 + 108 in parallel (109 = `justfile` infra + regen reset; 108 = `internal/api/me/*` backend handlers — file-disjoint).
-- After that batch lands, the v2 backlog enters a true vacuum until 082/084/095 gates clear or new slices file.
-
-🎉 **MILESTONE**: slice-093 UI fill-in suite is ENTIRELY COMPLETE — all 6 mockup-implementation pages (controls/evidence/risks/policies/audits/settings) and all 3 backend `?include=` joins (anchors/evidence/policies) are on main. 103 slices total merged.
+🎉 **MILESTONE PRESERVED**: slice-093 UI fill-in suite is ENTIRELY COMPLETE on main (6 mockup pages + 3 backend `?include=` joins). 104 slices total merged.
 
 **Not-ready (gated, unchanged):**
 
@@ -2273,9 +2287,9 @@ Legal values (use exactly these strings):
 
 ## In-flight (1 PR open)
 
-- PR pending — this batch-38 final-reconcile sweep. Touches `_STATUS.md` only. Awaits CI + maintainer review.
+- PR pending — this batch-39 final-reconcile sweep. Touches `_STATUS.md` only. Awaits CI + maintainer review.
 
-Stale worktrees on disk: **0** managed by the loop. (External `../security-atlas-obs` exists at `docs/106-atlas-otel-sdk` — appears unrelated to this loop's work; left untouched per maintainer-owned cleanup discipline.) The batch-37 worktrees (`-099`, `-101`, `-105`) were removed at merge-time.
+Stale worktrees on disk: **0** managed by the loop. (External `../security-atlas-obs` exists at `docs/106-atlas-otel-sdk` — appears unrelated to this loop's work; left untouched per maintainer-owned cleanup discipline.) The batch-39 worktree (`-109`) was removed at merge-time.
 
 ## Notes
 
