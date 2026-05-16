@@ -2,21 +2,28 @@ import Link from "next/link";
 
 import { cn } from "@/lib/utils";
 
+// Canonical order per Plans/canvas/12-ui-fill-in-design-decisions.md §1:
+// Dashboard · Controls · Evidence · Risks · Audits · Policies · Vendors ·
+// Board Packs · Settings · Admin.
+//
+// Post-093 additions kept (see Plans/canvas/13-ui-mockup-audit-2026-05-16.md
+// F-2): Calendar (094) + Metrics (097) cluster with Dashboard as the cross-
+// business "at-a-glance" group; Catalog · SCF sits after the core-5 as a
+// reference-content top-level. Risk hierarchy stays in nav until slice 101
+// ships /risks (which lifts hierarchy to a page-header link there).
 const NAV = [
   { href: "/dashboard", label: "Dashboard" },
-  // Slice 094: cross-business compliance calendar. Placed immediately
-  // after Dashboard for the shortest scanning path — see decision D8
-  // in docs/audit-log/094-compliance-calendar-decisions.md.
   { href: "/calendar", label: "Calendar" },
   { href: "/dashboards/metrics", label: "Metrics" },
-  { href: "/catalog/scf", label: "Catalog · SCF" },
   { href: "/controls", label: "Controls" },
   { href: "/evidence", label: "Evidence" },
   { href: "/risks", label: "Risks" },
   { href: "/risks/hierarchy", label: "Risk hierarchy" },
+  { href: "/audits", label: "Audits" },
   { href: "/policies", label: "Policies" },
   { href: "/vendors", label: "Vendors" },
-  { href: "/audits", label: "Audits" },
+  { href: "/board-packs", label: "Board Packs" },
+  { href: "/catalog/scf", label: "Catalog · SCF" },
   { href: "/settings", label: "Settings" },
   { href: "/admin", label: "Admin" },
 ];
