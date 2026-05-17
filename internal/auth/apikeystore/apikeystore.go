@@ -322,6 +322,17 @@ func credentialFromRow(row dbx.ApiKey) credstore.Credential {
 	idUU, _ := uuidFromPg(row.ID)
 	tenUU, _ := uuidFromPg(row.TenantID)
 	credID := "key_" + idUU.String()
+	// Slice 108: when api_keys.issued_by is set (slice 034 OIDC flow set it from
+	// the IdP-provisioned users.id), thread it through as cred.UserID so /v1/me
+	// can resolve to a real users row. When unset (bootstrap admin keys, where
+	// no users row exists), fall back to the credential id — handlers that need a
+	// real users.id check the parse and degrade gracefully.
+	userID := credID
+	if row.IssuedBy.Valid {
+		if u, err := uuidFromPg(row.IssuedBy); err == nil {
+			userID = u.String()
+		}
+	}
 	c := credstore.Credential{
 		ID:             credID,
 		TenantID:       tenUU.String(),
@@ -332,7 +343,7 @@ func credentialFromRow(row dbx.ApiKey) credstore.Credential {
 		Last4:          row.Last4,
 		IsAdmin:        row.IsAdmin,
 		IsApprover:     row.IsApprover,
-		UserID:         credID,
+		UserID:         userID,
 		OwnerRoles:     append([]string(nil), row.OwnerRoles...),
 	}
 	if row.LastUsedAt.Valid {

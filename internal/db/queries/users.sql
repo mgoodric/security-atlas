@@ -20,6 +20,18 @@ SELECT *
 FROM users
 WHERE tenant_id = $1 AND id = $2;
 
+-- name: UpdateUserProfile :one
+-- Slice 108: PATCH /v1/me. Updates display_name + time_zone only (email + idp_subject
+-- are read-only — managed by the IdP). Empty-string sentinel pattern: pass the existing
+-- value to leave the column unchanged. The handler builds the diff from the request
+-- body before calling this query.
+UPDATE users
+SET display_name = $3,
+    time_zone    = $4,
+    updated_at   = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
 -- name: UpsertUserByIdpSubject :one
 -- Used by the OIDC callback: provision-on-first-sign-in by (idp_issuer, idp_subject).
 -- The composite UNIQUE index on (idp_issuer, idp_subject) WHERE both non-empty

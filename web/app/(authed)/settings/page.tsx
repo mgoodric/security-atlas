@@ -64,7 +64,15 @@ import {
   AdminCredentialIssueRequest,
   AdminCredentialIssueResponse,
   AdminCredentialListResponse,
+  getMe,
+  getMyPreferences,
   getSessionMe,
+  listMySessions,
+  MePreferences,
+  MeProfile,
+  MeSession,
+  patchMyPreferences,
+  revokeMySession,
 } from "@/lib/api";
 
 import { DEFAULT_THEME, readTheme, Theme, writeTheme } from "./theme";
@@ -153,13 +161,15 @@ export default function SettingsPage() {
 
 // --- Section 1: Profile ---------------------------------------------------
 
-function ProfileSection({
-  isAdmin,
-  loading,
-}: {
-  isAdmin: boolean;
-  loading: boolean;
-}) {
+function ProfileSection({ isAdmin }: { isAdmin: boolean; loading: boolean }) {
+  // Slice 108 wired GET /v1/me. Falls back to the credential-derived
+  // tenant_role badge when the upstream returns a synthetic profile (API-key
+  // bearer with no users row).
+  const profileQuery = useQuery({
+    queryKey: ["settings-me-profile"],
+    queryFn: getMe,
+  });
+  const profile: MeProfile | undefined = profileQuery.data;
   return (
     <Card data-testid="settings-section-profile">
       <CardHeader>
@@ -170,8 +180,15 @@ function ProfileSection({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {loading ? (
+        {profileQuery.isLoading ? (
           <Skeleton className="h-24 w-full" />
+        ) : profileQuery.error ? (
+          <Alert variant="destructive">
+            <AlertTitle>Could not load profile</AlertTitle>
+            <AlertDescription>
+              {(profileQuery.error as Error).message}
+            </AlertDescription>
+          </Alert>
         ) : (
           <dl className="grid grid-cols-3 gap-x-4 gap-y-3 text-sm">
             <dt className="text-muted-foreground">Display name</dt>
@@ -179,16 +196,15 @@ function ProfileSection({
               className="col-span-2 text-foreground"
               data-testid="settings-profile-display-name"
             >
-              <span className="text-muted-foreground">
-                (from your OIDC profile -- server-side profile API is a
-                follow-up)
-              </span>
+              {profile?.display_name || (
+                <span className="text-muted-foreground">(unset)</span>
+              )}
             </dd>
             <dt className="text-muted-foreground">Email</dt>
             <dd className="col-span-2 text-foreground">
-              <span className="text-muted-foreground">
-                Managed by your IdP (read-only)
-              </span>
+              {profile?.email || (
+                <span className="text-muted-foreground">(unset)</span>
+              )}
             </dd>
             <dt className="text-muted-foreground">Tenant role</dt>
             <dd className="col-span-2">
@@ -206,19 +222,20 @@ function ProfileSection({
             <dt className="text-muted-foreground">OIDC subject</dt>
             <dd className="col-span-2">
               <code className="text-xs text-muted-foreground">
-                (server-side /v1/me endpoint lands in a follow-up slice)
+                {profile?.idp_subject || "(local user — no IdP backing)"}
               </code>
+            </dd>
+            <dt className="text-muted-foreground">Time zone</dt>
+            <dd
+              className="col-span-2 text-foreground"
+              data-testid="settings-profile-time-zone"
+            >
+              {profile?.time_zone || (
+                <span className="text-muted-foreground">(browser-derived)</span>
+              )}
             </dd>
           </dl>
         )}
-        <Alert>
-          <AlertTitle>Server-side profile API pending</AlertTitle>
-          <AlertDescription>
-            The full profile payload (display name, email, OIDC subject, time
-            zone) requires a backend <code>GET /v1/me</code> endpoint that does
-            not exist on main today. A spillover slice files this work.
-          </AlertDescription>
-        </Alert>
       </CardContent>
     </Card>
   );
@@ -350,11 +367,22 @@ const NOTIF_EVENTS: { key: NotifEvent; label: string; description: string }[] =
     },
   ];
 
-function notifKey(event: NotifEvent, channel: "in_app" | "email"): string {
-  return `security-atlas.settings.notif.${event}.${channel}`;
-}
+// Slice 108: notifications section is server-backed via GET/PATCH /v1/me/preferences.
+// The localStorage fallback is retired; toggles update the server immediately and
+// invalidate the cache to re-fetch.
 
 function NotificationsSection() {
+  const qc = useQueryClient();
+  const prefsQuery = useQuery({
+    queryKey: ["settings-me-preferences"],
+    queryFn: getMyPreferences,
+  });
+  const patchMut = useMutation({
+    mutationFn: patchMyPreferences,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["settings-me-preferences"] });
+    },
+  });
   return (
     <Card data-testid="settings-section-notifications">
       <CardHeader>
@@ -364,20 +392,29 @@ function NotificationsSection() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Alert>
-          <AlertTitle>Server-side preferences API pending</AlertTitle>
-          <AlertDescription>
-            These toggles persist to <code>localStorage</code> only. The backend{" "}
-            <code>GET /v1/me/preferences</code> endpoint lands in a follow-up
-            slice; until then the platform falls back to its default routing
-            (in-app on, email on).
-          </AlertDescription>
-        </Alert>
-        <div className="divide-y divide-border">
-          {NOTIF_EVENTS.map((ev) => (
-            <NotificationRow key={ev.key} event={ev} />
-          ))}
-        </div>
+        {prefsQuery.isLoading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : prefsQuery.error ? (
+          <Alert variant="destructive">
+            <AlertTitle>Could not load preferences</AlertTitle>
+            <AlertDescription>
+              {(prefsQuery.error as Error).message}
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <div className="divide-y divide-border">
+            {NOTIF_EVENTS.map((ev) => (
+              <NotificationRow
+                key={ev.key}
+                event={ev}
+                prefs={prefsQuery.data ?? {}}
+                onChange={(channel, next) =>
+                  patchMut.mutate({ [ev.key]: { [channel]: next } })
+                }
+              />
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -385,32 +422,18 @@ function NotificationsSection() {
 
 function NotificationRow({
   event,
+  prefs,
+  onChange,
 }: {
   event: { key: NotifEvent; label: string; description: string };
+  prefs: MePreferences;
+  onChange: (channel: "in_app" | "email", next: boolean) => void;
 }) {
-  // Lazy initializer reads localStorage exactly once on first render
-  // (client-side only — the parent is "use client"). Defaults to `true`
-  // on both channels when nothing is stored, matching the v1 fallback
-  // routing described in the section's spillover banner.
-  const [inApp, setInApp] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    const v = window.localStorage.getItem(notifKey(event.key, "in_app"));
-    return v === null ? true : v === "true";
-  });
-  const [email, setEmail] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    const v = window.localStorage.getItem(notifKey(event.key, "email"));
-    return v === null ? true : v === "true";
-  });
-
-  function toggle(channel: "in_app" | "email", next: boolean) {
-    if (channel === "in_app") setInApp(next);
-    else setEmail(next);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(notifKey(event.key, channel), String(next));
-    }
-  }
-
+  // Server is the source of truth; defaults to true when the row is missing
+  // (server-side default-on-missing-row policy in userprefs.Get).
+  const row = prefs[event.key] ?? {};
+  const inApp = row.in_app !== false;
+  const email = row.email !== false;
   return (
     <div
       className="flex items-start justify-between gap-3 py-3"
@@ -425,7 +448,7 @@ function NotificationRow({
           <input
             type="checkbox"
             checked={inApp}
-            onChange={(e) => toggle("in_app", e.target.checked)}
+            onChange={(e) => onChange("in_app", e.target.checked)}
             className="h-4 w-4"
             data-testid={`settings-notif-${event.key}-in-app`}
           />
@@ -435,7 +458,7 @@ function NotificationRow({
           <input
             type="checkbox"
             checked={email}
-            onChange={(e) => toggle("email", e.target.checked)}
+            onChange={(e) => onChange("email", e.target.checked)}
             className="h-4 w-4"
             data-testid={`settings-notif-${event.key}-email`}
           />
@@ -816,7 +839,24 @@ function RevokeConfirmModal({
 
 // --- Section 5: Active sessions ------------------------------------------
 
+// Slice 108: sessions section is server-backed via GET /v1/me/sessions +
+// DELETE /v1/me/sessions/{id}. The "current" flag depends on the atlas_session
+// cookie reaching the platform; bearer-only requests (no cookie) leave every
+// row unflagged — surfaced via an explanatory tooltip rather than a banner so
+// the section UI matches the design.
+
 function SessionsSection() {
+  const qc = useQueryClient();
+  const sessionsQuery = useQuery({
+    queryKey: ["settings-me-sessions"],
+    queryFn: listMySessions,
+  });
+  const revokeMut = useMutation({
+    mutationFn: revokeMySession,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["settings-me-sessions"] });
+    },
+  });
   return (
     <Card data-testid="settings-section-sessions">
       <CardHeader>
@@ -824,26 +864,61 @@ function SessionsSection() {
         <CardDescription>Browsers currently signed in as you.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Alert>
-          <AlertTitle>Session management pending</AlertTitle>
-          <AlertDescription>
-            Per-device session listing and individual sign-out require a backend{" "}
-            <code>GET /v1/me/sessions</code> endpoint that does not exist on
-            main today. A spillover slice files this work; until then, sign-out
-            for all sessions can be performed via your IdP.
-          </AlertDescription>
-        </Alert>
-        <div className="rounded-md border border-border p-4 text-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="font-medium">This device</div>
-              <div className="text-xs text-muted-foreground">
-                Current browser session
+        {sessionsQuery.isLoading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : sessionsQuery.error ? (
+          <Alert variant="destructive">
+            <AlertTitle>Could not load sessions</AlertTitle>
+            <AlertDescription>
+              {(sessionsQuery.error as Error).message}
+            </AlertDescription>
+          </Alert>
+        ) : !sessionsQuery.data || sessionsQuery.data.length === 0 ? (
+          <p
+            className="py-6 text-center text-sm text-muted-foreground"
+            data-testid="settings-sessions-empty"
+          >
+            No active OIDC sessions. Sessions appear here after sign-in via your
+            IdP.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {sessionsQuery.data.map((s: MeSession) => (
+              <div
+                key={s.id}
+                className="flex items-center justify-between gap-3 rounded-md border border-border p-3 text-sm"
+                data-testid="settings-session-row"
+              >
+                <div>
+                  <div className="font-medium">
+                    Session <code className="font-mono">…{s.last4}</code>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Created {s.created_at.slice(0, 10)}
+                    {s.last_used_at
+                      ? ` · last used ${s.last_used_at.slice(0, 10)}`
+                      : null}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {s.is_current ? (
+                    <Badge variant="outline">current</Badge>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => revokeMut.mutate(s.id)}
+                      disabled={revokeMut.isPending}
+                      data-testid="settings-session-revoke"
+                    >
+                      Revoke
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
-            <Badge variant="outline">current</Badge>
+            ))}
           </div>
-        </div>
+        )}
       </CardContent>
     </Card>
   );

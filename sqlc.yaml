@@ -51,6 +51,7 @@ sql:
       - "migrations/sql/20260511000033_controls_superseded_fk_deferrable.sql"
       - "migrations/sql/20260516000001_metrics_catalog.sql"
       - "migrations/sql/20260516000002_policies_next_review_at.sql"
+      - "migrations/sql/20260516000003_me_endpoints.sql"
     queries: "internal/db/queries"
     gen:
       go:

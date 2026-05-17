@@ -18,7 +18,7 @@ INSERT INTO users (
 VALUES (
     $1, $2, $3, $4, $5, $6, $7
 )
-RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at
+RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone
 `
 
 type CreateUserParams struct {
@@ -54,12 +54,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.IdpSubject,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TimeZone,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at
+SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone
 FROM users
 WHERE tenant_id = $1 AND lower(email) = lower($2::text)
 `
@@ -83,12 +84,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) 
 		&i.IdpSubject,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TimeZone,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at
+SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone
 FROM users
 WHERE tenant_id = $1 AND id = $2
 `
@@ -111,6 +113,50 @@ func (q *Queries) GetUserByID(ctx context.Context, arg GetUserByIDParams) (User,
 		&i.IdpSubject,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TimeZone,
+	)
+	return i, err
+}
+
+const updateUserProfile = `-- name: UpdateUserProfile :one
+UPDATE users
+SET display_name = $3,
+    time_zone    = $4,
+    updated_at   = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone
+`
+
+type UpdateUserProfileParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	ID          pgtype.UUID `json:"id"`
+	DisplayName string      `json:"display_name"`
+	TimeZone    string      `json:"time_zone"`
+}
+
+// Slice 108: PATCH /v1/me. Updates display_name + time_zone only (email + idp_subject
+// are read-only — managed by the IdP). Empty-string sentinel pattern: pass the existing
+// value to leave the column unchanged. The handler builds the diff from the request
+// body before calling this query.
+func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateUserProfile,
+		arg.TenantID,
+		arg.ID,
+		arg.DisplayName,
+		arg.TimeZone,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Email,
+		&i.DisplayName,
+		&i.Status,
+		&i.IdpIssuer,
+		&i.IdpSubject,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TimeZone,
 	)
 	return i, err
 }
@@ -128,7 +174,7 @@ DO UPDATE SET
     email = EXCLUDED.email,
     display_name = EXCLUDED.display_name,
     updated_at = now()
-RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at
+RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone
 `
 
 type UpsertUserByIdpSubjectParams struct {
@@ -166,6 +212,7 @@ func (q *Queries) UpsertUserByIdpSubject(ctx context.Context, arg UpsertUserById
 		&i.IdpSubject,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TimeZone,
 	)
 	return i, err
 }
