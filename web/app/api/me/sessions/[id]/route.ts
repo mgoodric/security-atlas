@@ -1,10 +1,14 @@
 // Slice 108 — BFF proxy for DELETE /v1/me/sessions/{id}.
+// Slice 110 — additionally forwards the slice-034 `atlas_session` cookie
+// so the platform handler knows whether the targeted session is the
+// caller's current one (relevant for confirm-dialog UX).
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { OIDC_SESSION_COOKIE, SESSION_COOKIE } from "@/lib/auth";
+import { buildSessionsForwardHeaders } from "../_headers";
 
 export async function DELETE(
   _req: Request,
@@ -15,12 +19,13 @@ export async function DELETE(
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
+  const oidc = jar.get(OIDC_SESSION_COOKIE)?.value;
   const { id } = await ctx.params;
   const upstream = await fetch(
     `${apiBaseURL()}/v1/me/sessions/${encodeURIComponent(id)}`,
     {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${bearer}` },
+      headers: buildSessionsForwardHeaders(bearer, oidc),
     },
   );
   if (upstream.status === 204) {
