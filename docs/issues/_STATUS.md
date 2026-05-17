@@ -3,9 +3,28 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-16 (batch 40 in-review · 108 → in-review · spillover 110 filed)
+**Last reconciled:** 2026-05-16 (batch 40 merged · 108 on main · 105/109 slices · slice-103 settings page now fully wired to /v1/me/*)
 
-## Drift detected — 2026-05-16 (batch 40 in-review · 108 → in-review · spillover 110 filed)
+## Drift detected — 2026-05-16 (batch 40 merged · 108 shipped end-to-end + spillover 110 filed)
+
+Continuous-loop batch 40 closed. Single-pick (108 /v1/me/* backend) shipped end-to-end, closing the localStorage-fallback banners from slice 103. Spillover slice 110 filed for the BFF cookie-forwarding UX nicety (slice 108 D4).
+
+| Row | Transition             | Evidence                                                                                                                                                                                                                                                                                                                                |
+| --- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 108 | `in-review` → `merged` | PR [#246](https://github.com/mgoodric/security-atlas/pull/246) squashed · 14/14 ACs PASS + 9 JUDGMENT decisions · 32 files · migration `_000003_me_endpoints.sql` (users.time_zone + user_notification_preferences + me_audit_log) · D1: reused users table (not user_profiles) · sqlc regen clean on post-109 baseline                |
+
+**Batch notes:**
+
+- Zero subagent stalls (9th consecutive clean batch).
+- The post-109 sqlc baseline held — `sqlc generate` produced zero drift outside slice 108's new query targets. The slice-109 hand-narrows on policies + scf_anchors were preserved verbatim per slice 109 D4 instructions.
+- D1 was a meaningful deviation: slice text specified a sibling `user_profiles` table but the engineer chose to reuse the existing `users` table after grilling. Documented + recorded in decisions log.
+- Slice 103's localStorage-fallback banners on `/settings` are now retired — the page consumes real `/v1/me/*` endpoints end-to-end.
+- New informational `Go · sqlc generate diff` CI job (slice 109) flagged hand-narrow non-reproducibility as expected. Continue-on-error: true; non-blocking.
+- One spillover slice filed: 110 (BFF atlas_session cookie forwarding on `/api/me/sessions*` for `is_current` UX flag). Deps: 108 merged → now `ready`.
+
+**Counts delta:** in-progress −1 · merged +1 · ready +1 (110) · total +1 (108 → 109).
+
+After 110 lands (next batch, 0.5d AFK), the v2 backlog enters a TRUE vacuum until 082/084/095 gates clear or new slices file.
 
 Continuous-loop batch 40: slice 108 implementation complete and pushed for review. Single-pick batch (108 was the only ready slice on entry); spillover slice 110 (`bff-forward-atlas-session-cookie`) filed as a follow-on to close the slice 108 D4 UX gap (cookie-bridged `is_current` flag depends on the BFF forwarding the `atlas_session` cookie alongside the bearer; today only the `sa_session_token` bearer reaches the platform on /v1/\* requests).
 
@@ -2154,13 +2173,13 @@ Reconcile against `git log main` + `gh pr list` + `git worktree list` after para
 
 | Status        | Count   |
 | ------------- | ------- |
-| `merged`      | 104     |
+| `merged`      | 105     |
 | `in-review`   | 0       |
-| `in-progress` | 1       |
-| `ready`       | 0       |
+| `in-progress` | 0       |
+| `ready`       | 1       |
 | `blocked`     | 0       |
 | `not-ready`   | 3       |
-| **Total**     | **108** |
+| **Total**     | **109** |
 
 🎯 **v1 backlog 69/69 complete.** Every slice in the v1 plan is merged on `main`. The binary v1 success test — "does the solo security leader run their next SOC 2 audit out of security-atlas, generate the next board pack from it, and not reach for Vanta or a Google Sheet to fill a gap?" — is evaluable end-to-end.
 
@@ -2289,7 +2308,7 @@ Legal values (use exactly these strings):
 | 105 | Risk-create UI for /risks empty-state CTA (follow-on to slice 100)     | `merged`    | frontend/105-risk-create-ui                             | gh#231 | 2026-05-16 | 2026-05-16 | batch 37 · frontend · ~50min shipped (1-2d est) · AFK · PR gh#231 squashed at commit `f39c33e` · 9 files / 758 insertions · 8/8 ACs PASS · binds directly to `createReq` (no invented fields per P0-A4) · 5x5 widget = two native `<select>` serializing into `{likelihood, impact}` · slice 100's empty-state CTA re-pointed `/admin` → `/risks/new` · 3 new vitest POST cases (6 total in file)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 106 | `GET /v1/evidence` extension (control_id optional + filters)           | `merged`    | backend/106-evidence-list-backend-extension             | gh#240 | 2026-05-16 | 2026-05-16 | batch 38 · backend · AFK · ~50min shipped (1d est) · PR gh#240 squashed at commit `860c10a` · 10/10 ACs PASS · 17 files · single SQL query reuses `idx_evidence_tenant_control_observed` index · 9 unit + 7 integration tests · sqlc hand-extension over clean regen due to toolchain drift (spillover slice 109 filed by orchestrator) · CHANGELOG entry                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 107 | `GET /v1/policies?include=ack_rate` extension                          | `merged`    | backend/107-policies-include-ack-rate                   | gh#239 | 2026-05-16 | 2026-05-16 | batch 38 · backend · AFK · ~30min shipped (1d est) · spillover from 101 · single SQL join (CountFreshAcks + CountRequiredRoleUsers predicates mirrored verbatim) under tenancy.ApplyTenant tx · 6 unit + 5 integration tests (RLS round-trip + cross-check vs per-policy handler) · frontend hard-codes `?include=ack_rate` mirroring slice 104                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| 108 | `/v1/me/*` profile + preferences + sessions endpoints                  | `in-review` | backend/108-me-profile-preferences-sessions             | gh#246 | 2026-05-16 | —          | batch 40 · backend · AFK · 2-3d · spillover from 103 · PR pending · migration `_000003_me_endpoints.sql` (users.time_zone + user_notification_preferences + me_audit_log + admin_audit_log_v eighth branch) · new `internal/auth/userprefs/` + extended users/sessions + new `internal/api/me/{profile,preferences,sessions}.go` + 4 BFF routes · `/settings` page cuts over · 9-call JUDGMENT decisions log · sqlc regen clean on post-109 baseline (slice-109 hand-narrows re-applied verbatim; no new hand-narrows) · spillover slice 110 filed (BFF atlas_session cookie forwarding)                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 108 | `/v1/me/*` profile + preferences + sessions endpoints                  | `merged`    | backend/108-me-profile-preferences-sessions             | gh#246 | 2026-05-16 | 2026-05-16 | batch 40 · backend · AFK · ~90min shipped (2-3d est) · PR gh#246 squashed · 14/14 ACs PASS + 9 JUDGMENT decisions · 32 files · migration `_000003_me_endpoints.sql` (users.time_zone + user_notification_preferences + me_audit_log) · new `internal/auth/userprefs/` + extended users/sessions/apikeystore + new `internal/api/me/{profile,preferences,sessions}.go` + 4 BFF routes · slice 103 `/settings` page cuts over (localStorage banners removed) · D1 reused `users` table not `user_profiles` · sqlc regen clean on post-109 baseline (hand-narrows re-applied verbatim) · spillover slice 110 filed (BFF atlas_session cookie forwarding)                                                                                                                                                                                                                                                                                                                                                                              |
 | 110 | BFF forwards atlas_session cookie alongside bearer (`/v1/me/sessions`) | `ready`     | —                                                       | —      | 2026-05-16 | —          | batch 40 spillover · frontend · AFK · 0.5d · closes slice 108 D4 UX gap (cookie-bridged `is_current` flag only fires when BFF forwards `atlas_session`); narrow cookie-forwarding scope on `/api/me/sessions*` BFF routes only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 109 | sqlc toolchain pin + regen reset                                       | `merged`    | infra/109-sqlc-toolchain-pin                            | gh#243 | 2026-05-16 | 2026-05-16 | batch 39 · infra · AFK · ~50min shipped (0.25d est) · PR gh#243 squashed · 26/26 ACs PASS · pin sqlc v1.31.1 in justfile · NEW `internal/db/sqlc-schema/_enums.sql` (17 bare enums — closes DO-block invisibility) + retired `models_metrics.go` (consolidated into models.go) · 4 hand-narrows preserved on policies + scf_anchors for typed-enum/nullable Go types · slice-106 hand-extension retired (regen replaces it) · informational `Go · sqlc generate diff` CI job added (continue-on-error: true; NOT required-checks per P0-A3) · `go test ./...` green                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
@@ -2299,9 +2318,9 @@ Legal values (use exactly these strings):
 | --- | ---------------------------------------------------------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 110 | BFF forwards atlas_session cookie alongside bearer (`/v1/me/sessions`) | Frontend | 0.5     | Spillover from 108 D4. Cookie-bridged `is_current` flag in `GET /v1/me/sessions` only fires when the BFF forwards the `atlas_session` cookie alongside `sa_session_token`. Narrow scope: only the `/api/me/sessions*` BFF routes; no change to bearer-auth semantic or to non-sessions /me routes. |
 
-**1 slice ready** (108). **Recommended next continuous-batch sweep:** 108 solo. After that lands, the v2 backlog enters a true vacuum until 082/084/095 gates clear or new slices file.
+**1 slice ready** (110 BFF cookie-forward). **Recommended next continuous-batch sweep:** 110 solo (0.5d AFK). After that lands, the v2 backlog enters a TRUE vacuum.
 
-🎉 **MILESTONE PRESERVED**: slice-093 UI fill-in suite is ENTIRELY COMPLETE on main (6 mockup pages + 3 backend `?include=` joins). 104 slices total merged.
+🎉 **MILESTONE PRESERVED**: slice-093 UI fill-in suite is ENTIRELY COMPLETE on main (6 mockup pages + 3 backend `?include=` joins). **105 slices total merged. The /settings page is now wired to real /v1/me/* endpoints end-to-end.**
 
 **Not-ready (gated, unchanged):**
 
@@ -2311,9 +2330,9 @@ Legal values (use exactly these strings):
 
 ## In-flight (1 PR open)
 
-- PR pending — this batch-39 final-reconcile sweep. Touches `_STATUS.md` only. Awaits CI + maintainer review.
+- PR pending — this batch-40 final-reconcile sweep. Touches `_STATUS.md` only. Awaits CI + maintainer review.
 
-Stale worktrees on disk: **0** managed by the loop. (External `../security-atlas-obs` exists at `docs/106-atlas-otel-sdk` — appears unrelated to this loop's work; left untouched per maintainer-owned cleanup discipline.) The batch-39 worktree (`-109`) was removed at merge-time.
+Stale worktrees on disk: **0** managed by the loop. (External `../security-atlas-obs` exists at `docs/106-atlas-otel-sdk` — appears unrelated to this loop's work; left untouched per maintainer-owned cleanup discipline.) The batch-40 worktree (`-108`) was removed at merge-time.
 
 ## Notes
 
