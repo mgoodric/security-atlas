@@ -27,11 +27,20 @@
 
 import { test } from "@playwright/test";
 
+import { seedFromFixture } from "./seed";
+
 // Per the preamble above: assertions are deliberately commented pending
-// the slice-082 seed-data harness. The test body is preserved verbatim
-// as a reviewable contract.
+// per-spec un-comment slices (slice 082's scoping decision — see
+// docs/audit-log/082-playwright-seed-data-harness-decisions.md). The
+// test body is preserved verbatim as a reviewable contract. Slice 082
+// DOES wire the seed harness in `beforeAll` so the harness is exercised
+// end-to-end against real Postgres+MinIO+NATS in CI.
 
 test.describe("control detail view", () => {
+  test.beforeAll(() => {
+    seedFromFixture("control-detail");
+  });
+
   test("AC-1: /controls/:id renders the full detail layout", async () => {
     // 1. Sign in.
     //    await page.goto("/login");

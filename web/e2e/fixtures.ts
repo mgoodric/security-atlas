@@ -30,6 +30,42 @@ import { test as base, expect, type Page } from "@playwright/test";
 
 import { SESSION_COOKIE } from "../lib/auth";
 
+// Slice 082 — re-export seeded-entity accessors so specs reference
+// rows by symbolic name (e.g. `seeded.controlId`) rather than embedded
+// UUIDs in the spec body. The IDs are deterministic and match the
+// fixture SQL files; renaming a row is then a single-file edit in
+// `web/e2e/seed.ts`.
+import {
+  DEMO_AUDIT_PERIOD_ID,
+  DEMO_CONTROL_ID,
+  DEMO_FRAMEWORK_VERSION_ID,
+  DEMO_TENANT_ID,
+  DEMO_USER_EMAIL,
+} from "./seed";
+
+/**
+ * SeededEntities is the typed surface specs use to reach into the
+ * seeded data without hard-coding UUIDs. Add a field here when a new
+ * row is added to `fixtures/walkthroughs/00-seed.sql` or
+ * `fixtures/e2e/<spec>.sql` and the spec needs to reference it.
+ */
+export type SeededEntities = {
+  tenantId: string;
+  userEmail: string;
+  controlId: string;
+  frameworkVersionId: string;
+  auditPeriodId: string;
+};
+
+/** Typed accessor for seeded entities. */
+export const seeded: SeededEntities = {
+  tenantId: DEMO_TENANT_ID,
+  userEmail: DEMO_USER_EMAIL,
+  controlId: DEMO_CONTROL_ID,
+  frameworkVersionId: DEMO_FRAMEWORK_VERSION_ID,
+  auditPeriodId: DEMO_AUDIT_PERIOD_ID,
+};
+
 type Fixtures = {
   authedPage: Page;
 };
