@@ -43,14 +43,18 @@ export default defineConfig({
   ],
 
   // Local dev: spin up `npm start` if nothing is listening on :3000.
-  // CI: rely on the docker-compose self-host bundle (the
+  // CI: rely on the workflow's "Start web server" step (the
   // `Frontend · Playwright e2e` job in .github/workflows/ci.yml brings up
   // postgres + nats + minio + atlas + web before invoking `playwright
-  // test`). `reuseExistingServer: !isCI` keeps either path one-command.
+  // test`). `reuseExistingServer: isCI` keeps either path one-command:
+  // attach to the workflow-spawned server in CI, spawn a fresh one
+  // locally. Slice 119 — the prior `!isCI` was a polarity inversion: it
+  // told Playwright to spawn its own server in CI, racing the workflow
+  // step for :3000 and failing every run with "port 3000 already in use".
   webServer: {
     command: "npm start",
     url: baseURL,
-    reuseExistingServer: !isCI,
+    reuseExistingServer: isCI,
     timeout: 120_000,
     stdout: "ignore",
     stderr: "pipe",
