@@ -3,7 +3,7 @@
 **Cluster:** Infra
 **Estimate:** 2-3d
 **Type:** AFK
-**Status:** not-ready
+**Status:** ready
 
 ## Narrative
 
@@ -18,8 +18,7 @@ Slice doc 079 + its decisions log at `docs/audit-log/079-quarantine-playwright-e
 carry the full reasoning for the quarantine and the per-spec
 preconditions.
 
-**Not-ready until staffed.** No specific blocking dependency — flip to
-`ready` when a maintainer chooses to take this on.
+**Staffed 2026-05-16 by maintainer** — flipped to `ready` for the continuous-batch loop to pick up.
 
 ## Acceptance criteria
 
