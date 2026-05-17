@@ -31,7 +31,7 @@ Slice 082 shipped the `seedFromFixture()` harness with `fixtures/e2e/control-det
 
 - Does NOT touch other specs/fixtures (one slice per spec)
 - Does NOT promote the e2e job to required-checks (slice 116)
-- No real customer data; neutral test-* tokens only
+- No real customer data; neutral test-\* tokens only
 
 ## Notes
 

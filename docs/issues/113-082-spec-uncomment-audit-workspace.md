@@ -31,5 +31,5 @@ Slice 082 shipped `fixtures/e2e/audit-workspace.sql` at **MINIMAL** coverage. Ex
 
 - Does NOT touch other specs/fixtures
 - Does NOT promote the e2e job to required-checks (slice 116)
-- No real customer data; neutral test-* tokens only
+- No real customer data; neutral test-\* tokens only
 - Honors constitutional invariant #10 (audit-period freezing) — frozen rows must use `observed_at ≤ frozen_at`

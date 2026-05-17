@@ -31,5 +31,5 @@ Slice 082 shipped `fixtures/e2e/admin-bootstrap.sql` at **MINIMAL** coverage. Ex
 
 - Does NOT touch other specs/fixtures
 - Does NOT promote the e2e job to required-checks (slice 116)
-- No real customer data; neutral test-* tokens only
+- No real customer data; neutral test-\* tokens only
 - RLS context must be exercised — admin user must be created under `current_tenant_id` from the seed harness

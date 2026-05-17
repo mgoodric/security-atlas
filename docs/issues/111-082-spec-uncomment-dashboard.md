@@ -26,7 +26,7 @@ This slice enables those deeper assertions one-by-one, confirms each passes agai
 ## Constitutional invariants honored
 
 - **No real customer data in fixtures** (slice 082 P0-A1 carries through)
-- **Neutral test-* fixture tokens only** (slice 082 P0-A3)
+- **Neutral test-\* fixture tokens only** (slice 082 P0-A3)
 - **Pre-commit + DCO sign-off** per CLAUDE.md
 
 ## Canvas references

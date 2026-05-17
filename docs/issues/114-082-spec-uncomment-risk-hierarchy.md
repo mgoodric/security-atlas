@@ -31,4 +31,4 @@ Slice 082 shipped `fixtures/e2e/risk-hierarchy.sql` at **MINIMAL** coverage. Ext
 
 - Does NOT touch other specs/fixtures
 - Does NOT promote the e2e job to required-checks (slice 116)
-- No real customer data; neutral test-* tokens only
+- No real customer data; neutral test-\* tokens only
