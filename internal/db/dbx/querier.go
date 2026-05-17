@@ -709,6 +709,10 @@ type Querier interface {
 	// surface (no UpdateEvidenceRecord, no DeleteEvidenceRecord exists).
 	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
 	InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error)
+	// Append a row to the slice 108 audit ledger. before / after are JSONB; the handler
+	// builds them from the wire shape minus any redacted fields. Gated by handler logic on
+	// non-empty diff (anti-criterion ISC-A5).
+	InsertMeAuditLog(ctx context.Context, arg InsertMeAuditLogParams) error
 	// Append one manual entry. The fn_metric_inputs_replicate trigger fires
 	// AFTER INSERT and writes a matching metric_observations row so the
 	// read API serves both shapes from one series. Idempotency boundary is
@@ -1474,6 +1478,9 @@ type Querier interface {
 	// Enumerate the active tenant's declared dimensions. Ordering: builtins first
 	// (stable presentation in the admin UI), then alphabetical by name.
 	ListScopeDimensions(ctx context.Context, tenantID pgtype.UUID) ([]ScopeDimension, error)
+	// Slice 108: GET /v1/me/sessions. Returns the caller's currently-valid sessions
+	// (revoked_at IS NULL AND expires_at > now()). Tenant scoped via RLS + explicit filter.
+	ListSessionsForUser(ctx context.Context, arg ListSessionsForUserParams) ([]Session, error)
 	// Tenant-private themes only. Caller composes with ListDefaultThemes when a
 	// full visible vocabulary is needed.
 	ListTenantThemes(ctx context.Context, tenantID pgtype.UUID) ([]OrgTheme, error)
@@ -1564,6 +1571,16 @@ type Querier interface {
 	// cursor (cursor_date = '-infinity', cursor_id = '') selects the first
 	// page; the empty category filter ('' = all) narrows to one source.
 	ListUpcomingItems(ctx context.Context, arg ListUpcomingItemsParams) ([]ListUpcomingItemsRow, error)
+	// Slice 108 — /v1/me/* preferences + audit-log queries.
+	//
+	// Queries land in their own file (not appended to users.sql or sessions.sql) so the
+	// sqlc regen diff for slice 108 is scoped to one new dbx file: control over which
+	// existing dbx files mutate per slice 109's regen reset.
+	// Read every preference row for (tenant, user). The application layer fills in defaults
+	// (enabled=true) for any (event, channel) tuple absent from the result set. RLS enforces
+	// the tenant scope; the explicit tenant_id filter in WHERE is defense-in-depth and lets
+	// a future RLS misconfiguration still filter by tenant.
+	ListUserNotificationPreferences(ctx context.Context, arg ListUserNotificationPreferencesParams) ([]UserNotificationPreference, error)
 	// Cells attached to one vendor.
 	ListVendorScopeCells(ctx context.Context, arg ListVendorScopeCellsParams) ([]pgtype.UUID, error)
 	// AC-2 filter by criticality. NULL criticality_filter means "all" — the
@@ -1620,7 +1637,18 @@ type Querier interface {
 	// the same UPDATE that flips the status — one atomic transition.
 	PublishBoardPack(ctx context.Context, arg PublishBoardPackParams) (BoardPack, error)
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
+	// Slice 108: DELETE /v1/me/sessions (no {id}). Revokes every valid session for the
+	// caller EXCEPT the one identified by $3 (the "current" session id). When the caller
+	// has no current-session cookie, pass an empty string to revoke ALL sessions for the
+	// user — there is no way to keep the request alive past this point anyway.
+	RevokeOtherSessionsForUser(ctx context.Context, arg RevokeOtherSessionsForUserParams) (int64, error)
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
+	// Slice 108: DELETE /v1/me/sessions/{id}. Atomic ownership-guard via the WHERE clause:
+	// the row is only updated when (tenant_id, id, user_id) all match. RowsAffected = 0
+	// means "no such session under this user" — the handler returns 404 (not 403) to avoid
+	// the existence-oracle on cross-user ids. Idempotent: re-revoking an already-revoked
+	// row is a no-op but still returns 1 row affected (the row still matches the WHERE).
+	RevokeSessionForUser(ctx context.Context, arg RevokeSessionForUserParams) (int64, error)
 	// Slice 067: risk-hierarchy backend read endpoints. Two read-only
 	// aggregation queries that fill the placeholders slice 056 (hierarchical
 	// risk dashboard) shipped binding empty-state affordances for. No
@@ -1769,6 +1797,11 @@ type Querier interface {
 	// Update an existing anchor in place. Touches updated_at; the caller
 	// decides whether to call this based on a content-equality check.
 	UpdateSCFAnchor(ctx context.Context, arg UpdateSCFAnchorParams) (ScfAnchor, error)
+	// Slice 108: PATCH /v1/me. Updates display_name + time_zone only (email + idp_subject
+	// are read-only — managed by the IdP). Empty-string sentinel pattern: pass the existing
+	// value to leave the column unchanged. The handler builds the diff from the request
+	// body before calling this query.
+	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
 	// Full-row update. Caller is responsible for sending every field; partial
 	// updates are not supported in lite (no PATCH semantics merge). updated_at
 	// is application-owned (no trigger).
@@ -1831,6 +1864,10 @@ type Querier interface {
 	// is the conflict target. On conflict we update display_name + email (the IdP
 	// is canonical) and updated_at.
 	UpsertUserByIdpSubject(ctx context.Context, arg UpsertUserByIdpSubjectParams) (User, error)
+	// Atomic per-cell upsert. The (tenant_id, user_id, event, channel) primary key is the
+	// conflict target. On conflict we update enabled + updated_at. This is the natural
+	// partial-merge primitive for AC-5 (PATCH /v1/me/preferences merges, no replacement).
+	UpsertUserNotificationPreference(ctx context.Context, arg UpsertUserNotificationPreferenceParams) error
 	// ===== aggregation_rule_audit_log (append-only) =====
 	// Append-only. Every lifecycle transition (created / activated /
 	// deactivated / reactivated) and every threshold edit writes one row

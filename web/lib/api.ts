@@ -2019,3 +2019,116 @@ export async function fetchPoliciesList(): Promise<PoliciesListResponse> {
   }
   return (await res.json()) as PoliciesListResponse;
 }
+
+// ===== Slice 108 — /v1/me/* (profile + preferences + sessions) =====
+
+export type MeProfile = {
+  user_id: string;
+  tenant_id: string;
+  display_name: string;
+  email: string;
+  idp_subject: string;
+  tenant_role: string;
+  time_zone: string | null;
+  is_admin: boolean;
+  owner_roles: string[];
+};
+
+export type MePatchRequest = {
+  display_name?: string;
+  time_zone?: string;
+};
+
+export type MePreferences = Record<string, Record<string, boolean>>;
+
+export type MeSession = {
+  id: string;
+  last4: string;
+  created_at: string;
+  last_used_at: string | null;
+  is_current: boolean;
+};
+
+export type MeSessionsResponse = {
+  sessions: MeSession[];
+  count: number;
+};
+
+// Browser-side fetchers — go through the BFF at /api/me/* so the session-cookie
+// bearer is attached server-side. The BFF routes proxy to the platform /v1/me/*.
+
+export async function getMe(): Promise<MeProfile> {
+  const res = await fetch(`/api/me`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as MeProfile;
+}
+
+export async function patchMe(body: MePatchRequest): Promise<MeProfile> {
+  const res = await fetch(`/api/me`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* body not JSON */
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as MeProfile;
+}
+
+export async function getMyPreferences(): Promise<MePreferences> {
+  const res = await fetch(`/api/me/preferences`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  const body = (await res.json()) as { preferences: MePreferences };
+  return body.preferences;
+}
+
+export async function patchMyPreferences(
+  partial: MePreferences,
+): Promise<MePreferences> {
+  const res = await fetch(`/api/me/preferences`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(partial),
+  });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* body not JSON */
+    }
+    throw new APIError(res.status, msg);
+  }
+  const body = (await res.json()) as { preferences: MePreferences };
+  return body.preferences;
+}
+
+export async function listMySessions(): Promise<MeSession[]> {
+  const res = await fetch(`/api/me/sessions`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  const body = (await res.json()) as MeSessionsResponse;
+  return body.sessions ?? [];
+}
+
+export async function revokeMySession(id: string): Promise<void> {
+  const res = await fetch(`/api/me/sessions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok && res.status !== 204) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+}

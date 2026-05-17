@@ -21,7 +21,7 @@ The output is a PR comment using a structured Markdown template (see below). The
 
 ## When to use
 
-- Triaging Dependabot PRs that have been open more than ~24h (the cooldown window — gives upstream supply-chain attacks time to be discovered before you pull)
+- Triaging open Dependabot PRs against the GitHub Advisory DB + call-site cross-reference, with auto-merge on LOW risk
 - The continuous-batch loop is paused and you want to use the available cycles for upgrade hygiene instead of feature slices
 - A specific Dependabot PR has a CHANGELOG entry that mentions "breaking" or "behavior change" and you want a structured assessment before deciding
 
@@ -66,12 +66,14 @@ The invoking user specifies one of:
   PR=<NNN>     — review this exact PR. After completing, do NOT call
                  ScheduleWakeup; this is a one-shot run.
 
-  PR=auto      — pick the OLDEST open Dependabot PR that:
-                   - was created > 24h ago (supply-chain cooldown window)
-                   - has no "/loop dep-review" comment from us yet
-                   - has CI status green OR pending (skip CI-failing PRs
-                     — those need maintainer attention before we burn
-                     cycles analyzing them)
+  PR=auto      — pick the OLDEST open Dependabot PR that has no
+                 "/loop dep-review" comment from us yet. CI-failing
+                 and BEHIND PRs are NOT skipped at selection time —
+                 PREFLIGHT (below) handles them (most are out-of-date
+                 branches; rebase then re-enter the loop). Supply-chain
+                 hygiene is signal-based (STEP 1.5 advisory check),
+                 not clock-based — calendar cooldowns ship false
+                 confidence; GitHub Advisory DB is the real defense.
                  After completing, call ScheduleWakeup({delaySeconds: 300,
                  prompt: <same /loop prompt body>}) IF another eligible
                  PR remains. Otherwise exit.
@@ -79,12 +81,75 @@ The invoking user specifies one of:
 To list eligible PRs in `auto` mode:
   gh pr list --repo mgoodric/security-atlas --state open --base main \
     --search "author:app/dependabot author:dependabot[bot] -comment:/loop dep-review" \
-    --json number,createdAt,statusCheckRollup \
+    --json number,createdAt \
     --limit 30 \
-  | jq '[.[] | select(
-      (.createdAt | fromdateiso8601) < (now - 86400)
-      and (.statusCheckRollup[] | select(.conclusion == "FAILURE")) == null
-    )] | sort_by(.createdAt) | .[0].number'
+  | jq '[.[]] | sort_by(.createdAt) | .[0].number'
+
+═══════════════════════════════════════════════════════════════════════════════
+PREFLIGHT — branch freshness + merge state (runs before STEP 1)
+═══════════════════════════════════════════════════════════════════════════════
+
+Most Dependabot CI failures on a repo with active development are
+out-of-date branches, not real test failures from the upgrade. Diagnose
++ trigger a rebase before spending tokens on the analysis.
+
+  P1. Read merge state and failing-check class:
+        gh pr view <PR> --repo mgoodric/security-atlas \
+          --json mergeStateStatus,statusCheckRollup,headRefOid
+
+      mergeStateStatus values:
+        - CLEAN     — ready to merge; proceed to STEP 1
+        - UNSTABLE  — non-required checks failing OR has non-blocking
+                      failures; proceed to STEP 1 (real analysis still
+                      worth doing; informational fails are noise)
+        - BEHIND    — branch is behind base; rebase needed (see P2)
+        - UNKNOWN   — GitHub hasn't recomputed mergeability since last
+                      base movement; treat as BEHIND. Posting
+                      `@dependabot rebase` both triggers a recompute AND
+                      fixes the underlying staleness if any (see P2)
+        - DIRTY     — merge conflict; cannot auto-resolve (see P3)
+        - BLOCKED   — required reviews or status checks not satisfied;
+                      treat as CLEAN-or-UNSTABLE for analysis purposes
+                      (the analysis comment IS the review signal)
+        - HAS_HOOKS — pre-merge hook failure; treat as DIRTY
+
+  P2. If BEHIND or UNKNOWN:
+        a) Check whether we already asked Dependabot to rebase in the
+           last hour:
+             gh pr view <PR> --repo mgoodric/security-atlas --json comments \
+               | jq '[.comments[] | select(
+                   (.body | startswith("@dependabot rebase"))
+                   and ((.createdAt | fromdateiso8601) > (now - 3600))
+                 )] | length'
+        b) If count > 0: a rebase is in flight — Dependabot hasn't
+           force-pushed the new HEAD yet. Skip this PR for this
+           iteration; the next loop tick will re-evaluate.
+        c) Otherwise: post `@dependabot rebase` and skip this PR for
+           this iteration:
+             gh pr comment <PR> --repo mgoodric/security-atlas \
+               --body "@dependabot rebase"
+           Note in the audit JSONL: outcome="preflight_rebase_requested"
+           (no comment.md posted yet — that comes after re-analysis on
+           the rebased branch).
+        d) Move to next eligible PR (or exit if none).
+
+  P3. If DIRTY:
+        Merge conflicts cannot be auto-resolved from this prompt.
+        Post a one-line comment flagging the state + skip:
+          gh pr comment <PR> --repo mgoodric/security-atlas \
+            --body "## /loop dep-review · SKIPPED · DIRTY
+
+This PR has merge conflicts with main. Dependabot cannot auto-rebase
+through conflicts; maintainer attention required. Re-run \`/loop\` against
+this PR after the conflict is resolved."
+        Note in JSONL: outcome="preflight_skipped_dirty".
+        Move to next eligible PR.
+
+  P4. If CLEAN, UNSTABLE, or BLOCKED: proceed to STEP 1 below.
+
+PREFLIGHT counts as one "completion" for `auto`-mode ScheduleWakeup
+purposes (an iteration that ends in P2 or P3 still schedules the next
+iteration).
 
 ═══════════════════════════════════════════════════════════════════════════════
 STEP 1 — Identify the upgrade delta
@@ -119,6 +184,79 @@ For the chosen PR:
     UPGRADE: <pkg> <old_version> → <new_version> [<bump-class>]
     UPSTREAM: <repo-url>
     ECOSYSTEM: <npm|pip|go-modules>
+
+═══════════════════════════════════════════════════════════════════════════════
+STEP 1.5 — GitHub Advisory DB check (supply-chain hygiene, signal-based)
+═══════════════════════════════════════════════════════════════════════════════
+
+Replaces the earlier 24h calendar-cooldown approach with an evidence-
+based check: if the target version is implicated in a published
+advisory (CVE / GHSA / npm-security-advisory / OSV), HOLD the PR
+regardless of CHANGELOG analysis. Calendar time was theater; the
+Advisory DB is the actual signal.
+
+  1.5a. Map our ecosystem string to GitHub Advisory DB's ecosystem
+        parameter:
+          - npm        → npm
+          - pip        → pip
+          - go-modules → go
+
+  1.5b. Query the global Advisory DB for advisories affecting the
+        target version:
+          gh api "/advisories?ecosystem=<eco>&affects=<pkg>@<new_version>" \
+            > /tmp/dep-review-<PR>/advisories.json
+          jq 'length' /tmp/dep-review-<PR>/advisories.json
+
+        The `affects` parameter does range-aware matching — a query for
+        `axios@1.7.5` will return advisories with vulnerable ranges
+        like `>= 1.0.0, < 1.15.1` (which 1.7.5 satisfies).
+
+  1.5c. If `length > 0`:
+          - Extract per-advisory: ghsa_id, summary, severity (low /
+            medium / high / critical), and the matching vulnerable
+            version range
+          - Post a HOLD comment immediately (do NOT proceed to STEP 2):
+
+            ```markdown
+            ## /loop dep-review · HOLD · advisory implicates target version
+
+            **Upgrade:** `<pkg>` `<old_version>` → `<new_version>` (<bump-class> bump · <ecosystem>)
+
+            The GitHub Advisory DB returns <N> advisory/advisories whose
+            vulnerable version range includes the target version `<new_version>`:
+
+            | GHSA | Severity | Summary | Range |
+            |---|---|---|---|
+            | [<GHSA-ID>](https://github.com/advisories/<GHSA-ID>) | <severity> | <summary> | `<range>` |
+
+            ### Recommendation
+
+            **hold pending advisory resolution**
+
+            Reasoning: Pulling `<new_version>` would land us in a known-
+            vulnerable version range. Wait for Dependabot to surface a
+            fixed version, OR (if upstream has shipped a fix that
+            Dependabot has not yet picked up) close this PR + retrigger
+            Dependabot to open against the patched version.
+
+            ---
+            *Analyzed by `/loop dep-review` against Plans/prompts/08-dependabot-pr-review.md. Reproduce locally: `gh api '/advisories?ecosystem=<eco>&affects=<pkg>@<new_version>'`.*
+            ```
+
+          - Append JSONL entry with `outcome: "advisory_hold"`,
+            `risk: "HIGH"`, `auto_merged: false`. Include the GHSA IDs
+            in a new `advisory_ghsa_ids` field.
+          - Exit (do NOT proceed to STEP 2 — analysis of CHANGELOG /
+            call-sites is pointless when the version itself is
+            embargoed).
+
+  1.5d. If `length == 0`: log the clean check + proceed to STEP 2.
+        Cache the clean result in the JSONL entry for the eventual
+        STEP-6 comment (no need to display it; the absence of an
+        advisory section in the comment means clean).
+
+  Output to console:
+    ADVISORY: <N> advisories matched (HOLD if >0; proceed if 0)
 
 ═══════════════════════════════════════════════════════════════════════════════
 STEP 2 — Fetch upstream history for the delta
@@ -320,17 +458,36 @@ STEP 6 — Post the structured PR comment
 ````
 
 ═══════════════════════════════════════════════════════════════════════════════
-STEP 7 — Optional action (only on LOW with --auto-merge enabled)
+STEP 7 — Auto-merge on LOW (default ON; opt-out via AUTO_MERGE_LOW=false)
 ═══════════════════════════════════════════════════════════════════════════════
 
-If the user invoked with PR=auto AND configured AUTO_MERGE_LOW=true
-(an environment variable they set before invoking /loop), AND the risk
-classification is LOW AND CI is green:
+If ALL of:
+
+- risk classification from STEP 4 is LOW
+- no HIT-BREAKING anywhere in the cross-reference table
+- CI is green OR all failing checks are non-required-checks
+  informational jobs (verify via `gh pr view <PR>
+--json statusCheckRollup` — any FAILURE on a check listed in
+  `.github/branch-protection.json` required-checks blocks auto-merge)
+- AUTO_MERGE_LOW is NOT explicitly set to the literal string "false"
+  (env var unset OR set to anything other than "false" → auto-merge
+  proceeds)
+
+then run:
 
     gh pr review <PR> --approve --body "auto-approved by /loop dep-review (LOW risk)"
     gh pr merge <PR> --squash --auto
 
-Otherwise: post the comment and leave the merge decision to the maintainer.
+The `--auto` flag means GitHub merges as soon as required checks pass —
+safe even if some informational checks are still running. The maintainer
+sees the analysis comment + approval + auto-merge-armed in their inbox
+and can cancel before checks clear if anything looks off.
+
+Set `auto_merged: true` in the JSONL entry when this branch runs.
+
+If risk is MEDIUM or HIGH, OR if AUTO_MERGE_LOW is explicitly "false",
+OR if a required check is failing: post the comment and leave the merge
+decision to the maintainer. Set `auto_merged: false` in JSONL.
 
 ═══════════════════════════════════════════════════════════════════════════════
 PER-PR STATE PERSISTENCE
@@ -354,8 +511,15 @@ Schema:
 "hit_breaking_count": <N>,
 "hit_neutral_count": <N>,
 "auto_merged": <bool>,
-"comment_url": "<url>"
+"comment_url": "<url>",
+"outcome": "<analyzed | advisory_hold | preflight_rebase_requested | preflight_rebase_in_flight | preflight_skipped_dirty>",
+"advisory_ghsa_ids": [<list of GHSA-IDs if outcome=advisory_hold; else empty>]
 }
+
+For preflight-only outcomes (P2, P3), the analysis fields
+(package/ecosystem/old_version/etc.) may be partially populated or null
+— the `outcome` field is the load-bearing signal. Always record the PR
+number and timestamp.
 
 This is the audit trail; it's also what the maintainer queries to
 periodically calibrate the prompt (if a "LOW" risk classification later
@@ -366,12 +530,16 @@ the prompt's heuristics).
 HARD RULES (dep-review-specific)
 ═══════════════════════════════════════════════════════════════════════════════
 
-- NEVER auto-merge on MEDIUM or HIGH risk, even if the user configured
-  AUTO_MERGE_LOW=true. AUTO_MERGE_LOW means "LOW risk + green CI + no
-  HIT-BREAKING anywhere"; HIGH and MEDIUM are explicit human-eyes paths.
+- NEVER auto-merge on MEDIUM or HIGH risk, even if AUTO_MERGE_LOW is
+  unset (= default-on). The auto-merge default applies ONLY to LOW
+  risk with no HIT-BREAKING and no failing required-checks; HIGH and
+  MEDIUM are explicit human-eyes paths regardless of env config.
 - NEVER push commits to the Dependabot branch from this prompt. The
-  prompt READS the PR and COMMENTS on it. Adding code to a Dependabot
-  PR is a separate, manual maintainer action.
+  prompt READS the PR, COMMENTS on it, and may post `@dependabot rebase`
+  to ask Dependabot itself to update the branch (Dependabot owns the
+  rebase commit; we don't). Adding new code to a Dependabot PR (test
+  drafts, migration shims, etc.) is a separate, manual maintainer
+  action.
 - NEVER skip STEP 2c (commit log scan) for MAJOR bumps. CHANGELOG-only
   analysis on a major version bump is insufficient signal; if the
   /compare API returns too many commits to scan, surface that as a
@@ -393,10 +561,10 @@ HARD RULES (dep-review-specific)
 
 | Knob | Default | When to adjust |
 |---|---|---|
-| Cooldown age (24h before a PR becomes eligible) | 24h | Lower to 1h if a security-only PR needs faster turnaround; raise to 72h if the supply-chain attack landscape has gotten worse and you want more soak time |
 | Commit-log cap (100 commits scanned) | 100 | Raise if you're routinely hitting it on first-major-version bumps for fast-moving libs; lower if API rate-limit pressure |
 | Test-suite filter on STEP 5 | basename-based | Switch to a Go/npm/pip module-path filter if the basename heuristic produces too many false matches |
-| AUTO_MERGE_LOW env var | unset (default off) | Set to `true` ONLY after you've watched the prompt's LOW classifications for a few weeks and they match your own judgment. The cost of a wrong auto-merge is far higher than the cost of one extra click |
+| AUTO_MERGE_LOW env var | unset (default ON) | Set to the literal string `false` to disable the LOW-risk auto-merge default and require a maintainer click on every PR. Reasonable opt-out during prompt-calibration windows (the first weeks after a major prompt change) or if the JSONL audit trail shows the LOW classifier surfaced a regression. Default-on is the calibrated steady state |
+| PREFLIGHT rebase cooldown (1h between `@dependabot rebase` requests) | 1h | Lower to 15m if Dependabot is responding fast and you want tighter loops; raise to 6h if Dependabot's rebase queue is backed up and we're issuing duplicates that confuse the audit trail |
 | Risk thresholds (LOW/MEDIUM/HIGH boundaries) | per STEP 4c | If you find HIGH is too noisy (every major bump hits HIT-NEUTRAL → HIGH even when innocuous), tune 4c's MAJOR-bump rule. Keep changes anchored in observed outcomes from the JSONL audit trail, not intuition |
 
 ## What this prompt deliberately does NOT do

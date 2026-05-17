@@ -174,6 +174,93 @@ func (s *Store) Read(ctx context.Context, tenantID uuid.UUID, id string) (Sessio
 	return sessionFromRow(row), nil
 }
 
+// ListForUser returns every currently-valid session belonging to userID under
+// tenantID. "Currently-valid" means revoked_at IS NULL AND expires_at > now().
+// Slice 108: backs GET /v1/me/sessions.
+func (s *Store) ListForUser(ctx context.Context, tenantID, userID uuid.UUID) ([]Session, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		return nil, err
+	}
+	q := dbx.New(tx)
+	rows, err := q.ListSessionsForUser(ctx, dbx.ListSessionsForUserParams{
+		TenantID: pgtype.UUID{Bytes: tenantID, Valid: true},
+		UserID:   pgtype.UUID{Bytes: userID, Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sessions: list for user: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	out := make([]Session, len(rows))
+	for i, r := range rows {
+		out[i] = sessionFromRow(r)
+	}
+	return out, nil
+}
+
+// RevokeForUser revokes a single session iff it belongs to userID. Returns true
+// when a matching row was updated. The ownership guard lives in the SQL WHERE
+// clause so a cross-user id never updates the wrong row. Idempotent: re-revoking
+// an already-revoked row leaves revoked_at unchanged but still returns true (the
+// row matched the WHERE). Slice 108: backs DELETE /v1/me/sessions/{id}.
+func (s *Store) RevokeForUser(ctx context.Context, tenantID, userID uuid.UUID, id string) (bool, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		return false, err
+	}
+	q := dbx.New(tx)
+	rowsAffected, err := q.RevokeSessionForUser(ctx, dbx.RevokeSessionForUserParams{
+		TenantID: pgtype.UUID{Bytes: tenantID, Valid: true},
+		ID:       id,
+		UserID:   pgtype.UUID{Bytes: userID, Valid: true},
+	})
+	if err != nil {
+		return false, fmt.Errorf("sessions: revoke for user: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return rowsAffected > 0, nil
+}
+
+// RevokeOthersForUser revokes every valid session for userID EXCEPT keepID. Pass
+// "" for keepID to revoke every session including the current one. Returns the
+// count of revoked rows. Slice 108: backs DELETE /v1/me/sessions ("sign out other
+// devices").
+func (s *Store) RevokeOthersForUser(ctx context.Context, tenantID, userID uuid.UUID, keepID string) (int64, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		return 0, err
+	}
+	q := dbx.New(tx)
+	n, err := q.RevokeOtherSessionsForUser(ctx, dbx.RevokeOtherSessionsForUserParams{
+		TenantID: pgtype.UUID{Bytes: tenantID, Valid: true},
+		UserID:   pgtype.UUID{Bytes: userID, Valid: true},
+		ID:       keepID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("sessions: revoke others: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // Revoke flags a session as logged-out. Idempotent.
 func (s *Store) Revoke(ctx context.Context, tenantID uuid.UUID, id string) error {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})

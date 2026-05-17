@@ -59,6 +59,9 @@ import (
 	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/audit/walkthrough"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
+	"github.com/mgoodric/security-atlas/internal/auth/sessions"
+	"github.com/mgoodric/security-atlas/internal/auth/userprefs"
+	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/board"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -432,6 +435,25 @@ func (s *Server) httpHandler() http.Handler {
 	meNotificationsH := meapi.NewNotifications(notificationsStore)
 	root.Get("/v1/me/notifications", meNotificationsH.List)
 	root.Patch("/v1/me/notifications/{id}/read", meNotificationsH.MarkRead)
+	// Slice 108: /v1/me + /v1/me/preferences + /v1/me/sessions. Each handler
+	// gets its own dependency object (users store, userprefs store, sessions
+	// store + dbPool for me_audit_log writes). Routes appended directly to the
+	// root chi router per the parallel-batch convention. Static suffix routes
+	// (/preferences, /sessions, /sessions/{id}) are declared after the bare
+	// /v1/me but use distinct path shapes so there is no shadowing.
+	usersStore := users.NewStore(s.dbPool)
+	sessionsStore := sessions.NewStore(s.dbPool, 0)
+	userprefsStore := userprefs.NewStore(s.dbPool)
+	meProfileH := meapi.NewProfile(usersStore, s.dbPool)
+	mePrefsH := meapi.NewPreferences(userprefsStore, s.dbPool)
+	meSessionsH := meapi.NewSessions(sessionsStore, s.dbPool)
+	root.Get("/v1/me", meProfileH.GetMe)
+	root.Patch("/v1/me", meProfileH.PatchMe)
+	root.Get("/v1/me/preferences", mePrefsH.GetPreferences)
+	root.Patch("/v1/me/preferences", mePrefsH.PatchPreferences)
+	root.Get("/v1/me/sessions", meSessionsH.ListSessions)
+	root.Delete("/v1/me/sessions", meSessionsH.RevokeOtherSessions)
+	root.Delete("/v1/me/sessions/{id}", meSessionsH.RevokeSession)
 	// Slice 021: exception / waiver workflow. Routes appended per the
 	// parallel-batch convention -- chi.Mux rejects two Mounts at "/", so
 	// individual routes are registered onto the root. Literal-segment
