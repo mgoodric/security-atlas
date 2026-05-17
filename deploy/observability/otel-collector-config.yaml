@@ -1,0 +1,79 @@
+# OTel Collector pipeline config.
+#
+# Receives OTLP (gRPC + HTTP) from atlas, fans out:
+#   - traces  → Tempo via OTLP gRPC
+#   - metrics → Prometheus exporter (Prometheus pulls /metrics every 15s)
+#   - logs    → DROP (logs flow via Promtail → Loki already; the collector
+#                here intentionally does NOT receive or forward logs to
+#                avoid duplicating the existing path)
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Bound memory so a metric/trace flood can't OOM the collector and
+  # cascade-fail the rest of the stack on the same host.
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Standard batching. Reduces per-export overhead; trades a small amount
+  # of latency for throughput. 200ms is a reasonable single-node default.
+  batch:
+    timeout: 200ms
+    send_batch_size: 1024
+
+  # Trim resource attributes that aren't useful in Prometheus labels (high
+  # cardinality, e.g. process.pid). Adjust as you learn what's noisy.
+  resource:
+    attributes:
+      - key: process.pid
+        action: delete
+      - key: process.command_line
+        action: delete
+
+exporters:
+  # Forward traces to Tempo (which receives OTLP on its own 4317).
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true # in-cluster; switch to mutual TLS for cross-host
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+
+  # Expose metrics on :8889 for Prometheus to scrape.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    # Use the namespace prefix so user-defined metrics + auto-emitted
+    # ones (http_*, db_client_*) are clearly attributable to atlas.
+    namespace: atlas
+    # Send "stale markers" so a disappearing series doesn't haunt
+    # dashboards as a flatline.
+    send_timestamps: true
+    metric_expiration: 5m
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/tempo]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus]
+  telemetry:
+    logs:
+      level: info

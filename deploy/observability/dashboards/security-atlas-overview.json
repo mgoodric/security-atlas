@@ -1,0 +1,249 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Security-atlas overview — logs from Loki today; metrics + traces light up once the atlas-OTel slice ships and atlas restarts with OTEL_EXPORTER_OTLP_ENDPOINT set.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "row",
+      "title": "Logs (working today via Loki)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Atlas log volume (lines/s)",
+      "datasource": { "type": "loki", "uid": "security-atlas-loki" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "id": 1,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (container) (rate({container=~\"security-atlas-.*\"}[$__interval]))",
+          "queryType": "range"
+        }
+      ],
+      "options": { "legend": { "displayMode": "table", "placement": "right" } }
+    },
+    {
+      "type": "logs",
+      "title": "Atlas errors (last 1h)",
+      "datasource": { "type": "loki", "uid": "security-atlas-loki" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "id": 2,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{container=~\"security-atlas-.*\"} |~ \"level=ERROR|error:|panic:\"",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "dedupStrategy": "exact"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Bootstrap exit signal (one-shot success markers)",
+      "datasource": { "type": "loki", "uid": "security-atlas-loki" },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 9 },
+      "id": 3,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (container) (count_over_time({container=\"security-atlas-bootstrap\"} |~ \"bootstrap complete\"[$__interval]))",
+          "queryType": "range"
+        }
+      ],
+      "description": "Increments each time the bootstrap container reports success. Zero for a long stretch = bootstrap hasn't run since the window started, which is the steady state."
+    },
+    {
+      "type": "row",
+      "title": "Metrics (lights up once atlas-OTel slice ships)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+      "id": 200,
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP request rate by route",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "security-atlas-prometheus"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 4,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (http_route) (rate(atlas_http_server_duration_count[$__rate_interval]))"
+        }
+      ],
+      "options": { "legend": { "displayMode": "table", "placement": "right" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP latency P50 / P95 / P99",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "security-atlas-prometheus"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 5,
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "p50",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(atlas_http_server_duration_bucket[$__rate_interval])))"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "p95",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(atlas_http_server_duration_bucket[$__rate_interval])))"
+        },
+        {
+          "refId": "C",
+          "legendFormat": "p99",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(atlas_http_server_duration_bucket[$__rate_interval])))"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Errors (5xx) by route",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "security-atlas-prometheus"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "id": 6,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (http_route) (rate(atlas_http_server_duration_count{http_status_code=~\"5..\"}[$__rate_interval]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "DB query duration P95 (pgx via otelpgx)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "security-atlas-prometheus"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "id": 7,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, db_operation) (rate(atlas_db_client_operation_duration_bucket[$__rate_interval])))",
+          "legendFormat": "{{db_operation}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "type": "row",
+      "title": "Go runtime",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 },
+      "id": 300,
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Goroutines + heap (MB)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "security-atlas-prometheus"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
+      "id": 8,
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "goroutines",
+          "expr": "atlas_go_goroutines"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "heap_alloc_mb",
+          "expr": "atlas_go_memory_used_bytes{type=\"heap\"} / 1024 / 1024"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "GC pause (95th)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "security-atlas-prometheus"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
+      "id": 9,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(atlas_go_gc_pause_seconds_bucket[$__rate_interval])))"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "type": "row",
+      "title": "Traces (jump to Tempo from any timeseries spike)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 },
+      "id": 400,
+      "collapsed": false
+    },
+    {
+      "type": "traces",
+      "title": "Recent slow traces (P95+)",
+      "datasource": { "type": "tempo", "uid": "security-atlas-tempo" },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 42 },
+      "id": 10,
+      "targets": [
+        {
+          "refId": "A",
+          "query": "{ resource.service.name=\"security-atlas\" && duration > 500ms }",
+          "queryType": "traceql",
+          "tableType": "traces",
+          "limit": 20
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["security-atlas", "observability"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "security-atlas overview",
+  "uid": "security-atlas-overview",
+  "version": 1,
+  "weekStart": ""
+}
