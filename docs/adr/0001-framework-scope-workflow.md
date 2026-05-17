@@ -1,6 +1,6 @@
 # ADR 0001 — FrameworkScope predicate lifecycle workflow
 
-**Status:** Accepted
+**Status:** Accepted · Honored (verified 2026-05-15 by slice 071 audit — four-state lifecycle `draft → review → approved → activated` is implemented in slice 018 + reused by slice 030 OSCAL export's framework-scope intersection compute)
 
 **Date:** 2026-05-11
 

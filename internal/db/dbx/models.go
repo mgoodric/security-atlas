@@ -1258,6 +1258,68 @@ type LocalCredential struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type MetricCascadeEdge struct {
+	ParentID  string             `json:"parent_id"`
+	ChildID   string             `json:"child_id"`
+	Weight    pgtype.Numeric     `json:"weight"`
+	Notes     string             `json:"notes"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type MetricInput struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	MetricID        string             `json:"metric_id"`
+	InputAt         pgtype.Timestamptz `json:"input_at"`
+	NumericValue    pgtype.Numeric     `json:"numeric_value"`
+	Dimensions      []byte             `json:"dimensions"`
+	EnteredByUserID pgtype.UUID        `json:"entered_by_user_id"`
+	Notes           string             `json:"notes"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type MetricObservation struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	MetricID     string             `json:"metric_id"`
+	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
+	NumericValue pgtype.Numeric     `json:"numeric_value"`
+	Dimensions   []byte             `json:"dimensions"`
+	Source       string             `json:"source"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type MetricTarget struct {
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	MetricID          string             `json:"metric_id"`
+	TargetValue       pgtype.Numeric     `json:"target_value"`
+	WarningThreshold  pgtype.Numeric     `json:"warning_threshold"`
+	CriticalThreshold pgtype.Numeric     `json:"critical_threshold"`
+	Direction         string             `json:"direction"`
+	OwnerUserID       pgtype.UUID        `json:"owner_user_id"`
+	Notes             string             `json:"notes"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MetricsCatalog struct {
+	ID               string             `json:"id"`
+	TenantID         pgtype.UUID        `json:"tenant_id"`
+	Level            string             `json:"level"`
+	Category         string             `json:"category"`
+	Name             string             `json:"name"`
+	Description      string             `json:"description"`
+	Unit             string             `json:"unit"`
+	Cadence          string             `json:"cadence"`
+	ComputeStrategy  string             `json:"compute_strategy"`
+	ComputeEvaluator *string            `json:"compute_evaluator"`
+	SourceSlices     []string           `json:"source_slices"`
+	Notes            string             `json:"notes"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Notification struct {
 	ID              pgtype.UUID        `json:"id"`
 	TenantID        pgtype.UUID        `json:"tenant_id"`
@@ -1325,6 +1387,7 @@ type Policy struct {
 	PublishedAt                 pgtype.Timestamptz `json:"published_at"`
 	PublishedBy                 *string            `json:"published_by"`
 	SupersededAt                pgtype.Timestamptz `json:"superseded_at"`
+	NextReviewAt                pgtype.Timestamptz `json:"next_review_at"`
 }
 
 type PolicyAcknowledgment struct {

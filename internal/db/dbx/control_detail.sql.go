@@ -89,7 +89,7 @@ func (q *Queries) ListControlEvaluationHistoryPaged(ctx context.Context, arg Lis
 const listEvidenceForControlPaged = `-- name: ListEvidenceForControlPaged :many
 
 SELECT id, tenant_id, control_id, control_ref, scope_id,
-       observed_at, evidence_kind, provenance, hash
+       observed_at, evidence_kind, provenance, hash, result
 FROM evidence_records
 WHERE tenant_id = $1
   AND (control_id = $2 OR control_ref = $3)
@@ -124,6 +124,7 @@ type ListEvidenceForControlPagedRow struct {
 	EvidenceKind *string            `json:"evidence_kind"`
 	Provenance   []byte             `json:"provenance"`
 	Hash         string             `json:"hash"`
+	Result       EvidenceResult     `json:"result"`
 }
 
 // Slice 064 — control-detail backend read endpoints.
@@ -159,6 +160,10 @@ type ListEvidenceForControlPagedRow struct {
 // is the same keyset semantics: ties on observed_at fall back to id. A
 // sentinel cursor (cursor_ts = 'infinity', cursor_id = max-uuid) selects
 // the first page. The handler computes all cutoff values in Go.
+//
+// Slice 106: the SELECT projects `result` so the wire shape `evidenceWire`
+// can surface it (the column has always been on evidence_records; the slice
+// 064 wire shape simply omitted it).
 func (q *Queries) ListEvidenceForControlPaged(ctx context.Context, arg ListEvidenceForControlPagedParams) ([]ListEvidenceForControlPagedRow, error) {
 	rows, err := q.db.Query(ctx, listEvidenceForControlPaged,
 		arg.TenantID,
@@ -187,6 +192,117 @@ func (q *Queries) ListEvidenceForControlPaged(ctx context.Context, arg ListEvide
 			&i.EvidenceKind,
 			&i.Provenance,
 			&i.Hash,
+			&i.Result,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEvidencePaged = `-- name: ListEvidencePaged :many
+SELECT id, tenant_id, control_id, control_ref, scope_id,
+       observed_at, evidence_kind, provenance, hash, result
+FROM evidence_records
+WHERE tenant_id = $1
+  AND observed_at >= $2
+  AND observed_at <= $3
+  AND ($4::text IS NULL
+       OR evidence_kind = $4::text)
+  AND ($5::text IS NULL
+       OR result::text = $5::text)
+  AND ($6::text IS NULL
+       OR source_attribution->>'actor_type' = $6::text)
+  AND ($7::text IS NULL
+       OR source_attribution->>'actor_id' = $7::text)
+  AND (
+        observed_at < $8
+        OR (observed_at = $8 AND id < $9)
+      )
+ORDER BY observed_at DESC, id DESC
+LIMIT $10
+`
+
+type ListEvidencePagedParams struct {
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	ObservedAt      pgtype.Timestamptz `json:"observed_at"`
+	ObservedAt_2    pgtype.Timestamptz `json:"observed_at_2"`
+	Kind            *string            `json:"kind"`
+	ResultFilter    *string            `json:"result_filter"`
+	SourceActorType *string            `json:"source_actor_type"`
+	SourceActorID   *string            `json:"source_actor_id"`
+	CursorTs        pgtype.Timestamptz `json:"cursor_ts"`
+	CursorID        pgtype.UUID        `json:"cursor_id"`
+	RowLimit        int32              `json:"row_limit"`
+}
+
+type ListEvidencePagedRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	ControlID    pgtype.UUID        `json:"control_id"`
+	ControlRef   string             `json:"control_ref"`
+	ScopeID      pgtype.UUID        `json:"scope_id"`
+	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
+	EvidenceKind *string            `json:"evidence_kind"`
+	Provenance   []byte             `json:"provenance"`
+	Hash         string             `json:"hash"`
+	Result       EvidenceResult     `json:"result"`
+}
+
+// Slice 106: tenant-wide evidence ledger window with optional filters. Used
+// when GET /v1/evidence is called WITHOUT a control_id — returns the
+// caller-tenant's whole evidence stream (RLS still scopes it on top of the
+// explicit tenant_id predicate, defense-in-depth per canvas invariant #6).
+//
+// All four filter args are optional. The
+//
+//	(sqlc.narg('x')::T IS NULL OR col = sqlc.narg('x')::T)
+//
+// pattern is the established NULL-skip shape — see
+// internal/db/queries/vendors.sql:50 — and keeps the query plan stable while
+// letting sqlc emit nullable Go parameters. The source-actor filters drill
+// into the JSONB source_attribution column (slice 013 enforces the
+// {actor_type, actor_id, session_id} shape there).
+//
+// Keyset pagination mirrors ListEvidenceForControlPaged exactly: same
+// decomposed (observed_at, id) predicate, same +1 probe-row idiom.
+// Window default (last 30 days) is still applied by the handler, not the
+// query — the handler passes the resolved cutoff timestamps verbatim.
+func (q *Queries) ListEvidencePaged(ctx context.Context, arg ListEvidencePagedParams) ([]ListEvidencePagedRow, error) {
+	rows, err := q.db.Query(ctx, listEvidencePaged,
+		arg.TenantID,
+		arg.ObservedAt,
+		arg.ObservedAt_2,
+		arg.Kind,
+		arg.ResultFilter,
+		arg.SourceActorType,
+		arg.SourceActorID,
+		arg.CursorTs,
+		arg.CursorID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEvidencePagedRow
+	for rows.Next() {
+		var i ListEvidencePagedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ControlID,
+			&i.ControlRef,
+			&i.ScopeID,
+			&i.ObservedAt,
+			&i.EvidenceKind,
+			&i.Provenance,
+			&i.Hash,
+			&i.Result,
 		); err != nil {
 			return nil, err
 		}

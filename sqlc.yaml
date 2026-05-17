@@ -4,7 +4,17 @@ sql:
     # Schema is read from every forward migration in the tree, applied in
     # filename order. Down migrations (*.down.sql) are excluded — sqlc
     # processes the cumulative current state.
+    #
+    # `internal/db/sqlc-schema/_enums.sql` is listed FIRST because the
+    # production migrations wrap every `CREATE TYPE` in a DO block for
+    # self-host idempotency (slice 065 bug #3), and sqlc v1.31.1 cannot
+    # parse `CREATE TYPE` inside `DO $$ BEGIN ... END $$`. Without the
+    # bare-enum prelude, every typed enum column would emit as
+    # `interface{}`. The DO-block re-declarations that follow are
+    # silently tolerated as duplicates by sqlc. See slice 109 decisions
+    # log + the file's own header comment for the full rationale.
     schema:
+      - "internal/db/sqlc-schema/_enums.sql"
       - "migrations/sql/20260511000000_init.sql"
       - "migrations/sql/20260511000001_scf_anchors.sql"
       - "migrations/sql/20260511000002_schema_registry.sql"
@@ -39,6 +49,8 @@ sql:
       - "migrations/sql/20260511000031_board_briefs.sql"
       - "migrations/sql/20260511000032_board_packs.sql"
       - "migrations/sql/20260511000033_controls_superseded_fk_deferrable.sql"
+      - "migrations/sql/20260516000001_metrics_catalog.sql"
+      - "migrations/sql/20260516000002_policies_next_review_at.sql"
     queries: "internal/db/queries"
     gen:
       go:

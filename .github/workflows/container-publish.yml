@@ -74,6 +74,10 @@ jobs:
             org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.description=security-atlas ${{ matrix.image.name }} — open-source GRC platform
 
+      - name: Compute BUILD_TIME (RFC3339 UTC)
+        id: buildtime
+        run: echo "value=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Build + push
         id: build
         uses: docker/build-push-action@v7
@@ -84,6 +88,21 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Slice 092: bake release metadata into the binary AND the OCI
+          # image labels. atlas.Dockerfile + atlas-cli.Dockerfile both
+          # accept ARG VERSION / ARG COMMIT / ARG BUILD_TIME and wire
+          # them into `-ldflags "-X main.version=... -X main.commit=...
+          # -X main.date=..."` (see deploy/docker/atlas.Dockerfile lines
+          # 39-46). Without these build-args the binary's ldflag
+          # defaults win (`dev`, `none`, `unknown`), and every released
+          # image reports `version=dev` on `/v1/version`. Images whose
+          # Dockerfile doesn't declare these ARGs (web, bootstrap)
+          # safely ignore the build-args with a Docker warning only — no
+          # change to those images.
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ steps.buildtime.outputs.value }}
           cache-from: type=gha,scope=${{ matrix.image.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
           provenance: true

@@ -31,13 +31,17 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
+	metricscatalog "github.com/mgoodric/security-atlas/internal/catalog/metrics"
 	"github.com/mgoodric/security-atlas/internal/decision"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/freshnessdrift"
+	metricseval "github.com/mgoodric/security-atlas/internal/metrics/eval"
+	metricsscheduler "github.com/mgoodric/security-atlas/internal/metrics/scheduler"
 	"github.com/mgoodric/security-atlas/internal/oscal"
+	"github.com/mgoodric/security-atlas/internal/platform"
 	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
@@ -188,6 +192,11 @@ func main() {
 		SchemaRegistry:   schemaSvc,
 		IngestService:    ingestSvc,
 		EvidencePushRate: 100, // 100 records/sec default per EVIDENCE_SDK §4.6
+		// Slice 072: wire the build-time-injected version metadata
+		// callback into the HTTP server. Mounts GET /v1/version as a
+		// public, no-auth metadata endpoint (see api.NewVersionHandler
+		// for the documented intent).
+		VersionFieldsFn: versionFields,
 	}
 	if streamPub != nil {
 		cfg.EvidencePublisher = streamPub
@@ -243,6 +252,24 @@ func main() {
 			}
 			fmt.Fprintf(os.Stderr, "atlas: fixed-token admin credential issued: id=%s tenant=%s last4=%s\n",
 				cred.ID, cred.TenantID, cred.Last4)
+
+			// Slice 073 — emit the grep-friendly stdout line + write the
+			// bootstrap-token file (mode 0600) so a self-host operator
+			// has three orthogonal ways to find the token: stderr,
+			// `docker compose logs atlas | grep BOOTSTRAP_TOKEN`, and the
+			// file at ${ATLAS_DATA_DIR}/bootstrap-token. The file is
+			// atomically deleted on first successful sign-in by the
+			// /v1/install/mark-first-signin handler (load-bearing P0-A1).
+			fmt.Println(platform.SanitizeTokenForLogStdout(bootstrapToken))
+			tokenPath := platform.BootstrapTokenPath(os.Getenv("ATLAS_DATA_DIR"))
+			if writeErr := platform.WriteBootstrapToken(tokenPath, bootstrapToken); writeErr != nil {
+				// Non-fatal: the file is a convenience, not a hard dep.
+				// The operator can still find the token in stderr or via
+				// `docker compose logs`. Log and continue.
+				fmt.Fprintf(os.Stderr, "atlas: bootstrap-token file write skipped: %v\n", writeErr)
+			} else {
+				fmt.Fprintf(os.Stderr, "atlas: bootstrap-token file written at %s (mode 0600)\n", tokenPath)
+			}
 		}
 	}
 
@@ -278,6 +305,19 @@ func main() {
 		apikeySvc := apikeystore.NewStore(pool, authPool, hasher, 0)
 		srv.AttachAPIKeyStore(apikeySvc)
 		fmt.Fprintf(os.Stderr, "atlas: api_keys store wired (BEARER_HASH_KEY ok)\n")
+
+		// Slice 073: platform_status reader/writer. Read pool is the
+		// RLS-bound app pool (public_read RLS policy is USING (true));
+		// write pool is the BYPASSRLS migrate pool (atlas_app has no
+		// UPDATE policy under FORCE ROW LEVEL SECURITY by design).
+		// When authPool is nil (DATABASE_URL not set) the write path is
+		// disabled — the public read endpoint still works.
+		platformStatus := platform.NewStatus(pool, authPool)
+		srv.AttachPlatformStatus(platformStatus)
+		srv.AttachPlatformResetter(platformStatus)
+		srv.AttachBootstrapTokenPath(platform.BootstrapTokenPath(os.Getenv("ATLAS_DATA_DIR")))
+		srv.AttachLogger(logger)
+		fmt.Fprintf(os.Stderr, "atlas: platform_status wired (install-state endpoint ready)\n")
 
 		// Slice 037: wire the user-facing auth routes so /auth/local/login
 		// mounts. The docker-compose self-host bundle is a local-mode
@@ -608,6 +648,50 @@ func main() {
 				fmt.Fprintf(os.Stderr, "atlas: freshness/drift scheduler checking every %s\n", tickCheck.String())
 				if err := fdScheduler.Run(ctx, tickCheck); err != nil {
 					errCh <- fmt.Errorf("freshness/drift scheduler: %w", err)
+				}
+			}()
+		}
+	}
+
+	// Slice 076: metrics catalog seeder (boot-time, runs once) + 15-min
+	// evaluator scheduler. The seeder embeds catalogs/metrics/*.yaml; the
+	// scheduler enumerates tenants from the migrator pool and runs each
+	// computed-metric evaluator under the app pool with tenancy.WithTenant.
+	// ATLAS_METRICS_INTERVAL overrides the 15-min cadence for dev loops.
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		mctx, mcancel := context.WithTimeout(context.Background(), 10*time.Second)
+		mPool, err := pgxpool.New(mctx, migratorURL)
+		mcancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: metrics scheduler pool: %v\n", err)
+		} else {
+			registry := metricseval.NewRegistry(pool)
+			seeder := metricscatalog.NewSeeder(mPool)
+			seedCtx, seedCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			report, serr := seeder.SeedFromEmbedded(seedCtx, registry)
+			seedCancel()
+			if serr != nil {
+				fmt.Fprintf(os.Stderr, "atlas: metrics seeder: %v\n", serr)
+			} else {
+				fmt.Fprintf(os.Stderr, "atlas: metrics catalog seeded (%d metrics, %d edges)\n",
+					report.MetricsApplied, report.EdgesApplied)
+			}
+			interval := metricsscheduler.DefaultInterval
+			if raw := os.Getenv("ATLAS_METRICS_INTERVAL"); raw != "" {
+				if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+					interval = d
+				} else {
+					fmt.Fprintf(os.Stderr, "atlas: ATLAS_METRICS_INTERVAL=%q invalid: %v\n", raw, perr)
+				}
+			}
+			ms := metricsscheduler.New(mPool, pool, registry, logger)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer mPool.Close()
+				fmt.Fprintf(os.Stderr, "atlas: metrics scheduler ticking every %s\n", interval.String())
+				if err := ms.Run(ctx, interval); err != nil {
+					errCh <- fmt.Errorf("metrics scheduler: %w", err)
 				}
 			}()
 		}

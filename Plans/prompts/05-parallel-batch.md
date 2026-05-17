@@ -132,6 +132,8 @@ Failure-mode playbook (orchestrator behavior):
 
 - **CI fails on prettier reformat of CHANGELOG.md**: one-character fix in the worktree, push, watch CI. If recurring across multiple slices in the batch, update the subagent prompts on the next batch.
 
+- **Pre-commit failure on the status-flip commit specifically**: run `pre-commit run --all-files` against the worktree, amend the status-flip commit, force-push. This is the dominant pre-commit failure shape and is fixed by slice 081's pre-push hook on engineer-installed setups; remote CI still catches it as a safety net.
+
 - **CI fails on GitGuardian Security Checks**: check if HEAD content is clean. If yes, the flag is historical (GitGuardian is branch-scoped, not HEAD-scoped). Squash-rebase the branch to one clean commit:
 ```
 

@@ -278,6 +278,139 @@ func (q *Queries) ListSCFAnchorsForVersion(ctx context.Context, arg ListSCFAncho
 	return items, nil
 }
 
+const listSCFAnchorsForVersionWithState = `-- name: ListSCFAnchorsForVersionWithState :many
+WITH latest_eval AS (
+    SELECT DISTINCT ON (ce.tenant_id, ce.control_id, ce.scope_cell_id)
+        ce.tenant_id,
+        ce.control_id,
+        ce.scope_cell_id,
+        ce.result,
+        ce.freshness_status,
+        ce.last_observed_at,
+        ce.evaluated_at
+    FROM control_evaluations ce
+    ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
+),
+worst_per_anchor AS (
+    SELECT
+        c.scf_anchor_id AS anchor_id,
+        CASE MAX(CASE le.result
+                    WHEN 'fail'         THEN 4
+                    WHEN 'inconclusive' THEN 3
+                    WHEN 'pass'         THEN 2
+                    WHEN 'na'           THEN 1
+                    ELSE 0
+                 END)
+            WHEN 4 THEN 'fail'
+            WHEN 3 THEN 'inconclusive'
+            WHEN 2 THEN 'pass'
+            WHEN 1 THEN 'na'
+        END::evidence_result AS result,
+        CASE MAX(CASE le.freshness_status
+                    WHEN 'expired'     THEN 4
+                    WHEN 'stale'       THEN 3
+                    WHEN 'no_evidence' THEN 2
+                    WHEN 'fresh'       THEN 1
+                    ELSE 0
+                 END)
+            WHEN 4 THEN 'expired'
+            WHEN 3 THEN 'stale'
+            WHEN 2 THEN 'no_evidence'
+            WHEN 1 THEN 'fresh'
+        END AS freshness_status,
+        MAX(le.last_observed_at) AS last_observed_at,
+        MAX(le.evaluated_at)     AS evaluated_at
+    FROM controls c
+    JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
+    WHERE c.superseded_by IS NULL
+      AND c.scf_anchor_id IS NOT NULL
+    GROUP BY c.scf_anchor_id
+)
+SELECT
+    a.id, a.framework_version_id, a.scf_id, a.family, a.title,
+    a.description, a.subtopics, a.created_at, a.updated_at,
+    wpa.result::evidence_result       AS state_result,
+    wpa.freshness_status::text        AS state_freshness_status,
+    wpa.last_observed_at::timestamptz AS state_last_observed_at,
+    wpa.evaluated_at::timestamptz     AS state_evaluated_at
+FROM scf_anchors a
+LEFT JOIN worst_per_anchor wpa ON wpa.anchor_id = a.id
+WHERE a.framework_version_id = $1
+ORDER BY a.scf_id
+LIMIT $2 OFFSET $3
+`
+
+type ListSCFAnchorsForVersionWithStateParams struct {
+	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
+	Limit              int32       `json:"limit"`
+	Offset             int32       `json:"offset"`
+}
+
+type ListSCFAnchorsForVersionWithStateRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	ScfID              string             `json:"scf_id"`
+	Family             string             `json:"family"`
+	Title              string             `json:"title"`
+	Description        string             `json:"description"`
+	Subtopics          []byte             `json:"subtopics"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	// StateResult + StateFreshnessStatus are hand-narrowed from sqlc's
+	// inferred non-nullable (`EvidenceResult`, `string`) back to the
+	// nullable shapes (`NullEvidenceResult`, `pgtype.Text`) the
+	// slice-104 handler depends on (slice 109). When no
+	// control_evaluation exists for the anchor, every state_* column
+	// returns NULL via the LEFT JOIN; the handler keys off
+	// `StateResult.Valid` to render `state: null`. sqlc v1.31.1 cannot
+	// type the CASE-WHEN-aggregate-over-LEFT-JOIN expression as
+	// nullable on its own. See `docs/audit-log/109-sqlc-toolchain-pin-decisions.md`.
+	StateResult          NullEvidenceResult `json:"state_result"`
+	StateFreshnessStatus pgtype.Text        `json:"state_freshness_status"`
+	StateLastObservedAt  pgtype.Timestamptz `json:"state_last_observed_at"`
+	StateEvaluatedAt     pgtype.Timestamptz `json:"state_evaluated_at"`
+}
+
+// Slice 104: version-scoped sibling to ListSCFAnchorsLatestWithState.
+// Same CTE shape; the only difference is the WHERE clause filters
+// scf_anchors to the caller-supplied framework_version_id instead of
+// the current SCF version. Kept as two queries (rather than one with
+// a NULL sentinel) so the planner can inline the simpler predicate
+// and so the parameter types stay tight for sqlc codegen.
+func (q *Queries) ListSCFAnchorsForVersionWithState(ctx context.Context, arg ListSCFAnchorsForVersionWithStateParams) ([]ListSCFAnchorsForVersionWithStateRow, error) {
+	rows, err := q.db.Query(ctx, listSCFAnchorsForVersionWithState, arg.FrameworkVersionID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSCFAnchorsForVersionWithStateRow
+	for rows.Next() {
+		var i ListSCFAnchorsForVersionWithStateRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.FrameworkVersionID,
+			&i.ScfID,
+			&i.Family,
+			&i.Title,
+			&i.Description,
+			&i.Subtopics,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.StateResult,
+			&i.StateFreshnessStatus,
+			&i.StateLastObservedAt,
+			&i.StateEvaluatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSCFAnchorsLatest = `-- name: ListSCFAnchorsLatest :many
 SELECT a.id, a.framework_version_id, a.scf_id, a.family, a.title, a.description, a.subtopics, a.created_at, a.updated_at
 FROM scf_anchors a
@@ -313,6 +446,159 @@ func (q *Queries) ListSCFAnchorsLatest(ctx context.Context, arg ListSCFAnchorsLa
 			&i.Subtopics,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSCFAnchorsLatestWithState = `-- name: ListSCFAnchorsLatestWithState :many
+WITH latest_eval AS (
+    SELECT DISTINCT ON (ce.tenant_id, ce.control_id, ce.scope_cell_id)
+        ce.tenant_id,
+        ce.control_id,
+        ce.scope_cell_id,
+        ce.result,
+        ce.freshness_status,
+        ce.last_observed_at,
+        ce.evaluated_at
+    FROM control_evaluations ce
+    ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
+),
+worst_per_anchor AS (
+    SELECT
+        c.scf_anchor_id AS anchor_id,
+        CASE MAX(CASE le.result
+                    WHEN 'fail'         THEN 4
+                    WHEN 'inconclusive' THEN 3
+                    WHEN 'pass'         THEN 2
+                    WHEN 'na'           THEN 1
+                    ELSE 0
+                 END)
+            WHEN 4 THEN 'fail'
+            WHEN 3 THEN 'inconclusive'
+            WHEN 2 THEN 'pass'
+            WHEN 1 THEN 'na'
+        END::evidence_result AS result,
+        CASE MAX(CASE le.freshness_status
+                    WHEN 'expired'     THEN 4
+                    WHEN 'stale'       THEN 3
+                    WHEN 'no_evidence' THEN 2
+                    WHEN 'fresh'       THEN 1
+                    ELSE 0
+                 END)
+            WHEN 4 THEN 'expired'
+            WHEN 3 THEN 'stale'
+            WHEN 2 THEN 'no_evidence'
+            WHEN 1 THEN 'fresh'
+        END AS freshness_status,
+        MAX(le.last_observed_at) AS last_observed_at,
+        MAX(le.evaluated_at)     AS evaluated_at
+    FROM controls c
+    JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
+    WHERE c.superseded_by IS NULL
+      AND c.scf_anchor_id IS NOT NULL
+    GROUP BY c.scf_anchor_id
+)
+SELECT
+    a.id, a.framework_version_id, a.scf_id, a.family, a.title,
+    a.description, a.subtopics, a.created_at, a.updated_at,
+    wpa.result::evidence_result       AS state_result,
+    wpa.freshness_status::text        AS state_freshness_status,
+    wpa.last_observed_at::timestamptz AS state_last_observed_at,
+    wpa.evaluated_at::timestamptz     AS state_evaluated_at
+FROM scf_anchors a
+JOIN framework_versions fv ON fv.id = a.framework_version_id
+JOIN frameworks f ON f.id = fv.framework_id
+LEFT JOIN worst_per_anchor wpa ON wpa.anchor_id = a.id
+WHERE f.slug = 'scf' AND fv.status = 'current' AND f.tenant_id IS NULL
+ORDER BY a.scf_id
+LIMIT $1 OFFSET $2
+`
+
+type ListSCFAnchorsLatestWithStateParams struct {
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+type ListSCFAnchorsLatestWithStateRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	ScfID              string             `json:"scf_id"`
+	Family             string             `json:"family"`
+	Title              string             `json:"title"`
+	Description        string             `json:"description"`
+	Subtopics          []byte             `json:"subtopics"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	// Same hand-narrow as ListSCFAnchorsForVersionWithStateRow above —
+	// see that struct's comment + slice 109 decisions log for rationale.
+	StateResult          NullEvidenceResult `json:"state_result"`
+	StateFreshnessStatus pgtype.Text        `json:"state_freshness_status"`
+	StateLastObservedAt  pgtype.Timestamptz `json:"state_last_observed_at"`
+	StateEvaluatedAt     pgtype.Timestamptz `json:"state_evaluated_at"`
+}
+
+// Slice 104: paginated anchor list for the latest current SCF
+// framework_version, LEFT JOINed to the worst-state-wins per-anchor
+// rollup over the tenant's `control_evaluations` ledger.
+//
+// Shape:
+//  1. `latest_eval` CTE picks the latest control_evaluations row per
+//     (tenant, control_id, scope_cell_id) via DISTINCT ON — the same
+//     pattern slice 012's ListLatestControlEvaluations uses for one
+//     control. This honors slice 012's append-only ledger semantics
+//     (we never lose history; we pick the current state).
+//  2. `worst_per_anchor` aggregates across every cell of every
+//     tenant-instantiated control that satisfies one anchor:
+//     result rank: fail (4) > inconclusive (3) > pass (2) > na (1)
+//     freshness  : expired (4) > stale (3) > no_evidence (2) > fresh (1)
+//  3. Outer SELECT joins scf_anchors LEFT JOIN worst_per_anchor — an
+//     anchor with no tenant control returns NULLs for every state
+//     column (the handler renders `state: null`).
+//
+// Constitutional invariants:
+//
+//	#6 RLS: `controls` and `control_evaluations` are tenant-scoped under
+//	   FORCE ROW LEVEL SECURITY. The tenant GUC set by `tenancymw`
+//	   filters those rows; the global `scf_anchors` rows
+//	   (`tenant_id IS NULL`) are visible to every tenant by design.
+//	#2 Engine is sole writer of control_evaluations: this is a pure read
+//	   over the engine's output table, never a parallel computation.
+//	#1 One control, N framework satisfactions: state is rolled up per
+//	   ANCHOR (the catalog spine node), not per framework.
+//
+// NOTE: the matching Go method lives in internal/db/dbx/scf_anchors.sql.go
+// (hand-maintained to keep the rest of the dbx tree HEAD-blessed per the
+// regen-on-rebase note in MEMORY.md). Keep the two in sync.
+func (q *Queries) ListSCFAnchorsLatestWithState(ctx context.Context, arg ListSCFAnchorsLatestWithStateParams) ([]ListSCFAnchorsLatestWithStateRow, error) {
+	rows, err := q.db.Query(ctx, listSCFAnchorsLatestWithState, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSCFAnchorsLatestWithStateRow
+	for rows.Next() {
+		var i ListSCFAnchorsLatestWithStateRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.FrameworkVersionID,
+			&i.ScfID,
+			&i.Family,
+			&i.Title,
+			&i.Description,
+			&i.Subtopics,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.StateResult,
+			&i.StateFreshnessStatus,
+			&i.StateLastObservedAt,
+			&i.StateEvaluatedAt,
 		); err != nil {
 			return nil, err
 		}

@@ -1,0 +1,61 @@
+# Board metric: Critical-findings SLA
+#
+# Fraction of P0/P1 audit findings (slice 027 audit_notes severity=finding)
+# closed within their SLA window. A direct trust signal in board updates.
+
+metrics:
+  - id: critical_findings_sla
+    level: board
+    category: audit
+    name: Critical-findings SLA
+    description: |
+      Fraction of P0/P1 audit findings closed within the
+      target time window (P0: 7 days, P1: 30 days by default).
+    unit: percent
+    cadence: weekly
+    compute_strategy: computed
+    compute_evaluator: critical_findings_sla
+    source_slices: ["027"]
+    notes: |
+      Composes from audit_notes where severity='finding' AND
+      severity_band IN ('p0','p1'). Findings without a close-by
+      target inherit the default 7d/30d. The evaluator returns 1.0
+      (100% compliant) when zero P0/P1 findings exist in the window —
+      "no findings" is the desired board state.
+
+  - id: mttr_critical_findings
+    level: program
+    category: audit
+    name: MTTR critical findings
+    description: |
+      Median days from finding-created to finding-closed for P0/P1
+      severity findings in the last 90 days.
+    unit: days
+    cadence: weekly
+    compute_strategy: manual_input
+    source_slices: ["027"]
+    notes: |
+      Manual until the audit_notes close-time aggregation query lands.
+      Pair with critical_findings_sla — a high SLA percentage with a
+      long MTTR means findings are closing right at the deadline.
+    parents:
+      - parent_id: critical_findings_sla
+        weight: 1.0
+
+  - id: open_findings_severity
+    level: program
+    category: audit
+    name: Open findings by severity
+    description: |
+      Count of open audit findings grouped by severity_band.
+      Dimensions['severity'] carries the band ('p0', 'p1', 'p2', 'p3').
+    unit: count
+    cadence: daily
+    compute_strategy: manual_input
+    source_slices: ["027"]
+    notes: |
+      Manual roll-up; the v1 persona reads this off the audit hub
+      directly each morning.
+    parents:
+      - parent_id: critical_findings_sla
+        weight: 1.0

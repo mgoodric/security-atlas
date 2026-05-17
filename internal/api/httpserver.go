@@ -24,6 +24,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
 	boardapi "github.com/mgoodric/security-atlas/internal/api/board"
+	calendarapi "github.com/mgoodric/security-atlas/internal/api/calendar"
 	controldetailapi "github.com/mgoodric/security-atlas/internal/api/controldetail"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	controlstateapi "github.com/mgoodric/security-atlas/internal/api/controlstate"
@@ -36,6 +37,7 @@ import (
 	fwscopesapi "github.com/mgoodric/security-atlas/internal/api/frameworkscopes"
 	freshnessdriftapi "github.com/mgoodric/security-atlas/internal/api/freshnessdrift"
 	meapi "github.com/mgoodric/security-atlas/internal/api/me"
+	metricsapi "github.com/mgoodric/security-atlas/internal/api/metrics"
 	orgunitsapi "github.com/mgoodric/security-atlas/internal/api/orgunits"
 	oscalexportapi "github.com/mgoodric/security-atlas/internal/api/oscalexport"
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
@@ -43,6 +45,7 @@ import (
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
+	"github.com/mgoodric/security-atlas/internal/api/securityheaders"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	themesapi "github.com/mgoodric/security-atlas/internal/api/themes"
 	"github.com/mgoodric/security-atlas/internal/api/ucfcoverage"
@@ -93,6 +96,14 @@ func (s *Server) HTTPHandlerForTests() http.Handler {
 // local dev frontend.
 func (s *Server) httpHandler() http.Handler {
 	root := chi.NewRouter()
+	// Slice 087: hardening HTTP headers (HSTS, X-Content-Type-Options,
+	// X-Frame-Options, Referrer-Policy, CSP-Report-Only) must be the FIRST
+	// middleware in the chain so they apply to EVERY response — including
+	// the bearer-auth 401s, the /auth/* sign-in flow, /health, /v1/version,
+	// and /v1/install-state. Surfaced by the 2026-Q2 security audit
+	// (MEDIUM-HIGH finding); see docs/audits/2026-Q2-security-audit.md and
+	// internal/api/securityheaders/middleware.go.
+	root.Use(securityheaders.Middleware)
 	root.Use(corsMiddleware)
 	// Slice 034: /auth/* (login/callback/logout) is bearer-exempt — users
 	// don't have a bearer yet at the moment they sign in. The middleware
@@ -102,7 +113,22 @@ func (s *Server) httpHandler() http.Handler {
 	// bundle's healthcheck and the atlas-bootstrap readiness poll both hit
 	// it with no credential. (The /health *route* is registered below,
 	// after every .Use() — chi requires all middleware before any route.)
-	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health"))
+	// Slice 072: /v1/version is added to the bearer-exempt set. The
+	// endpoint is intentionally public — it returns metadata about the
+	// binary (Version/Commit/BuildTime/GoVersion), NOT tenant data. The
+	// auth-bypass is documented at api.NewVersionHandler. Same precedent
+	// as /health from slice 037.
+	// Slice 073: /v1/install-state is added to the bearer-exempt set for
+	// the same reason — public metadata about whether this is a fresh
+	// install (P0-A4). The login page reads it SSR before any auth exists.
+	// Slice 094: /v1/calendar.ics is exempted from the upstream Bearer-header
+	// auth because calendar clients (Google / Apple / Outlook) cannot
+	// carry an Authorization header — they fetch with no auth metadata
+	// beyond what's in the URL. The calendar.ics handler authenticates
+	// inline via the `?token=` URL parameter, scope-restricted to
+	// AllowedKinds=[calendar.read.v1]. See decision D3 in
+	// docs/audit-log/094-compliance-calendar-decisions.md.
+	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health", "/v1/version", "/v1/install-state", "/v1/calendar.ics"))
 	// Slice 033: lift the authenticated credential's tenant id onto the
 	// request context so every downstream handler — and every database
 	// transaction it opens — runs under the right `app.current_tenant`
@@ -117,7 +143,11 @@ func (s *Server) httpHandler() http.Handler {
 	// Exempt prefixes mirror the bearer-auth exempt set; /health is
 	// added because a liveness probe shouldn't require credentials.
 	if s.authzEngine != nil {
-		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health"))
+		// Slice 072: /v1/version is added to the authz-exempt set for the
+		// same reason as /health — a metadata probe shouldn't reach OPA.
+		// Slice 073: /v1/install-state is added too — public metadata, same
+		// reasoning as the bearer-exempt above.
+		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/v1/version", "/v1/install-state", "/v1/calendar.ics"))
 	}
 	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
 	// tenancy / authz so the cache lives inside the same request-context
@@ -127,7 +157,11 @@ func (s *Server) httpHandler() http.Handler {
 	root.Use(featureflag.CacheMiddleware)
 
 	queries := dbx.New(s.dbPool)
-	root.Mount("/", anchors.New(queries).Routes())
+	// Slice 104: the anchors handler needs the pool (not just the
+	// pre-bound queries) to open per-request tenant-GUC transactions
+	// when `?include=state` is set. The non-state paths continue to use
+	// the pre-bound `queries`.
+	root.Mount("/", anchors.NewWithPool(queries, s.dbPool).Routes())
 
 	// Slice 037: /health liveness probe. Registered after the root Mount
 	// and alongside the other direct routes below — chi panics if a route
@@ -136,6 +170,23 @@ func (s *Server) httpHandler() http.Handler {
 	// panic. It is bearer- and authz-exempt via the exemption lists
 	// passed to the middleware above, so it answers with no credential.
 	root.Get("/health", s.handleHealth)
+	// Slice 072: GET /v1/version. Public metadata endpoint — bearer- and
+	// authz-exempt above. Registered directly on the root chi router (not
+	// via a second Mount("/")) to avoid the double-mount panic. Only
+	// mounted when cmd/atlas has wired in Config.VersionFieldsFn; unit
+	// servers that leave it nil simply don't get the route, which is fine
+	// for slice-013-style fallback paths that don't need the endpoint.
+	if s.versionFieldsFn != nil {
+		root.Method(http.MethodGet, "/v1/version", NewVersionHandler(s.versionFieldsFn))
+	}
+	// Slice 073: public install-state metadata + elevated mark-first-signin
+	// write. GET /v1/install-state is intentionally bearer-exempt — same
+	// precedent as /health and /v1/version (P0-A4). POST
+	// /v1/install/mark-first-signin requires a bearer (the user who just
+	// signed in proxies through the BFF route); the bearer-auth middleware
+	// above gates the path because /v1/install/* is NOT in the exempt list.
+	root.Get("/v1/install-state", s.handleInstallState)
+	root.Post("/v1/install/mark-first-signin", s.handleMarkFirstSignin)
 	// Slice 008: UCF graph traversal HTTP API. Three read endpoints
 	// query the requirement-anchor-control graph through the SCF spine
 	// (canvas §3 / Plans/UCF_GRAPH_MODEL.md). Routes are appended
@@ -420,7 +471,11 @@ func (s *Server) httpHandler() http.Handler {
 	// declaration-order match keeps the literal-segment routes first
 	// within the same method. Approve + Publish enforce IsApprover at the
 	// handler (slice 034 credential flag).
-	policiesH := policiesapi.New(policy.NewStore(s.dbPool))
+	// Slice 107: NewWithPool wires the *pgxpool.Pool the
+	// `?include=ack_rate` path uses (it opens a tenant-GUC-bearing tx
+	// for the joined query). Backwards-compatible: callers without the
+	// extension continue through the store as before.
+	policiesH := policiesapi.NewWithPool(policy.NewStore(s.dbPool), s.dbPool)
 	root.Post("/v1/policies", policiesH.CreatePolicy)
 	root.Get("/v1/policies", policiesH.ListPolicies)
 	root.Patch("/v1/policies/{id}/submit", policiesH.Submit)
@@ -502,6 +557,21 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/frameworks/posture", dashboardH.FrameworkPosture)
 	root.Get("/v1/activity", dashboardH.Activity)
 	root.Get("/v1/upcoming", dashboardH.Upcoming)
+	// Slice 094: compliance calendar. Read-only aggregation across four
+	// existing source tables (audit_periods + exceptions + policies +
+	// controls + control_evaluations) plus an iCalendar (RFC 5545) export.
+	// Tenant isolation is enforced at the DB layer via RLS (slice 033).
+	// ICS auth is a per-user opaque URL token, hashed in api_keys and
+	// scope-restricted to AllowedKinds=[calendar.read.v1] — a leaked
+	// calendar URL token cannot be used as a general bearer. Routes
+	// appended per the parallel-batch convention (chi rejects two
+	// Mounts at "/"). See docs/audit-log/094-compliance-calendar-decisions.md
+	// decisions D1-D8 for the design calls the implementing agent made.
+	calendarH := calendarapi.New(
+		calendarapi.NewStore(s.dbPool),
+		s.credStore,
+	)
+	calendarH.RegisterRoutes(root)
 	// Slice 031: monthly board brief. Generates a single-page, board-ready
 	// posture snapshot (per-framework posture + 30-day drift + top-3 risks
 	// aging) and persists it as a PINNED, IMMUTABLE snapshot (canvas §7.5).
@@ -544,6 +614,12 @@ func (s *Server) httpHandler() http.Handler {
 		root.Post("/v1/admin/credentials/{id}/rotate", admincredsH.Rotate)
 		root.Post("/v1/admin/credentials/{id}/revoke", admincredsH.Revoke)
 	}
+	// Slice 073: admin-only bootstrap-token reset endpoint. Used by
+	// `atlas-cli credentials issue --reset-bootstrap`. Mounts only when
+	// the platform_status resetter is attached.
+	if s.platformResetter != nil {
+		root.Post("/v1/admin/install/reset-bootstrap", s.handleResetBootstrap)
+	}
 	if s.authHandler != nil {
 		root.Get("/auth/oidc/login", s.authHandler.OIDCLogin)
 		root.Get("/auth/oidc/callback", s.authHandler.OIDCCallback)
@@ -576,6 +652,21 @@ func (s *Server) httpHandler() http.Handler {
 	root.Patch("/v1/admin/users/{id}/roles", usersH.PatchRoles)
 	auditLogH := adminauditlog.New(s.dbPool)
 	root.Get("/v1/admin/audit-log", auditLogH.List)
+	// Slice 076: metrics catalog + cascade + observation store. Routes
+	// appended per the parallel-batch convention (chi.Mux rejects two
+	// Mounts at "/"). The literal-segment route /v1/metrics/cascade is
+	// declared BEFORE /v1/metrics/{id} so chi's declaration-order match
+	// keeps the cascade route ahead of the generic /{id} route. The
+	// /{id}/observations + /{id}/inputs + /{id}/target sub-routes are
+	// distinct path shapes, no shadowing.
+	metricsH := metricsapi.New(s.dbPool)
+	root.Get("/v1/metrics", metricsH.ListCatalog)
+	root.Get("/v1/metrics/cascade", metricsH.GetCascade)
+	root.Get("/v1/metrics/{id}", metricsH.GetCatalog)
+	root.Get("/v1/metrics/{id}/observations", metricsH.ListObservations)
+	root.Post("/v1/metrics/{id}/inputs", metricsH.CreateInput)
+	root.Get("/v1/metrics/{id}/target", metricsH.GetTarget)
+	root.Put("/v1/metrics/{id}/target", metricsH.UpsertTarget)
 	return root
 }
 

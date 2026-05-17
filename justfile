@@ -66,10 +66,11 @@ fmt-frontend:
 fmt-python:
     ruff format .
 
-# Install pre-commit hooks
+# Install pre-commit hooks (commit + push stages)
 install-hooks:
     pre-commit install --install-hooks
-    @echo "pre-commit hooks installed. Bad-format commits will be rejected locally."
+    pre-commit install --hook-type pre-push --install-hooks
+    @echo "pre-commit hooks installed (commit + push). Bad-format commits and pushes will be rejected locally."
 
 # Run pre-commit against the whole tree
 hooks-run:
@@ -77,6 +78,27 @@ hooks-run:
 
 # What CI runs (lint + test + build)
 ci: lint test build
+
+# Regenerate every derived logo asset from the canonical candidate-04
+# SVG. On-demand, NOT a CI gate (slice 075 P0-A5 — generated assets are
+# committed; freshness is a maintainer act tied to logo updates).
+#
+# Reads:
+#   docs/design/logo-candidates/candidate-04/mark.svg          (canonical, full mark)
+#   docs/design/logo-candidates/candidate-04/mark-favicon.svg  (simplified favicon variant)
+#
+# Writes (overwrites in place):
+#   web/public/{logo-light,logo-dark}.{svg,png}
+#   web/public/{favicon.ico,apple-touch-icon.png,icon-192.png,icon-512.png}
+#   web/public/{og-image.png,twitter-card.png}
+#   docs-site/docs/assets/{logo-light.svg,logo-dark.svg,favicon.png}
+#   docs/images/{logo-light.png,logo-dark.png}
+#
+# Toolchain: Sharp (transitive of next@^16; npm install must have run
+# at the workspace root). No new image-processing dependency added per
+# slice 075 AC-10 + P0.
+regen-logo:
+    node scripts/regen-logo-variants.mjs
 
 # Tidy Go modules and verify no diff
 tidy:
@@ -120,9 +142,38 @@ db-up:
 db-down:
     docker rm -f security-atlas-pg
 
-# Generate sqlc code from the migration schema + queries
-sqlc-generate:
+# Pinned sqlc version. The committed `internal/db/dbx/*.go` files were
+# emitted by sqlc v1.31.1; running `sqlc generate` with any other version
+# will produce drift that no committer intended. The pin lives here as the
+# single source of truth; CONTRIBUTING.md and CLAUDE.md reference it.
+# Bump via a dedicated `chore(sqlc):` slice so the regen diff is auditable
+# (slice 109 was the first such regen reset).
+SQLC_VERSION := "v1.31.1"
+
+# Verify the installed sqlc matches the pin. Used by `sqlc-generate` and
+# the CI drift-check job. Fails with an actionable message when the
+# binary version doesn't match the SQLC_VERSION pin.
+sqlc-version-check:
+    @installed=$(sqlc version 2>/dev/null || echo "missing"); \
+    if [ "$installed" != "{{SQLC_VERSION}}" ]; then \
+        echo "sqlc version mismatch: installed=$installed pinned={{SQLC_VERSION}}"; \
+        echo "Install the pinned version: 'brew install sqlc' on macOS, or download from https://github.com/sqlc-dev/sqlc/releases/tag/{{SQLC_VERSION}}"; \
+        exit 1; \
+    fi
+
+# Generate sqlc code from the migration schema + queries. The version
+# check ensures byte-stable generation across contributors — without it,
+# each contributor's local sqlc emits subtly different bytes (typed enums
+# vs `interface{}`, alphabetization, comment hoisting) and PRs spuriously
+# touch the whole `internal/db/dbx/` tree.
+sqlc-generate: sqlc-version-check
     sqlc generate
+
+# Generate the metrics-reference docs page from catalogs/metrics/*.yaml.
+# Slice 076 AC-18 — the reference page is auto-generated so it never
+# drifts from the YAML catalog. Run before `mkdocs build --strict`.
+metrics-reference:
+    ./scripts/gen-metrics-reference.sh
 
 # Audit every public-schema table with a `tenant_id` column. Fails if any
 # such table lacks an RLS policy or FORCE ROW LEVEL SECURITY. Constitutional
@@ -364,3 +415,78 @@ refresh-screenshots:
     @echo "Refresh complete. Total weight:"
     @du -sh docs/images/*.{png,gif} 2>/dev/null | awk '{print "    " $0}'
     @du -sch docs/images/*.{png,gif} 2>/dev/null | tail -1 | awk '{print "  TOTAL: " $1}'
+
+# ----- Onboarding walkthroughs (slice 070) -----
+#
+# Regenerates the five executable onboarding walkthroughs under
+# docs/walkthroughs/ from a fresh slice-037 docker-compose self-host
+# bundle. Like refresh-screenshots, this is on-demand only — CI does
+# NOT block on walkthrough freshness (anti-criterion P0-A2 / AC-9). Run
+# it when the underlying surface materially drifts.
+#
+# Walkthrough vs slice 027: the walkthroughs this recipe generates are
+# PAI Walkthrough skill documents (`uvx showboat` driven). They are
+# UNRELATED to slice 027's `internal/audit/walkthrough` package — that
+# one is auditor evidence capture against controls. See each
+# walkthrough doc's header for the full disambiguation.
+#
+# Prerequisites (one-time):
+#   - `uvx` on PATH (Homebrew: `brew install uv`). Showboat installs
+#     via `uvx showboat` at first use.
+#   - `just self-host-up` succeeds. The recipe assumes a running stack
+#     at the canonical ports (Postgres on 5432, atlas-server on 8080).
+#     For the dev fast-path the recipe can also be pointed at any
+#     migrated Postgres via the PG_CONTAINER env var (defaults to the
+#     self-host bundle's postgres container).
+#
+# What it does:
+#   1. Verifies the local stack is reachable via `just self-host-ps`.
+#   2. Applies `fixtures/walkthroughs/00-seed.sql` (base seed) then each
+#      per-walkthrough SQL in the order the walkthroughs run them.
+#   3. Replays each walkthrough's `uvx showboat init/note/exec` sequence
+#      (the canonical pattern is captured in each .md file; the recipe
+#      is the operator's re-execution harness).
+#   4. Rewrites the docs-site/docs/walkthroughs/ copies' relative paths
+#      to GitHub URLs so `mkdocs build --strict` passes.
+#   5. Runs `just docs-build` to confirm the walkthroughs render.
+#
+# Determinism: the fixtures are static SQL with deterministic UUIDs, so
+# every run produces byte-identical output (modulo the showboat
+# timestamp + UUID header per file). A large diff on the output blocks
+# is a real drift signal — the underlying surface changed and the
+# walkthrough needs review.
+PG_CONTAINER := env_var_or_default("PG_CONTAINER", "security-atlas-pg-030")
+
+walkthroughs-refresh:
+    @echo "[1/4] Verifying local Postgres reachable via docker exec…"
+    docker exec {{PG_CONTAINER}} pg_isready -U postgres > /dev/null \
+        || (echo "Postgres container {{PG_CONTAINER}} not reachable. Run 'just self-host-up' or set PG_CONTAINER." && exit 1)
+    @echo "[2/4] Applying fixtures…"
+    @for f in fixtures/walkthroughs/00-seed.sql \
+              fixtures/walkthroughs/rls-isolation.sql \
+              fixtures/walkthroughs/schema-registry.sql \
+              fixtures/walkthroughs/audit-period.sql \
+              fixtures/walkthroughs/evaluation-pipeline.sql \
+              fixtures/walkthroughs/oscal-export.sql; do \
+        docker cp "$f" {{PG_CONTAINER}}:/tmp/$(basename $f); \
+        docker exec {{PG_CONTAINER}} psql -U postgres -d security_atlas -v ON_ERROR_STOP=1 -f /tmp/$(basename $f); \
+    done
+    @echo "[3/4] Walkthrough re-capture is a manual operator workflow."
+    @echo "      For each docs/walkthroughs/*.md file, replay its bash blocks"
+    @echo "      via the canonical showboat shape:"
+    @echo "        uvx showboat init <file> '<title>'"
+    @echo "        uvx showboat note <file> '<prose>'"
+    @echo "        uvx showboat exec <file> bash '<cmd>'"
+    @echo "      The fixtures in step 2 establish the data preconditions."
+    @echo "      See CONTRIBUTING.md 'Refreshing walkthroughs' for the full workflow."
+    @echo "[4/4] Sync docs-site/docs/walkthroughs/ from docs/walkthroughs/…"
+    @cp docs/walkthroughs/*.md docs-site/docs/walkthroughs/
+    @for f in docs-site/docs/walkthroughs/audit-period-freezing.md \
+              docs-site/docs/walkthroughs/evaluation-pipeline.md \
+              docs-site/docs/walkthroughs/oscal-ssp-export.md \
+              docs-site/docs/walkthroughs/rls-tenant-isolation.md \
+              docs-site/docs/walkthroughs/schema-registry-seed-and-validate.md; do \
+        sed -i.bak -E 's|\(\.\./\.\./([^)]+)\)|(https://github.com/mgoodric/security-atlas/blob/main/\1)|g; s|\(\.\./issues/([^)]+)\)|(https://github.com/mgoodric/security-atlas/blob/main/docs/issues/\1)|g; s|\(\.\./adr/([^)]+)\)|(https://github.com/mgoodric/security-atlas/blob/main/docs/adr/\1)|g' "$f"; \
+        rm -f "$f.bak"; \
+    done
+    @echo "Refresh complete. Verify via 'just docs-build'."

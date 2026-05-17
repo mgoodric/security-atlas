@@ -1,0 +1,85 @@
+# Board metric: Program effectiveness
+#
+# The board-facing rollup of "is the security program actually working?"
+# Composes from control evaluation pass rates (slice 012) weighted by the
+# control's risk linkage residual (slice 019/020). A high effectiveness
+# score with a small risk surface is great; a high effectiveness score
+# with a large risk surface is misleading without the residual weight.
+
+metrics:
+  - id: program_effectiveness
+    level: board
+    category: posture
+    name: Program effectiveness
+    description: |
+      Weighted control-pass rate across all active controls, weighted by
+      the residual risk score of each control's linked risks. The single
+      "is the program working?" number for the board pack.
+    unit: percent
+    cadence: weekly
+    compute_strategy: computed
+    compute_evaluator: program_effectiveness
+    source_slices: ["012", "016", "019", "020"]
+    notes: |
+      The weighting is what keeps this honest: a 95% pass rate across
+      controls that protect nothing important reads worse than an 80%
+      pass rate across controls that gate top-residual risks.
+
+  - id: control_pass_rate
+    level: program
+    category: posture
+    name: Control passing rate
+    description: |
+      Rolling 30-day fraction of (control, scope_cell) evaluations whose
+      worst-cell result is "pass" with "fresh" evidence.
+    unit: percent
+    cadence: daily
+    compute_strategy: manual_input
+    source_slices: ["012"]
+    notes: |
+      Auto-promoted to computed when the eval engine's bulk-summarize
+      query lands; for v1 the maintainer enters the rollup quarterly.
+    parents:
+      - parent_id: program_effectiveness
+        weight: 1.0
+        notes: Direct input to program effectiveness.
+
+  - id: risk_weighted_pass_rate
+    level: program
+    category: posture
+    name: Risk-weighted pass rate
+    description: |
+      Control-pass rate weighted by the residual risk score of each
+      control's linked risks (slice 020). High pass rate on
+      protect-nothing controls scores lower than lower pass rate on
+      protect-top-residuals controls.
+    unit: percent
+    cadence: weekly
+    compute_strategy: manual_input
+    source_slices: ["012", "019", "020"]
+    notes: |
+      Manual input until the cross-aggregate is wired (likely the
+      same dashboard slice that hosts the cascade visualization).
+    parents:
+      - parent_id: program_effectiveness
+        weight: 1.0
+
+  - id: open_findings_team
+    level: team
+    category: posture
+    name: Open findings by control owner
+    description: |
+      Count of audit findings (slice 027 audit_notes severity=finding)
+      not yet closed, grouped by control owner. Surfaces where the
+      review attention is currently underweight.
+    unit: count
+    cadence: daily
+    compute_strategy: manual_input
+    source_slices: ["027"]
+    notes: |
+      Manual roll-up until the audit_notes aggregation query lands as a
+      follow-on. The v1 persona reads this quarterly from the audit
+      hub directly.
+    parents:
+      - parent_id: control_pass_rate
+        weight: 1.0

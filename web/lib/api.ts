@@ -93,6 +93,34 @@ export async function listAnchors(bearer: string): Promise<Anchor[]> {
   return body.anchors;
 }
 
+// ----- Slice 104: anchors with optional joined state -----
+//
+// `AnchorState` mirrors `anchorStateCellWire` in
+// internal/api/anchors/handlers.go — the slice-104 backend extension
+// returns one rollup cell per anchor when `?include=state` is set.
+// The shape is INTENTIONALLY a subset of the slice-012 `stateWire` —
+// only the columns slice 098's design doc pins to the /controls table
+// (result, freshness_status, last_observed_at) plus `evaluated_at` for
+// staleness display.
+export type AnchorState = {
+  result: string;
+  freshness_status: string;
+  last_observed_at: string | null;
+  evaluated_at: string;
+};
+
+export type AnchorWithState = Anchor & {
+  state: AnchorState | null;
+};
+
+export async function listAnchorsWithState(
+  bearer: string,
+): Promise<AnchorWithState[]> {
+  const res = await apiFetch("/v1/anchors?include=state", bearer);
+  const body = (await res.json()) as { anchors: AnchorWithState[] };
+  return body.anchors;
+}
+
 export async function getAnchorRequirements(
   bearer: string,
   id: string,
@@ -102,6 +130,38 @@ export async function getAnchorRequirements(
     bearer,
   );
   return (await res.json()) as AnchorDetail;
+}
+
+// ----- Slice 098 + 104: /controls list view (browser-side BFF call) -----
+//
+// The page at `web/app/(authed)/controls/page.tsx` calls this from the
+// browser; the BFF handler at `web/app/api/controls/route.ts` is the
+// server-side counterpart that injects the bearer cookie.
+//
+// Slice 098 shipped this view bound to the catalog (anchorWire only,
+// state columns rendered as `—`). Slice 104 lifts the BFF to the
+// joined `?include=state` shape — every row now carries either a real
+// state cell or `state: null` (anchor has no tenant control). The
+// frontend table renders the populated rows and the `—` placeholder
+// stays for the null branch (slice 098 P0-A1 — no fabrication).
+
+export type ControlsListResponse = {
+  anchors: AnchorWithState[];
+};
+
+export async function fetchControlsList(): Promise<ControlsListResponse> {
+  const res = await fetch(`/api/controls`);
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // body not JSON — keep the status line
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as ControlsListResponse;
 }
 
 // ----- Slice 024: vendor lite -----
@@ -1489,4 +1549,473 @@ export async function getSessionMe(): Promise<SessionMe> {
   }
   const body = (await res.json()) as { is_admin?: boolean };
   return { is_admin: body.is_admin === true };
+}
+
+// ===== Slice 094 — Compliance calendar =====
+//
+// Read-only aggregation across audit_periods + exceptions + policies +
+// controls (with cadence math). Plus a per-user ICS URL token mint.
+// See docs/audit-log/094-compliance-calendar-decisions.md.
+
+export type CalendarEventType = "audit" | "exception" | "policy" | "control";
+
+export type CalendarEvent = {
+  id: string;
+  type: CalendarEventType;
+  title: string;
+  starts_at: string; // RFC 3339
+  ends_at?: string;
+  related_entity_id: string;
+  related_entity_kind: string;
+  summary: string;
+  status: string;
+  cadence?: string;
+};
+
+export type CalendarResponse = {
+  events: CalendarEvent[];
+  count: number;
+  from: string;
+  to: string;
+  truncated: boolean;
+  next_from?: string;
+};
+
+export type CalendarSubscriptionResponse = {
+  url: string;
+  expires_at: string;
+};
+
+// Server-side fn: hit the platform with the bearer.
+export async function getCalendarEvents(
+  bearer: string,
+  params: { from?: string; to?: string; types?: string } = {},
+): Promise<CalendarResponse> {
+  const qp = new URLSearchParams();
+  if (params.from) qp.set("from", params.from);
+  if (params.to) qp.set("to", params.to);
+  if (params.types) qp.set("types", params.types);
+  const suffix = qp.toString() ? `?${qp.toString()}` : "";
+  const res = await apiFetch(`/v1/calendar${suffix}`, bearer);
+  return (await res.json()) as CalendarResponse;
+}
+
+export async function postCalendarSubscription(
+  bearer: string,
+): Promise<CalendarSubscriptionResponse> {
+  const url = `${apiBaseURL()}/v1/calendar/subscription`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+    },
+  });
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as CalendarSubscriptionResponse;
+}
+
+// Browser-side fn: hit the BFF.
+export function fetchCalendarEvents(params: {
+  from?: string;
+  to?: string;
+  types?: string;
+}): Promise<CalendarResponse> {
+  const qp = new URLSearchParams();
+  if (params.from) qp.set("from", params.from);
+  if (params.to) qp.set("to", params.to);
+  if (params.types) qp.set("types", params.types);
+  const suffix = qp.toString() ? `?${qp.toString()}` : "";
+  return bffControlFetch<CalendarResponse>(`/api/calendar${suffix}`);
+}
+
+export async function createCalendarSubscription(): Promise<CalendarSubscriptionResponse> {
+  const res = await fetch(`/api/calendar/subscription`, { method: "POST" });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* body not JSON */
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as CalendarSubscriptionResponse;
+}
+
+// ----- Slice 100: /risks list view -----
+//
+// The slice-019 `riskWire` shape with the slice-067 hierarchy + severity
+// fields. `inherent_score` and `residual_score` stay opaque JSON blobs
+// (canvas §2.2: 5x5 grid is the v1 shape, but tenants may switch to FAIR
+// later). The page renders them through pure formatters that defensively
+// extract `{likelihood, impact}` — a malformed score formats as "—",
+// matching the platform's degrade-quietly posture (`store.go`
+// `residualMagnitude`).
+
+export type Risk = {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  methodology: string;
+  inherent_score: unknown;
+  treatment: string;
+  treatment_owner: string;
+  residual_score: unknown;
+  review_due_at?: string;
+  accepted_until?: string | null;
+  accepter: string;
+  instrument_reference: string;
+  linked_control_ids: string[];
+  created_at: string;
+  updated_at: string;
+  // Slice 067 additions — surfaced by the same handler.
+  org_unit_id?: string;
+  themes: string[];
+  severity: number;
+};
+
+export type RisksListResponse = {
+  risks: Risk[];
+};
+
+// Server-side fetcher used by the slice-100 BFF route. Mirrors the
+// slice-098 `listAnchors` shape: no query-string narrowing — the page
+// owns filter state client-side and the upstream `GET /v1/risks` ships
+// the full unfiltered list.
+export async function listRisks(bearer: string): Promise<Risk[]> {
+  const res = await apiFetch("/v1/risks", bearer);
+  const body = (await res.json()) as { risks: Risk[]; count: number };
+  return body.risks;
+}
+
+// Browser-side fetcher used by the slice-100 page. Hits the BFF at
+// `/api/risks` which forwards the bearer cookie to upstream.
+export async function fetchRisksList(): Promise<RisksListResponse> {
+  const res = await fetch(`/api/risks`);
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // body not JSON — keep the status line
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as RisksListResponse;
+}
+
+// ----- Slice 105: risk-create wire shape -----
+//
+// `RiskCreateInput` mirrors `createReq` in
+// `internal/api/risks/handlers.go` exactly. The form binds directly to
+// this shape — no invented fields per P0-A4. `inherent_score` /
+// `residual_score` stay opaque JSON blobs by design (canvas §2.2 — 5x5
+// today, FAIR/dollar-banded tomorrow). The slice-105 form constructs
+// `{likelihood, impact}` for the 5x5 case because that is what
+// `severityOf()` reads downstream.
+//
+// Optional fields (review_due_at, accepted_until, accepter,
+// instrument_reference, linked_control_ids, residual_score, description)
+// are NOT enumerated in the slice-105 AC list — the form omits them
+// rather than invent UI for them. The wire shape carries them for the
+// future slice that adds the richer editor.
+
+export type RiskCreateInput = {
+  title: string;
+  description?: string;
+  category: string;
+  methodology?: string;
+  inherent_score?: unknown;
+  treatment?: string;
+  treatment_owner?: string;
+  residual_score?: unknown;
+  review_due_at?: string | null;
+  accepted_until?: string | null;
+  accepter?: string;
+  instrument_reference?: string;
+  linked_control_ids?: string[];
+};
+
+export type RiskCreatedResponse = {
+  risk: Risk;
+};
+
+// Server-side fn: hit the platform directly with the bearer. Mirrors
+// `createVendor`'s shape (slice 024). The form goes through the BFF at
+// `POST /api/risks` instead so the bearer stays httpOnly.
+export async function createRisk(
+  bearer: string,
+  body: RiskCreateInput,
+): Promise<Risk> {
+  const res = await fetch(`${apiBaseURL()}/v1/risks`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // body not JSON — keep the status line
+    }
+    throw new APIError(res.status, msg);
+  }
+  const decoded = (await res.json()) as RiskCreatedResponse;
+  return decoded.risk;
+}
+
+// ----- Slice 102: /audits list view (browser-side BFF call) -----
+//
+// Row source: `periodWire` in `internal/api/auditperiods/handlers.go`
+// (the canonical mapping per design doc §7). The page at
+// `web/app/(authed)/audits/page.tsx` calls `fetchAuditPeriods` from the
+// browser; the BFF at `web/app/api/audits/route.ts` is the server-side
+// counterpart that injects the bearer cookie (slice 094 pattern).
+//
+// `frozen_at`, `frozen_hash`, `frozen_by` are present on the wire ONLY
+// when the period is frozen (omitempty on the Go side). The TypeScript
+// types reflect that with optional + nullable fields.
+//
+// `audit_periods.status` is constrained to `('open', 'frozen')` in v1
+// per migration `20260511000020_audit_periods.sql`. The slice text
+// mentions `planned/in-progress/frozen/closed` as forward-looking
+// statuses; the page renders whatever status the backend returns and
+// treats anything non-`frozen` as "live" for the in-progress amber-dot
+// cue. This is forward-compatible: when the backend lifts the CHECK
+// constraint to include more statuses, the renderer keeps working.
+
+export type AuditPeriod = {
+  id: string;
+  name: string;
+  framework_version_id: string;
+  period_start: string;
+  period_end: string;
+  status: string;
+  frozen_at?: string | null;
+  frozen_hash?: string | null;
+  frozen_by?: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AuditPeriodsListResponse = {
+  audit_periods: AuditPeriod[];
+  count: number;
+};
+
+export async function fetchAuditPeriods(): Promise<AuditPeriodsListResponse> {
+  const res = await fetch(`/api/audits`);
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* body not JSON — keep the status line */
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as AuditPeriodsListResponse;
+}
+
+// ----- Slice 099 + 106: /evidence list view (browser-side BFF call) -----
+//
+// Row source: `evidenceWire` in `internal/api/controldetail/handler.go`
+// (the row shape `GET /v1/evidence` returns — both per-control and
+// tenant-wide paths use the same wire shape). The page at
+// `web/app/(authed)/evidence/page.tsx` calls `fetchEvidenceList` from
+// the browser; the BFF at `web/app/api/evidence/route.ts` is the
+// server-side counterpart that injects the bearer cookie (slice 094
+// pattern) and forwards the whitelisted query params.
+//
+// Slice 106 changes:
+//   * `result` is now on the GET wire shape (the column has always
+//     existed on `evidence_records.result`; slice 064 omitted it).
+//     The page renders the real result cell — no more em-dash
+//     placeholder.
+//   * `fetchEvidenceList` accepts an optional filter object. When
+//     `controlID` is omitted the BFF + upstream serve the tenant-wide
+//     ledger window (RLS continues to scope tenancy).
+
+export type EvidenceResultEnum = "pass" | "fail" | "na" | "inconclusive";
+
+export type EvidenceRecord = {
+  evidence_id: string;
+  evidence_kind: string | null;
+  observed_at: string;
+  // `source` is the slice-013 provenance JSONB verbatim. Shape varies
+  // by connector — we render a summary client-side. `null` when the row
+  // has no provenance metadata recorded.
+  source: Record<string, unknown> | null;
+  content_hash: string;
+  scope_cell: string | null;
+  /**
+   * Slice 106: the `evidence_records.result` enum, surfaced on the GET
+   * wire shape. One of pass | fail | na | inconclusive. Always set —
+   * the column is NOT NULL on the table.
+   */
+  result: EvidenceResultEnum;
+};
+
+export type EvidenceListResponse = {
+  // Empty string when the request was tenant-wide (no control_id).
+  control_id: string;
+  evidence: EvidenceRecord[];
+  count: number;
+  next_cursor: string;
+};
+
+/**
+ * Filter options for `fetchEvidenceList`. All fields are optional — an
+ * empty object yields the tenant-wide ledger window.
+ */
+export type EvidenceListFilters = {
+  controlID?: string;
+  kind?: string;
+  result?: EvidenceResultEnum;
+  sourceActorType?: string;
+  sourceActorID?: string;
+  cursor?: string;
+  limit?: number;
+};
+
+// Browser-side fetcher used by the slice-099 page. Hits the BFF at
+// `/api/evidence[?...]` which forwards the bearer cookie to upstream
+// `/v1/evidence[?...]`. Slice 106: signature changed from
+// `fetchEvidenceList(controlID: string)` to
+// `fetchEvidenceList(filters: EvidenceListFilters)` — when `controlID`
+// is omitted the request returns the tenant-wide window.
+export async function fetchEvidenceList(
+  filters: EvidenceListFilters = {},
+): Promise<EvidenceListResponse> {
+  const qs = new URLSearchParams();
+  if (filters.controlID) qs.set("control_id", filters.controlID);
+  if (filters.kind) qs.set("kind", filters.kind);
+  if (filters.result) qs.set("result", filters.result);
+  if (filters.sourceActorType)
+    qs.set("source_actor_type", filters.sourceActorType);
+  if (filters.sourceActorID) qs.set("source_actor_id", filters.sourceActorID);
+  if (filters.cursor) qs.set("cursor", filters.cursor);
+  if (filters.limit) qs.set("limit", String(filters.limit));
+
+  const url = qs.toString()
+    ? `/api/evidence?${qs.toString()}`
+    : `/api/evidence`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* body not JSON — keep the status line */
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as EvidenceListResponse;
+}
+
+// ----- Slice 101: /policies list view -----
+//
+// Row source: `policyWire` in `internal/api/policies/handlers.go` (the
+// canonical mapping per design doc `Plans/canvas/12-ui-fill-in-design-
+// decisions.md` §7). The page at `web/app/(authed)/policies/page.tsx`
+// calls `fetchPoliciesList` from the browser; the BFF at
+// `web/app/api/policies/route.ts` is the server-side counterpart that
+// injects the bearer cookie (slice 094 pattern).
+//
+// Ack-rate sourcing: the slice 101 design doc + the slice text both
+// note that `GET /v1/policies` should be extended with
+// `?include=ack_rate` so the list endpoint returns one ack-rate cell
+// per row in one round-trip. That extension does NOT exist on main as
+// of slice 101 — the spillover slice 107 files it. Until it lands, the
+// `ack_rate` field on `Policy` is `null`; the page renders an em-dash
+// honestly (precedent: slice 098 D1 for state cells; same pattern).
+// Client-side per-row fan-out is explicitly forbidden by P0-A2.
+
+export type PolicyAckRate = {
+  numerator: number;
+  denominator: number;
+  /** Percent in 0..100, null when denominator is zero or window unsettled. */
+  percent: number | null;
+};
+
+export type Policy = {
+  id: string;
+  predecessor_id?: string | null;
+  title: string;
+  version: string;
+  effective_date?: string | null;
+  body_md: string;
+  owner_role: string;
+  approver_role: string;
+  linked_control_ids: string[];
+  acknowledgment_required_roles: string[];
+  status: string;
+  source_attribution: string;
+  created_by: string;
+  submitted_at?: string | null;
+  submitted_by?: string | null;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  published_at?: string | null;
+  published_by?: string | null;
+  superseded_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  warnings?: string[];
+  /**
+   * Optional joined ack-rate cell. Set ONLY when the backend supports
+   * `?include=ack_rate` (spillover slice 107). Until that lands the
+   * field is always undefined / null and the page renders em-dash.
+   */
+  ack_rate?: PolicyAckRate | null;
+};
+
+export type PoliciesListResponse = {
+  policies: Policy[];
+};
+
+// Server-side fetcher used by the slice 101 BFF route. Hits the
+// upstream `/v1/policies?include=ack_rate` with the bearer.
+//
+// Slice 107: the `?include=ack_rate` query parameter is hard-coded on
+// the BFF (mirrors slice 104's hard-coded `?include=state` for anchors)
+// — every list-view caller wants the joined cell. The upstream returns
+// `ack_rate: null` for non-published rows and a populated cell for
+// published rows; the page renders accordingly.
+export async function listPolicies(bearer: string): Promise<Policy[]> {
+  const res = await apiFetch("/v1/policies?include=ack_rate", bearer);
+  const body = (await res.json()) as { policies: Policy[]; count: number };
+  return body.policies;
+}
+
+// Browser-side fetcher used by the slice 101 page. Hits the BFF at
+// `/api/policies` which forwards the bearer cookie to upstream and
+// hard-codes `?include=ack_rate` (slice 107).
+export async function fetchPoliciesList(): Promise<PoliciesListResponse> {
+  const res = await fetch(`/api/policies`);
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* body not JSON — keep the status line */
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as PoliciesListResponse;
 }

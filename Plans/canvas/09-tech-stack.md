@@ -48,7 +48,7 @@ OIDC because every credible IdP speaks it; we ship as a relying party only, neve
 
 **GitHub Actions; `dorny/paths-filter@v3` is the in-workflow gate for docs-only PRs (slice 061).**
 
-A `changes` job runs first in `ci.yml`, sets a `code` boolean, and each expensive job (Go build+test, Go integration RLS, Go lint, Frontend, Python ruff, Proto) is paired with a same-named stub sibling so branch-protection required-check names always resolve. Security and secret-scan jobs (CodeQL, GitGuardian, pre-commit) are always-on and never gated by paths. See [`docs/ci/PATH_FILTERING.md`](../../docs/ci/PATH_FILTERING.md) for the rationale and the `paths-ignore:`-at-workflow-level gotcha.
+A `changes` job runs first in `ci.yml`, sets a `code` boolean, and each expensive job is paired with a same-named stub sibling so branch-protection required-check names always resolve. As of 2026-05-15 the path-filtered jobs are: `Go · build + test`, `Go · integration (Postgres RLS)`, `Go · lint`, `Frontend · install + build`, `Frontend · vitest`, `Frontend · lint` (slice 078), `Frontend · Playwright e2e` (slice 069, quarantined per slice 079), `Python · ruff`, `Proto · lint + format`, `OSCAL bridge · pytest`, `Self-host bundle · smoke`, `Helm chart · lint + template`, `Go · govulncheck` (slice 089/090), `Frontend · npm audit` (slice 089), `Container · Trivy scan` (slice 089). Security and secret-scan jobs (CodeQL, GitGuardian, pre-commit) are always-on and never gated by paths. See [`docs/ci/PATH_FILTERING.md`](../../docs/ci/PATH_FILTERING.md) for the rationale and the `paths-ignore:`-at-workflow-level gotcha.
 
 ---
 

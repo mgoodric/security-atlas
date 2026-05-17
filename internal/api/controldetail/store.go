@@ -95,6 +95,33 @@ func (s *Store) EvidenceForControl(ctx context.Context, controlID uuid.UUID, p e
 	return rows, err
 }
 
+// EvidencePaged reads one page of the tenant-wide evidence ledger, bounded
+// by the [since, until] observed_at window, the keyset cursor, and the
+// optional filter set (kind, result, source_actor_type, source_actor_id).
+// Used when GET /v1/evidence is called WITHOUT a control_id. Tenant
+// isolation continues to ride on RLS plus the explicit tenant_id predicate
+// (canvas invariant #6). Slice 106.
+func (s *Store) EvidencePaged(ctx context.Context, p evidenceListPage) ([]dbx.ListEvidencePagedRow, error) {
+	var rows []dbx.ListEvidencePagedRow
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var qerr error
+		rows, qerr = q.ListEvidencePaged(ctx, dbx.ListEvidencePagedParams{
+			TenantID:        pgUUID(tenantID),
+			ObservedAt:      pgTimestamptz(p.since),
+			ObservedAt_2:    pgTimestamptz(p.until),
+			Kind:            optString(p.kind),
+			ResultFilter:    optString(p.result),
+			SourceActorType: optString(p.sourceActorType),
+			SourceActorID:   optString(p.sourceActorID),
+			CursorTs:        pgTimestamptz(p.cursor.ts),
+			CursorID:        pgUUID(p.cursor.id),
+			RowLimit:        p.pageRows + 1, // +1 probe row to detect a next page
+		})
+		return qerr
+	})
+	return rows, err
+}
+
 // PoliciesForControl reads every policy whose linked_control_ids array
 // contains controlID. The policy library is small per the canvas v1 scope,
 // so this read is not paginated.

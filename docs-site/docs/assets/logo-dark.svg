@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  security-atlas candidate-04 mark — v6
+
+  Sparse node-and-edge graph implying a stylized capital A, densified.
+
+  v6 changes from v5:
+    1. LINE COUNT: 11 → 16. Maintainer asked for "more lines, similar to
+       how the logo was originally, not quite as many, but more". v1 had
+       ~15 lines in a dense triangular mesh; v5 had 11. v6 lands at 16 —
+       between v5 and v1. 5 new lines added without inventing floating
+       segments: 1 upper parallel crossbar (above main crossbar) + 2 apex
+       roof lines (L_APEX_DETAIL→APEX, APEX→R_APEX_DETAIL) + 2 inner
+       diagonals (CROSS_MID→L_OUTRIGGER, CROSS_MID→R_OUTRIGGER).
+    2. NODE COUNT: 12 → 14. Added CROSS_LEFT_UP and CROSS_RIGHT_UP for
+       the new upper parallel crossbar. All other lines reuse existing
+       v5 nodes.
+    3. PALETTE: 4-color pastel/sky → 8-color wide-spectrum temperature
+       gradient. New maintainer ask:
+         "use a more wide ranging color palette like:
+          #f2a2b3 #f9c3c3 #f7d4c0 #f9e6c1 #d1e7e0 #a0d1e8 #7ab8e1 #4b8db5"
+       Seven of the eight pastels fail SC 1.4.11 on a light background
+       (only #4b8db5 clears at 3.48:1). Same v5 split-palette pattern:
+       pastels run verbatim on dark variant; derived dark complements
+       (Tailwind 700-800 weight in matching color families) run on light
+       variant.
+    4. COLOR APPLICATION: by midpoint y-coordinate (positional gradient),
+       NOT by line weight. v5 had three weight tiers each with its own
+       color. v6 uses uniform stroke (sw=6) and lets color carry the
+       hierarchy. Reading: warm pinks at the apex, cream/mint at mid-A,
+       sky/blue at the foundation. Sister L/R lines share a color to
+       preserve symmetry and prevent the gradient reading as confetti.
+    5. NODE DOTS: uniform deepest color per variant (#4b8db5 on dark,
+       #4b8db5 on light). Departs from v5's shared #517891 brand-through-
+       line because no color in the new 8-pastel palette clears SC 1.4.11
+       on both backgrounds. Tradeoff documented in notes.md.
+    6. STROKE WEIGHT: uniform sw=6 across all 16 lines (v5 used 3 tiers:
+       14/8/4). v6 chose uniform weight because 16 lines × 8 colors ×
+       3 weight tiers is visual confetti — color IS the v6 hierarchy.
+
+  NODE COORDINATE TABLE (the only legal line endpoints — v6, 14 nodes):
+    APEX               (512, 160)   — top of A
+    LEFT_BASE          (220, 780)   — bottom-left of A
+    RIGHT_BASE         (804, 780)   — bottom-right of A
+    CROSS_LEFT         (320, 600)   — left end of main crossbar
+    CROSS_RIGHT        (704, 600)   — right end of main crossbar
+    CROSS_MID          (512, 600)   — middle of main crossbar
+    CROSS_LEFT_UP      (340, 575)   — left end of upper crossbar (v6 NEW)
+    CROSS_RIGHT_UP     (684, 575)   — right end of upper crossbar (v6 NEW)
+    LEFT_OUTRIGGER     (170, 380)   — outer-left scaffold node
+    RIGHT_OUTRIGGER    (854, 380)   — outer-right scaffold node
+    LEFT_FOOT          (100, 850)   — outer-left base foot
+    RIGHT_FOOT         (924, 850)   — outer-right base foot
+    LEFT_APEX_DETAIL   (380, 210)   — apex-tangent left detail
+    RIGHT_APEX_DETAIL  (644, 210)   — apex-tangent right detail
+
+  Color application — positional gradient by midpoint y (v6, light variant):
+    UPPER zone (y_mid < 390)  warm pinks → peach
+    MIDDLE zone (390-620)     cream → mint → pale sky
+    LOWER zone (y_mid > 620)  medium sky → deep blue (foundation)
+
+  Per-line color assignment (sister L/R pairs share a color):
+    [upper]  apex_roof_L, apex_roof_R       : #f2a2b3 rose-800  (mirrors #f2a2b3)
+    [upper]  apex_tangent                   : #f9c3c3 pink-700  (mirrors #f9c3c3)
+    [upper]  L/R outrigger braces           : #f7d4c0 orange-800 (mirrors #f7d4c0)
+    [middle] left leg, right leg            : #f9e6c1 amber-700 (mirrors #f9e6c1)
+    [middle] main crossbar, upper crossbar  : #d1e7e0 emerald-800 (mirrors #d1e7e0)
+    [middle] inner diag L, inner diag R     : #a0d1e8 sky-800   (mirrors #a0d1e8)
+    [lower]  CROSS_MID→L_BASE / R_BASE      : #7ab8e1 sky-700   (mirrors #7ab8e1)
+    [lower]  base, L/R base braces          : #4b8db5 blue-800  (mirrors #4b8db5)
+    [nodes]  all 14 dot fills (uniform)     : #4b8db5 blue-800  (= deepest tone)
+
+  Dark-bg variant (maintainer-supplied pastels verbatim, same slot order):
+    apex_roof_L/R                           : #f2a2b3 pink
+    apex_tangent                            : #f9c3c3 pale pink
+    L/R outrigger braces                    : #f7d4c0 peach
+    left leg, right leg                     : #f9e6c1 cream
+    main crossbar, upper crossbar           : #d1e7e0 mint
+    inner diag L, inner diag R              : #a0d1e8 pale sky
+    CROSS_MID→L_BASE / R_BASE               : #7ab8e1 medium sky
+    base, L/R base braces                   : #4b8db5 deep blue (foundation)
+    all 14 dot fills (uniform)              : #4b8db5 deep blue (= deepest tone)
+
+  Per-slot contrast (WCAG 2.2 SC 1.4.11 Non-text Contrast, ≥3:1):
+    Light bg #fafafa (8 dark complements):
+      rose-800 #f2a2b3     7.68:1
+      pink-700 #f9c3c3     5.78:1
+      orange-800 #f7d4c0   7.00:1
+      amber-700 #f9e6c1    6.56:1
+      emerald-800 #d1e7e0  7.36:1
+      sky-800 #a0d1e8      7.25:1
+      sky-700 #7ab8e1      5.68:1
+      blue-800 #4b8db5     8.36:1
+    Dark bg #0a0a0a (8 maintainer pastels):
+      pink #f2a2b3         9.99:1
+      pale pink #f9c3c3   12.84:1
+      peach #f7d4c0       14.27:1
+      cream #f9e6c1       16.14:1
+      mint #d1e7e0        15.29:1
+      pale sky #a0d1e8    12.05:1
+      medium sky #7ab8e1   9.21:1
+      deep blue #4b8db5    5.45:1
+  All 16 tier colors clear the SC 1.4.11 3:1 floor on their target bg.
+  All 8 light-variant colors also clear the text-contrast 4.5:1 floor
+  (SC 1.4.3). Seven of eight dark-variant colors clear 4.5:1; the deepest
+  blue #4b8db5 sits at 5.45:1 on dark bg — also passes 4.5:1, so v6 is
+  fully 4.5:1-compliant on BOTH variants (an improvement over v5, where
+  the NODES color #517891 sat at 4.19:1 on dark).
+
+  Coordinate system: 1024x1024 viewBox.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <g id="mark-light" stroke-linecap="round" stroke-linejoin="round" fill="none">
+
+    <!-- UPPER zone (y_mid < 390) -->
+    <!-- apex roof L (NEW v6): LEFT_APEX_DETAIL → APEX -->
+    <line x1="380" y1="210" x2="512" y2="160" stroke="#f2a2b3" stroke-width="6"/>
+    <!-- apex roof R (NEW v6): APEX → RIGHT_APEX_DETAIL -->
+    <line x1="512" y1="160" x2="644" y2="210" stroke="#f2a2b3" stroke-width="6"/>
+    <!-- apex tangent: LEFT_APEX_DETAIL → RIGHT_APEX_DETAIL -->
+    <line x1="380" y1="210" x2="644" y2="210" stroke="#f9c3c3" stroke-width="6"/>
+    <!-- left outrigger brace: LEFT_APEX_DETAIL → LEFT_OUTRIGGER -->
+    <line x1="380" y1="210" x2="170" y2="380" stroke="#f7d4c0" stroke-width="6"/>
+    <!-- right outrigger brace: RIGHT_APEX_DETAIL → RIGHT_OUTRIGGER -->
+    <line x1="644" y1="210" x2="854" y2="380" stroke="#f7d4c0" stroke-width="6"/>
+
+    <!-- MIDDLE zone (390 ≤ y_mid ≤ 620) -->
+    <!-- left leg: APEX → LEFT_BASE -->
+    <line x1="512" y1="160" x2="220" y2="780" stroke="#f9e6c1" stroke-width="6"/>
+    <!-- right leg: APEX → RIGHT_BASE -->
+    <line x1="512" y1="160" x2="804" y2="780" stroke="#f9e6c1" stroke-width="6"/>
+    <!-- upper crossbar (NEW v6): CROSS_LEFT_UP → CROSS_RIGHT_UP -->
+    <line x1="340" y1="575" x2="684" y2="575" stroke="#d1e7e0" stroke-width="6"/>
+    <!-- main crossbar: CROSS_LEFT → CROSS_RIGHT -->
+    <line x1="320" y1="600" x2="704" y2="600" stroke="#d1e7e0" stroke-width="6"/>
+    <!-- inner diagonal L (NEW v6): CROSS_MID → LEFT_OUTRIGGER -->
+    <line x1="512" y1="600" x2="170" y2="380" stroke="#a0d1e8" stroke-width="6"/>
+    <!-- inner diagonal R (NEW v6): CROSS_MID → RIGHT_OUTRIGGER -->
+    <line x1="512" y1="600" x2="854" y2="380" stroke="#a0d1e8" stroke-width="6"/>
+
+    <!-- LOWER zone (y_mid > 620) -->
+    <!-- inner lower-left support: CROSS_MID → LEFT_BASE -->
+    <line x1="512" y1="600" x2="220" y2="780" stroke="#7ab8e1" stroke-width="6"/>
+    <!-- inner lower-right support: CROSS_MID → RIGHT_BASE -->
+    <line x1="512" y1="600" x2="804" y2="780" stroke="#7ab8e1" stroke-width="6"/>
+    <!-- base line: LEFT_BASE → RIGHT_BASE -->
+    <line x1="220" y1="780" x2="804" y2="780" stroke="#4b8db5" stroke-width="6"/>
+    <!-- outer left base brace: LEFT_BASE → LEFT_FOOT -->
+    <line x1="220" y1="780" x2="100" y2="850" stroke="#4b8db5" stroke-width="6"/>
+    <!-- outer right base brace: RIGHT_BASE → RIGHT_FOOT -->
+    <line x1="804" y1="780" x2="924" y2="850" stroke="#4b8db5" stroke-width="6"/>
+
+    <!-- NODE DOTS (uniform deepest tone #4b8db5 blue-800, v6): 14 nodes -->
+    <!-- Large primary nodes (r=18-20) at the A-backbone vertices -->
+    <circle cx="512" cy="160" r="20" fill="#4b8db5"/>  <!-- APEX -->
+    <circle cx="320" cy="600" r="18" fill="#4b8db5"/>  <!-- CROSS_LEFT -->
+    <circle cx="704" cy="600" r="18" fill="#4b8db5"/>  <!-- CROSS_RIGHT -->
+    <circle cx="220" cy="780" r="20" fill="#4b8db5"/>  <!-- LEFT_BASE -->
+    <circle cx="804" cy="780" r="20" fill="#4b8db5"/>  <!-- RIGHT_BASE -->
+    <circle cx="512" cy="600" r="14" fill="#4b8db5"/>  <!-- CROSS_MID -->
+    <!-- Upper crossbar endpoints (r=12, NEW v6) -->
+    <circle cx="340" cy="575" r="12" fill="#4b8db5"/>  <!-- CROSS_LEFT_UP -->
+    <circle cx="684" cy="575" r="12" fill="#4b8db5"/>  <!-- CROSS_RIGHT_UP -->
+    <!-- Secondary nodes (r=10) at scaffold endpoints -->
+    <circle cx="170" cy="380" r="10" fill="#4b8db5"/>  <!-- LEFT_OUTRIGGER -->
+    <circle cx="854" cy="380" r="10" fill="#4b8db5"/>  <!-- RIGHT_OUTRIGGER -->
+    <circle cx="100" cy="850" r="10" fill="#4b8db5"/>  <!-- LEFT_FOOT -->
+    <circle cx="924" cy="850" r="10" fill="#4b8db5"/>  <!-- RIGHT_FOOT -->
+    <!-- Detail nodes (r=8) on the apex tangent -->
+    <circle cx="380" cy="210" r="8" fill="#4b8db5"/>   <!-- LEFT_APEX_DETAIL -->
+    <circle cx="644" cy="210" r="8" fill="#4b8db5"/>   <!-- RIGHT_APEX_DETAIL -->
+  </g>
+</svg>

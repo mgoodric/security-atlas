@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"strings"
 	"time"
@@ -73,6 +74,21 @@ type Server struct {
 	// servers leave it nil (the export needs a running Python
 	// oscal-bridge); the production binary wires it via AttachOscalExporter.
 	oscalExporter *oscal.Exporter
+	// Slice 072: build-time-injected version metadata callback. When
+	// non-nil, GET /v1/version is mounted (public, no auth). cmd/atlas
+	// wires it once at startup via Config.VersionFieldsFn (which is
+	// `versionFields` from cmd/atlas/version.go).
+	versionFieldsFn func() VersionFields
+	// Slice 073: platform_status reader/writer + bootstrap-token file
+	// path. Wired by cmd/atlas; unit servers leave them nil and the
+	// install-state routes 503.
+	platformStatus     PlatformStatus
+	platformResetter   PlatformResetter
+	bootstrapTokenPath string
+	// Slice 073: structured logger for non-request-bound events
+	// (bootstrap-token deletion is the first). Falls back to
+	// slog.Default() when nil.
+	logger *slog.Logger
 }
 
 // AttachAuthz wires the slice-035 OPA engine + decision audit writer.
@@ -181,6 +197,12 @@ type Config struct {
 	// Service.Process — backwards compat for unit servers and for the
 	// dev mode without NATS.
 	EvidencePublisher evidence.Publisher
+	// VersionFieldsFn is the slice-072 build-time-injected version
+	// metadata callback. When non-nil, GET /v1/version is mounted —
+	// public, no auth, no tenancy. cmd/atlas wires in
+	// `versionFields` from cmd/atlas/version.go. Unit-only servers
+	// leave it nil and the route is simply absent.
+	VersionFieldsFn func() VersionFields
 }
 
 // New constructs the Server with its services and interceptors mounted.
@@ -222,6 +244,7 @@ func New(cfg Config) *Server {
 		evidencePushRate:  cfg.EvidencePushRate,
 		artifactStore:     cfg.ArtifactStore,
 		evidencePublisher: cfg.EvidencePublisher,
+		versionFieldsFn:   cfg.VersionFieldsFn,
 	}
 }
 

@@ -1,0 +1,220 @@
+-- Slice 094 — compliance calendar backend read query.
+--
+-- ONE UNION ALL across four event sources:
+--
+--   1. audit_periods           — period_end is the audit's "report due" date
+--   2. exceptions              — expires_at is the waiver-lapse date
+--   3. policies                — next_review_at is the next review date
+--   4. controls + control_evaluations — periodic-review controls whose
+--      cadence (derived from freshness_class) places their next review
+--      between $from and $to. last_evaluated_at = MAX(evaluated_at) over
+--      the append-only control_evaluations ledger.
+--
+-- All four are tenant-scoped; RLS fires on each underlying SELECT, and the
+-- explicit tenant_id predicates are the primary guarantee.
+--
+-- Date filter is a half-open window [from, to). The window is computed in
+-- application code (default 90d forward from now()) and passed in as
+-- timestamptz bounds.
+--
+-- Type filter (`type_filter`) is a CSV string. Empty string ('') means
+-- "all four sources." A non-empty filter narrows to the subset by checking
+-- membership on the per-branch literal type discriminator.
+--
+-- Cadence math for the controls branch:
+--   - The control's freshness_class is mapped to a max-acceptable-age
+--     interval. The mapping is the same one `internal/eval/state.go`
+--     `FreshnessMaxAge` exposes (realtime 24h, daily 7d, weekly 30d,
+--     monthly 90d, quarterly 120d, annual 400d). We replicate the mapping
+--     here as a CASE expression so the SQL is self-contained.
+--   - next_due_at = last_evaluated_at + cadence, OR now() when the
+--     control has never been evaluated (LEFT JOIN -> NULL).
+--   - status: 'overdue' when next_due_at < now(); 'due-soon' when
+--     next_due_at <= now() + 14d; otherwise 'upcoming'.
+--   - Only `manual_periodic` and `manual_attested` controls are included
+--     (the periodic-review IN-vs-OUT filter from the slice narrative).
+--   - Controls with NULL freshness_class are excluded (no cadence ->
+--     no scheduled review).
+--
+-- Result is ordered by starts_at ascending, then by event_id ascending for
+-- a deterministic order.
+--
+-- Returns at most `row_limit` rows so the handler can detect the
+-- truncation at the 500-event threshold with a +1 probe.
+
+-- name: ListCalendarEvents :many
+SELECT
+    event_id,
+    event_type,
+    title,
+    starts_at,
+    ends_at,
+    related_entity_id,
+    related_entity_kind,
+    summary,
+    status,
+    cadence
+FROM (
+    -- audit periods: period_end is when the audit's report is due.
+    SELECT
+        ap.id::text                                                   AS event_id,
+        'audit'::text                                                 AS event_type,
+        ('Audit period: ' || ap.name)::text                           AS title,
+        ap.period_end::timestamptz                                    AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        ap.id::text                                                   AS related_entity_id,
+        'audit_period'::text                                          AS related_entity_kind,
+        ap.status                                                     AS summary,
+        ap.status                                                     AS status,
+        NULL::text                                                    AS cadence
+    FROM audit_periods ap
+    WHERE ap.tenant_id = $1
+      AND ap.period_end::timestamptz >= sqlc.arg(from_ts)::timestamptz
+      AND ap.period_end::timestamptz <  sqlc.arg(to_ts)::timestamptz
+      AND (sqlc.arg(type_filter)::text = '' OR position('audit' IN sqlc.arg(type_filter)::text) > 0)
+
+    UNION ALL
+
+    -- exception expirations: active waivers ordered by when they lapse.
+    SELECT
+        e.id::text                                                    AS event_id,
+        'exception'::text                                             AS event_type,
+        ('Exception on control ' || e.control_id::text)::text         AS title,
+        e.expires_at::timestamptz                                     AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        e.id::text                                                    AS related_entity_id,
+        'exception'::text                                             AS related_entity_kind,
+        e.justification                                               AS summary,
+        e.status                                                      AS status,
+        NULL::text                                                    AS cadence
+    FROM exceptions e
+    WHERE e.tenant_id = $1
+      AND e.status = 'active'
+      AND e.expires_at IS NOT NULL
+      AND e.expires_at::timestamptz >= sqlc.arg(from_ts)::timestamptz
+      AND e.expires_at::timestamptz <  sqlc.arg(to_ts)::timestamptz
+      AND (sqlc.arg(type_filter)::text = '' OR position('exception' IN sqlc.arg(type_filter)::text) > 0)
+
+    UNION ALL
+
+    -- policy review cycles: policies with next_review_at set.
+    SELECT
+        p.id::text                                                    AS event_id,
+        'policy'::text                                                AS event_type,
+        ('Policy review: ' || p.title)::text                          AS title,
+        p.next_review_at::timestamptz                                 AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        p.id::text                                                    AS related_entity_id,
+        'policy'::text                                                AS related_entity_kind,
+        p.status                                                      AS summary,
+        p.status                                                      AS status,
+        NULL::text                                                    AS cadence
+    FROM policies p
+    WHERE p.tenant_id = $1
+      AND p.next_review_at IS NOT NULL
+      AND p.next_review_at::timestamptz >= sqlc.arg(from_ts)::timestamptz
+      AND p.next_review_at::timestamptz <  sqlc.arg(to_ts)::timestamptz
+      AND (sqlc.arg(type_filter)::text = '' OR position('policy' IN sqlc.arg(type_filter)::text) > 0)
+
+    UNION ALL
+
+    -- periodic control reviews: manual_periodic / manual_attested controls
+    -- whose next_due_at falls in the window. Two cases:
+    --   (a) never evaluated   -> next_due_at = now()        status=overdue
+    --   (b) has evaluation    -> next_due_at = last + cadence
+    -- AC-2c says a never-evaluated control with a defined cadence is the
+    -- highest-priority signal — emit it AT now() with status=overdue so
+    -- it sits at the top of the agenda regardless of from/to bounds (as
+    -- long as the window includes now()).
+    SELECT
+        c.id::text                                                    AS event_id,
+        'control'::text                                               AS event_type,
+        ('Control review: ' || c.title)::text                         AS title,
+        CASE
+            WHEN le.last_evaluated_at IS NULL THEN sqlc.arg(now_ts)::timestamptz
+            ELSE le.last_evaluated_at +
+                CASE c.freshness_class
+                    WHEN 'realtime'  THEN INTERVAL '1 day'
+                    WHEN 'daily'     THEN INTERVAL '7 days'
+                    WHEN 'weekly'    THEN INTERVAL '30 days'
+                    WHEN 'monthly'   THEN INTERVAL '90 days'
+                    WHEN 'quarterly' THEN INTERVAL '120 days'
+                    WHEN 'annual'    THEN INTERVAL '400 days'
+                    ELSE                 INTERVAL '90 days'
+                END
+        END                                                           AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        c.id::text                                                    AS related_entity_id,
+        'control'::text                                               AS related_entity_kind,
+        c.freshness_class::text                                       AS summary,
+        CASE
+            WHEN le.last_evaluated_at IS NULL                              THEN 'overdue'
+            WHEN (le.last_evaluated_at +
+                  CASE c.freshness_class
+                      WHEN 'realtime'  THEN INTERVAL '1 day'
+                      WHEN 'daily'     THEN INTERVAL '7 days'
+                      WHEN 'weekly'    THEN INTERVAL '30 days'
+                      WHEN 'monthly'   THEN INTERVAL '90 days'
+                      WHEN 'quarterly' THEN INTERVAL '120 days'
+                      WHEN 'annual'    THEN INTERVAL '400 days'
+                      ELSE                 INTERVAL '90 days'
+                  END) <  sqlc.arg(now_ts)::timestamptz                    THEN 'overdue'
+            WHEN (le.last_evaluated_at +
+                  CASE c.freshness_class
+                      WHEN 'realtime'  THEN INTERVAL '1 day'
+                      WHEN 'daily'     THEN INTERVAL '7 days'
+                      WHEN 'weekly'    THEN INTERVAL '30 days'
+                      WHEN 'monthly'   THEN INTERVAL '90 days'
+                      WHEN 'quarterly' THEN INTERVAL '120 days'
+                      WHEN 'annual'    THEN INTERVAL '400 days'
+                      ELSE                 INTERVAL '90 days'
+                  END) <= sqlc.arg(now_ts)::timestamptz + INTERVAL '14 days' THEN 'due-soon'
+            ELSE                                                            'upcoming'
+        END                                                           AS status,
+        c.freshness_class::text                                       AS cadence
+    FROM controls c
+    LEFT JOIN LATERAL (
+        SELECT MAX(ce.evaluated_at)::timestamptz AS last_evaluated_at
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = c.tenant_id
+          AND ce.control_id = c.id
+    ) le ON TRUE
+    WHERE c.tenant_id = $1
+      AND c.superseded_by IS NULL
+      AND c.lifecycle_state = 'active'
+      AND c.freshness_class IS NOT NULL
+      AND c.implementation_type IN ('manual_periodic', 'manual_attested')
+      AND (
+            CASE
+                WHEN le.last_evaluated_at IS NULL THEN sqlc.arg(now_ts)::timestamptz
+                ELSE le.last_evaluated_at +
+                    CASE c.freshness_class
+                        WHEN 'realtime'  THEN INTERVAL '1 day'
+                        WHEN 'daily'     THEN INTERVAL '7 days'
+                        WHEN 'weekly'    THEN INTERVAL '30 days'
+                        WHEN 'monthly'   THEN INTERVAL '90 days'
+                        WHEN 'quarterly' THEN INTERVAL '120 days'
+                        WHEN 'annual'    THEN INTERVAL '400 days'
+                        ELSE                 INTERVAL '90 days'
+                    END
+            END
+          ) >= sqlc.arg(from_ts)::timestamptz
+      AND (
+            CASE
+                WHEN le.last_evaluated_at IS NULL THEN sqlc.arg(now_ts)::timestamptz
+                ELSE le.last_evaluated_at +
+                    CASE c.freshness_class
+                        WHEN 'realtime'  THEN INTERVAL '1 day'
+                        WHEN 'daily'     THEN INTERVAL '7 days'
+                        WHEN 'weekly'    THEN INTERVAL '30 days'
+                        WHEN 'monthly'   THEN INTERVAL '90 days'
+                        WHEN 'quarterly' THEN INTERVAL '120 days'
+                        WHEN 'annual'    THEN INTERVAL '400 days'
+                        ELSE                 INTERVAL '90 days'
+                    END
+            END
+          ) <  sqlc.arg(to_ts)::timestamptz
+      AND (sqlc.arg(type_filter)::text = '' OR position('control' IN sqlc.arg(type_filter)::text) > 0)
+) calendar_events
+ORDER BY starts_at ASC, event_id ASC
+LIMIT sqlc.arg(row_limit)::int;

@@ -653,6 +653,42 @@ jobs:
     steps:
       - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
+  # ─── Frontend · lint (slice 078) ─────────────────────────────────────
+  # Runs `npm run lint -w web` against PRs that touch code paths.
+  # Informational only — NOT added to required-checks per slice 078 P0-A4
+  # (lint regressions on every dep bump would flake the merge queue).
+  # Promote-to-required is a future slice once the cadence proves stable.
+  # See docs/audit-log/078-eslint-10-react-plugin-incompat-decisions.md
+  # for the path-B rationale (ESLint pinned to ^9 until eslint-plugin-react
+  # ships ESLint-10 support — tracked at docs/issues/095-eslint-10-re-upgrade.md).
+  frontend-lint:
+    name: Frontend · lint
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install workspaces
+        working-directory: .
+        run: npm install --no-audit --no-fund
+      - name: Run eslint
+        run: npm run lint
+
+  frontend-lint-stub:
+    name: Frontend · lint
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
+
   # ====================================================================
   # Slice 069 — Frontend Playwright e2e.
   #
@@ -677,6 +713,28 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    # Slice 079 — quarantine until the seed-data harness lands.
+    #
+    # Slice 069 (PR gh#132) wired this job and shipped it with AC-5
+    # PARTIAL: the five un-shimmed specs (admin-bootstrap,
+    # audit-workspace, control-detail, dashboard, risk-hierarchy)
+    # reference seeded test users + tenant data that no harness applies
+    # at job startup, so every run fails with "expected element not
+    # visible"-shaped errors — predictable, not a flake. The job is NOT
+    # in `.github/branch-protection.json`'s required-checks list, so
+    # merges aren't blocked — only PR-status noise (84% of CI failure
+    # surface as of 2026-05-15).
+    #
+    # `continue-on-error: true` at JOB level (not step level) so every
+    # step's red exit is absorbed — the precondition steps (postgres /
+    # NATS / MinIO startup, migrations, atlas+web build) flake for
+    # reasons unrelated to seed data, and we still want the PR to merge
+    # cleanly when they do. New failure modes still surface as warning
+    # annotations on the PR; we keep the signal, drop the false alarm.
+    #
+    # Reverse this line when slice 082 (Playwright e2e seed-data
+    # harness) lands. Slice 082 AC-4 explicitly tracks the flip-back.
+    continue-on-error: true
     services:
       postgres:
         image: postgres:16-alpine
@@ -811,6 +869,243 @@ jobs:
 
   frontend-playwright-stub:
     name: Frontend · Playwright e2e
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
+
+  # ====================================================================
+  # Slice 089 — Dependency vulnerability scanning.
+  #
+  # Three complementary scanners that close the "known-CVE-on-current-
+  # version" gap Dependabot leaves open (Dependabot opens PRs when an
+  # upgrade is available; says nothing when a package sits at a
+  # vulnerable patch with no newer release):
+  #
+  #   1. Go · govulncheck      — Go's official call-graph-aware scanner
+  #   2. Frontend · npm audit  — runtime-shipped JS deps in web/
+  #   3. Container · Trivy scan — OS-package CVEs in the atlas image
+  #
+  # All three follow the slice-069 stub-job pattern: gated on
+  # `changes.code`, with a mutually-exclusive stub sibling under the
+  # same check name so docs-only PRs resolve the check in < 30s.
+  #
+  # None are added to `.github/branch-protection.json`'s required-checks
+  # list (P0-A1). Newly-published CVEs would otherwise flake the merge
+  # queue on PRs that didn't touch the affected dep. Promotion-to-
+  # required is a future slice once the maintainer has observed
+  # cadence + false-positive rate. See
+  # docs/audit-log/089-dependency-vulnerability-scanning-decisions.md
+  # for the threshold + suppression rationale.
+  # ====================================================================
+  govulncheck:
+    name: Go · govulncheck
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+      # Pinned version (not @latest) for reproducibility. Bump in a
+      # dedicated PR so the diff is auditable. See slice 089 decisions
+      # log D3 + slice 090 (which bumped v1.1.3 → v1.1.4 because the
+      # v1.1.3 pin's transitive x/tools@v0.23.0 dependency contained a
+      # constant-folding pattern Go 1.26 rejects — silent install
+      # failure on every PR until the bump).
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+      # govulncheck exits non-zero ONLY when a vulnerability is reachable
+      # from the analyzed binary's call graph — call-graph filtering is
+      # the highest signal-to-noise property of the tool. There is no
+      # severity flag; reachability IS the threshold. See decisions log
+      # D1. The text output also uploads as an artifact below for
+      # maintainer triage.
+      - name: Run govulncheck (text + sarif)
+        id: vulncheck
+        run: |
+          set +e
+          govulncheck -format text ./... | tee govulncheck.txt
+          rc_text=$?
+          govulncheck -format sarif ./... > govulncheck.sarif || true
+          set -e
+          echo "exit_code=$rc_text" >> "$GITHUB_OUTPUT"
+          if [ "$rc_text" -ne 0 ]; then
+            echo "::warning::govulncheck reported reachable vulnerabilities (see uploaded artifact)"
+          fi
+          exit "$rc_text"
+      - name: Upload govulncheck report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: govulncheck-report
+          path: |
+            govulncheck.txt
+            govulncheck.sarif
+          if-no-files-found: warn
+
+  govulncheck-stub:
+    name: Go · govulncheck
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
+
+  # ====================================================================
+  # sqlc drift check — informational only, NOT in required-checks.
+  #
+  # Installs the pinned sqlc version from SQLC_VERSION (defined in
+  # justfile) and runs `sqlc generate`. If the generated tree differs
+  # from what's committed, fails with the diff in the log so the
+  # contributor can re-run locally and commit the regen.
+  #
+  # Why informational (not required): the sqlc binary install via `go
+  # install` may differ slightly from the brew-distributed binary in
+  # edge cases (build tags, embedded version string). Until the install
+  # paths are proven byte-identical across both, this job stays out of
+  # branch protection. Promotion to required-checks is a future-slice
+  # decision per slice 109 anti-criterion P0-A3.
+  # ====================================================================
+  sqlc-drift:
+    name: Go · sqlc generate diff
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: Read SQLC_VERSION from justfile
+        id: pin
+        run: |
+          version=$(grep -E '^SQLC_VERSION\s*:=' justfile | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -z "$version" ]; then
+            echo "could not read SQLC_VERSION from justfile" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Pinned sqlc version: $version"
+      - name: Install pinned sqlc
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@${{ steps.pin.outputs.version }}
+      - name: Run sqlc generate
+        run: sqlc generate
+      - name: Assert no drift in internal/db/dbx/
+        run: |
+          if ! git diff --exit-code -- internal/db/dbx/; then
+            echo "::warning::sqlc generate produced drift against committed internal/db/dbx/. Run 'just sqlc-generate' locally and commit the diff."
+            exit 1
+          fi
+          echo "sqlc generate produced no drift — committed dbx tree matches the pinned-binary output."
+
+  sqlc-drift-stub:
+    name: Go · sqlc generate diff
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
+
+  npm-audit:
+    name: Frontend · npm audit
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install workspaces (production dependency tree only)
+        # Use the lockfile-faithful install so audit sees the same
+        # transitive tree the runtime will. --omit=dev keeps the
+        # signal focused on what actually ships.
+        run: npm ci --no-audit --no-fund
+      # `--omit dev` drops dev-only findings (React testing libs,
+      # eslint plugins, vitest plumbing) — the runtime-shipped tree is
+      # what an attacker reaches. `--audit-level=high` bands the failure
+      # threshold at HIGH+CRITICAL. See decisions log D1.
+      - name: Run npm audit on web workspace
+        id: audit
+        run: |
+          set +e
+          npm audit --omit=dev --audit-level=high --workspace web | tee npm-audit.txt
+          rc=$?
+          npm audit --omit=dev --audit-level=high --workspace web --json > npm-audit.json || true
+          set -e
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::npm audit reported HIGH/CRITICAL vulnerabilities in the runtime tree (see uploaded artifact)"
+          fi
+          exit "$rc"
+      - name: Upload npm-audit report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: npm-audit-report
+          path: |
+            npm-audit.txt
+            npm-audit.json
+          if-no-files-found: warn
+
+  npm-audit-stub:
+    name: Frontend · npm audit
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
+
+  trivy-image:
+    name: Container · Trivy scan
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # Build the atlas image locally so Trivy has a target without
+      # needing to push to a registry. The Dockerfile is the same one
+      # release.yml uses; if a slice changes the Dockerfile, this job
+      # picks the change up via the `changes.code` filter (which
+      # includes deploy/**, Dockerfile*, and **/Dockerfile).
+      - name: Build atlas image (local tag)
+        run: |
+          docker build \
+            --file deploy/docker/atlas.Dockerfile \
+            --tag atlas:trivy-scan \
+            .
+      # Pinned action version (not @latest) for reproducibility. The
+      # action wraps Trivy CLI; see decisions log D3 for the upgrade
+      # cadence. severity HIGH,CRITICAL + exit-code 1 implements the
+      # AC-3 fail threshold. .trivyignore at repo root is honored if
+      # present (it is NOT shipped this slice — see decisions log D2).
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: atlas:trivy-scan
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          output: trivy-report.txt
+      - name: Upload Trivy report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: trivy-report
+          path: trivy-report.txt
+          if-no-files-found: warn
+
+  trivy-image-stub:
+    name: Container · Trivy scan
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest

@@ -162,4 +162,25 @@ for dir in "$CONTROLS_DIR"/*/; do
 done
 log "uploaded $uploaded control bundles"
 
+# Slice 073: emit the grep-friendly bootstrap-token line + write the
+# 0600 file (the platform also writes the file in cmd/atlas; this is
+# triple redundancy so the operator can find the token via three
+# orthogonal paths: stderr-of-atlas, `docker compose logs atlas | grep
+# BOOTSTRAP_TOKEN`, or filesystem inspection at
+# ${ATLAS_DATA_DIR}/bootstrap-token). The file is atomically deleted
+# by atlas on the first successful sign-in (load-bearing P0-A1 safety
+# property: long-lived bootstrap tokens on disk are a credential leak
+# shape this slice does not introduce).
+if [ -n "${ATLAS_BOOTSTRAP_TOKEN:-}" ]; then
+    echo "ATLAS_BOOTSTRAP_TOKEN=${ATLAS_BOOTSTRAP_TOKEN}  # one-time use, see docs-site/docs/troubleshooting/first-login.md"
+    TOKEN_FILE="${ATLAS_DATA_DIR:-/var/lib/atlas}/bootstrap-token"
+    TOKEN_DIR="$(dirname "$TOKEN_FILE")"
+    if mkdir -p "$TOKEN_DIR" 2>/dev/null; then
+        printf '%s' "$ATLAS_BOOTSTRAP_TOKEN" > "$TOKEN_FILE" 2>/dev/null \
+            && chmod 0600 "$TOKEN_FILE" 2>/dev/null \
+            && log "bootstrap-token file written at $TOKEN_FILE (mode 0600)"
+    fi
+    log "first-time sign-in: see ${TOKEN_FILE} or 'docker compose logs atlas-bootstrap | grep BOOTSTRAP_TOKEN'"
+fi
+
 log "bootstrap complete — security-atlas is seeded and ready"
