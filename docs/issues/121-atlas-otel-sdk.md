@@ -1,8 +1,11 @@
-# 106 — Add OTel SDK to atlas (traces + metrics + Go runtime telemetry)
+# 121 — Add OTel SDK to atlas (traces + metrics + Go runtime telemetry)
+
+> **Slot renumber 2026-05-16**: this slice was originally drafted at slot 106 in a prior session. Slot 106 was reassigned during the v2 backlog drain (slice 106 = "GET /v1/evidence backend extension" — merged via PR #240 at commit `860c10a`). Renumbered to 121 by the maintainer when reopening this PR for merge.
 
 **Cluster:** Infra / observability
 **Estimate:** 2.5d
 **Type:** AFK
+**Status:** `ready`
 
 ## Narrative
 
