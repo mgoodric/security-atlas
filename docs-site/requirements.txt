@@ -5,4 +5,4 @@
 # docs-site/requirements.txt mkdocs ...` so it never pollutes the
 # monorepo's `uv` workspace.
 mkdocs-material==9.7.6
-mkdocs-git-revision-date-localized-plugin==1.2.6
+mkdocs-git-revision-date-localized-plugin==1.5.2
