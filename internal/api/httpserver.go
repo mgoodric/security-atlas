@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/mgoodric/security-atlas/internal/api/adminauditlog"
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
@@ -131,7 +132,12 @@ func (s *Server) httpHandler() http.Handler {
 	// inline via the `?token=` URL parameter, scope-restricted to
 	// AllowedKinds=[calendar.read.v1]. See decision D3 in
 	// docs/audit-log/094-compliance-calendar-decisions.md.
-	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health", "/v1/version", "/v1/install-state", "/v1/calendar.ics"))
+	// Slice 121 (AC-16): /metrics is bearer-exempt when the opt-in
+	// Prometheus fallback is enabled. The exemption applies to the EXACT
+	// path; broader prefixes would widen the unauthenticated read
+	// surface. When metricsHandler is nil (default off — P0-A3), the
+	// route is absent and the exemption is a harmless no-match.
+	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics"))
 	// Slice 033: lift the authenticated credential's tenant id onto the
 	// request context so every downstream handler — and every database
 	// transaction it opens — runs under the right `app.current_tenant`
@@ -150,7 +156,7 @@ func (s *Server) httpHandler() http.Handler {
 		// same reason as /health — a metadata probe shouldn't reach OPA.
 		// Slice 073: /v1/install-state is added too — public metadata, same
 		// reasoning as the bearer-exempt above.
-		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/v1/version", "/v1/install-state", "/v1/calendar.ics"))
+		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics"))
 	}
 	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
 	// tenancy / authz so the cache lives inside the same request-context
@@ -173,6 +179,17 @@ func (s *Server) httpHandler() http.Handler {
 	// panic. It is bearer- and authz-exempt via the exemption lists
 	// passed to the middleware above, so it answers with no credential.
 	root.Get("/health", s.handleHealth)
+	// Slice 121 (AC-15/16): opt-in Prometheus `/metrics` fallback.
+	// Mounted only when cmd/atlas has wired the handler in via
+	// AttachMetricsHandler (driven by ATLAS_METRICS_FALLBACK_ENABLE=true).
+	// Default off (P0-A3): without the env-var the route is absent and
+	// GET /metrics returns 404. When mounted, the route is bearer-exempt
+	// + authz-exempt above so Prometheus can scrape it without a
+	// credential — operators MUST gate this endpoint at the network layer
+	// (firewall / reverse-proxy ACL / private subnet) when enabled.
+	if s.metricsHandler != nil {
+		root.Method(http.MethodGet, "/metrics", s.metricsHandler)
+	}
 	// Slice 072: GET /v1/version. Public metadata endpoint — bearer- and
 	// authz-exempt above. Registered directly on the root chi router (not
 	// via a second Mount("/")) to avoid the double-mount panic. Only
@@ -674,6 +691,14 @@ func (s *Server) httpHandler() http.Handler {
 	root.Patch("/v1/admin/users/{id}/roles", usersH.PatchRoles)
 	auditLogH := adminauditlog.New(s.dbPool)
 	root.Get("/v1/admin/audit-log", auditLogH.List)
+	// Slice 124: unified audit-log aggregation read across all nine
+	// per-domain audit-log tables (decision/evidence/exception/sample/
+	// audit_period/aggregation_rule/feature_flag/me/walkthrough). The
+	// upstream slice 035 OPA middleware is the canonical role gate; the
+	// handler does defense-in-depth (admin OR auditor OR grc_engineer).
+	// Route appended per the parallel-batch convention (chi.Mux rejects
+	// two Mounts at "/", so individual routes register onto the root).
+	root.Get("/v1/admin/audit-log/unified", auditLogH.UnifiedList)
 	// Slice 076: metrics catalog + cascade + observation store. Routes
 	// appended per the parallel-batch convention (chi.Mux rejects two
 	// Mounts at "/"). The literal-segment route /v1/metrics/cascade is
@@ -689,7 +714,34 @@ func (s *Server) httpHandler() http.Handler {
 	root.Post("/v1/metrics/{id}/inputs", metricsH.CreateInput)
 	root.Get("/v1/metrics/{id}/target", metricsH.GetTarget)
 	root.Put("/v1/metrics/{id}/target", metricsH.UpsertTarget)
-	return root
+	// Slice 121 (AC-5/6/7): wrap the assembled chi router with otelhttp
+	// at the OUTERMOST layer so every request including 401s gets a
+	// span. AC-6: otelhttp's default attribute set is
+	// {http.method, http.route, http.status_code, http.target, net.peer.ip}
+	// — it does NOT capture Authorization / Cookie headers, request
+	// body, or response body (P0-A7 / P0-A8). AC-7: high-frequency
+	// probes (/health, /metrics, /v1/version, /v1/install-state) are
+	// excluded via WithFilter so they don't drown out useful spans.
+	//
+	// AC-2: when OTel is in no-op mode (OTEL_EXPORTER_OTLP_ENDPOINT
+	// unset), otelhttp still runs but its tracer is the no-op — every
+	// span is recorded against a discarded backend. Cheap. No
+	// behavioural change for callers that haven't configured OTel.
+	return otelhttp.NewHandler(root, "atlas-http",
+		otelhttp.WithFilter(spanFilter),
+	)
+}
+
+// spanFilter excludes high-frequency probes from span generation
+// (AC-7). These endpoints are called every few seconds by the
+// docker-compose healthcheck, Prometheus scraper, and frontend
+// install-state SSR fetch; tracing them is noise without signal.
+func spanFilter(r *http.Request) bool {
+	switch r.URL.Path {
+	case "/health", "/metrics", "/v1/version", "/v1/install-state":
+		return false
+	}
+	return true
 }
 
 // attestUploader returns the slice-011 ArtifactUploader adapter over the

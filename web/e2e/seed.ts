@@ -96,11 +96,18 @@ function seedApiKey(databaseURL: string): void {
   const tokenHashHex = hexHmacSha256(key, TEST_BEARER);
 
   // Composite SQL: clear any prior row with this hash, then insert a
-  // fresh admin row in the demo tenant. The DELETE keeps the harness
-  // idempotent across re-runs (the same hash maps to the same key, so
-  // a re-run without DELETE would fail the UNIQUE constraint on
-  // token_hash). is_admin=true so the admin-bootstrap spec's /admin
-  // routes pass the authz gate.
+  // fresh admin row in the demo tenant. The DELETE handles the
+  // re-run case across separate test invocations; the `ON CONFLICT
+  // (token_hash) DO NOTHING` clause handles the parallel-worker case
+  // within ONE test invocation (Playwright defaults to multiple
+  // workers, each calling `seedFromFixture()` via test.beforeAll —
+  // the DELETEs see no row, then the INSERTs race; without ON
+  // CONFLICT the second insert fails the UNIQUE constraint on
+  // token_hash). All workers insert the same row content
+  // (deterministic from TEST_BEARER + BEARER_HASH_KEY), so DO
+  // NOTHING is the right semantics. Slice 122 fix.
+  // is_admin=true so the admin-bootstrap spec's /admin routes pass
+  // the authz gate.
   const sql = `
     DELETE FROM api_keys WHERE token_hash = decode('${tokenHashHex}', 'hex');
     INSERT INTO api_keys (tenant_id, token_hash, is_admin, owner_roles, last4)
@@ -110,7 +117,8 @@ function seedApiKey(databaseURL: string): void {
       TRUE,
       ARRAY['admin']::TEXT[],
       '${TEST_BEARER.slice(-4)}'
-    );
+    )
+    ON CONFLICT (token_hash) DO NOTHING;
   `;
   execFileSync("psql", [databaseURL, "-v", "ON_ERROR_STOP=1", "-c", sql], {
     stdio: "inherit",

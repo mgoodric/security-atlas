@@ -47,6 +47,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/canonjson"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
+	atlasotel "github.com/mgoodric/security-atlas/internal/observability/otel"
 )
 
 // Defaults. Documented values per canvas §9.3 / EVIDENCE_SDK §4.6.
@@ -287,11 +288,26 @@ func (p *JetStreamPublisher) Publish(ctx context.Context, rec *evidencev1.Eviden
 	recordID := uuid.NewSHA1(uuid.MustParse("00000000-0000-0000-0000-000000015000"),
 		[]byte(cred.TenantID+"|"+rec.IdempotencyKey+"|"+hash)).String()
 
+	// Slice 121 (AC-11/13): wrap the publish in a producer-side span so
+	// the downstream consumer can link its handler span to this trace.
+	// `messaging.message.id` carries the idempotency key — never the
+	// payload body (P0-A8). pubErr is the carry-out from the publish
+	// branch; the deferred End stamps it on the span (success → no
+	// error, broker failure → recorded + Error status).
+	pubSpanCtx, pubSpan := atlasotel.StartNATSPublishSpan(ctx, p.conn.cfg.Subject, rec.IdempotencyKey)
+	var pubErr error
+	defer func() { atlasotel.EndNATSSpanWithError(pubSpan, pubErr) }()
+
 	msg := &nats.Msg{
 		Subject: p.conn.cfg.Subject,
 		Data:    bytes,
 		Header:  nats.Header{},
 	}
+	// Slice 121 (AC-11): inject the W3C traceparent header before the
+	// other headers so the consumer's Extract finds it on every message.
+	// When OTel is in no-op mode (AC-2) the propagator writes nothing
+	// and this is a cheap no-op.
+	atlasotel.InjectNATSTraceContext(pubSpanCtx, msg)
 	// Nats-Msg-Id enables JetStream's in-stream dedup window — a same-id
 	// re-publish inside the window is collapsed by the broker. The
 	// stream-level dedup is a defense-in-depth complement to the
@@ -308,10 +324,11 @@ func (p *JetStreamPublisher) Publish(ctx context.Context, rec *evidencev1.Eviden
 		msg.Header.Set(HeaderCredentialScope, cred.ScopePredicate)
 	}
 
-	pubCtx, cancel := context.WithTimeout(ctx, p.conn.cfg.PublishTimeout)
+	pubCtx, cancel := context.WithTimeout(pubSpanCtx, p.conn.cfg.PublishTimeout)
 	defer cancel()
 
 	if _, perr := p.conn.js.PublishMsg(pubCtx, msg); perr != nil {
+		pubErr = perr
 		return ingest.Receipt{}, ingest.DecisionRejectedInternalError, fmt.Errorf("streambuf: publish: %w", perr)
 	}
 
@@ -474,6 +491,19 @@ func (c *Consumer) handle(ctx context.Context, msg jetstream.Msg) {
 		cred.Kinds = strings.Split(k, ",")
 	}
 
+	// Slice 121 (AC-12): extract the W3C traceparent the publisher
+	// injected so the consumer-side span links back to the producer
+	// span. jetstream.Msg.Headers() is the same nats.Header shape used
+	// in publish. Then start the consumer span; ctx flows through
+	// Service.Process so the DB span underneath (otelpgx) becomes a
+	// grandchild of the producer span — one trace from HTTP push to
+	// ledger write.
+	extracted := atlasotel.ExtractNATSTraceContext(ctx, &nats.Msg{Header: hdr})
+	consumeCtx, consumeSpan := atlasotel.StartNATSConsumeSpan(extracted, c.conn.cfg.Subject, hdr.Get(HeaderIdempotencyKey))
+	var consumeErr error
+	defer func() { atlasotel.EndNATSSpanWithError(consumeSpan, consumeErr) }()
+	ctx = consumeCtx
+
 	var rec evidencev1.EvidenceRecord
 	if err := proto.Unmarshal(msg.Data(), &rec); err != nil {
 		// Poison message: cannot decode. Term the message so it does
@@ -482,12 +512,14 @@ func (c *Consumer) handle(ctx context.Context, msg jetstream.Msg) {
 			slog.String("err", err.Error()),
 			slog.String("idempotency_key", hdr.Get(HeaderIdempotencyKey)),
 		)
+		consumeErr = err
 		_ = msg.Term()
 		return
 	}
 
 	_, decision, perr := c.svc.Process(ctx, &rec, cred)
 	if perr != nil {
+		consumeErr = perr
 		// On idempotency mismatch or validation error, the message is
 		// poison and we Term it (a Nak would just redeliver forever).
 		// On internal/transient errors, Nak to redeliver after AckWait.

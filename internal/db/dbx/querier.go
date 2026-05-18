@@ -611,6 +611,14 @@ type Querier interface {
 	GetUserByID(ctx context.Context, arg GetUserByIDParams) (User, error)
 	GetVendor(ctx context.Context, arg GetVendorParams) (Vendor, error)
 	GetWalkthroughByID(ctx context.Context, arg GetWalkthroughByIDParams) (Walkthrough, error)
+	// Slice 124 — defense-in-depth role probe for the unified audit-log endpoint.
+	//
+	// Returns TRUE when the caller holds 'auditor' OR 'grc_engineer' in user_roles
+	// under their tenant context, FALSE otherwise. Runs under
+	// `tenancy.ApplyTenant`; RLS on user_roles enforces the tenant scope.
+	// The caller checks `IsAdmin` separately and short-circuits before invoking
+	// this query so the SQL only checks the two non-admin roles.
+	HasUnifiedAuditLogRole(ctx context.Context, arg HasUnifiedAuditLogRoleParams) (bool, error)
 	// Returns risk counts grouped by (likelihood, impact) for risks whose
 	// methodology shares the 5x5 (likelihood, impact 1..5) shape. nist_800_30
 	// and qualitative_5x5 both use this shape (canvas §2.2 + AC-7); other
@@ -1541,6 +1549,34 @@ type Querier interface {
 	// '' so the comparison matches. This avoids pgx single-placeholder
 	// type-inference issues (SQLSTATE 42P08).
 	ListThreadForScope(ctx context.Context, arg ListThreadForScopeParams) ([]ListThreadForScopeRow, error)
+	// Slice 124 — unified audit-log aggregation query.
+	//
+	// One SQL statement: UNION ALL across the nine per-domain audit-log tables,
+	// each projected to the canonical Entry shape
+	// (occurred_at, actor_id, tenant_id, kind, target_type, target_id, action, payload_json),
+	// with WHERE filters applied at each branch.
+	//
+	// RLS-aware: the query runs under `tenancy.ApplyTenant` as `atlas_app`. Every
+	// branch's source-table tenant_read policy fires; rows from other tenants are
+	// silently filtered out at the source-table policy layer. The aggregator never
+	// receives or accepts a tenant_id parameter — the implicit session context
+	// is the only carrier of tenant identity (slice 124 anti-criterion P0-A5).
+	//
+	// Pagination is cursor-based on (occurred_at, target_id, kind). The cursor is
+	// opaque at the API layer; the handler base64-encodes a `{occurred_at, target_id, kind}`
+	// tuple. Ordering is `occurred_at DESC, kind ASC, target_id ASC` so the cursor's
+	// next-page condition is a single tuple comparison.
+	//
+	// Filters:
+	//   from / to       — required RFC3339 window (handler enforces <= 90 days)
+	//   actor_filter    — optional exact match on actor_id
+	//   kind_filter     — optional comma-joined kinds; '' means "all kinds"
+	//   cursor_*        — optional opaque cursor tuple from a prior response
+	//
+	// Limit:
+	//   limit_n is set to 1001 by the caller for a 1000-row page so the handler can
+	//   detect "more available" without an extra round-trip (slice-062 pattern).
+	ListUnifiedAuditLog(ctx context.Context, arg ListUnifiedAuditLogParams) ([]ListUnifiedAuditLogRow, error)
 	// AC-4: unified upcoming-items rollup. ONE UNION ALL across the four
 	// sources — expiring exceptions (021), policy-ack expirations (023), vendor
 	// reviews (024), audit-period milestones (028) — projected to the AC-4 row
