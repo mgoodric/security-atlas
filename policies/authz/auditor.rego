@@ -141,4 +141,12 @@ auditor_readable_resources := {
     "artifacts",
     "scopes",
     "audit-periods",
+    # Slice 124: the unified audit-log aggregation endpoint (read-only
+    # UNION ALL across the nine per-domain audit-log tables). Auditors
+    # need this for the same reason they need 'audit-periods' — visibility
+    # into the test artifacts of the program. RLS keeps the read
+    # tenant-scoped; the canvas §9.5 ABAC layer is not needed because the
+    # log is already tenant-internal (every row already belongs to the
+    # caller's tenant after RLS filtering).
+    "audit-log-unified",
 }
