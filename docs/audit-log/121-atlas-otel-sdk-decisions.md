@@ -13,10 +13,12 @@ Slice type: JUDGMENT. Per the slice-development workflow (CLAUDE.md "JUDGMENT sl
 ## D2 — `service.name` vs `otelhttp.NewHandler` operation name
 
 **Decision.** Use two distinct strings:
+
 - The OTel resource attribute `service.name` defaults to `security-atlas` (overridable via `OTEL_SERVICE_NAME`).
 - The `otelhttp.NewHandler` operation-name argument is the literal `"atlas-http"`.
 
 **Why.** They are different concepts:
+
 - `service.name` identifies the EMITTING SERVICE (the binary). Dashboards, the trace-to-logs correlation in Grafana, and the receive-side `deploy/observability/dashboards/security-atlas-overview.json` all filter by it. `security-atlas` matches what the docs and the existing dashboard queries assume.
 - `otelhttp.NewHandler`'s second arg is a generic span name FALLBACK for requests whose route the chi router can't surface (404s mostly). `"atlas-http"` is a readable default that surfaces on the spans-without-a-route. Most requests will get their span name overridden to the actual route pattern by chi → otelhttp's route-pattern derivation.
 
@@ -31,6 +33,7 @@ The slice doc's AC-3 says `OTEL_SERVICE_NAME defaults to security-atlas` — fol
 ## D4 — NATS trace propagation: hand-rolled over `nats.Header`
 
 **Decision.** OTel-Go ships no first-party NATS contrib package as of OTel-Go v1.34. The slice doc anticipated this. We hand-rolled:
+
 - `InjectNATSTraceContext(ctx, *nats.Msg)` — writes `traceparent` + `baggage` headers via a thin `natsHeaderCarrier` adapter to the `propagation.TextMapCarrier` interface.
 - `ExtractNATSTraceContext(ctx, *nats.Msg) context.Context` — reverse direction.
 - `StartNATSPublishSpan` / `StartNATSConsumeSpan` — open spans with the right `SpanKind` + the AC-13 attribute set (`messaging.system=nats`, `messaging.destination=<subject>`, `messaging.message.id=<idempotency-key>`).
@@ -44,6 +47,7 @@ The slice doc's AC-3 says `OTEL_SERVICE_NAME defaults to security-atlas` — fol
 **Decision.** Wrap the assembled chi router with `otelhttp.NewHandler(root, ...)` ONCE at the OUTERMOST layer of `Server.httpHandler()`. Every request — including 401s from the bearer-auth middleware, 403s from the OPA authz middleware, and exempt paths like `/auth/local/login` — gets a span.
 
 **Why.** The alternative is per-route registration via `otelhttp.NewMiddleware` inside chi. That would:
+
 - Skip 401s entirely (the middleware never reaches the route).
 - Require touching every `root.Get("/v1/...")` call (there are ~120).
 - Make the "every request gets a span" property fragile to add-route mistakes.
