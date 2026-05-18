@@ -9,6 +9,30 @@ Conventional-Commit messages. Each entry links to its slice issue, the
 merging PR, and the squash-merge commit. For richer per-slice narrative
 see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
+## [1.10.0](https://github.com/mgoodric/security-atlas/compare/v1.9.0...v1.10.0) (2026-05-18)
+
+
+### Features
+
+* **api:** /api/admin/me role enumeration ([#130](https://github.com/mgoodric/security-atlas/issues/130)) ([#281](https://github.com/mgoodric/security-atlas/issues/281)) ([2ac4f51](https://github.com/mgoodric/security-atlas/commit/2ac4f5169d5564c134d6e5a0fb550cd3ad13ddb2))
+* **audit-log:** actor_name in unified endpoint ([#129](https://github.com/mgoodric/security-atlas/issues/129)) ([#282](https://github.com/mgoodric/security-atlas/issues/282)) ([ba65799](https://github.com/mgoodric/security-atlas/commit/ba6579958aa9af491493c49e150d26d550e2b5d5))
+* **ci:** branch-protection drift reconcile + drift-detect job ([#127](https://github.com/mgoodric/security-atlas/issues/127)) ([#285](https://github.com/mgoodric/security-atlas/issues/285)) ([d71dae2](https://github.com/mgoodric/security-atlas/commit/d71dae2fe5007f062657599204edbd4bc9a191e4))
+* **ci:** SHA-pin every GitHub Action + BLOCKING actions-pin-check guard ([#128](https://github.com/mgoodric/security-atlas/issues/128)) ([#288](https://github.com/mgoodric/security-atlas/issues/288)) ([ba49891](https://github.com/mgoodric/security-atlas/commit/ba4989119bae7b4303da7a39b321473b605d6f88))
+* **frontend:** /audit-log page consuming unified aggregation ([#125](https://github.com/mgoodric/security-atlas/issues/125)) ([#276](https://github.com/mgoodric/security-atlas/issues/276)) ([e0770b3](https://github.com/mgoodric/security-atlas/commit/e0770b346b0f1d47ba04f02486a3d7fbabfcdae9))
+* **observability:** external audit-log sink with backpressure ([#126](https://github.com/mgoodric/security-atlas/issues/126)) ([#277](https://github.com/mgoodric/security-atlas/issues/277)) ([6a5cd51](https://github.com/mgoodric/security-atlas/commit/6a5cd5156831abb28de89be4d67b1a6a00a63c1e))
+
+
+### Bug Fixes
+
+* **e2e:** unmask + fix 4 specs blocked by slice 119 polarity flip ([#123](https://github.com/mgoodric/security-atlas/issues/123)) ([#286](https://github.com/mgoodric/security-atlas/issues/286)) ([97e3eb4](https://github.com/mgoodric/security-atlas/commit/97e3eb4cf5c4f1372575aeef29b64e48148790d5))
+
+
+### Documentation
+
+* **audit-log:** close slice 117 AC-2 + AC-3 with StepSecurity enrollment ([#273](https://github.com/mgoodric/security-atlas/issues/273)) ([c8289dd](https://github.com/mgoodric/security-atlas/commit/c8289dd06421a51df68da31852170bafe6c21432))
+* **issues:** add slice 127 — branch-protection drift fix ([#272](https://github.com/mgoodric/security-atlas/issues/272)) ([dc69882](https://github.com/mgoodric/security-atlas/commit/dc69882048b85abbfd4b6448d44370cae10cfb7d))
+* **issues:** add slice 128 — SHA-pin every GitHub Action across all workflows ([#274](https://github.com/mgoodric/security-atlas/issues/274)) ([f808559](https://github.com/mgoodric/security-atlas/commit/f8085597a935ccfded665d71008390e85614045f))
+
 ## [1.9.0](https://github.com/mgoodric/security-atlas/compare/v1.8.0...v1.9.0) (2026-05-18)
 
 
