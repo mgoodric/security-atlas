@@ -674,6 +674,14 @@ func (s *Server) httpHandler() http.Handler {
 	root.Patch("/v1/admin/users/{id}/roles", usersH.PatchRoles)
 	auditLogH := adminauditlog.New(s.dbPool)
 	root.Get("/v1/admin/audit-log", auditLogH.List)
+	// Slice 124: unified audit-log aggregation read across all nine
+	// per-domain audit-log tables (decision/evidence/exception/sample/
+	// audit_period/aggregation_rule/feature_flag/me/walkthrough). The
+	// upstream slice 035 OPA middleware is the canonical role gate; the
+	// handler does defense-in-depth (admin OR auditor OR grc_engineer).
+	// Route appended per the parallel-batch convention (chi.Mux rejects
+	// two Mounts at "/", so individual routes register onto the root).
+	root.Get("/v1/admin/audit-log/unified", auditLogH.UnifiedList)
 	// Slice 076: metrics catalog + cascade + observation store. Routes
 	// appended per the parallel-batch convention (chi.Mux rejects two
 	// Mounts at "/"). The literal-segment route /v1/metrics/cascade is
