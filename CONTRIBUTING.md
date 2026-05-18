@@ -60,7 +60,7 @@ After `just install-hooks`, commits with malformed Go (or unformatted YAML / JSO
 | `just hooks-run`            | Run pre-commit against the whole tree                                      |
 | `just tidy`                 | `go mod tidy` and fail if `go.mod` / `go.sum` change                       |
 | `just ci`                   | Run what CI runs (lint + test + build)                                     |
-| `just refresh-screenshots`  | Re-capture README screenshots + animated GIF (slice 057)                   |
+| `just refresh-screenshots`  | Re-capture README screenshots — requires `ATLAS_DEMO_SEED=1` per slice 132 |
 | `just walkthroughs-refresh` | Apply walkthrough fixtures + sync docs-site walkthrough copies (slice 070) |
 
 ---

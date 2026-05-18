@@ -23,7 +23,7 @@ Open-source, self-hostable GRC platform — a control-graph and evidence-pipelin
 
 The spine is the [Secure Controls Framework](https://securecontrolsframework.com/) (~1,400 controls crosswalked to 200+ frameworks via NIST IR 8477 STRM). The wire format is NIST OSCAL. The target user is the solo security leader at a 50–150-person security-product startup who runs the entire program — risk register, board reporting, SOC 2, vendor reviews, policies, exceptions — alone.
 
-**v1 complete.** All 69 v1 slices are merged on `main`; v2 follow-on work is tracked under `docs/issues/` (slices numbered 070+). See [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) for the design canvas, [`docs/issues/_INDEX.md`](./docs/issues/_INDEX.md) for the v1 backlog, and [`docs/issues/_STATUS.md`](./docs/issues/_STATUS.md) for the live merge trail.
+**v1 complete; operator-grade today.** All 69 v1 slices are merged on `main`; v2 follow-on work is well underway — current release is **v1.10.0** (2026-05-18). 120+ slices have shipped, including the unified audit-log trio (124 + 125 + 126 + 129 + 130 — admin-visible `/audit-log` aggregation across nine per-domain log surfaces with an external HMAC-signed sink) and the CI hardening trilogy (117 + 127 + 128 — StepSecurity Harden-Runner, branch-protection drift detection, and SHA-pinned GitHub Actions with a BLOCKING pin-check guard). See [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) for the design canvas, [`docs/issues/_INDEX.md`](./docs/issues/_INDEX.md) for the slice backlog, [`docs/issues/_STATUS.md`](./docs/issues/_STATUS.md) for the live merge trail, and [`CHANGELOG.md`](./CHANGELOG.md) for the per-release notes.
 
 ---
 
@@ -40,9 +40,20 @@ security-atlas inverts the model:
 
 ---
 
+## What's new in v1.10.0 (2026-05-18)
+
+The two recent capability batches that materially changed the operator experience:
+
+- **Unified audit-log trio.** Slices 124 + 125 + 126 + 129 + 130 land a single admin-facing `/audit-log` page that aggregates across nine per-domain audit-log tables (decisions, evidence, exceptions, sample, audit-period, aggregation-rule, feature-flag, me, walkthrough) via a `GET /v1/admin/audit-log/unified` endpoint, with an HMAC-SHA256-signed external JSONL sink for tamper-evident off-host retention and a backpressure-to-fallback table so no record is ever silent-dropped. The role guard admits admin + auditor + grc_engineer; the wire format includes `actor_name` resolution via LEFT JOIN on `users` (per-tenant RLS isolation).
+- **CI hardening trilogy.** Slices 117 + 127 + 128 close three supply-chain gaps: StepSecurity Harden-Runner audit mode on every CI job, branch-protection file ↔ live drift detection on every PR + push to main, and SHA-pinning of every GitHub Action across every workflow with a BLOCKING `actions-pin-check` guard that fails the build on any non-40-char-hex `uses:` line.
+
+See [`CHANGELOG.md`](./CHANGELOG.md) for the full per-release notes; the [`docs/audit-log/`](./docs/audit-log/) directory holds per-slice decision logs that record the JUDGMENT calls behind each merged feature.
+
+---
+
 ## Screenshots
 
-Captured from the running app with seeded demo data — `just refresh-screenshots` regenerates them. Light and dark variants below; the page selects per `prefers-color-scheme`.
+Captured from the running app against the slice-057 hermetic stub-server demo fixtures (`fixtures/readme-demo/`) — `ATLAS_DEMO_SEED=1 just refresh-screenshots` regenerates them. The capture pipeline refuses to run unless `ATLAS_DEMO_SEED=1` is set and the upstream HTTP target is loopback / RFC1918 private (slice 132 information-disclosure safety gate — every captured PNG is public forever once the README merges). Light and dark variants below; the page selects per `prefers-color-scheme`.
 
 ### Control detail — UCF crosswalks
 
@@ -73,12 +84,6 @@ The v1 binary success-test artifact. Templated narrative per section, per-sectio
   <source media="(prefers-color-scheme: light)" srcset="./docs/images/board-pack-preview.png">
   <img alt="board pack preview showing the framework posture section with templated narrative" src="./docs/images/board-pack-preview.png">
 </picture>
-
-### What it looks like in motion
-
-Short walk-through: dashboard, then a drill into a control to see UCF coverage.
-
-![dashboard to control detail walk-through](./docs/images/flow-create-control.gif)
 
 ---
 

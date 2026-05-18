@@ -59,6 +59,14 @@ export default defineConfig({
       // so no escape is needed.
       "app/audit-log/**/*.test.ts",
       "proxy.test.ts",
+      // Slice 132: the README-screenshot capture pipeline's safety
+      // gate (assertCaptureSafe + isLoopbackOrPrivate) is the
+      // load-bearing information-disclosure mitigation per the slice
+      // 132 threat model. The test file exercises 13 branches of the
+      // gate so a refactor cannot widen the admit set silently — a
+      // public-IP slip would publish real customer data to the public
+      // README permanently.
+      "scripts/**/*.test.ts",
     ],
     exclude: ["**/node_modules/**", "**/.next/**", "**/dist/**", "e2e/**"],
     coverage: {
