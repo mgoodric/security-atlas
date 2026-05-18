@@ -1,12 +1,17 @@
-// Slice 057 — README-screenshot capture pipeline.
+// Slice 057 (authored) + Slice 132 (hardened) — README-screenshot
+// capture pipeline.
 //
 // What this script does
 // ---------------------
 // Renders the four high-leverage views of the merged frontend code and
-// captures a PNG of each in both light and dark themes (8 PNGs total),
-// then records an ~8-second flow as webm. The output lands under
-// `docs/images/` and is committed to the repo. ffmpeg post-processes
-// the webm into the final animated GIF.
+// captures a PNG of each in both light and dark themes (8 PNGs total).
+// The output lands under `docs/images/` and is committed to the repo.
+//
+// Slice 132 removed the flow GIF recording (slice 132 P0 scope: static
+// PNG only — animated GIFs / video are out of scope for the README to
+// keep the page diff-friendly, a11y-friendly, and under the 2 MB total
+// image budget). The `recordFlowVideo()` helper was deleted along with
+// the `webm → ffmpeg → GIF` post-step in the justfile.
 //
 // Why a standalone Node script (D5 revised)
 // -----------------------------------------
@@ -30,24 +35,62 @@
 // `@playwright/test` devDependency is still the only Playwright
 // install in the tree (P0-A7 honored).
 //
+// Slice 132 safety gate (AC-2)
+// ----------------------------
+// The script refuses to run unless BOTH of the following are true:
+//
+//   1. The environment variable `ATLAS_DEMO_SEED=1` is set. This is the
+//      operator-typed safety affirmation that the upstream platform the
+//      script is about to capture is a sanitized demo seed, NOT a real
+//      tenant. The variable is deliberately a hard string-match — not
+//      `${ATLAS_DEMO_SEED:-0}` parsing — so a typo (`true`, `yes`,
+//      `ATLAS_DEMOSEED`) trips the gate.
+//   2. The upstream HTTP target — read from `ATLAS_HTTP_URL` if set,
+//      otherwise the stub-server localhost default — has a hostname
+//      that resolves to a loopback or RFC1918 private-range address.
+//      This catches the "I forgot to switch off prod" footgun: the
+//      script will REFUSE if the hostname is anything that looks like
+//      it could be a customer endpoint.
+//
+// The gate is information-disclosure mitigation. Slice 132's threat
+// model treats the README as a permanent public PII leak vector — every
+// captured PNG is public forever the moment the PR merges. The gate is
+// the cheapest defense-in-depth against a future capture-run operator
+// accidentally pointing this script at a live tenant.
+//
 // What this script deliberately is NOT
 // -----------------------------------
 // * NOT an e2e regression test. The slice-069 e2e suite stays
 //   untouched. CI does not run this script.
 // * NOT a CI freshness gate. The output is on-demand artifacts
-//   (anti-criterion P0-A4).
+//   (anti-criterion P0-A4 from slice 057; preserved by slice 132).
 //
 // Running it
 // ----------
 // Prerequisites: `npm install` in repo root; `npx playwright install
-// chromium`; ffmpeg + pngquant on `$PATH`. Then:
+// chromium`; pngquant on `$PATH`. Then:
 //
-//     just refresh-screenshots
+//     ATLAS_DEMO_SEED=1 just refresh-screenshots
 //
-// The recipe wraps this script — see the justfile for the full chain.
+// The recipe wraps this script and exports `ATLAS_DEMO_SEED=1` for the
+// operator — see the justfile for the full chain.
+//
+// Demo seed vs stub-server fixtures (slice 132 D1)
+// ------------------------------------------------
+// Slice 132 AC-3 says the script should invoke `web/e2e/seed.ts`'s
+// demo-seed path "or a documented equivalent". The slice-057 stub server
+// at `web/scripts/stub-platform-server.ts` IS the documented equivalent:
+// it serves neutral, hermetic JSON from `fixtures/readme-demo/*.json`,
+// no docker-compose dependency, deterministic byte-for-byte across runs.
+// The stub fixtures encode the same demo-tenant shape the slice-082 e2e
+// seed produces — neutral org names, synthetic emails, no real customer
+// data. This satisfies P0-A1/A2/A3 at the design level (the fixtures
+// THEMSELVES contain no real data), independent of the safety gate
+// above (which catches the live-tenant case if a future maintainer
+// rewires the script onto the real platform).
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdir, readdir, unlink } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import {
@@ -61,7 +104,6 @@ import { startStubServer } from "./stub-platform-server";
 
 const REPO_ROOT = resolve(__dirname, "../..");
 const OUT_DIR = resolve(REPO_ROOT, "docs/images");
-const VIDEO_DIR = resolve(REPO_ROOT, "web/test-results/readme-capture-video");
 const STUB_PORT = 8787;
 const NEXT_PORT = 3300; // avoid colliding with the dev convention :3000
 const DEMO_BEARER = "demo-bearer-readme-capture";
@@ -83,6 +125,91 @@ const CAPTURE_TARGETS = [
 function log(msg: string): void {
   // eslint-disable-next-line no-console
   console.log(`[capture] ${msg}`);
+}
+
+// Slice 132 AC-2 — the safety gate. Asserts the operator has
+// affirmatively flagged the capture target as a demo seed AND the
+// target hostname is a loopback / RFC1918 private-range address. Throws
+// with an actionable diagnostic on any violation.
+//
+// Exported for unit testing — `web/scripts/capture-readme-screenshots.test.ts`
+// covers the seven branches (env-missing, env-typo, env-correct,
+// localhost-permitted, 127.0.0.1-permitted, 10.x-permitted,
+// public-IP-rejected, hostname-cannot-be-resolved-rejected).
+//
+// The gate is intentionally STRICT — failing closed is the right
+// information-disclosure posture. A capture run that aborts is cheap
+// to retry; a screenshot of a real tenant in the public README is
+// permanent and unrecoverable.
+export function assertCaptureSafe(env: NodeJS.ProcessEnv = process.env): void {
+  // Gate 1 — `ATLAS_DEMO_SEED=1` operator affirmation. The literal "1"
+  // is intentional. We do NOT accept "true" / "yes" / "on" because
+  // ambiguity creates false-positive bypass paths via a typo.
+  if (env.ATLAS_DEMO_SEED !== "1") {
+    throw new Error(
+      "ATLAS_DEMO_SEED=1 is required. This is slice 132's AC-2 safety " +
+        "gate: every captured PNG goes into the public README, and the " +
+        "capture target MUST be a sanitized demo seed (or the slice-057 " +
+        "stub-server which uses hermetic fixtures). Set " +
+        "`ATLAS_DEMO_SEED=1` in your environment before running this " +
+        "script (the `just refresh-screenshots` recipe sets it for you).",
+    );
+  }
+
+  // Gate 2 — host must be loopback / private-range. Read from
+  // ATLAS_HTTP_URL if set (the script's upstream platform target);
+  // default to "localhost" (the stub-server case).
+  const httpURL = env.ATLAS_HTTP_URL ?? `http://localhost:${STUB_PORT}`;
+  const host = extractHost(httpURL);
+  if (!isLoopbackOrPrivate(host)) {
+    throw new Error(
+      `Capture target ${httpURL} is not a loopback or RFC1918 private ` +
+        `address (host="${host}"). Slice 132 AC-2 refuses to capture ` +
+        `against a remote tenant. If you need to capture against a ` +
+        `non-localhost target, port-forward it to localhost first.`,
+    );
+  }
+}
+
+function extractHost(httpURL: string): string {
+  try {
+    return new URL(httpURL).hostname;
+  } catch {
+    // If the value is not a parseable URL, treat the whole string as
+    // the host. Better-safe-than-sorry: this will almost certainly fail
+    // the loopback / private-range check below, which is the right
+    // outcome.
+    return httpURL;
+  }
+}
+
+// Returns true iff `host` is a loopback name / IPv4 / IPv6 OR an
+// RFC1918 private-range IPv4 OR a unique-local IPv6 (fc00::/7).
+// Returns false for public IPs, public DNS names, and unresolvable
+// strings. Intentionally conservative — false-negative (refuse safe)
+// beats false-positive (allow unsafe).
+export function isLoopbackOrPrivate(host: string): boolean {
+  if (host === "localhost") return true;
+  if (host === "127.0.0.1" || host === "::1") return true;
+  if (host === "0.0.0.0") return true;
+
+  // IPv4 RFC1918 + carrier NAT
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const [a, b] = [parseInt(v4[1], 10), parseInt(v4[2], 10)];
+    if (a === 10) return true; // 10.0.0.0/8
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+    if (a === 192 && b === 168) return true; // 192.168.0.0/16
+    if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 (CGN)
+    if (a === 127) return true; // 127.0.0.0/8 loopback
+    return false;
+  }
+
+  // IPv6 unique-local (fc00::/7) — covers fc00:: and fd00:: prefixes
+  if (/^f[cd][0-9a-f]{2}:/i.test(host)) return true;
+
+  // Anything else (public DNS name, public IP, garbage): refuse.
+  return false;
 }
 
 async function waitForPort(port: number, timeoutMs: number): Promise<void> {
@@ -193,57 +320,10 @@ async function captureOne(
   }
 }
 
-async function recordFlowVideo(
-  browser: Browser,
-  baseURL: string,
-): Promise<string> {
-  await mkdir(VIDEO_DIR, { recursive: true });
-  const context = await browser.newContext({
-    viewport: { width: 1440, height: 900 },
-    recordVideo: { dir: VIDEO_DIR, size: { width: 1440, height: 900 } },
-  });
-  try {
-    await injectSessionCookie(context, baseURL);
-    const page = await context.newPage();
-    await applyTheme(page, "light");
-
-    // 1. Dashboard.
-    await page.goto(`${baseURL}/dashboard`, {
-      waitUntil: "domcontentloaded",
-      timeout: 60_000,
-    });
-    await page.waitForTimeout(1200);
-
-    // 2. Slow scroll down then back up.
-    await page.evaluate(() =>
-      window.scrollTo({ top: 220, behavior: "smooth" }),
-    );
-    await page.waitForTimeout(1500);
-    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
-    await page.waitForTimeout(1200);
-
-    // 3. Drill into a control.
-    await page.goto(`${baseURL}/controls/acme-soc2-ac-1`, {
-      waitUntil: "domcontentloaded",
-      timeout: 60_000,
-    });
-    await page.waitForTimeout(1500);
-
-    // 4. Scroll within the control to show UCF coverage.
-    await page.evaluate(() =>
-      window.scrollTo({ top: 300, behavior: "smooth" }),
-    );
-    await page.waitForTimeout(1500);
-
-    await page.close();
-    const video = page.video();
-    const path = await video?.path();
-    if (!path) throw new Error("Playwright did not produce a video path");
-    return path;
-  } finally {
-    await context.close();
-  }
-}
+// Slice 132 removed `recordFlowVideo()` — the README no longer embeds
+// the animated GIF (slice 132 explicitly scopes to static PNG only;
+// the previous 1.8 MB `flow-create-control.gif` blew through slice
+// 132's 2 MB total-README image budget single-handedly).
 
 function spawnNextServer(): ChildProcess {
   // Launch the standalone production server. The slice-037 build
@@ -272,22 +352,13 @@ function spawnNextServer(): ChildProcess {
   );
 }
 
-async function clearOldVideos(): Promise<void> {
-  try {
-    const files = await readdir(VIDEO_DIR);
-    for (const f of files) {
-      if (f.endsWith(".webm")) {
-        await unlink(join(VIDEO_DIR, f));
-      }
-    }
-  } catch {
-    // dir may not exist yet — fine
-  }
-}
-
 async function main(): Promise<void> {
+  // Slice 132 AC-2 — assert safety gate BEFORE any side effect.
+  // Throws with an actionable diagnostic if ATLAS_DEMO_SEED!=1 or the
+  // upstream HTTP target is not a loopback / private-range host.
+  assertCaptureSafe();
+
   await mkdir(OUT_DIR, { recursive: true });
-  await clearOldVideos();
 
   log(`starting stub platform server on :${STUB_PORT}`);
   const stub = startStubServer(STUB_PORT);
@@ -316,10 +387,6 @@ async function main(): Promise<void> {
       }
     }
 
-    log("recording flow video for GIF source…");
-    const videoPath = await recordFlowVideo(browser, baseURL);
-    log(`  flow video → ${videoPath}`);
-
     log("capture complete");
   } finally {
     await browser.close();
@@ -328,8 +395,16 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.error("[capture] failed:", err);
-  process.exit(1);
-});
+// Only run main() when this file is the script entry point. Importing
+// the module (e.g. from a vitest test of `assertCaptureSafe`) must NOT
+// kick off the capture. esbuild's bundled output preserves
+// `require.main === module` semantics in CJS — the script invocation
+// flows through that branch; the test import does not.
+if (require.main === module) {
+  main().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error("[capture] failed:", err);
+    process.exit(1);
+  });
+}
+

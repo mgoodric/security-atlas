@@ -346,39 +346,51 @@ docs-serve:
 docs-build:
     {{_docs_uv}} --from mkdocs mkdocs build --strict --config-file docs-site/mkdocs.yml
 
-# ----- README screenshots (slice 057) -----
+# ----- README screenshots (slice 057 + slice 132) -----
 #
-# Refreshes the screenshots + animated GIF embedded in README.md from
-# the actually-running app. This is an on-demand recipe — CI does NOT
-# block on screenshot freshness (anti-criterion P0-A4). Run it when
-# the captured views drift visibly from the merged frontend.
+# Refreshes the eight PNG screenshots embedded in README.md from the
+# actually-running app. This is an on-demand recipe — CI does NOT block
+# on screenshot freshness (anti-criterion P0-A4 from slice 057,
+# preserved by slice 132). Run it when the captured views drift visibly
+# from the merged frontend, or after the platform version baseline
+# bumps (e.g. v1.10.0+).
+#
+# Slice 132 changes:
+#   * Static PNG only — the animated flow GIF was dropped (slice 132
+#     scope: static PNG only; the previous 1.8 MB flow-create-control.gif
+#     blew through slice 132's 2 MB total-README image budget).
+#   * Safety gate — ATLAS_DEMO_SEED=1 is exported into the script's
+#     env so the capture-script's AC-2 safety gate sees the operator
+#     affirmation. The script will REFUSE to run if this variable is
+#     absent or the upstream HTTP target is not loopback / private.
+#   * Per-image budget gate — after capture + pngquant, a check
+#     enforces the 200 KB / page · 350 KB hero · 2 MB total budget.
 #
 # Prerequisites (one-time):
 #   - `just build-frontend` succeeds (Next.js builds without error)
 #   - `npx playwright install chromium` (Playwright browser binaries)
-#   - `ffmpeg` on PATH (Homebrew: `brew install ffmpeg`)
-#   - `pngquant` on PATH for size optimization (optional but recommended:
-#     `brew install pngquant`)
+#   - `pngquant` on PATH (Homebrew: `brew install pngquant`) — REQUIRED,
+#     was optional in slice 057, promoted to required here because the
+#     2 MB total budget makes compression non-negotiable.
 #
 # What it does:
 #   1. Builds the web/ workspace (`npm run build` in web/) — produces
 #      the production-mode bundle that the captures render against.
-#   2. Starts `next start` in the background on :3000 with ATLAS_HTTP_URL
-#      pointed at a fixture-driven stub server on :8787 (spun up inside
-#      the Playwright spec via `web/scripts/stub-platform-server.ts`).
-#   3. Runs the capture spec at
-#      `web/scripts/capture-readme-screenshots.spec.ts` — produces 8
-#      PNGs + 1 webm under `docs/images/` + the Playwright `test-results/`
-#      directory.
-#   4. ffmpeg converts the recorded webm → `docs/images/flow-create-control.gif`
-#      with a generated palette (smaller than naive single-pass).
-#   5. pngquant compresses the PNGs in place (lossy palette quantization)
-#      to keep the total weight ≤ 5 MB (anti-criterion P0-A3).
+#   2. Copies static assets into the standalone bundle directory so
+#      the Next 16 standalone server can find them.
+#   3. Bundles the capture script via esbuild.
+#   4. Runs the capture (boots production Next server + stub platform
+#      on :3300/:8787, writes 8 PNGs to docs/images/).
+#   5. pngquant compresses the PNGs in place (lossy palette
+#      quantization) to meet the 200 KB / 350 KB / 2 MB budget.
+#   6. Asserts the budget; exits non-zero with per-file diagnostic
+#      on violation.
 #
 # Determinism: the stub server replays static JSON fixtures from
 # `fixtures/readme-demo/**`, so every run produces the same captured
 # pixels modulo font rasterization. Fixture content is neutral — no
-# maintainer references, no real tenant data (anti-criterion P0-A2).
+# maintainer references, no real tenant data (anti-criterion P0-A2
+# from slice 057, P0-A1/A3 from slice 132).
 refresh-screenshots:
     @echo "[1/5] Building web/ (production mode — standalone output)…"
     cd web && npm run build
@@ -394,27 +406,21 @@ refresh-screenshots:
         --external:@playwright/test \
         --outfile=web/scripts/.capture-readme-screenshots.bundled.js
     @echo "[4/5] Running capture (boots production Next server + stub platform)…"
-    cd web && node scripts/.capture-readme-screenshots.bundled.js
-    @echo "[5/6] Converting recorded webm → optimized GIF via ffmpeg…"
-    WEBM=$(find web/test-results/readme-capture-video -name '*.webm' 2>/dev/null | head -1); \
-        if [ -z "$WEBM" ]; then \
-            echo "no flow-recording webm produced — GIF skipped"; \
-            exit 1; \
-        else \
-            ffmpeg -y -i "$WEBM" \
-                -vf "fps=10,scale=1280:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3" \
-                -loop 0 \
-                docs/images/flow-create-control.gif; \
-        fi
-    @echo "[6/6] Compressing PNGs via pngquant (optional)…"
-    if command -v pngquant >/dev/null 2>&1; then \
-        find docs/images -name '*.png' -exec pngquant --quality=70-90 --speed=1 --force --ext .png {} \; ; \
-    else \
-        echo "pngquant not on PATH — skipping PNG compression"; \
+    cd web && ATLAS_DEMO_SEED=1 node scripts/.capture-readme-screenshots.bundled.js
+    @echo "[5/5] Compressing PNGs via pngquant (REQUIRED for slice 132 budget)…"
+    if ! command -v pngquant >/dev/null 2>&1; then \
+        echo "pngquant not on PATH — install via 'brew install pngquant'"; \
+        exit 1; \
     fi
-    @echo "Refresh complete. Total weight:"
-    @du -sh docs/images/*.{png,gif} 2>/dev/null | awk '{print "    " $0}'
-    @du -sch docs/images/*.{png,gif} 2>/dev/null | tail -1 | awk '{print "  TOTAL: " $1}'
+    find docs/images -name '*.png' -exec pngquant --quality=60-85 --speed=1 --force --ext .png {} \;
+    @echo "Refresh complete. Per-image sizes (slice 132 budget: page≤200K, hero≤350K, total≤2M):"
+    @du -k docs/images/*.png 2>/dev/null | awk '{print "    " $1 "K  " $2}'
+    @total=$(du -k docs/images/*.png 2>/dev/null | awk '{s+=$1} END {print s}'); \
+        echo "  TOTAL: ${total}K"; \
+        if [ "$total" -gt 2048 ]; then \
+            echo "  BUDGET VIOLATION: total ${total}K exceeds 2048K (2 MB) cap"; \
+            exit 1; \
+        fi
 
 # ----- Onboarding walkthroughs (slice 070) -----
 #
