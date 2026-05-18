@@ -1192,6 +1192,117 @@ jobs:
 
       - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
+  # ====================================================================
+  # Phantom dependency audit — informational only, NOT in required-checks.
+  #
+  # Runs scripts/audit-deps.sh whenever any of the four manifests
+  # changes in a PR. The script classifies every direct dep across the
+  # monorepo as USED / USED-VIA-CONFIG / USED-VIA-SCRIPT / PHANTOM
+  # (slice 120). Any PHANTOM finding is posted as a sticky PR comment
+  # so the contributor sees it inline before merge. The comment is
+  # informational; CI never blocks on phantom findings.
+  #
+  # Why informational (not required): the audit is a heuristic — it
+  # has known false positives (e.g. peer-detected deps like
+  # @vitest/coverage-v8 and react-dom) tracked in
+  # docs/audit-log/120-audit-and-remove-phantom-dependencies-decisions.md
+  # D5. Promoting to required would force contributors to grep through
+  # the audit-log to justify a KEEP case on every PR — the wrong
+  # ergonomic for an opt-in hygiene signal. Mirrors the slice 109
+  # sqlc-drift and slice 089 npm-audit informational-job pattern above.
+  #
+  # Sticky comment via a hidden HTML marker — re-running the workflow
+  # updates the same comment instead of stacking new ones on the PR.
+  # ====================================================================
+  phantom-deps:
+    name: Deps · phantom audit
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install ripgrep
+        # Required by scripts/audit-deps.sh — the ubuntu-latest runner
+        # doesn't pre-bundle ripgrep as of 2026-05; install explicitly.
+        run: sudo apt-get update -q && sudo apt-get install -y -q ripgrep
+      - name: Verify ripgrep available
+        run: rg --version
+      - name: Run audit-deps.sh
+        id: audit
+        run: |
+          set +e
+          bash scripts/audit-deps.sh > audit-deps.tsv 2> audit-deps.stderr
+          rc=$?
+          set -e
+          # Count PHANTOM rows (excludes the TSV header).
+          phantom_count=$(awk -F'\t' '$3=="PHANTOM"' audit-deps.tsv | wc -l | tr -d ' ')
+          echo "phantom_count=$phantom_count" >> "$GITHUB_OUTPUT"
+          echo "Phantom-dep findings: $phantom_count"
+          exit "$rc"
+      - name: Build comment body
+        id: body
+        run: |
+          {
+            echo "<!-- atlas-phantom-deps-marker -->"
+            echo "## Deps · phantom audit (slice 120)"
+            echo
+            phantom_count="${{ steps.audit.outputs.phantom_count }}"
+            if [ "$phantom_count" -eq 0 ]; then
+              echo "No PHANTOM direct dependencies detected across the four manifests. "
+              echo "(\`web/package.json\`, \`go.mod\`, \`oscal-bridge/pyproject.toml\`, \`docs-site/requirements.txt\`)"
+            else
+              echo "$phantom_count direct dep(s) classified PHANTOM — declared in a manifest but not referenced in any source file, allowlisted config, or build script:"
+              echo
+              echo '| ecosystem | package | evidence |'
+              echo '|---|---|---|'
+              awk -F'\t' '$3=="PHANTOM" { printf "| %s | `%s` | (no consumer found) |\n", $1, $2 }' audit-deps.tsv
+              echo
+              echo "Known KEEP cases (peer-detected by their consumer; not actually phantom) are tracked in [\`docs/audit-log/120-audit-and-remove-phantom-dependencies-decisions.md\`](../blob/main/docs/audit-log/120-audit-and-remove-phantom-dependencies-decisions.md) D5. If your PR adds a NEW dep that surfaces here, drop the dep (or extend the decisions-log KEEP table with rationale)."
+            fi
+            echo
+            echo "---"
+            echo "_Informational only. Reproduce locally: \`bash scripts/audit-deps.sh\`. Slice 120 · ${{ github.run_id }}._"
+          } > comment-body.md
+      - name: Post or update sticky PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Find any existing sticky comment by our hidden marker.
+          existing=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.body | startswith("<!-- atlas-phantom-deps-marker -->")) | .id' \
+            | head -1)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/${existing}" \
+              -f body="$(cat comment-body.md)" >/dev/null
+            echo "Updated existing sticky comment id=$existing"
+          else
+            gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" --body-file comment-body.md
+            echo "Posted new sticky comment"
+          fi
+      - name: Upload audit TSV as artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: audit-deps-tsv
+          path: |
+            audit-deps.tsv
+            audit-deps.stderr
+            comment-body.md
+          if-no-files-found: warn
+
+  phantom-deps-stub:
+    name: Deps · phantom audit
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Non-PR push OR docs-only change — phantom audit skipped (slice 120)."
+
   npm-audit:
     name: Frontend · npm audit
     needs: changes

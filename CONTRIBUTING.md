@@ -120,6 +120,10 @@ Scope is optional but recommended (`feat(evidence):`, `fix(ucf):`, `docs(canvas)
 
 Dependabot opens PRs every Monday with the `deps:` prefix (`deps(deps):`, `deps(deps-dev):`, `deps(actions):`, etc.) across all ecosystems (Go modules, npm, pip, Docker, GitHub Actions). Release-please surfaces them under the **Dependencies** section in `CHANGELOG.md`. Patch and minor bumps are reviewed individually; majors are investigated for breaking-change exposure before merge.
 
+### Phantom dependencies
+
+`scripts/audit-deps.sh` classifies every direct dependency across the four manifests (`web/package.json`, `go.mod`, `oscal-bridge/pyproject.toml`, `docs-site/requirements.txt`) as USED, USED-VIA-CONFIG, USED-VIA-SCRIPT, or PHANTOM. The CI workflow re-runs the audit on every PR that touches one of those manifests and posts a comment listing any PHANTOM candidates — informational only, never blocks the merge (slice 120). If a PR you authored draws a phantom-dependency comment, drop the unused dep in the same PR (or document in the PR description why the comment is a false positive — known KEEP cases like Next.js's runtime peer `react-dom` are recorded in [`docs/audit-log/120-audit-and-remove-phantom-dependencies-decisions.md`](./docs/audit-log/120-audit-and-remove-phantom-dependencies-decisions.md)). The script is also runnable locally (`bash scripts/audit-deps.sh` from the repo root) — output is TSV, scoped runs via `--ecosystem <npm|go|pip-bridge|pip-docs>`.
+
 ---
 
 ## Developer Certificate of Origin (DCO)
