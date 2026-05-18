@@ -9,6 +9,49 @@ Conventional-Commit messages. Each entry links to its slice issue, the
 merging PR, and the squash-merge commit. For richer per-slice narrative
 see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
+## [1.9.0](https://github.com/mgoodric/security-atlas/compare/v1.8.0...v1.9.0) (2026-05-18)
+
+
+### Features
+
+* **api:** /v1/evidence make control_id optional + filters + result on GET wire ([#106](https://github.com/mgoodric/security-atlas/issues/106)) ([#240](https://github.com/mgoodric/security-atlas/issues/240)) ([860c10a](https://github.com/mgoodric/security-atlas/commit/860c10a1218f05caaa16a67527ac9d04547a5173))
+* **api:** /v1/me/* profile + preferences + sessions endpoints ([#108](https://github.com/mgoodric/security-atlas/issues/108)) ([#246](https://github.com/mgoodric/security-atlas/issues/246)) ([d05ff2c](https://github.com/mgoodric/security-atlas/commit/d05ff2c7c4795e75c2d550586ddf561c54387540))
+* **api:** GET /v1/anchors?include=state join + /controls real state cells ([#104](https://github.com/mgoodric/security-atlas/issues/104)) ([#228](https://github.com/mgoodric/security-atlas/issues/228)) ([b105519](https://github.com/mgoodric/security-atlas/commit/b105519b32cb8a9383e3b4b2ae4734c9281e1af7))
+* **api:** GET /v1/policies?include=ack_rate join + /policies real ack-rate cells ([#107](https://github.com/mgoodric/security-atlas/issues/107)) ([#239](https://github.com/mgoodric/security-atlas/issues/239)) ([9971b41](https://github.com/mgoodric/security-atlas/commit/9971b41ed7526da56713eb1b48292bf259a6c551))
+* **backend:** unified audit-log aggregation API ([#124](https://github.com/mgoodric/security-atlas/issues/124)) ([#267](https://github.com/mgoodric/security-atlas/issues/267)) ([2406725](https://github.com/mgoodric/security-atlas/commit/2406725f338e8fc2c53b2d8df4cdbefedf06fcf7))
+* **frontend:** /audits period list view ([#102](https://github.com/mgoodric/security-atlas/issues/102)) ([#227](https://github.com/mgoodric/security-atlas/issues/227)) ([d6f68c3](https://github.com/mgoodric/security-atlas/commit/d6f68c3487e4824cd302fb1dfae64b24f14fb852))
+* **frontend:** /controls list view + shared list shell ([#098](https://github.com/mgoodric/security-atlas/issues/098)) ([#223](https://github.com/mgoodric/security-atlas/issues/223)) ([9428cc1](https://github.com/mgoodric/security-atlas/commit/9428cc1fc80699ef8cd4799144508861c3787a47))
+* **frontend:** /evidence list view ([#099](https://github.com/mgoodric/security-atlas/issues/099)) ([#232](https://github.com/mgoodric/security-atlas/issues/232)) ([35580e4](https://github.com/mgoodric/security-atlas/commit/35580e4f921d47e066b9c462a7c68239f746ad24))
+* **frontend:** /policies list view ([#101](https://github.com/mgoodric/security-atlas/issues/101)) ([#233](https://github.com/mgoodric/security-atlas/issues/233)) ([70d0098](https://github.com/mgoodric/security-atlas/commit/70d00980d5dd876650356dd45b98b29dc4d5b4cb))
+* **frontend:** /risks list view + sidebar realignment ([#100](https://github.com/mgoodric/security-atlas/issues/100)) ([#226](https://github.com/mgoodric/security-atlas/issues/226)) ([b5ee208](https://github.com/mgoodric/security-atlas/commit/b5ee208c080b102fed49a57f9e191d79dcb907f8))
+* **frontend:** /settings user-facing page ([#103](https://github.com/mgoodric/security-atlas/issues/103)) ([#238](https://github.com/mgoodric/security-atlas/issues/238)) ([2299506](https://github.com/mgoodric/security-atlas/commit/2299506de0a714d51fd10bcff4d3afd277950e82))
+* **frontend:** BFF forwards atlas_session cookie on /api/me/sessions* ([#110](https://github.com/mgoodric/security-atlas/issues/110)) ([#249](https://github.com/mgoodric/security-atlas/issues/249)) ([53c3b20](https://github.com/mgoodric/security-atlas/commit/53c3b20e67fdce4fb5193d100845ce1d470df09d))
+* **frontend:** risk-create UI for /risks empty-state ([#105](https://github.com/mgoodric/security-atlas/issues/105)) ([#231](https://github.com/mgoodric/security-atlas/issues/231)) ([f39c33e](https://github.com/mgoodric/security-atlas/commit/f39c33e268e5509ee7fd11d3077de2cf8ffe3374))
+* **infra:** StepSecurity Harden-Runner audit mode ([#117](https://github.com/mgoodric/security-atlas/issues/117)) ([#262](https://github.com/mgoodric/security-atlas/issues/262)) ([c70c2f3](https://github.com/mgoodric/security-atlas/commit/c70c2f3a63fb01aaf9d5a48304b78cb2282a35d8))
+* **observability:** atlas OTel SDK — traces + metrics + Go runtime ([#121](https://github.com/mgoodric/security-atlas/issues/121)) ([#269](https://github.com/mgoodric/security-atlas/issues/269)) ([f7b1eab](https://github.com/mgoodric/security-atlas/commit/f7b1eabbc0894e05a00774c0352d6b580bf12887))
+* **observability:** deploy bundle for OTel Collector + Prometheus + Tempo backplane ([#234](https://github.com/mgoodric/security-atlas/issues/234)) ([2d790b8](https://github.com/mgoodric/security-atlas/commit/2d790b8b3bbd77d0425563772402451a8c2c197a))
+* **quality:** audit + remove phantom dependencies ([#120](https://github.com/mgoodric/security-atlas/issues/120)) ([#264](https://github.com/mgoodric/security-atlas/issues/264)) ([751ee12](https://github.com/mgoodric/security-atlas/commit/751ee1211912d2b4d030d8f5013dbb3f42650f9a))
+
+
+### Bug Fixes
+
+* **infra:** idempotent api_keys insert in e2e seed harness ([#122](https://github.com/mgoodric/security-atlas/issues/122)) ([#265](https://github.com/mgoodric/security-atlas/issues/265)) ([eac3278](https://github.com/mgoodric/security-atlas/commit/eac3278c49f0eff8bc4fd63718fd40ec56930d0d))
+* **infra:** Playwright port-3000 CI race ([#119](https://github.com/mgoodric/security-atlas/issues/119)) ([#259](https://github.com/mgoodric/security-atlas/issues/259)) ([e21d266](https://github.com/mgoodric/security-atlas/commit/e21d26628636e4bb6dd563ec0579d9078d86b891))
+
+
+### Dependencies
+
+* **deps:** Bump lucide-react from 0.475.0 to 1.16.0 ([#154](https://github.com/mgoodric/security-atlas/issues/154)) ([458c443](https://github.com/mgoodric/security-atlas/commit/458c443744559e7da0210ba9fcf6aa68ff466103))
+* **deps:** bump mkdocs-material from 9.5.39 to 9.7.6 ([d67e584](https://github.com/mgoodric/security-atlas/commit/d67e5841b69e9621f9ef33b70fd107befff2cef2))
+
+
+### Documentation
+
+* **issues:** add slice 106 — atlas OTel SDK (traces + metrics + Go runtime) ([#235](https://github.com/mgoodric/security-atlas/issues/235)) ([1f5d7fa](https://github.com/mgoodric/security-atlas/commit/1f5d7fac7c7eb74e2672d372f12e85221d5ccd68))
+* **issues:** add slice 120 — audit and remove phantom dependencies ([#257](https://github.com/mgoodric/security-atlas/issues/257)) ([529d133](https://github.com/mgoodric/security-atlas/commit/529d133531d7c13be95934d8d2983fb3c7614d5d))
+* **issues:** add slices 124 + 125 + 126 — unified audit-log trio ([#260](https://github.com/mgoodric/security-atlas/issues/260)) ([7123879](https://github.com/mgoodric/security-atlas/commit/71238795e936d3ee46d74743129ec67fd532fa57))
+* **ui:** audit current UI vs mockups + file 6 fill-in slices (098-103) ([#220](https://github.com/mgoodric/security-atlas/issues/220)) ([f3a605a](https://github.com/mgoodric/security-atlas/commit/f3a605a9f665004a94fb7d3a6b9cd52a487c8f8d))
+
 ## [1.8.0](https://github.com/mgoodric/security-atlas/compare/v1.7.0...v1.8.0) (2026-05-16)
 
 
