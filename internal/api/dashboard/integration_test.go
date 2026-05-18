@@ -753,3 +753,62 @@ func TestDashboard_RejectsBadInput(t *testing.T) {
 		}
 	}
 }
+
+// ===== Slice 147 — empty-install AC-5 =====
+//
+// AC-5 (slice 147): "Empty-install integration test: dashboard loads
+// cleanly with 0 frameworks + 0 activity events — no placeholders, no
+// 500s." On a fresh tenant with no seeded rows, both dashboard endpoints
+// MUST return 200 with the documented empty envelope (NOT 500, NOT a
+// placeholder body). The frontend re-pointing in slice 147 depends on
+// this — a placeholder-free panel renders its empty-state copy off the
+// empty envelope.
+
+func TestDashboard_EmptyTenant_FrameworkPostureReturnsEmptyEnvelope(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	resp, body := get(t, env, "/v1/frameworks/posture")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("AC-5: empty tenant GET /v1/frameworks/posture status %d, want 200", resp.StatusCode)
+	}
+	// AC-5 P0-DASH-2: empty install returns 200 with well-formed envelope,
+	// NOT 500. The framework catalog is GLOBAL per canvas §3.5 (platform-
+	// bundled, not tenant-scoped); only `controls` is tenant-scoped. A
+	// fresh tenant correctly sees the bundled frameworks with no coverage
+	// because no controls exist — so we assert ENVELOPE shape (presence
+	// of the `frameworks` key + a numeric `count`), NOT row count.
+	if _, ok := body["frameworks"].([]any); !ok {
+		t.Fatalf("AC-5: response missing `frameworks` array; got body=%v", body)
+	}
+	if _, ok := body["count"].(float64); !ok {
+		t.Fatalf("AC-5: response missing numeric `count`; got body=%v", body)
+	}
+}
+
+func TestDashboard_EmptyTenant_ActivityReturnsEmptyEnvelope(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	resp, body := get(t, env, "/v1/activity")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("AC-5: empty tenant GET /v1/activity status %d, want 200", resp.StatusCode)
+	}
+	rows, _ := body["activity"].([]any)
+	if len(rows) != 0 {
+		t.Fatalf("AC-5: empty tenant returned %d activity rows, want 0", len(rows))
+	}
+	count, _ := body["count"].(float64)
+	if count != 0 {
+		t.Fatalf("AC-5: empty tenant count = %v, want 0", count)
+	}
+	// next_cursor MUST be the empty string on an empty result set so the
+	// frontend's pagination affordance correctly hides itself.
+	if nc, _ := body["next_cursor"].(string); nc != "" {
+		t.Fatalf("AC-5: empty tenant next_cursor = %q, want \"\"", nc)
+	}
+}
