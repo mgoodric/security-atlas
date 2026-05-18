@@ -45,6 +45,20 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   `actor_id::uuid` cast via a `CASE WHEN regex` expression, closing
   a planner-reordering footgun that surfaced during slice-135
   integration testing ([#135](https://github.com/mgoodric/security-atlas/issues/135) D6).
+- Dashboard `frameworks posture` + `recent activity` panels now render
+  real data ([#147](https://github.com/mgoodric/security-atlas/issues/147);
+  slice 066 follow-on). The slice-040 `MissingEndpointPanel` placeholders
+  ("This panel binds to GET /v1/frameworks/posture, which does not exist
+  on main yet" / same for `/v1/activity`) reported on v1.10.0 Unraid are
+  removed; both panels now consume the slice-066 backend reads via new
+  BFF proxies under `/api/dashboard/framework-posture` and
+  `/api/dashboard/activity`. Per-framework tiles render coverage %,
+  freshness composite, and signed 90-day trend delta; the activity feed
+  renders event_type / resource / actor / relative-time per row. Empty
+  installs render the panels' empty-state copy, never a placeholder or
+  500. The remaining two slice-066 follow-on bindings (`upcoming-panel`
+  → `/v1/upcoming`; `top-risks-panel` → `?sort=residual,age`) are
+  spilled to [#148](https://github.com/mgoodric/security-atlas/issues/148).
 
 ## [1.10.0](https://github.com/mgoodric/security-atlas/compare/v1.9.0...v1.10.0) (2026-05-18)
 

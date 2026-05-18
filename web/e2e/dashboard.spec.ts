@@ -57,16 +57,30 @@ test.describe("dashboard view", () => {
     //    await expect(page.getByTestId("activity-feed-panel")).toBeVisible();
   });
 
-  test("AC-2: framework posture tiles render as an endpoint-naming placeholder", async () => {
-    // There is no per-framework posture endpoint on main; the tiles ship
-    // as an endpoint-naming placeholder (slice 041/060 precedent) with a
-    // six-slot data-free scaffold. No fabricated percentages or arrows.
+  test("AC-2: framework posture tiles bind to /v1/frameworks/posture (slice 147)", async () => {
+    // Slice 147: the framework posture panel was originally a
+    // MissingEndpointPanel placeholder (slice 041/060 precedent). Slice 066
+    // shipped the backend endpoint; slice 147 re-pointed the panel.
+    //
+    // P0-DASH-1: the literal "does not exist on main yet" string MUST NOT
+    // render anywhere in the dashboard code path.
+    //    const requests: string[] = [];
+    //    page.on("request", (r) => requests.push(r.url()));
     //    await page.goto("/dashboard");
-    //    await expect(page.getByTestId("framework-posture-placeholder")).toBeVisible();
-    //    await expect(page.getByTestId("framework-posture-placeholder")).toContainText(
-    //      "/v1/frameworks/posture",
+    //    await expect(page.getByTestId("framework-posture-panel")).toBeVisible();
+    //    // The placeholder copy is gone:
+    //    await expect(page.getByTestId("framework-posture-panel-placeholder")).toHaveCount(0);
+    //    await expect(page.getByTestId("framework-posture-panel")).not.toContainText(
+    //      "does not exist on main yet",
     //    );
-    //    await expect(page.getByTestId("framework-tile")).toHaveCount(6);
+    //    // The BFF route was called:
+    //    expect(
+    //      requests.filter((u) => u.includes("/api/dashboard/framework-posture")).length,
+    //    ).toBeGreaterThan(0);
+    //    // Real tiles render (or empty-state, never a placeholder):
+    //    const tiles = page.getByTestId("framework-tile");
+    //    const emptyState = page.getByTestId("framework-posture-empty");
+    //    await expect(tiles.or(emptyState).first()).toBeVisible();
   });
 
   test("AC-3: top risks panel binds to /v1/risks?treatment=mitigate", async () => {
@@ -118,16 +132,40 @@ test.describe("dashboard view", () => {
     //    await expect(page.getByTestId("evidence-freshness-stale-total")).toBeVisible();
   });
 
-  test("AC-6: activity feed renders as an endpoint-naming placeholder", async () => {
-    // There is no NATS event-stream archive read endpoint on main; the
-    // feed ships as an endpoint-naming placeholder (slice 041/060
-    // precedent) with disabled filter chips. No fabricated activity rows.
+  test("AC-6: activity feed binds to /v1/activity (slice 147)", async () => {
+    // Slice 147: the activity feed panel was originally a
+    // MissingEndpointPanel placeholder. Slice 066 shipped the backend
+    // endpoint (reading slice-062's admin_audit_log_v evidence branch);
+    // slice 147 re-pointed the panel.
+    //
+    // P0-DASH-1: the literal "does not exist on main yet" string MUST NOT
+    // render anywhere in the dashboard code path.
+    //    const requests: string[] = [];
+    //    page.on("request", (r) => requests.push(r.url()));
     //    await page.goto("/dashboard");
-    //    await expect(page.getByTestId("activity-feed-placeholder")).toBeVisible();
-    //    await expect(page.getByTestId("activity-feed-placeholder")).toContainText(
-    //      "/v1/activity",
+    //    await expect(page.getByTestId("activity-feed-panel")).toBeVisible();
+    //    await expect(page.getByTestId("activity-feed-panel-placeholder")).toHaveCount(0);
+    //    await expect(page.getByTestId("activity-feed-panel")).not.toContainText(
+    //      "does not exist on main yet",
     //    );
+    //    expect(
+    //      requests.filter((u) => u.includes("/api/dashboard/activity")).length,
+    //    ).toBeGreaterThan(0);
+    //    // Real rows render (or empty-state, never a placeholder):
+    //    const rows = page.getByTestId("activity-feed-row");
+    //    const emptyState = page.getByTestId("activity-feed-empty");
+    //    await expect(rows.or(emptyState).first()).toBeVisible();
+    //    // The filter chips still render (visual continuity) but stay disabled:
     //    await expect(page.getByTestId("activity-filter-chip")).toHaveCount(4);
+  });
+
+  test("AC-1 P0-DASH-1: no 'does not exist on main yet' copy anywhere on the dashboard", async () => {
+    // Whole-page guard: slice 147 must remove the literal placeholder
+    // string from the entire dashboard surface, not just the two panels.
+    //    await page.goto("/dashboard");
+    //    await expect(page.getByTestId("program-dashboard")).not.toContainText(
+    //      "does not exist on main yet",
+    //    );
   });
 
   test("AC-7: panels degrade independently — slow/failing API skeletons + retry", async () => {
@@ -138,10 +176,13 @@ test.describe("dashboard view", () => {
     // The drift panel shows its own error with a retry affordance...
     //    await expect(page.getByTestId("recent-drift-panel-error")).toBeVisible();
     //    await expect(page.getByTestId("recent-drift-panel-retry")).toBeVisible();
-    // ...while the other bound panels still resolve.
+    // ...while the other bound panels still resolve (slice 147 adds two more
+    // bound panels to the degrade-independently contract).
     //    await expect(page.getByTestId("top-risks-panel")).toBeVisible();
     //    await expect(page.getByTestId("evidence-freshness-panel")).toBeVisible();
     //    await expect(page.getByTestId("upcoming-panel")).toBeVisible();
+    //    await expect(page.getByTestId("framework-posture-panel")).toBeVisible();
+    //    await expect(page.getByTestId("activity-feed-panel")).toBeVisible();
     // And while a query is in flight the panel shows its own skeleton:
     //    await page.route("**/api/dashboard/freshness", async (r) => {
     //      await new Promise((res) => setTimeout(res, 1500));

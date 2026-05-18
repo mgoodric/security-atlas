@@ -970,39 +970,30 @@ export function fetchControlEffectiveScope(
   );
 }
 
-// ===== Slice 040 — Program dashboard view =====
+// ===== Slice 040 — Program dashboard view (+ slice 147 re-point) =====
 //
 // The dashboard at `/dashboard` is the solo-security-leader persona's
 // morning home screen. It binds six panels, each to a real backend
 // endpoint via a thin BFF proxy under `/api/dashboard/**`. No panel
 // fabricates data (anti-criterion P0-1).
 //
-// Endpoint inventory verified against main `internal/api/` at slice time:
+// Endpoint inventory verified against main `internal/api/` (updated by
+// slice 147 — slice 066 backend endpoints are now bound):
 //
-//   * Recent drift       GET /v1/controls/drift?since=7d   (slice 016) — bound
-//   * Evidence freshness GET /v1/evidence/freshness        (slice 016) — bound
-//   * Top risks aging    GET /v1/risks?treatment=mitigate  (slice 019) — bound
-//       The mockup asks for `sort=residual,age`. The ListRisks handler
-//       supports only treatment/category/methodology filters — there is
-//       no `sort` param, and `residual_score` is an opaque json blob with
-//       no exposed `age` field. The panel binds the `treatment=mitigate`
-//       filter (which exists) and renders the returned rows honestly; it
-//       does NOT fabricate a residual/age ordering. The server-side
-//       `sort=residual,age` capability is a follow-up backend gap.
+//   * Recent drift       GET /v1/controls/drift?since=7d    (slice 016) — bound
+//   * Evidence freshness GET /v1/evidence/freshness         (slice 016) — bound
+//   * Top risks aging    GET /v1/risks?treatment=mitigate   (slice 019) — bound
+//       Server-side `sort=residual,age` (slice 066) is not yet passed —
+//       spillover at slice 148.
 //   * Upcoming items     GET /v1/exceptions/expiring?within=30d (slice 028) — bound
-//       The mockup's "upcoming" panel also wants board-report-due,
-//       access-review, and questionnaire-due rows. There is no unified
-//       upcoming-rollup endpoint on main; exceptions-expiring is the one
-//       real source and is bound. The other categories are noted as a
-//       labelled gap in the panel rather than fabricated.
-//   * Framework posture  (no endpoint)  — MISSING; tiles render an
-//       endpoint-naming placeholder (slice 041/060 precedent).
-//   * Activity feed      (no endpoint)  — MISSING; feed renders an
-//       endpoint-naming placeholder. There is no NATS event-stream
-//       archive read endpoint on main.
+//       The unified rollup `/v1/upcoming` (slice 066) is not yet consumed —
+//       spillover at slice 148.
+//   * Framework posture  GET /v1/frameworks/posture          (slice 066) — bound by slice 147
+//   * Activity feed      GET /v1/activity                    (slice 066) — bound by slice 147
 //
-// See `docs/audit-log/040-program-dashboard-view-decisions.md` for the
-// full gap inventory so a follow-up backend slice can be scoped.
+// See `docs/audit-log/040-program-dashboard-view-decisions.md` and
+// `docs/audit-log/147-dashboard-placeholders-decisions.md` for the full
+// rebinding history.
 
 // driftRowWire mirrors `driftRowWire` in internal/api/freshnessdrift/handlers.go.
 export type DriftRow = {
@@ -1084,6 +1075,47 @@ export type ExpiringExceptionsResponse = {
   within: string;
 };
 
+// FrameworkPostureRow mirrors `postureWire` in
+// internal/api/dashboard/handler.go. One row per active framework version.
+// `coverage_pct` and `freshness_composite` are 0-100; `trend_delta_90d`
+// is signed (current coverage minus coverage 90 days ago, in points).
+export type FrameworkPostureRow = {
+  framework_id: string;
+  framework_version: string;
+  coverage_pct: number;
+  freshness_composite: number;
+  trend_delta_90d: number;
+};
+
+// FrameworkPostureReport mirrors the FrameworkPosture handler's envelope.
+export type FrameworkPostureReport = {
+  frameworks: FrameworkPostureRow[];
+  count: number;
+};
+
+// ActivityEvent mirrors `activityWire` in internal/api/dashboard/handler.go.
+// `summary` is forwarded as-is — the slice-062 admin_audit_log_v evidence
+// branch packs an event-type-specific JSON blob whose shape is not
+// uniformly renderable in the feed row; the panel cites the metadata
+// triple (event_type / resource_type / resource_id) instead.
+export type ActivityEvent = {
+  ts: string;
+  event_type: string;
+  actor: string;
+  resource_type: string;
+  resource_id: string;
+  summary: unknown;
+};
+
+// ActivityFeedResponse mirrors the Activity handler's envelope.
+// `next_cursor` is the opaque base64url keyset token for the next page,
+// or "" when no next page exists.
+export type ActivityFeedResponse = {
+  activity: ActivityEvent[];
+  count: number;
+  next_cursor: string;
+};
+
 // ----- server-side fns (called by the BFF route handlers) -----
 
 export async function getControlDrift(
@@ -1123,6 +1155,20 @@ export async function getExpiringExceptions(
   return (await res.json()) as ExpiringExceptionsResponse;
 }
 
+export async function getFrameworkPosture(
+  bearer: string,
+): Promise<FrameworkPostureReport> {
+  const res = await apiFetch(`/v1/frameworks/posture`, bearer);
+  return (await res.json()) as FrameworkPostureReport;
+}
+
+export async function getActivity(
+  bearer: string,
+): Promise<ActivityFeedResponse> {
+  const res = await apiFetch(`/v1/activity`, bearer);
+  return (await res.json()) as ActivityFeedResponse;
+}
+
 // ----- browser-side fns (hit the BFF under /api/dashboard/**) -----
 
 export function fetchDashboardDrift(): Promise<DriftReport> {
@@ -1141,6 +1187,16 @@ export function fetchDashboardRisks(): Promise<DashboardRisk[]> {
 
 export function fetchDashboardUpcoming(): Promise<ExpiringExceptionsResponse> {
   return bffControlFetch<ExpiringExceptionsResponse>(`/api/dashboard/upcoming`);
+}
+
+export function fetchDashboardFrameworkPosture(): Promise<FrameworkPostureReport> {
+  return bffControlFetch<FrameworkPostureReport>(
+    `/api/dashboard/framework-posture`,
+  );
+}
+
+export function fetchDashboardActivity(): Promise<ActivityFeedResponse> {
+  return bffControlFetch<ActivityFeedResponse>(`/api/dashboard/activity`);
 }
 
 // ===== Slice 056 — Hierarchical risk dashboard view =====

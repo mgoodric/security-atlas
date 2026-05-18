@@ -1,36 +1,106 @@
 "use client";
 
-// Slice 040 — recent activity feed (AC-6).
+// Slice 040 — recent activity feed (AC-6) — REBOUND by slice 147.
 //
-// The mockup shows an infinite-scroll feed of evidence-ingest, control
-// state-change, and approval events, with All/Evidence/Controls/
-// Approvals filter chips. The issue specifies it is "backed by a
-// NATS-driven event stream archive".
+// Binds to `GET /v1/activity` via the dashboard BFF (slice 066 backend
+// reads). Per `docs/audit-log/066-...-decisions.md` D1 the endpoint
+// reads slice-062's `admin_audit_log_v` view filtered to the
+// `evidence_audit_log` source table (slice 015 ingestion's durable
+// append-only archive), keyed newest-first by `received_at`.
 //
-// There is no event-stream archive read endpoint on main: a grep of
-// `internal/api/` finds no activity / events / feed handler, and no
-// NATS-archive read model exists. Per the slice 041 / 060 precedent
-// this panel renders an endpoint-naming placeholder rather than
-// blocking the slice or fabricating activity rows (anti-criterion
-// P0-1). The filter chips render as a disabled, data-free scaffold so
-// the layout matches the mockup; infinite scroll is wired when the
-// endpoint lands.
+// Slice 040 originally shipped this as a `MissingEndpointPanel` with
+// disabled filter chips. Slice 147 binds the panel to real data; the
+// filter chips remain visually present but are still disabled — the
+// slice-066 endpoint surfaces only the evidence branch today, so the
+// Controls / Approvals filter chips would have nothing to show. Per
+// slice-066 D1 "revisit once in use", widening the endpoint via a
+// `?source=` filter is the path to wire them — out of scope here.
 
-import { MissingEndpointPanel } from "@/components/dashboard/panel-card";
+import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
+import type { ActivityEvent, ActivityFeedResponse } from "@/lib/api";
 
 const FILTER_CHIPS = ["All", "Evidence", "Controls", "Approvals"];
 
-export function ActivityFeedPanel() {
+// relativeTime renders an RFC3339Nano timestamp as a short human-readable
+// "Nm ago" / "Nh ago" / "Nd ago" string. Future timestamps degrade to
+// "just now" (a server clock skew shouldn't break the feed render).
+function relativeTime(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return iso;
+  const seconds = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
+}
+
+function eventTypeBadgeClass(eventType: string): string {
+  const lower = eventType.toLowerCase();
+  if (lower.includes("reject") || lower.includes("fail")) {
+    return "text-destructive";
+  }
+  if (lower.includes("dedup")) return "text-muted-foreground";
+  return "text-emerald-600 dark:text-emerald-400";
+}
+
+function ActivityRow({ event }: { event: ActivityEvent }) {
   return (
-    <MissingEndpointPanel
+    <li data-testid="activity-feed-row" className="py-3 text-sm">
+      <div className="flex items-baseline justify-between gap-3">
+        <span
+          className={`font-mono text-xs ${eventTypeBadgeClass(event.event_type)}`}
+          data-testid="activity-feed-row-event-type"
+        >
+          {event.event_type}
+        </span>
+        <span
+          className="shrink-0 text-xs text-muted-foreground"
+          data-testid="activity-feed-row-ts"
+        >
+          {relativeTime(event.ts)}
+        </span>
+      </div>
+      <div className="mt-1 text-xs text-muted-foreground">
+        <span className="font-mono">{event.resource_type}</span>
+        {event.resource_id ? (
+          <>
+            {" · "}
+            <span className="font-mono">{event.resource_id.slice(0, 12)}</span>
+          </>
+        ) : null}
+        {event.actor ? (
+          <>
+            {" · by "}
+            <span className="font-mono">{event.actor}</span>
+          </>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
+export function ActivityFeedPanel({
+  report,
+  state,
+}: {
+  report: ActivityFeedResponse | undefined;
+  state: PanelState;
+}) {
+  return (
+    <PanelCard
       title="Recent activity"
       description="Evidence ingest, control state changes, approvals"
-      endpoint="GET /v1/activity"
-      detail="A read model over the NATS-driven event-stream archive is needed to back the infinite-scroll feed; it is tracked as a follow-up backend slice."
+      state={state}
+      skeletonClassName="h-48 w-full"
       testid="activity-feed-panel"
     >
       <div
-        className="mt-4 flex items-center gap-2"
+        className="mb-3 flex items-center gap-2"
         data-testid="activity-feed-filters"
       >
         {FILTER_CHIPS.map((chip) => (
@@ -39,11 +109,33 @@ export function ActivityFeedPanel() {
             data-testid="activity-filter-chip"
             aria-disabled="true"
             className="cursor-not-allowed rounded bg-muted px-2 py-1 text-xs text-muted-foreground"
+            title="Filter chips activate once the activity endpoint widens beyond the evidence branch"
           >
             {chip}
           </span>
         ))}
       </div>
-    </MissingEndpointPanel>
+      {!report || report.activity.length === 0 ? (
+        <p
+          className="py-6 text-sm text-muted-foreground"
+          data-testid="activity-feed-empty"
+        >
+          No evidence-ingest activity yet. Push evidence via a connector or the
+          CLI to populate this feed.
+        </p>
+      ) : (
+        <ul
+          className="divide-y divide-foreground/5"
+          data-testid="activity-feed-list"
+        >
+          {report.activity.map((event, idx) => (
+            <ActivityRow
+              key={`${event.ts}:${event.resource_id}:${idx}`}
+              event={event}
+            />
+          ))}
+        </ul>
+      )}
+    </PanelCard>
   );
 }
