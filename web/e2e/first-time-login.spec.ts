@@ -1,6 +1,8 @@
 // Slice 073 — Playwright E2E for the first-time login UX (AC-12).
 //
-// Two assertions, both driven by page.route() mocking of /v1/install-state:
+// Two assertions, both driven by page.route() mocking of
+// /api/install-state (the slice-123 BFF in front of the platform's
+// /v1/install-state public endpoint):
 //
 //   (a) When the mocked endpoint returns first_install=true, the login
 //       page renders the FirstInstallGuidance card with the three-bullet
@@ -13,6 +15,16 @@
 // applies. The route mock pattern mirrors slice 069 + dashboard.spec.ts
 // AC-7 (route.abort / continue with delay).
 //
+// Slice 123 — mock target moved from `**/v1/install-state` to
+// `**/api/install-state`. The slice-073 implementation fetched
+// `/v1/install-state` from the login page's Server Component (Node-side
+// fetch), but `page.route()` only sees BROWSER network traffic, so the
+// mock never fired and the spec hit the real atlas response in CI
+// (returning first_install=false, hiding the card, timing out
+// `toBeVisible`). Slice 123 routes the read through a BFF
+// (`/api/install-state`) called from a client island
+// (`<FirstInstallCard>`), so the mock now intercepts as intended.
+//
 // Hard rule (P0-A9 inherited from slice 069's fixtures): no
 // vendor-prefixed tokens in test strings. The mocked install-state body
 // is metadata only — no token plaintext ever appears here.
@@ -23,7 +35,7 @@ test.describe("first-time login UX", () => {
   test("renders the first-install guidance when /v1/install-state reports fresh", async ({
     page,
   }) => {
-    await page.route("**/v1/install-state", async (route) => {
+    await page.route("**/api/install-state", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -49,7 +61,7 @@ test.describe("first-time login UX", () => {
   test("hides the first-install guidance when /v1/install-state reports not-fresh", async ({
     page,
   }) => {
-    await page.route("**/v1/install-state", async (route) => {
+    await page.route("**/api/install-state", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -70,7 +82,7 @@ test.describe("first-time login UX", () => {
     // P0-A5: a metadata failure must NOT block the production sign-in
     // path. The login page renders the existing copy verbatim and the
     // guidance card is absent.
-    await page.route("**/v1/install-state", async (route) => {
+    await page.route("**/api/install-state", async (route) => {
       await route.fulfill({ status: 503, body: "" });
     });
 
