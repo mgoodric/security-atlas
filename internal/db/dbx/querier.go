@@ -1673,6 +1673,23 @@ type Querier interface {
 	// notification preserves the original read_at (COALESCE keeps the
 	// earliest timestamp).
 	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (Notification, error)
+	// Slice 135 AC-12: the earliest `frozen_at` across all FROZEN
+	// audit_periods whose [period_start, period_end] intersects the
+	// supplied [from_ts, to_ts] export window. Used by the audit-log
+	// export endpoint to clamp the effective `to` boundary so an export
+	// inside (or overlapping) a frozen period only surfaces rows whose
+	// observed_at (= occurred_at on the audit-log union) is <= the
+	// earliest applicable frozen_at.
+	//
+	// Returns NULL when no frozen period overlaps the window (live
+	// horizon — no clamp applied).
+	//
+	// RLS-aware: runs under `tenancy.ApplyTenant` as atlas_app; the
+	// tenant_id filter is defense-in-depth on top of the RLS policy.
+	// Period-end is a DATE; cast to inclusive end-of-day timestamptz so
+	// a request whose `from` is the last hour of a frozen period's last
+	// day still counts as overlapping.
+	MinFrozenAtOverlappingWindow(ctx context.Context, arg MinFrozenAtOverlappingWindowParams) (pgtype.Timestamptz, error)
 	// Slice 053 cycle detection (AC-4). Returns every node id in the parent_id
 	// chain starting at $2 ("the proposed parent"), tenant-scoped to $1. The
 	// application checks whether $3 ("the node whose parent we're setting")

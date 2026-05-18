@@ -30,6 +30,31 @@ SELECT * FROM audit_periods
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC;
 
+-- name: MinFrozenAtOverlappingWindow :one
+-- Slice 135 AC-12: the earliest `frozen_at` across all FROZEN
+-- audit_periods whose [period_start, period_end] intersects the
+-- supplied [from_ts, to_ts] export window. Used by the audit-log
+-- export endpoint to clamp the effective `to` boundary so an export
+-- inside (or overlapping) a frozen period only surfaces rows whose
+-- observed_at (= occurred_at on the audit-log union) is <= the
+-- earliest applicable frozen_at.
+--
+-- Returns NULL when no frozen period overlaps the window (live
+-- horizon — no clamp applied).
+--
+-- RLS-aware: runs under `tenancy.ApplyTenant` as atlas_app; the
+-- tenant_id filter is defense-in-depth on top of the RLS policy.
+-- Period-end is a DATE; cast to inclusive end-of-day timestamptz so
+-- a request whose `from` is the last hour of a frozen period's last
+-- day still counts as overlapping.
+SELECT min(frozen_at)::timestamptz AS min_frozen_at
+FROM audit_periods
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND status    = 'frozen'
+  AND frozen_at IS NOT NULL
+  AND (period_start::timestamptz, (period_end + 1)::timestamptz)
+      OVERLAPS (sqlc.arg('window_from')::timestamptz, sqlc.arg('window_to')::timestamptz);
+
 -- name: FreezeAuditPeriod :one
 -- AC-2 + AC-6: flip status open->frozen, stamp the freeze metadata. The
 -- `WHERE status='open'` guard means re-freezing a frozen row matches zero

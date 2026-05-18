@@ -174,8 +174,19 @@ SELECT
 FROM unified
 LEFT JOIN users u
   ON u.tenant_id = unified.tenant_id
- AND unified.actor_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
- AND u.id = unified.actor_id::uuid
+ -- Slice 124 + 129 + 135: short-circuit the UUID cast so non-UUID
+ -- actor_ids (system actors like 'seeder', credential ids like
+ -- 'key_foo') don't raise ` + "`" + `invalid input syntax for type uuid` + "`" + ` when
+ -- the planner reorders the JOIN predicates. The regex guard alone
+ -- is not enough — Postgres' optimizer can hoist the ` + "`" + `::uuid` + "`" + ` cast
+ -- above the regex check in some plans. Wrapping the cast in a CASE
+ -- expression that returns NULL on non-UUID input keeps the JOIN
+ -- side a single safe expression the planner cannot split.
+ AND u.id = CASE
+                WHEN unified.actor_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                THEN unified.actor_id::uuid
+                ELSE NULL
+            END
 WHERE unified.occurred_at >= $1::timestamptz
   AND unified.occurred_at <  $2::timestamptz
   AND ($3::text = '' OR unified.actor_id = $3::text)

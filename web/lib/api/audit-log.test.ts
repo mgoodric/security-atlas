@@ -3,10 +3,12 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  AUDIT_LOG_EXPORT_FORMATS,
   AUDIT_LOG_KINDS,
   AuditLogFetchError,
   MAX_WINDOW_DAYS,
   UnifiedEntry,
+  buildAuditLogExportURL,
   buildUnifiedQuery,
   renderActorLabel,
   truncateActorId,
@@ -172,6 +174,47 @@ describe("renderActorLabel (slice 129)", () => {
     // 'seeder' as actor_id. truncateActorId returns the literal when
     // its length is <= 8.
     expect(renderActorLabel(entry("seeder", null))).toBe("seeder");
+  });
+});
+
+describe("buildAuditLogExportURL (slice 135)", () => {
+  test("produces the canonical BFF export URL with format + window", () => {
+    const url = buildAuditLogExportURL("csv", {
+      from: "2026-05-11T00:00:00.000Z",
+      to: "2026-05-18T00:00:00.000Z",
+    });
+    expect(url.startsWith("/api/audit-log/export?")).toBe(true);
+    expect(url).toContain("format=csv");
+    expect(url).toContain("from=2026-05-11T00%3A00%3A00.000Z");
+    expect(url).toContain("to=2026-05-18T00%3A00%3A00.000Z");
+  });
+
+  test("drops empty optional filters but keeps non-empty ones", () => {
+    const url = buildAuditLogExportURL("json", {
+      from: "2026-05-11T00:00:00.000Z",
+      to: "2026-05-18T00:00:00.000Z",
+      actor: "",
+      kinds: [],
+    });
+    expect(url).not.toContain("actor=");
+    expect(url).not.toContain("kind=");
+
+    const withFilters = buildAuditLogExportURL("xlsx", {
+      from: "2026-05-11T00:00:00.000Z",
+      to: "2026-05-18T00:00:00.000Z",
+      actor: "user-alice",
+      kinds: ["evidence", "me"],
+    });
+    expect(withFilters).toContain("actor=user-alice");
+    expect(withFilters).toContain("kind=evidence%2Cme");
+    expect(withFilters).toContain("format=xlsx");
+  });
+
+  test("AUDIT_LOG_EXPORT_FORMATS enumerates exactly csv|json|xlsx (slice 135 P0-A11)", () => {
+    // Triple-locked: order matters for the dropdown UX; PDF MUST NOT
+    // appear (slice 135 P0-A11).
+    expect(AUDIT_LOG_EXPORT_FORMATS).toEqual(["csv", "json", "xlsx"]);
+    expect(AUDIT_LOG_EXPORT_FORMATS).not.toContain("pdf" as never);
   });
 });
 
