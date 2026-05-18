@@ -58,7 +58,9 @@ function PostureTile({ row }: { row: FrameworkPostureRow }) {
           {row.coverage_pct.toFixed(1)}%
         </span>
         <span
-          className={`font-mono text-xs ${trendBadgeClass(row.trend_delta_90d)}`}
+          className={`font-mono text-xs ${trendBadgeClass(
+            row.trend_delta_90d,
+          )}`}
           data-testid="framework-tile-trend"
           title="90-day coverage delta"
         >

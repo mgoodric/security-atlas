@@ -53,7 +53,9 @@ function ActivityRow({ event }: { event: ActivityEvent }) {
     <li data-testid="activity-feed-row" className="py-3 text-sm">
       <div className="flex items-baseline justify-between gap-3">
         <span
-          className={`font-mono text-xs ${eventTypeBadgeClass(event.event_type)}`}
+          className={`font-mono text-xs ${eventTypeBadgeClass(
+            event.event_type,
+          )}`}
           data-testid="activity-feed-row-event-type"
         >
           {event.event_type}
