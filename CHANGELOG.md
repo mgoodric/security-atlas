@@ -13,6 +13,22 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- OpenAPI 3.1 spec for the REST API + Redoc UI on the docs site +
+  BLOCKING `openapi-drift-check` CI guard
+  ([#140](https://github.com/mgoodric/security-atlas/issues/140)).
+  The canonical spec at `docs/openapi.yaml` is generated
+  deterministically by `cmd/atlas-openapi` from the in-tree
+  `internal/api/openapi.RouteSpecs` slice — single source of truth
+  (slice 140 P0-A8). The BLOCKING CI guard asserts the committed
+  spec is in lockstep with both the generator output AND the chi
+  registrations under `internal/api/*/` (slice 140 D3 — same
+  pattern as slice 128's `actions-pin-check`). The Redoc UI lives at
+  `/api/` on the published mkdocs site; operator-only endpoints
+  (`/health`, `/metrics`, `/v1/version`, `/v1/install-state`) carry
+  `x-internal: true` and are filtered from the public render by
+  `docs-site/hooks/openapi_pipeline.py` at docs build time (P0-A3
+  mitigation against information disclosure). gRPC stays specified
+  separately in `proto/*.proto` (P0-A7).
 - Data-export library (CSV / JSON / XLSX) + audit-log export endpoint
   + Export buttons on `/audit-log` ([#135](https://github.com/mgoodric/security-atlas/issues/135)).
   Reusable `internal/export/` package with three streaming encoders;

@@ -1602,3 +1602,49 @@ jobs:
 
       - name: Run check-action-pins.sh
         run: bash scripts/check-action-pins.sh
+
+  # ====================================================================
+  # Slice 140 — OpenAPI drift-detect guard.
+  #
+  # Asserts that the committed `docs/openapi.yaml` is in lockstep with:
+  #   (1) the output of `cmd/atlas-openapi` against the in-tree
+  #       `internal/api/openapi.RouteSpecs` slice, AND
+  #   (2) the actual chi route registrations grep-extracted from
+  #       `internal/api/*/`.
+  #
+  # Why BLOCKING (matches slice 128 `actions-pin-check`; differs from
+  # the informational pattern of slices 069/089/109/120/127):
+  #   The spec being out of sync with handler reality is the only
+  #   failure mode that makes the spec actively misleading — operators
+  #   who code against a stale spec hit surprising 404s/401s and lose
+  #   trust in the platform's documentation. A 30-second CI re-run is
+  #   cheaper than the trust damage. Slice 140 D3 records the rationale.
+  #
+  # Why no stub-twin: the script is fast (~3 seconds, no network), runs
+  # `go run ./cmd/atlas-openapi` deterministically, and SHOULD run on
+  # every PR — including non-code PRs (a docs-only PR that edits the
+  # spec by hand must still pass drift-detect). Mirrors the
+  # actions-pin-check stub-omission rationale.
+  #
+  # Local repro: `bash scripts/check-openapi-drift.sh`
+  # See: CONTRIBUTING.md "API spec" + docs/audit-log/140-*.md.
+  # ====================================================================
+  openapi-drift-check:
+    name: openapi-drift-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Run check-openapi-drift.sh
+        run: bash scripts/check-openapi-drift.sh
