@@ -12,6 +12,13 @@
 //                                        with the page that consumes
 //                                        them; node env, no JSX in the
 //                                        module under test)
+//       web/app/audit-log/**/*.test.ts  (slice 130: same precedent —
+//                                        the layout exports its
+//                                        route-guard predicate
+//                                        `canReachAuditLog` as pure
+//                                        logic so a fail-closed
+//                                        regression is covered without
+//                                        a server-component harness)
 //   * Test environment is `node` (not jsdom): every covered module is
 //     either runtime-agnostic (lib/api.ts URL resolution) or server-only
 //     (BFF route handlers, lib/api/bff.ts).
@@ -47,6 +54,10 @@ export default defineConfig({
       // walks into it. The escaped pattern matches a directory named
       // exactly `(authed)`.
       "app/[(]authed[)]/**/*.test.ts",
+      // Slice 130: the /audit-log layout exports its route-guard
+      // predicate as pure logic. Covered without a route-group wrapper,
+      // so no escape is needed.
+      "app/audit-log/**/*.test.ts",
       "proxy.test.ts",
     ],
     exclude: ["**/node_modules/**", "**/.next/**", "**/dist/**", "e2e/**"],
@@ -58,6 +69,7 @@ export default defineConfig({
         "lib/**/*.ts",
         "app/api/**/*.ts",
         "app/[(]authed[)]/**/*.ts",
+        "app/audit-log/**/*.ts",
         "proxy.ts",
       ],
       exclude: [
@@ -66,6 +78,7 @@ export default defineConfig({
         "lib/**/*.tsx",
         "app/api/**/*.tsx",
         "app/[(]authed[)]/**/*.tsx",
+        "app/audit-log/**/*.tsx",
       ],
     },
   },

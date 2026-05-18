@@ -455,3 +455,167 @@ func TestRLS_TenantACannotListTenantBSessions(t *testing.T) {
 		t.Errorf("RLS leak: tenant A sees %d sessions; want 0", len(rows))
 	}
 }
+
+// ===== Slice 130 — `roles` field on GET /v1/me =====
+//
+// AC-2: the handler returns the caller's user_roles list under
+// `tenancy.ApplyTenant`. AC-6: cross-tenant isolation — Tenant A's caller
+// cannot see Tenant B's roles. P0-A1: roles come from user_roles (not
+// fabricated from cred.IsAdmin or cred.OwnerRoles). P0-A2: existing
+// `is_admin` field continues to render.
+
+// seedUserRoles is the slice-130 helper that inserts one or more roles
+// for (tenantID, userID) under the tenant GUC. Matches the slice-027 +
+// slice-035 INSERT shape exactly (TEXT user_id, granted_by NOT NULL).
+func seedUserRoles(t *testing.T, admin *pgxpool.Pool, tenantID, userID string, roles ...string) {
+	t.Helper()
+	ctx := context.Background()
+	for _, r := range roles {
+		if _, err := admin.Exec(ctx,
+			`INSERT INTO user_roles (tenant_id, user_id, role, granted_by)
+			 VALUES ($1, $2, $3, 'slice-130-test')
+			 ON CONFLICT DO NOTHING`,
+			tenantID, userID, r,
+		); err != nil {
+			t.Fatalf("seedUserRoles %q for %s: %v", r, userID, err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(ctx, `DELETE FROM user_roles WHERE tenant_id = $1`, tenantID)
+	})
+}
+
+// TestGetMe_ReturnsRolesList — AC-2 happy path. The caller holds
+// auditor + grc_engineer; both roles flow through to the wire response.
+// The existing `is_admin` field continues to render (P0-A2 additive).
+func TestGetMe_ReturnsRolesList(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenantID, userID := seedTenantAndUser(t, admin, "auditor130@example.com", "Auditor 130")
+	seedUserRoles(t, admin, tenantID, userID, "auditor", "grc_engineer")
+
+	// Non-admin caller — `is_admin` should be false, `roles` should carry both grants.
+	env := testServerForUser(t, app, tenantID, userID, false)
+	resp, body := do(t, env, http.MethodGet, "/v1/me", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/me: status %d, want 200; body=%v", resp.StatusCode, body)
+	}
+	// is_admin still renders (P0-A2 additive).
+	if v, ok := body["is_admin"].(bool); !ok || v {
+		t.Errorf("is_admin = %v (%T); want false (boolean)", body["is_admin"], body["is_admin"])
+	}
+	rolesRaw, ok := body["roles"].([]any)
+	if !ok {
+		t.Fatalf("roles field missing or wrong type: %T %v", body["roles"], body["roles"])
+	}
+	got := map[string]bool{}
+	for _, r := range rolesRaw {
+		s, _ := r.(string)
+		got[s] = true
+	}
+	if !got["auditor"] || !got["grc_engineer"] {
+		t.Errorf("roles=%v; want both auditor and grc_engineer", rolesRaw)
+	}
+}
+
+// TestGetMe_EmptyRolesForNoUserRolesRow — caller with no user_roles row
+// sees an empty `roles: []` (not null, not missing). Fail-closed posture
+// (P0-A3): the BFF + frontend can rely on the field always being present.
+func TestGetMe_EmptyRolesForNoUserRolesRow(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenantID, userID := seedTenantAndUser(t, admin, "no-roles130@example.com", "No Roles")
+	// Deliberately NO seedUserRoles call.
+	env := testServerForUser(t, app, tenantID, userID, false)
+
+	resp, body := do(t, env, http.MethodGet, "/v1/me", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/me: status %d, want 200; body=%v", resp.StatusCode, body)
+	}
+	rolesRaw, ok := body["roles"].([]any)
+	if !ok {
+		t.Fatalf("roles field missing or wrong type (must be present, even when empty): %T %v",
+			body["roles"], body["roles"])
+	}
+	if len(rolesRaw) != 0 {
+		t.Errorf("roles=%v; want []", rolesRaw)
+	}
+}
+
+// TestGetMe_RolesCrossTenantIsolation — AC-6. Tenant A's caller cannot see
+// Tenant B's roles. Both tenants are seeded with the same role name
+// ("auditor") under DIFFERENT user_ids so the test catches both
+// (i) bleed via the tenant GUC and (ii) bleed via shared user_id collision.
+func TestGetMe_RolesCrossTenantIsolation(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+
+	tenantA, userA := seedTenantAndUser(t, admin, "tenA130@example.com", "TA")
+	seedUserRoles(t, admin, tenantA, userA, "auditor")
+
+	tenantB, userB := seedTenantAndUser(t, admin, "tenB130@example.com", "TB")
+	seedUserRoles(t, admin, tenantB, userB, "grc_engineer", "control_owner")
+
+	envA := testServerForUser(t, app, tenantA, userA, false)
+	envB := testServerForUser(t, app, tenantB, userB, false)
+
+	// Tenant A: must see ONLY "auditor".
+	respA, bodyA := do(t, envA, http.MethodGet, "/v1/me", nil)
+	if respA.StatusCode != http.StatusOK {
+		t.Fatalf("envA GET: status %d", respA.StatusCode)
+	}
+	rolesA, _ := bodyA["roles"].([]any)
+	if len(rolesA) != 1 || rolesA[0] != "auditor" {
+		t.Errorf("tenant A roles=%v; want exactly [auditor]", rolesA)
+	}
+
+	// Tenant B: must see ONLY grc_engineer + control_owner (no leak of A's).
+	respB, bodyB := do(t, envB, http.MethodGet, "/v1/me", nil)
+	if respB.StatusCode != http.StatusOK {
+		t.Fatalf("envB GET: status %d", respB.StatusCode)
+	}
+	rolesB, _ := bodyB["roles"].([]any)
+	if len(rolesB) != 2 {
+		t.Fatalf("tenant B roles=%v; want exactly [grc_engineer control_owner] (any order)", rolesB)
+	}
+	seen := map[string]bool{}
+	for _, r := range rolesB {
+		s, _ := r.(string)
+		seen[s] = true
+	}
+	if !seen["grc_engineer"] || !seen["control_owner"] {
+		t.Errorf("tenant B roles=%v; want [grc_engineer control_owner]", rolesB)
+	}
+	if seen["auditor"] {
+		t.Errorf("RLS leak: tenant B sees A's 'auditor' role: %v", rolesB)
+	}
+}
+
+// TestGetMe_AdminCallerAlsoCarriesRoles — an admin caller (cred.IsAdmin=true)
+// who ALSO has explicit user_roles rows sees BOTH the is_admin flag AND the
+// roles list. The two are independent surfaces — admin via credential flag,
+// roles via user_roles table.
+func TestGetMe_AdminCallerAlsoCarriesRoles(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenantID, userID := seedTenantAndUser(t, admin, "admin130@example.com", "Admin 130")
+	seedUserRoles(t, admin, tenantID, userID, "admin", "auditor")
+	env := testServerForUser(t, app, tenantID, userID, true)
+
+	resp, body := do(t, env, http.MethodGet, "/v1/me", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/me: status %d, want 200", resp.StatusCode)
+	}
+	if v, ok := body["is_admin"].(bool); !ok || !v {
+		t.Errorf("is_admin = %v; want true", body["is_admin"])
+	}
+	rolesRaw, _ := body["roles"].([]any)
+	got := map[string]bool{}
+	for _, r := range rolesRaw {
+		s, _ := r.(string)
+		got[s] = true
+	}
+	if !got["admin"] || !got["auditor"] {
+		t.Errorf("roles=%v; want both admin and auditor present", rolesRaw)
+	}
+}
