@@ -7,6 +7,10 @@
     "required_status_checks.contexts": "Slice 050 AC-11 enumerated 10 checks including some speculative names (Frontend · build + lint + test, Python · lint, Lint · pre-commit, codecov/project, DCO). Updated to actual workflow names. codecov/project and DCO removed pending the maintainer wiring those services — tracked in docs/RELEASE_READINESS.md §10. Analyze (python) removed because the repo currently has zero Python source (oscal-bridge hasn't shipped yet); re-add when the slice that lands oscal-bridge merges."
   },
 
+  "$deviations_from_slice_069": {
+    "frontend_vitest_and_playwright_not_required": "Slice 069 added `Frontend · vitest` and `Frontend · Playwright e2e` to this file as required-checks, but the contexts were never applied to the live GitHub branch-protection config — silent drift (file moved forward; the `gh api PUT` never ran). The drift caused real harm during the 2026-05-17/18 cascade-unblock session: four PRs (#234, #259, #262, #264) sat held for hours on a phantom-blocker rationale. Slice 127 reconciles via option (a) (file-to-live) — the file is the side that moved, but the practical constraint is that 4 e2e specs are still broken (slice 123 territory: auth-open-redirect, first-time-login, logo-render, security-headers) and applying option (b) (file-to-restore) right now would block every PR — including slice 127's own PR — on those known-failing specs. The restoration to option (b) is filed as a follow-up: once slice 123 lands and unblocks the 4 specs, re-add `Frontend · vitest` + `Frontend · Playwright e2e` here and run `bash scripts/apply-branch-protection.sh`. Slice 127 also ships `scripts/check-branch-protection.sh` + a `branch-protection-drift` informational CI job so the next drift event surfaces as a sticky PR comment instead of waiting hours of debugging."
+  },
+
   "required_status_checks": {
     "strict": true,
     "contexts": [
@@ -15,8 +19,6 @@
       "Go · lint",
       "Proto · lint + generate diff",
       "Frontend · install + build",
-      "Frontend · vitest",
-      "Frontend · Playwright e2e",
       "Python · ruff",
       "pre-commit · all hooks",
       "Analyze (go)",

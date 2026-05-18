@@ -1366,6 +1366,140 @@ jobs:
 
       - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
+  # ====================================================================
+  # Branch-protection drift detector — informational only, NOT in
+  # required-checks.
+  #
+  # Compares `.github/branch-protection.json`'s required-checks contexts
+  # list against the live GitHub branch-protection config on `main` via
+  # `gh api`. Posts a sticky PR comment if drift is detected. Runs on
+  # every PR (no path filter — the file lives outside `code` and the
+  # check is cheap; sub-second `gh api` call).
+  #
+  # Why informational (not required): the job itself is a regression
+  # detector. If it became required, it would race with itself — adding
+  # the new `branch-protection-drift` check to `.github/branch-
+  # protection.json`'s `required_status_checks.contexts` list, then
+  # running on the same PR that introduces it, would create a chicken-
+  # and-egg. Slice 127 P0-A1 enforces the informational posture.
+  #
+  # Why no stub-twin (deviating from the slice 061 convention shared by
+  # the build/test/lint jobs above): the job is small enough (one
+  # `gh api` call + one diff) that it runs in ~5 seconds even on
+  # docs-only PRs, and it deliberately ignores `changes.code` so it
+  # also fires on PRs that touch ONLY `.github/branch-protection.json`
+  # (which is a markdown-adjacent config edit that the `code` filter
+  # does NOT match). Slice 127 D4 documents the trade-off.
+  #
+  # Sticky comment via a hidden HTML marker — re-running the workflow
+  # updates the same comment instead of stacking new ones on the PR.
+  # Matches the slice 120 (`phantom-deps`) pattern.
+  # ====================================================================
+  branch-protection-drift:
+    name: Infra · branch-protection drift
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@v6
+
+      - name: Run check-branch-protection-drift.sh
+        id: drift
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ATLAS_REPO: ${{ github.repository }}
+        run: |
+          set +e
+          bash scripts/check-branch-protection-drift.sh > drift.stdout 2> drift.stderr
+          rc=$?
+          set -e
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+          # Surface the stderr (drift diff lives there) and stdout (the
+          # one-line summary) into the workflow log so reviewers don't
+          # have to download the sticky-comment artifact to see the
+          # finding.
+          echo "----- script stdout -----"
+          cat drift.stdout || true
+          echo "----- script stderr -----"
+          cat drift.stderr || true
+          echo "-------------------------"
+          # Always exit 0 here so the workflow step itself succeeds —
+          # the `continue-on-error: true` on the job is belt-and-braces
+          # but the informational posture is cleaner when the step
+          # explicitly does not propagate the script's exit code.
+          exit 0
+
+      - name: Build sticky comment body
+        if: github.event_name == 'pull_request'
+        id: body
+        run: |
+          {
+            echo "<!-- atlas-branch-protection-drift-marker -->"
+            echo "## Infra · branch-protection drift (slice 127)"
+            echo
+            rc="${{ steps.drift.outputs.exit_code }}"
+            if [ "$rc" -eq 0 ]; then
+              echo "No drift detected — \`.github/branch-protection.json\` and the live GitHub branch-protection config on \`main\` are in sync."
+            elif [ "$rc" -eq 1 ]; then
+              echo "**Drift detected** between \`.github/branch-protection.json\` and the live GitHub branch-protection config on \`main\`."
+              echo
+              echo "\`\`\`"
+              cat drift.stderr
+              echo "\`\`\`"
+              echo
+              echo "To reconcile:"
+              echo "1. Decide which side is correct (file = intent; live = enforcement)."
+              echo "2. EITHER edit \`.github/branch-protection.json\` to match live, OR run \`bash scripts/apply-branch-protection.sh\` to push the file to live."
+              echo "3. Re-run this workflow to confirm convergence."
+            else
+              echo "**Script error** (\`scripts/check-branch-protection-drift.sh\` exited \`$rc\`). See the workflow log for details. This is usually missing tooling on the runner OR a malformed \`.github/branch-protection.json\`."
+              echo
+              echo "\`\`\`"
+              cat drift.stderr
+              echo "\`\`\`"
+            fi
+            echo
+            echo "---"
+            echo "_Informational only — this check is NOT in \`required_status_checks\` (slice 127 P0-A1). Reproduce locally: \`bash scripts/check-branch-protection-drift.sh\`. Slice 127 · run ${{ github.run_id }}._"
+          } > comment-body.md
+
+      - name: Post or update sticky PR comment
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          existing=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.body | startswith("<!-- atlas-branch-protection-drift-marker -->")) | .id' \
+            | head -1)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/${existing}" \
+              -f body="$(cat comment-body.md)" >/dev/null
+            echo "Updated existing sticky comment id=$existing"
+          else
+            gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" --body-file comment-body.md
+            echo "Posted new sticky comment"
+          fi
+
+      - name: Upload drift report as artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: branch-protection-drift-report
+          path: |
+            drift.stdout
+            drift.stderr
+            comment-body.md
+          if-no-files-found: warn
+
   trivy-image:
     name: Container · Trivy scan
     needs: changes
