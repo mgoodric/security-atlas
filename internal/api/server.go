@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"strings"
 	"time"
 
@@ -89,6 +90,11 @@ type Server struct {
 	// (bootstrap-token deletion is the first). Falls back to
 	// slog.Default() when nil.
 	logger *slog.Logger
+	// Slice 121: opt-in Prometheus `/metrics` fallback handler. Mounted
+	// only when ATLAS_METRICS_FALLBACK_ENABLE=true (AC-15). When nil,
+	// GET /metrics returns 404 (default off — P0-A3). Auth-exempted via
+	// the same pattern slice 092 used for /v1/version (AC-16).
+	metricsHandler http.Handler
 }
 
 // AttachAuthz wires the slice-035 OPA engine + decision audit writer.
@@ -99,6 +105,14 @@ type Server struct {
 func (s *Server) AttachAuthz(engine *authz.Engine, audit *authz.AuditWriter) {
 	s.authzEngine = engine
 	s.authzAudit = audit
+}
+
+// AttachMetricsHandler wires the slice-121 Prometheus `/metrics` fallback
+// handler. cmd/atlas constructs it from the otel.Init Result when
+// ATLAS_METRICS_FALLBACK_ENABLE=true. Unit servers leave it nil — GET
+// /metrics returns 404 (default off; opt-in per P0-A3).
+func (s *Server) AttachMetricsHandler(h http.Handler) {
+	s.metricsHandler = h
 }
 
 // AttachOscalExporter wires the slice-030 OSCAL export pipeline.

@@ -274,6 +274,21 @@ services:
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?}
       AWS_REGION: ${AWS_REGION:-us-east-1}
+      # Slice 121: OpenTelemetry. All env-vars default to empty (no-op
+      # mode); operators opt in by setting OTEL_EXPORTER_OTLP_ENDPOINT in
+      # .env (typical value: http://otel-collector:4317 when the
+      # `deploy/observability/` bundle is up). Other OTEL_* knobs follow
+      # the OTel standard. ATLAS_METRICS_FALLBACK_ENABLE is the opt-in
+      # Prometheus /metrics endpoint — see .env.example for the
+      # network-layer-gating requirement.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-}
+      OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-}
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-}
+      ATLAS_DEPLOYMENT_ENVIRONMENT: ${ATLAS_DEPLOYMENT_ENVIRONMENT:-}
+      ATLAS_METRICS_FALLBACK_ENABLE: ${ATLAS_METRICS_FALLBACK_ENABLE:-false}
     ports:
       - "${ATLAS_HTTP_PORT:-8080}:8080"
       - "${ATLAS_GRPC_PORT:-50051}:50051"

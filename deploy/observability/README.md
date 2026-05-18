@@ -4,11 +4,11 @@ OTel Collector + Prometheus + Tempo + Grafana data-source provisioning + a start
 
 ## Three signals, three statuses
 
-| Signal      | Status                                                                                                                                                                                          | Receives via                                                           |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| **Logs**    | ✅ Working today (Promtail → Loki → Grafana). Atlas's `slog` TextHandler → stderr → docker logs is auto-discovered by Promtail's `docker_sd_configs` and shipped to Loki at `GrafanaLoki:3100`. | Existing Loki                                                          |
-| **Metrics** | 🟡 Backplane ready (this bundle ships OTel Collector + Prometheus). **Atlas-side SDK integration pending** (file/track via the atlas-OTel SDK slice).                                           | OTel Collector `:4317` → Prometheus exporter `:8889` → Prometheus pull |
-| **Traces**  | 🟡 Backplane ready (this bundle ships OTel Collector + Tempo). **Atlas-side SDK integration pending** (same slice as metrics).                                                                  | OTel Collector `:4317` → Tempo OTLP `:4317`                            |
+| Signal      | Status                                                                                                                                                                                       | Receives via                                                           |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **Logs**    | Working today (Promtail → Loki → Grafana). Atlas's `slog` TextHandler → stderr → docker logs is auto-discovered by Promtail's `docker_sd_configs` and shipped to Loki at `GrafanaLoki:3100`. | Existing Loki                                                          |
+| **Metrics** | Working — slice 121 wires the atlas OTel SDK (HTTP / DB / NATS / Go runtime). Set `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317` in the atlas `.env` and restart to enable.        | OTel Collector `:4317` → Prometheus exporter `:8889` → Prometheus pull |
+| **Traces**  | Working — same slice 121 wires producer + consumer spans for the HTTP → NATS → DB hot path with W3C trace-context propagation end-to-end.                                                    | OTel Collector `:4317` → Tempo OTLP `:4317`                            |
 
 ## Bundle contents
 
@@ -140,16 +140,43 @@ Atlas's OTel SDK should NOT attach `tenant_id` as an unbounded label on traces o
 
 In production, never sample at 100%. Sane defaults: parent-based + 5-10% root sampling. The atlas-OTel slice should expose `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` env vars so this is tunable without code changes.
 
-## What comes next (atlas-OTel slice)
+## Phase B + C — done (slice 121)
 
-The slice that completes Phase C of the observability rollout will (proposed AC headlines):
+Slice 121 wired the atlas OTel SDK end-to-end. With this bundle deployed AND `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317` set in `/mnt/user/appdata/security-atlas/.env`, the trace-to-log correlation in Grafana lights up end-to-end and the Metrics / Traces sections of `dashboards/security-atlas-overview.json` populate.
 
-- Initialize OTel SDK in `cmd/atlas/main.go` startup, config via OTel-standard env vars
-- Wrap HTTP handler with `otelhttp.NewHandler(root, "atlas-http")` for request spans
-- Instrument pgx pool via `otelpgx` for DB span tracking
-- Instrument NATS publisher/subscriber for evidence-ingest trace propagation
-- Expose Go runtime metrics (goroutines / GC / heap) via OTel meter
-- Add fallback `/metrics` Prometheus scrape endpoint (exempted from auth middleware, same pattern as slice 092's `/api/version` exemption)
-- Threat model: scrub bearer tokens / session cookies / SQL parameters from span attributes; bound trace sampling; require auth boundary on `/metrics` OR private-subnet binding
+What's wired on the atlas side:
 
-File via `/idea-to-slice "add OTel SDK to atlas — metrics + traces + Go runtime telemetry"` to get the threat-model phase baked in automatically.
+- `cmd/atlas/main.go` initializes the OTel SDK BEFORE the pgx pool comes up. When `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, init is a NO-OP — atlas serves traffic with zero telemetry overhead.
+- HTTP server: `otelhttp.NewHandler(root, "atlas-http")` at the outermost middleware layer; `/health`, `/metrics`, `/v1/version`, `/v1/install-state` excluded from spans (high-frequency probes).
+- DB pool: every `pgxpool.New` call goes through `atlasotel.NewTracedPool`, which attaches the `otelpgx` tracer. Every SQL query becomes a child span under the request span; `db.statement` carries the parameterized form (`$N` placeholders, never inline values).
+- NATS: producer-side span on each `Publish`, W3C `traceparent` header injected into the message; consumer extracts it and starts a linked child span. Evidence ingest becomes one trace from HTTP push → publisher span → consumer span → DB write.
+- Go runtime metrics (`runtime.go.goroutines`, `runtime.go.gc.*`, `runtime.go.mem.*`, etc.) auto-emitted at 15s cadence.
+- Opt-in `/metrics` Prometheus scrape endpoint via `ATLAS_METRICS_FALLBACK_ENABLE=true`. OFF by default — when on, operators MUST gate at the network layer (it's an unauthenticated read surface).
+
+### Post-deploy smoke procedure
+
+After atlas restarts with `OTEL_EXPORTER_OTLP_ENDPOINT` set, run:
+
+```bash
+# 1. Look for the startup line confirming OTel is enabled.
+docker logs security-atlas-atlas 2>&1 | grep "opentelemetry:"
+# Expected: atlas: opentelemetry: enabled endpoint=http://otel-collector:4317 sampler=parentbased_traceidratio sampler_arg=0.1 ...
+
+# 2. Drive traffic.
+TOKEN=$(grep ATLAS_BOOTSTRAP_TOKEN /mnt/user/appdata/security-atlas/.env | cut -d= -f2)
+for i in $(seq 1 20); do
+    curl -s -H "Authorization: Bearer $TOKEN" http://192.168.1.246:8087/v1/anchors > /dev/null
+    sleep 0.5
+done
+
+# 3. Verify traces in Tempo (via the OTel Collector).
+curl -s 'http://192.168.1.246:3200/api/search?tags=service.name%3Dsecurity-atlas&limit=5' | jq
+
+# 4. Verify metrics in Prometheus (via the OTel Collector → prometheus exporter).
+curl -s 'http://192.168.1.246:9090/api/v1/query?query=atlas_http_server_request_duration_seconds_count' | jq
+
+# 5. Verify trace-to-logs correlation in Grafana UI:
+#    Explore → Tempo → search for service.name=security-atlas →
+#    click any trace → expand a span → "Logs for this span" should
+#    surface the corresponding atlas log line from Loki, joined by trace_id.
+```

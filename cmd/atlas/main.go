@@ -40,6 +40,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/freshnessdrift"
 	metricseval "github.com/mgoodric/security-atlas/internal/metrics/eval"
 	metricsscheduler "github.com/mgoodric/security-atlas/internal/metrics/scheduler"
+	atlasotel "github.com/mgoodric/security-atlas/internal/observability/otel"
 	"github.com/mgoodric/security-atlas/internal/oscal"
 	"github.com/mgoodric/security-atlas/internal/platform"
 	"github.com/mgoodric/security-atlas/internal/risk"
@@ -68,6 +69,42 @@ func main() {
 		dbURL = os.Getenv("DATABASE_URL")
 	}
 
+	// Slice 121 (AC-1/2/3/4): wire the OTel SDK BEFORE the pgx pool so
+	// otelpgx's tracer (installed at pool creation) writes to the
+	// configured TracerProvider. When OTEL_EXPORTER_OTLP_ENDPOINT is
+	// unset, Init returns a no-op tuple: every downstream call site is
+	// safe; OTel pays zero cost. Build-time facts (git SHA, deployment
+	// environment) come from cmd/atlas's version metadata + the
+	// ATLAS_DEPLOYMENT_ENVIRONMENT env-var (a single atlas-specific knob
+	// because deployment.environment.name is a fact the binary cannot
+	// auto-detect — not configuration).
+	otelLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	otelInitCtx, otelInitCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	otelResult, otelErr := atlasotel.Init(otelInitCtx, atlasotel.Options{
+		ServiceVersion: versionFields().Commit,
+		Environment:    os.Getenv("ATLAS_DEPLOYMENT_ENVIRONMENT"),
+		Logger:         otelLogger,
+	})
+	otelInitCancel()
+	if otelErr != nil {
+		fmt.Fprintf(os.Stderr, "atlas: opentelemetry init: %v\n", otelErr)
+		os.Exit(1)
+	}
+	defer func() {
+		shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutCancel()
+		if err := otelResult.Shutdown(shutCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: opentelemetry shutdown: %v\n", err)
+		}
+	}()
+
+	// Slice 121 (AC-14): Go runtime metrics. Non-fatal — if it fails,
+	// log and continue; the platform still serves traffic, just without
+	// the {goroutines, GC, heap, ...} time series.
+	if rmErr := atlasotel.StartRuntimeMetrics(); rmErr != nil {
+		fmt.Fprintf(os.Stderr, "atlas: opentelemetry runtime metrics: %v\n", rmErr)
+	}
+
 	// Slice 034: BEARER_HASH_KEY is mandatory. Without it the server cannot
 	// authenticate DB-backed API keys (api_keys.token_hash is HMAC-SHA256
 	// keyed with this secret). Refuse-to-boot per docs/adr/0002.
@@ -87,7 +124,7 @@ func main() {
 	var schemaSvc *schemaregistry.Service
 	var pool *pgxpool.Pool
 	if dbURL != "" {
-		p, err := pgxpool.New(ctxBoot, dbURL)
+		p, err := atlasotel.NewTracedPool(ctxBoot, dbURL)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "atlas: pgxpool.New: %v\n", err)
 			os.Exit(1)
@@ -203,6 +240,14 @@ func main() {
 	}
 	srv := api.New(cfg)
 
+	// Slice 121 (AC-15/16): wire the opt-in Prometheus `/metrics` fallback
+	// when atlasotel.Init produced a non-nil handler (driven by
+	// ATLAS_METRICS_FALLBACK_ENABLE=true). When nil (default off —
+	// P0-A3), the route stays absent and GET /metrics returns 404.
+	if otelResult.PrometheusHandler != nil {
+		srv.AttachMetricsHandler(otelResult.PrometheusHandler)
+	}
+
 	// Slice 065 bug #1 / AC-3 note: the two bootstrap credential-issuance
 	// calls below (IssueBootstrapCredential here, and
 	// IssueBootstrapFixedAdminCredential further down) write into the
@@ -293,7 +338,7 @@ func main() {
 		var authPool *pgxpool.Pool
 		if migURL := os.Getenv("DATABASE_URL"); migURL != "" {
 			apCtx, apCancel := context.WithTimeout(ctx, 10*time.Second)
-			ap, err := pgxpool.New(apCtx, migURL)
+			ap, err := atlasotel.NewTracedPool(apCtx, migURL)
 			apCancel()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "atlas: api-key auth pool: %v\n", err)
@@ -386,7 +431,7 @@ func main() {
 		// tenant_id NULL.
 		if importerURL := os.Getenv("DATABASE_URL"); importerURL != "" && schemaSvc != nil {
 			impCtx, impCancel := context.WithTimeout(ctx, 30*time.Second)
-			impPool, err := pgxpool.New(impCtx, importerURL)
+			impPool, err := atlasotel.NewTracedPool(impCtx, importerURL)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "atlas: schema import pool: %v\n", err)
 			} else {
@@ -517,7 +562,7 @@ func main() {
 	// without auto-expiry and the operator must sweep manually.
 	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" {
 		expiryCtx, expiryCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		expiryPool, err := pgxpool.New(expiryCtx, migratorURL)
+		expiryPool, err := atlasotel.NewTracedPool(expiryCtx, migratorURL)
 		expiryCancel()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "atlas: exception expiry pool: %v\n", err)
@@ -555,7 +600,7 @@ func main() {
 	// expirer uses).
 	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" {
 		overdueCtx, overdueCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		overduePool, err := pgxpool.New(overdueCtx, migratorURL)
+		overduePool, err := atlasotel.NewTracedPool(overdueCtx, migratorURL)
 		overdueCancel()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "atlas: decision overdue pool: %v\n", err)
@@ -591,7 +636,7 @@ func main() {
 	// to hourly; ATLAS_EVAL_RECOMPUTE_INTERVAL overrides for dev loops.
 	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
 		schedCtx, schedCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		schedPool, err := pgxpool.New(schedCtx, migratorURL)
+		schedPool, err := atlasotel.NewTracedPool(schedCtx, migratorURL)
 		schedCancel()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "atlas: eval scheduler pool: %v\n", err)
@@ -627,7 +672,7 @@ func main() {
 	// the migrator URL + the app pool are both available.
 	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
 		fdCtx, fdCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		fdPool, err := pgxpool.New(fdCtx, migratorURL)
+		fdPool, err := atlasotel.NewTracedPool(fdCtx, migratorURL)
 		fdCancel()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "atlas: freshness/drift scheduler pool: %v\n", err)
@@ -660,7 +705,7 @@ func main() {
 	// ATLAS_METRICS_INTERVAL overrides the 15-min cadence for dev loops.
 	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
 		mctx, mcancel := context.WithTimeout(context.Background(), 10*time.Second)
-		mPool, err := pgxpool.New(mctx, migratorURL)
+		mPool, err := atlasotel.NewTracedPool(mctx, migratorURL)
 		mcancel()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "atlas: metrics scheduler pool: %v\n", err)
