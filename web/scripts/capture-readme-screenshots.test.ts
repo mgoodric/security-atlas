@@ -88,7 +88,9 @@ describe("isLoopbackOrPrivate", () => {
 
 describe("assertCaptureSafe", () => {
   it("refuses when ATLAS_DEMO_SEED is missing", () => {
-    expect(() => assertCaptureSafe({})).toThrow(/ATLAS_DEMO_SEED=1 is required/);
+    expect(() => assertCaptureSafe({})).toThrow(
+      /ATLAS_DEMO_SEED=1 is required/,
+    );
   });
 
   it("refuses when ATLAS_DEMO_SEED is a typo (true)", () => {

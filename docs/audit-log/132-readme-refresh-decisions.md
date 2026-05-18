@@ -30,7 +30,7 @@ criterion is satisfied because:
 2. The stub is hermetic — no network, no real platform binary, no
    docker-compose dependency. A capture run that takes 20 seconds
    beats one that takes 5 minutes of compose bring-up + health-wait
-   + seed.
+   - seed.
 3. The information-disclosure threat (P0-A1 — real customer data
    leaks into the public README) is mitigated AT THE FIXTURE LAYER:
    the stub fixtures themselves contain no real data. Compare to the
@@ -63,19 +63,19 @@ Slice 132 AC-4 budget:
 
 **Result (post-pngquant, slice-057 fresh PNGs restored after the slice 132 pipeline rerun):**
 
-| File | Size | Budget | Status |
-|------|------|--------|--------|
-| `docs/images/hero-dashboard.png` | 44K | 350K | OK |
-| `docs/images/hero-dashboard-dark.png` | 36K | 350K | OK |
-| `docs/images/control-detail.png` | 52K | 200K | OK |
-| `docs/images/control-detail-dark.png` | 52K | 200K | OK |
-| `docs/images/audit-workspace.png` | 12K | 200K | OK |
-| `docs/images/audit-workspace-dark.png` | 12K | 200K | OK |
-| `docs/images/board-pack-preview.png` | 32K | 200K | OK |
-| `docs/images/board-pack-preview-dark.png` | 32K | 200K | OK |
-| `docs/images/logo-light.png` | 8K | n/a (not page) | OK |
-| `docs/images/logo-dark.png` | 8K | n/a (not page) | OK |
-| **TOTAL** | **288K** | **2048K** | **OK** (14% of budget) |
+| File                                      | Size     | Budget         | Status                 |
+| ----------------------------------------- | -------- | -------------- | ---------------------- |
+| `docs/images/hero-dashboard.png`          | 44K      | 350K           | OK                     |
+| `docs/images/hero-dashboard-dark.png`     | 36K      | 350K           | OK                     |
+| `docs/images/control-detail.png`          | 52K      | 200K           | OK                     |
+| `docs/images/control-detail-dark.png`     | 52K      | 200K           | OK                     |
+| `docs/images/audit-workspace.png`         | 12K      | 200K           | OK                     |
+| `docs/images/audit-workspace-dark.png`    | 12K      | 200K           | OK                     |
+| `docs/images/board-pack-preview.png`      | 32K      | 200K           | OK                     |
+| `docs/images/board-pack-preview-dark.png` | 32K      | 200K           | OK                     |
+| `docs/images/logo-light.png`              | 8K       | n/a (not page) | OK                     |
+| `docs/images/logo-dark.png`               | 8K       | n/a (not page) | OK                     |
+| **TOTAL**                                 | **288K** | **2048K**      | **OK** (14% of budget) |
 
 Margin is comfortable — even at 8× the current size we'd remain under
 budget. The slice-057 capture pipeline + pngquant already produced
@@ -113,7 +113,7 @@ section addition). Slice 132 changes:
    the safety gate explicitly + cites the slice 132 information-
    disclosure rationale + the loopback / private-range hostname guard.
    Rationale: AC-2 is load-bearing; a reader who runs `just refresh-
-   screenshots` without `ATLAS_DEMO_SEED=1` will get a refusal — they
+screenshots` without `ATLAS_DEMO_SEED=1` will get a refusal — they
    should know up-front WHY.
 4. **REMOVED "What it looks like in motion" subsection** + the
    `flow-create-control.gif` reference. Slice 132 explicitly scopes
@@ -196,6 +196,7 @@ regression as a follow-up. Rationale:
    spillover (see "Spillovers" below).
 
 **The slice 132 deliverables LAND:**
+
 - Capture pipeline hardening (AC-1, AC-2, AC-3, AC-4): the safety
   gate + the demo-seed equivalent docs + the pngquant budget step.
 - Documented per-image budget (AC-4): 288 KB total / 2 MB cap.
@@ -213,18 +214,18 @@ server fixtures + the slice-057 capture script. The fixtures are at
 emails, real IPs, real bearer tokens, or maintainer-specific
 references.
 
-| File | Origin | Manual review |
-|------|--------|---------------|
-| `hero-dashboard.png` | stub fixtures: `me.json`, `dashboard-*.json` | OK — sidebar = `Dashboard / Calendar / Metrics / Controls / Evidence / Risks / Audits / Policies / Vendors / Board Packs / Catalog · SCF / Settings / Admin`; risks rendered as "Unmanaged third-party access to production data" + 2 others (generic); actor = `demo-operator`; framework = `nist_800_30`; no PII, no IPs, no real-org names, no URLs in address bar (no chrome captured), no dev tools, no bearer tokens, no query-string tokens |
-| `hero-dashboard-dark.png` | same fixtures, dark theme | OK — same content as light, dark CSS variables; same review verdict |
-| `control-detail.png` | stub fixtures: `control-*.json`, `control-effective-scope.json` | OK — control = `acme-soc2-bundle / v3 / IAC-06 / Access provisioning approvals`; STRM crosswalks = SOC 2 CC6.1 + ISO 27001 A.9.2.1 + NIST CSF PR.AC-1 (all framework requirements, no PII); UCF graph nodes = framework crosswalks, no customer data |
-| `control-detail-dark.png` | same fixtures, dark theme | OK — same review verdict |
-| `audit-workspace.png` | stub fixtures: `audit-control.json` | OK — audit period = "Acme SOC 2 Type II — 2026 Q2" (frozen demo period); control ID = `acme-soc2-ac-1`; no PII |
-| `audit-workspace-dark.png` | same fixtures, dark theme | OK — same review verdict |
-| `board-pack-preview.png` | stub fixtures: `board-pack.json` | OK — board pack report ID = `REPORT-2026-03-31T23:59:59Z`; approver = `demo-cto`; framework posture = SOC 2 + ISO 27001 with synthetic percentages; templated narrative "The security program closed Q1..."; no PII |
-| `board-pack-preview-dark.png` | same fixtures, dark theme | OK — same review verdict |
-| `logo-light.png` | slice 074/075/077 canonical logo set | OK — pure design asset, no data |
-| `logo-dark.png` | slice 074/075/077 canonical logo set | OK — pure design asset, no data |
+| File                          | Origin                                                          | Manual review                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hero-dashboard.png`          | stub fixtures: `me.json`, `dashboard-*.json`                    | OK — sidebar = `Dashboard / Calendar / Metrics / Controls / Evidence / Risks / Audits / Policies / Vendors / Board Packs / Catalog · SCF / Settings / Admin`; risks rendered as "Unmanaged third-party access to production data" + 2 others (generic); actor = `demo-operator`; framework = `nist_800_30`; no PII, no IPs, no real-org names, no URLs in address bar (no chrome captured), no dev tools, no bearer tokens, no query-string tokens |
+| `hero-dashboard-dark.png`     | same fixtures, dark theme                                       | OK — same content as light, dark CSS variables; same review verdict                                                                                                                                                                                                                                                                                                                                                                                |
+| `control-detail.png`          | stub fixtures: `control-*.json`, `control-effective-scope.json` | OK — control = `acme-soc2-bundle / v3 / IAC-06 / Access provisioning approvals`; STRM crosswalks = SOC 2 CC6.1 + ISO 27001 A.9.2.1 + NIST CSF PR.AC-1 (all framework requirements, no PII); UCF graph nodes = framework crosswalks, no customer data                                                                                                                                                                                               |
+| `control-detail-dark.png`     | same fixtures, dark theme                                       | OK — same review verdict                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `audit-workspace.png`         | stub fixtures: `audit-control.json`                             | OK — audit period = "Acme SOC 2 Type II — 2026 Q2" (frozen demo period); control ID = `acme-soc2-ac-1`; no PII                                                                                                                                                                                                                                                                                                                                     |
+| `audit-workspace-dark.png`    | same fixtures, dark theme                                       | OK — same review verdict                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `board-pack-preview.png`      | stub fixtures: `board-pack.json`                                | OK — board pack report ID = `REPORT-2026-03-31T23:59:59Z`; approver = `demo-cto`; framework posture = SOC 2 + ISO 27001 with synthetic percentages; templated narrative "The security program closed Q1..."; no PII                                                                                                                                                                                                                                |
+| `board-pack-preview-dark.png` | same fixtures, dark theme                                       | OK — same review verdict                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `logo-light.png`              | slice 074/075/077 canonical logo set                            | OK — pure design asset, no data                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `logo-dark.png`               | slice 074/075/077 canonical logo set                            | OK — pure design asset, no data                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 All eight page captures + two logo assets scanned for: dev-tools panels
 (none captured — the capture script uses headless Chromium with no
@@ -233,22 +234,22 @@ viewport is a fixed 1440×900 below the address bar so no chrome is
 visible), real emails (none — no email-shaped string appears in any
 PNG), real IPv4/IPv6 addresses (none), bearer tokens (none — the
 stub fixtures encode no auth artifacts in renderable text), real-org /
-customer / maintainer names (none — "Acme" + "demo-*" + "test-*" only).
+customer / maintainer names (none — "Acme" + "demo-_" + "test-_" only).
 
 **Verdict: every PNG passes P0-A1 + P0-A2 + P0-A3.**
 
 ## D7 — Anti-criteria compliance summary
 
-| Anti-criterion | Status | Evidence |
-|----------------|--------|----------|
-| P0-A1: no real customer data | OK | D6 per-PNG audit |
-| P0-A2: no emails / IPs / tokens / session cookies / real-org names | OK | D6 per-PNG audit |
-| P0-A3: no PII the demo seed contains | OK | fixtures contain only neutral synthetic data; D6 per-PNG audit |
-| P0-A4: ≤ 2 MB total; no git lfs | OK | D2 size table: 288 KB total / 2048 KB cap; `git lfs` untouched |
-| P0-A5: no scope creep into mkdocs (slice 133) / walkthroughs (slice 134) | OK | `git diff --stat` shows no `docs/getting-started/` or `docs/walkthroughs/` edits |
-| P0-A6: no CLAUDE.md edits in this PR | OK | `git diff --stat` shows no `CLAUDE.md` edit |
-| P0-A7: no new logo work | OK | `web/public/logo-*.svg` + `docs/images/logo-*.png` untouched |
-| P0-A8: no vendor-prefixed test fixture tokens | OK | new test file uses only neutral `test-*` literals; no `ghp_` / `sk_` / `eyJ` / `AKIA` |
+| Anti-criterion                                                           | Status | Evidence                                                                              |
+| ------------------------------------------------------------------------ | ------ | ------------------------------------------------------------------------------------- |
+| P0-A1: no real customer data                                             | OK     | D6 per-PNG audit                                                                      |
+| P0-A2: no emails / IPs / tokens / session cookies / real-org names       | OK     | D6 per-PNG audit                                                                      |
+| P0-A3: no PII the demo seed contains                                     | OK     | fixtures contain only neutral synthetic data; D6 per-PNG audit                        |
+| P0-A4: ≤ 2 MB total; no git lfs                                          | OK     | D2 size table: 288 KB total / 2048 KB cap; `git lfs` untouched                        |
+| P0-A5: no scope creep into mkdocs (slice 133) / walkthroughs (slice 134) | OK     | `git diff --stat` shows no `docs/getting-started/` or `docs/walkthroughs/` edits      |
+| P0-A6: no CLAUDE.md edits in this PR                                     | OK     | `git diff --stat` shows no `CLAUDE.md` edit                                           |
+| P0-A7: no new logo work                                                  | OK     | `web/public/logo-*.svg` + `docs/images/logo-*.png` untouched                          |
+| P0-A8: no vendor-prefixed test fixture tokens                            | OK     | new test file uses only neutral `test-*` literals; no `ghp_` / `sk_` / `eyJ` / `AKIA` |
 
 ## D8 — Test coverage for the safety gate
 
