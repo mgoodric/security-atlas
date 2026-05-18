@@ -232,6 +232,86 @@ bash scripts/check-branch-protection-drift.sh
 
 Exit 0 = in sync; exit 1 = drift detected (diff printed on stderr); exit 2 = environment misconfigured (missing `gh` / `jq`, malformed file). Requires `gh` authenticated with `repo:read` against `mgoodric/security-atlas`.
 
+### API spec
+
+The REST API surface has a machine-readable contract at
+[`docs/openapi.yaml`](./docs/openapi.yaml) — an OpenAPI 3.1 document
+generated deterministically from the in-tree route declarations. It is
+the single source of truth for what HTTP endpoints the platform
+exposes, what auth tier each requires, and which are internal-only
+(filtered out of the public Redoc render). The gRPC surface stays
+specified separately in `proto/*.proto` — this OpenAPI spec covers
+REST only (slice 140 P0-A7).
+
+**When to update the spec.** Every PR that adds, removes, or changes
+an HTTP route on `chi.Mux` MUST also edit
+[`internal/api/openapi/routes.go`](./internal/api/openapi/routes.go)
+to reflect the change AND re-run `just openapi-generate` to refresh
+the committed YAML. The BLOCKING `openapi-drift-check` CI guard fails
+the build on any mismatch — see below.
+
+**How to regenerate.**
+
+```sh
+just openapi-generate
+```
+
+The recipe runs `go run ./cmd/atlas-openapi --out docs/openapi.yaml`.
+Output is deterministic: two back-to-back runs produce byte-identical
+results. Commit the regenerated `docs/openapi.yaml` along with the
+`internal/api/openapi/routes.go` edit in the same PR.
+
+**Drift-detect guard.** The `openapi-drift-check` job in
+`.github/workflows/ci.yml` runs `scripts/check-openapi-drift.sh` on
+every PR and every push to `main`. The job is **blocking** — a spec
+out of sync with handler reality fails the build and the merge button
+stays disabled. This is the slice-140 D3 mitigation (same precedent as
+slice 128's `actions-pin-check`): a misleading spec is silent control
+degradation, not an informational nice-to-have.
+
+The script checks two things:
+
+1. **Inventory drift** — the committed `docs/openapi.yaml` matches
+   `cmd/atlas-openapi`'s output against the current `RouteSpecs`.
+   Catches "edited routes.go but forgot to regen the spec".
+2. **Coverage drift** — every chi route registration grep-extracted
+   from `internal/api/*/` is declared in `RouteSpecs`. Catches "added
+   a chi route but forgot to declare it in `RouteSpecs`".
+
+**Local repro.**
+
+```sh
+bash scripts/check-openapi-drift.sh
+```
+
+Exit 0 = no drift; exit 1 = drift detected (per-file fix steps printed
+to stderr); exit 2 = environment misconfigured (missing Go toolchain,
+malformed routes.go).
+
+**Operator post-merge ritual.** When this slice (or any future PR that
+adds a new BLOCKING CI guard to `required_status_checks`) merges, the
+maintainer runs:
+
+```sh
+bash scripts/apply-branch-protection.sh
+```
+
+to push the updated `.github/branch-protection.json` contexts list to
+the live GitHub branch-protection config on `main`. Without this step,
+the file-as-source-of-truth claim is structurally untrue (the new
+required check is declared but not enforced) — see the slice 127
+narrative for the exact failure mode this protects against.
+
+**Redoc UI.** The user-facing render of the spec lives at
+[`docs-site/docs/api/index.md`](./docs-site/docs/api/index.md) and
+ships as part of the mkdocs Material site at
+`/api/` on the published docs. Internal endpoints (`/health`,
+`/metrics`, `/v1/version`, `/v1/install-state`) carry `x-internal:
+true` in the source spec and are filtered out at build time by
+[`docs-site/hooks/openapi_pipeline.py`](./docs-site/hooks/openapi_pipeline.py)
+before reaching the page (slice 140 P0-A3 mitigation against
+information disclosure).
+
 ---
 
 ## Refreshing the README screenshots

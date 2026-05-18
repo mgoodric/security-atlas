@@ -99,10 +99,19 @@ nav:
       - RLS tenant isolation: walkthroughs/rls-tenant-isolation.md
       - Schema registry seed + validate: walkthroughs/schema-registry-seed-and-validate.md
       - OSCAL SSP export: walkthroughs/oscal-ssp-export.md
+  - REST API reference: api/index.md
   - Troubleshooting:
       - First-time login: troubleshooting/first-login.md
   - Design decisions:
       - Logo selection: design/logo-decision.md
+
+# Slice 140 — copy the canonical docs/openapi.yaml into the docs site
+# at build time and filter out operations marked `x-internal: true`
+# (P0-A3 mitigation: operator-only endpoints never appear in the
+# public Redoc render). Source spec stays the single source of truth
+# (P0-A8); this hook produces a derived filtered view.
+hooks:
+  - hooks/openapi_pipeline.py
 
 extra:
   social:

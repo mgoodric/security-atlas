@@ -91,6 +91,10 @@ htmlcov/
 ### Docs site (mkdocs Material build output, slice 058)
 docs-site/site/
 
+### Slice 140 — generated at docs build time by docs-site/hooks/openapi_pipeline.py
+### from the canonical docs/openapi.yaml (the source of truth, committed).
+docs-site/docs/openapi.yaml
+
 ### Slice 069 — Playwright runner artifacts
 web/playwright-report/
 web/test-results/

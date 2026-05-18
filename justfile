@@ -175,6 +175,22 @@ sqlc-generate: sqlc-version-check
 metrics-reference:
     ./scripts/gen-metrics-reference.sh
 
+# Generate the OpenAPI 3.1 spec at docs/openapi.yaml from the canonical
+# RouteSpecs slice in internal/api/openapi/routes.go. Slice 140 —
+# deterministic + offline; two runs produce byte-identical output. The
+# BLOCKING openapi-drift-check CI job (slice 140 D3 / P0-A2) asserts
+# this committed file is in lockstep with the generator + the chi
+# route registrations under internal/api/*/. Local repro of the CI
+# check: `bash scripts/check-openapi-drift.sh`.
+openapi-generate:
+    go run ./cmd/atlas-openapi --out docs/openapi.yaml
+
+# Reproduce the BLOCKING openapi-drift-check CI guard locally. Exits
+# non-zero on drift between docs/openapi.yaml and either the generator
+# output or the chi registrations under internal/api/*/. Slice 140.
+openapi-drift-check:
+    bash scripts/check-openapi-drift.sh
+
 # Audit every public-schema table with a `tenant_id` column. Fails if any
 # such table lacks an RLS policy or FORCE ROW LEVEL SECURITY. Constitutional
 # invariant 6 enforcement — see docs/architecture/rls.md. Requires

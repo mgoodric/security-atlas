@@ -9,6 +9,7 @@
     "cmd/atlas": 0,
     "cmd/atlas-cli": 0,
     "cmd/atlas-cli/cmdhttp": 98,
+    "cmd/atlas-openapi": 0,
 
     "connectors/1password/cmd/atlas-1password": 12,
     "connectors/1password/internal/idem": 98,
@@ -57,6 +58,7 @@
     "internal/api/controldetail": 25,
     "internal/api/controls": 26,
     "internal/api/credstore": 24,
+    "internal/api/openapi": 71,
     "internal/api/oscalexport": 37,
     "internal/api/schemaregistry": 26,
     "internal/api/soc2import": 23,
