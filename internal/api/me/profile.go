@@ -21,6 +21,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 
@@ -30,20 +31,41 @@ import (
 )
 
 // ProfileHandler bundles the GET/PATCH /v1/me routes.
+//
+// Slice 130: `roles` is a new field on the GET response — the caller's
+// canonical user_roles list, sourced via the shared `authz.DBRolesResolver`
+// (same path the slice-035 OPA middleware reads). The resolver may be nil
+// for unit-test harnesses that bypass authz; the handler then returns an
+// empty roles array (fail-closed: the BFF + frontend treat empty-roles as
+// "no role beyond what `is_admin` carries").
 type ProfileHandler struct {
 	users *users.Store
 	pool  *pgxpool.Pool
+	roles *authz.DBRolesResolver
 }
 
 // NewProfile constructs a ProfileHandler.
-func NewProfile(usersStore *users.Store, pool *pgxpool.Pool) *ProfileHandler {
-	return &ProfileHandler{users: usersStore, pool: pool}
+//
+// Slice 130: `rolesResolver` is the shared `authz.DBRolesResolver` whose
+// `RolesFor(ctx, tenantID, userID)` returns the caller's `user_roles`
+// rows under `tenancy.ApplyTenant`. Pass nil to disable role enumeration
+// (test harnesses that don't need it); the handler will then return an
+// empty roles array on the wire.
+func NewProfile(usersStore *users.Store, pool *pgxpool.Pool, rolesResolver *authz.DBRolesResolver) *ProfileHandler {
+	return &ProfileHandler{users: usersStore, pool: pool, roles: rolesResolver}
 }
 
 // ----- wire shapes -----
 
 // profileWire is the canonical JSON shape returned by GET /v1/me and PATCH /v1/me.
 // Fields are tagged so omitted nullable fields render as null (RFC 8259-compliant).
+//
+// Slice 130: `roles` carries the caller's canonical `user_roles` list
+// (admin / grc_engineer / control_owner / auditor / viewer). The field is
+// always present — empty array, not omitted — so the BFF + frontend can
+// rely on it without a nil-vs-missing branch. The set is additive to the
+// existing `is_admin` / `owner_roles` fields; consumers that only read
+// `is_admin` continue to work unchanged.
 type profileWire struct {
 	UserID      string   `json:"user_id"`
 	TenantID    string   `json:"tenant_id"`
@@ -54,6 +76,7 @@ type profileWire struct {
 	TimeZone    *string  `json:"time_zone"`
 	IsAdmin     bool     `json:"is_admin"`
 	OwnerRoles  []string `json:"owner_roles"`
+	Roles       []string `json:"roles"`
 }
 
 // patchProfileRequest is the wire shape of PATCH /v1/me. Pointer fields encode the
@@ -70,6 +93,13 @@ type patchProfileRequest struct {
 // row. When the credential is not backed by a real users row (bootstrap admin /
 // API-key with NULL issued_by), returns a synthetic profile carrying only what the
 // credential knows. No IdP roundtrip (P0-A3).
+//
+// Slice 130: the response additionally carries the caller's `roles` list — the
+// canonical user_roles rows under the tenant's RLS context. Fetched via the
+// shared `authz.DBRolesResolver` (the same path the slice-035 OPA middleware
+// uses). Bootstrap-admin / API-key callers with no users row get an empty
+// `roles` array; their authorization continues to ride on `is_admin` +
+// `owner_roles`.
 func (h *ProfileHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := authnContext(r)
 	if !ok {
@@ -81,6 +111,12 @@ func (h *ProfileHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 		writeServerErr(w, "get profile", err)
 		return
 	}
+	roles, rerr := h.resolveRoles(ctx, cred)
+	if rerr != nil {
+		writeServerErr(w, "resolve roles", rerr)
+		return
+	}
+	wire.Roles = roles
 	writeJSON(w, http.StatusOK, wire)
 }
 
@@ -143,7 +179,14 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	}
 	// Empty-diff path: skip the UPDATE + skip the audit-log INSERT (ISC-A5).
 	if newDisplay == current.DisplayName && newTZ == current.TimeZone {
-		writeJSON(w, http.StatusOK, profileWireFrom(current, cred))
+		wire := profileWireFrom(current, cred)
+		roles, rerr := h.resolveRoles(ctx, cred)
+		if rerr != nil {
+			writeServerErr(w, "resolve roles", rerr)
+			return
+		}
+		wire.Roles = roles
+		writeJSON(w, http.StatusOK, wire)
 		return
 	}
 	updated, err := h.users.UpdateProfile(ctx, users.UpdateProfileInput{
@@ -164,7 +207,41 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	before := map[string]any{"display_name": current.DisplayName, "time_zone": current.TimeZone}
 	after := map[string]any{"display_name": updated.DisplayName, "time_zone": updated.TimeZone}
 	_ = h.writeAuditLog(ctx, tenantUUID, userUUID, "profile.update", before, after)
-	writeJSON(w, http.StatusOK, profileWireFrom(updated, cred))
+	wire := profileWireFrom(updated, cred)
+	roles, rerr := h.resolveRoles(ctx, cred)
+	if rerr != nil {
+		writeServerErr(w, "resolve roles", rerr)
+		return
+	}
+	wire.Roles = roles
+	writeJSON(w, http.StatusOK, wire)
+}
+
+// resolveRoles fetches the caller's canonical user_roles list via the shared
+// `authz.DBRolesResolver`. Returns an empty non-nil slice when:
+//
+//   - the handler was constructed without a resolver (unit-test bypass), or
+//   - the credential carries no UserID (rare misconfig), or
+//   - the resolver returns zero rows (the common case for bootstrap-admin /
+//     API-key credentials with no matching users row).
+//
+// The non-nil empty slice is load-bearing — the JSON wire shape promises
+// `"roles": []` (never `null`) so the BFF + frontend can rely on it without
+// a nil-check. P0-A3: fail-closed posture; never infer roles from
+// `cred.IsAdmin` or `cred.OwnerRoles`.
+func (h *ProfileHandler) resolveRoles(ctx context.Context, cred credstore.Credential) ([]string, error) {
+	out := []string{}
+	if h.roles == nil || cred.UserID == "" || cred.TenantID == "" {
+		return out, nil
+	}
+	rows, err := h.roles.RolesFor(ctx, cred.TenantID, cred.UserID)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		out = append(out, string(r))
+	}
+	return out, nil
 }
 
 // buildProfile resolves the caller's identity into the wire shape. When the

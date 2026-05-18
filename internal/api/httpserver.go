@@ -63,6 +63,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
 	"github.com/mgoodric/security-atlas/internal/auth/userprefs"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/board"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -461,7 +462,13 @@ func (s *Server) httpHandler() http.Handler {
 	usersStore := users.NewStore(s.dbPool)
 	sessionsStore := sessions.NewStore(s.dbPool, 0)
 	userprefsStore := userprefs.NewStore(s.dbPool)
-	meProfileH := meapi.NewProfile(usersStore, s.dbPool)
+	// Slice 130: share the same DBRolesResolver the slice-035 OPA engine
+	// uses for `Input.UserRoles`. Building a fresh resolver here is cheap
+	// (resolver is a pool wrapper, no state) and avoids threading the
+	// authz.Engine's private resolver out through AttachAuthz. The shared
+	// SELECT semantics + the shared `tenancy.ApplyTenant` posture are the
+	// load-bearing properties; instance identity is not.
+	meProfileH := meapi.NewProfile(usersStore, s.dbPool, authz.NewDBRolesResolver(s.dbPool))
 	mePrefsH := meapi.NewPreferences(userprefsStore, s.dbPool)
 	meSessionsH := meapi.NewSessions(sessionsStore, s.dbPool)
 	root.Get("/v1/me", meProfileH.GetMe)
