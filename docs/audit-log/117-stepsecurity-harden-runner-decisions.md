@@ -124,6 +124,18 @@ records the choice. Calling it MEDIUM rather than LOW because the
 slice's CI surface and decisions log are independently verifiable; only
 the account-ownership row is pending.
 
+---
+
+### Maintainer follow-up — 2026-05-18 (RESOLVED)
+
+**Account identity:** Personal — `@mgoodric` (per the non-binding recommendation above). Matches the project's solo-maintainer reality. Revisit when a second maintainer joins.
+
+**Dashboard URL pattern verified:** [`https://app.stepsecurity.io/github/mgoodric/security-atlas`](https://app.stepsecurity.io/github/mgoodric/security-atlas) — repo enrolled in the Community Plan, Harden-Runner telemetry flowing.
+
+**Sample run URL (per-run path):** [`https://app.stepsecurity.io/github/mgoodric/security-atlas/actions/runs/26035945058`](https://app.stepsecurity.io/github/mgoodric/security-atlas/actions/runs/26035945058) — clickable from any CI run summary. Contributors can drill into this per-run view to see the egress baseline.
+
+**Cleared:** Slice 117 AC-2 (account enrollment) ✓ + AC-3 (dashboard URL captured) ✓. Slice 118's external prerequisite is also cleared; its 14-day audit-mode soak window starts now (2026-05-18 → eligible to flip to `ready` around 2026-06-01) once the audit-mode runs accumulate enough baseline data to derive a sane `allowed-endpoints` list for block-mode promotion.
+
 ## D4 — Free Community Plan covers our use case
 
 **Decision:** Use the StepSecurity Community Plan (no paid tier).
