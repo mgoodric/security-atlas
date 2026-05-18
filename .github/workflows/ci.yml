@@ -1225,6 +1225,10 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v6
+      - name: Install ripgrep
+        # Required by scripts/audit-deps.sh — the ubuntu-latest runner
+        # doesn't pre-bundle ripgrep as of 2026-05; install explicitly.
+        run: sudo apt-get update -q && sudo apt-get install -y -q ripgrep
       - name: Verify ripgrep available
         run: rg --version
       - name: Run audit-deps.sh
