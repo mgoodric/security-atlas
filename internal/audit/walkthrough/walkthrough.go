@@ -39,6 +39,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/audit/sink"
+	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -646,8 +648,9 @@ func writeLog(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, walkthrou
 	} else {
 		detailJSON = []byte(`{}`)
 	}
+	auditID := uuid.New()
 	_, err := q.WriteWalkthroughAuditLog(ctx, dbx.WriteWalkthroughAuditLogParams{
-		ID:            pgUUID(uuid.New()),
+		ID:            pgUUID(auditID),
 		TenantID:      pgUUID(tenantID),
 		WalkthroughID: walkthroughID,
 		Action:        action,
@@ -657,6 +660,22 @@ func writeLog(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, walkthrou
 	if err != nil {
 		return fmt.Errorf("write walkthrough log: %w", err)
 	}
+	// Slice 126: fan out to the external sink.
+	wtID := ""
+	if walkthroughID.Valid {
+		wtID = uuid.UUID(walkthroughID.Bytes).String()
+	}
+	sink.EmitDefault(ctx, unifiedlog.Entry{
+		OccurredAt:  time.Now().UTC(),
+		ActorID:     actor,
+		TenantID:    tenantID,
+		Kind:        unifiedlog.KindWalkthrough,
+		TargetType:  "walkthrough",
+		TargetID:    wtID,
+		Action:      action,
+		RowID:       auditID,
+		PayloadJSON: detailJSON,
+	})
 	return nil
 }
 

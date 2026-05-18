@@ -151,18 +151,23 @@ func (e *Expirer) sweepTenant(ctx context.Context, tenantID uuid.UUID, now time.
 	// is `expired`, the actor is the SystemActor constant so audit-trail
 	// review can segregate system-driven transitions from human ones.
 	for _, row := range expired {
+		auditID := uuid.New()
+		reason := fmt.Sprintf("expires_at=%s < now=%s", row.ExpiresAt.Time.UTC().Format(time.RFC3339), now.Format(time.RFC3339))
 		if _, alErr := q.WriteExceptionAuditLog(tenantCtx, dbx.WriteExceptionAuditLogParams{
-			ID:          pgtype.UUID{Bytes: uuid.New(), Valid: true},
+			ID:          pgtype.UUID{Bytes: auditID, Valid: true},
 			TenantID:    pgtype.UUID{Bytes: tenantID, Valid: true},
 			ExceptionID: row.ID,
 			Action:      ActionExpired,
 			Actor:       SystemActor,
 			FromState:   stringPtr(StateActive),
 			ToState:     StateExpired,
-			Reason:      fmt.Sprintf("expires_at=%s < now=%s", row.ExpiresAt.Time.UTC().Format(time.RFC3339), now.Format(time.RFC3339)),
+			Reason:      reason,
 		}); alErr != nil {
 			return 0, fmt.Errorf("write expired audit log: %w", alErr)
 		}
+		// Slice 126: fan out to the external sink.
+		emitSinkException(tenantCtx, tenantID, uuid.UUID(row.ID.Bytes), auditID,
+			ActionExpired, SystemActor, StateActive, StateExpired, reason)
 	}
 	if err := tx.Commit(tenantCtx); err != nil {
 		return 0, fmt.Errorf("commit: %w", err)

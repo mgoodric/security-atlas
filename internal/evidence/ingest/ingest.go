@@ -35,6 +35,8 @@ import (
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/audit/sink"
+	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/canonjson"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/evidence/redact"
@@ -542,8 +544,9 @@ func (s *Service) writeAudit(ctx context.Context, cred credstore.Credential, ide
 		if kind != "" {
 			kindPtr = &kind
 		}
+		auditID := uuid.New()
 		_, _ = q.InsertEvidenceAuditEntry(tenantCtx, dbx.InsertEvidenceAuditEntryParams{
-			ID:             pgUUID(uuid.New().String()),
+			ID:             pgUUID(auditID.String()),
 			TenantID:       pgUUID(cred.TenantID),
 			CredentialID:   cred.ID,
 			Decision:       decision.String(),
@@ -551,6 +554,32 @@ func (s *Service) writeAudit(ctx context.Context, cred credstore.Credential, ide
 			IdempotencyKey: idemPtr,
 			EvidenceKind:   kindPtr,
 			RecordID:       recordID,
+		})
+		// Slice 126: fan out the audit row to the external sink. The
+		// canonical Entry shape mirrors slice 124's unifiedlog.Entry;
+		// payload fields not present on the per-domain table land in
+		// PayloadJSON. Non-blocking: this never fails the ingest path.
+		tenantUUID, _ := uuid.Parse(cred.TenantID)
+		recordIDStr := ""
+		if recordID.Valid {
+			recordIDStr = uuid.UUID(recordID.Bytes).String()
+		}
+		payload, _ := json.Marshal(map[string]any{
+			"credential_id":   cred.ID,
+			"idempotency_key": idem,
+			"evidence_kind":   kind,
+			"reason_code":     truncate(reason, 1024),
+		})
+		sink.EmitDefault(tenantCtx, unifiedlog.Entry{
+			OccurredAt:  time.Now().UTC(),
+			ActorID:     cred.ID,
+			TenantID:    tenantUUID,
+			Kind:        unifiedlog.KindEvidence,
+			TargetType:  "evidence_record",
+			TargetID:    recordIDStr,
+			Action:      decision.String(),
+			RowID:       auditID,
+			PayloadJSON: payload,
 		})
 		return nil
 	})

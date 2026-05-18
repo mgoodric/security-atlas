@@ -18,6 +18,8 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/audit/sink"
+	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -261,7 +263,28 @@ func (h *ProfileHandler) writeAuditLog(ctx context.Context, tenantID, userID uui
 	}); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	// Slice 126: fan out to the external sink. Sink RowID is a fresh
+	// UUID — the in-app row id is gen_random_uuid() at the DB layer and
+	// not surfaced from the InsertMeAuditLog :exec query.
+	sinkPayload, _ := json.Marshal(map[string]any{
+		"before": json.RawMessage(beforeJSON),
+		"after":  json.RawMessage(afterJSON),
+	})
+	sink.EmitDefault(ctx, unifiedlog.Entry{
+		OccurredAt:  time.Now().UTC(),
+		ActorID:     userID.String(),
+		TenantID:    tenantID,
+		Kind:        unifiedlog.KindMe,
+		TargetType:  "user",
+		TargetID:    userID.String(),
+		Action:      action,
+		RowID:       uuid.New(),
+		PayloadJSON: sinkPayload,
+	})
+	return nil
 }
 
 // Note on package-shared helpers (authnContext, writeError, writeJSON,

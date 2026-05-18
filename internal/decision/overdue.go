@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/audit/sink"
+	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -216,16 +218,31 @@ func (n *Notifier) sweepTenant(ctx context.Context, tenantID uuid.UUID, today ti
 		}
 
 		// The authoritative dedup marker, written in the same tx.
+		auditID := uuid.New()
+		detail := fmt.Sprintf("recipient=%s revisit_by=%s", d.DecisionMaker, revisit)
 		if _, err := q.WriteDecisionAudit(tenantCtx, dbx.WriteDecisionAuditParams{
-			ID:         pgUUID(uuid.New()),
+			ID:         pgUUID(auditID),
 			TenantID:   pgUUID(tenantID),
 			DecisionID: pgUUID(d.ID),
 			Action:     ActionOverdueNotified,
 			Actor:      SystemActor,
-			Detail:     fmt.Sprintf("recipient=%s revisit_by=%s", d.DecisionMaker, revisit),
+			Detail:     detail,
 		}); err != nil {
 			return 0, fmt.Errorf("write overdue_notified audit: %w", err)
 		}
+		// Slice 126: fan out the audit row to the external sink.
+		sinkPayload, _ := json.Marshal(map[string]any{"detail": detail})
+		sink.EmitDefault(tenantCtx, unifiedlog.Entry{
+			OccurredAt:  time.Now().UTC(),
+			ActorID:     SystemActor,
+			TenantID:    tenantID,
+			Kind:        unifiedlog.KindDecision,
+			TargetType:  "decision",
+			TargetID:    d.ID.String(),
+			Action:      ActionOverdueNotified,
+			RowID:       auditID,
+			PayloadJSON: sinkPayload,
+		})
 		emitted++
 	}
 

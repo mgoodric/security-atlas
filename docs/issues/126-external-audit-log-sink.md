@@ -3,7 +3,7 @@
 **Cluster:** Infra (observability)
 **Estimate:** 1.5d
 **Type:** JUDGMENT
-**Status:** `not-ready`
+**Status:** `in-review`
 
 ## Narrative
 

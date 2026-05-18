@@ -764,7 +764,6 @@ func (ns NullVendorReviewCadence) Value() (driver.Value, error) {
 	return string(ns.VendorReviewCadence), nil
 }
 
-// Slice 062 — unified read across the seven per-domain audit-log tables. RLS-aware: each source-table tenant_read policy fires under the caller's app.current_tenant GUC. Append-only by construction (no INSERT path). Slice 108 extends the view with an eighth branch (me_audit_log).
 type AdminAuditLogV struct {
 	TenantID     pgtype.UUID        `json:"tenant_id"`
 	Ts           pgtype.Timestamptz `json:"ts"`
@@ -897,6 +896,19 @@ type AuditPeriodAuditLog struct {
 	Actor         string             `json:"actor"`
 	Detail        []byte             `json:"detail"`
 	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+}
+
+type AuditSinkFailure struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	OccurredAt      pgtype.Timestamptz `json:"occurred_at"`
+	FailureReason   string             `json:"failure_reason"`
+	EntryKind       string             `json:"entry_kind"`
+	EntryActor      string             `json:"entry_actor"`
+	EntryTargetType string             `json:"entry_target_type"`
+	EntryTargetID   string             `json:"entry_target_id"`
+	EntryAction     string             `json:"entry_action"`
+	ErrorText       string             `json:"error_text"`
 }
 
 type AuditorAssignment struct {

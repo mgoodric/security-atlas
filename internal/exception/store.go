@@ -22,6 +22,7 @@ package exception
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -32,9 +33,33 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/audit/sink"
+	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
+
+// emitSinkException is the slice-126 fanout helper. Builds the canonical
+// unifiedlog.Entry for an exception-audit row + forwards to the package-
+// level sink. Non-blocking; never returns an error to its caller.
+func emitSinkException(ctx context.Context, tenantID, exceptionID, auditID uuid.UUID, action, actor, fromState, toState, reason string) {
+	payload, _ := json.Marshal(map[string]any{
+		"from_state": fromState,
+		"to_state":   toState,
+		"reason":     reason,
+	})
+	sink.EmitDefault(ctx, unifiedlog.Entry{
+		OccurredAt:  time.Now().UTC(),
+		ActorID:     actor,
+		TenantID:    tenantID,
+		Kind:        unifiedlog.KindException,
+		TargetType:  "exception",
+		TargetID:    exceptionID.String(),
+		Action:      action,
+		RowID:       auditID,
+		PayloadJSON: payload,
+	})
+}
 
 // MaxLifetime is the hard ceiling on exception duration. Anti-criterion P0:
 // expires_at MUST NOT exceed requested_at + 365 days. Application rejects
@@ -219,8 +244,9 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Exception, error) {
 		}
 		out = exceptionFromRow(row)
 		// AC-7: write audit-log row for the requested transition.
+		auditID := uuid.New()
 		if _, alErr := q.WriteExceptionAuditLog(ctx, dbx.WriteExceptionAuditLogParams{
-			ID:          pgUUID(uuid.New()),
+			ID:          pgUUID(auditID),
 			TenantID:    pgUUID(tenantID),
 			ExceptionID: row.ID,
 			Action:      ActionRequested,
@@ -231,6 +257,9 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Exception, error) {
 		}); alErr != nil {
 			return fmt.Errorf("write requested audit log: %w", alErr)
 		}
+		// Slice 126: fan out to the external sink.
+		emitSinkException(ctx, tenantID, uuid.UUID(row.ID.Bytes), auditID,
+			ActionRequested, in.RequestedBy, "", StateRequested, "")
 		return nil
 	})
 	return out, err
@@ -484,8 +513,9 @@ func (s *Store) transition(ctx context.Context, id uuid.UUID, p transitionParams
 		// from_state from the priorRequester probe when available; fall
 		// back to the expected-prior constant otherwise.
 		fromState := p.expectedPrior
+		auditID := uuid.New()
 		if _, alErr := q.WriteExceptionAuditLog(ctx, dbx.WriteExceptionAuditLogParams{
-			ID:          pgUUID(uuid.New()),
+			ID:          pgUUID(auditID),
 			TenantID:    pgUUID(tenantID),
 			ExceptionID: row.ID,
 			Action:      p.action,
@@ -496,6 +526,9 @@ func (s *Store) transition(ctx context.Context, id uuid.UUID, p transitionParams
 		}); alErr != nil {
 			return fmt.Errorf("write %s audit log: %w", p.action, alErr)
 		}
+		// Slice 126: fan out to the external sink.
+		emitSinkException(ctx, tenantID, uuid.UUID(row.ID.Bytes), auditID,
+			p.action, p.actor, fromState, p.newState, p.reason)
 		return nil
 	})
 	return out, err

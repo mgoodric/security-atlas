@@ -19,9 +19,32 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/audit/sink"
+	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
+
+// emitSinkAggregationRule is the slice-126 fanout helper for the three
+// per-rule lifecycle write sites (create/activate/deactivate). Non-blocking;
+// never returns an error.
+func emitSinkAggregationRule(ctx context.Context, tenantID, ruleID, auditID uuid.UUID, event, actor, fromStatus, toStatus string) {
+	payload, _ := json.Marshal(map[string]any{
+		"from_status": fromStatus,
+		"to_status":   toStatus,
+	})
+	sink.EmitDefault(ctx, unifiedlog.Entry{
+		OccurredAt:  time.Now().UTC(),
+		ActorID:     actor,
+		TenantID:    tenantID,
+		Kind:        unifiedlog.KindAggregationRule,
+		TargetType:  "aggregation_rule",
+		TargetID:    ruleID.String(),
+		Action:      event,
+		RowID:       auditID,
+		PayloadJSON: payload,
+	})
+}
 
 // Sentinel errors. Kept as package sentinels (not pgx.ErrNoRows) so the HTTP
 // handler maps them without importing pgx.
@@ -105,8 +128,9 @@ func (s *Store) Create(ctx context.Context, r Rule, actor string) (StoredRule, e
 			}
 			return fmt.Errorf("aggrule: create rule: %w", err)
 		}
+		auditID := uuid.New()
 		if _, err := q.WriteAggregationRuleAuditLog(ctx, dbx.WriteAggregationRuleAuditLogParams{
-			ID:         pgUUID(uuid.New()),
+			ID:         pgUUID(auditID),
 			TenantID:   pgUUID(tenantID),
 			RuleID:     row.ID,
 			Event:      "created",
@@ -117,6 +141,9 @@ func (s *Store) Create(ctx context.Context, r Rule, actor string) (StoredRule, e
 		}); err != nil {
 			return fmt.Errorf("aggrule: write created audit log: %w", err)
 		}
+		// Slice 126: fan out to the external sink.
+		emitSinkAggregationRule(ctx, tenantID, uuid.UUID(row.ID.Bytes), auditID,
+			"created", actor, "", "staged")
 		sr, cerr := storedRuleFromRow(row)
 		if cerr != nil {
 			return cerr
@@ -221,8 +248,9 @@ func (s *Store) Activate(ctx context.Context, id uuid.UUID, actor string) (Store
 			}
 			return fmt.Errorf("aggrule: activate rule: %w", err)
 		}
+		auditID := uuid.New()
 		if _, err := q.WriteAggregationRuleAuditLog(ctx, dbx.WriteAggregationRuleAuditLogParams{
-			ID:         pgUUID(uuid.New()),
+			ID:         pgUUID(auditID),
 			TenantID:   pgUUID(tenantID),
 			RuleID:     row.ID,
 			Event:      event,
@@ -233,6 +261,9 @@ func (s *Store) Activate(ctx context.Context, id uuid.UUID, actor string) (Store
 		}); err != nil {
 			return fmt.Errorf("aggrule: write %s audit log: %w", event, err)
 		}
+		// Slice 126: fan out to the external sink.
+		emitSinkAggregationRule(ctx, tenantID, uuid.UUID(row.ID.Bytes), auditID,
+			event, actor, fromStatus, "active")
 		sr, cerr := storedRuleFromRow(row)
 		if cerr != nil {
 			return cerr
@@ -273,8 +304,9 @@ func (s *Store) Deactivate(ctx context.Context, id uuid.UUID, actor string) (Sto
 			}
 			return fmt.Errorf("aggrule: deactivate rule: %w", err)
 		}
+		auditID := uuid.New()
 		if _, err := q.WriteAggregationRuleAuditLog(ctx, dbx.WriteAggregationRuleAuditLogParams{
-			ID:         pgUUID(uuid.New()),
+			ID:         pgUUID(auditID),
 			TenantID:   pgUUID(tenantID),
 			RuleID:     row.ID,
 			Event:      "deactivated",
@@ -285,6 +317,9 @@ func (s *Store) Deactivate(ctx context.Context, id uuid.UUID, actor string) (Sto
 		}); err != nil {
 			return fmt.Errorf("aggrule: write deactivated audit log: %w", err)
 		}
+		// Slice 126: fan out to the external sink.
+		emitSinkAggregationRule(ctx, tenantID, uuid.UUID(row.ID.Bytes), auditID,
+			"deactivated", actor, "active", "inactive")
 		sr, cerr := storedRuleFromRow(row)
 		if cerr != nil {
 			return cerr

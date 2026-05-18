@@ -44,6 +44,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/audit/sample"
+	"github.com/mgoodric/security-atlas/internal/audit/sink"
+	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -601,8 +603,9 @@ func writeAuditLog(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, e au
 		s := *e.Seed
 		seed = &s
 	}
+	auditID := uuid.New()
 	_, err := q.WriteSampleAuditLog(ctx, dbx.WriteSampleAuditLogParams{
-		ID:           pgUUID(uuid.New()),
+		ID:           pgUUID(auditID),
 		TenantID:     pgUUID(tenantID),
 		Action:       e.Action,
 		Actor:        e.Actor,
@@ -616,6 +619,32 @@ func writeAuditLog(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, e au
 	if err != nil {
 		return fmt.Errorf("write audit log: %w", err)
 	}
+	// Slice 126: fan out to the external sink. Target id is the sample id
+	// when present, else the population id (one of the two is always set).
+	targetType, targetID := "sample", ""
+	if sampID.Valid {
+		targetID = uuid.UUID(sampID.Bytes).String()
+	} else if popID.Valid {
+		targetType = "population"
+		targetID = uuid.UUID(popID.Bytes).String()
+	}
+	sinkPayload, _ := json.Marshal(map[string]any{
+		"seed":        e.Seed,
+		"n_requested": e.NRequested,
+		"n_returned":  e.NReturned,
+		"reason_code": e.ReasonCode,
+	})
+	sink.EmitDefault(ctx, unifiedlog.Entry{
+		OccurredAt:  time.Now().UTC(),
+		ActorID:     e.Actor,
+		TenantID:    tenantID,
+		Kind:        unifiedlog.KindSample,
+		TargetType:  targetType,
+		TargetID:    targetID,
+		Action:      e.Action,
+		RowID:       auditID,
+		PayloadJSON: sinkPayload,
+	})
 	return nil
 }
 
