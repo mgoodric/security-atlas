@@ -706,6 +706,14 @@ func (s *Server) httpHandler() http.Handler {
 	// Route appended per the parallel-batch convention (chi.Mux rejects
 	// two Mounts at "/", so individual routes register onto the root).
 	root.Get("/v1/admin/audit-log/unified", auditLogH.UnifiedList)
+	// Slice 135: bulk data-export variant of the unified read.
+	// Same admit set (admin OR auditor OR grc_engineer — slice 124 D5;
+	// slice 135 P0-A9 admit-set parity test pins it at the OPA layer),
+	// same 90-day window cap, same tenancy + RLS path. Reuses the
+	// slice-124 aggregator (internal/audit/unifiedlog.Query) with a
+	// format-encoder swap on the response body (CSV / JSON / XLSX).
+	// Meta-audit row written on EVERY outcome (slice 135 P0-A4).
+	root.Get("/v1/admin/audit-log/export", auditLogH.ExportUnified)
 	// Slice 076: metrics catalog + cascade + observation store. Routes
 	// appended per the parallel-batch convention (chi.Mux rejects two
 	// Mounts at "/"). The literal-segment route /v1/metrics/cascade is

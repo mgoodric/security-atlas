@@ -24,7 +24,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -36,12 +36,15 @@ import {
 } from "@/components/ui/table";
 
 import {
+  AUDIT_LOG_EXPORT_FORMATS,
   AUDIT_LOG_KINDS,
+  AuditLogExportFormat,
   AuditLogFetchError,
   AuditLogKind,
   MAX_WINDOW_DAYS,
   UnifiedEntry,
   UnifiedListResponse,
+  buildAuditLogExportURL,
   fetchUnifiedAuditLog,
   renderActorLabel,
 } from "@/lib/api/audit-log";
@@ -236,6 +239,15 @@ export function AuditLogPageClient() {
         onKindToggle={toggleKind}
         windowValid={queryEnabled}
       />
+
+      {/* Slice 135 — Export controls. CSV / JSON / XLSX bulk-download
+          of the current filter set. Each button is an <a download> so
+          the browser handles the file-save dialog natively; filters
+          propagate to the export URL via buildAuditLogExportURL.
+          The button row is disabled when the window is invalid (the
+          backend would 400 anyway, but disabling fast here keeps the
+          UI consistent with the read-side error banner above). */}
+      <ExportBar filters={filters} disabled={!queryEnabled} />
 
       {!queryEnabled ? (
         <div
@@ -599,6 +611,83 @@ function Row({ row }: { row: UnifiedEntry }) {
         </TableRow>
       ) : null}
     </>
+  );
+}
+
+// ----- ExportBar -----------------------------------------------------
+//
+// Slice 135 AC-14. Three buttons (CSV / JSON / XLSX) inside a card.
+// Each button is an <a download> pointing at the BFF export URL with
+// the current filter set encoded. The browser handles the file-save
+// dialog; no client-side JS download flow needed.
+//
+// `disabled` mirrors the window-validity check from the read side so
+// the buttons are visually-inert when the filter range is invalid
+// (the backend would 400 anyway).
+//
+// Slice 135 P0-A14 — no per-button column-selection UI. Each format
+// dumps the canonical column set the backend declares.
+
+const EXPORT_FORMAT_LABELS: Record<AuditLogExportFormat, string> = {
+  csv: "CSV",
+  json: "JSON",
+  xlsx: "XLSX",
+};
+
+function ExportBar({
+  filters,
+  disabled,
+}: {
+  filters: Filters;
+  disabled: boolean;
+}) {
+  return (
+    <div
+      data-testid="audit-log-export-bar"
+      className="flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3"
+    >
+      <span className="text-xs font-medium text-muted-foreground">
+        Export current filter:
+      </span>
+      {AUDIT_LOG_EXPORT_FORMATS.map((format) => {
+        if (disabled) {
+          return (
+            <Button
+              key={format}
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled
+              data-testid={`audit-log-export-${format}`}
+            >
+              {EXPORT_FORMAT_LABELS[format]}
+            </Button>
+          );
+        }
+        const href = buildAuditLogExportURL(format, {
+          from: filters.from,
+          to: filters.to,
+          actor: filters.actor,
+          kinds: filters.kinds,
+        });
+        return (
+          <a
+            key={format}
+            href={href}
+            // The native `download` attr nudges the browser to
+            // honour the backend's Content-Disposition filename.
+            // The actual filename is server-authored
+            // (slice 135 AC-6 BuildFilename).
+            download
+            rel="noopener"
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+            data-testid={`audit-log-export-${format}`}
+          >
+            {EXPORT_FORMAT_LABELS[format]}
+          </a>
+        );
+      })}
+    </div>
   );
 }
 

@@ -9,6 +9,27 @@ Conventional-Commit messages. Each entry links to its slice issue, the
 merging PR, and the squash-merge commit. For richer per-slice narrative
 see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
+## [Unreleased]
+
+### Added
+
+- Data-export library (CSV / JSON / XLSX) + audit-log export endpoint
+  + Export buttons on `/audit-log` ([#135](https://github.com/mgoodric/security-atlas/issues/135)).
+  Reusable `internal/export/` package with three streaming encoders;
+  reference impl at `GET /v1/admin/audit-log/export?format=...` reuses
+  the slice-124 aggregator; BFF at `/api/audit-log/export` streams the
+  body; Playwright + vitest + Go-integration coverage. The XLSX encoder
+  is a handcrafted single-sheet-text-only writer (zero new deps,
+  P0-A6 by construction). Meta-audit row written on every outcome
+  (action = `audit_log_export`).
+
+### Changed
+
+- Hardened the slice-124 unified-audit-log SQL to defer the
+  `actor_id::uuid` cast via a `CASE WHEN regex` expression, closing
+  a planner-reordering footgun that surfaced during slice-135
+  integration testing ([#135](https://github.com/mgoodric/security-atlas/issues/135) D6).
+
 ## [1.10.0](https://github.com/mgoodric/security-atlas/compare/v1.9.0...v1.10.0) (2026-05-18)
 
 

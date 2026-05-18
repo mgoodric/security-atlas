@@ -131,6 +131,37 @@ export class AuditLogFetchError extends Error {
  */
 export const MAX_WINDOW_DAYS = 90;
 
+// Slice 135 — bulk-export wire format identifiers. PDF is explicitly
+// NOT in the list (slice 135 P0-A11); the three formats below match the
+// backend's `internal/export.AllFormats` exactly.
+export const AUDIT_LOG_EXPORT_FORMATS = ["csv", "json", "xlsx"] as const;
+export type AuditLogExportFormat = (typeof AUDIT_LOG_EXPORT_FORMATS)[number];
+
+/**
+ * buildAuditLogExportURL constructs the BFF URL the browser hits to
+ * trigger an export download. The URL carries the same filter shape
+ * as the unified read endpoint (`from`, `to`, `actor`, `kind`) plus
+ * the format selector — backend reuses the slice-124 aggregator so
+ * the wire shape is bit-for-bit aligned. Exported so the Playwright
+ * spec can assert the URL the Export button assembles.
+ */
+export function buildAuditLogExportURL(
+  format: AuditLogExportFormat,
+  params: Omit<UnifiedListParams, "cursor">,
+): string {
+  const u = new URLSearchParams();
+  u.set("format", format);
+  u.set("from", params.from);
+  u.set("to", params.to);
+  if (params.actor && params.actor.trim()) {
+    u.set("actor", params.actor.trim());
+  }
+  if (params.kinds && params.kinds.length > 0) {
+    u.set("kind", params.kinds.join(","));
+  }
+  return `/api/audit-log/export?${u.toString()}`;
+}
+
 /**
  * truncateActorId returns the first 8 characters of an actor identifier
  * followed by an ellipsis. The page uses this as the cell-text fallback

@@ -149,4 +149,12 @@ auditor_readable_resources := {
     # log is already tenant-internal (every row already belongs to the
     # caller's tenant after RLS filtering).
     "audit-log-unified",
+    # Slice 135: the bulk-download (csv / json / xlsx) variant of the
+    # same unified audit-log read. Admit set MUST match audit-log-unified
+    # bit-for-bit (slice 135 P0-A9) — the export endpoint is the SAME
+    # underlying query with an encoder swap, so any role admitted to
+    # the read MUST be admitted to the export. The slice-135 OPA matrix
+    # test (TestSlice135_UnifiedAuditLogExportAdmitSetParity) pins this
+    # parity at the rego layer.
+    "audit-log-export",
 }
