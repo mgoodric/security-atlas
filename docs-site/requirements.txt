@@ -4,5 +4,5 @@
 # Installed in isolation via `uv tool run --with-requirements
 # docs-site/requirements.txt mkdocs ...` so it never pollutes the
 # monorepo's `uv` workspace.
-mkdocs-material==9.5.39
+mkdocs-material==9.7.6
 mkdocs-git-revision-date-localized-plugin==1.2.6
