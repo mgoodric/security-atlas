@@ -8,6 +8,22 @@
 // `/api/version/anything`) that a sloppy `startsWith("/api/v")` or
 // `startsWith("/api/version")` would have leaked.
 //
+// Slice 123 extension — two new branches:
+//
+//   * /api/install-state is also exempt (matches the slice-073 BFF
+//     contract for the unauthenticated login page; same
+//     exact-equality discipline as /api/version).
+//   * Every emitted response (next OR redirect) carries the five
+//     hardening headers from the slice-087 middleware. The browser
+//     sees a Next.js response, not the atlas response — without
+//     these headers the deployed UI was clickjackable / MIME-
+//     sniffable, and the slice-087 security-headers.spec.ts spec
+//     was failing because the Next.js BFF never set them.
+//   * web/public static assets referenced from /login (logo svgs,
+//     PWA icons, OG/Twitter cards) are exempt — without this the
+//     proxy redirected `GET /og-image.png` to `/login`, breaking the
+//     slice-075 logo-render spec's content-type assertions.
+//
 // Hard rule (slice 069 P0-A9): no vendor-prefixed token strings in
 // fixtures. The token below is a neutral test-* string.
 
@@ -16,15 +32,23 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // Mock next/server with a minimal shape sufficient for proxy.ts. The
 // real NextResponse class isn't importable outside a Next runtime; the
 // public surface proxy.ts uses is NextResponse.next() and
-// NextResponse.redirect(url). Both return a recognizable marker so the
-// tests can branch on type.
-type ProxyMarker = { kind: "next" } | { kind: "redirect"; url: URL };
+// NextResponse.redirect(url), then mutates the returned object's
+// `headers` via Headers.set(...). The mock returns a recognizable
+// marker plus a real Headers instance so the slice-123 hardening
+// header assertions exercise the real set() path.
+type ProxyMarker =
+  | { kind: "next"; headers: Headers }
+  | { kind: "redirect"; url: URL; headers: Headers };
 
 vi.mock("next/server", () => {
   return {
     NextResponse: {
-      next: (): ProxyMarker => ({ kind: "next" }),
-      redirect: (url: URL): ProxyMarker => ({ kind: "redirect", url }),
+      next: (): ProxyMarker => ({ kind: "next", headers: new Headers() }),
+      redirect: (url: URL): ProxyMarker => ({
+        kind: "redirect",
+        url,
+        headers: new Headers(),
+      }),
     },
   };
 });
@@ -34,6 +58,24 @@ import { proxy as proxyImpl } from "./proxy";
 // Wrap proxy() so the call site has the test marker type rather than
 // the production NextResponse type the mock substitutes for.
 const proxy = proxyImpl as unknown as (req: unknown) => ProxyMarker;
+
+// The five hardening header names slice 123 added to the proxy.
+// Matches the slice-087 middleware exactly (intentional duplication —
+// the Go middleware applies to atlas responses, the proxy applies to
+// Next.js responses, and the browser only ever sees the latter).
+const SECURITY_HEADERS = [
+  "strict-transport-security",
+  "x-content-type-options",
+  "x-frame-options",
+  "referrer-policy",
+  "content-security-policy-report-only",
+];
+
+function assertSecurityHeaders(res: ProxyMarker) {
+  for (const name of SECURITY_HEADERS) {
+    expect(res.headers.get(name), `missing ${name}`).not.toBeNull();
+  }
+}
 
 // Synthetic NextRequest. The proxy function only touches:
 //   request.nextUrl.pathname
@@ -129,5 +171,92 @@ describe("proxy (Next.js 16 request interceptor)", () => {
       }),
     );
     expect(res.kind).toBe("next");
+  });
+
+  // ---- Slice 123: /api/install-state is exempt (BFF for the
+  //      unauthenticated login page's first-install detection) ----
+  test("exempts /api/install-state (BFF for the public install-state endpoint)", () => {
+    const res = proxy(makeRequest({ pathname: "/api/install-state" }));
+    expect(res.kind).toBe("next");
+  });
+
+  test("exempts /api/install-state even when no session cookie is present", () => {
+    // The login page calls this BEFORE the user signs in. The exemption
+    // must fire before the cookie check, same as /api/version.
+    const res = proxy(
+      makeRequest({ pathname: "/api/install-state", cookies: {} }),
+    );
+    expect(res.kind).toBe("next");
+  });
+
+  test("does NOT exempt /api/install-state/anything (sub-route)", () => {
+    // Same P0-A1 discipline as /api/version: exact-equality, not
+    // startsWith. A future /api/install-state/bootstrap-token route
+    // (hypothetical) must NOT inherit the exemption.
+    const res = proxy(makeRequest({ pathname: "/api/install-state/anything" }));
+    expect(res.kind).toBe("redirect");
+  });
+
+  // ---- Slice 123: public static assets referenced from /login are
+  //      exempt — without this the proxy redirected requests for
+  //      /og-image.png etc. to /login, breaking the logo-render spec. ----
+  test.each([
+    ["/og-image.png"],
+    ["/twitter-card.png"],
+    ["/icon-192.png"],
+    ["/icon-512.png"],
+    ["/apple-touch-icon.png"],
+    ["/logo-light.svg"],
+    ["/logo-dark.svg"],
+  ])("exempts %s (public static asset on the login page)", (path) => {
+    const res = proxy(makeRequest({ pathname: path }));
+    expect(res.kind).toBe("next");
+  });
+
+  test("does NOT exempt /og-image-suffix.png (adjacent path that startsWith would leak)", () => {
+    // PUBLIC_STATIC_FILES is a Set with exact-equality lookup; an
+    // adjacent name still gates.
+    const res = proxy(makeRequest({ pathname: "/og-image-suffix.png" }));
+    expect(res.kind).toBe("redirect");
+  });
+
+  // ---- Slice 123: every emitted response carries the five hardening
+  //      headers. The atlas Go middleware (slice 087) only covers atlas
+  //      responses; the Next.js BFF needs its own header pass. ----
+  test("hardening headers are set on the next() path (public /login)", () => {
+    const res = proxy(makeRequest({ pathname: "/login" }));
+    expect(res.kind).toBe("next");
+    assertSecurityHeaders(res);
+    // Defensive: report-only mode ships, NOT enforced. An enforced CSP
+    // would block Next.js inline hydration scripts. Slice-087 D1 applies.
+    expect(res.headers.get("content-security-policy")).toBeNull();
+  });
+
+  test("hardening headers are set on the next() path (authed /dashboard)", () => {
+    const res = proxy(
+      makeRequest({
+        pathname: "/dashboard",
+        cookies: { sa_session_token: "test-bearer-fixture" },
+      }),
+    );
+    expect(res.kind).toBe("next");
+    assertSecurityHeaders(res);
+  });
+
+  test("hardening headers are set on the redirect() path (unauth -> /login)", () => {
+    // The redirect response also carries the headers — a browser
+    // following a 307 would otherwise see one un-headered hop. Defense
+    // in depth.
+    const res = proxy(makeRequest({ pathname: "/dashboard" }));
+    expect(res.kind).toBe("redirect");
+    assertSecurityHeaders(res);
+  });
+
+  test("hardening headers are set on the exempt static-asset path", () => {
+    // OG scrapers, favicon fetchers, etc. also get the hardening
+    // headers — defense in depth for the public surface.
+    const res = proxy(makeRequest({ pathname: "/og-image.png" }));
+    expect(res.kind).toBe("next");
+    assertSecurityHeaders(res);
   });
 });
