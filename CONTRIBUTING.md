@@ -154,6 +154,46 @@ If a commit was AI-assisted, also include a `Co-authored-by:` trailer naming the
 
 `just install-hooks` installs pre-commit on both the `pre-commit` and `pre-push` stages. The pre-push hook runs the full pre-commit suite against the about-to-push commits and `npm run lint -w web` for frontend ESLint. This catches the "prettier reformats `_STATUS.md` after the status-flip commit" pattern that produced 5 of the 62 CI failures observed on 2026-05-15. Emergency bypass remains available via `git push --no-verify`; do not use it casually — the recurring pre-commit-failure data is the reason this hook exists.
 
+### Action pinning
+
+Every `uses:` line in every workflow under `.github/workflows/` MUST reference a 40-character commit SHA, never a floating tag like `@v6` or `@main`. The shape is:
+
+```yaml
+uses: <owner>/<repo>@<40-char-sha> # <tag>
+```
+
+Example: `uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6`.
+
+**Why:** A tag-pinned action is exposed to the tag-jacking supply-chain attack class — an attacker who compromises an action's push permissions can move a floating tag like `v6` to point at malicious code, and every consumer pinned to `@v6` silently picks it up on the next CI run. SHA pins are immutable; the attacker cannot retroactively change what `@<sha>` resolves to. Slice 117 SHA-pinned `step-security/harden-runner`; slice 128 extended the discipline to every action in every workflow.
+
+**Adding a new action.** Look up the SHA for the tag you want to pin to:
+
+```sh
+gh api repos/<owner>/<repo>/git/refs/tags/<tag> --jq '.object.sha'
+```
+
+If `.object.type == "tag"` (annotated tag — common for `actions/attest-build-provenance`, `github/codeql-action`, and some others), dereference one more hop to get the commit:
+
+```sh
+gh api repos/<owner>/<repo>/git/tags/<sha-from-above> --jq '.object.sha'
+```
+
+Use the resulting 40-character commit SHA in the workflow with the `# <tag>` trailing comment so the next reader can see what version it corresponds to. Dependabot's `github-actions` ecosystem (configured in `.github/dependabot.yml`) understands this convention and proposes SHA-bump PRs that update both the SHA and the comment together when the upstream tag moves.
+
+**Updating an existing pin.** Re-run the same `gh api` lookup against the new tag, replace the SHA, update the `# <tag>` comment. Dependabot handles this for you on a weekly cadence; manual updates are only needed for out-of-cycle security bumps.
+
+**Sub-paths share a SHA.** Multiple `uses:` lines that refer to sub-paths of the same repo (e.g. `github/codeql-action/init`, `github/codeql-action/analyze`, `github/codeql-action/autobuild`) all use the same SHA from `repos/github/codeql-action/git/refs/tags/<tag>`. Pin all three to the same value.
+
+**CI guard.** The `actions-pin-check` job in `.github/workflows/ci.yml` runs `scripts/check-action-pins.sh` on every PR and every push to `main`. The job is **blocking** — a tag-pinned action fails the build and the merge button stays disabled. This is the slice-117/128 supply-chain mitigation; an informational-only check would silently allow regression.
+
+**Local repro.** Reproduce the CI check locally with:
+
+```sh
+bash scripts/check-action-pins.sh
+```
+
+Exit 0 = every `uses:` line is SHA-pinned; exit 1 = one or more tag-pinned actions (the failing lines are printed to stderr with file:line + a reconcile hint); exit 2 = environment misconfigured (workflows dir missing, no `.yml` files).
+
 ### Dependency hygiene
 
 CI runs through [StepSecurity Harden-Runner](https://github.com/step-security/harden-runner) in **audit mode** as the first step of every job in every workflow under `.github/workflows/` (slice 117). The action instruments the runner to record outbound network calls, file writes, and process executions — catching supply-chain attacks (malicious package post-installs, exfiltration, compromised actions) that PR-time analysis cannot see. Audit mode never fails a job; the data lands on the StepSecurity dashboard at `https://app.stepsecurity.io/github/mgoodric/security-atlas/actions/runs/<run-id>` (one URL per workflow run, surfaced via the "Action Security Insights" link in the GitHub Actions job summary). If you see new outbound destinations flagged in the workflow summary that you can't justify, surface them in the PR description; we treat unexplained egress as a review-blocker even while we're in audit mode. Block-mode promotion (with an `allowed-endpoints` allowlist derived from the audit baseline) is filed as slice 118, `not-ready`, gated on ~2 weeks of audit-mode data.

@@ -59,14 +59,14 @@ jobs:
           disable-sudo: true
 
       - name: Checkout (with full history for changelog)
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           # GoReleaser needs the full history + tags to render the conv-commit
           # changelog and to detect the previous tag.
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: "1.26"
           cache: true
@@ -94,7 +94,7 @@ jobs:
         # in the v3 protobuf-bundle format, which cosign v2 cannot verify.
         # v6 uses a non-cosign verify path. v6.4.0 is the latest v6 (2025-
         # 08); follow-on cosign-v3 slice bumps to v7 together.
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
         with:
           cosign-release: "v2.4.1"
 
@@ -104,7 +104,7 @@ jobs:
         # if present on PATH (current config does not declare sboms: yet —
         # leaving syft installed so a follow-up slice can enable without
         # changing the workflow).
-        uses: anchore/sbom-action/download-syft@v0
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
         continue-on-error: true
 
       - name: Run GoReleaser (validates config then builds + signs + publishes)
@@ -120,7 +120,7 @@ jobs:
         # (the `signs:` args set + consumer docs need a coordinated bump).
         # v6.4.0 is the latest v6; dependabot's actions group will surface
         # @v7 again, the follow-on slice consumes that flag.
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           version: "~> v2"
           args: release --clean
