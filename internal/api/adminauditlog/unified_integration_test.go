@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -517,5 +518,278 @@ func TestSlice124_RejectsCallerWithoutEligibleRole(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("status = %d; want %d (403 — caller is neither admin nor auditor/grc_engineer)",
 			rec.Code, http.StatusForbidden)
+	}
+}
+
+// ===== Slice 129 — actor_name LEFT JOIN extension =====
+
+// seedTenantUser inserts ONE row into `users` under tenant's GUC and returns
+// the user's id. The caller controls the id so the cross-tenant collision
+// test (`TestSlice129_ActorNameRLSIsolatedAcrossTenants`) can deliberately
+// seed the SAME UUID under both tenants and prove RLS keeps the JOIN clean.
+func seedTenantUser(t *testing.T, tenantID, userID uuid.UUID, email, displayName string) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := appPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("seed user begin: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", tenantID.String()); err != nil {
+		t.Fatalf("seed user set_config: %v", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO users (id, tenant_id, email, display_name) VALUES ($1, $2, $3, $4)`,
+		userID, tenantID, email, displayName,
+	); err != nil {
+		t.Fatalf("seed user INSERT: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("seed user commit: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = appPool.Exec(context.Background(),
+			`DELETE FROM users WHERE id = $1 AND tenant_id = $2`, userID, tenantID)
+	})
+}
+
+// seedMeAuditRowForUser inserts ONE me_audit_log row carrying user_id (which
+// becomes the actor_id projection in the unified read). Returns the row's
+// occurred_at. Cleanup happens via cleanupUnifiedTables when the caller pairs
+// this with that helper.
+func seedMeAuditRowForUser(t *testing.T, tenantID, userID uuid.UUID) time.Time {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := appPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("seed me-audit begin: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", tenantID.String()); err != nil {
+		t.Fatalf("seed me-audit set_config: %v", err)
+	}
+	var ts time.Time
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO me_audit_log (tenant_id, user_id, action) VALUES ($1, $2, 'profile.update') RETURNING occurred_at`,
+		tenantID, userID,
+	).Scan(&ts); err != nil {
+		t.Fatalf("seed me-audit INSERT: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("seed me-audit commit: %v", err)
+	}
+	return ts
+}
+
+// AC-3 (slice 129): an actor_id that resolves to a users row in the same
+// tenant carries the display_name in the response. The me_audit_log kind
+// projects user_id::text as actor_id, which matches the UUID regex and
+// joins cleanly.
+func TestSlice129_ActorNameResolvedWhenUserRowExists(t *testing.T) {
+	tenant := uuid.New()
+	user := uuid.New()
+	cleanupUnifiedTables(t, tenant)
+	seedTenantUser(t, tenant, user, "alice@test-example.test", "Alice Test")
+	seedMeAuditRowForUser(t, tenant, user)
+
+	from := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339)
+	to := time.Now().Add(1 * time.Hour).UTC().Format(time.RFC3339)
+	url := fmt.Sprintf("/v1/admin/audit-log/unified?from=%s&to=%s", from, to)
+
+	r := newUnifiedRouter(t, tenant, true)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
+	}
+
+	var resp adminauditlog.UnifiedListResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Find the me-kind row keyed to our seeded user_id and assert
+	// actor_name resolves.
+	var found *adminauditlog.UnifiedEntry
+	for i := range resp.Entries {
+		e := &resp.Entries[i]
+		if e.Kind == "me" && e.ActorID == user.String() {
+			found = e
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("seeded me_audit_log row not present in response; got %d entries", len(resp.Entries))
+	}
+	if found.ActorName == nil {
+		t.Fatalf("actor_name = nil; want \"Alice Test\" (users row exists for this actor_id)")
+	}
+	if *found.ActorName != "Alice Test" {
+		t.Errorf("actor_name = %q; want %q", *found.ActorName, "Alice Test")
+	}
+
+	// (The slice-124 meta-audit row for THIS query is written AFTER the
+	// aggregator read in the same transaction, so a single-query test
+	// cannot observe it in its own response. The AC-4
+	// `TestSlice129_ActorNameNilWhenNoUserRow` test below covers the
+	// no-users-row → actor_name=nil branch.)
+}
+
+// AC-4 (slice 129): a row whose actor_id has NO matching users row returns
+// actor_name=nil rather than failing. The decision-kind seed uses a literal
+// `'seeder'` for user_id — non-UUID — so the JOIN's regex rejects the cast
+// and the LEFT JOIN harmlessly yields no match.
+func TestSlice129_ActorNameNilWhenNoUserRow(t *testing.T) {
+	tenant := uuid.New()
+	cleanupUnifiedTables(t, tenant)
+	// decision_audit_log's seed uses user_id='seeder' (string literal,
+	// non-UUID). The JOIN regex rejects it and the row's actor_name
+	// remains nil.
+	seedUnifiedRow(t, tenant, "decision_audit_log")
+
+	from := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339)
+	to := time.Now().Add(1 * time.Hour).UTC().Format(time.RFC3339)
+	url := fmt.Sprintf("/v1/admin/audit-log/unified?from=%s&to=%s", from, to)
+
+	r := newUnifiedRouter(t, tenant, true)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
+	}
+
+	// Capture the raw body BEFORE decoding so the AC-4 wire-shape check
+	// below can inspect the literal JSON. json.NewDecoder consumes the
+	// underlying *bytes.Buffer.
+	rawBody := rec.Body.String()
+
+	var resp adminauditlog.UnifiedListResponse
+	if err := json.NewDecoder(strings.NewReader(rawBody)).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	var decision *adminauditlog.UnifiedEntry
+	for i := range resp.Entries {
+		if resp.Entries[i].Kind == "decision" {
+			decision = &resp.Entries[i]
+			break
+		}
+	}
+	if decision == nil {
+		t.Fatalf("decision-kind row missing from response")
+	}
+	if decision.ActorID != "seeder" {
+		t.Fatalf("seeded actor_id = %q; want %q (seedUnifiedRow contract)", decision.ActorID, "seeder")
+	}
+	if decision.ActorName != nil {
+		t.Errorf("actor_name = %q; want nil (no users row matches non-UUID actor_id)",
+			*decision.ActorName)
+	}
+
+	// AC-4 explicit wire-shape check: the JSON serialization MUST carry
+	// actor_name as JSON `null` (not absent, not empty string). This
+	// guards against an accidental `omitempty` regression that would
+	// hide the field on null callers.
+	if !strings.Contains(rawBody, `"actor_name":null`) {
+		t.Errorf("response body MUST carry \"actor_name\":null for unresolved actors; got: %s", rawBody)
+	}
+}
+
+// P0-A1 (slice 129): tenant isolation across the JOIN.
+//
+// Threat model row I (information disclosure): a LEFT JOIN onto `users`
+// could leak Tenant B's display names into Tenant A's audit-log response
+// if RLS on `users` were bypassed or if the JOIN itself were not
+// tenant-scoped.
+//
+// Test design: seed a user row ONLY in Tenant B (display="leaked-secret").
+// Then seed an audit row in Tenant A keyed to THE SAME UUID as Tenant B's
+// user. Tenant A's query MUST return actor_name=nil for that audit row,
+// because:
+//
+//   - RLS on `users` makes Tenant B's user invisible from Tenant A's
+//     session (the load-bearing contract).
+//   - The explicit `ON u.tenant_id = unified.tenant_id` predicate is
+//     defense-in-depth on top of RLS.
+//
+// If actor_name comes back as "leaked-secret", at least one of those
+// barriers has broken and the slice is a P0 cross-tenant info-disclosure
+// regression.
+//
+// (Note: `users.id` is a global PRIMARY KEY, so we cannot seed the same
+// UUID under both tenants simultaneously — the leak vector is "one
+// tenant's user UUID happens to appear as an actor_id in a different
+// tenant's audit row", which this test exercises directly.)
+func TestSlice129_ActorNameRLSIsolatedAcrossTenants(t *testing.T) {
+	tenantA := uuid.New()
+	tenantB := uuid.New()
+	tenantBUserID := uuid.New() // exists only in Tenant B
+
+	cleanupUnifiedTables(t, tenantA)
+	cleanupUnifiedTables(t, tenantB)
+	seedTenantUser(t, tenantB, tenantBUserID, "leaked@test-tenant-b.test", "leaked-secret")
+
+	// Audit row in Tenant A whose actor_id is Tenant B's user UUID.
+	// If the JOIN were not tenant-scoped (or if RLS on users were
+	// bypassed) Tenant A's response would carry "leaked-secret" as
+	// actor_name. That MUST NOT happen.
+	seedMeAuditRowForUser(t, tenantA, tenantBUserID)
+
+	from := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339)
+	to := time.Now().Add(1 * time.Hour).UTC().Format(time.RFC3339)
+	url := fmt.Sprintf("/v1/admin/audit-log/unified?from=%s&to=%s", from, to)
+
+	rA := newUnifiedRouter(t, tenantA, true)
+	recA := httptest.NewRecorder()
+	rA.ServeHTTP(recA, httptest.NewRequest(http.MethodGet, url, nil))
+	if recA.Code != http.StatusOK {
+		t.Fatalf("tenant A status = %d; body = %s", recA.Code, recA.Body.String())
+	}
+	var respA adminauditlog.UnifiedListResponse
+	if err := json.NewDecoder(recA.Body).Decode(&respA); err != nil {
+		t.Fatalf("decode A: %v", err)
+	}
+	var foundA *adminauditlog.UnifiedEntry
+	for i := range respA.Entries {
+		e := &respA.Entries[i]
+		if e.Kind == "me" && e.ActorID == tenantBUserID.String() {
+			foundA = e
+			break
+		}
+	}
+	if foundA == nil {
+		t.Fatalf("tenant A: seeded me_audit_log row missing from response (got %d entries)",
+			len(respA.Entries))
+	}
+	if foundA.ActorName != nil {
+		t.Errorf("CROSS-TENANT LEAK: tenant A's response carries actor_name=%q; want nil "+
+			"(the users row lives in tenant B only — RLS or the tenant-scoped JOIN MUST "+
+			"keep it hidden)",
+			*foundA.ActorName)
+	}
+
+	// Sanity check: as Tenant B, query for that user's id and confirm the
+	// users row IS visible (so the absence in Tenant A is a tenant-scope
+	// effect, not a missing-row artifact). We don't have an audit row in
+	// Tenant B (it's only in A), so the unified query returns no row for
+	// that actor_id; instead, probe users directly under Tenant B's GUC.
+	ctx := context.Background()
+	tx, err := appPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("tenant B probe begin: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", tenantB.String()); err != nil {
+		t.Fatalf("tenant B probe set_config: %v", err)
+	}
+	var displayName string
+	if err := tx.QueryRow(ctx,
+		`SELECT display_name FROM users WHERE id = $1`, tenantBUserID,
+	).Scan(&displayName); err != nil {
+		t.Fatalf("tenant B probe: should see own users row; got error: %v", err)
+	}
+	if displayName != "leaked-secret" {
+		t.Errorf("tenant B probe: display_name = %q; want %q (control: own-tenant read should work)",
+			displayName, "leaked-secret")
 	}
 }

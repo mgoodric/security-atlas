@@ -11,9 +11,12 @@
 // Filters live in the URL (`?from=...&to=...&actor=...&kind=foo,bar`)
 // so back/forward buttons and shared links restore the same view.
 //
-// `actor_name` is unresolved on the wire (see decisions log D1). Until the
-// slice-124 endpoint extension lands, the table shows the first 8 chars of
-// `actor_id`. Hovering displays the full UUID.
+// Slice 129: `actor_name` is now resolved on the wire by a backend LEFT
+// JOIN onto `users.display_name`. When present, the table shows the human
+// name (with the full actor_id available via tooltip for forensic
+// cross-reference). When absent (no users row, OR older deployment whose
+// backend predates slice 129 — P0-A6 graceful-degrade) the cell falls
+// back to the slice-125 truncated-UUID render.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -40,6 +43,7 @@ import {
   UnifiedEntry,
   UnifiedListResponse,
   fetchUnifiedAuditLog,
+  renderActorLabel,
 } from "@/lib/api/audit-log";
 
 // AUTO_LOAD_PAGE_LIMIT — after this many auto-loaded pages, switch to a
@@ -96,11 +100,10 @@ function formatLocal(s: string): string {
   }
 }
 
-function truncateActor(id: string): string {
-  if (!id) return "(none)";
-  if (id.length <= 8) return id;
-  return `${id.slice(0, 8)}…`;
-}
+// Slice 129: `renderActorLabel` lives in `lib/api/audit-log.ts` so the
+// vitest suite can lock the actor-cell render contract without a JSX
+// test environment. It chooses `actor_name` when present, falls back to
+// the truncated `actor_id` otherwise. See that module for details.
 
 type Filters = {
   from: string;
@@ -554,11 +557,18 @@ function Row({ row }: { row: UnifiedEntry }) {
         </TableCell>
         <TableCell>
           <span
+            // Title (tooltip) is the full actor_id so investigators can
+            // cross-reference back to other audit-log queries even when
+            // the cell renders the friendly display name. Slice 129.
             title={row.actor_id || "(empty)"}
-            className="font-mono text-xs"
+            className={
+              row.actor_name && row.actor_name.length > 0
+                ? "text-sm"
+                : "font-mono text-xs"
+            }
             data-testid="audit-log-row-actor"
           >
-            {truncateActor(row.actor_id)}
+            {renderActorLabel(row)}
           </span>
         </TableCell>
         <TableCell>

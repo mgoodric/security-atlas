@@ -6,7 +6,10 @@ import {
   AUDIT_LOG_KINDS,
   AuditLogFetchError,
   MAX_WINDOW_DAYS,
+  UnifiedEntry,
   buildUnifiedQuery,
+  renderActorLabel,
+  truncateActorId,
 } from "./audit-log";
 
 describe("buildUnifiedQuery", () => {
@@ -93,5 +96,93 @@ describe("AuditLogFetchError", () => {
     expect(err.status).toBe(403);
     expect(err.message).toMatch(/admin, auditor/);
     expect(err.name).toBe("AuditLogFetchError");
+  });
+});
+
+// Helper: build a minimal UnifiedEntry varying only the fields the actor
+// renderer cares about. The other fields are stubbed so the assertions
+// stay focused on the cell-text contract.
+function entry(actor_id: string, actor_name?: string | null): UnifiedEntry {
+  return {
+    occurred_at: "2026-05-18T00:00:00.000Z",
+    actor_id,
+    actor_name,
+    tenant_id: "00000000-0000-0000-0000-000000000000",
+    kind: "me",
+    target_type: "user",
+    target_id: "00000000-0000-0000-0000-000000000000",
+    action: "profile.update",
+    row_id: "00000000-0000-0000-0000-000000000000",
+    payload_json: {},
+  };
+}
+
+describe("truncateActorId (slice 129 fallback)", () => {
+  test("empty actor_id renders '(none)'", () => {
+    expect(truncateActorId("")).toBe("(none)");
+  });
+  test("short ids pass through unchanged", () => {
+    expect(truncateActorId("abc")).toBe("abc");
+    expect(truncateActorId("12345678")).toBe("12345678");
+  });
+  test("UUID-length ids truncate to first 8 chars + ellipsis", () => {
+    expect(truncateActorId("00000000-0000-0000-0000-000000001111")).toBe(
+      "00000000…",
+    );
+  });
+});
+
+describe("renderActorLabel (slice 129)", () => {
+  test("prefers actor_name when the backend resolved one", () => {
+    expect(
+      renderActorLabel(
+        entry("00000000-0000-0000-0000-000000001111", "Alice Example"),
+      ),
+    ).toBe("Alice Example");
+  });
+
+  test("falls back to truncated actor_id when actor_name is null (no users row matches)", () => {
+    expect(
+      renderActorLabel(entry("00000000-0000-0000-0000-000000001111", null)),
+    ).toBe("00000000…");
+  });
+
+  test("falls back to truncated actor_id when actor_name is undefined (P0-A6 — older deployment)", () => {
+    // Older deployments whose backend predates slice 129 do NOT serve
+    // actor_name. The wire shape is then `undefined` (field absent).
+    // The page MUST gracefully degrade rather than render "undefined"
+    // or throw.
+    expect(
+      renderActorLabel(entry("00000000-0000-0000-0000-000000001111")),
+    ).toBe("00000000…");
+  });
+
+  test("treats empty-string actor_name as a no-resolve and falls back", () => {
+    // The schema-level default `users.display_name` is `''`. A user row
+    // that was never edited would surface as `""` here; rendering an
+    // empty string in the cell would be operator-hostile, so the
+    // renderer treats it as 'no-resolve' and falls back.
+    expect(
+      renderActorLabel(entry("00000000-0000-0000-0000-000000001111", "")),
+    ).toBe("00000000…");
+  });
+
+  test("non-UUID actor_id with no actor_name renders short literal verbatim", () => {
+    // Credential-only / system actors carry literals like 'key_xxx' or
+    // 'seeder' as actor_id. truncateActorId returns the literal when
+    // its length is <= 8.
+    expect(renderActorLabel(entry("seeder", null))).toBe("seeder");
+  });
+});
+
+describe("UnifiedEntry shape (slice 129)", () => {
+  test("actor_name is typed as optional string | null (forward-compat with older backends)", () => {
+    // Compile-time assertion: all three forms must satisfy the type.
+    const withName: UnifiedEntry = entry("uuid", "Alice");
+    const withNullName: UnifiedEntry = entry("uuid", null);
+    const withoutField: UnifiedEntry = entry("uuid");
+    expect(withName.actor_name).toBe("Alice");
+    expect(withNullName.actor_name).toBeNull();
+    expect(withoutField.actor_name).toBeUndefined();
   });
 });
