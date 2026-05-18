@@ -46,14 +46,15 @@ export const DEMO_AUDIT_PERIOD_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0001";
 // that row.
 export const TEST_BEARER = "test-bearer-e2e";
 
-// The five fixture names the harness understands. Each maps to one
+// The six fixture names the harness understands. Each maps to one
 // per-spec SQL file under fixtures/e2e/.
 export type FixtureName =
   | "dashboard"
   | "control-detail"
   | "audit-workspace"
   | "risk-hierarchy"
-  | "admin-bootstrap";
+  | "admin-bootstrap"
+  | "audit-log";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 
