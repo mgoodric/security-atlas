@@ -14,16 +14,16 @@ Atlas emits OTLP traces + metrics + Go runtime telemetry to a maintainer-configu
 
 Set these env-vars on the atlas process (`deploy/docker/.env` for docker-compose, the Helm chart `values.yaml` for Kubernetes):
 
-| Env var                       | Required | Default       | Purpose                                                                 |
-| ----------------------------- | -------- | ------------- | ----------------------------------------------------------------------- |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Yes      | unset = no-op | OTLP receiver URL (e.g. `http://otel-collector:4317`)                   |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | No       | `grpc`        | `grpc` or `http/protobuf`                                               |
-| `OTEL_SERVICE_NAME`           | No       | `security-atlas` | Resource attribute `service.name`                                       |
-| `OTEL_RESOURCE_ATTRIBUTES`    | No       | none          | `key=value,key=value` resource attributes                               |
-| `OTEL_TRACES_SAMPLER`         | No       | `parentbased_traceidratio` | One of the OTel-standard sampler names                                  |
-| `OTEL_TRACES_SAMPLER_ARG`     | No       | `0.1`         | Sampler ratio (10% by default)                                          |
-| `ATLAS_METRICS_FALLBACK_ENABLE` | No     | `false`       | Opt-in: serve Prometheus `/metrics` for scrape (otherwise OTLP-only)    |
-| `ATLAS_DEPLOYMENT_ENVIRONMENT` | No      | unset         | Sets `deployment.environment.name` resource attribute                   |
+| Env var                         | Required | Default                    | Purpose                                                              |
+| ------------------------------- | -------- | -------------------------- | -------------------------------------------------------------------- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`   | Yes      | unset = no-op              | OTLP receiver URL (e.g. `http://otel-collector:4317`)                |
+| `OTEL_EXPORTER_OTLP_PROTOCOL`   | No       | `grpc`                     | `grpc` or `http/protobuf`                                            |
+| `OTEL_SERVICE_NAME`             | No       | `security-atlas`           | Resource attribute `service.name`                                    |
+| `OTEL_RESOURCE_ATTRIBUTES`      | No       | none                       | `key=value,key=value` resource attributes                            |
+| `OTEL_TRACES_SAMPLER`           | No       | `parentbased_traceidratio` | One of the OTel-standard sampler names                               |
+| `OTEL_TRACES_SAMPLER_ARG`       | No       | `0.1`                      | Sampler ratio (10% by default)                                       |
+| `ATLAS_METRICS_FALLBACK_ENABLE` | No       | `false`                    | Opt-in: serve Prometheus `/metrics` for scrape (otherwise OTLP-only) |
+| `ATLAS_DEPLOYMENT_ENVIRONMENT`  | No       | unset                      | Sets `deployment.environment.name` resource attribute                |
 
 ### Verify
 
@@ -53,11 +53,11 @@ Atlas's in-app audit-log tables (`decision_audit_log`, `evidence_audit_log`, `ex
 
 ### Enable
 
-| Env var                          | Required when sink active | Default                                      | Purpose                                                                              |
-| -------------------------------- | ------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `ATLAS_AUDIT_SINK_PATH`          | Yes (to activate)         | unset = no-op (sink disabled)                | JSONL file path (e.g. `/var/log/security-atlas/audit-log.jsonl`)                     |
-| `ATLAS_AUDIT_SINK_HMAC_KEY`      | Yes (when path is set)    | unset = atlas refuses to boot                | HMAC secret (>= 32 bytes; treat as a deployment secret, NOT in the env file plaintext) |
-| `ATLAS_AUDIT_SINK_BUFFER_SIZE`   | No                        | `10000`                                      | In-memory channel capacity before overflow lands in `audit_sink_failures` table      |
+| Env var                        | Required when sink active | Default                       | Purpose                                                                                |
+| ------------------------------ | ------------------------- | ----------------------------- | -------------------------------------------------------------------------------------- |
+| `ATLAS_AUDIT_SINK_PATH`        | Yes (to activate)         | unset = no-op (sink disabled) | JSONL file path (e.g. `/var/log/security-atlas/audit-log.jsonl`)                       |
+| `ATLAS_AUDIT_SINK_HMAC_KEY`    | Yes (when path is set)    | unset = atlas refuses to boot | HMAC secret (>= 32 bytes; treat as a deployment secret, NOT in the env file plaintext) |
+| `ATLAS_AUDIT_SINK_BUFFER_SIZE` | No                        | `10000`                       | In-memory channel capacity before overflow lands in `audit_sink_failures` table        |
 
 **Opt-in default**: when `ATLAS_AUDIT_SINK_PATH` is unset, the sink is a no-op. Atlas continues to write the in-app rows; no external fan-out happens.
 
@@ -80,7 +80,7 @@ services:
 
   vector:
     image: timberio/vector:latest-alpine
-    user: "1003:1003"            # OWNED-BY user — atlas writes, vector ships
+    user: "1003:1003" # OWNED-BY user — atlas writes, vector ships
     volumes:
       - audit-sink:/var/log/security-atlas:ro
     # ... vector config that tails the JSONL + ships to your log backend
