@@ -21,23 +21,23 @@ different root cause, captured in D2.
 
 **Investigation (file-by-file read on `main` at commit `2f7817b`):**
 
-| Artifact | Present on main? | Evidence |
-| --- | --- | --- |
-| `internal/api/calendar/handler.go` | YES (455 LOC) | `Handler.RegisterRoutes` mounts `GET /v1/calendar`, `GET /v1/calendar.ics`, `POST /v1/calendar/subscription` |
-| `internal/api/calendar/store.go` | YES (123 LOC) | `Store.ListEvents` opens a tenant-GUC tx, calls sqlc-generated `ListCalendarEvents` |
-| `internal/api/calendar/ics.go` | YES (153 LOC) | `renderICS` hand-rolled RFC 5545 encoder |
-| `internal/api/calendar/handler_test.go` | YES (138 LOC) | unit coverage for `parseWindow` / `normalizeTypeFilter` / `calendarNameFor` |
-| `internal/api/calendar/ics_test.go` | YES (171 LOC) | unit coverage for ICS envelope + escaping + line folding |
-| `internal/api/calendar/integration_test.go` | YES (520 LOC, `//go:build integration`) | RLS isolation + cadence math + truncation + ICS feed shape + ICS auth |
-| `internal/db/queries/calendar.sql` | YES (221 LOC) | the four-way `UNION ALL` over `audit_periods` + `exceptions` + `policies` + `controls` + `control_evaluations` |
-| `internal/db/dbx/calendar.sql.go` | YES (sqlc-generated) | `ListCalendarEventsParams` / `ListCalendarEventsRow` |
-| `internal/api/httpserver.go` route registration | YES (line 616-620) | `calendarH.RegisterRoutes(root)` |
-| `internal/api/httpserver.go` ICS exemption | YES (line 141 + 160) | `/v1/calendar.ics` exempt from upstream bearer + authz middleware (handler does inline scope-restricted auth) |
-| `web/app/(authed)/calendar/page.tsx` | YES | full client component with agenda + month-grid + ICS subscribe button |
-| `web/app/api/calendar/route.ts` | YES | BFF proxy reads `SESSION_COOKIE`, forwards to `/v1/calendar` |
-| `web/app/api/calendar/subscription/route.ts` | YES | BFF proxy mints ICS URL token via `/v1/calendar/subscription` |
-| `web/lib/api.ts` calendar helpers | YES (lines 1554-1647) | `getCalendarEvents` / `fetchCalendarEvents` / `createCalendarSubscription` / wire types |
-| Go unit tests | PASS | `go test ./internal/api/calendar/...` → `ok 0.332s` (10 cases) |
+| Artifact                                        | Present on main?                        | Evidence                                                                                                       |
+| ----------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `internal/api/calendar/handler.go`              | YES (455 LOC)                           | `Handler.RegisterRoutes` mounts `GET /v1/calendar`, `GET /v1/calendar.ics`, `POST /v1/calendar/subscription`   |
+| `internal/api/calendar/store.go`                | YES (123 LOC)                           | `Store.ListEvents` opens a tenant-GUC tx, calls sqlc-generated `ListCalendarEvents`                            |
+| `internal/api/calendar/ics.go`                  | YES (153 LOC)                           | `renderICS` hand-rolled RFC 5545 encoder                                                                       |
+| `internal/api/calendar/handler_test.go`         | YES (138 LOC)                           | unit coverage for `parseWindow` / `normalizeTypeFilter` / `calendarNameFor`                                    |
+| `internal/api/calendar/ics_test.go`             | YES (171 LOC)                           | unit coverage for ICS envelope + escaping + line folding                                                       |
+| `internal/api/calendar/integration_test.go`     | YES (520 LOC, `//go:build integration`) | RLS isolation + cadence math + truncation + ICS feed shape + ICS auth                                          |
+| `internal/db/queries/calendar.sql`              | YES (221 LOC)                           | the four-way `UNION ALL` over `audit_periods` + `exceptions` + `policies` + `controls` + `control_evaluations` |
+| `internal/db/dbx/calendar.sql.go`               | YES (sqlc-generated)                    | `ListCalendarEventsParams` / `ListCalendarEventsRow`                                                           |
+| `internal/api/httpserver.go` route registration | YES (line 616-620)                      | `calendarH.RegisterRoutes(root)`                                                                               |
+| `internal/api/httpserver.go` ICS exemption      | YES (line 141 + 160)                    | `/v1/calendar.ics` exempt from upstream bearer + authz middleware (handler does inline scope-restricted auth)  |
+| `web/app/(authed)/calendar/page.tsx`            | YES                                     | full client component with agenda + month-grid + ICS subscribe button                                          |
+| `web/app/api/calendar/route.ts`                 | YES                                     | BFF proxy reads `SESSION_COOKIE`, forwards to `/v1/calendar`                                                   |
+| `web/app/api/calendar/subscription/route.ts`    | YES                                     | BFF proxy mints ICS URL token via `/v1/calendar/subscription`                                                  |
+| `web/lib/api.ts` calendar helpers               | YES (lines 1554-1647)                   | `getCalendarEvents` / `fetchCalendarEvents` / `createCalendarSubscription` / wire types                        |
+| Go unit tests                                   | PASS                                    | `go test ./internal/api/calendar/...` → `ok 0.332s` (10 cases)                                                 |
 
 **Conclusion.** Slice 094 shipped **everything backend-side**. The slice
 148 doc's narrative ("backend aggregation endpoints appear to not have
