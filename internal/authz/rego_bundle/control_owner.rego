@@ -37,6 +37,27 @@ control_owner_readable_resources := {
     # enforces ownership by matching control.owner_role to the
     # credential's OwnerRoles; rego only gates the resource-type touch.
     "walkthroughs",
+    # Slice 148: compliance calendar is cross-business by design
+    # (slice 094 AC-9: "accessible to all signed-in users, no admin
+    # gate"). Control owners specifically need to see when their own
+    # periodic-review controls are due — the calendar surfaces that
+    # cadence (slice 094 AC-2b "next_due_at = last_evaluated_at +
+    # cadence"). RLS keeps the read tenant-scoped. The companion
+    # `POST /v1/calendar/subscription` write is admitted by a
+    # separate rule further down so a control owner can mint their
+    # own ICS URL token.
+    "calendar",
+}
+
+# Slice 148: control owner can mint their own ICS subscription URL via
+# POST /v1/calendar/subscription. See viewer.rego for the design
+# rationale; the same narrow path predicate keeps the write surface
+# bound to the subscription mint and nothing else.
+allow if {
+    has_role("control_owner")
+    input.action == "write"
+    input.resource.type == "calendar"
+    input.request.path == "/v1/calendar/subscription"
 }
 
 control_owner_writable_resources := {
