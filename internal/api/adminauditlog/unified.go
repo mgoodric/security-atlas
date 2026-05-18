@@ -59,9 +59,19 @@ const (
 )
 
 // UnifiedEntry is the wire shape for one row of the response.
+//
+// ActorName (slice 129) is the human-readable display name resolved via
+// LEFT JOIN against `users.display_name` under the caller's tenant
+// context (RLS enforced). It is `null` on the wire when no users row
+// matches the actor_id — the normal case for bootstrap-key callers,
+// credential-only callers, and system actors (whose actor_id is a
+// credential id like "key_foo" or a literal like "seeder", not a UUID).
+// Consumers MUST tolerate `null`; the frontend falls back to a truncated
+// actor_id render.
 type UnifiedEntry struct {
 	OccurredAt  time.Time       `json:"occurred_at"`
 	ActorID     string          `json:"actor_id"`
+	ActorName   *string         `json:"actor_name"`
 	TenantID    uuid.UUID       `json:"tenant_id"`
 	Kind        string          `json:"kind"`
 	TargetType  string          `json:"target_type"`
@@ -222,6 +232,7 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 		out = append(out, UnifiedEntry{
 			OccurredAt:  e.OccurredAt,
 			ActorID:     e.ActorID,
+			ActorName:   e.ActorName,
 			TenantID:    e.TenantID,
 			Kind:        string(e.Kind),
 			TargetType:  e.TargetType,

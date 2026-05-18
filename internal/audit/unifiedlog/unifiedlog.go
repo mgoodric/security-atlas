@@ -100,9 +100,17 @@ func IsCanonical(k Kind) bool {
 // independently unique and the kind discriminator separates branches), which
 // is load-bearing for cursor pagination's strict-greater-than tiebreaker
 // when many rows share the same occurred_at.
+//
+// ActorName (slice 129) is the human-readable display name resolved by
+// LEFT JOIN against `users.display_name`. It is nil when no users row
+// matches the actor_id — this is the normal case for bootstrap-key
+// callers and credential-only callers (their actor_id is a credential id
+// like "key_foo" rather than a UUID, or a system actor like "seeder").
+// The wire shape exposes nil as JSON `null`; consumers must tolerate it.
 type Entry struct {
 	OccurredAt  time.Time       `json:"occurred_at"`
 	ActorID     string          `json:"actor_id"`
+	ActorName   *string         `json:"actor_name"`
 	TenantID    uuid.UUID       `json:"tenant_id"`
 	Kind        Kind            `json:"kind"`
 	TargetType  string          `json:"target_type"`
@@ -200,6 +208,7 @@ func Query(ctx context.Context, q *dbx.Queries, params QueryParams) ([]Entry, *C
 		entries = append(entries, Entry{
 			OccurredAt:  r.OccurredAt.Time,
 			ActorID:     r.ActorID,
+			ActorName:   r.ActorName,
 			TenantID:    r.TenantID.Bytes,
 			Kind:        Kind(r.Kind),
 			TargetType:  r.TargetType,

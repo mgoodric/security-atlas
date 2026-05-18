@@ -1584,6 +1584,23 @@ type Querier interface {
 	// Limit:
 	//   limit_n is set to 1001 by the caller for a 1000-row page so the handler can
 	//   detect "more available" without an extra round-trip (slice-062 pattern).
+	// Slice 129 — LEFT JOIN onto users to resolve human-readable actor_name.
+	//
+	// The JOIN is guarded two ways:
+	//   1. ON u.tenant_id = unified.tenant_id  — defense-in-depth tenant scope on
+	//      the JOIN itself, on top of the users-table RLS policy. RLS is the
+	//      load-bearing contract (atlas_app role); the explicit predicate is a
+	//      second leg so an accidental ROLE elevation cannot leak cross-tenant
+	//      names through this query.
+	//   2. unified.actor_id matches a UUID literal — many actor_id values are NOT
+	//      UUIDs (evidence kind uses credential_id like 'key_foo'; me kind uses
+	//      user_id::text which IS a UUID; system actors use 'seeder' etc.).
+	//      Casting a non-UUID string to ::uuid raises an error inside Postgres,
+	//      so the JOIN predicate first rejects non-UUID actor_ids via a regex.
+	//
+	// Rows whose actor_id does not resolve to a users row emit actor_name=NULL
+	// (the wire shape tolerates null — bootstrap-key + credential-only callers
+	// have no users row).
 	ListUnifiedAuditLog(ctx context.Context, arg ListUnifiedAuditLogParams) ([]ListUnifiedAuditLogRow, error)
 	// AC-4: unified upcoming-items rollup. ONE UNION ALL across the four
 	// sources — expiring exceptions (021), policy-ack expirations (023), vendor

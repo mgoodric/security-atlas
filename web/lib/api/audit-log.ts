@@ -4,11 +4,15 @@
 //   * `UnifiedEntry`        — one row of the audit-log union
 //   * `UnifiedListResponse` — wrapper with `entries` + opaque `next_cursor`
 //
-// `actor_id` is included verbatim. Per the slice-125 decisions log (D1), the
-// frontend renders a truncated 8-char prefix because the slice-124 endpoint
-// does NOT join the actor row's display name. A spillover slice (filed
-// alongside this slice) extends slice 124 with `actor_name` so the page can
-// upgrade to the human-readable label without a per-row N+1 client lookup.
+// `actor_id` is included verbatim.
+//
+// Slice 129: `actor_name` is the human-readable display name resolved via
+// LEFT JOIN against `users.display_name` on the backend. It is `null` when
+// no users row matches the actor_id (bootstrap-key callers, credential-only
+// callers, system actors like 'seeder'). The page renders `actor_name` when
+// present and falls back to the truncated `actor_id` otherwise. The field is
+// also `undefined` for older deployments that predate slice 129 — the page
+// MUST gracefully degrade to the actor_id truncation in that case (P0-A6).
 //
 // `kind` is the canonical 9-value enum from the platform side
 // (see `internal/audit/unifiedlog/Kind`); the union is kept loose (`string`)
@@ -32,6 +36,15 @@ export type AuditLogKind = (typeof AUDIT_LOG_KINDS)[number];
 export type UnifiedEntry = {
   occurred_at: string; // RFC3339
   actor_id: string;
+  // Slice 129: human-readable display name resolved via LEFT JOIN onto
+  // `users.display_name` under the caller's tenant context (RLS enforced).
+  // - `string` — a users row matched the actor_id (the actor is a real user).
+  // - `null`   — backend served the field but no users row matched (the
+  //              normal case for credential-only / bootstrap-key / system
+  //              actors whose actor_id is not a UUID or does not resolve).
+  // - `undefined` — backend predates slice 129 (older deployment); the page
+  //                 falls back to the truncated actor_id (P0-A6).
+  actor_name?: string | null;
   tenant_id: string;
   kind: string; // typically AuditLogKind, but kept loose for forward-compat
   target_type: string;
@@ -117,3 +130,34 @@ export class AuditLogFetchError extends Error {
  * same cap in the date-picker; this constant is the single source of truth.
  */
 export const MAX_WINDOW_DAYS = 90;
+
+/**
+ * truncateActorId returns the first 8 characters of an actor identifier
+ * followed by an ellipsis. The page uses this as the cell-text fallback
+ * when no `actor_name` is available. Exported so the vitest suite can
+ * lock the truncation contract.
+ */
+export function truncateActorId(id: string): string {
+  if (!id) return "(none)";
+  if (id.length <= 8) return id;
+  return `${id.slice(0, 8)}…`;
+}
+
+/**
+ * renderActorLabel chooses what to render in the actor column for one
+ * audit-log row. Slice 129 contract:
+ *
+ *   - When the backend resolved a `users` row, return the display name
+ *     (`actor_name`).
+ *   - Otherwise (no users row, or older deployment whose backend predates
+ *     slice 129 and never serves the field — P0-A6 graceful-degrade)
+ *     fall back to `truncateActorId(actor_id)`.
+ *
+ * `null` and `undefined` are treated identically — both mean "no resolved
+ * name available; render the actor_id fallback".
+ */
+export function renderActorLabel(row: UnifiedEntry): string {
+  const name = row.actor_name;
+  if (name && name.length > 0) return name;
+  return truncateActorId(row.actor_id);
+}

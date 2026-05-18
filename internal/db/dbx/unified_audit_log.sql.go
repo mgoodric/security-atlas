@@ -161,30 +161,35 @@ WITH unified AS (
     FROM walkthrough_audit_log w
 )
 SELECT
-    occurred_at,
-    actor_id,
-    tenant_id,
-    kind,
-    target_type,
-    target_id,
-    action,
-    row_id,
-    payload_json
+    unified.occurred_at,
+    unified.actor_id,
+    unified.tenant_id,
+    unified.kind,
+    unified.target_type,
+    unified.target_id,
+    unified.action,
+    unified.row_id,
+    unified.payload_json,
+    u.display_name AS actor_name
 FROM unified
-WHERE occurred_at >= $1::timestamptz
-  AND occurred_at <  $2::timestamptz
-  AND ($3::text = '' OR actor_id = $3::text)
+LEFT JOIN users u
+  ON u.tenant_id = unified.tenant_id
+ AND unified.actor_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+ AND u.id = unified.actor_id::uuid
+WHERE unified.occurred_at >= $1::timestamptz
+  AND unified.occurred_at <  $2::timestamptz
+  AND ($3::text = '' OR unified.actor_id = $3::text)
   AND ($4::text = ''
-       OR kind = ANY(string_to_array($4::text, ',')))
+       OR unified.kind = ANY(string_to_array($4::text, ',')))
   -- Cursor: occurred_at strictly less, OR same occurred_at and a strictly-greater
   -- (kind, row_id) tuple. row_id is the underlying audit-log row's UUID PK and
   -- is GUARANTEED unique per row across the UNION (because each base table's PK
   -- is independently unique and the kind discriminator separates branches).
   AND ($5::timestamptz IS NULL
-       OR occurred_at < $5::timestamptz
-       OR (occurred_at = $5::timestamptz
-           AND (kind, row_id::text) > ($6::text, $7::text)))
-ORDER BY occurred_at DESC, kind ASC, row_id ASC
+       OR unified.occurred_at < $5::timestamptz
+       OR (unified.occurred_at = $5::timestamptz
+           AND (unified.kind, unified.row_id::text) > ($6::text, $7::text)))
+ORDER BY unified.occurred_at DESC, unified.kind ASC, unified.row_id ASC
 LIMIT $8::integer
 `
 
@@ -209,6 +214,7 @@ type ListUnifiedAuditLogRow struct {
 	Action      string             `json:"action"`
 	RowID       pgtype.UUID        `json:"row_id"`
 	PayloadJson []byte             `json:"payload_json"`
+	ActorName   *string            `json:"actor_name"`
 }
 
 // Slice 124 — unified audit-log aggregation query.
@@ -240,6 +246,24 @@ type ListUnifiedAuditLogRow struct {
 //
 //	limit_n is set to 1001 by the caller for a 1000-row page so the handler can
 //	detect "more available" without an extra round-trip (slice-062 pattern).
+//
+// Slice 129 — LEFT JOIN onto users to resolve human-readable actor_name.
+//
+// The JOIN is guarded two ways:
+//  1. ON u.tenant_id = unified.tenant_id  — defense-in-depth tenant scope on
+//     the JOIN itself, on top of the users-table RLS policy. RLS is the
+//     load-bearing contract (atlas_app role); the explicit predicate is a
+//     second leg so an accidental ROLE elevation cannot leak cross-tenant
+//     names through this query.
+//  2. unified.actor_id matches a UUID literal — many actor_id values are NOT
+//     UUIDs (evidence kind uses credential_id like 'key_foo'; me kind uses
+//     user_id::text which IS a UUID; system actors use 'seeder' etc.).
+//     Casting a non-UUID string to ::uuid raises an error inside Postgres,
+//     so the JOIN predicate first rejects non-UUID actor_ids via a regex.
+//
+// Rows whose actor_id does not resolve to a users row emit actor_name=NULL
+// (the wire shape tolerates null — bootstrap-key + credential-only callers
+// have no users row).
 func (q *Queries) ListUnifiedAuditLog(ctx context.Context, arg ListUnifiedAuditLogParams) ([]ListUnifiedAuditLogRow, error) {
 	rows, err := q.db.Query(ctx, listUnifiedAuditLog,
 		arg.FromTs,
@@ -268,6 +292,7 @@ func (q *Queries) ListUnifiedAuditLog(ctx context.Context, arg ListUnifiedAuditL
 			&i.Action,
 			&i.RowID,
 			&i.PayloadJson,
+			&i.ActorName,
 		); err != nil {
 			return nil, err
 		}
