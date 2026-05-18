@@ -38,6 +38,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -181,13 +182,35 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 			// the request log) when needed.
 			uID = uuid.Nil
 		}
-		return q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
+		if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
 			TenantID: pgtype.UUID{Bytes: tenantID, Valid: true},
 			UserID:   pgtype.UUID{Bytes: uID, Valid: true},
 			Action:   metaAuditAction,
 			Before:   paramsBlob,
 			After:    resultBlob,
+		}); err != nil {
+			return err
+		}
+		// Slice 126: fan out the meta-audit row to the external sink.
+		// InsertMeAuditLog uses default gen_random_uuid() at the DB layer,
+		// so we don't have the row's id locally; sink RowID gets a fresh
+		// UUID — it is a sink-side correlation id, not the DB row id.
+		sinkPayload, _ := json.Marshal(map[string]any{
+			"before": json.RawMessage(paramsBlob),
+			"after":  json.RawMessage(resultBlob),
 		})
+		sink.EmitDefault(ctx, unifiedlog.Entry{
+			OccurredAt:  time.Now().UTC(),
+			ActorID:     userIdentifier,
+			TenantID:    tenantID,
+			Kind:        unifiedlog.KindMe,
+			TargetType:  "user",
+			TargetID:    uID.String(),
+			Action:      metaAuditAction,
+			RowID:       uuid.New(),
+			PayloadJSON: sinkPayload,
+		})
+		return nil
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "unified audit-log: "+err.Error())

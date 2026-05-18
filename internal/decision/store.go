@@ -26,6 +26,7 @@ package decision
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -37,6 +38,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/audit/sink"
+	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -841,8 +844,9 @@ func loadLinkage(ctx context.Context, q *dbx.Queries, tenantID, decisionID uuid.
 
 // writeAudit appends one decisions_audit row inside the caller's tx.
 func (s *Store) writeAudit(ctx context.Context, q *dbx.Queries, tenantID, decisionID uuid.UUID, action, actor, detail string) error {
+	auditID := uuid.New()
 	if _, err := q.WriteDecisionAudit(ctx, dbx.WriteDecisionAuditParams{
-		ID:         pgUUID(uuid.New()),
+		ID:         pgUUID(auditID),
 		TenantID:   pgUUID(tenantID),
 		DecisionID: pgUUID(decisionID),
 		Action:     action,
@@ -851,6 +855,19 @@ func (s *Store) writeAudit(ctx context.Context, q *dbx.Queries, tenantID, decisi
 	}); err != nil {
 		return fmt.Errorf("write decision audit (%s): %w", action, err)
 	}
+	// Slice 126: fan out the audit row to the external sink.
+	payload, _ := json.Marshal(map[string]any{"detail": detail})
+	sink.EmitDefault(ctx, unifiedlog.Entry{
+		OccurredAt:  time.Now().UTC(),
+		ActorID:     actor,
+		TenantID:    tenantID,
+		Kind:        unifiedlog.KindDecision,
+		TargetType:  "decision",
+		TargetID:    decisionID.String(),
+		Action:      action,
+		RowID:       auditID,
+		PayloadJSON: payload,
+	})
 	return nil
 }
 

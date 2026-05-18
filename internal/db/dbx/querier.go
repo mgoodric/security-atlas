@@ -111,6 +111,10 @@ type Querier interface {
 	CountRiskControlLinks(ctx context.Context, arg CountRiskControlLinksParams) (int64, error)
 	CountSCFAnchorsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
 	CountScopeCells(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	// Return the row count for the caller's tenant. Used by the slice 126
+	// integration test to assert exactly-1 fallback row after the 10001-record
+	// backpressure scenario.
+	CountSinkFailures(ctx context.Context) (int64, error)
 	// Used by the /v1/me/notifications response to surface the unread count
 	// in the page header.
 	CountUnreadNotificationsForUser(ctx context.Context, arg CountUnreadNotificationsForUserParams) (int64, error)
@@ -1377,6 +1381,10 @@ type Querier interface {
 	// Sample populations attached to one audit period. The slice-026
 	// populations table carries audit_period_id (slice 028 added the FK).
 	ListPopulationsForPeriod(ctx context.Context, arg ListPopulationsForPeriodParams) ([]ListPopulationsForPeriodRow, error)
+	// The last N failures for the caller's tenant, newest first. Used by
+	// ops paths (a future admin UI surface) and by the integration test
+	// asserting projected-Entry fields landed correctly.
+	ListRecentSinkFailures(ctx context.Context, limit int32) ([]AuditSinkFailure, error)
 	// AC-2. Reverse traversal — given an SCF anchor, return every framework
 	// requirement it satisfies, joined to framework_versions + frameworks so
 	// callers see the full natural key (slug + version + code) in one
@@ -1946,6 +1954,23 @@ type Querier interface {
 	// Every sample pull writes one row here. The seed -> sample_id mapping
 	// captured in (seed, sample_id) is the re-audit trail (AC-6).
 	WriteSampleAuditLog(ctx context.Context, arg WriteSampleAuditLogParams) (SampleAuditLog, error)
+	// Slice 126 — audit_sink_failures queries.
+	//
+	// The fallback ledger for the external audit-log sink. Writes happen
+	// from the sink writer goroutine (internal/audit/sink) when either
+	// the bounded channel rejects an Emit OR the file-side write fails.
+	// Reads happen from ops investigation paths + the slice 126 integration
+	// test asserting AC-8 backpressure semantics.
+	//
+	// Both queries are tenant-scoped via RLS — the caller MUST have applied
+	// the tenant context on the underlying tx (via tenancy.ApplyTenant)
+	// before invoking either. No tenant_id parameter is passed across the
+	// API boundary (defense-in-depth + parity with slice 124).
+	// Append one row to the failure ledger. failure_reason is one of the
+	// two CHECK enum values ('buffer_overflow' | 'write_error');
+	// error_text is the OS error string for write_error, empty for
+	// buffer_overflow.
+	WriteSinkFailure(ctx context.Context, arg WriteSinkFailureParams) (AuditSinkFailure, error)
 	// Append-only lifecycle log. action is DB-constrained
 	// (walkthrough_created | attachment_added | walkthrough_finalized |
 	// tamper_detected | mutation_rejected_frozen). detail captures action-

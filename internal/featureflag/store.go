@@ -2,6 +2,7 @@ package featureflag
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -12,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/audit/sink"
+	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -241,8 +244,9 @@ func (s *Store) Set(ctx context.Context, key string, enabled bool, actor, reason
 		}
 
 		// Write the audit-log row (append-only).
+		auditID := uuid.New()
 		if _, alErr := q.WriteFeatureFlagAuditLog(ctx, dbx.WriteFeatureFlagAuditLogParams{
-			ID:          pgUUID(uuid.New()),
+			ID:          pgUUID(auditID),
 			TenantID:    pgUUID(tenantID),
 			FlagKey:     key,
 			FromEnabled: fromEnabled,
@@ -252,6 +256,27 @@ func (s *Store) Set(ctx context.Context, key string, enabled bool, actor, reason
 		}); alErr != nil {
 			return fmt.Errorf("write feature_flag_audit_log: %w", alErr)
 		}
+		// Slice 126: fan out to the external sink.
+		ffPayload, _ := json.Marshal(map[string]any{
+			"from_enabled": fromEnabled,
+			"to_enabled":   enabled,
+			"reason":       reason,
+		})
+		action := "disable"
+		if enabled {
+			action = "enable"
+		}
+		sink.EmitDefault(ctx, unifiedlog.Entry{
+			OccurredAt:  time.Now().UTC(),
+			ActorID:     actor,
+			TenantID:    tenantID,
+			Kind:        unifiedlog.KindFeatureFlag,
+			TargetType:  "feature_flag",
+			TargetID:    key,
+			Action:      action,
+			RowID:       auditID,
+			PayloadJSON: ffPayload,
+		})
 
 		out = flagFromRow(row, def)
 		out.HasOverride = true

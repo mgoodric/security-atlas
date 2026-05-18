@@ -25,6 +25,7 @@ import (
 	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/audit/auditor"
+	auditsink "github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
@@ -132,6 +133,37 @@ func main() {
 		pool = p
 		schemaSvc = schemaregistry.NewService(pool)
 	}
+
+	// Slice 126: external audit-log sink. Opt-in via
+	// ATLAS_AUDIT_SINK_PATH; no-op when unset. When active, every
+	// per-domain audit-log INSERT fans out to a JSONL file with HMAC
+	// integrity. Fail-fast if the HMAC key is missing or too short.
+	// Pool is the SAME pool the in-app writers use, so fallback rows
+	// land in the same database under the caller's tenant. When pool
+	// is nil (no DATABASE_URL — slice-003 in-memory fallback mode),
+	// the sink still constructs but skips the fallback-table write
+	// (PoolForTenant is nil-tolerated by writeFailureRow).
+	auditSinkLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	var sinkPool auditsink.PoolForTenant
+	if pool != nil {
+		sinkPool = auditsink.PoolFromPgx(pool)
+	}
+	auditSink, auditSinkErr := auditsink.New(auditsink.Options{
+		Logger:        auditSinkLogger,
+		PoolForTenant: sinkPool,
+	})
+	if auditSinkErr != nil {
+		fmt.Fprintf(os.Stderr, "atlas: audit-sink init: %v\n", auditSinkErr)
+		os.Exit(1)
+	}
+	auditsink.SetDefault(auditSink)
+	defer func() {
+		shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutCancel()
+		if err := auditSink.Shutdown(shutCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: audit-sink shutdown: %v\n", err)
+		}
+	}()
 
 	// Slice 013: wire the DB-backed ingestion stage when both the
 	// schema registry and the pool are available. Without them the
