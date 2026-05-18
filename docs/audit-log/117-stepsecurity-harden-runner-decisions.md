@@ -184,3 +184,37 @@ because:
 This bonus note exists because a future contributor reading both
 CLAUDE.md and this slice could reasonably ask the question. Document
 ahead, not after.
+
+## D5 — `disable-sudo: false` per-job exception for `frontend-playwright`
+
+**Decision:** The `frontend-playwright` job in `.github/workflows/ci.yml` overrides the slice-117 default of `disable-sudo: true` with `disable-sudo: false`. Every other job in every workflow retains `disable-sudo: true`.
+
+**Surfaced:** CI run [26008765330](https://github.com/mgoodric/security-atlas/actions/runs/26008765330) on PR #262 — the first post-merge-conflict-rebase CI run after slice 117 was applied. The `Install Playwright chromium` step failed with:
+
+```
+Switching to root user to install dependencies...
+sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper
+sudo: a password is required
+Failed to install browsers
+Error: Installation process exited with code: 1
+```
+
+**Root cause:** `npx playwright install --with-deps chromium` uses `sudo apt-get install` to install chromium's system dependencies (libfontconfig, libnss3, libxss1, etc.) that the ubuntu-latest runner image doesn't pre-bundle. Harden-Runner's `disable-sudo: true` blocks sudo invocations, causing the install step to fail.
+
+**Alternatives considered:**
+
+1. **Drop `--with-deps`** — Run `npx playwright install chromium` without system-dep install. **Rejected:** GitHub-hosted runner images change over time; relying on the image to pre-bundle every chromium dep is fragile, and the failure mode if a future runner update removes a dep is a confusing browser-level error instead of a clear "missing system dep" install error.
+
+2. **Per-job override (chosen)** — Set `disable-sudo: false` on JUST the `frontend-playwright` job. **Chosen because:** the playwright job runs e2e tests; the sudo it uses is for Playwright's own browser install (well-known, well-documented behavior), NOT for arbitrary user-controlled code. Egress audit still applies to this job, so any unexpected outbound calls are still observable. The narrow exception preserves slice 117's security stance everywhere else (40 of 41 jobs still have `disable-sudo: true`).
+
+3. **File spillover slice, ship 117 with the regression** — Per Amendment 2 of the continuous-batch policy. **Rejected:** slice 117 is the _cause_ of the regression; fixing it within slice 117 is in-scope, not out-of-scope. Shipping 117 with a known regression that breaks every PR's Playwright job would invert the slice's value (it would block more PRs than it secures).
+
+**Tradeoff (the security stance for that one job):** With `disable-sudo: false`, a compromised action (or malicious dep in the build chain) running on the `frontend-playwright` job COULD use sudo to install other things. Audit-mode egress logging will still show any unexpected outbound calls, but the in-runner blast radius is wider. Acceptable for now because:
+
+- The job is read-only on the codebase (it does NOT push artifacts to any registry)
+- The job has no secrets beyond test-bearer / ephemeral DB creds
+- The block-mode promotion (slice 118) will add `allowed-endpoints` which still narrows the egress surface even with sudo enabled
+
+**Slight scope-stretch of slice 117's AC-1:** AC-1 says "every job has `disable-sudo: true`". This exception breaks that letter-of-the-AC but preserves the spirit (defense-in-depth via Harden-Runner). Future contributors reading this row should know the exception exists and why. Slice 118 should re-evaluate whether `disable-sudo: true` can be restored for this job once block-mode `allowed-endpoints` are in place (the Playwright install's egress destinations would be in the allowlist, which might enable a different mitigation).
+
+**Confidence:** HIGH (the failure mode is well-understood; the per-job exception is a clean YAML override; the in-line comment + decisions-log entry make the exception discoverable for future readers).

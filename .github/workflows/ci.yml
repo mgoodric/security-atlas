@@ -907,7 +907,14 @@ jobs:
         uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
         with:
           egress-policy: audit
-          disable-sudo: true
+          # Slice 117 per-job exception: Playwright's `npx playwright
+          # install --with-deps chromium` step uses sudo to install
+          # chromium's system dependencies (libfontconfig, etc.).
+          # `disable-sudo: true` (the slice-117 default) breaks that.
+          # Egress audit still applies; only sudo is permitted on this
+          # one job. See docs/audit-log/117-stepsecurity-harden-runner-decisions.md
+          # decision D5 for the rationale.
+          disable-sudo: false
 
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
