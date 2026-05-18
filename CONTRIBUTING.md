@@ -160,17 +160,37 @@ CI runs through [StepSecurity Harden-Runner](https://github.com/step-security/ha
 
 When you touch any file under `internal/db/queries/`, run `just sqlc-generate` (which version-checks first) and commit the regenerated `internal/db/dbx/*.go` in the same commit as the query edit. Do NOT hand-edit `internal/db/dbx/*.go` outside of the two documented hand-narrows (`policies.sql.go` `AckDenominator`/`AckNumerator`, `scf_anchors.sql.go` `StateResult`/`StateFreshnessStatus`) — both are annotated in place and explained in slice 109's decisions log. New queries should regen cleanly; if the regen also rewrites unrelated files, your local sqlc binary is the wrong version (compare against `SQLC_VERSION` in `justfile`).
 
-`main` is protected:
+### Branch protection
 
-- ≥1 approving review required
-- All CI status checks must pass (build, lint, test, codeql, codecov, container-publish-on-release)
-- Linear history (squash- or rebase-merge only)
-- Force-push blocked
-- Direct push blocked
-- All review-thread comments resolved
-- Stale approvals dismissed on new commits
+`main` is protected. The current ruleset (as of slice 127):
 
-See [`.github/branch-protection.json`](./.github/branch-protection.json) for the full ruleset.
+- All 10 named CI status checks must report success (Go build/test/lint/integration, Frontend install+build, Python ruff, pre-commit, Analyze go/javascript-typescript via CodeQL, GitGuardian — full list in [`.github/branch-protection.json`](./.github/branch-protection.json)).
+- Linear history (squash- or rebase-merge only).
+- Force-push blocked.
+- Direct push to `main` blocked.
+- All review-thread comments resolved.
+- `enforce_admins: true` (maintainer cannot bypass).
+- `required_approving_review_count` is currently `null` (solo maintainer; documented in the file's `$deviations_from_slice_050_AC11` block). Re-evaluate when the contributor base passes ~3 active committers.
+
+The file at [`.github/branch-protection.json`](./.github/branch-protection.json) is the **source of truth for intent**. The live GitHub branch-protection config on `main` is the **source of truth for enforcement**. They must be kept in sync.
+
+**Apply ritual.** When you edit `.github/branch-protection.json`, push the change to live by running:
+
+```sh
+bash scripts/apply-branch-protection.sh
+```
+
+The script reads the file, strips the `$`-prefixed annotation keys (GitHub's PUT API rejects unknown top-level fields), `PUT`s the cleaned payload to `repos/mgoodric/security-atlas/branches/main/protection`, then re-reads live and asserts the contexts list converged. Re-running the script with no file change is a no-op (idempotent — P0-A2). The equivalent manual call is `gh api -X PUT repos/mgoodric/security-atlas/branches/main/protection --input <(jq 'with_entries(select(.key | startswith("$") | not))' .github/branch-protection.json)`.
+
+**Failure mode of omission.** If you edit the file but skip the apply, the file's "source of truth" claim becomes a lie and security controls degrade silently. This exact failure cost the project four PRs of churn during the 2026-05-17/18 cascade-unblock session — see slice 127's narrative. The `Infra · branch-protection drift` informational CI job (added by slice 127) now surfaces the next drift event as a sticky PR comment on every PR; if you see that comment fire on your PR, decide which side is correct (file or live) and run the apply script OR edit the file to match live, then push the resolution.
+
+**Local repro for drift findings.** Reproduce the CI check locally with:
+
+```sh
+bash scripts/check-branch-protection-drift.sh
+```
+
+Exit 0 = in sync; exit 1 = drift detected (diff printed on stderr); exit 2 = environment misconfigured (missing `gh` / `jq`, malformed file). Requires `gh` authenticated with `repo:read` against `mgoodric/security-atlas`.
 
 ---
 
