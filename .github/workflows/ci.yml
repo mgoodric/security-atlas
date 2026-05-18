@@ -1402,6 +1402,14 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      # Read branch-protection settings via `gh api`. Without this, the
+      # `gh api repos/.../branches/main/protection/required_status_checks`
+      # call returns 403 + the script exits 2 with the misleading
+      # "Script error ... usually missing tooling on the runner OR a
+      # malformed .github/branch-protection.json" sticky-comment text.
+      # Neither was the real cause; GITHUB_TOKEN just lacked
+      # administration:read. Slice 127's engineer missed this.
+      administration: read
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
