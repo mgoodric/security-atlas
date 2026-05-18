@@ -31,11 +31,8 @@ Invoked from mkdocs.yml under the `hooks:` key.
 
 from __future__ import annotations
 
-import os
-import shutil
 from pathlib import Path
 from typing import Any
-
 
 # Computed once and cached for the rest of the build.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -130,7 +127,11 @@ def _filter_internal_operations(yaml_text: str) -> str:
             method_blocks: list[list[str]] = []
             while i < len(lines):
                 peek = lines[i]
-                if peek.startswith("    ") and not peek.startswith("      ") and peek.rstrip("\n").endswith(":"):
+                if (
+                    peek.startswith("    ")
+                    and not peek.startswith("      ")
+                    and peek.rstrip("\n").endswith(":")
+                ):
                     # New method block.
                     block = [peek]
                     i += 1
@@ -138,9 +139,17 @@ def _filter_internal_operations(yaml_text: str) -> str:
                     # the next path or EOF.
                     while i < len(lines):
                         body = lines[i]
-                        if body.startswith("    ") and not body.startswith("      ") and body.rstrip("\n").endswith(":"):
+                        if (
+                            body.startswith("    ")
+                            and not body.startswith("      ")
+                            and body.rstrip("\n").endswith(":")
+                        ):
                             break
-                        if body.startswith("  ") and not body.startswith("    ") and body.rstrip("\n").endswith(":"):
+                        if (
+                            body.startswith("  ")
+                            and not body.startswith("    ")
+                            and body.rstrip("\n").endswith(":")
+                        ):
                             break
                         if body.strip() and not body.startswith(" "):
                             break
@@ -151,7 +160,8 @@ def _filter_internal_operations(yaml_text: str) -> str:
                 break
             # Filter out any method block carrying `x-internal: true`.
             public_blocks = [
-                block for block in method_blocks
+                block
+                for block in method_blocks
                 if not any("x-internal: true" in ln for ln in block)
             ]
             if public_blocks:

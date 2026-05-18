@@ -251,24 +251,24 @@ func groupByPath(routes []RouteSpec) pathGroupings {
 
 // writeOperation emits one OpenAPI operation entry. The format is:
 //
-//	    get:
-//	      summary: <Summary>
-//	      tags: [<Tag>]
-//	      x-internal: true          # only when Internal is true
-//	      security:                 # omitted when Tier is "none"
-//	        - bearer: []
-//	      parameters:               # only when path contains {placeholders}
-//	        - name: id
-//	          in: path
-//	          required: true
-//	          schema: { type: string }
-//	      responses:
-//	        default:
-//	          description: ...
-//	          content:
-//	            application/json:
-//	              schema:
-//	                $ref: '#/components/schemas/Ack'
+//	get:
+//	  summary: <Summary>
+//	  tags: [<Tag>]
+//	  x-internal: true          # only when Internal is true
+//	  security:                 # omitted when Tier is "none"
+//	    - bearer: []
+//	  parameters:               # only when path contains {placeholders}
+//	    - name: id
+//	      in: path
+//	      required: true
+//	      schema: { type: string }
+//	  responses:
+//	    default:
+//	      description: ...
+//	      content:
+//	        application/json:
+//	          schema:
+//	            $ref: '#/components/schemas/Ack'
 //
 // The indentation is two-space, matching the rest of the file. The
 // emission is line-by-line, never map-marshalled — keeps the output
@@ -348,7 +348,7 @@ func writeOperation(w io.Writer, r RouteSpec) error {
 	if _, err := io.WriteString(w, "              schema:\n"); err != nil {
 		return err
 	}
-	if _, err := io.WriteString(w, "                $ref: '#/components/schemas/Ack'\n"); err != nil {
+	if _, err := io.WriteString(w, "                $ref: \"#/components/schemas/Ack\"\n"); err != nil {
 		return err
 	}
 	return nil
@@ -419,8 +419,5 @@ func needsYAMLQuoting(s string) bool {
 	case '-', '?', ':', ',', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '\'', '"', '%', '@', '`':
 		return true
 	}
-	if strings.Contains(s, ": ") {
-		return true
-	}
-	return false
+	return strings.Contains(s, ": ")
 }

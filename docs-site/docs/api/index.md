@@ -19,20 +19,20 @@ code by a BLOCKING CI guard (`openapi-drift-check`).
 [slice-140]: https://github.com/mgoodric/security-atlas/blob/main/docs/issues/140-openapi-spec-and-redoc-ui.md
 
 !!! note "Two API surfaces"
-    The platform exposes two API surfaces. This page documents the
-    **REST** surface (operator integration, dashboards, admin
-    workflows). The **gRPC** surface (Evidence SDK push, connector
-    ingest, OSCAL bridge) is specified separately in the
-    [`proto/`](https://github.com/mgoodric/security-atlas/tree/main/proto)
-    files. The two surfaces stay separately specified.
+The platform exposes two API surfaces. This page documents the
+**REST** surface (operator integration, dashboards, admin
+workflows). The **gRPC** surface (Evidence SDK push, connector
+ingest, OSCAL bridge) is specified separately in the
+[`proto/`](https://github.com/mgoodric/security-atlas/tree/main/proto)
+files. The two surfaces stay separately specified.
 
 !!! info "Internal endpoints are hidden from this render"
-    Operator-only probes (`/health`, `/metrics`, `/v1/version`,
-    `/v1/install-state`) carry `x-internal: true` in the source spec
-    and are filtered out at docs-build time before reaching this page
-    — see [slice 140][slice-140] P0-A3. They exist for docker-compose
-    healthchecks, Prometheus scraping, and SSR rendering; they are not
-    part of the consumer integration surface.
+Operator-only probes (`/health`, `/metrics`, `/v1/version`,
+`/v1/install-state`) carry `x-internal: true` in the source spec
+and are filtered out at docs-build time before reaching this page
+— see [slice 140][slice-140] P0-A3. They exist for docker-compose
+healthchecks, Prometheus scraping, and SSR rendering; they are not
+part of the consumer integration surface.
 
 <!--
   Redoc standalone bundle. Loaded from jsdelivr CDN with subresource

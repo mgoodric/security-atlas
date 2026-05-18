@@ -87,6 +87,7 @@ Option (c) — the custom Go generator — won because:
    `internal/api/openapi/routes.go` — a single Go source file
    that declares the canonical `[]RouteSpec` slice.
 2. For each route it emits one OpenAPI operation with:
+
    - `summary` — one-line human description from the `RouteSpec`.
    - `tags` — single tag derived from the path's first segment after
      `/v1/` (or `auth`, `system` for non-`/v1/` paths). Groups the
@@ -237,13 +238,13 @@ None at this time. Spillover candidates considered + rejected:
 
 ## File contracts (for the next agent)
 
-| File                                            | Purpose                                                                                                                                            |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `internal/api/openapi/routes.go`                | Canonical `[]RouteSpec` slice — source of truth. Edited by hand when a route is added.                                                             |
-| `internal/api/openapi/generator.go`             | Pure-Go YAML emitter. No external deps; uses `gopkg.in/yaml.v3` (already in `go.mod`).                                                             |
-| `cmd/atlas-openapi/main.go`                     | CLI entry: `atlas-openapi --out docs/openapi.yaml`.                                                                                                |
-| `docs/openapi.yaml`                             | Committed generator output. Single source of truth for the REST API contract.                                                                      |
-| `docs/api/route-inventory.txt`                  | Generator side-output: sorted `METHOD PATH` lines extracted from the codebase via grep. Drift-detect compares this against the `RouteSpecs` slice. |
-| `scripts/check-openapi-drift.sh`                | Local + CI drift-detect script. Idempotent + offline-safe.                                                                                         |
-| `.github/workflows/ci.yml` `openapi-drift-check`| New BLOCKING CI job. Added to `.github/branch-protection.json`.                                                                                    |
-| `docs-site/docs/api/index.md`                   | Redoc-embedded mkdocs page. Reads `openapi.yaml`. Filters `x-internal: true`.                                                                      |
+| File                                             | Purpose                                                                                                                                            |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `internal/api/openapi/routes.go`                 | Canonical `[]RouteSpec` slice — source of truth. Edited by hand when a route is added.                                                             |
+| `internal/api/openapi/generator.go`              | Pure-Go YAML emitter. No external deps; uses `gopkg.in/yaml.v3` (already in `go.mod`).                                                             |
+| `cmd/atlas-openapi/main.go`                      | CLI entry: `atlas-openapi --out docs/openapi.yaml`.                                                                                                |
+| `docs/openapi.yaml`                              | Committed generator output. Single source of truth for the REST API contract.                                                                      |
+| `docs/api/route-inventory.txt`                   | Generator side-output: sorted `METHOD PATH` lines extracted from the codebase via grep. Drift-detect compares this against the `RouteSpecs` slice. |
+| `scripts/check-openapi-drift.sh`                 | Local + CI drift-detect script. Idempotent + offline-safe.                                                                                         |
+| `.github/workflows/ci.yml` `openapi-drift-check` | New BLOCKING CI job. Added to `.github/branch-protection.json`.                                                                                    |
+| `docs-site/docs/api/index.md`                    | Redoc-embedded mkdocs page. Reads `openapi.yaml`. Filters `x-internal: true`.                                                                      |

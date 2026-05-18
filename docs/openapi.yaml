@@ -89,7 +89,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /auth/logout:
     post:
       summary: POST /auth/logout
@@ -101,7 +101,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /auth/oidc/callback:
     get:
       summary: GET /auth/oidc/callback
@@ -113,7 +113,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /auth/oidc/login:
     get:
       summary: GET /auth/oidc/login
@@ -125,7 +125,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /health:
     get:
       summary: GET /health
@@ -138,7 +138,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /metrics:
     get:
       summary: GET /metrics
@@ -151,7 +151,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/activity:
     get:
       summary: GET /v1/activity
@@ -165,7 +165,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/admin/audit-log:
     get:
       summary: GET /v1/admin/audit-log
@@ -179,7 +179,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/admin/audit-log/export:
     get:
       summary: GET /v1/admin/audit-log/export
@@ -193,7 +193,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/admin/audit-log/unified:
     get:
       summary: GET /v1/admin/audit-log/unified
@@ -207,7 +207,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/admin/credentials:
     get:
       summary: GET /v1/admin/credentials
@@ -221,7 +221,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/admin/credentials
       tags: [admin-credentials]
@@ -234,7 +234,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/admin/credentials/{id}/revoke:
     post:
       summary: POST /v1/admin/credentials/{id}/revoke
@@ -254,7 +254,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/admin/credentials/{id}/rotate:
     post:
       summary: POST /v1/admin/credentials/{id}/rotate
@@ -274,7 +274,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/admin/features:
     get:
       summary: GET /v1/admin/features
@@ -288,7 +288,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/admin/features/{key}:
     patch:
       summary: PATCH /v1/admin/features/{key}
@@ -308,7 +308,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/admin/install/reset-bootstrap:
     post:
       summary: POST /v1/admin/install/reset-bootstrap
@@ -322,7 +322,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/admin/sso:
     get:
       summary: GET /v1/admin/sso
@@ -336,7 +336,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     patch:
       summary: PATCH /v1/admin/sso
       tags: [admin-sso]
@@ -349,7 +349,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/admin/sso/preflight:
     post:
       summary: POST /v1/admin/sso/preflight
@@ -363,7 +363,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/admin/users:
     get:
       summary: GET /v1/admin/users
@@ -377,7 +377,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/admin/users/{id}:
     get:
       summary: GET /v1/admin/users/{id}
@@ -397,7 +397,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/admin/users/{id}/roles:
     patch:
       summary: PATCH /v1/admin/users/{id}/roles
@@ -417,7 +417,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/aggregation-rules:
     get:
       summary: GET /v1/aggregation-rules
@@ -431,7 +431,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/aggregation-rules
       tags: [risks]
@@ -444,7 +444,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/aggregation-rules/{id}:
     get:
       summary: GET /v1/aggregation-rules/{id}
@@ -464,7 +464,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/aggregation-rules/{id}/activate:
     patch:
       summary: PATCH /v1/aggregation-rules/{id}/activate
@@ -484,7 +484,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/aggregation-rules/{id}/deactivate:
     patch:
       summary: PATCH /v1/aggregation-rules/{id}/deactivate
@@ -504,7 +504,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/anchors:
     get:
       summary: GET /v1/anchors
@@ -518,7 +518,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/anchors/{id}:
     get:
       summary: GET /v1/anchors/{id}
@@ -538,7 +538,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/anchors/{id}/requirements:
     get:
       summary: GET /v1/anchors/{id}/requirements
@@ -558,7 +558,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/artifacts/{id}:
     get:
       summary: GET /v1/artifacts/{id}
@@ -578,7 +578,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/artifacts:upload:
     post:
       summary: POST /v1/artifacts:upload
@@ -592,7 +592,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/audit-notes:
     get:
       summary: GET /v1/audit-notes
@@ -606,7 +606,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/audit-notes
       tags: [audit-notes]
@@ -619,7 +619,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/audit-notes/thread:
     get:
       summary: GET /v1/audit-notes/thread
@@ -633,7 +633,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/audit-periods:
     get:
       summary: GET /v1/audit-periods
@@ -647,7 +647,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/audit-periods
       tags: [audit-periods]
@@ -660,7 +660,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/audit-periods/{id}:
     get:
       summary: GET /v1/audit-periods/{id}
@@ -680,7 +680,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/audit-periods/{id}/control-state:
     get:
       summary: GET /v1/audit-periods/{id}/control-state
@@ -700,7 +700,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/audit-periods/{id}/freeze:
     post:
       summary: POST /v1/audit-periods/{id}/freeze
@@ -720,7 +720,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/audit-periods/{id}/oscal-export:
     post:
       summary: POST /v1/audit-periods/{id}/oscal-export
@@ -740,7 +740,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/audit-periods/{id}/populations/{popID}:
     post:
       summary: POST /v1/audit-periods/{id}/populations/{popID}
@@ -765,7 +765,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/board-briefs:
     get:
       summary: GET /v1/board-briefs
@@ -779,7 +779,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/board-briefs
       tags: [board]
@@ -792,7 +792,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/board-briefs/{id}:
     get:
       summary: GET /v1/board-briefs/{id}
@@ -812,7 +812,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/board-briefs/{id}.md:
     get:
       summary: GET /v1/board-briefs/{id}.md
@@ -832,7 +832,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/board-briefs/{id}/pdf:
     get:
       summary: GET /v1/board-briefs/{id}/pdf
@@ -852,7 +852,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/board-packs:
     get:
       summary: GET /v1/board-packs
@@ -866,7 +866,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/board-packs
       tags: [board]
@@ -879,7 +879,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/board-packs/{id}:
     get:
       summary: GET /v1/board-packs/{id}
@@ -899,7 +899,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/board-packs/{id}.md:
     get:
       summary: GET /v1/board-packs/{id}.md
@@ -919,7 +919,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/board-packs/{id}/pdf:
     get:
       summary: GET /v1/board-packs/{id}/pdf
@@ -939,7 +939,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/board-packs/{id}/publish:
     post:
       summary: POST /v1/board-packs/{id}/publish
@@ -959,7 +959,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/board-packs/{id}/sections/{key}:
     put:
       summary: PUT /v1/board-packs/{id}/sections/{key}
@@ -984,7 +984,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/board-packs/{id}/sections/{key}/approve:
     post:
       summary: POST /v1/board-packs/{id}/sections/{key}/approve
@@ -1009,7 +1009,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/calendar:
     get:
       summary: GET /v1/calendar
@@ -1023,7 +1023,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/calendar.ics:
     get:
       summary: GET /v1/calendar.ics
@@ -1035,7 +1035,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/calendar/subscription:
     post:
       summary: POST /v1/calendar/subscription
@@ -1049,7 +1049,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/controls/drift:
     get:
       summary: GET /v1/controls/drift
@@ -1063,7 +1063,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/applicability:
     get:
       summary: GET /v1/controls/{id}/applicability
@@ -1083,7 +1083,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/attest-form:
     get:
       summary: GET /v1/controls/{id}/attest-form
@@ -1103,7 +1103,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/attestations:
     post:
       summary: POST /v1/controls/{id}/attestations
@@ -1123,7 +1123,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/coverage:
     get:
       summary: GET /v1/controls/{id}/coverage
@@ -1143,7 +1143,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/effective-scope:
     get:
       summary: GET /v1/controls/{id}/effective-scope
@@ -1163,7 +1163,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/effectiveness:
     get:
       summary: GET /v1/controls/{id}/effectiveness
@@ -1183,7 +1183,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/history:
     get:
       summary: GET /v1/controls/{id}/history
@@ -1203,7 +1203,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/policies:
     get:
       summary: GET /v1/controls/{id}/policies
@@ -1223,7 +1223,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/risks:
     get:
       summary: GET /v1/controls/{id}/risks
@@ -1243,7 +1243,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/state:
     get:
       summary: GET /v1/controls/{id}/state
@@ -1263,7 +1263,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/controls:upload-bundle:
     post:
       summary: POST /v1/controls:upload-bundle
@@ -1277,7 +1277,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/decisions:
     get:
       summary: GET /v1/decisions
@@ -1291,7 +1291,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/decisions
       tags: [decisions]
@@ -1304,7 +1304,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/decisions/overdue:
     get:
       summary: GET /v1/decisions/overdue
@@ -1318,7 +1318,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/decisions/{id}:
     get:
       summary: GET /v1/decisions/{id}
@@ -1338,7 +1338,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     patch:
       summary: PATCH /v1/decisions/{id}
       tags: [decisions]
@@ -1357,7 +1357,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/decisions/{id}/audit-log:
     get:
       summary: GET /v1/decisions/{id}/audit-log
@@ -1377,7 +1377,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/decisions/{id}/links/{kind}:
     post:
       summary: POST /v1/decisions/{id}/links/{kind}
@@ -1402,7 +1402,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/decisions/{id}/links/{kind}/{targetID}:
     delete:
       summary: DELETE /v1/decisions/{id}/links/{kind}/{targetID}
@@ -1432,7 +1432,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/decisions/{id}/supersede:
     post:
       summary: POST /v1/decisions/{id}/supersede
@@ -1452,7 +1452,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/evidence:
     get:
       summary: GET /v1/evidence
@@ -1466,7 +1466,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/evidence/freshness:
     get:
       summary: GET /v1/evidence/freshness
@@ -1480,7 +1480,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/evidence:push:
     post:
       summary: POST /v1/evidence:push
@@ -1494,7 +1494,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/exceptions:
     get:
       summary: GET /v1/exceptions
@@ -1508,7 +1508,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/exceptions
       tags: [exceptions]
@@ -1521,7 +1521,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/exceptions/expiring:
     get:
       summary: GET /v1/exceptions/expiring
@@ -1535,7 +1535,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/exceptions/{id}:
     get:
       summary: GET /v1/exceptions/{id}
@@ -1555,7 +1555,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/exceptions/{id}/activate:
     patch:
       summary: PATCH /v1/exceptions/{id}/activate
@@ -1575,7 +1575,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/exceptions/{id}/approve:
     patch:
       summary: PATCH /v1/exceptions/{id}/approve
@@ -1595,7 +1595,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/exceptions/{id}/audit-log:
     get:
       summary: GET /v1/exceptions/{id}/audit-log
@@ -1615,7 +1615,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/exceptions/{id}/deny:
     patch:
       summary: PATCH /v1/exceptions/{id}/deny
@@ -1635,7 +1635,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/framework-scopes:
     get:
       summary: GET /v1/framework-scopes
@@ -1649,7 +1649,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/framework-scopes
       tags: [framework-scopes]
@@ -1662,7 +1662,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/framework-scopes/{id}:
     get:
       summary: GET /v1/framework-scopes/{id}
@@ -1682,7 +1682,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     patch:
       summary: PATCH /v1/framework-scopes/{id}
       tags: [framework-scopes]
@@ -1701,7 +1701,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/framework-scopes/{id}/activate:
     patch:
       summary: PATCH /v1/framework-scopes/{id}/activate
@@ -1721,7 +1721,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/framework-scopes/{id}/approve:
     patch:
       summary: PATCH /v1/framework-scopes/{id}/approve
@@ -1741,7 +1741,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/framework-scopes/{id}/submit:
     patch:
       summary: PATCH /v1/framework-scopes/{id}/submit
@@ -1761,7 +1761,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/frameworks:
     get:
       summary: GET /v1/frameworks
@@ -1775,7 +1775,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/frameworks/posture:
     get:
       summary: GET /v1/frameworks/posture
@@ -1789,7 +1789,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/frameworks/scf/versions:
     get:
       summary: GET /v1/frameworks/scf/versions
@@ -1803,7 +1803,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/install-state:
     get:
       summary: GET /v1/install-state
@@ -1816,7 +1816,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/install/mark-first-signin:
     post:
       summary: POST /v1/install/mark-first-signin
@@ -1830,7 +1830,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/me:
     get:
       summary: GET /v1/me
@@ -1844,7 +1844,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     patch:
       summary: PATCH /v1/me
       tags: [me]
@@ -1857,7 +1857,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/me/acknowledgments:
     get:
       summary: GET /v1/me/acknowledgments
@@ -1871,7 +1871,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/me/audit-period:
     get:
       summary: GET /v1/me/audit-period
@@ -1885,7 +1885,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/me/audit-periods:
     get:
       summary: GET /v1/me/audit-periods
@@ -1899,7 +1899,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/me/notifications:
     get:
       summary: GET /v1/me/notifications
@@ -1913,7 +1913,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/me/notifications/{id}/read:
     patch:
       summary: PATCH /v1/me/notifications/{id}/read
@@ -1933,7 +1933,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/me/preferences:
     get:
       summary: GET /v1/me/preferences
@@ -1947,7 +1947,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     patch:
       summary: PATCH /v1/me/preferences
       tags: [me]
@@ -1960,7 +1960,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/me/sessions:
     delete:
       summary: DELETE /v1/me/sessions
@@ -1974,7 +1974,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     get:
       summary: GET /v1/me/sessions
       tags: [me]
@@ -1987,7 +1987,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/me/sessions/{id}:
     delete:
       summary: DELETE /v1/me/sessions/{id}
@@ -2007,7 +2007,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/metrics:
     get:
       summary: GET /v1/metrics
@@ -2021,7 +2021,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/metrics/cascade:
     get:
       summary: GET /v1/metrics/cascade
@@ -2035,7 +2035,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/metrics/{id}:
     get:
       summary: GET /v1/metrics/{id}
@@ -2055,7 +2055,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/metrics/{id}/inputs:
     post:
       summary: POST /v1/metrics/{id}/inputs
@@ -2075,7 +2075,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/metrics/{id}/observations:
     get:
       summary: GET /v1/metrics/{id}/observations
@@ -2095,7 +2095,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/metrics/{id}/target:
     get:
       summary: GET /v1/metrics/{id}/target
@@ -2115,7 +2115,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     put:
       summary: PUT /v1/metrics/{id}/target
       tags: [me]
@@ -2134,7 +2134,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/org_units:
     get:
       summary: GET /v1/org_units
@@ -2148,7 +2148,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/org_units
       tags: [risks]
@@ -2161,7 +2161,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/org_units/{id}:
     delete:
       summary: DELETE /v1/org_units/{id}
@@ -2181,7 +2181,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     get:
       summary: GET /v1/org_units/{id}
       tags: [risks]
@@ -2200,7 +2200,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     patch:
       summary: PATCH /v1/org_units/{id}
       tags: [risks]
@@ -2219,7 +2219,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/policies:
     get:
       summary: GET /v1/policies
@@ -2233,7 +2233,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/policies
       tags: [policies]
@@ -2246,7 +2246,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/policies/{id}:
     get:
       summary: GET /v1/policies/{id}
@@ -2266,7 +2266,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/policies/{id}/acknowledge:
     post:
       summary: POST /v1/policies/{id}/acknowledge
@@ -2286,7 +2286,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/policies/{id}/acknowledgment-rate:
     get:
       summary: GET /v1/policies/{id}/acknowledgment-rate
@@ -2306,7 +2306,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/policies/{id}/approve:
     patch:
       summary: PATCH /v1/policies/{id}/approve
@@ -2326,7 +2326,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/policies/{id}/pdf:
     get:
       summary: GET /v1/policies/{id}/pdf
@@ -2346,7 +2346,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/policies/{id}/publish:
     post:
       summary: POST /v1/policies/{id}/publish
@@ -2366,7 +2366,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/policies/{id}/submit:
     patch:
       summary: PATCH /v1/policies/{id}/submit
@@ -2386,7 +2386,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/populations:
     post:
       summary: POST /v1/populations
@@ -2400,7 +2400,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/populations/{id}:
     get:
       summary: GET /v1/populations/{id}
@@ -2420,7 +2420,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/requirements/{id}/anchors:
     get:
       summary: GET /v1/requirements/{id}/anchors
@@ -2440,7 +2440,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/requirements/{id}/coverage:
     get:
       summary: GET /v1/requirements/{id}/coverage
@@ -2460,7 +2460,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/risks:
     get:
       summary: GET /v1/risks
@@ -2474,7 +2474,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/risks
       tags: [risks]
@@ -2487,7 +2487,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/risks/aggregate:
     post:
       summary: POST /v1/risks/aggregate
@@ -2501,7 +2501,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/risks/heatmap:
     get:
       summary: GET /v1/risks/heatmap
@@ -2515,7 +2515,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/risks/theme-heatmap:
     get:
       summary: GET /v1/risks/theme-heatmap
@@ -2529,7 +2529,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/risks/{id}:
     delete:
       summary: DELETE /v1/risks/{id}
@@ -2549,7 +2549,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     get:
       summary: GET /v1/risks/{id}
       tags: [risks]
@@ -2568,7 +2568,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/risks/{id}/aggregation:
     get:
       summary: GET /v1/risks/{id}/aggregation
@@ -2588,7 +2588,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/risks/{id}/controls:
     post:
       summary: POST /v1/risks/{id}/controls
@@ -2608,7 +2608,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/risks/{id}/themes:
     post:
       summary: POST /v1/risks/{id}/themes
@@ -2628,7 +2628,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/risks/{id}/themes/{theme}:
     delete:
       summary: DELETE /v1/risks/{id}/themes/{theme}
@@ -2653,7 +2653,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/samples:
     post:
       summary: POST /v1/samples
@@ -2667,7 +2667,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/samples/{id}:
     get:
       summary: GET /v1/samples/{id}
@@ -2687,7 +2687,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/samples/{id}/annotations:
     get:
       summary: GET /v1/samples/{id}/annotations
@@ -2707,7 +2707,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/samples/{id}/annotations
       tags: [audit-samples]
@@ -2726,7 +2726,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/schemas:
     get:
       summary: GET /v1/schemas
@@ -2740,7 +2740,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/schemas
       tags: [schemas]
@@ -2753,7 +2753,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/schemas/{kind}/{semver}:
     get:
       summary: GET /v1/schemas/{kind}/{semver}
@@ -2778,7 +2778,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/scopes/cells:
     get:
       summary: GET /v1/scopes/cells
@@ -2792,7 +2792,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/scopes/cells
       tags: [scopes]
@@ -2805,7 +2805,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/scopes/dimensions:
     get:
       summary: GET /v1/scopes/dimensions
@@ -2819,7 +2819,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/themes:
     get:
       summary: GET /v1/themes
@@ -2833,7 +2833,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/upcoming:
     get:
       summary: GET /v1/upcoming
@@ -2847,7 +2847,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/vendors:
     get:
       summary: GET /v1/vendors
@@ -2861,7 +2861,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/vendors
       tags: [vendors]
@@ -2874,7 +2874,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/vendors/burndown:
     get:
       summary: GET /v1/vendors/burndown
@@ -2888,7 +2888,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/vendors/{id}:
     delete:
       summary: DELETE /v1/vendors/{id}
@@ -2908,7 +2908,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     get:
       summary: GET /v1/vendors/{id}
       tags: [vendors]
@@ -2927,7 +2927,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     patch:
       summary: PATCH /v1/vendors/{id}
       tags: [vendors]
@@ -2946,7 +2946,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/version:
     get:
       summary: GET /v1/version
@@ -2959,7 +2959,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/walkthroughs:
     get:
       summary: GET /v1/walkthroughs
@@ -2973,7 +2973,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
     post:
       summary: POST /v1/walkthroughs
       tags: [walkthroughs]
@@ -2986,7 +2986,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/walkthroughs/{id}:
     get:
       summary: GET /v1/walkthroughs/{id}
@@ -3006,7 +3006,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/walkthroughs/{id}/attachments:
     post:
       summary: POST /v1/walkthroughs/{id}/attachments
@@ -3026,7 +3026,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/walkthroughs/{id}/export:
     get:
       summary: GET /v1/walkthroughs/{id}/export
@@ -3046,7 +3046,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
   /v1/walkthroughs/{id}:finalize:
     post:
       summary: POST /v1/walkthroughs/{id}:finalize
@@ -3066,7 +3066,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Ack'
+                $ref: "#/components/schemas/Ack"
 
 components:
   securitySchemes:
