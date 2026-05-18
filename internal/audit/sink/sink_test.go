@@ -402,3 +402,48 @@ func TestCanonicalize_DeterministicAcrossRuns(t *testing.T) {
 			buf1.Bytes(), buf2.Bytes())
 	}
 }
+
+// TestCanonicalize_RejectsOversizedEntry asserts the MaxCanonicalSize cap:
+// an entry whose marshaled canonical bytes exceed the 1 MiB cap is rejected
+// (no line written) and the WriteErrors counter increments. Closes the
+// allocation-overflow path that CodeQL flagged on the original PR. The
+// fallback-row write is exercised by the integration test; here we just
+// assert the producer-side bound.
+func TestCanonicalize_RejectsOversizedEntry(t *testing.T) {
+	t.Setenv(sink.EnvPath, "")
+	t.Setenv(sink.EnvHMACKey, "")
+
+	key := []byte("test-hmac-key-must-be-32-bytes-min!!")
+	buf := &safeBuffer{}
+	s, err := sink.New(sink.Options{Writer: buf, HMACKey: key})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Build a payload_json larger than the cap. The raw payload alone is
+	// already past MaxCanonicalSize, so the marshaled entry comfortably
+	// exceeds the bound.
+	big := make([]byte, sink.MaxCanonicalSize+1024)
+	for i := range big {
+		big[i] = 'a'
+	}
+	huge := json.RawMessage(`{"blob":"` + string(big) + `"}`)
+
+	entry := makeEntry("preferences.update")
+	entry.PayloadJSON = huge
+	s.Emit(context.Background(), entry)
+	if err := s.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	emitted, _, writeErrors, _ := s.StatsSnapshot()
+	if emitted != 0 {
+		t.Errorf("expected 0 emitted, got %d", emitted)
+	}
+	if writeErrors != 1 {
+		t.Errorf("expected 1 WriteErrors increment from oversized entry, got %d", writeErrors)
+	}
+	if len(buf.Bytes()) != 0 {
+		t.Errorf("expected no bytes written to sink, got %d bytes", len(buf.Bytes()))
+	}
+}

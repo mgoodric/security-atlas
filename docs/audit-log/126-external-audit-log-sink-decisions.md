@@ -130,3 +130,17 @@ The trade-off: a unit-test asserting "Emit failed" needs a different mechanism. 
 **Decision.** Use the next monotonic timestamp after `20260517000000_unified_audit_log.sql`. Pick `20260518000000` to reflect today's date and the natural ordering.
 
 **Why.** The migration runner globs `migrations/sql/*.sql` in lexical order; timestamp prefixes give natural ordering. No collision with existing files.
+
+## D11 — Cap canonical entry size at 1 MiB (CodeQL allocation-overflow fix)
+
+**Decision.** Add `const MaxCanonicalSize = 1 << 20` and reject any entry whose marshaled canonical JSON exceeds the cap. Rejection path: `canonicalizeAndSign` returns an error → `writeOne` increments `WriteErrors` + writes a fallback row + ERR-logs. Cap is checked AFTER `json.Marshal` and BEFORE the splice allocation.
+
+**Why.** CodeQL alert #29 (`go/allocation-size-overflow`) flagged `make([]byte, 0, len(canonical)+len(tag)+16)` on line 448 because `canonical` derives from `entry.PayloadJSON` — a caller-supplied value that the type system does not bound. On 64-bit Go (our deployment target) the sum cannot in practice overflow `int`, but CodeQL's data-flow analysis cannot prove that without a visible bound, and defense in depth says a malicious or buggy upstream that hands the sink a multi-GB payload would OOM the writer goroutine regardless of overflow. Bounding it explicitly:
+
+1. Silences the CodeQL alert (the bound is a constant, visible to the analyzer).
+2. Defends against pathological inputs.
+3. Composes with P0-A1 (no silent drop): rejected entries land in `audit_sink_failures` with `reason="write_error"` + error message `"canonical entry exceeds 1048576 byte cap (got N)"`.
+
+The cap of 1 MiB is generous — typical audit-log entries are < 4 KiB; the payload_json fields in slice-124's 9-table union are small structured records (before/after diffs, decision metadata, evidence pointers). 1 MiB leaves > 250x headroom for unusual cases while keeping the per-write allocation bounded.
+
+Test: `TestCanonicalize_RejectsOversizedEntry` constructs an entry with a `payload_json` larger than the cap, calls `Emit`, asserts `WriteErrors == 1`, `Emitted == 0`, and 0 bytes written to the sink.

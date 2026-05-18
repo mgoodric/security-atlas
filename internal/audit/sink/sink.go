@@ -97,6 +97,16 @@ const BatchFlushInterval = 250 * time.Millisecond
 // BatchFlushSize is the batch-record count that triggers an immediate fsync.
 const BatchFlushSize = 100
 
+// MaxCanonicalSize caps the marshaled canonical entry at 1 MiB. The audit
+// entry's payload_json is caller-supplied (per-domain INSERT sites pass
+// pgtype.JSONB whose body can in principle be arbitrarily large), so the
+// downstream allocation in canonicalizeAndSign needs a bounded input.
+// 1 MiB is generous — typical audit entries are < 4 KiB; the cap exists
+// to reject pathological multi-GB inputs before they OOM the writer
+// goroutine. Rejected entries land in audit_sink_failures with reason
+// "canonical_too_large" (preserves the P0-A1 no-silent-drop invariant).
+const MaxCanonicalSize = 1 << 20
+
 // PoolForTenant is a callback the caller supplies so the sink can write
 // fallback rows without coupling to pgxpool. The caller is responsible
 // for opening a tx, applying tenancy.ApplyTenant, and returning the tx
@@ -433,6 +443,13 @@ func (s *Sink) canonicalizeAndSign(entry unifiedlog.Entry) ([]byte, error) {
 	canonical, err := json.Marshal(entry)
 	if err != nil {
 		return nil, fmt.Errorf("marshal canonical: %w", err)
+	}
+	// Bound the allocation below. canonical comes from a caller-supplied
+	// payload_json — without the cap the downstream make() size sum is
+	// CodeQL-flagged as allocation-overflow-prone. The constant keeps the
+	// allocation's upper bound at MaxCanonicalSize + HMAC overhead.
+	if len(canonical) > MaxCanonicalSize {
+		return nil, fmt.Errorf("canonical entry exceeds %d byte cap (got %d)", MaxCanonicalSize, len(canonical))
 	}
 	mac := hmac.New(sha256.New, s.hmacKey)
 	mac.Write(canonical)
