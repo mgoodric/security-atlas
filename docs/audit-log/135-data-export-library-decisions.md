@@ -22,11 +22,11 @@ zero new dependencies).**
 The slice file's "Notes for the implementing agent" laid out three
 options:
 
-| Option                                  | Pros                                                                     | Cons                                                                          |
-| --------------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| (a) `xuri/excelize/v2`                  | Mature, well-documented, large feature surface                           | ~5 MB binary impact; large API surface most of which violates P0-A6 if misused; new transitive-dep audit surface |
-| (b) `tealeg/xlsx`                       | Smaller, simpler                                                         | Older / less maintained; same dep-audit concern                               |
-| (c) Handcrafted single-sheet-text-only  | Zero new deps; perfect P0-A6 fit by construction (cannot emit charts)    | Engineer must understand the Open Office XML zip-structure                    |
+| Option                                 | Pros                                                                  | Cons                                                                                                             |
+| -------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| (a) `xuri/excelize/v2`                 | Mature, well-documented, large feature surface                        | ~5 MB binary impact; large API surface most of which violates P0-A6 if misused; new transitive-dep audit surface |
+| (b) `tealeg/xlsx`                      | Smaller, simpler                                                      | Older / less maintained; same dep-audit concern                                                                  |
+| (c) Handcrafted single-sheet-text-only | Zero new deps; perfect P0-A6 fit by construction (cannot emit charts) | Engineer must understand the Open Office XML zip-structure                                                       |
 
 I chose (c). Rationale:
 
@@ -342,6 +342,6 @@ End-to-end streaming behavior is covered by the integration tests
 - **PDF format** — P0-A11 forbids. Lives in slice-042-area PDF
   pipeline forever; never added to this dropdown.
 - **Per-tenant rate limit on exports** — not in scope; the row cap
-  + concurrency cap (mentioned in slice doc but not implemented at
-  v1 — left to a v2 spillover if observed concurrent-export storms
-  surface in production).
+  - concurrency cap (mentioned in slice doc but not implemented at
+    v1 — left to a v2 spillover if observed concurrent-export storms
+    surface in production).
