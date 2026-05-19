@@ -13,6 +13,26 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Fixed
 
+- Audits page "Create audit period" button no longer redirects to
+  `/admin` ([#149](https://github.com/mgoodric/security-atlas/issues/149)).
+  Slice 102 shipped `/audits` with the toolbar `audits-create-cta`
+  disabled and the true-zero empty-state CTA placeholder-routed to
+  `/admin` (slice 102 P0-A3). Operators on v1.10.0 reported clicking
+  "Create audit period" bounced them to the admin overview instead of
+  any period-create flow. Slice 149 ships the minimal create flow at
+  `/audits/new`: a form bound directly to the slice-028 `createReq`
+  wire shape (name + framework_version_id UUID + period_start +
+  period_end) posting through a new `POST /api/audits` BFF handler to
+  `POST /v1/audit-periods`. Both CTAs (toolbar action and empty-state
+  CTA) are re-pointed to `/audits/new`. The FrameworkVersion picker is
+  a UUID-paste input — copy the value from the audits-list table's
+  framework-version column (the first 8 chars render with the full
+  UUID in the title attribute) or from the catalog admin; a dedicated
+  picker is a future enhancement once the list endpoint exists.
+  Vitest covers the BFF POST (3 new cases: 401-without-cookie,
+  forwards-bearer-and-body, propagates-upstream-4xx). Playwright spec
+  at `web/e2e/audits-create.spec.ts` is quarantined behind slice 082
+  per the established precedent.
 - Compliance calendar OPA admit — `GET /v1/calendar` and
   `POST /v1/calendar/subscription` are now admitted for every
   signed-in role (admin, grc_engineer, auditor, viewer, control_owner)
