@@ -37,6 +37,27 @@ viewer_readable_resources := {
     # write is admitted by a separate rule further down so a
     # viewer can mint their own ICS URL token.
     "calendar",
+    # Slice 156: slice-066 dashboard read endpoints. The viewer is
+    # the most restrictive signed-in role and the program dashboard
+    # is the entry surface every signed-in user lands on (slice 040
+    # + 066 contract). Without these admits, OPA returns
+    # allow=false on GET /v1/activity and GET /v1/upcoming, the
+    # React Query enters the isError branch, and the dashboard
+    # Activity / Upcoming panels render "Failed to load." RLS keeps
+    # the reads tenant-scoped (activity = admin_audit_log_v view,
+    # tenant-scoped via slice 062; upcoming = rollup over already
+    # tenant-scoped tables). No write surface exists on either
+    # endpoint (constitutional invariant #2 — slice 066 P0-A3); the
+    # is_read predicate on the rule above keeps these admits
+    # read-only.
+    #
+    # /v1/frameworks/posture is admitted via
+    # defaults.rego.catalog_resources["frameworks"] (slice 035);
+    # the slice-156 unit test pins that the existing catalog admit
+    # continues to cover this path so a future maintainer who
+    # narrows catalog_resources is surfaced at the unit-test layer.
+    "activity",
+    "upcoming",
 }
 
 # Slice 148: viewer can mint their own ICS subscription URL via

@@ -169,6 +169,20 @@ auditor_readable_resources := {
     # auditor sees only their assignments" admit on /v1/calendar
     # — that is a v2 ABAC narrowing if surface demands).
     "calendar",
+    # Slice 156: slice-066 dashboard read endpoints. The auditor
+    # role is intentionally narrow (audit-period-scoped reads of
+    # audit artefacts) but the dashboard's Activity feed and
+    # Upcoming rollup are the at-a-glance program-health view that
+    # an auditor uses to orient on a tenant's posture (parity with
+    # the slice-094 calendar admit — same cross-business signal,
+    # different surface). RLS keeps both reads tenant-scoped; the
+    # auditor sees the full program rollup, NOT a period-narrowed
+    # cut, matching the slice-148 calendar precedent. No write path
+    # exists on either endpoint; the is_read predicate above bounds
+    # these admits to reads. /v1/frameworks/posture admits via
+    # defaults.rego.catalog_resources["frameworks"] (slice 035).
+    "activity",
+    "upcoming",
 }
 
 # Slice 148: auditor can mint their own ICS subscription URL via

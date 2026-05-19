@@ -47,6 +47,20 @@ control_owner_readable_resources := {
     # separate rule further down so a control owner can mint their
     # own ICS URL token.
     "calendar",
+    # Slice 156: slice-066 dashboard read endpoints. Control owners
+    # land on the dashboard at sign-in and need the same Activity /
+    # Upcoming panels every other signed-in role does — without these
+    # admits, the panels surface "Failed to load" for any control-
+    # owner credential. RLS keeps both reads tenant-scoped (activity
+    # uses the slice-062 admin_audit_log_v view; upcoming rolls up
+    # already tenant-scoped tables). No write path exists on either
+    # endpoint (constitutional invariant #2 — slice 066 P0-A3); the
+    # is_read predicate on the rule above bounds these admits to
+    # reads. /v1/frameworks/posture admits via
+    # defaults.rego.catalog_resources["frameworks"] (slice 035), so
+    # the slice-156 contract is two new resource-type symbols here.
+    "activity",
+    "upcoming",
 }
 
 # Slice 148: control owner can mint their own ICS subscription URL via
