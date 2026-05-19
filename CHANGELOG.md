@@ -13,6 +13,28 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Fixed
 
+- Control detail no longer hard-404s on fresh install
+  ([#152](https://github.com/mgoodric/security-atlas/issues/152)). On a
+  fresh install the `/controls` list renders the ~1,400-row global SCF
+  anchor catalog, but clicking any row navigated to
+  `/controls/{anchor.id}` which the detail page passed to
+  `/v1/controls/{id}/coverage` — a path that expects a tenant control
+  UUID, not an SCF anchor UUID. Every click 404'd. The fix is a hybrid
+  (b + c) per [ADR-0004](docs/adr/0004-control-detail-404-empty-state.md):
+  the detail page now distinguishes the 404 path from 5xx and renders
+  a friendly empty-state explaining honestly that "this SCF anchor has
+  no control instantiated in your tenant yet" with a back-to-list CTA;
+  the list page gains a truly-zero defensive empty-state for the
+  catalog-not-seeded branch. The backend 404 contract is preserved
+  (slice 150 D3 — bare-`{id}` 404 is a load-bearing platform semantic).
+  Discriminator lives in a pure-logic helper
+  (`web/app/(authed)/controls/error-classifier.ts`) with eight vitest
+  cases. Auto-seeding the SOC 2 stock kit on bootstrap (option a in the
+  slice doc) was rejected — full reasoning in
+  `docs/audit-log/152-control-detail-404-decisions.md`. Vision §1.5 #7
+  ("installable, seeded, producing first evidence within 4 hours")
+  remains unmet and is the right scope for a successor slice gated on
+  slice 141 multi-tenant bootstrap landing.
 - Dashboard `upcoming` and `top risks` panels now consume the slice-066
   unified rollup and `sort=residual,age` server-side ranking
   ([#157](https://github.com/mgoodric/security-atlas/issues/157); slice

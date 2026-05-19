@@ -326,24 +326,25 @@ function ControlsPageInner() {
     );
   }
 
-  const emptyState = (
+  // Slice 152 D1-b: distinguish truly-zero (the anchor catalog itself
+  // returned zero rows — defensive; on main today anchors are catalog-
+  // global so this only fires if the SCF importer has not been run) from
+  // filter-narrowed empty. The truly-zero copy is HONEST about cause
+  // (catalog not seeded) and offers documentation orientation, NOT a
+  // vapor "use the SOC 2 starter kit" CTA — there is no in-app button
+  // for kit ingestion on main and slice 152 does not invent one
+  // (decisions log D-152-1 + ADR-0004).
+  const isTrulyEmpty = rows.length === 0;
+  const trulyEmptyState = (
     <EmptyState
-      icon={
-        <svg
-          className="w-12 h-12 mx-auto"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          aria-hidden
-        >
-          <path
-            d="M9 3.75H6.912a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661V18a2.25 2.25 0 002.25 2.25h15a2.25 2.25 0 002.25-2.25v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      }
+      icon={emptyStateIcon}
+      title="No controls in your tenant yet"
+      body="The global SCF anchor catalog is empty in this deployment. Import a framework via the atlas CLI, or run the SCF importer to populate the catalog. See the user guide for the bootstrap walkthrough."
+    />
+  );
+  const filterEmptyState = (
+    <EmptyState
+      icon={emptyStateIcon}
       title="No controls match these filters"
       body="Try widening the framework, family, or state filters."
       cta={
@@ -353,6 +354,7 @@ function ControlsPageInner() {
       }
     />
   );
+  const emptyState = isTrulyEmpty ? trulyEmptyState : filterEmptyState;
 
   return (
     <ListPage
@@ -379,6 +381,26 @@ function ControlsPageInner() {
     </ListPage>
   );
 }
+
+// Slice 152: shared empty-state icon node lifted out of the page body
+// so both the truly-zero and filter-narrowed empty-states render with
+// the same heroicon (slice 098 §2 — "centered illustration" pattern).
+const emptyStateIcon = (
+  <svg
+    className="w-12 h-12 mx-auto"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    aria-hidden
+  >
+    <path
+      d="M9 3.75H6.912a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661V18a2.25 2.25 0 002.25 2.25h15a2.25 2.25 0 002.25-2.25v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
 
 export default function ControlsListPage() {
   // useSearchParams must be wrapped in Suspense in App Router (Next 16
