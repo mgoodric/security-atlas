@@ -60,7 +60,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useReducer, useState } from "react";
+import { useMemo, useReducer, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -716,15 +716,15 @@ function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
     },
   });
 
-  // Slice 163: rotateMut dispatches ROTATED on success. The successor's
-  // bearer plaintext flows through state ONCE and is GC'd on DISMISS
-  // (P0-163-1). The predecessor's last4 is captured from the
-  // confirm-modal's row at click-time so the callout can render
-  // "rotated from ...XXXX" without re-querying the list.
+  // Slice 163: rotateMut dispatches ROTATED on success. The predecessor's
+  // last4 is captured from the modal's row at click-time (passed as the
+  // mutation variable) so the callout can render "rotated from ...XXXX"
+  // without re-querying the list. The bearer plaintext flows through
+  // state ONCE and is GC'd on DISMISS (P0-163-1).
   const rotateMut = useMutation({
     mutationFn: (args: { id: string; predecessor_last4: string }) =>
-      rotateCred(args.id).then((out) => ({ out, args })),
-    onSuccess: ({ out, args }) => {
+      rotateCred(args.id),
+    onSuccess: (out, args) => {
       dispatch({
         kind: "ROTATED",
         bearer: out.bearer_token,
@@ -739,26 +739,21 @@ function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
 
   // Slice 163: derive the predecessor -> successor link map from the
   // list. The slice 062 wire shape carries `rotated_from` on the
-  // SUCCESSOR (pointing back at the predecessor); to surface the
-  // forward direction on a predecessor row's badge ("rotated -> ...succ")
-  // we invert: for each row, if rotated_from is set, then the row
-  // pointed-to-by-rotated_from has THIS row as its successor.
-  //
-  // The map keys on predecessor.id and values are a small {id, last4}
-  // tuple so the predecessor row's render path can find the
-  // successor's display string without a second pass over the list.
-  const successorByPredecessorId = new Map<
-    string,
-    { id: string; last4: string }
-  >();
-  for (const c of list.data ?? []) {
-    if (c.rotated_from) {
-      successorByPredecessorId.set(c.rotated_from, {
-        id: c.id,
-        last4: c.last4,
-      });
+  // SUCCESSOR; to surface the forward direction on a predecessor row's
+  // badge ("rotated -> ...succ") we invert -- for each row with a
+  // rotated_from, the row pointed-to-by-rotated_from has THIS row as
+  // its successor. Memoised on list.data so the inversion does not
+  // re-run on unrelated re-renders (modal open/close, mutation
+  // pending-state flips).
+  const successorByPredecessorId = useMemo(() => {
+    const m = new Map<string, { id: string; last4: string }>();
+    for (const c of list.data ?? []) {
+      if (c.rotated_from) {
+        m.set(c.rotated_from, { id: c.id, last4: c.last4 });
+      }
     }
-  }
+    return m;
+  }, [list.data]);
 
   if (!isAdmin) {
     return (
@@ -860,11 +855,9 @@ function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
             </TableHeader>
             <TableBody>
               {list.data.map((c) => {
-                // Slice 163: an "id-anchor" on every row so the muted
-                // predecessor badge can scroll the user to the
-                // corresponding successor row. The id is intentionally
-                // a derived string (token-row-{id}) so we never collide
-                // with an unrelated element on the page.
+                // Slice 163: row id is prefixed with `token-row-` so the
+                // predecessor badge's `href="#token-row-{successor.id}"`
+                // cannot collide with an unrelated element on the page.
                 const rowAnchor = `token-row-${c.id}`;
                 const successor = successorByPredecessorId.get(c.id);
                 return (
@@ -913,9 +906,6 @@ function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
                           variant="outline"
                           onClick={() => setRotateConfirm(c)}
                           data-testid="settings-token-rotate-button"
-                          disabled={
-                            rotateMut.isPending && rotateConfirm?.id === c.id
-                          }
                         >
                           Rotate
                         </Button>
