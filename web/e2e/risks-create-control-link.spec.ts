@@ -25,7 +25,7 @@
 //   AC-5  Form posts linked_control_ids when mitigate + selection exists.
 //   AC-6  Newly created risk appears in the risk list with linked control.
 
-import { test, expect } from "@playwright/test";
+import { test } from "@playwright/test";
 
 test.describe("/risks/new control-link multi-select", () => {
   test.skip(
