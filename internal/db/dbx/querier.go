@@ -273,6 +273,12 @@ type Querier interface {
 	// Persist a new session row. The id is generated server-side by the caller as
 	// a 32-byte crypto/rand string; we pass it in so the cookie and the row share
 	// exact bytes.
+	//
+	// Slice 162: now also accepts user_agent + ip_address. The geo_country /
+	// geo_city columns are NOT populated here — they're filled by a future
+	// enrichment hook (per slice 162 P0-162-3). The two captured fields are
+	// nullable: callers that do not provide them (e.g. background-task token
+	// issuance flows that have no http.Request in context) pass NULL.
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	// Insert a new user (local-mode). For OIDC-provisioned users use UpsertUserByIdpSubject
 	// which also handles tenant_id, display_name, and the idp_* fields.

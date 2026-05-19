@@ -33,20 +33,36 @@ func NewSessions(store *sessions.Store, pool *pgxpool.Pool) *SessionsHandler {
 
 // ----- wire shapes -----
 
+// sessionWire is the JSON shape returned on `/v1/me/sessions`.
+//
+// Slice 162: extended with `user_agent`, `ip_address`, `geo_country`, `geo_city`.
+// All four are pointer-string + `omitempty` so a row that lacks them (pre-migration
+// rows, sessions created by background flows with no http.Request in scope, or
+// the not-yet-populated geo columns) renders as missing-field on the wire rather
+// than `"": null`. The frontend (slice 162 session-line helper) treats missing
+// and empty identically — honest empty, no fabricated placeholder text (P0-162-1).
 type sessionWire struct {
 	ID         string  `json:"id"`
 	Last4      string  `json:"last4"`
 	CreatedAt  string  `json:"created_at"`
 	LastUsedAt *string `json:"last_used_at"`
 	IsCurrent  bool    `json:"is_current"`
+	UserAgent  string  `json:"user_agent,omitempty"`
+	IPAddress  string  `json:"ip_address,omitempty"`
+	GeoCountry string  `json:"geo_country,omitempty"`
+	GeoCity    string  `json:"geo_city,omitempty"`
 }
 
 func sessionWireFrom(s sessions.Session, currentID string) sessionWire {
 	w := sessionWire{
-		ID:        s.ID,
-		Last4:     last4OfSessionID(s.ID),
-		CreatedAt: s.IssuedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
-		IsCurrent: s.ID == currentID && currentID != "",
+		ID:         s.ID,
+		Last4:      last4OfSessionID(s.ID),
+		CreatedAt:  s.IssuedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+		IsCurrent:  s.ID == currentID && currentID != "",
+		UserAgent:  s.UserAgent,
+		IPAddress:  s.IPAddress,
+		GeoCountry: s.GeoCountry,
+		GeoCity:    s.GeoCity,
 	}
 	if !s.LastSeenAt.IsZero() {
 		ts := s.LastSeenAt.UTC().Format("2006-01-02T15:04:05Z07:00")

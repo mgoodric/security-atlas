@@ -13,12 +13,13 @@ import (
 
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (
-    id, tenant_id, user_id, idp_issuer, idp_subject, expires_at
+    id, tenant_id, user_id, idp_issuer, idp_subject, expires_at,
+    user_agent, ip_address
 )
 VALUES (
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
-RETURNING id, tenant_id, user_id, idp_issuer, idp_subject, issued_at, expires_at, last_seen_at, revoked_at
+RETURNING id, tenant_id, user_id, idp_issuer, idp_subject, issued_at, expires_at, last_seen_at, revoked_at, user_agent, ip_address, geo_country, geo_city
 `
 
 type CreateSessionParams struct {
@@ -28,11 +29,19 @@ type CreateSessionParams struct {
 	IdpIssuer  string             `json:"idp_issuer"`
 	IdpSubject string             `json:"idp_subject"`
 	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	UserAgent  *string            `json:"user_agent"`
+	IpAddress  *string            `json:"ip_address"`
 }
 
 // Persist a new session row. The id is generated server-side by the caller as
 // a 32-byte crypto/rand string; we pass it in so the cookie and the row share
 // exact bytes.
+//
+// Slice 162: now also accepts user_agent + ip_address. The geo_country /
+// geo_city columns are NOT populated here — they're filled by a future
+// enrichment hook (per slice 162 P0-162-3). The two captured fields are
+// nullable: callers that do not provide them (e.g. background-task token
+// issuance flows that have no http.Request in context) pass NULL.
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
 	row := q.db.QueryRow(ctx, createSession,
 		arg.ID,
@@ -41,6 +50,8 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.IdpIssuer,
 		arg.IdpSubject,
 		arg.ExpiresAt,
+		arg.UserAgent,
+		arg.IpAddress,
 	)
 	var i Session
 	err := row.Scan(
@@ -53,12 +64,16 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.ExpiresAt,
 		&i.LastSeenAt,
 		&i.RevokedAt,
+		&i.UserAgent,
+		&i.IpAddress,
+		&i.GeoCountry,
+		&i.GeoCity,
 	)
 	return i, err
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, tenant_id, user_id, idp_issuer, idp_subject, issued_at, expires_at, last_seen_at, revoked_at
+SELECT id, tenant_id, user_id, idp_issuer, idp_subject, issued_at, expires_at, last_seen_at, revoked_at, user_agent, ip_address, geo_country, geo_city
 FROM sessions
 WHERE tenant_id = $1 AND id = $2
 `
@@ -83,12 +98,16 @@ func (q *Queries) GetSessionByID(ctx context.Context, arg GetSessionByIDParams) 
 		&i.ExpiresAt,
 		&i.LastSeenAt,
 		&i.RevokedAt,
+		&i.UserAgent,
+		&i.IpAddress,
+		&i.GeoCountry,
+		&i.GeoCity,
 	)
 	return i, err
 }
 
 const listSessionsForUser = `-- name: ListSessionsForUser :many
-SELECT id, tenant_id, user_id, idp_issuer, idp_subject, issued_at, expires_at, last_seen_at, revoked_at
+SELECT id, tenant_id, user_id, idp_issuer, idp_subject, issued_at, expires_at, last_seen_at, revoked_at, user_agent, ip_address, geo_country, geo_city
 FROM sessions
 WHERE tenant_id = $1
   AND user_id = $2
@@ -123,6 +142,10 @@ func (q *Queries) ListSessionsForUser(ctx context.Context, arg ListSessionsForUs
 			&i.ExpiresAt,
 			&i.LastSeenAt,
 			&i.RevokedAt,
+			&i.UserAgent,
+			&i.IpAddress,
+			&i.GeoCountry,
+			&i.GeoCity,
 		); err != nil {
 			return nil, err
 		}

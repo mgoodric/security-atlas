@@ -45,6 +45,29 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ## [Unreleased]
 
+### Added
+
+- Active sessions show user-agent, IP, and geo
+  ([#162](https://github.com/mgoodric/security-atlas/issues/162); closes
+  slice 154 F6). The `sessions` table gains four nullable columns
+  (`user_agent`, `ip_address`, `geo_country`, `geo_city`) via migration
+  `20260518100000_sessions_augment_ua_ip_geo.sql` (idempotent / reversible).
+  The user-facing OIDC + local-login session-create paths now capture the
+  caller's `User-Agent` header (truncated to 512 bytes — DoS guard) and IP
+  address (`r.RemoteAddr` by default, honoring `X-Forwarded-For` only when
+  `TRUST_FORWARDED_HEADERS=1` per OWASP IP-spoofing guidance). The
+  slice-108 `/v1/me/sessions` wire shape exposes the four new fields with
+  `omitempty`, the slice-110 BFF route proxies them transparently
+  (passthrough body), and the settings page Active Sessions section renders
+  them as a `… · UA · IP · City, Country` line beneath the existing
+  Created / last used line. Per anti-criterion P0-162-1 the line is
+  rendered honestly: missing fields are omitted (no fabricated
+  "(unknown)" placeholder), and rows with no augmented fields render
+  identically to today. Geo enrichment (IP → country/city) is NOT in
+  scope of this slice; the columns ship nullable and a follow-up
+  populates them. Decisions log at
+  `docs/audit-log/162-sessions-wire-shape-decisions.md`.
+
 ### Fixed
 
 - Playwright `control-detail-empty.spec.ts` fixture file is now present

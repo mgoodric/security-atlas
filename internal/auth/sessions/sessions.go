@@ -52,6 +52,11 @@ var ErrRevoked = errors.New("sessions: revoked")
 var ErrExpired = errors.New("sessions: expired")
 
 // Session is the domain projection.
+//
+// Slice 162: UserAgent / IPAddress / GeoCountry / GeoCity are surfaced from
+// the augmented columns added by migration 20260518100000. All four are
+// nullable strings — pre-migration rows return empty values; geo enrichment
+// is not populated by this slice (P0-162-3) and ships empty.
 type Session struct {
 	ID         string
 	TenantID   uuid.UUID
@@ -62,6 +67,10 @@ type Session struct {
 	ExpiresAt  time.Time
 	LastSeenAt time.Time
 	RevokedAt  *time.Time
+	UserAgent  string
+	IPAddress  string
+	GeoCountry string
+	GeoCity    string
 }
 
 // Store wraps the sessions table with tenancy plumbing.
@@ -87,12 +96,27 @@ func NewID() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
+// MaxUserAgentBytes caps the User-Agent string we persist. RFC 7231 sets no
+// upper bound on header length, but real browsers stay well under 512 bytes;
+// the cap is a cheap DoS guard against pathological clients that send a
+// megabyte UA string and force the DB to bloat. Truncation happens at the
+// boundary so the persisted value remains a valid prefix of the original.
+const MaxUserAgentBytes = 512
+
 // CreateInput captures what the login handlers know after authenticating.
+//
+// Slice 162: UserAgent + IPAddress are now optional — callers that have an
+// http.Request in scope (the auth http handler at session-issue time) pass
+// them; background flows that don't (e.g. admin-credential issuance, tests
+// seeding sessions directly) leave them empty. Empty strings are persisted
+// as SQL NULL by the store layer.
 type CreateInput struct {
 	TenantID   uuid.UUID
 	UserID     uuid.UUID
 	IdpIssuer  string
 	IdpSubject string
+	UserAgent  string
+	IPAddress  string
 }
 
 // Create persists a new session and returns its id (cookie value).
@@ -111,6 +135,7 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Session, error) {
 	}
 	q := dbx.New(tx)
 	expiresAt := time.Now().UTC().Add(s.ttl)
+	ua := truncateUserAgent(in.UserAgent)
 	row, err := q.CreateSession(ctx, dbx.CreateSessionParams{
 		ID:         id,
 		TenantID:   pgtype.UUID{Bytes: in.TenantID, Valid: true},
@@ -118,6 +143,8 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Session, error) {
 		IdpIssuer:  in.IdpIssuer,
 		IdpSubject: in.IdpSubject,
 		ExpiresAt:  pgtype.Timestamptz{Time: expiresAt, Valid: true},
+		UserAgent:  nullable(ua),
+		IpAddress:  nullable(in.IPAddress),
 	})
 	if err != nil {
 		return Session{}, fmt.Errorf("sessions: create: %w", err)
@@ -330,5 +357,39 @@ func sessionFromRow(row dbx.Session) Session {
 		t := row.RevokedAt.Time
 		s.RevokedAt = &t
 	}
+	// Slice 162: surface the augmented columns. sqlc emits *string for nullable
+	// TEXT/CHAR(2) columns; an unset value is nil → empty string in the domain
+	// projection, which `sessionWireFrom` then omits via omitempty on the wire.
+	if row.UserAgent != nil {
+		s.UserAgent = *row.UserAgent
+	}
+	if row.IpAddress != nil {
+		s.IPAddress = *row.IpAddress
+	}
+	if row.GeoCountry != nil {
+		s.GeoCountry = *row.GeoCountry
+	}
+	if row.GeoCity != nil {
+		s.GeoCity = *row.GeoCity
+	}
 	return s
+}
+
+// truncateUserAgent caps the User-Agent at MaxUserAgentBytes. Empty strings
+// pass through unchanged so the nullable helper can convert them to SQL NULL.
+func truncateUserAgent(ua string) string {
+	if len(ua) <= MaxUserAgentBytes {
+		return ua
+	}
+	return ua[:MaxUserAgentBytes]
+}
+
+// nullable returns nil for the empty string, otherwise a pointer to v. Used to
+// convert the CreateInput's empty-string sentinel into SQL NULL for the
+// nullable slice 162 columns.
+func nullable(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
 }

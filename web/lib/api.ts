@@ -2203,12 +2203,22 @@ export type MePatchRequest = {
 
 export type MePreferences = Record<string, Record<string, boolean>>;
 
+// Slice 162: extended with `user_agent`, `ip_address`, `geo_country`, `geo_city`.
+// All four are optional — the backend wire shape emits them with `omitempty`,
+// so a row that was created before the slice-162 migration (or by a flow that
+// had no http.Request in scope) arrives with the field absent. The settings
+// page's session-line helper treats `undefined` identically to empty — honest
+// empty render, no fabricated placeholder text (slice 162 P0-162-1).
 export type MeSession = {
   id: string;
   last4: string;
   created_at: string;
   last_used_at: string | null;
   is_current: boolean;
+  user_agent?: string;
+  ip_address?: string;
+  geo_country?: string;
+  geo_city?: string;
 };
 
 export type MeSessionsResponse = {

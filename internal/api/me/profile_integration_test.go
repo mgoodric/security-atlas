@@ -108,6 +108,21 @@ func seedSession(t *testing.T, admin *pgxpool.Pool, tenantID, userID string) str
 	return id
 }
 
+// seedSessionWithMetadata inserts a sessions row populating the slice 162
+// augmented columns (user_agent, ip_address, geo_country, geo_city). Used by
+// the slice-162 wire-shape assertion.
+func seedSessionWithMetadata(t *testing.T, admin *pgxpool.Pool, tenantID, userID, ua, ip, geoCountry, geoCity string) string {
+	t.Helper()
+	id := uuid.NewString()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO sessions (id, tenant_id, user_id, expires_at, user_agent, ip_address, geo_country, geo_city)
+		VALUES ($1, $2, $3, now() + interval '7 days', $4, $5, $6, $7)
+	`, id, tenantID, userID, ua, ip, geoCountry, geoCity); err != nil {
+		t.Fatalf("seed session with metadata: %v", err)
+	}
+	return id
+}
+
 type testEnv struct {
 	server *httptest.Server
 	bearer string
@@ -617,5 +632,76 @@ func TestGetMe_AdminCallerAlsoCarriesRoles(t *testing.T) {
 	}
 	if !got["admin"] || !got["auditor"] {
 		t.Errorf("roles=%v; want both admin and auditor present", rolesRaw)
+	}
+}
+
+// ===== Slice 162 — UA / IP / geo on the /v1/me/sessions wire shape =====
+//
+// AC-3: GET /v1/me/sessions surfaces user_agent + ip_address + geo_country +
+// geo_city when the underlying sessions row carries them. AC-A1 / P0-162-1:
+// rows that DON'T carry the columns render with the fields omitted, not
+// populated with a placeholder.
+
+// TestListSessions_AugmentedFieldsOnWire — a session row that was created with
+// UA/IP/geo populated surfaces all four fields on the JSON response.
+func TestListSessions_AugmentedFieldsOnWire(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenantID, userID := seedTenantAndUser(t, admin, "ua162@example.com", "UA Tester")
+	env := testServerForUser(t, app, tenantID, userID, false)
+
+	// One session WITH metadata, one WITHOUT — proves both shapes render correctly.
+	_ = seedSessionWithMetadata(t, admin, tenantID, userID,
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15",
+		"192.0.2.18",
+		"US",
+		"San Francisco",
+	)
+	_ = seedSession(t, admin, tenantID, userID)
+
+	resp, body := do(t, env, http.MethodGet, "/v1/me/sessions", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/me/sessions: status %d, want 200; body=%v", resp.StatusCode, body)
+	}
+	rows, _ := body["sessions"].([]any)
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 sessions, got %d", len(rows))
+	}
+
+	var withUA, withoutUA map[string]any
+	for _, r := range rows {
+		m, _ := r.(map[string]any)
+		if _, hasUA := m["user_agent"]; hasUA {
+			withUA = m
+		} else {
+			withoutUA = m
+		}
+	}
+	if withUA == nil || withoutUA == nil {
+		t.Fatalf("expected one row with user_agent and one without; got rows=%v", rows)
+	}
+
+	// AC-3 happy path: the augmented row carries all four fields.
+	if got := withUA["user_agent"]; got != "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15" {
+		t.Errorf("user_agent on wire = %v; want Safari UA string", got)
+	}
+	if got := withUA["ip_address"]; got != "192.0.2.18" {
+		t.Errorf("ip_address on wire = %v; want 192.0.2.18", got)
+	}
+	if got := withUA["geo_country"]; got != "US" {
+		t.Errorf("geo_country on wire = %v; want US", got)
+	}
+	if got := withUA["geo_city"]; got != "San Francisco" {
+		t.Errorf("geo_city on wire = %v; want San Francisco", got)
+	}
+
+	// P0-162-1: the row WITHOUT metadata has the four fields OMITTED from the
+	// JSON object (not present-with-placeholder). omitempty on the wire shape
+	// produces this — the frontend session-line helper treats missing identically
+	// to empty and renders the row honestly.
+	for _, key := range []string{"user_agent", "ip_address", "geo_country", "geo_city"} {
+		if v, present := withoutUA[key]; present {
+			t.Errorf("row without metadata leaked %q=%v on wire; want field omitted (P0-162-1)", key, v)
+		}
 	}
 }
