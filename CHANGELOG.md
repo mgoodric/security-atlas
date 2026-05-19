@@ -9,6 +9,40 @@ Conventional-Commit messages. Each entry links to its slice issue, the
 merging PR, and the squash-merge commit. For richer per-slice narrative
 see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
+## [1.11.0](https://github.com/mgoodric/security-atlas/compare/v1.10.0...v1.11.0) (2026-05-19)
+
+
+### Features
+
+* **api:** OpenAPI 3.1 spec + Redoc UI + BLOCKING openapi-drift-check ([#140](https://github.com/mgoodric/security-atlas/issues/140)) ([#300](https://github.com/mgoodric/security-atlas/issues/300)) ([e1e0a4f](https://github.com/mgoodric/security-atlas/commit/e1e0a4f8400fb99c9eaabab8c640427ba7c396e9))
+* **calendar:** /v1/calendar aggregation endpoint + ICS subscription ([#148](https://github.com/mgoodric/security-atlas/issues/148)) ([#310](https://github.com/mgoodric/security-atlas/issues/310)) ([8df4e40](https://github.com/mgoodric/security-atlas/commit/8df4e4024627209c9e9578743a43a51772772b35))
+* **export:** data-export library + audit-log CSV/JSON/XLSX export ([#135](https://github.com/mgoodric/security-atlas/issues/135)) ([#297](https://github.com/mgoodric/security-atlas/issues/297)) ([6d4d2a0](https://github.com/mgoodric/security-atlas/commit/6d4d2a03baa22b00733d9af501044115ae44ce98))
+
+
+### Bug Fixes
+
+* **authz:** admit slice-066 dashboard endpoints for non-admin roles ([#156](https://github.com/mgoodric/security-atlas/issues/156)) ([#319](https://github.com/mgoodric/security-atlas/issues/319)) ([ff53899](https://github.com/mgoodric/security-atlas/commit/ff538990ee978362717016c20f0baea7778de408))
+* **backend:** empty-set robustness across /v1/* list endpoints ([#150](https://github.com/mgoodric/security-atlas/issues/150)) ([#316](https://github.com/mgoodric/security-atlas/issues/316)) ([bb46b00](https://github.com/mgoodric/security-atlas/commit/bb46b00bc490f24162d1542fc9ac32466f59bd97))
+* **dashboard:** unstick frameworks/posture + activity placeholder panels ([#147](https://github.com/mgoodric/security-atlas/issues/147)) ([#309](https://github.com/mgoodric/security-atlas/issues/309)) ([e116b3b](https://github.com/mgoodric/security-atlas/commit/e116b3b75569636cf95b4ef834364247e42bc96e))
+* **frontend:** add control-link multi-select to risks/new form ([#151](https://github.com/mgoodric/security-atlas/issues/151)) ([#324](https://github.com/mgoodric/security-atlas/issues/324)) ([aa6f510](https://github.com/mgoodric/security-atlas/commit/aa6f510e13a95860bbfb52c34a5950193f409cd6))
+* **frontend:** BFF cookie forwarding works in Next.js production-build standalone ([#146](https://github.com/mgoodric/security-atlas/issues/146)) ([#327](https://github.com/mgoodric/security-atlas/issues/327)) ([ca52ad9](https://github.com/mgoodric/security-atlas/commit/ca52ad9a6a4cd3a875df6d8ee48cadb2a81d9f1f))
+* **frontend:** friendly empty-state on controls list + control detail 404 ([#152](https://github.com/mgoodric/security-atlas/issues/152)) ([#323](https://github.com/mgoodric/security-atlas/issues/323)) ([9830e84](https://github.com/mgoodric/security-atlas/commit/9830e843b5a4200e60a16637d596abaa81ee4a45))
+* **frontend:** logo renders in Next.js production-build standalone ([#153](https://github.com/mgoodric/security-atlas/issues/153)) ([#330](https://github.com/mgoodric/security-atlas/issues/330)) ([7485ee6](https://github.com/mgoodric/security-atlas/commit/7485ee65660e6fb2d35876bc1f30d8ea900d2970))
+* **frontend:** re-point dashboard upcoming + top-risks panels to slice-066 endpoints ([#157](https://github.com/mgoodric/security-atlas/issues/157)) ([#320](https://github.com/mgoodric/security-atlas/issues/320)) ([967e435](https://github.com/mgoodric/security-atlas/commit/967e4350a525cd4da3a157eef9d4ab475a363dd4))
+* **frontend:** wire audits 'Create audit period' button to slice 042 workspace ([#149](https://github.com/mgoodric/security-atlas/issues/149)) ([#315](https://github.com/mgoodric/security-atlas/issues/315)) ([2da7ac2](https://github.com/mgoodric/security-atlas/commit/2da7ac2c1be80f95031e8979c5b50fe74ae71649))
+
+
+### Documentation
+
+* **issues:** add slice 132 + spillover stubs 133 + 134 (full-docs refresh) ([#291](https://github.com/mgoodric/security-atlas/issues/291)) ([b98386a](https://github.com/mgoodric/security-atlas/commit/b98386a570cda2bee1ab6980797882469cb1bc27))
+* **issues:** add slice 135 + spillover stubs 136-139 (data-export library) ([#292](https://github.com/mgoodric/security-atlas/issues/292)) ([cce63ec](https://github.com/mgoodric/security-atlas/commit/cce63ec5f418a7c14f4d04b75539a64c544f99fe))
+* **issues:** add slice 140 — OpenAPI 3.1 spec + Redoc UI + drift-detect guard ([#293](https://github.com/mgoodric/security-atlas/issues/293)) ([d1975f2](https://github.com/mgoodric/security-atlas/commit/d1975f2b5869366f698279b15869bbf02484badf))
+* **issues:** add slice 141 + spillover stubs 142-144 (multi-tenant login) ([#303](https://github.com/mgoodric/security-atlas/issues/303)) ([8c61673](https://github.com/mgoodric/security-atlas/commit/8c616739306d374af7f6fa6b5de06077f9293c9e))
+* **issues:** add slice 145 (data-export hardening) + 146 (BFF cookie regression) ([#304](https://github.com/mgoodric/security-atlas/issues/304)) ([177a64b](https://github.com/mgoodric/security-atlas/commit/177a64bafd3e1bba7bd61a819a765ef3c72ad2fa))
+* **issues:** add slice 158 — branch-protection drift real fix (PR [#311](https://github.com/mgoodric/security-atlas/issues/311) follow-on) ([#313](https://github.com/mgoodric/security-atlas/issues/313)) ([a34d412](https://github.com/mgoodric/security-atlas/commit/a34d412b469df0f32ce41061c2cfa666c1a6109f))
+* **issues:** add slices 147-155 (comprehensive front-end-to-back-end gap audit) ([#305](https://github.com/mgoodric/security-atlas/issues/305)) ([3cb8eba](https://github.com/mgoodric/security-atlas/commit/3cb8ebad6932c694b62d8309b36436da731707a3))
+* **readme:** refresh README + capture fresh screenshots against v1.10.0+ ([#132](https://github.com/mgoodric/security-atlas/issues/132)) ([#296](https://github.com/mgoodric/security-atlas/issues/296)) ([1ed75a3](https://github.com/mgoodric/security-atlas/commit/1ed75a363fe4158b14089111ff77059229616ce1))
+
 ## [Unreleased]
 
 ### Fixed
