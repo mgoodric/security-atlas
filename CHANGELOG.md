@@ -53,6 +53,27 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   doc's suspect list (`/v1/risks`, `/v1/evidence`, `/v1/audit-periods`,
   `/v1/board-briefs`, `/v1/vendors`, `/v1/admin/users`, and 25 more)
   is now covered by the sweep as a regression gate.
+- Dashboard read endpoints admitted for non-admin roles — `GET /v1/activity`
+  and `GET /v1/upcoming` (slice 066) are now admitted for viewer,
+  control_owner, and auditor in addition to the admin / grc_engineer
+  wildcard reads they already had ([#156](https://github.com/mgoodric/security-atlas/issues/156);
+  slice 066 follow-on, paired with slice 148). Slice 066 shipped the
+  three dashboard read endpoints registered at
+  `internal/api/httpserver.go:603-605` but never updated the per-role
+  readable-resources sets, so any non-admin / non-grc credential hitting
+  the dashboard saw "Failed to load" on the Activity and Upcoming
+  panels (same OPA-admit-omission shape slice 148 fixed for
+  `/v1/calendar` — surfaced as spillover D8 in the slice 148 decisions
+  log). `GET /v1/frameworks/posture` was already admitted via
+  `defaults.rego.catalog_resources["frameworks"]` (slice 035) — the
+  slice-156 matrix test pins that contract so a future narrowing of
+  `catalog_resources` trips at the unit-test layer. Both
+  `policies/authz/` (source of truth) and `internal/authz/rego_bundle/`
+  (embedded mirror) are updated in lockstep. The OPA matrix test at
+  `internal/authz/slice156_test.go` covers the 18 (endpoints × roles)
+  admit cases plus 8 write-deny cases so a future maintainer
+  accidentally removing one of the admits or widening to a write
+  surface trips a unit-test failure.
 - Compliance calendar OPA admit — `GET /v1/calendar` and
   `POST /v1/calendar/subscription` are now admitted for every
   signed-in role (admin, grc_engineer, auditor, viewer, control_owner)
