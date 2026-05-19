@@ -13,6 +13,31 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Fixed
 
+- Logo SVGs render correctly in production-build standalone
+  ([#153](https://github.com/mgoodric/security-atlas/issues/153)).
+  Operators reported on v1.10.0 Unraid that the header logo + login-
+  screen logo still didn't render even after slice 123's `proxy.ts`
+  exempt-list fix landed. Root cause: the Next.js `output: "standalone"`
+  tracer (`web/next.config.ts`) does NOT copy `web/public/` into the
+  standalone bundle by design — `.next/static` is copied separately by
+  `deploy/docker/web.Dockerfile`, but a stale comment in that file
+  ("There is no web/public directory in this project, so none is
+  copied") pre-dated slice 123's introduction of the public/ tree and
+  was never updated. As a result `/logo-light.svg`, `/logo-dark.svg`,
+  `/og-image.png`, `/twitter-card.png`, the PWA icons, and
+  `/apple-touch-icon.png` all returned 404 in the deployed image, even
+  though `proxy.ts`'s PUBLIC_STATIC_FILES set correctly let the
+  requests through to the static-file handler. The fix adds a third
+  `COPY` line to web.Dockerfile (`/app/web/public ./web/public`, NOT
+  `./public` — the monorepo standalone tracer roots at the repo
+  layout so server.js lives at `web/server.js` and public/ must be
+  its sibling) and a `build:standalone` npm script in `web/package.json`
+  that performs the same copy for local `node .next/standalone/web/
+  server.js` invocations. Regression-guarded by a new Playwright spec
+  at `web/e2e/logo-render-production-build.spec.ts` (6 assertions
+  covering both logo variants + OG card + Twitter card + favicon +
+  end-to-end login-page rendering) following the slice 146
+  `ATLAS_PROD_BUILD` quarantine pattern.
 - BFF cookie forwarding works in Next.js production-build standalone
   ([#146](https://github.com/mgoodric/security-atlas/issues/146)). Every
   Unraid / Helm / docker-compose operator pulling main was hit by a
