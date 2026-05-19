@@ -52,10 +52,27 @@ USER node
 
 # The standalone output is self-contained: server.js + the minimal traced
 # node_modules. `.next/static` is copied alongside it (the standalone
-# tracer intentionally excludes static assets). There is no web/public
-# directory in this project, so none is copied.
+# tracer intentionally excludes static assets).
+#
+# Slice 153 — `web/public/` must ALSO be copied. In a monorepo
+# workspace the standalone tracer roots the output at the workspace
+# layout (next.config.ts's `outputFileTracingRoot` resolves to the
+# repo root), so server.js lives at `web/server.js` and the
+# standalone server resolves `/public/*` request paths against
+# `<server.js dir>/public/` — i.e. `./web/public/` from the runtime
+# CWD. Without this COPY, requests for `/logo-light.svg`,
+# `/logo-dark.svg`, `/og-image.png`, `/twitter-card.png`, the PWA
+# icons, and `/apple-touch-icon.png` returned 404 even though
+# `web/proxy.ts`'s PUBLIC_STATIC_FILES set (slice 123) correctly
+# exempted them from the auth-redirect: the proxy let the request
+# pass, but the standalone server had no file to serve. The
+# operator-reported v1.10.0 logo-render bug surfaced exactly this
+# gap. The previous comment ("There is no web/public directory in
+# this project") pre-dated slice 123's introduction of the public/
+# tree and was stale.
 COPY --from=builder --chown=node:node /app/web/.next/standalone ./
 COPY --from=builder --chown=node:node /app/web/.next/static ./web/.next/static
+COPY --from=builder --chown=node:node /app/web/public ./web/public
 
 EXPOSE 3000
 
