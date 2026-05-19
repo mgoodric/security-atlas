@@ -40,8 +40,9 @@ func baseAckRateRow(t *testing.T) dbx.ListPoliciesWithAckRateRow {
 // computes percent.
 func TestWireFromAckRateRow_PublishedWithAcks_PassesThrough(t *testing.T) {
 	row := baseAckRateRow(t)
-	row.AckDenominator = pgtype.Int8{Int64: 10, Valid: true}
-	row.AckNumerator = pgtype.Int8{Int64: 4, Valid: true}
+	denom, num := int64(10), int64(4)
+	row.AckDenominator = &denom
+	row.AckNumerator = &num
 
 	w := wireFromAckRateRow(row)
 
@@ -73,9 +74,10 @@ func TestWireFromAckRateRow_NonPublished_AckRateIsNil(t *testing.T) {
 		t.Run(status, func(t *testing.T) {
 			row := baseAckRateRow(t)
 			row.Status = status
-			// Both columns NULL — SQL CASE WHEN status='published' did not fire.
-			row.AckDenominator = pgtype.Int8{Valid: false}
-			row.AckNumerator = pgtype.Int8{Valid: false}
+			// Both columns NULL — slice 159 CTE filters published-only,
+			// so the LEFT JOIN produces nil pointers for non-published rows.
+			row.AckDenominator = nil
+			row.AckNumerator = nil
 
 			w := wireFromAckRateRow(row)
 
@@ -96,8 +98,9 @@ func TestWireFromAckRateRow_NonPublished_AckRateIsNil(t *testing.T) {
 // required-role members exist").
 func TestWireFromAckRateRow_PublishedZeroDenominator_PercentNull(t *testing.T) {
 	row := baseAckRateRow(t)
-	row.AckDenominator = pgtype.Int8{Int64: 0, Valid: true}
-	row.AckNumerator = pgtype.Int8{Int64: 0, Valid: true}
+	denom, num := int64(0), int64(0)
+	row.AckDenominator = &denom
+	row.AckNumerator = &num
 
 	w := wireFromAckRateRow(row)
 
@@ -147,8 +150,9 @@ func TestIncludesAckRate(t *testing.T) {
 // verbatim. (Anti-criterion ISC-A2.)
 func TestPolicyWithAckRateWire_PreservesEmbeddedPolicyWireShape(t *testing.T) {
 	row := baseAckRateRow(t)
-	row.AckDenominator = pgtype.Int8{Int64: 5, Valid: true}
-	row.AckNumerator = pgtype.Int8{Int64: 5, Valid: true}
+	denom, num := int64(5), int64(5)
+	row.AckDenominator = &denom
+	row.AckNumerator = &num
 
 	w := wireFromAckRateRow(row)
 

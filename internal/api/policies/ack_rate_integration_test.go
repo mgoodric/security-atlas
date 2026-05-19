@@ -607,6 +607,94 @@ func TestListPolicies_IncludeAckRate_MatchesPerPolicyHandler(t *testing.T) {
 	}
 }
 
+// TestListPolicies_IncludeAckRate_WireShape_PinsNullVsNumber is the
+// slice 159 belt-and-suspenders test (AC-6). The slice 159 codegen
+// changes shifted `AckDenominator` / `AckNumerator` from
+// `pgtype.Int8` (with a `.Valid` field) to `*int64` (nil = NULL).
+// This test asserts the JSON-on-the-wire shape — that the keys are
+// present, that nil pointers serialize as JSON `null`, and that
+// populated pointers serialize as JSON numbers. Without this test
+// pin, a future codegen-type drift could silently change the wire
+// contract (e.g. emit `*int64` -> nil as `{}` rather than `null` if
+// the struct tags drift). The earlier tests assert numeric values
+// but not the marshal semantics of the null branch.
+func TestListPolicies_IncludeAckRate_WireShape_PinsNullVsNumber(t *testing.T) {
+	s := setup(t)
+
+	// One draft policy: ack_rate columns MUST be JSON null.
+	draftID := createDraftPolicy(t, s, "Draft-Policy-WireShape", "1", []string{"employee"})
+
+	// One published-with-no-acks policy: ack_rate cell MUST be populated
+	// with denominator >= 0 (the API key the bootstrap-admin holds may
+	// or may not match the required role; either way, both columns
+	// MUST be JSON numbers, not null).
+	publishedID := createAndPublishPolicy(t, s, "Published-No-Ack-WireShape", "1", []string{"employee"})
+
+	raw := s.do(t, http.MethodGet, "/v1/policies?include=ack_rate", nil, s.adminBear, http.StatusOK)
+
+	// Decode to a shape that tells us whether the key was PRESENT in
+	// the wire and whether the value was a JSON number vs JSON null.
+	// Using json.RawMessage lets us inspect the literal bytes.
+	var envelope struct {
+		Policies []struct {
+			ID      string          `json:"id"`
+			Status  string          `json:"status"`
+			AckRate json.RawMessage `json:"ack_rate"`
+		} `json:"policies"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("unmarshal: %v body=%s", err, raw)
+	}
+
+	var sawDraft, sawPublished bool
+	for _, p := range envelope.Policies {
+		switch p.ID {
+		case draftID:
+			sawDraft = true
+			// Draft → ack_rate MUST be the JSON literal `null` (key present, value null).
+			if string(p.AckRate) != "null" {
+				t.Errorf("draft policy %s: ack_rate = %q; want literal `null`",
+					p.ID, string(p.AckRate))
+			}
+		case publishedID:
+			sawPublished = true
+			// Published → ack_rate MUST be a JSON object with `numerator`
+			// + `denominator` as JSON numbers (not nulls). We don't
+			// assert the values here — the OTHER tests do that. We
+			// assert the SHAPE: ack_rate is non-null, denominator is a
+			// JSON number, numerator is a JSON number.
+			if string(p.AckRate) == "null" {
+				t.Errorf("published policy %s: ack_rate = `null`; want populated cell",
+					p.ID)
+				continue
+			}
+			var cell struct {
+				Numerator   *int64 `json:"numerator"`
+				Denominator *int64 `json:"denominator"`
+			}
+			if err := json.Unmarshal(p.AckRate, &cell); err != nil {
+				t.Errorf("published policy %s: ack_rate body %q does not unmarshal: %v",
+					p.ID, string(p.AckRate), err)
+				continue
+			}
+			if cell.Numerator == nil {
+				t.Errorf("published policy %s: numerator is JSON null; want a number",
+					p.ID)
+			}
+			if cell.Denominator == nil {
+				t.Errorf("published policy %s: denominator is JSON null; want a number",
+					p.ID)
+			}
+		}
+	}
+	if !sawDraft {
+		t.Fatalf("draft policy %s not found in joined list", draftID)
+	}
+	if !sawPublished {
+		t.Fatalf("published policy %s not found in joined list", publishedID)
+	}
+}
+
 // issueRoledUserBearer mints a non-admin owner bearer carrying the
 // supplied roles, then seeds a users row + an api_keys row so the
 // joined query's denominator (api_keys) counts this user. The bearer's
