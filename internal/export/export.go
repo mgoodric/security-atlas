@@ -312,22 +312,10 @@ func (*jsonExporter) WriteRowsWithOpts(w io.Writer, header []string, rows iter.S
 	return nil
 }
 
-// jsonMarshalOrdered marshals an object preserving header column order.
-// The stdlib `map[string]string` would sort keys alphabetically; the
-// slice 135 contract requires keys in header declaration order so the
-// JSON output mirrors the CSV column order downstream consumers expect.
-//
-// Deprecated: use jsonMarshalOrderedWithOpts. Retained for symmetry
-// with the slice 135 export.go surface; callers in this package now
-// route through the opts variant exclusively.
-func jsonMarshalOrdered(header []string, obj map[string]string) ([]byte, error) {
-	return jsonMarshalOrderedWithOpts(header, obj, WriteOpts{})
-}
-
-// jsonMarshalOrderedWithOpts is the slice 145 variant. It marshals
-// keys in header order (slice 135 contract) and renders nullable-set
-// columns as the JSON `null` token when their cell value is the empty
-// string (slice 145 AC-2).
+// jsonMarshalOrderedWithOpts marshals an object preserving header column order
+// (slice 135 contract — the stdlib map encoder would sort keys alphabetically).
+// Renders nullable-set columns as the JSON `null` token when their cell value
+// is the empty string (slice 145 AC-2).
 func jsonMarshalOrderedWithOpts(header []string, obj map[string]string, opts WriteOpts) ([]byte, error) {
 	var b strings.Builder
 	b.WriteByte('{')
