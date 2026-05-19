@@ -3,7 +3,32 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-18 (batch 63 claim-stake · 163 → in-progress · solo)
+**Last reconciled:** 2026-05-18 (slice 163 → in-review · settings API tokens Rotate action solo)
+
+## Drift detected — 2026-05-18 (slice 163 → in-review · settings API tokens Rotate action)
+
+Solo slice. F8 spillover from slice 154 audit. Pure-frontend wiring of
+the Rotate action on `/settings` Personal API Tokens table. Reducer
+extended with `ROTATED` transition carrying `{bearer, last4,
+predecessor_last4, predecessor_expires_at}` — plaintext-once invariant
+applies symmetrically with ISSUED (P0-163-1). Sibling
+`RotateConfirmModal`; `FreshTokenCallout` widened via
+discriminated-union prop; predecessor row badge derived from the
+successor's `rotated_from` field. No backend / migration / BFF route
+changes (P0-163-2/P0-163-3). 5 new reducer vitest cases (492 total in
+`web/` suite). Decisions log captures D1-D5 including D3 wire-shape
+reconciliation (slice doc AC-4 says `superseded_by`; actual wire shape
+exposes `rotated_from` on the successor — semantic outcome identical,
+frontend inverts the direction). Branch
+`frontend/163-settings-api-tokens-rotate-action`, PR #351.
+
+| Row | Transition                  | Evidence                                                                                                                                                                                                                                  |
+| --- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 163 | `in-progress` → `in-review` | PR #351 opened · D1 rotate-now-atomic · D3 wire-shape derivation from `rotated_from` (corrects slice doc AC-4 `superseded_by` slip) · 492/492 vitest pass · pre-commit clean · ship-gate PASS · decisions log at docs/audit-log/163-\*.md |
+
+**Counts delta:** in-progress −1 · in-review +1.
+
+Remaining ready queue: 164 (settings e2e seed + uncomment 0.5d AFK).
 
 ## Drift detected — 2026-05-18 (batch 63 claim-stake · 163 → in-progress)
 
