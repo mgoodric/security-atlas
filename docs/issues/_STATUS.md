@@ -5,6 +5,18 @@
 
 **Last reconciled:** 2026-05-19 (batch 69 reconcile · 170 → merged · AC-2 green)
 
+## Drift detected — 2026-05-19 (slice 171 → in-progress · AC-3 final-AC fix)
+
+Continuous-loop pickup — slice 171 (settings.spec AC-3 notifications PATCH misfire, Quality / JUDGMENT / 0.25d, slice 168 AC-3 spillover follow-on). Branch `quality/171-ac-3-patch-misfire` claim-staked off main at `adb13e2`.
+
+Trace-driven diagnosis run BEFORE applying a fix per the slice doc's recommended workflow. PR #368's Playwright job log (run 26115121287, job 76802322769) shows the actual error — NOT a 30s `waitForResponse` timeout (slice doc Narrative assumption), but `locator.check: Clicking the checkbox did not change its state` raised at 756ms / 731ms on retry. Engineer picks a NEW hypothesis (H4): the production input is React-controlled (`<input type="checkbox" checked={email}>` where `email = row.email !== false`), so Playwright's `.check()` post-state verification sees the checkbox snap back to `checked=false` after React re-renders with the stale `prefsQuery.data` (cache not yet invalidated). H1/H2/H3 all rejected: testids match (H1), URLs match (H2), production code DOES wire `onChange → patchMut.mutate` (H3). Slice 168 engineer's "PATCH never fires" framing was itself a misdiagnosis: the PATCH does in fact fire — the failure is in Playwright's strict post-click state verification, not the network.
+
+| Row | Transition              | Evidence                                                                                                                                                                                                                                  |
+| --- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 171 | `ready` → `in-progress` | branch `quality/171-ac-3-patch-misfire` claim-stake commit; engineer picks H4 (controlled-checkbox post-state verification failure, not PATCH misfire); narrow ≤5-line spec fix swapping `toggle.check()` for `toggle.click()` planned |
+
+**Counts delta:** ready −1 · in-progress +1.
+
 ## Drift detected — 2026-05-19 (batch 69 reconcile · 170 → merged · AC-2 flipped green)
 
 Continuous-loop batch 69 (solo). Slice 170 (theme picker hydration bug) shipped via PR #370 squash-merged at `2c89eb3`. UNSTABLE merge (only AC-3 still failing; slice 171's scope). Engineer picked D1 = Pattern A (`useEffect` post-mount sync). 507/507 vitest pass. 3 CodeQL alerts (#31/32/33 — useless assignment in new tests) flagged + resolved in-PR by orchestrator (collapse `let theme = DEFAULT_THEME; theme = readTheme(...)` to `const theme = readTheme(...)` in 3 tests where the initial value was never asserted).
