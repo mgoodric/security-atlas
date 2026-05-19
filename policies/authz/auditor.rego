@@ -157,4 +157,27 @@ auditor_readable_resources := {
     # test (TestSlice135_UnifiedAuditLogExportAdmitSetParity) pins this
     # parity at the rego layer.
     "audit-log-export",
+    # Slice 148: compliance calendar is cross-business by design
+    # (slice 094 AC-9: "accessible to all signed-in users, no admin
+    # gate"). The auditor needs visibility into the audit-period
+    # milestones and exception expirations that the calendar
+    # surfaces. RLS keeps the read tenant-scoped; ABAC narrowing
+    # to the auditor's assigned periods is enforced at the query
+    # layer (the audit_periods table reads ALL active periods in
+    # the tenant — the auditor sees the full program calendar, not
+    # just their assigned slice, because v1 has no "assigned
+    # auditor sees only their assignments" admit on /v1/calendar
+    # — that is a v2 ABAC narrowing if surface demands).
+    "calendar",
+}
+
+# Slice 148: auditor can mint their own ICS subscription URL via
+# POST /v1/calendar/subscription. See viewer.rego for the design
+# rationale; the same narrow path predicate keeps the write surface
+# bound to the subscription mint.
+allow if {
+    has_role("auditor")
+    input.action == "write"
+    input.resource.type == "calendar"
+    input.request.path == "/v1/calendar/subscription"
 }

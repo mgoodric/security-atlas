@@ -61,3 +61,17 @@ grc_actions := {
     "deny",
     "aggregate",
 }
+
+# Slice 148: grc_engineer can mint their own ICS subscription URL via
+# POST /v1/calendar/subscription. The wildcard-read rule above
+# admits GET /v1/calendar but the action="write" path is gated
+# separately. Same narrow path predicate the slice-148 admit uses
+# on viewer / control_owner / auditor — keeps the write surface
+# bound to the subscription mint, not the (non-existent) future
+# POST /v1/calendar write path.
+allow if {
+    has_role("grc_engineer")
+    input.action == "write"
+    input.resource.type == "calendar"
+    input.request.path == "/v1/calendar/subscription"
+}

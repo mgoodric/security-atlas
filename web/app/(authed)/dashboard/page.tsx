@@ -9,11 +9,11 @@
 // Six panels, each owning its own TanStack Query so a slow or failing
 // endpoint degrades only that panel — the page never blocks on a single
 // API (AC-7, anti-criterion P0-2). Every panel binds to a real backend
-// endpoint via a BFF proxy under `/api/dashboard/**`; the two panels
-// whose endpoints do not exist on main yet (framework posture, activity
-// feed) render endpoint-naming placeholders rather than fabricating
-// data (anti-criterion P0-1). See the slice 040 decisions log for the
-// full missing-endpoint gap inventory.
+// endpoint via a BFF proxy under `/api/dashboard/**`. Slice 040 shipped
+// four bound panels + two `MissingEndpointPanel` placeholders (framework
+// posture, activity feed); slice 066 shipped the backend endpoints; and
+// slice 147 closed the loop by re-pointing the placeholders. See
+// `docs/audit-log/147-dashboard-placeholders-decisions.md`.
 //
 // Data sync: server values live ONLY in the TanStack Query cache and
 // are read during render — there is NO useEffect that seeds state from
@@ -33,7 +33,9 @@ import { TopRisksPanel } from "@/components/dashboard/top-risks-panel";
 import { UpcomingPanel } from "@/components/dashboard/upcoming-panel";
 import {
   APIError,
+  fetchDashboardActivity,
   fetchDashboardDrift,
+  fetchDashboardFrameworkPosture,
   fetchDashboardFreshness,
   fetchDashboardRisks,
   fetchDashboardUpcoming,
@@ -58,12 +60,26 @@ export default function DashboardPage() {
     queryKey: ["dashboard", "upcoming"],
     queryFn: fetchDashboardUpcoming,
   });
+  const postureQ = useQuery({
+    queryKey: ["dashboard", "framework-posture"],
+    queryFn: fetchDashboardFrameworkPosture,
+  });
+  const activityQ = useQuery({
+    queryKey: ["dashboard", "activity"],
+    queryFn: fetchDashboardActivity,
+  });
 
   // 401 from any bound panel query -> the cookie expired mid-session;
   // bounce to /login. The (authed) layout guards the initial load; this
   // covers token expiry while the page is open.
   const firstError =
-    driftQ.error ?? freshnessQ.error ?? risksQ.error ?? upcomingQ.error ?? null;
+    driftQ.error ??
+    freshnessQ.error ??
+    risksQ.error ??
+    upcomingQ.error ??
+    postureQ.error ??
+    activityQ.error ??
+    null;
   useEffect(() => {
     if (firstError instanceof APIError && firstError.status === 401) {
       router.push("/login?from=/dashboard");
@@ -84,7 +100,15 @@ export default function DashboardPage() {
       </header>
 
       {/* ============ FRAMEWORK POSTURE TILES ============ */}
-      <FrameworkPosturePanel />
+      <FrameworkPosturePanel
+        report={postureQ.data}
+        state={{
+          isLoading: postureQ.isLoading,
+          isError: postureQ.isError,
+          error: postureQ.error,
+          refetch: () => void postureQ.refetch(),
+        }}
+      />
 
       {/* ============ SECONDARY GRID: risks + freshness ============ */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -135,7 +159,15 @@ export default function DashboardPage() {
       </div>
 
       {/* ============ ACTIVITY FEED ============ */}
-      <ActivityFeedPanel />
+      <ActivityFeedPanel
+        report={activityQ.data}
+        state={{
+          isLoading: activityQ.isLoading,
+          isError: activityQ.isError,
+          error: activityQ.error,
+          refetch: () => void activityQ.refetch(),
+        }}
+      />
     </div>
   );
 }

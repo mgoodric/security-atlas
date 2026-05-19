@@ -11,6 +11,29 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ## [Unreleased]
 
+### Fixed
+
+- Compliance calendar OPA admit — `GET /v1/calendar` and
+  `POST /v1/calendar/subscription` are now admitted for every
+  signed-in role (admin, grc_engineer, auditor, viewer, control_owner)
+  per slice 094 AC-9 intent ([#148](https://github.com/mgoodric/security-atlas/issues/148)).
+  Slice 094 shipped the calendar handler + frontend but never updated
+  the OPA policies; operators on v1.10.0 with non-admin / non-grc
+  credentials saw "Failed to load calendar events" because OPA
+  returned `allow=false` on the new `"calendar"` resource type
+  (root cause D2 in the slice 148 decisions log). Both
+  `policies/authz/` (source of truth) and `internal/authz/rego_bundle/`
+  (embedded mirror) are updated in lockstep; OPA matrix tests at
+  `internal/authz/slice148_test.go` pin the admit set so a future
+  maintainer accidentally removing one of the admits trips a unit-test
+  failure. The subscription mint is path-predicated
+  (`request.path == "/v1/calendar/subscription"`) rather than wildcard
+  write on `"calendar"` so future write paths require an explicit
+  rego edit. Spillover slice
+  [#156](https://github.com/mgoodric/security-atlas/issues/156)
+  filed for the same gap on slice 066's dashboard read endpoints
+  (`/v1/activity`, `/v1/upcoming`, `/v1/frameworks/posture`).
+
 ### Added
 
 - OpenAPI 3.1 spec for the REST API + Redoc UI on the docs site +
@@ -45,6 +68,20 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   `actor_id::uuid` cast via a `CASE WHEN regex` expression, closing
   a planner-reordering footgun that surfaced during slice-135
   integration testing ([#135](https://github.com/mgoodric/security-atlas/issues/135) D6).
+- Dashboard `frameworks posture` + `recent activity` panels now render
+  real data ([#147](https://github.com/mgoodric/security-atlas/issues/147);
+  slice 066 follow-on). The slice-040 `MissingEndpointPanel` placeholders
+  ("This panel binds to GET /v1/frameworks/posture, which does not exist
+  on main yet" / same for `/v1/activity`) reported on v1.10.0 Unraid are
+  removed; both panels now consume the slice-066 backend reads via new
+  BFF proxies under `/api/dashboard/framework-posture` and
+  `/api/dashboard/activity`. Per-framework tiles render coverage %,
+  freshness composite, and signed 90-day trend delta; the activity feed
+  renders event_type / resource / actor / relative-time per row. Empty
+  installs render the panels' empty-state copy, never a placeholder or
+  500. The remaining two slice-066 follow-on bindings (`upcoming-panel`
+  → `/v1/upcoming`; `top-risks-panel` → `?sort=residual,age`) are
+  spilled to [#148](https://github.com/mgoodric/security-atlas/issues/148).
 
 ## [1.10.0](https://github.com/mgoodric/security-atlas/compare/v1.9.0...v1.10.0) (2026-05-18)
 
