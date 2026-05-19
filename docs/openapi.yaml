@@ -2546,6 +2546,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/risks/export:
+    get:
+      summary: GET /v1/risks/export
+      tags: [risks]
+      operationId: get-v1-risks-export
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/risks/heatmap:
     get:
       summary: GET /v1/risks/heatmap

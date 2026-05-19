@@ -53,6 +53,11 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { fetchRisksList, type Risk, type RisksListResponse } from "@/lib/api";
+import {
+  RISK_EXPORT_FORMATS,
+  RISK_EXPORT_FORMAT_LABELS,
+  buildRiskExportURL,
+} from "@/lib/api/risks-export";
 
 import {
   ALL,
@@ -277,6 +282,12 @@ function RisksPageInner() {
   // AC-6: Page-header `Hierarchy view ->` link on /risks navigates to
   // /risks/hierarchy. The reciprocal `List view ->` link on the
   // hierarchy page is wired in a sibling edit.
+  //
+  // Slice 136: Export buttons (CSV / JSON / XLSX) wire to the BFF
+  // proxy at `/api/risks/export?format=...`, which forwards to the
+  // platform `GET /v1/risks/export` endpoint. Each link is an
+  // `<a download>` so the browser honours the backend's
+  // Content-Disposition filename; no client-side JS download flow.
   const actions = (
     <>
       <Link
@@ -286,9 +297,18 @@ function RisksPageInner() {
       >
         Hierarchy view →
       </Link>
-      <Button variant="outline" size="sm" disabled>
-        Export CSV
-      </Button>
+      {RISK_EXPORT_FORMATS.map((format) => (
+        <a
+          key={format}
+          href={buildRiskExportURL(format)}
+          download
+          rel="noopener"
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+          data-testid={`risks-export-${format}`}
+        >
+          Export {RISK_EXPORT_FORMAT_LABELS[format]}
+        </a>
+      ))}
       <Button size="sm" disabled>
         New risk
       </Button>

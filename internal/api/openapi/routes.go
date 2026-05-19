@@ -114,6 +114,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/requirements/{id}/anchors", Tag: "ucf", Tier: "bearer", Internal: false, Summary: "GET /v1/requirements/{id}/anchors"},
 	{Method: "GET", Path: "/v1/requirements/{id}/coverage", Tag: "ucf", Tier: "bearer", Internal: false, Summary: "GET /v1/requirements/{id}/coverage"},
 	{Method: "GET", Path: "/v1/risks", Tag: "risks", Tier: "bearer", Internal: false, Summary: "GET /v1/risks"},
+	{Method: "GET", Path: "/v1/risks/export", Tag: "risks", Tier: "bearer", Internal: false, Summary: "GET /v1/risks/export"},
 	{Method: "GET", Path: "/v1/risks/heatmap", Tag: "risks", Tier: "bearer", Internal: false, Summary: "GET /v1/risks/heatmap"},
 	{Method: "GET", Path: "/v1/risks/theme-heatmap", Tag: "risks", Tier: "bearer", Internal: false, Summary: "GET /v1/risks/theme-heatmap"},
 	{Method: "GET", Path: "/v1/risks/{id}", Tag: "risks", Tier: "bearer", Internal: false, Summary: "GET /v1/risks/{id}"},
