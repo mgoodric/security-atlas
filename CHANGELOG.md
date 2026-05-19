@@ -66,7 +66,37 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   `fixtures/e2e/README.md`'s per-spec table is updated to include both
   the new `control-detail-empty.sql` row and the pre-existing
   `audit-log.sql` row that was missing from the table.
-
+- **quality:** auth-open-redirect Playwright spec drift
+  ([#161](https://github.com/mgoodric/security-atlas/issues/161)). The
+  `web/e2e/auth-open-redirect.spec.ts` spec (slice 086 live-verification
+  of the open-redirect HIGH remediation) has been silently failing on
+  `main` since merge — slice 079's `continue-on-error: true` quarantine
+  + a docs-only path filter on the `Frontend · Playwright e2e` job
+  masked the failure until slice 153 PR #330 triggered the real job.
+  JUDGMENT-type slice with 3-case diagnosis matrix (behavior regression
+  / spec drift / fixture drift); evidence in the CI trace + failure
+  artifacts ruled out Case 1 (host assertion at line 71 passed —
+  open-redirect defense IS functional) and Case 3 (page-snapshot at
+  failure time shows the dashboard fully rendered — fixture is producing
+  a valid session). Case 2 selected: the spec's `waitForURL` predicate
+  was self-referential —
+  `(url) => url.origin === new URL(authedPage.url()).origin` resolved
+  immediately because `authedPage.url()` returns the current page URL,
+  so the candidate's origin was compared against itself (always true).
+  `waitForURL` returned without actually waiting for the post-sign-in
+  redirect; line 70's `final = new URL(authedPage.url())` then captured
+  `/login?from=...` mid-flight and the pathname assertion fired. Fix
+  replaces the predicate with `(url) => !url.pathname.startsWith("/login")`
+  which actually waits for the redirect off `/login`. Smallest possible
+  change — no edit to `web/lib/safe-redirect.ts` (P0-A1), no edit to
+  `web/app/login/actions.ts` (Case 1 ruled out), no edit to
+  `web/e2e/fixtures.ts` (Case 3 ruled out). Decisions log at
+  `docs/audit-log/161-playwright-auth-open-redirect-spec-drift-decisions.md`
+  records the diagnosis chain, alternatives rejected, and the
+  revisit-once-in-use list (slice 141 multi-tenant, slice 034 OIDC RP,
+  slice 116 promote-e2e). The open-redirect defense itself is unchanged
+  and continues to be gated by the always-required
+  `web/lib/safe-redirect.test.ts` vitest (9 cases, all green).
 - Logo SVGs render correctly in production-build standalone
   ([#153](https://github.com/mgoodric/security-atlas/issues/153)).
   Operators reported on v1.10.0 Unraid that the header logo + login-
