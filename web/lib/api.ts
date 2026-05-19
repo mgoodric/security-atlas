@@ -2186,6 +2186,14 @@ export type MeProfile = {
   time_zone: string | null;
   is_admin: boolean;
   owner_roles: string[];
+  // Slice 130 (extended by slice 154): canonical `user_roles` list.
+  // Always present on the wire — empty array, never omitted — so
+  // callers can rely on it without a nil-check. The Profile section
+  // on /settings renders the additional roles (excluding the primary
+  // admin/user already shown via the `is_admin` badge) as a muted
+  // tail, mirroring the `Plans/mockups/settings.html` "admin +
+  // grc_engineer" pattern.
+  roles: string[];
 };
 
 export type MePatchRequest = {
