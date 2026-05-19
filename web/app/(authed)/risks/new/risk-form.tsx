@@ -35,6 +35,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RiskCreateInput } from "@/lib/api";
 
+import { ControlMultiSelect } from "./control-multi-select";
+import { FieldErrors, hasErrors, validateRiskForm } from "./validate";
+
 const CATEGORIES = [
   "confidentiality",
   "integrity",
@@ -66,6 +69,11 @@ type FormState = {
   treatment_owner: string;
   likelihood: number;
   impact: number;
+  // Slice 151: linked_control_ids drives the ControlMultiSelect picker.
+  // The form keeps the selection in state even when the picker is
+  // hidden (treatment !== mitigate) so toggling treatment back to
+  // mitigate does NOT wipe the user's prior selection (D-151-Q8).
+  linked_control_ids: string[];
 };
 
 function initialState(): FormState {
@@ -78,11 +86,12 @@ function initialState(): FormState {
     treatment_owner: "",
     likelihood: 3,
     impact: 3,
+    linked_control_ids: [],
   };
 }
 
 function toCreateInput(s: FormState): RiskCreateInput {
-  return {
+  const body: RiskCreateInput = {
     title: s.title.trim(),
     description: s.description.trim(),
     category: s.category,
@@ -91,6 +100,13 @@ function toCreateInput(s: FormState): RiskCreateInput {
     treatment_owner: s.treatment_owner.trim(),
     inherent_score: { likelihood: s.likelihood, impact: s.impact },
   };
+  // Slice 151: only post linked_control_ids when treatment requires
+  // them. Sending an empty array for non-mitigate is noise; the
+  // backend defaults to no links absent the field (D-151-4).
+  if (s.treatment === "mitigate" && s.linked_control_ids.length > 0) {
+    body.linked_control_ids = s.linked_control_ids;
+  }
+  return body;
 }
 
 type Props = {
@@ -110,13 +126,37 @@ export function RiskForm({ onSubmit }: Props) {
   const [state, setState] = useState<FormState>(initialState());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Slice 151: field-level errors from validateRiskForm. Empty object
+  // until the user attempts a submit (so we don't pre-shame an empty
+  // form). After a failed submit, validation re-runs on every state
+  // change so the error clears as the user fixes the field — the
+  // P0-RISK-1 contract is "field-level error before submit", which
+  // means clearing on input is required for honest UX.
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setState((s) => ({ ...s, [key]: value }));
+    setState((prev) => {
+      const next = { ...prev, [key]: value };
+      if (submitAttempted) {
+        // Re-validate live after the first submit attempt so cleared
+        // errors disappear immediately as the user fixes the field.
+        setFieldErrors(validateRiskForm(next));
+      }
+      return next;
+    });
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setSubmitAttempted(true);
+    const errs = validateRiskForm(state);
+    setFieldErrors(errs);
+    if (hasErrors(errs)) {
+      // Surface the inline field errors and stop. Server is not even
+      // contacted — P0-RISK-1 ("client-side gate, not server bounce").
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -157,6 +197,14 @@ export function RiskForm({ onSubmit }: Props) {
           placeholder="Short, scannable risk statement"
           data-testid="risks-create-title"
         />
+        {fieldErrors.title && (
+          <p
+            className="mt-1 text-sm text-destructive"
+            data-testid="risks-create-title-error"
+          >
+            {fieldErrors.title}
+          </p>
+        )}
       </div>
 
       <div>
@@ -262,8 +310,28 @@ export function RiskForm({ onSubmit }: Props) {
             placeholder="Person or role accountable for treatment"
             data-testid="risks-create-treatment-owner"
           />
+          {fieldErrors.treatment_owner && (
+            <p
+              className="mt-1 text-sm text-destructive"
+              data-testid="risks-create-treatment-owner-error"
+            >
+              {fieldErrors.treatment_owner}
+            </p>
+          )}
         </div>
       </div>
+
+      {/* Slice 151: Control-link multi-select. Renders ONLY when
+          treatment === 'mitigate' (D-151-Q8): toggling treatment away
+          hides the picker but the selection persists in form state so
+          toggling back restores it. */}
+      {state.treatment === "mitigate" && (
+        <ControlMultiSelect
+          selectedIds={state.linked_control_ids}
+          onChange={(ids) => update("linked_control_ids", ids)}
+          showRequiredError={Boolean(fieldErrors.linked_control_ids)}
+        />
+      )}
 
       <fieldset
         className="rounded-md border border-input p-4"
