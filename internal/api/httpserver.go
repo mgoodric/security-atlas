@@ -276,6 +276,12 @@ func (s *Server) httpHandler() http.Handler {
 	// alongside /v1/risks/heatmap, before the generic /v1/risks/{id}, so
 	// chi's declaration-order match keeps it ahead of the UUID-id route.
 	root.Get("/v1/risks/theme-heatmap", risksH.ThemeHeatmap)
+	// Slice 136: risk register data export (CSV / JSON / XLSX). Reuses
+	// the slice 135 data-export library + slice 145 concurrency cap.
+	// Literal-segment route declared before the generic /v1/risks/{id}
+	// so chi's declaration-order match keeps it ahead.
+	risksExportH := risksapi.NewExportHandler(s.dbPool)
+	root.Get("/v1/risks/export", risksExportH.ExportRisks)
 	// Slice 053: manual aggregation + live recompute. Literal-segment
 	// routes (/aggregate, /{id}/aggregation) declared before the generic
 	// /v1/risks/{id} so chi's declaration-order match keeps them ahead.

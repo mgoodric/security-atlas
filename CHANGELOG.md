@@ -100,6 +100,29 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- Risk register data export
+  ([#136](https://github.com/mgoodric/security-atlas/issues/136); spillover
+  from slice 135). New `GET /v1/risks/export?format=<csv|json|xlsx>`
+  endpoint dumps the full risk register for the authenticated tenant in
+  CSV, JSON, or XLSX. Reuses the slice 135 data-export library and
+  inherits the slice 145 per-(tenant, user) concurrency cap. Canonical
+  18-column set covers id / title / description / category / methodology
+  / treatment / treatment_owner / accepter / instrument_reference /
+  inherent_score / residual_score / severity / org_unit_id / themes /
+  review_due_at / accepted_until / created_at / updated_at —
+  `treatment_narrative` is intentionally excluded at v1 (slice 136
+  P0-A-Risk-1; defer to a future column-selection slice). Row cap
+  defaults to 50,000 risks. Meta-audit action is `risk_export` (distinct
+  from `audit_log_export` so forensic queries can enumerate
+  risk-register extractions separately). BFF at `/api/risks/export`
+  forwards the bearer-only auth to the platform. Risk-register page
+  ships three Export buttons (CSV / JSON / XLSX) replacing the prior
+  disabled placeholder. Migration `20260519000010_risk_export_meta_audit`
+  extends the `me_audit_log.action` CHECK to permit the new value. See
+  `docs/audit-log/136-risk-register-export-decisions.md` for the
+  column-set rationale and the audit-period-freezing decision
+  (D2 — risks have no observed_at; the per-period attested state lives
+  in the slice 028 attestation workflow, not the export endpoint).
 - Audit-log export: payload-redaction flag + per-(tenant, user)
   concurrency cap
   ([#145](https://github.com/mgoodric/security-atlas/issues/145);
