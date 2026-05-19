@@ -2,7 +2,7 @@
 
 > JUDGMENT slice. Claude resolved the design questions inline and recorded
 > them here. Slice 109 anti-criterion P0-A3 (promote `Go · sqlc generate
-> diff` to required-checks) closes with this slice's merge.
+diff` to required-checks) closes with this slice's merge.
 
 ## Context
 
@@ -174,12 +174,12 @@ note (R1 below) tracks it.
 
 ## D2 — Rejected alternatives
 
-| Option | Why rejected                                                                                                                                                                                                                                                                       | Confidence |
-| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| A      | Tighten the install pin. Hypothesis was wrong: local v1.31.1 (brew) reproduces the same drift CI produces (`go install`). Install path is byte-identical; the drift is structural sqlc inferencer behavior.                                                                        | high       |
+| Option | Why rejected                                                                                                                                                                                                                                                                         | Confidence |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
+| A      | Tighten the install pin. Hypothesis was wrong: local v1.31.1 (brew) reproduces the same drift CI produces (`go install`). Install path is byte-identical; the drift is structural sqlc inferencer behavior.                                                                          | high       |
 | B      | Post-generate hook. Adds a maintenance burden (a `sed` script that must stay in sync with whatever future drift introduces). Hides the actual problem (sqlc emits the wrong type) behind a fixup layer. Option C is the same runtime correctness with no script and no hidden magic. | high       |
-| D      | sqlc.yaml `overrides:` block. Doesn't apply to derived SELECT-alias columns in v1.31.1 — verified twice (slice 109 D1 + slice 159 BUILD). The `*.column_name` glob silently no-ops.                                                                                                | high       |
-| E      | Accept divergence; refactor handler to work with `interface{}`. Strictly worse than Option C: the handler becomes uglier (type-assertion + nil-check vs simple nil-check + dereference), and the codegen file says `interface{}` which lies about the column's runtime type.        | high       |
+| D      | sqlc.yaml `overrides:` block. Doesn't apply to derived SELECT-alias columns in v1.31.1 — verified twice (slice 109 D1 + slice 159 BUILD). The `*.column_name` glob silently no-ops.                                                                                                  | high       |
+| E      | Accept divergence; refactor handler to work with `interface{}`. Strictly worse than Option C: the handler becomes uglier (type-assertion + nil-check vs simple nil-check + dereference), and the codegen file says `interface{}` which lies about the column's runtime type.         | high       |
 
 ## D3 — Promotion to required-checks (closes slice 109 P0-A3)
 
@@ -216,14 +216,14 @@ deleted post-evidence-capture.
 
 ## D5 — Confidence summary
 
-| Decision                                       | Confidence | Notes                                                                                                                                                                          |
-| ---------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| D1 chosen option (C - query rewrite)           | high       | Verified locally — `sqlc generate` produces zero diff post-rewrite. Integration tests pass.                                                                                    |
-| D2 rejected alternatives                       | high       | Each rejection has a verified failure mode or is strictly worse than D1.                                                                                                       |
-| D3 promotion to required-checks                | high       | Direct config change. Live reconcile via slice 127's apply script.                                                                                                             |
-| D4 AC-10 evidence approach                     | high       | Same pattern slice 158 used to verify the drift-detector live job. Throwaway PR pattern is repo-proven.                                                                        |
-| Handler API change scope (pointer-style)       | high       | Slice doc AC-4 explicitly allows handler updates under Option C. JSON response shape unchanged. Wire shape tested via unit tests + handler integration tests + new AC-6 test. |
-| Two files, one slice                           | high       | Slice doc P0-A6 explicitly OKs both files in one slice when the same root cause applies. Same root cause confirmed (sqlc inferencer limits on derived columns).                |
+| Decision                                 | Confidence | Notes                                                                                                                                                                         |
+| ---------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1 chosen option (C - query rewrite)     | high       | Verified locally — `sqlc generate` produces zero diff post-rewrite. Integration tests pass.                                                                                   |
+| D2 rejected alternatives                 | high       | Each rejection has a verified failure mode or is strictly worse than D1.                                                                                                      |
+| D3 promotion to required-checks          | high       | Direct config change. Live reconcile via slice 127's apply script.                                                                                                            |
+| D4 AC-10 evidence approach               | high       | Same pattern slice 158 used to verify the drift-detector live job. Throwaway PR pattern is repo-proven.                                                                       |
+| Handler API change scope (pointer-style) | high       | Slice doc AC-4 explicitly allows handler updates under Option C. JSON response shape unchanged. Wire shape tested via unit tests + handler integration tests + new AC-6 test. |
+| Two files, one slice                     | high       | Slice doc P0-A6 explicitly OKs both files in one slice when the same root cause applies. Same root cause confirmed (sqlc inferencer limits on derived columns).               |
 
 ## D6 — Revisit-once-in-use list (R1-R3)
 
