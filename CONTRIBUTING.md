@@ -222,7 +222,14 @@ bash scripts/apply-branch-protection.sh
 
 The script reads the file, strips the `$`-prefixed annotation keys (GitHub's PUT API rejects unknown top-level fields), `PUT`s the cleaned payload to `repos/mgoodric/security-atlas/branches/main/protection`, then re-reads live and asserts the contexts list converged. Re-running the script with no file change is a no-op (idempotent — P0-A2). The equivalent manual call is `gh api -X PUT repos/mgoodric/security-atlas/branches/main/protection --input <(jq 'with_entries(select(.key | startswith("$") | not))' .github/branch-protection.json)`.
 
-**Failure mode of omission.** If you edit the file but skip the apply, the file's "source of truth" claim becomes a lie and security controls degrade silently. This exact failure cost the project four PRs of churn during the 2026-05-17/18 cascade-unblock session — see slice 127's narrative. The `Infra · branch-protection drift` informational CI job (added by slice 127) now surfaces the next drift event as a sticky PR comment on every PR; if you see that comment fire on your PR, decide which side is correct (file or live) and run the apply script OR edit the file to match live, then push the resolution.
+**Failure mode of omission.** If you edit the file but skip the apply, the file's "source of truth" claim becomes a lie and security controls degrade silently. This exact failure cost the project four PRs of churn during the 2026-05-17/18 cascade-unblock session — see slice 127's narrative.
+
+**Drift detection (slice 127 + slice 158).** Two informational CI surfaces watch for drift:
+
+- `Infra · branch-protection (PR-time validate)` runs on every PR. It validates ONLY the shape of `.github/branch-protection.json` (valid JSON + non-empty `required_status_checks.contexts`). It does not call the GitHub API, so it needs no elevated token and cannot leak a credential. The sticky PR comment fires only when the file shape is broken.
+- `Infra · branch-protection (live drift)` runs on push to `main`. It compares the file against the live ruleset via `gh api`. Drift findings surface in the workflow run summary + as an artifact (no PR exists on a push event).
+
+The live job needs the `Administration: Read` repo permission, which `GITHUB_TOKEN` cannot have. Slice 158 grants it via a fine-grained PAT in `secrets.BRANCH_PROTECTION_READ_TOKEN` ([ADR 0005](./docs/adr/0005-branch-protection-pat-vs-app.md) records the PAT-vs-GitHub-App decision and the maintainer setup steps including the 90-day rotation ritual). Until the secret is configured, the live job exits with a clear "secret not configured" message and stays informational.
 
 **Local repro for drift findings.** Reproduce the CI check locally with:
 
@@ -230,7 +237,25 @@ The script reads the file, strips the `$`-prefixed annotation keys (GitHub's PUT
 bash scripts/check-branch-protection-drift.sh
 ```
 
-Exit 0 = in sync; exit 1 = drift detected (diff printed on stderr); exit 2 = environment misconfigured (missing `gh` / `jq`, malformed file). Requires `gh` authenticated with `repo:read` against `mgoodric/security-atlas`.
+Exit 0 = in sync; exit 1 = drift detected (diff printed on stderr); exit 2 = environment misconfigured (missing `gh` / `jq`, malformed file). Locally the script reads whatever `gh` is authenticated as (`gh auth status`); CI reads the PAT.
+
+### Workflow linting (actionlint)
+
+`.github/workflows/*.yml` is linted by [actionlint](https://github.com/rhysd/actionlint) on every commit (pre-commit hook) and every PR (`pre-commit · all hooks` CI job, slice 158). The most common error class actionlint catches is **invalid `GITHUB_TOKEN` permission scopes** — PR #311 (closed unmerged) tried to add `administration: read` to a job's `permissions:` block, but `administration` is not a valid scope, and GHA silently dropped the entire workflow file at parse. The actionlint guard prevents that mistake recurring.
+
+**Install locally.** macOS: `brew install actionlint`. Debian/Ubuntu: `apt install actionlint` (or download a release binary from https://github.com/rhysd/actionlint/releases). The pre-commit hook is a `local` entry that calls the system binary — no extra Python wrapper to install.
+
+**Reproduce a CI finding.**
+
+```sh
+actionlint -shellcheck "" -no-color .github/workflows/*.yml
+```
+
+The `-shellcheck ""` flag disables actionlint's embedded shellcheck pass — pre-existing `SC2034`/`SC2045` warnings in some `run:` blocks are not the failure mode the guard is for and would be a noisy distraction. The wrong-permission-scope error fires regardless.
+
+**Smoke test (slice 158 AC-17).** `bash scripts/check-actionlint-fixture.sh` asserts that actionlint still flags the fixture at `scripts/actionlint-fixture-invalid-scope.yml` (the exact `administration: read` mistake). If this test ever passes incorrectly (actionlint stopped flagging the scope), the guard is silently broken and a follow-up slice should pick a different still-invalid scope as the canary.
+
+**Valid `GITHUB_TOKEN` scopes.** Per actionlint 1.7.12 + the GHA docs: `actions`, `artifact-metadata`, `attestations`, `checks`, `contents`, `deployments`, `discussions`, `id-token`, `issues`, `models`, `packages`, `pages`, `pull-requests`, `repository-projects`, `security-events`, `statuses`. **There is no `administration` scope on `GITHUB_TOKEN`.** Higher-privilege reads (branch-protection, org membership, etc.) require a PAT or GitHub App, as documented in [ADR 0005](./docs/adr/0005-branch-protection-pat-vs-app.md).
 
 ### API spec
 

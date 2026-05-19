@@ -1,0 +1,31 @@
+# actionlint-fixture-invalid-scope.yml — slice 158 AC-6 / AC-12 / AC-17
+#
+# Negative test fixture for the actionlint pre-commit + CI gate added by
+# slice 158. The `administration: read` line below is the EXACT mistake
+# PR #311 made: `administration` is not a valid GITHUB_TOKEN permission
+# scope. Running `actionlint scripts/actionlint-fixture-invalid-scope.yml`
+# MUST exit non-zero with an `unknown permission scope "administration"`
+# diagnostic. If it does not, the slice-158 guard is silently broken.
+#
+# This file is NOT a real workflow — it lives under `scripts/` (not
+# `.github/workflows/`) so GHA never tries to load it. The smoke-test
+# script `scripts/check-actionlint-fixture.sh` is the load-bearing
+# caller.
+#
+# DO NOT FIX the lint error. The point is that actionlint catches it.
+
+name: invalid-scope-fixture
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  administration: read # intentional bad scope — actionlint must catch
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "fixture"
