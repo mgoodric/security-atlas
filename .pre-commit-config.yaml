@@ -62,3 +62,30 @@ repos:
         stages: [pre-push]
         files: ^web/
         pass_filenames: false
+
+  # actionlint — slice 158 D3 guard against invalid GHA workflow files.
+  # PR #311 added `administration: read` to a job's `permissions:` block;
+  # `administration` is not a valid GITHUB_TOKEN scope, GHA silently
+  # dropped the workflow file at parse, and the slice-127 drift job
+  # never ran. actionlint catches that exact class of error before the
+  # commit lands.
+  #
+  # `local` hook (not the upstream `rhysd/actionlint-pre-commit` repo)
+  # so contributors install actionlint via their package manager
+  # (`brew install actionlint` on macOS, `apt install actionlint` on
+  # Debian, or download from releases). This matches the pattern for
+  # `gofmt` above and avoids a python-wheel-wrapper dependency that
+  # would lag the upstream actionlint binary on bug-fix releases.
+  # `-shellcheck ""` disables the embedded shellcheck pass — pre-
+  # existing SC2034/SC2045 warnings in this repo's `run:` blocks are
+  # not the failure mode this guard is for and would be a noisy
+  # distraction. The wrong-permission-scope error (slice 158 P0) fires
+  # regardless of shellcheck level.
+  - repo: local
+    hooks:
+      - id: actionlint
+        name: actionlint (slice 158)
+        entry: actionlint -shellcheck "" -no-color
+        language: system
+        files: ^\.github/workflows/.*\.ya?ml$
+        pass_filenames: true

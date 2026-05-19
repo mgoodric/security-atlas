@@ -5,10 +5,19 @@
 # protection config on `main` and exit non-zero on any drift.
 #
 # Slice 127 — this is the local-repro script for AC-7 and the worker
-# that the `branch-protection-drift` CI job in `.github/workflows/ci.yml`
-# invokes (AC-3 + AC-5). Both surfaces use the same comparison logic so
-# contributors can reproduce a CI finding by running this script
-# locally.
+# that the `branch-protection-drift-live` CI job in
+# `.github/workflows/ci.yml` invokes (AC-3 + AC-5). Both surfaces use
+# the same comparison logic so contributors can reproduce a CI finding
+# by running this script locally.
+#
+# Slice 158 — auth: this script's `gh api` call requires the
+# `Administration: Read` repo permission, which `GITHUB_TOKEN` cannot
+# be granted via the workflow `permissions:` block (no such scope
+# exists). The CI job passes a fine-grained PAT via
+# `secrets.BRANCH_PROTECTION_READ_TOKEN` -> `GH_TOKEN` env var. Locally
+# the script reads whatever `gh` is authenticated as (`gh auth status`).
+# See `docs/adr/0005-branch-protection-pat-vs-app.md` for D1 (PAT vs
+# GitHub App) rationale + PAT setup steps for the maintainer.
 #
 # Why it exists:
 #   `.github/branch-protection.json` is the file-as-source-of-truth for
