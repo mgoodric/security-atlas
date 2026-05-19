@@ -80,11 +80,11 @@ D1 captures the correct framing.
 
 ## D3 — Files changed
 
-| File                                          | Lines changed | Substantive? |
-| --------------------------------------------- | ------------- | ------------ |
-| `web/e2e/settings.spec.ts`                    | 14            | Yes          |
-| `docs/audit-log/165-settings-spec-ac-diagnosis-fix-decisions.md` | NEW           | log          |
-| `docs/issues/_STATUS.md`                      | 11 + table-realign | book-keeping |
+| File                                                             | Lines changed      | Substantive? |
+| ---------------------------------------------------------------- | ------------------ | ------------ |
+| `web/e2e/settings.spec.ts`                                       | 14                 | Yes          |
+| `docs/audit-log/165-settings-spec-ac-diagnosis-fix-decisions.md` | NEW                | log          |
+| `docs/issues/_STATUS.md`                                         | 11 + table-realign | book-keeping |
 
 `web/e2e/settings.spec.ts` diff breakdown:
 
@@ -98,15 +98,15 @@ Net diff vs slice doc's "< 20 lines" AC-3: 14 lines in the spec, well under the 
 
 ## D4 — Anti-criteria audit (P0)
 
-| Anti-criterion | Status                                                                                                                                                                              |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P0-A1          | PASS — no AC body commented out; all 11 assertions remain un-commented.                                                                                                             |
-| P0-A2          | PASS — no new assertions added; only fixture wiring changed.                                                                                                                        |
-| P0-A3          | PASS — no production code touched. `internal/api/me/*.go`, `internal/auth/sessions/*.go`, and `web/app/(authed)/settings/*` are untouched.                                          |
-| P0-A4          | PASS — no real-data UUIDs introduced (fixture SQL unchanged).                                                                                                                       |
-| P0-A5          | PASS — no `SET ROLE` / `SET SESSION AUTHORIZATION` / `\connect` in fixtures.                                                                                                        |
-| P0-A6          | PASS — branch-protection.json untouched; `Frontend · Playwright e2e` remains advisory.                                                                                              |
-| P0-A7          | PASS — no vendor-prefixed token strings introduced; spec test names + fixture all neutral.                                                                                          |
+| Anti-criterion | Status                                                                                                                                                                                        |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0-A1          | PASS — no AC body commented out; all 11 assertions remain un-commented.                                                                                                                       |
+| P0-A2          | PASS — no new assertions added; only fixture wiring changed.                                                                                                                                  |
+| P0-A3          | PASS — no production code touched. `internal/api/me/*.go`, `internal/auth/sessions/*.go`, and `web/app/(authed)/settings/*` are untouched.                                                    |
+| P0-A4          | PASS — no real-data UUIDs introduced (fixture SQL unchanged).                                                                                                                                 |
+| P0-A5          | PASS — no `SET ROLE` / `SET SESSION AUTHORIZATION` / `\connect` in fixtures.                                                                                                                  |
+| P0-A6          | PASS — branch-protection.json untouched; `Frontend · Playwright e2e` remains advisory.                                                                                                        |
+| P0-A7          | PASS — no vendor-prefixed token strings introduced; spec test names + fixture all neutral.                                                                                                    |
 | P0-A8          | PASS — change is scoped to `web/e2e/settings.spec.ts`'s fixture binding. The other 121 specs have their own fixture bindings (all stub/empty or using `authedPage` correctly) — none touched. |
 
 ## D5 — Verification
