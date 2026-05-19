@@ -1,11 +1,12 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { apiBaseURL } from "@/lib/api";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { safeRedirectTarget } from "@/lib/safe-redirect";
+import { shouldUseSecureCookie } from "@/lib/secure-cookie";
 
 // signIn stores the supplied bearer token in an httpOnly cookie. Dev-mode
 // auth: the human pastes a token from `atlas-cli credentials issue` or
@@ -47,10 +48,19 @@ export async function signIn(formData: FormData): Promise<void> {
   }
 
   const jar = await cookies();
+  // Slice 146 — pick `secure` based on the actual transport (per-request,
+  // via X-Forwarded-Proto / Forwarded) rather than a blunt build-time
+  // NODE_ENV check. The old check broke every self-hosted operator that
+  // serves the production-build standalone over plain HTTP: Secure cookies
+  // were emitted but the browser refused to round-trip them, the BFF saw
+  // no cookie, web/proxy.ts redirected /api/dashboard/** to /login, and
+  // panels rendered "Unexpected token '<'". See web/lib/secure-cookie.ts +
+  // docs/runbooks/bff-cookie-forwarding.md.
+  const reqHeaders = await headers();
   jar.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookie(reqHeaders),
     path: "/",
     // 8 hours — short-lived, matching the typical CI bearer's TTL.
     maxAge: 60 * 60 * 8,

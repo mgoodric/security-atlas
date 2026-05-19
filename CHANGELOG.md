@@ -13,6 +13,29 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Fixed
 
+- BFF cookie forwarding works in Next.js production-build standalone
+  ([#146](https://github.com/mgoodric/security-atlas/issues/146)). Every
+  Unraid / Helm / docker-compose operator pulling main was hit by a
+  regression where the dashboard / control-detail / audit-workspace /
+  board-pack-preview panels rendered "Could not load this panel ·
+  Unexpected token '<'... is not valid JSON" against the production-
+  build standalone server (`node .next/standalone/server.js`), even
+  though the same surface worked against `npm run dev`. Root cause: the
+  `signIn` server action (`web/app/login/actions.ts`) set the
+  `sa_session_token` cookie with `secure: process.env.NODE_ENV ===
+  "production"`, which emitted the `Secure` attribute on every prod-
+  build deployment — including the many self-hosted operators serving
+  over plain HTTP. Browsers refuse to send Secure cookies on HTTP, so
+  the BFF saw no cookie, `web/proxy.ts` redirected every `/api/**` path
+  to `/login`, and the browser fetch parsed the login HTML as JSON.
+  The fix replaces the blunt `NODE_ENV` check with a per-request
+  transport detection (`web/lib/secure-cookie.ts::shouldUseSecureCookie`)
+  that trusts the `X-Forwarded-Proto` / RFC 7239 `Forwarded` headers
+  and defaults to NOT-secure when no signal is present. Unit-tested
+  (8 vitest cases) and end-to-end-tested via a quarantined Playwright
+  spec at `web/e2e/bff-cookie-production-build.spec.ts`. Operator-facing
+  runbook at `docs/runbooks/bff-cookie-forwarding.md` explains the
+  gotcha + how to test for regression.
 - Control detail no longer hard-404s on fresh install
   ([#152](https://github.com/mgoodric/security-atlas/issues/152)). On a
   fresh install the `/controls` list renders the ~1,400-row global SCF
