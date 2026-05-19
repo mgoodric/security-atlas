@@ -524,13 +524,20 @@ jobs:
       # checksum on the GitHub releases page. Slice-128's SHA-pin
       # discipline applies to `uses:` lines (action references), not
       # to ad-hoc tool downloads in `run:` blocks.
+      #
+      # Installs to `$HOME/.local/bin` (added to GITHUB_PATH) — no
+      # sudo required. Slice 117 sets `disable-sudo: true` on every
+      # job; binaries that need root-owned install paths break that
+      # invariant.
       - name: Install actionlint
         run: |
           # actionlint v1.7.12 — matches the local-dev version used to
           # validate slice 158's workflow changes.
+          mkdir -p "$HOME/.local/bin"
+          cd "$HOME/.local/bin"
           bash <(curl -fsSL --retry 3 https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
-          sudo mv actionlint /usr/local/bin/
-          actionlint -version
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/actionlint" -version
       - name: Validate config
         run: pre-commit validate-config
       - name: Run all hooks against all files
