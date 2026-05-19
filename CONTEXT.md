@@ -249,3 +249,64 @@ GET  /v1/policies/{id}/acknowledgment-rate     (auth required; numerator/denomin
 ```
 
 P0 anti-criteria: anonymous ack rejected (slice 034 cred required); stale acks not counted; superseded-version ack does not satisfy current.
+
+## User-tenant membership (slice 141, in design)
+
+Multi-tenant login enumeration. The `user_roles(tenant_id, user_id, role)` table is RLS-tenant-scoped — cross-tenant "which tenants does this user belong to?" queries fail under `atlas_app` without a pre-set tenant GUC. To break the chicken-and-egg at OIDC callback time, slice 141 adds:
+
+- **`user_tenants(idp_issuer, idp_subject, tenant_id, joined_at)`** — a NON-RLS global mapping table. Read by exactly ONE code path: the OIDC callback's tenant-enumeration step.
+- **`atlas_auth` Postgres role** — minimal-privilege role granted SELECT on `user_tenants` ONLY. Used by the session-init code path; never by domain handlers. Does NOT have BYPASSRLS.
+- **Sync invariant** — every insert/delete into `user_roles` writes the corresponding `user_tenants` row. Maintained via Go application code under transaction; an integrity sweep job verifies parity.
+
+Why a separate table (not BYPASSRLS on `user_roles`, not iterate-all-tenants): vCISO targets 1-50 clients today but the platform is OSS and SaaS-shape deployments will appear; iterate-all-tenants caps at ~100 tenants per login. The `atlas_auth` role narrows the cross-tenant privilege to a single purpose-built table vs blanket BYPASSRLS.
+
+## Session current-tenant model (slice 141, in design)
+
+The session row models "currently-active tenant", not "tenant bound at issuance".
+
+- **`sessions.current_tenant_id`** replaces the slice-034 `sessions.tenant_id` column. RLS GUC `app.current_tenant` is set from this column on every request.
+- **Mutable mid-session via the header tenant switcher.** User flipping in the header updates this column + records a row in `session_tenant_switches`.
+- **`session_tenant_switches(session_id, from_tenant_id, to_tenant_id, switched_at, switched_by)`** — append-only audit-log table. Surfaces in the slice-124 unified audit-log aggregator as the 10th `kind` value `session_tenant_switch`.
+- **Available-tenant freshness** — every request that renders the header picker queries `user_tenants` for the caller's `(idp_issuer, idp_subject)` at render time. Indexed single lookup; not cached at the session level. Means: tenant added to user mid-session → next request shows it in the picker; no logout/login required.
+
+## OIDC bootstrap semantics (slice 141, in design)
+
+When OIDC callback receives `(idp_issuer, idp_subject)`:
+
+1. **First-install detection.** `SELECT count(*) FROM tenants` == 0 → bootstrap path. Atomically (single transaction) create: (a) one tenant named "Default Tenant" (slice 144 lets the user rename it), (b) `super_admin` grant for this user (slice 142 owns the role surface), (c) `admin` role for this user in the new tenant, (d) `user_tenants` mapping row. `INSERT ... ON CONFLICT DO NOTHING` guards the unlikely two-concurrent-first-installers race.
+
+2. **Established install, OIDC subject present in `user_tenants` for ≥1 tenant.** Normal login flow. If 1 tenant → auto-select. If ≥2 → show login picker (slice 141 AC).
+
+3. **Established install, OIDC subject NOT in `user_tenants`.** Reject with HTTP 403 + page "You don't have access to security-atlas. Contact your administrator." Page renders the configured admin contact email if set in install config (slice 037 area). No auto-create; no invite-link subsystem at v1 (slice 142 may add `super_admin`-issued invite tokens as a follow-on).
+
+The slice-034 OIDC callback handler is the single owner of this branch. The slice-082 bootstrap-key admin path (local/dev provisioning before OIDC is wired) is complementary, not redundant — that path provisions the very first admin via API key when no OIDC IdP is configured at install time.
+
+## `super_admin` role (slice 142, in design)
+
+A GLOBAL role separate from per-tenant roles. NOT a member of the slice-018 per-tenant role enum.
+
+- **`super_admins(idp_issuer, idp_subject, granted_at, granted_by)`** — NEW non-RLS table; granted to the `atlas_auth` role only (same pattern as `user_tenants`).
+- **Capabilities:** create tenant (slice 143), rename tenant (slice 144 — though per-tenant admin can rename their own tenant too), demote another super_admin, view tenant inventory. Does NOT imply per-tenant admin/auditor/grc_engineer/viewer — to read/write inside Tenant A's GRC data, super_admin still needs an explicit `user_roles` grant in Tenant A.
+- **Bootstrap (slice 141):** first OIDC sign-in on a fresh install atomically grants super_admin + admin-in-default-tenant in a single transaction.
+- **Demotion safety rail:** cannot demote the last remaining super_admin (`COUNT(*) FROM super_admins > 1` check before DELETE; self-demote forbidden when count == 1). Avoids the all-super_admins-leave deadlock.
+- **Coordination with slice 141:** slice 141 reads `super_admins` (only the bootstrap-grant write) and stubs the table if 142 isn't merged first; slice 142 owns the full table + demotion-safety + read/write authz semantics.
+
+## Switch-tenant wire format (slice 141, in design)
+
+`POST /v1/me/current-tenant` with body `{tenant_id}` → 200 with `{current_tenant: {id, name, ...}, available_tenants: [...]}`.
+
+- Server validates `tenant_id` is in the caller's `user_tenants` set; rejects 403 if not.
+- Server updates `sessions.current_tenant_id` + writes one `session_tenant_switches` row inside a single transaction.
+- 200 response shape lets the frontend update header chrome atomically — no extra round-trip.
+- Frontend then invalidates TanStack Query cache + navigates the active page to its tenant-default landing (e.g. `/dashboard`) to avoid stale-data render on the new tenant.
+- BFF at `web/app/api/me/current-tenant/route.ts` forwards bearer + atlas_session cookie per slice 110 pattern.
+- No rate-limit at v1. No cross-tab BroadcastChannel at v1 (Tab A's next request will read the new tenant from session row; UI catches up on next navigation).
+
+## Tenant-membership eviction (slice 141, in design)
+
+User removed from `user_tenants[current_tenant_id]` while session active → next request hits R2 middleware in `internal/api/httpserver.go` (post-auth, pre-handler).
+
+- **R2 check:** `if !userTenants.Contains(currentTenantID) → redirect("/login/tenant-picker?reason=membership-removed")`
+- Cost: one indexed `user_tenants` lookup per tenant-aware request. ~0.5 ms.
+- Picker page banner: "You were removed from [TenantName]. Choose another tenant or contact your administrator." If `user_tenants` empty → renders the slice-141 "Contact your administrator" page (same as Q3 established-install-unknown-user).
+- **Super_admin specifically:** loss of per-tenant role in current tenant triggers R2 just like any user. Loss of super_admin status itself does NOT trigger R2 — only hides the "Create Tenant" affordance on the next request.
