@@ -518,10 +518,36 @@ jobs:
         with:
           node-version: "20"
       - run: pip install pre-commit==3.8.0
+      # Slice 158: install actionlint so the slice-158 pre-commit hook
+      # has its binary on PATH. Pinned to a tag (not a SHA) because the
+      # download URL is a redirector and we use the install-script
+      # checksum on the GitHub releases page. Slice-128's SHA-pin
+      # discipline applies to `uses:` lines (action references), not
+      # to ad-hoc tool downloads in `run:` blocks.
+      #
+      # Installs to `$HOME/.local/bin` (added to GITHUB_PATH) — no
+      # sudo required. Slice 117 sets `disable-sudo: true` on every
+      # job; binaries that need root-owned install paths break that
+      # invariant.
+      - name: Install actionlint
+        run: |
+          # actionlint v1.7.12 — matches the local-dev version used to
+          # validate slice 158's workflow changes.
+          mkdir -p "$HOME/.local/bin"
+          cd "$HOME/.local/bin"
+          bash <(curl -fsSL --retry 3 https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/actionlint" -version
       - name: Validate config
         run: pre-commit validate-config
       - name: Run all hooks against all files
         run: pre-commit run --all-files --show-diff-on-failure
+      # Slice 158 AC-17: smoke test asserts actionlint actually flags
+      # the invalid `administration: read` scope. Runs AFTER the
+      # pre-commit suite so an actionlint regression on the fixture is
+      # visible as its own named step in the workflow log.
+      - name: Slice 158 actionlint fixture smoke test
+        run: bash scripts/check-actionlint-fixture.sh
 
   # ===========================================================================
   # Slice 030 — OSCAL bridge (Python). Self-contained job block: lints +
@@ -1368,36 +1394,57 @@ jobs:
 
   # ====================================================================
   # Branch-protection drift detector — informational only, NOT in
-  # required-checks.
+  # required-checks. Slice 158 split this into two surfaces; see comment
+  # block on each job below for the rationale.
   #
-  # Compares `.github/branch-protection.json`'s required-checks contexts
-  # list against the live GitHub branch-protection config on `main` via
-  # `gh api`. Posts a sticky PR comment if drift is detected. Runs on
-  # every PR (no path filter — the file lives outside `code` and the
-  # check is cheap; sub-second `gh api` call).
+  # Original: slice 127 ran a single job on every PR that called
+  # `gh api repos/.../branches/main/protection/required_status_checks`
+  # using the per-run `GITHUB_TOKEN`. That call requires the
+  # `Administration: Read` repo permission, which `GITHUB_TOKEN` cannot
+  # be granted via the workflow `permissions:` block (the GHA workflow
+  # schema has no `administration` scope — see slice 158 D3 + the
+  # actionlint guard added in `.pre-commit-config.yaml`). PR #311
+  # attempted a one-line fix that added `administration: read` to the
+  # permissions block; the workflow file was schema-invalid and GHA
+  # silently dropped it. Slice 158 replaces that wrong fix.
   #
-  # Why informational (not required): the job itself is a regression
-  # detector. If it became required, it would race with itself — adding
-  # the new `branch-protection-drift` check to `.github/branch-
-  # protection.json`'s `required_status_checks.contexts` list, then
-  # running on the same PR that introduces it, would create a chicken-
-  # and-egg. Slice 127 P0-A1 enforces the informational posture.
+  # Slice 158 redesign (D2):
   #
-  # Why no stub-twin (deviating from the slice 061 convention shared by
-  # the build/test/lint jobs above): the job is small enough (one
-  # `gh api` call + one diff) that it runs in ~5 seconds even on
-  # docs-only PRs, and it deliberately ignores `changes.code` so it
-  # also fires on PRs that touch ONLY `.github/branch-protection.json`
-  # (which is a markdown-adjacent config edit that the `code` filter
-  # does NOT match). Slice 127 D4 documents the trade-off.
+  #   - PR-time job (`branch-protection-drift-validate`) runs on every
+  #     PR. It validates ONLY the shape of `.github/branch-protection.json`
+  #     (valid JSON, contains `.required_status_checks.contexts`, non-
+  #     empty list). It does NOT call `gh api`. This means the PR-time
+  #     surface needs no elevated token and cannot leak a credential
+  #     from a malicious PR.
   #
-  # Sticky comment via a hidden HTML marker — re-running the workflow
-  # updates the same comment instead of stacking new ones on the PR.
-  # Matches the slice 120 (`phantom-deps`) pattern.
+  #   - Push-on-main job (`branch-protection-drift-live`) runs on push
+  #     to `main` only. It uses `secrets.BRANCH_PROTECTION_READ_TOKEN`
+  #     (a fine-grained PAT scoped to this repo with `Administration:
+  #     Read` only, 90-day expiry — see `docs/adr/0005-branch-
+  #     protection-pat-vs-app.md` for D1 rationale) to do the live
+  #     compare. The PAT is `env:`-scoped to the one step that calls
+  #     `gh api`, never to the whole job.
+  #
+  # Why split (vs. allowlist `if: github.actor == 'mgoodric'` on a
+  # single job): the elevation surface on `pull_request:` is the actor
+  # being able to MODIFY the workflow file in their PR. Even an
+  # `actor`-allowlisted single job is run from the PR's workflow file,
+  # so a malicious maintainer-impersonation (or an account compromise)
+  # could still leak the secret. Push-on-main inherently uses the main-
+  # branch workflow file. We trade PR-time live-compare signal (worth
+  # ~5 seconds, never load-bearing — the check is informational) for a
+  # zero-elevation PR surface. Slice 158 D2 records this.
+  #
+  # Sticky comment: only the live-compare side (push-on-main) emits
+  # drift findings, and they go to the workflow-run log + an artifact,
+  # NOT to a PR sticky comment (there is no PR on a push event). The
+  # PR-time job emits a sticky comment ONLY when the JSON shape itself
+  # is broken — a real defect contributors need to see at PR time.
   # ====================================================================
-  branch-protection-drift:
-    name: Infra · branch-protection drift
+  branch-protection-drift-validate:
+    name: Infra · branch-protection (PR-time validate)
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     continue-on-error: true
     permissions:
       contents: read
@@ -1411,68 +1458,52 @@ jobs:
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Run check-branch-protection-drift.sh
-        id: drift
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ATLAS_REPO: ${{ github.repository }}
+      - name: Validate .github/branch-protection.json shape
+        id: validate
         run: |
           set +e
-          bash scripts/check-branch-protection-drift.sh > drift.stdout 2> drift.stderr
-          rc=$?
-          set -e
-          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
-          # Surface the stderr (drift diff lives there) and stdout (the
-          # one-line summary) into the workflow log so reviewers don't
-          # have to download the sticky-comment artifact to see the
-          # finding.
-          echo "----- script stdout -----"
-          cat drift.stdout || true
-          echo "----- script stderr -----"
-          cat drift.stderr || true
-          echo "-------------------------"
-          # Always exit 0 here so the workflow step itself succeeds —
-          # the `continue-on-error: true` on the job is belt-and-braces
-          # but the informational posture is cleaner when the step
-          # explicitly does not propagate the script's exit code.
-          exit 0
+          file=".github/branch-protection.json"
+          if [ ! -f "$file" ]; then
+            echo "validate: missing $file" > validate.stderr
+            echo "exit_code=2" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! jq -e . "$file" > /dev/null 2> validate.stderr; then
+            echo "validate: $file is not valid JSON" >> validate.stderr
+            echo "exit_code=2" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          ctx=$(jq -r '.required_status_checks.contexts // empty | length' "$file")
+          if [ -z "$ctx" ] || [ "$ctx" = "0" ]; then
+            echo "validate: $file has no .required_status_checks.contexts entries" > validate.stderr
+            echo "exit_code=2" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "validate: $file is shape-valid (${ctx} required-checks contexts)"
+          echo "exit_code=0" >> "$GITHUB_OUTPUT"
 
-      - name: Build sticky comment body
-        if: github.event_name == 'pull_request'
+      - name: Build sticky comment body (PR-time)
+        if: steps.validate.outputs.exit_code != '0'
         id: body
         run: |
           {
             echo "<!-- atlas-branch-protection-drift-marker -->"
-            echo "## Infra · branch-protection drift (slice 127)"
+            echo "## Infra · branch-protection file-shape error (slice 158)"
             echo
-            rc="${{ steps.drift.outputs.exit_code }}"
-            if [ "$rc" -eq 0 ]; then
-              echo "No drift detected — \`.github/branch-protection.json\` and the live GitHub branch-protection config on \`main\` are in sync."
-            elif [ "$rc" -eq 1 ]; then
-              echo "**Drift detected** between \`.github/branch-protection.json\` and the live GitHub branch-protection config on \`main\`."
-              echo
-              echo "\`\`\`"
-              cat drift.stderr
-              echo "\`\`\`"
-              echo
-              echo "To reconcile:"
-              echo "1. Decide which side is correct (file = intent; live = enforcement)."
-              echo "2. EITHER edit \`.github/branch-protection.json\` to match live, OR run \`bash scripts/apply-branch-protection.sh\` to push the file to live."
-              echo "3. Re-run this workflow to confirm convergence."
-            else
-              echo "**Script error** (\`scripts/check-branch-protection-drift.sh\` exited \`$rc\`). See the workflow log for details. This is usually missing tooling on the runner OR a malformed \`.github/branch-protection.json\`."
-              echo
-              echo "\`\`\`"
-              cat drift.stderr
-              echo "\`\`\`"
-            fi
+            echo "**\`.github/branch-protection.json\` failed shape validation.** See workflow log for details."
+            echo
+            echo "\`\`\`"
+            cat validate.stderr 2>/dev/null || echo "(no stderr captured)"
+            echo "\`\`\`"
+            echo
+            echo "Fix the file in this PR. The live drift compare runs separately on push to \`main\`."
             echo
             echo "---"
-            echo "_Informational only — this check is NOT in \`required_status_checks\` (slice 127 P0-A1). Reproduce locally: \`bash scripts/check-branch-protection-drift.sh\`. Slice 127 · run ${{ github.run_id }}._"
+            echo "_Informational only — this check is NOT in \`required_status_checks\`. Slice 158 · run ${{ github.run_id }}._"
           } > comment-body.md
 
       - name: Post or update sticky PR comment
-        if: github.event_name == 'pull_request'
+        if: steps.validate.outputs.exit_code != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1489,6 +1520,93 @@ jobs:
             echo "Posted new sticky comment"
           fi
 
+      - name: Clear stale sticky comment when validate passes
+        if: steps.validate.outputs.exit_code == '0' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          existing=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.body | startswith("<!-- atlas-branch-protection-drift-marker -->")) | .id' \
+            | head -1)
+          if [ -n "$existing" ]; then
+            {
+              echo "<!-- atlas-branch-protection-drift-marker -->"
+              echo "## Infra · branch-protection file-shape (slice 158)"
+              echo ""
+              echo "Shape-valid. Live drift compare runs on push to \`main\` separately."
+              echo ""
+              echo "---"
+              echo "_Informational only — slice 158 · run ${RUN_ID}._"
+            } > comment-body.md
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/${existing}" \
+              -f body="$(cat comment-body.md)" >/dev/null
+            echo "Refreshed sticky comment to shape-valid id=$existing"
+          fi
+
+  branch-protection-drift-live:
+    name: Infra · branch-protection (live drift)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      # The elevated PAT is `env:`-scoped to ONLY this step. No other
+      # step in the job sees `BRANCH_PROTECTION_READ_TOKEN`. If the
+      # secret is unset (initial deploy before maintainer creates it),
+      # the script exits 2 with a clear error and the job stays
+      # informational.
+      - name: Run check-branch-protection-drift.sh
+        id: drift
+        env:
+          GH_TOKEN: ${{ secrets.BRANCH_PROTECTION_READ_TOKEN }}
+          ATLAS_REPO: ${{ github.repository }}
+        run: |
+          set +e
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "drift-live: BRANCH_PROTECTION_READ_TOKEN secret not configured — skipping live compare" > drift.stderr
+            echo "drift-live: see docs/adr/0005-branch-protection-pat-vs-app.md for setup steps" >> drift.stderr
+            echo "exit_code=2" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          bash scripts/check-branch-protection-drift.sh > drift.stdout 2> drift.stderr
+          rc=$?
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+          echo "----- script stdout -----"
+          cat drift.stdout || true
+          echo "----- script stderr -----"
+          cat drift.stderr || true
+          echo "-------------------------"
+          exit 0
+
+      - name: Surface drift in job summary
+        if: always()
+        run: |
+          {
+            echo "## Infra · branch-protection live drift (slice 158)"
+            echo
+            rc="${{ steps.drift.outputs.exit_code }}"
+            if [ "$rc" = "0" ]; then
+              echo "No drift detected — file and live in sync."
+            elif [ "$rc" = "1" ]; then
+              echo "**Drift detected** — see \`drift.stderr\` artifact for the diff. Reconcile via \`bash scripts/apply-branch-protection.sh\` OR by editing \`.github/branch-protection.json\` to match live."
+            else
+              echo "**Drift compare did not run** — \`BRANCH_PROTECTION_READ_TOKEN\` secret is not yet configured. See \`docs/adr/0005-branch-protection-pat-vs-app.md\` for setup steps."
+            fi
+            echo
+            echo "_Informational only — slice 158 · run ${{ github.run_id }}._"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload drift report as artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -1497,7 +1615,6 @@ jobs:
           path: |
             drift.stdout
             drift.stderr
-            comment-body.md
           if-no-files-found: warn
 
   trivy-image:
