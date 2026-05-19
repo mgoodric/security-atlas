@@ -136,8 +136,9 @@ if 410 Gone is ever introduced as a tombstoned-control marker).
 
 **Confidence:** HIGH. Matches the slice 098 `filters.ts`
 precedent + slice 130 `canReachAuditLog` route-guard precedent
-+ slice 132 `assertCaptureSafe` precedent — pure-logic helpers
-covered by vitest, consumed by the JSX in the page.
+
+- slice 132 `assertCaptureSafe` precedent — pure-logic helpers
+  covered by vitest, consumed by the JSX in the page.
 
 ## D-152-5 — Playwright spec is quarantined per slice 079 / 082 precedent
 
