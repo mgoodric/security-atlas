@@ -93,6 +93,32 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Fixed
 
+- Playwright e2e: settings page coverage gated on CI
+  ([#164](https://github.com/mgoodric/security-atlas/issues/164); closes
+  slice 154 F11). `web/e2e/settings.spec.ts` joins the gated CI rotation:
+  the eleven AC bodies that have been preserved as commented contracts
+  since slice 103 (AC-1..AC-6), slice 154 (AC-7..AC-10), and slice 163
+  (AC-11) are now un-commented and exercised on every Playwright run.
+  Adds `fixtures/e2e/settings.sql` seeding a real `users` row in the
+  demo tenant (display name, non-default `time_zone =
+  'America/New_York'`), two `user_roles` rows (`admin` + `grc_engineer`
+  so the multi-role tail badge renders), one
+  `user_notification_preferences` cell with `enabled=false`, two
+  `sessions` rows (one with slice-162 UA/IP/geo populated, one bare to
+  exercise the P0-162-1 honest-empty path), and a slice-062 predecessor
+  → successor api_keys chain so the AC-9 table branch and AC-11 rotate
+  chain have starting data. `web/e2e/seed.ts` learns a `"settings"`
+  fixture name; `seedApiKey()` threads `issued_by = DEMO_USER_ID` into
+  the admin bearer row for that fixture only (the five pre-existing
+  fixtures keep the historical NULL behavior) so `/v1/me` resolves a
+  real `users` row rather than falling into the synthetic-profile
+  branch. The AC-3 body was reshaped from the slice 154 localStorage
+  check to a server-round-trip check because slice 108 retired the
+  localStorage fallback (the toggle is now server-of-truth via
+  `PATCH /v1/me/preferences`); the original intent (the toggle persists)
+  is preserved. Decisions log at
+  `docs/audit-log/164-settings-e2e-seed-decisions.md`.
+
 - Playwright `control-detail-empty.spec.ts` fixture file is now present
   ([#160](https://github.com/mgoodric/security-atlas/issues/160)). Slice
   152 shipped `web/e2e/control-detail-empty.spec.ts` whose `beforeAll`

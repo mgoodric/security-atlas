@@ -45,6 +45,7 @@ cross-references slice 050 sanitization rules and slice 057 P0-A2):
 | `audit-log.sql`            | `web/e2e/audit-log.spec.ts`            |
 | `risk-hierarchy.sql`       | `web/e2e/risk-hierarchy.spec.ts`       |
 | `admin-bootstrap.sql`      | `web/e2e/admin-bootstrap.spec.ts`      |
+| `settings.sql`             | `web/e2e/settings.spec.ts`             |
 
 Each file builds on `fixtures/walkthroughs/00-seed.sql` (the harness
 applies that file first, then the per-spec file). All inserts use
