@@ -39,6 +39,12 @@ export const DEMO_USER_EMAIL = "demo-operator@example.invalid";
 export const DEMO_CONTROL_ID = "33333333-3333-3333-3333-333333330001";
 export const DEMO_FRAMEWORK_VERSION_ID = "11111111-1111-1111-1111-111111110002";
 export const DEMO_AUDIT_PERIOD_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0001";
+// Slice 164: the principal /v1/me resolves to under the "settings"
+// fixture. fixtures/e2e/settings.sql inserts a users row with this UUID
+// and `seedApiKey()` sets `api_keys.issued_by` to it (only for the
+// "settings" fixture) so the profile handler resolves a real users row
+// (non-synthetic profile path).
+export const DEMO_USER_ID = "44444444-4444-4444-4444-444444440001";
 
 // The neutral test bearer the Playwright fixture sets as the session
 // cookie. The platform's bearer middleware HMACs this with
@@ -46,7 +52,7 @@ export const DEMO_AUDIT_PERIOD_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0001";
 // that row.
 export const TEST_BEARER = "test-bearer-e2e";
 
-// The six fixture names the harness understands. Each maps to one
+// The seven fixture names the harness understands. Each maps to one
 // per-spec SQL file under fixtures/e2e/.
 export type FixtureName =
   | "dashboard"
@@ -54,7 +60,8 @@ export type FixtureName =
   | "audit-workspace"
   | "risk-hierarchy"
   | "admin-bootstrap"
-  | "audit-log";
+  | "audit-log"
+  | "settings";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 
@@ -78,7 +85,7 @@ function hexHmacSha256(key: string, message: string): string {
   return createHmac("sha256", key).update(message).digest("hex");
 }
 
-function seedApiKey(databaseURL: string): void {
+function seedApiKey(databaseURL: string, name: FixtureName): void {
   // The platform requires BEARER_HASH_KEY to be >=32 bytes (see
   // internal/auth/bearer/bearer.go HashKeyMinBytes). The harness uses
   // the env value the atlas server boots with so the hash matches at
@@ -96,6 +103,19 @@ function seedApiKey(databaseURL: string): void {
   }
   const tokenHashHex = hexHmacSha256(key, TEST_BEARER);
 
+  // Slice 164: for the "settings" fixture, the api_keys row's
+  // `issued_by` is set to DEMO_USER_ID so the profile handler resolves
+  // a real users row (slice 108 synthetic-profile fallback is bypassed
+  // — the row matches users.id inserted by fixtures/e2e/settings.sql).
+  // The five pre-existing fixtures keep the historical NULL behavior;
+  // they don't need a real users row to drive their AC bodies.
+  let issuedByColumn = "";
+  let issuedByValue = "";
+  if (name === "settings") {
+    issuedByColumn = ", issued_by";
+    issuedByValue = `, '${DEMO_USER_ID}'::uuid`;
+  }
+
   // Composite SQL: clear any prior row with this hash, then insert a
   // fresh admin row in the demo tenant. The DELETE handles the
   // re-run case across separate test invocations; the `ON CONFLICT
@@ -104,20 +124,20 @@ function seedApiKey(databaseURL: string): void {
   // workers, each calling `seedFromFixture()` via test.beforeAll —
   // the DELETEs see no row, then the INSERTs race; without ON
   // CONFLICT the second insert fails the UNIQUE constraint on
-  // token_hash). All workers insert the same row content
-  // (deterministic from TEST_BEARER + BEARER_HASH_KEY), so DO
-  // NOTHING is the right semantics. Slice 122 fix.
+  // token_hash). All workers within ONE invocation insert identical
+  // row content (deterministic from TEST_BEARER + BEARER_HASH_KEY +
+  // fixture name), so DO NOTHING is the right semantics. Slice 122 fix.
   // is_admin=true so the admin-bootstrap spec's /admin routes pass
   // the authz gate.
   const sql = `
     DELETE FROM api_keys WHERE token_hash = decode('${tokenHashHex}', 'hex');
-    INSERT INTO api_keys (tenant_id, token_hash, is_admin, owner_roles, last4)
+    INSERT INTO api_keys (tenant_id, token_hash, is_admin, owner_roles, last4${issuedByColumn})
     VALUES (
       '${DEMO_TENANT_ID}',
       decode('${tokenHashHex}', 'hex'),
       TRUE,
       ARRAY['admin']::TEXT[],
-      '${TEST_BEARER.slice(-4)}'
+      '${TEST_BEARER.slice(-4)}'${issuedByValue}
     )
     ON CONFLICT (token_hash) DO NOTHING;
   `;
@@ -145,5 +165,5 @@ export function seedFromFixture(name: FixtureName): void {
   runPsql(databaseURL, specSql);
 
   // 3. The API key the Playwright fixture's cookie matches.
-  seedApiKey(databaseURL);
+  seedApiKey(databaseURL, name);
 }
