@@ -9,6 +9,36 @@ Conventional-Commit messages. Each entry links to its slice issue, the
 merging PR, and the squash-merge commit. For richer per-slice narrative
 see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
+## [1.12.0](https://github.com/mgoodric/security-atlas/compare/v1.11.0...v1.12.0) (2026-05-19)
+
+
+### Features
+
+* **backend:** augment active sessions wire shape with user_agent, ip_address, geo ([#162](https://github.com/mgoodric/security-atlas/issues/162)) ([#346](https://github.com/mgoodric/security-atlas/issues/346)) ([a134691](https://github.com/mgoodric/security-atlas/commit/a13469115323697ff31e91c9970f88739e0baa73))
+* **deploy:** add atlas-startup-watcher — auto-post bearer tokens to Discord on every atlas restart ([#337](https://github.com/mgoodric/security-atlas/issues/337)) ([2fa0af3](https://github.com/mgoodric/security-atlas/commit/2fa0af3b3466f9e3b49b0ee91c8a6015c93cca77))
+* **frontend:** settings API tokens Rotate action ([#163](https://github.com/mgoodric/security-atlas/issues/163)) ([#351](https://github.com/mgoodric/security-atlas/issues/351)) ([a682c38](https://github.com/mgoodric/security-atlas/commit/a682c388008ce84d6b551ca627088c3f22658f75))
+* **infra:** resolve sqlc-toolchain CI binary drift ([#159](https://github.com/mgoodric/security-atlas/issues/159)) ([#347](https://github.com/mgoodric/security-atlas/issues/347)) ([cc43636](https://github.com/mgoodric/security-atlas/commit/cc43636513682735f53176630dc32cd503bf9815))
+* **quality:** settings page audit + parity check ([#154](https://github.com/mgoodric/security-atlas/issues/154)) ([#338](https://github.com/mgoodric/security-atlas/issues/338)) ([a0c83ec](https://github.com/mgoodric/security-atlas/commit/a0c83ec6ceb8fe2766feaea0e9840f25d3db73f9))
+
+
+### Bug Fixes
+
+* **e2e:** slice 165 — diagnose + fix 11 settings.spec.ts AC failures (H4-superset cause) ([#358](https://github.com/mgoodric/security-atlas/issues/358)) ([ed4d1e1](https://github.com/mgoodric/security-atlas/commit/ed4d1e1239ea8cc356af97a92a360a0f222614e1))
+* **e2e:** slice 165 iter 2 + reconcile — allowed_kinds workaround + slice 166 spillover ([#360](https://github.com/mgoodric/security-atlas/issues/360)) ([e725893](https://github.com/mgoodric/security-atlas/commit/e725893c2c233a050b52e10ff05436a0bc62dde5))
+* **infra:** branch-protection drift real permission fix ([#158](https://github.com/mgoodric/security-atlas/issues/158)) ([#336](https://github.com/mgoodric/security-atlas/issues/336)) ([4fa5728](https://github.com/mgoodric/security-atlas/commit/4fa5728d372b46f9d62bfbda4275b6a3aa2e0f38))
+* **infra:** settings Playwright e2e seed + un-comment AC bodies ([#164](https://github.com/mgoodric/security-atlas/issues/164)) ([#354](https://github.com/mgoodric/security-atlas/issues/354)) ([3092f3e](https://github.com/mgoodric/security-atlas/commit/3092f3e83e418dc46dbe7f65c5fec82ef3e7178b))
+* **quality:** add missing fixtures/e2e/control-detail-empty.sql ([#160](https://github.com/mgoodric/security-atlas/issues/160)) ([#342](https://github.com/mgoodric/security-atlas/issues/342)) ([f42aedf](https://github.com/mgoodric/security-atlas/commit/f42aedf404d4019bf90e34a590b1f1c5bf758a02))
+* **quality:** auth-open-redirect spec drift — Case 2 ([#161](https://github.com/mgoodric/security-atlas/issues/161)) ([#343](https://github.com/mgoodric/security-atlas/issues/343)) ([f090192](https://github.com/mgoodric/security-atlas/commit/f090192da50df3a3fb6250d8b9529e7cdad822bf))
+* **settings:** slice 166 — null-safe allowed_kinds deref to prevent /settings DoS ([#362](https://github.com/mgoodric/security-atlas/issues/362)) ([e76e5cf](https://github.com/mgoodric/security-atlas/commit/e76e5cf918efb892aefa67c3f00a17e6881d5cf5))
+
+
+### Documentation
+
+* **issues:** add slice 159 — resolve sqlc-toolchain CI binary drift ([#332](https://github.com/mgoodric/security-atlas/issues/332)) ([a9047ba](https://github.com/mgoodric/security-atlas/commit/a9047ba15eeb04698959fd15b17e1acca1e7d5ef))
+* **issues:** add slice 160 — add missing fixtures/e2e/control-detail-empty.sql ([#333](https://github.com/mgoodric/security-atlas/issues/333)) ([685b2b6](https://github.com/mgoodric/security-atlas/commit/685b2b653b8f9a5948064a1eb6b40e2e4b69710d))
+* **issues:** add slice 161 — diagnose + fix auth-open-redirect.spec.ts drift ([#334](https://github.com/mgoodric/security-atlas/issues/334)) ([8af11d7](https://github.com/mgoodric/security-atlas/commit/8af11d70ff09adac6dbcd333214e1cb1cf6143d1))
+* **issues:** add slice 165 — diagnose + fix 11 settings.spec.ts AC failures ([#356](https://github.com/mgoodric/security-atlas/issues/356)) ([8b6d066](https://github.com/mgoodric/security-atlas/commit/8b6d0662d1c678739320ce077b7b9a76fe9a6e43))
+
 ## [1.11.0](https://github.com/mgoodric/security-atlas/compare/v1.10.0...v1.11.0) (2026-05-19)
 
 
