@@ -167,8 +167,9 @@ describe("slice 170 — AppearanceSelector post-mount hydration contract", () =>
 
   test("post-mount read of a 'light' store returns 'light'", () => {
     writeTheme(store, "light");
-    let theme: Theme = DEFAULT_THEME;
-    theme = readTheme(store);
+    // The full SSR→hydrate flow is pinned in the "dark" test above;
+    // here we just validate the helper against this store state.
+    const theme: Theme = readTheme(store);
     expect(theme).toBe<Theme>("light");
   });
 
@@ -176,8 +177,7 @@ describe("slice 170 — AppearanceSelector post-mount hydration contract", () =>
     // First-time visitor — no prior write. The post-mount read
     // returns DEFAULT_THEME, matching the SSR pass. The setState is a
     // no-op flip (DEFAULT_THEME → DEFAULT_THEME). No flicker.
-    let theme: Theme = DEFAULT_THEME;
-    theme = readTheme(store);
+    const theme: Theme = readTheme(store);
     expect(theme).toBe<Theme>(DEFAULT_THEME);
   });
 
@@ -185,8 +185,7 @@ describe("slice 170 — AppearanceSelector post-mount hydration contract", () =>
     // Defensive: if a third party scribbled garbage into the storage
     // key, the picker MUST NOT render an out-of-set value.
     store.setItem(THEME_STORAGE_KEY, "midnight");
-    let theme: Theme = DEFAULT_THEME;
-    theme = readTheme(store);
+    const theme: Theme = readTheme(store);
     expect(theme).toBe<Theme>(DEFAULT_THEME);
   });
 });
