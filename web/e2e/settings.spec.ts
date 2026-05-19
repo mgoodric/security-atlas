@@ -79,6 +79,20 @@ test.describe("/settings user-facing page", () => {
     // The seed fixture starts with (audit_period_assignment, email) =
     // false; we flip it to true, wait for the BFF PATCH response, reload
     // the page, and assert the toggle is checked.
+    //
+    // Slice 171 (H4): the toggle is a React-controlled `<input
+    // type="checkbox" checked={email}>` (page.tsx:670-675 / 679-685)
+    // bound to TanStack-Query data. After click, React re-renders with
+    // the still-stale `prefsQuery.data` and snaps the DOM `checked`
+    // attribute back to `false` BEFORE the PATCH's `onSuccess` fires
+    // the cache invalidation. Playwright's `locator.check()` auto-
+    // verifies post-state ("Clicking the checkbox did not change its
+    // state") and throws on this snap-back. `locator.click()` skips
+    // that post-state assertion — the truthful invariant lives in the
+    // server round-trip + post-reload `toBeChecked()` assertion below.
+    // PR #368's CI log (run 26115121287 job 76802322769) confirms this
+    // is the actual failure mode; the slice doc Narrative's "PATCH never
+    // fires / 30s waitForResponse timeout" framing was a misdiagnosis.
     await page.goto("/settings");
     const toggle = page.getByTestId(
       "settings-notif-audit_period_assignment-email",
@@ -90,7 +104,7 @@ test.describe("/settings user-facing page", () => {
         r.url().includes("/api/me/preferences") &&
         r.request().method() === "PATCH",
     );
-    await toggle.check();
+    await toggle.click();
     await patchResponse;
     await page.reload();
     await expect(
