@@ -50,6 +50,7 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -96,6 +97,16 @@ const exportEntity = "audit-log"
 // streamed back with the appropriate Content-Type and a sanitized
 // Content-Disposition filename. Writes a `me_audit_log` row on EVERY
 // terminal outcome (slice 135 P0-A4).
+//
+// Slice 145 hardening additions:
+//   - `?include_payload=<bool>` (default true) — redacts the
+//     `payload_json` column for the external-audit-handoff workflow
+//     (slice 145 AC-1 / AC-2). The meta-audit row records the value
+//     used so operators can prove which export went to which
+//     audience (slice 145 AC-3).
+//   - per-(tenant, user) concurrency cap — excess returns 429 with
+//     `Retry-After: 30` and a JSON body explaining the limit
+//     (slice 145 AC-4 / AC-5).
 func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -122,18 +133,19 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 	// Parse + validate. Bad request shapes get a 400; the meta-audit
 	// fires (slice 135 P0-A4) with result=denied:bad_request so the
 	// trail captures the attempt.
-	format, params, parseErr := parseExportRequest(r)
+	format, params, includePayload, parseErr := parseExportRequest(r)
 	if parseErr != nil {
 		h.writeExportMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{
-			Format:    string(format),
-			From:      params.fromRaw,
-			To:        params.toRaw,
-			Kinds:     kindStringsFromQuery(params.queryParams),
-			Actor:     params.queryParams.ActorFilter,
-			Result:    "denied:bad_request",
-			RowCount:  0,
-			ByteCount: 0,
-			Reason:    parseErr.Error(),
+			Format:         string(format),
+			From:           params.fromRaw,
+			To:             params.toRaw,
+			Kinds:          kindStringsFromQuery(params.queryParams),
+			Actor:          params.queryParams.ActorFilter,
+			Result:         "denied:bad_request",
+			RowCount:       0,
+			ByteCount:      0,
+			Reason:         parseErr.Error(),
+			IncludePayload: includePayloadPtr(includePayload),
 		})
 		writeError(w, http.StatusBadRequest, parseErr.Error())
 		return
@@ -149,6 +161,7 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 		h.writeExportMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{
 			Format: string(format), From: params.fromRaw, To: params.toRaw,
 			Result: "error:role_probe", Reason: err.Error(),
+			IncludePayload: includePayloadPtr(includePayload),
 		})
 		writeError(w, http.StatusInternalServerError, "role probe: "+err.Error())
 		return
@@ -156,12 +169,60 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 	if !allowed {
 		h.writeExportMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{
 			Format: string(format), From: params.fromRaw, To: params.toRaw,
-			Result: "denied:forbidden",
-			Reason: "caller lacks admin|auditor|grc_engineer role",
+			Result:         "denied:forbidden",
+			Reason:         "caller lacks admin|auditor|grc_engineer role",
+			IncludePayload: includePayloadPtr(includePayload),
 		})
 		writeError(w, http.StatusForbidden, "admin, auditor, or grc_engineer role required")
 		return
 	}
+
+	// Slice 145 — per-(tenant, user) concurrency cap. ACQUIRED HERE,
+	// AFTER auth + role gate but BEFORE encoder resolve / DB work:
+	//   * Anonymous + bad-auth requests are never counted against the
+	//     cap (they're already 401/403'd above).
+	//   * The slot is held for the duration of the streaming write
+	//     (release is deferred), so an attacker firing N concurrent
+	//     requests really does saturate at cap=N regardless of
+	//     individual request latency.
+	//   * Refusal returns 429 with `Retry-After: 30` and a JSON body
+	//     explaining the limit (slice 145 P0-HARDEN-3 + P0-A10).
+	//   * Meta-audit fires on the 429 path too — operators reading
+	//     `me_audit_log WHERE action = 'audit_log_export'` see the
+	//     attempt with result=denied:concurrency_cap_exceeded.
+	limiter := h.exportLimiter()
+	release, capErr := limiter.Acquire(tenantID, userIdentifier)
+	if capErr != nil {
+		h.writeExportMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{
+			Format: string(format), From: params.fromRaw, To: params.toRaw,
+			Kinds:          kindStringsFromQuery(params.queryParams),
+			Actor:          params.queryParams.ActorFilter,
+			Result:         "denied:concurrency_cap_exceeded",
+			Reason:         capErr.Error(),
+			IncludePayload: includePayloadPtr(includePayload),
+		})
+		// `Retry-After: 30` per slice 145 P0-HARDEN-3 (mirroring the
+		// slice 141 P0-DOS-1 pattern). JSON body so operators reading
+		// curl output without -i still see the limit message
+		// (slice 145 P0-A10).
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": fmt.Sprintf(
+				"export concurrency cap (%d) reached for this (tenant, user); "+
+					"retry in 30s or narrow concurrent forensics work",
+				limiter.Cap()),
+			"retry_after_seconds": 30,
+			"cap":                 limiter.Cap(),
+		})
+		return
+	}
+	// Slice 145 P0-A9 — release on EVERY exit path (panic / error /
+	// 413 / 500 / success). The limiter's release fn is idempotent
+	// (sync.Once-guarded) so this is safe alongside any other
+	// explicit release call.
+	defer release()
 
 	// Resolve encoder for the requested format. Bad format would
 	// have been caught in parseExportRequest; this is the safe
@@ -170,6 +231,7 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeExportMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{
 			Format: string(format), Result: "denied:bad_format", Reason: err.Error(),
+			IncludePayload: includePayloadPtr(includePayload),
 		})
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -261,8 +323,20 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.WriteHeader(http.StatusOK)
 
+		// Slice 145 — when include_payload=false the row iterator
+		// emits the empty string for the payload_json column. CSV +
+		// XLSX render that as an empty cell; JSON renders it as the
+		// literal `null` token via WriteOpts.NullForEmpty.
+		rowIter := entriesToRowIter(entries, includePayload)
+		writeOpts := export.WriteOpts{}
+		if !includePayload {
+			writeOpts.NullForEmpty = map[string]bool{
+				"payload_json": true,
+			}
+		}
+
 		cw := &countingWriter{w: w}
-		if err := encoder.WriteRows(cw, header, entriesToRowIter(entries)); err != nil {
+		if err := encoder.WriteRowsWithOpts(cw, header, rowIter, writeOpts); err != nil {
 			queryErr = "encoder: " + err.Error()
 			// We already started the body; cannot change status now.
 			// The meta-audit captures the partial state.
@@ -288,6 +362,7 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 			Reason:            queryErr,
 			ClampedToFrozenAt: clampPtrIfSet(usedClamp, clampUsed),
 			RowCount:          rowsEmitted, ByteCount: bodyBytes,
+			IncludePayload: includePayloadPtr(includePayload),
 		})
 		if statusToSend == 0 {
 			writeError(w, http.StatusInternalServerError, "export: "+queryErr)
@@ -305,6 +380,7 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 			Result:            "denied:row_cap_exceeded",
 			Reason:            fmt.Sprintf("rowCap=%d", rowCap),
 			ClampedToFrozenAt: clampPtrIfSet(usedClamp, clampUsed),
+			IncludePayload:    includePayloadPtr(includePayload),
 		})
 		// 413 body: actionable narrow-the-filter guidance. The
 		// caller knows the cap and can re-issue with a tighter
@@ -326,16 +402,23 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 		ClampedToFrozenAt: clampPtrIfSet(usedClamp, clampUsed),
 		RowCount:          rowsEmitted,
 		ByteCount:         bodyBytes,
+		IncludePayload:    includePayloadPtr(includePayload),
 	})
 }
 
 // ===== Parsing =====
 
 // parseExportRequest reuses slice 124's parseUnifiedParams plus a
-// `format` query param. Returns the resolved format, the parsed
-// unified params (carrying the kindStrings + raw from/to so the
-// meta-audit doesn't re-serialize), and a parse error.
-func parseExportRequest(r *http.Request) (export.Format, parsedUnifiedParams, error) {
+// `format` query param + slice 145's `include_payload` flag. Returns
+// the resolved format, the parsed unified params (carrying the
+// kindStrings + raw from/to so the meta-audit doesn't re-serialize),
+// the resolved include_payload value, and a parse error.
+//
+// include_payload defaults to true (slice 145 P0-HARDEN-1 — preserves
+// the slice 135 wire shape for existing callers). When the query
+// parameter is present, it MUST parse as a strconv-acceptable bool
+// (`true`, `false`, `1`, `0`, `t`, `f`, …); anything else is a 400.
+func parseExportRequest(r *http.Request) (export.Format, parsedUnifiedParams, bool, error) {
 	q := r.URL.Query()
 	formatRaw := q.Get("format")
 	if formatRaw == "" {
@@ -343,29 +426,51 @@ func parseExportRequest(r *http.Request) (export.Format, parsedUnifiedParams, er
 	}
 	format := export.Format(strings.ToLower(formatRaw))
 	if !export.IsValid(format) {
-		return format, parsedUnifiedParams{},
+		return format, parsedUnifiedParams{}, true,
 			fmt.Errorf("unsupported format %q (want csv|json|xlsx)", formatRaw)
+	}
+
+	// Slice 145 — include_payload flag. Default true preserves the
+	// slice 135 wire shape (P0-HARDEN-1). Validation is intentionally
+	// strict (strconv.ParseBool, not a contains-check) so a typo'd
+	// `?include_payload=ture` 400s rather than silently defaulting.
+	includePayload := true
+	if rawIP := q.Get("include_payload"); rawIP != "" {
+		parsed, ipErr := strconv.ParseBool(rawIP)
+		if ipErr != nil {
+			return format, parsedUnifiedParams{}, true,
+				fmt.Errorf("invalid include_payload %q (want true|false): %w", rawIP, ipErr)
+		}
+		includePayload = parsed
 	}
 
 	params, err := parseUnifiedParams(r)
 	if err != nil {
-		return format, params, err
+		return format, params, includePayload, err
 	}
-	return format, params, nil
+	return format, params, includePayload, nil
 }
 
 // ===== Meta-audit shape =====
 
 // exportMetaAudit is the JSON shape persisted to me_audit_log.after on
-// every export attempt. The five outcome buckets are:
+// every export attempt. The outcome buckets are:
 //
 //	"success"
 //	"denied:bad_request"
 //	"denied:bad_format"
 //	"denied:forbidden"
 //	"denied:row_cap_exceeded"
+//	"denied:concurrency_cap_exceeded"     (slice 145)
 //	"error:tx"
 //	"error:role_probe"
+//
+// Slice 145 P0-A5: the `include_payload` field is **additive**. Legacy
+// slice 135 rows that predate slice 145 do NOT carry the key; readers
+// that need to distinguish "redacted handoff" from "full forensics"
+// should treat absence as `true` (the slice 135 default). The field
+// is emitted as `*bool` (rendered `null` when nil) so a future
+// always-set migration can backfill without ambiguity.
 type exportMetaAudit struct {
 	Format            string     `json:"format"`
 	From              string     `json:"from"`
@@ -377,6 +482,7 @@ type exportMetaAudit struct {
 	RowCount          int        `json:"row_count"`
 	ByteCount         int64      `json:"byte_count"`
 	ClampedToFrozenAt *time.Time `json:"clamped_to_frozen_at,omitempty"`
+	IncludePayload    *bool      `json:"include_payload,omitempty"`
 }
 
 // writeExportMetaAudit writes ONE me_audit_log row with
@@ -469,10 +575,19 @@ func unifiedExportHeader() []string {
 // is pure — no DB I/O, O(1) per row.
 //
 // payload_json is rendered as the raw JSON text (a single stringified
-// blob per row). actor_name is "" when nil. tenant_id renders the
-// UUID string (the export deliberately preserves it so downstream
-// re-imports / forensic-queries can correlate).
-func entriesToRowIter(entries []unifiedlog.Entry) iter.Seq[[]string] {
+// blob per row) when includePayload is true (slice 135 default). When
+// includePayload is false (slice 145 `?include_payload=false`
+// redacted-handoff workflow), the cell is the empty string — CSV +
+// XLSX emit a blank cell; JSON emits `null` via
+// [export.WriteOpts.NullForEmpty].
+//
+// actor_name is "" when nil. tenant_id renders the UUID string (the
+// export deliberately preserves it so downstream re-imports /
+// forensic-queries can correlate) regardless of the include_payload
+// value — tenant_id is identifier-level, not content-level, and
+// slice 145 P0-A2 keeps column-level redaction beyond `payload_json`
+// out of scope.
+func entriesToRowIter(entries []unifiedlog.Entry, includePayload bool) iter.Seq[[]string] {
 	return func(yield func([]string) bool) {
 		for _, e := range entries {
 			actorName := ""
@@ -480,7 +595,7 @@ func entriesToRowIter(entries []unifiedlog.Entry) iter.Seq[[]string] {
 				actorName = *e.ActorName
 			}
 			payload := ""
-			if len(e.PayloadJSON) > 0 {
+			if includePayload && len(e.PayloadJSON) > 0 {
 				payload = string(e.PayloadJSON)
 			}
 			row := []string{
@@ -500,6 +615,38 @@ func entriesToRowIter(entries []unifiedlog.Entry) iter.Seq[[]string] {
 			}
 		}
 	}
+}
+
+// includePayloadPtr returns &v — used to populate the optional
+// `include_payload` field in exportMetaAudit. The field is `*bool` so
+// legacy rows that predate slice 145 stay distinguishable from
+// "explicit false" (rendered as `false`) and "explicit true"
+// (rendered as `true`).
+func includePayloadPtr(v bool) *bool {
+	out := v
+	return &out
+}
+
+// exportLimiter returns the per-(tenant, user) concurrency limiter
+// used by this handler. Default implementation returns the
+// process-wide singleton; tests override via [Handler.WithLimiter]
+// for deterministic caps.
+func (h *Handler) exportLimiter() *export.Limiter {
+	if h.limiter != nil {
+		return h.limiter
+	}
+	return export.DefaultLimiter()
+}
+
+// WithLimiter installs a Limiter into the handler — used by
+// integration tests to pin a small, deterministic cap (default 2)
+// without setting the env var across the whole test process.
+//
+// Production callers MUST NOT use this — the default singleton is the
+// only correct shape for a process-wide cap.
+func (h *Handler) WithLimiter(l *export.Limiter) *Handler {
+	h.limiter = l
+	return h
 }
 
 // kindStringsFromQuery is a slice-of-strings projection of the

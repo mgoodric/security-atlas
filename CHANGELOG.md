@@ -84,6 +84,28 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- Audit-log export: payload-redaction flag + per-(tenant, user)
+  concurrency cap
+  ([#145](https://github.com/mgoodric/security-atlas/issues/145);
+  retro-STRIDE follow-on from slice 135). `GET /v1/admin/audit-log/export`
+  gains `?include_payload=<bool>` (default `true` — preserves slice 135
+  wire shape). When `false`, CSV emits an empty cell, JSON emits the
+  literal `null`, and XLSX emits an empty cell for the `payload_json`
+  column; all other columns render normally (slice 145 P0-A2 keeps
+  column-level redaction beyond `payload_json` out of scope). The
+  meta-audit row records the value used (legacy slice 135 rows without
+  the key represent default-true). NEW `internal/export/concurrency.go`
+  ships a per-(tenant, user) semaphore (default cap 2, tunable via
+  `ATLAS_EXPORT_MAX_CONCURRENT_PER_USER`); excess returns 429 with
+  `Retry-After: 30` header AND a JSON body explaining the limit
+  (P0-A10 — operators reading curl without `-i` still see the message).
+  The cap is per-tenant-per-user, not global — a super_admin running
+  exports across five tenants is NOT throttled by cap=2 in any single
+  tenant. CONTRIBUTING.md gains a "Data exports" section covering both
+  workflows (forensics default + external-audit-handoff with
+  `?include_payload=false`). Decisions log at
+  `docs/audit-log/145-data-export-hardening-decisions.md`.
+
 - Personal API tokens: Rotate action on /settings
   ([#163](https://github.com/mgoodric/security-atlas/issues/163); closes
   slice 154 F8). The Personal API Tokens table in

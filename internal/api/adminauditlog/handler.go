@@ -55,6 +55,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -64,8 +65,15 @@ const (
 )
 
 // Handler owns the audit-log route.
+//
+// Slice 145: the optional `limiter` field overrides the process-wide
+// singleton [export.DefaultLimiter] when set — used by integration
+// tests to pin a small, deterministic concurrency cap. Production
+// callers leave it nil; the handler resolves the singleton lazily on
+// every request.
 type Handler struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	limiter *export.Limiter
 }
 
 // New constructs a Handler.
