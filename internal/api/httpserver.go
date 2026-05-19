@@ -13,9 +13,11 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/mgoodric/security-atlas/internal/api/adminauditlog"
+	"github.com/mgoodric/security-atlas/internal/api/adminauditperiods"
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
 	"github.com/mgoodric/security-atlas/internal/api/adminsso"
 	"github.com/mgoodric/security-atlas/internal/api/adminusers"
+	"github.com/mgoodric/security-atlas/internal/api/adminvendors"
 	aggregationrulesapi "github.com/mgoodric/security-atlas/internal/api/aggregationrules"
 	"github.com/mgoodric/security-atlas/internal/api/anchors"
 	artifactsapi "github.com/mgoodric/security-atlas/internal/api/artifacts"
@@ -723,6 +725,18 @@ func (s *Server) httpHandler() http.Handler {
 	// format-encoder swap on the response body (CSV / JSON / XLSX).
 	// Meta-audit row written on EVERY outcome (slice 135 P0-A4).
 	root.Get("/v1/admin/audit-log/export", auditLogH.ExportUnified)
+	// Slice 139: per-entity data exports for audit_periods + vendors.
+	// Both reuse the slice-135 export library; both go through the
+	// slice-145 per-(tenant, user) concurrency cap; both emit a
+	// meta-audit row on every outcome (`audit_periods_export` +
+	// `vendors_export` — migration 20260519000000). Route mounts
+	// registered onto the root per the parallel-batch convention
+	// (chi.Mux rejects two Mounts at "/"). Same admit set as the
+	// slice-135 audit-log export (admin OR auditor OR grc_engineer).
+	auditPeriodsExportH := adminauditperiods.New(s.dbPool)
+	root.Get("/v1/admin/audit-periods/export", auditPeriodsExportH.ExportAuditPeriods)
+	vendorsExportH := adminvendors.New(s.dbPool)
+	root.Get("/v1/admin/vendors/export", vendorsExportH.ExportVendors)
 	// Slice 076: metrics catalog + cascade + observation store. Routes
 	// appended per the parallel-batch convention (chi.Mux rejects two
 	// Mounts at "/"). The literal-segment route /v1/metrics/cascade is

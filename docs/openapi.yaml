@@ -47,11 +47,13 @@ servers:
 
 tags:
   - name: admin-audit-log
+  - name: admin-audit-periods
   - name: admin-credentials
   - name: admin-feature-flags
   - name: admin-install
   - name: admin-sso
   - name: admin-users
+  - name: admin-vendors
   - name: artifacts
   - name: audit-notes
   - name: audit-periods
@@ -199,6 +201,20 @@ paths:
       summary: GET /v1/admin/audit-log/unified
       tags: [admin-audit-log]
       operationId: get-v1-admin-audit-log-unified
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/audit-periods/export:
+    get:
+      summary: GET /v1/admin/audit-periods/export
+      tags: [admin-audit-periods]
+      operationId: get-v1-admin-audit-periods-export
       security:
         - adminBearer: []
       responses:
@@ -411,6 +427,20 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/vendors/export:
+    get:
+      summary: GET /v1/admin/vendors/export
+      tags: [admin-vendors]
+      operationId: get-v1-admin-vendors-export
+      security:
+        - adminBearer: []
       responses:
         default:
           description: Default response envelope.

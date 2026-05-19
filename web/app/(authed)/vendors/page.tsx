@@ -95,9 +95,16 @@ export default function VendorsPage() {
             cadence, criticality. Phase 2 adds questionnaire issuance.
           </p>
         </div>
-        <Link href="/vendors/new" className={buttonVariants()}>
-          Add vendor
-        </Link>
+        <div className="flex items-center gap-2">
+          {/* Slice 139 — vendor data export (csv|json|xlsx). The
+              button group renders three direct links to the BFF;
+              clicking each triggers the browser's file-save dialog.
+              Owner emails are masked server-side to `*@domain.tld`. */}
+          <ExportButtons />
+          <Link href="/vendors/new" className={buttonVariants()}>
+            Add vendor
+          </Link>
+        </div>
       </div>
 
       <BurndownCard
@@ -317,6 +324,40 @@ function ListSkeleton() {
     <div className="space-y-2">
       {Array.from({ length: 5 }).map((_, i) => (
         <Skeleton key={i} className="h-10 w-full" />
+      ))}
+    </div>
+  );
+}
+
+// ExportButtons renders three direct-download links to the slice-139
+// vendor export BFF — one per format. Each is an `<a>` (not a fetch)
+// so the browser's native file-save dialog handles the download. The
+// BFF streams the platform response back unchanged; the row cap +
+// concurrency cap + role gate live server-side.
+//
+// `data-testid` tokens are stable contract points for the Playwright
+// e2e spec (`web/e2e/vendors-export.spec.ts`).
+function ExportButtons() {
+  return (
+    <div
+      className="flex items-center gap-1"
+      data-testid="vendors-export-buttons"
+    >
+      <span className="text-xs text-muted-foreground">Export:</span>
+      {(["csv", "json", "xlsx"] as const).map((fmt) => (
+        <a
+          key={fmt}
+          href={`/api/admin/vendors/export?format=${fmt}`}
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+          data-testid={`vendors-export-${fmt}`}
+          // <a download> is intentionally NOT set — the backend's
+          // Content-Disposition header carries the canonical
+          // filename (slice 135 BuildFilename) and the browser
+          // honors it for the file-save dialog. Setting `download`
+          // here would override that with the link text.
+        >
+          {fmt.toUpperCase()}
+        </a>
       ))}
     </div>
   );
