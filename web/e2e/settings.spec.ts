@@ -44,9 +44,17 @@ test.describe("/settings user-facing page", () => {
   test("AC-1: profile section renders for any signed-in user", async ({
     authedPage: page,
   }) => {
+    // Slice 168 AC-1 fix (spec drift): the CardTitle "Profile" renders as a
+    // shadcn `<div>` (web/components/ui/card.tsx:36 — `CardTitle` is
+    // `React.ComponentProps<"div">`), not as an `<h*>` or `role="heading"`.
+    // Playwright's `getByRole("heading", ...)` could never resolve to it.
+    // Assert the rendered "Profile" label via `getByText` instead — same
+    // intent (the section's title is visible), correct accessibility tree.
     await page.goto("/settings");
     await expect(page.getByTestId("settings-section-profile")).toBeVisible();
-    await expect(page.getByRole("heading", { name: /Profile/ })).toBeVisible();
+    await expect(
+      page.getByTestId("settings-section-profile").getByText("Profile"),
+    ).toBeVisible();
   });
 
   test("AC-2: theme picker persists choice across reload", async ({
@@ -93,10 +101,21 @@ test.describe("/settings user-facing page", () => {
   test("AC-4 + P0-A2: token issuance shows plaintext once then never re-displays it", async ({
     authedPage: page,
   }) => {
+    // Slice 168 AC-4 fix (spec drift): two buttons on the page match
+    // `/Issue token/` — the trigger button in the section header
+    // (page.tsx:801 `data-testid="settings-token-issue-button"`) AND the
+    // form submit button (page.tsx:1121-1123 — `<Button>Issue token</Button>`
+    // / "Issuing..."). The unscoped `getByRole` raised
+    //   `strict mode violation: getByRole('button', { name: /Issue token/ })
+    //    resolved to 2 elements`
+    // because by the time the click fires, both buttons are mounted (the
+    // trigger button stays visible while the form is open per page.tsx:790).
+    // Scope the role lookup to the form to disambiguate.
     await page.goto("/settings");
     await page.getByTestId("settings-token-issue-button").click();
-    await page.getByTestId("settings-token-issue-form").waitFor();
-    await page.getByRole("button", { name: /Issue token/ }).click();
+    const issueForm = page.getByTestId("settings-token-issue-form");
+    await issueForm.waitFor();
+    await issueForm.getByRole("button", { name: /Issue token/ }).click();
 
     // Callout appears with the plaintext.
     const callout = page.getByTestId("settings-fresh-token-callout");
