@@ -60,10 +60,23 @@ test.describe("open-redirect defense on signIn", () => {
       await tokenInput.fill(process.env.TEST_BEARER ?? "");
       await authedPage.getByRole("button", { name: /sign in/i }).click();
 
-      // Wait for the redirect to settle. The destination must be a
-      // path on the test origin — never the attacker URL.
+      // Wait for the redirect to settle off `/login`. The prior shape —
+      // `(url) => url.origin === new URL(authedPage.url()).origin` —
+      // was a no-op: `authedPage.url()` returns the current page URL
+      // at evaluation time, so the predicate compared the candidate
+      // URL's origin against itself and resolved immediately. That
+      // meant `authedPage.url()` at line `final = new URL(...)` below
+      // was read mid-flight, capturing the pre-redirect `/login` URL
+      // even though the server action HAD redirected to `/dashboard`.
+      // The page snapshot at assertion-failure time showed the
+      // dashboard fully rendered while `final.pathname` was still
+      // `/login` — classic racy-wait. See slice 161 decisions log.
+      //
+      // The fix: wait until pathname is no longer `/login`. That's the
+      // post-sign-in transition we actually care about. The host-and-
+      // pathname assertions below then run on the settled URL.
       await authedPage.waitForURL(
-        (url) => url.origin === new URL(authedPage.url()).origin,
+        (url) => !url.pathname.startsWith("/login"),
         { timeout: 5_000 },
       );
 
