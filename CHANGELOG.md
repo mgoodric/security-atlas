@@ -47,6 +47,29 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- Personal API tokens: Rotate action on /settings
+  ([#163](https://github.com/mgoodric/security-atlas/issues/163); closes
+  slice 154 F8). The Personal API Tokens table in
+  `/settings#tokens` gains a Rotate button per row, mirroring the
+  /admin/api-keys rotate flow (slice 062). The `token-state.ts` reducer
+  is extended with a `ROTATED` transition carrying
+  `{bearer, last4, predecessor_last4, predecessor_expires_at}`; the
+  plaintext-once invariant (P0-163-1) applies symmetrically with ISSUED
+  — DISMISS clears the bearer, any subsequent ISSUED/ROTATED replaces
+  the prior one regardless of which path produced it. A new
+  `RotateConfirmModal` mirrors `RevokeConfirmModal` with copy
+  explaining that the predecessor row stays visible with a muted
+  `rotated → …{last4}` badge until separately revoked (slice 062
+  D-062-3). The `FreshTokenCallout` is widened to a discriminated-union
+  prop so the same component renders both issue-flavour and
+  rotate-flavour copy. The successor-link badge is derived from the
+  slice 062 `rotated_from` field on the successor row (the slice doc
+  mistakenly named the inverse direction `superseded_by` — see D3 in
+  the decisions log for the wire-shape reconciliation). Pure-frontend
+  wiring: no backend or BFF route change (P0-163-2/P0-163-3). Decisions
+  log at
+  `docs/audit-log/163-settings-api-tokens-rotate-action-decisions.md`.
+
 - Active sessions show user-agent, IP, and geo
   ([#162](https://github.com/mgoodric/security-atlas/issues/162); closes
   slice 154 F6). The `sessions` table gains four nullable columns

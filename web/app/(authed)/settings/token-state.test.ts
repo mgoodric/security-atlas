@@ -1,6 +1,12 @@
 // Slice 103 -- vitest unit coverage for the personal-API-token
 // plaintext-once state machine.
 //
+// Slice 163 -- extended to cover the ROTATED transition. The reducer
+// holds a single bearer plaintext at a time across both ISSUED and
+// ROTATED paths; the plaintext-once invariant (P0-163-1) applies
+// symmetrically: DISMISS clears, and any new ISSUED or ROTATED
+// overwrites the prior bearer regardless of which path produced it.
+//
 // The state machine encodes P0-A2: the bearer plaintext returned by
 // POST /v1/admin/credentials is shown to the user EXACTLY ONCE in a
 // callout, then never re-displayed by the UI. Component state holds
@@ -132,5 +138,120 @@ describe("plaintext-once invariant under realistic flow", () => {
     // one is GC'd.
     expect(JSON.stringify(state)).not.toContain("test-bearer-a");
     expect(JSON.stringify(state)).toContain("test-bearer-b");
+  });
+});
+
+// Slice 163 -- ROTATED transition coverage.
+//
+// The rotate path (POST /v1/admin/credentials/:id/rotate, slice 062)
+// returns a successor bearer plaintext + the predecessor's retirement
+// deadline. The reducer holds these in a kind="rotated" variant which
+// the FreshTokenCallout discriminates on to render rotate-flavour copy
+// (predecessor retiring at {predecessor_expires_at}, successor last 4
+// is {last4}). P0-163-1 says the plaintext-once invariant for ROTATED
+// matches ISSUED: bearer cleared on DISMISS, and any second
+// ROTATED/ISSUED replaces the prior bearer wholesale.
+describe("FreshTokenState reducer -- ROTATED transition", () => {
+  test("ROTATED from none carries the successor bearer + predecessor metadata", () => {
+    const out = reduce(initialState, {
+      kind: "ROTATED",
+      bearer: "test-rotated-successor-bearer",
+      last4: "succ",
+      predecessor_last4: "pred",
+      predecessor_expires_at: "2026-05-23T00:00:00Z",
+    });
+    expect(out).toEqual<FreshTokenState>({
+      kind: "rotated",
+      bearer: "test-rotated-successor-bearer",
+      last4: "succ",
+      predecessor_last4: "pred",
+      predecessor_expires_at: "2026-05-23T00:00:00Z",
+    });
+  });
+
+  test("ROTATED -> DISMISS clears bearer (plaintext-once invariant)", () => {
+    const rotated: FreshTokenState = {
+      kind: "rotated",
+      bearer: "test-rotated-successor-bearer",
+      last4: "succ",
+      predecessor_last4: "pred",
+      predecessor_expires_at: "2026-05-23T00:00:00Z",
+    };
+    const out = reduce(rotated, { kind: "DISMISS" });
+    expect(out).toEqual<FreshTokenState>({ kind: "none" });
+    // Belt-and-suspenders: the result MUST NOT contain the plaintext
+    // anywhere, even as a leftover field.
+    expect(JSON.stringify(out)).not.toContain("test-rotated-successor-bearer");
+  });
+
+  test("ROTATED -> ROTATED (rotate twice) replaces prior bearer", () => {
+    let state = initialState;
+    state = reduce(state, {
+      kind: "ROTATED",
+      bearer: "test-rotated-bearer-first",
+      last4: "rot1",
+      predecessor_last4: "pre1",
+      predecessor_expires_at: "2026-05-23T00:00:00Z",
+    });
+    state = reduce(state, {
+      kind: "ROTATED",
+      bearer: "test-rotated-bearer-second",
+      last4: "rot2",
+      predecessor_last4: "pre2",
+      predecessor_expires_at: "2026-05-24T00:00:00Z",
+    });
+    expect(state).toEqual<FreshTokenState>({
+      kind: "rotated",
+      bearer: "test-rotated-bearer-second",
+      last4: "rot2",
+      predecessor_last4: "pre2",
+      predecessor_expires_at: "2026-05-24T00:00:00Z",
+    });
+    expect(JSON.stringify(state)).not.toContain("test-rotated-bearer-first");
+  });
+
+  test("ISSUED -> ROTATED clears the prior ISSUED bearer", () => {
+    let state = initialState;
+    state = reduce(state, {
+      kind: "ISSUED",
+      bearer: "test-issued-bearer-before-rotate",
+      last4: "iss1",
+      issued_at: "2026-05-15T00:00:00Z",
+    });
+    state = reduce(state, {
+      kind: "ROTATED",
+      bearer: "test-rotated-bearer-after-issue",
+      last4: "rot1",
+      predecessor_last4: "iss1",
+      predecessor_expires_at: "2026-05-23T00:00:00Z",
+    });
+    expect(state.kind).toBe("rotated");
+    // The ISSUED bearer is GONE; only the rotated bearer survives.
+    expect(JSON.stringify(state)).not.toContain(
+      "test-issued-bearer-before-rotate",
+    );
+    expect(JSON.stringify(state)).toContain("test-rotated-bearer-after-issue");
+  });
+
+  test("ROTATED -> ISSUED clears the prior ROTATED bearer", () => {
+    let state = initialState;
+    state = reduce(state, {
+      kind: "ROTATED",
+      bearer: "test-rotated-bearer-before-issue",
+      last4: "rot1",
+      predecessor_last4: "pre1",
+      predecessor_expires_at: "2026-05-23T00:00:00Z",
+    });
+    state = reduce(state, {
+      kind: "ISSUED",
+      bearer: "test-issued-bearer-after-rotate",
+      last4: "iss1",
+      issued_at: "2026-05-16T00:00:00Z",
+    });
+    expect(state.kind).toBe("issued");
+    expect(JSON.stringify(state)).not.toContain(
+      "test-rotated-bearer-before-issue",
+    );
+    expect(JSON.stringify(state)).toContain("test-issued-bearer-after-rotate");
   });
 });

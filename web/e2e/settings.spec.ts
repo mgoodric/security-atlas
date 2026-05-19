@@ -4,6 +4,10 @@
 //              docs/audit-log/154-settings-page-audit-decisions.md.
 //              Un-comment + seed fixture wiring deferred to spillover
 //              slice #164 (slice 082 per-spec un-quarantine pattern).
+// Slice 163 -- spec gains AC-11 (rotate-twice-in-a-row + chain) per
+//              docs/issues/163-settings-api-tokens-rotate-action.md
+//              AC-6. The body stays commented for slice 082 / 164
+//              consistency -- the test contract is the comment block.
 //
 // Runner status (post-slice-069 / 071 audit):
 // Playwright IS installed in `web/`. This spec is quarantined behind
@@ -236,6 +240,89 @@ test.describe("/settings user-facing page", () => {
     //    await expect(
     //      page.getByTestId("settings-token-issue-button"),
     //    ).toBeVisible();
+  });
+
+  test("AC-11 (slice 163): rotate-twice-in-a-row chains predecessors + fresh secret per rotate", async () => {
+    // Slice 163 F8 spillover: the Rotate action on a personal API token row
+    // mints a successor with a fresh bearer plaintext and leaves the
+    // predecessor row visible with a muted "rotated -> ...last4" badge
+    // (slice 062 D-062-3). A second rotate of the SUCCESSOR yields a new
+    // bearer (distinct from the first rotate's) and chains the badge so
+    // the original predecessor row points at the first successor, which
+    // in turn points at the second successor.
+    //
+    // P0-163-1 plaintext-once invariant: after each rotate's callout is
+    // dismissed, the corresponding bearer MUST NOT appear anywhere in
+    // the DOM, including on a reload.
+    //
+    // Un-comment + seed-fixture wiring lands in slice 164 (the settings
+    // seed fixture seeds at least one token row to drive the rotate
+    // chain). The test contract is preserved verbatim here per the
+    // slice 082 quarantine pattern.
+    //
+    //    await page.goto("/settings");
+    //
+    //    // Rotate the first row.
+    //    const firstRow = page.getByTestId("settings-token-row").first();
+    //    await firstRow.getByTestId("settings-token-rotate-button").click();
+    //    await page.getByTestId("settings-token-rotate-modal").waitFor();
+    //    await page.getByRole("button", { name: /Rotate now/ }).click();
+    //
+    //    // Callout shows the new bearer with rotate-flavour copy.
+    //    const callout1 = page.getByTestId("settings-fresh-token-callout");
+    //    await callout1.waitFor();
+    //    await expect(
+    //      page.getByTestId("settings-fresh-token-title"),
+    //    ).toContainText("rotated");
+    //    const bearer1 = await page
+    //      .getByTestId("settings-fresh-token-bearer")
+    //      .textContent();
+    //    expect(bearer1).toBeTruthy();
+    //    expect(bearer1!.length).toBeGreaterThan(20);
+    //
+    //    // Dismiss; bearer1 must not appear anywhere in the DOM.
+    //    await page.getByTestId("settings-fresh-token-dismiss").click();
+    //    await expect(callout1).not.toBeVisible();
+    //    let bodyText = await page.locator("body").textContent();
+    //    expect(bodyText).not.toContain(bearer1!);
+    //
+    //    // The predecessor row now carries the muted "rotated -> ..."
+    //    // link.
+    //    await expect(
+    //      page.getByTestId("settings-token-rotated-to-link").first(),
+    //    ).toBeVisible();
+    //
+    //    // Rotate the SUCCESSOR (the new most-recently-issued row) to
+    //    // exercise the chain.
+    //    const rows = page.getByTestId("settings-token-row");
+    //    const successorRow = rows.last();
+    //    await successorRow.getByTestId("settings-token-rotate-button").click();
+    //    await page.getByTestId("settings-token-rotate-modal").waitFor();
+    //    await page.getByRole("button", { name: /Rotate now/ }).click();
+    //
+    //    // The new callout's bearer MUST be distinct from bearer1.
+    //    const bearer2 = await page
+    //      .getByTestId("settings-fresh-token-bearer")
+    //      .textContent();
+    //    expect(bearer2).toBeTruthy();
+    //    expect(bearer2).not.toEqual(bearer1);
+    //
+    //    // Dismiss; bearer2 must not appear anywhere either.
+    //    await page.getByTestId("settings-fresh-token-dismiss").click();
+    //    bodyText = await page.locator("body").textContent();
+    //    expect(bodyText).not.toContain(bearer2!);
+    //
+    //    // Chain assertion: at least TWO predecessor rows now carry the
+    //    // rotated-to link (original predecessor + first successor).
+    //    await expect(
+    //      page.getByTestId("settings-token-rotated-to-link"),
+    //    ).toHaveCount(2);
+    //
+    //    // Reload: neither plaintext appears anywhere on the page.
+    //    await page.reload();
+    //    bodyText = await page.locator("body").textContent();
+    //    expect(bodyText).not.toContain(bearer1!);
+    //    expect(bodyText).not.toContain(bearer2!);
   });
 
   test("AC-10: roles tail badge renders when slice-130 roles array is non-empty", async () => {

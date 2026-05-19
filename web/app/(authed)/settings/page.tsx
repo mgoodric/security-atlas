@@ -10,6 +10,19 @@
 //              the audit findings + the deferred items (sessions UA/IP
 //              wire extension #162, rotate action #163, e2e seed
 //              fixture #164).
+// Slice 163 -- F8 spillover from slice 154 audit: wire the Rotate
+//              action into the Personal API Tokens table. New
+//              RotateConfirmModal mirrors RevokeConfirmModal; the
+//              existing FreshTokenCallout is widened to render
+//              rotate-flavour copy when entered via the ROTATED
+//              reducer transition. Predecessor rows render a muted
+//              "rotated -> ...last4" badge derived from the
+//              SUCCESSOR's `rotated_from` field (slice 062 wire shape;
+//              note the slice doc AC-4 mistakenly named the inverse
+//              direction `superseded_by` -- see D3 in
+//              docs/audit-log/163-settings-api-tokens-rotate-action-decisions.md).
+//              Pure-frontend wiring -- no backend or BFF route change
+//              (P0-163-2/P0-163-3).
 //
 // Per Plans/canvas/12-ui-fill-in-design-decisions.md section 4 (the
 // SCOPE definition), this page is USER-facing only. Tenant-wide
@@ -47,7 +60,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useReducer, useState } from "react";
+import { useMemo, useReducer, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -74,6 +87,7 @@ import {
   AdminCredentialIssueRequest,
   AdminCredentialIssueResponse,
   AdminCredentialListResponse,
+  AdminCredentialRotateResponse,
   getMe,
   getMyPreferences,
   getSessionMe,
@@ -133,6 +147,22 @@ async function revokeCred(id: string): Promise<void> {
   if (!res.ok) {
     throw new Error(`revoke credential: ${res.status}`);
   }
+}
+
+// Slice 163: rotateCred mirrors revokeCred but hits the
+// already-shipped /api/admin/credentials/:id/rotate BFF route (slice
+// 060). The successor's bearer plaintext is returned ONCE and is the
+// caller's only chance to capture it -- the reducer holds it for the
+// duration of the callout, then DISMISS clears it.
+async function rotateCred(id: string): Promise<AdminCredentialRotateResponse> {
+  const res = await fetch(
+    `/api/admin/credentials/${encodeURIComponent(id)}/rotate`,
+    { method: "POST" },
+  );
+  if (!res.ok) {
+    throw new Error(`rotate credential: ${res.status}`);
+  }
+  return (await res.json()) as AdminCredentialRotateResponse;
 }
 
 // --- Page -----------------------------------------------------------------
@@ -657,6 +687,12 @@ function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
   const [revokeConfirm, setRevokeConfirm] = useState<AdminCredential | null>(
     null,
   );
+  // Slice 163: a second confirm modal for Rotate. Same shape as
+  // revokeConfirm -- when set, the modal renders for that credential
+  // and the modal's onConfirm fires the rotateMut.
+  const [rotateConfirm, setRotateConfirm] = useState<AdminCredential | null>(
+    null,
+  );
 
   const issueMut = useMutation({
     mutationFn: issueCred,
@@ -679,6 +715,45 @@ function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
       qc.invalidateQueries({ queryKey: ["settings-creds"] });
     },
   });
+
+  // Slice 163: rotateMut dispatches ROTATED on success. The predecessor's
+  // last4 is captured from the modal's row at click-time (passed as the
+  // mutation variable) so the callout can render "rotated from ...XXXX"
+  // without re-querying the list. The bearer plaintext flows through
+  // state ONCE and is GC'd on DISMISS (P0-163-1).
+  const rotateMut = useMutation({
+    mutationFn: (args: { id: string; predecessor_last4: string }) =>
+      rotateCred(args.id),
+    onSuccess: (out, args) => {
+      dispatch({
+        kind: "ROTATED",
+        bearer: out.bearer_token,
+        last4: out.last4,
+        predecessor_last4: args.predecessor_last4,
+        predecessor_expires_at: out.predecessor_expires_at,
+      });
+      setRotateConfirm(null);
+      qc.invalidateQueries({ queryKey: ["settings-creds"] });
+    },
+  });
+
+  // Slice 163: derive the predecessor -> successor link map from the
+  // list. The slice 062 wire shape carries `rotated_from` on the
+  // SUCCESSOR; to surface the forward direction on a predecessor row's
+  // badge ("rotated -> ...succ") we invert -- for each row with a
+  // rotated_from, the row pointed-to-by-rotated_from has THIS row as
+  // its successor. Memoised on list.data so the inversion does not
+  // re-run on unrelated re-renders (modal open/close, mutation
+  // pending-state flips).
+  const successorByPredecessorId = useMemo(() => {
+    const m = new Map<string, { id: string; last4: string }>();
+    for (const c of list.data ?? []) {
+      if (c.rotated_from) {
+        m.set(c.rotated_from, { id: c.id, last4: c.last4 });
+      }
+    }
+    return m;
+  }, [list.data]);
 
   if (!isAdmin) {
     return (
@@ -731,9 +806,19 @@ function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
       <CardContent className="space-y-4">
         {freshSecret.kind === "issued" ? (
           <FreshTokenCallout
+            variant="issued"
             bearer={freshSecret.bearer}
             last4={freshSecret.last4}
             issuedAt={freshSecret.issued_at}
+            onDismiss={() => dispatch({ kind: "DISMISS" })}
+          />
+        ) : freshSecret.kind === "rotated" ? (
+          <FreshTokenCallout
+            variant="rotated"
+            bearer={freshSecret.bearer}
+            last4={freshSecret.last4}
+            predecessorLast4={freshSecret.predecessor_last4}
+            predecessorExpiresAt={freshSecret.predecessor_expires_at}
             onDismiss={() => dispatch({ kind: "DISMISS" })}
           />
         ) : null}
@@ -769,41 +854,74 @@ function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {list.data.map((c) => (
-                <TableRow key={c.id} data-testid="settings-token-row">
-                  <TableCell className="font-mono text-xs">{c.last4}</TableCell>
-                  <TableCell className="text-xs">
-                    {c.allowed_kinds.length === 0 ? (
-                      <span className="text-muted-foreground">any</span>
-                    ) : (
-                      c.allowed_kinds.join(", ")
-                    )}
-                  </TableCell>
-                  <TableCell className="font-mono text-[10px] text-muted-foreground">
-                    {c.scope_predicate || "{}"}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {c.issued_at.slice(0, 10)}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {c.last_used_at ? (
-                      c.last_used_at.slice(0, 10)
-                    ) : (
-                      <span className="text-muted-foreground">never</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => setRevokeConfirm(c)}
-                      data-testid="settings-token-revoke-button"
-                    >
-                      Revoke
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {list.data.map((c) => {
+                // Slice 163: row id is prefixed with `token-row-` so the
+                // predecessor badge's `href="#token-row-{successor.id}"`
+                // cannot collide with an unrelated element on the page.
+                const rowAnchor = `token-row-${c.id}`;
+                const successor = successorByPredecessorId.get(c.id);
+                return (
+                  <TableRow
+                    key={c.id}
+                    id={rowAnchor}
+                    data-testid="settings-token-row"
+                  >
+                    <TableCell className="font-mono text-xs">
+                      {c.last4}
+                      {successor ? (
+                        <a
+                          href={`#token-row-${successor.id}`}
+                          className="ml-2 inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground hover:bg-muted-foreground/10"
+                          data-testid="settings-token-rotated-to-link"
+                          title={`Rotated to successor ending in ${successor.last4}`}
+                        >
+                          rotated {"->"} …{successor.last4}
+                        </a>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {c.allowed_kinds.length === 0 ? (
+                        <span className="text-muted-foreground">any</span>
+                      ) : (
+                        c.allowed_kinds.join(", ")
+                      )}
+                    </TableCell>
+                    <TableCell className="font-mono text-[10px] text-muted-foreground">
+                      {c.scope_predicate || "{}"}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {c.issued_at.slice(0, 10)}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {c.last_used_at ? (
+                        c.last_used_at.slice(0, 10)
+                      ) : (
+                        <span className="text-muted-foreground">never</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setRotateConfirm(c)}
+                          data-testid="settings-token-rotate-button"
+                        >
+                          Rotate
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => setRevokeConfirm(c)}
+                          data-testid="settings-token-revoke-button"
+                        >
+                          Revoke
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         ) : (
@@ -822,35 +940,70 @@ function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
           onConfirm={() => revokeMut.mutate(revokeConfirm.id)}
         />
       ) : null}
+
+      {rotateConfirm ? (
+        <RotateConfirmModal
+          cred={rotateConfirm}
+          submitting={rotateMut.isPending}
+          onCancel={() => setRotateConfirm(null)}
+          onConfirm={() =>
+            rotateMut.mutate({
+              id: rotateConfirm.id,
+              predecessor_last4: rotateConfirm.last4,
+            })
+          }
+        />
+      ) : null}
     </Card>
   );
 }
 
-function FreshTokenCallout({
-  bearer,
-  last4,
-  issuedAt,
-  onDismiss,
-}: {
-  bearer: string;
-  last4: string;
-  issuedAt: string;
-  onDismiss: () => void;
-}) {
+// Slice 103 / Slice 163 -- one-shot plaintext callout used by both the
+// ISSUED and ROTATED reducer paths. The variant prop selects the copy
+// (title, "issued at" vs "rotated -- predecessor retires at") without
+// duplicating the surrounding callout chrome. The bearer flows in as a
+// string and is rendered into a <code> element inside the callout's
+// JSX -- the moment the parent component dispatches DISMISS, the
+// callout unmounts and the bearer reference goes out of scope. There
+// is no DOM persistence across re-renders, no localStorage write, no
+// hidden duplicate element.
+type FreshTokenCalloutProps =
+  | {
+      variant: "issued";
+      bearer: string;
+      last4: string;
+      issuedAt: string;
+      onDismiss: () => void;
+    }
+  | {
+      variant: "rotated";
+      bearer: string;
+      last4: string;
+      predecessorLast4: string;
+      predecessorExpiresAt: string;
+      onDismiss: () => void;
+    };
+
+function FreshTokenCallout(props: FreshTokenCalloutProps) {
+  const title =
+    props.variant === "issued"
+      ? "API token issued -- copy it now"
+      : "API token rotated -- copy the new bearer now";
+  const helperParagraph =
+    props.variant === "issued"
+      ? "This is the only time you'll see this token. The platform does not store it in plaintext; if you lose it, issue a new one."
+      : `This is the only time you'll see this token. The predecessor ending in ${props.predecessorLast4} keeps working until the timestamp below; rotate again or revoke it once your clients have switched over.`;
   return (
     <Alert variant="destructive" data-testid="settings-fresh-token-callout">
-      <AlertTitle>API token issued -- copy it now</AlertTitle>
+      <AlertTitle data-testid="settings-fresh-token-title">{title}</AlertTitle>
       <AlertDescription className="space-y-2">
-        <p className="font-medium">
-          This is the only time you&apos;ll see this token. The platform does
-          not store it in plaintext; if you lose it, issue a new one.
-        </p>
+        <p className="font-medium">{helperParagraph}</p>
         <div className="flex flex-col gap-2 sm:flex-row">
           <code
             className="flex-1 break-all rounded bg-foreground/5 p-2 font-mono text-xs"
             data-testid="settings-fresh-token-bearer"
           >
-            {bearer}
+            {props.bearer}
           </code>
           <div className="flex gap-2">
             <Button
@@ -858,7 +1011,7 @@ function FreshTokenCallout({
               size="sm"
               onClick={() => {
                 if (typeof navigator !== "undefined") {
-                  navigator.clipboard?.writeText(bearer);
+                  navigator.clipboard?.writeText(props.bearer);
                 }
               }}
             >
@@ -867,17 +1020,28 @@ function FreshTokenCallout({
             <Button
               variant="outline"
               size="sm"
-              onClick={onDismiss}
+              onClick={props.onDismiss}
               data-testid="settings-fresh-token-dismiss"
             >
               Dismiss
             </Button>
           </div>
         </div>
-        <p className="text-xs">
-          Last 4: <code>{last4}</code> &middot; Issued at{" "}
-          <code>{issuedAt}</code>
-        </p>
+        {props.variant === "issued" ? (
+          <p className="text-xs">
+            Last 4: <code>{props.last4}</code> &middot; Issued at{" "}
+            <code>{props.issuedAt}</code>
+          </p>
+        ) : (
+          <p
+            className="text-xs"
+            data-testid="settings-fresh-token-rotated-meta"
+          >
+            Successor last 4: <code>{props.last4}</code> &middot; Rotated from{" "}
+            <code>…{props.predecessorLast4}</code> &middot; Predecessor retires
+            at <code>{props.predecessorExpiresAt}</code>
+          </p>
+        )}
       </AlertDescription>
     </Alert>
   );
@@ -1003,6 +1167,63 @@ function RevokeConfirmModal({
               disabled={submitting}
             >
               {submitting ? "Revoking..." : "Revoke now"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// Slice 163: RotateConfirmModal is a parallel of RevokeConfirmModal
+// with rotate-specific copy. Rotation produces a NEW plaintext bearer
+// for the successor row; the predecessor row stays visible with a
+// muted "rotated -> ...last4" badge until the user separately revokes
+// it (slice 062 D-062-3). The modal copy makes this explicit so the
+// user is not surprised by the predecessor row sticking around.
+function RotateConfirmModal({
+  cred,
+  submitting,
+  onCancel,
+  onConfirm,
+}: {
+  cred: AdminCredential;
+  submitting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      data-testid="settings-token-rotate-modal"
+    >
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Rotate token?</CardTitle>
+          <CardDescription>
+            Last 4 <code>{cred.last4}</code>
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p>
+            Rotation mints a successor with the same scope and allowed kinds,
+            and returns a fresh bearer plaintext. The predecessor keeps working
+            for a short grace window so clients can switch over -- it stays
+            visible in this list with a muted &ldquo;rotated&rdquo; badge until
+            you revoke it.
+          </p>
+          <p>
+            You&apos;ll see the new bearer EXACTLY ONCE. Have a place to paste
+            it before continuing.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onCancel} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button onClick={onConfirm} disabled={submitting}>
+              {submitting ? "Rotating..." : "Rotate now"}
             </Button>
           </div>
         </CardContent>
