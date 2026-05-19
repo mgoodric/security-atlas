@@ -1,25 +1,35 @@
 // Slice 103 -- /settings (user-facing only; admin lives at /admin).
+// Slice 108 -- wired /v1/me, /v1/me/preferences, /v1/me/sessions.
+// Slice 154 -- parity audit pass against Plans/mockups/settings.html:
+//              section anchors (#profile / #appearance / ...), theme
+//              swatches, multi-role tail badge, editable time-zone
+//              picker bound to PATCH /v1/me, copy delta on the
+//              audit-period assignment notification row, and the
+//              Profile avatar / hero block. See
+//              docs/audit-log/154-settings-page-audit-decisions.md for
+//              the audit findings + the deferred items (sessions UA/IP
+//              wire extension #162, rotate action #163, e2e seed
+//              fixture #164).
 //
-// Per Plans/canvas/12-ui-fill-in-design-decisions.md section 4 (the SCOPE
-// definition), this page is USER-facing only. Tenant-wide settings are
-// at /admin/*. The page has five sections:
+// Per Plans/canvas/12-ui-fill-in-design-decisions.md section 4 (the
+// SCOPE definition), this page is USER-facing only. Tenant-wide
+// settings are at /admin/*. The page has five sections:
 //
-//   1. Profile -- read-only display from the session probe; the
-//      backend has no GET /v1/me profile endpoint today, so the page
-//      surfaces what is known (admin flag, OIDC subject placeholder)
-//      and files a spillover slice for the real backend route.
+//   1. Profile -- GET /v1/me; PATCH /v1/me wires the time-zone editor
+//      (display_name + IdP-managed email stay read-only per slice 108).
 //   2. Appearance -- theme picker (light / dark / system) persisted to
-//      localStorage. No server-side theme sync in v1 (spillover).
-//   3. Notifications -- per-event in-app + email toggles. No backend
-//      preferences endpoint today, so toggles persist to localStorage
-//      with a banner explaining the server roundtrip is pending
-//      (spillover).
+//      localStorage. The visual swatch previews mirror the mockup; the
+//      dark-mode stylesheet itself is still a follow-up (banner).
+//   3. Notifications -- per-event in-app + email toggles backed by
+//      GET/PATCH /v1/me/preferences (slice 108).
 //   4. API tokens -- admin-only view that reuses the slice 062/063
 //      /admin/api-keys plaintext-once flow. Non-admins see an
 //      affordance pointing at /admin/api-keys; admin RBAC is enforced
-//      at the backend (P0-A3).
-//   5. Active sessions -- placeholder; no backend session-list
-//      endpoint today (spillover).
+//      at the backend (P0-A3). The mockup's Rotate action is
+//      deferred to spillover slice #163.
+//   5. Active sessions -- GET /v1/me/sessions + DELETE per-id (slice
+//      108). The mockup's UA / IP / geo columns are a wire-shape
+//      extension deferred to spillover slice #162.
 //
 // Cross-link "Tenant administration -> /admin" is visible only to
 // admins (slice 097 D3 pattern: client-side via getSessionMe).
@@ -71,10 +81,17 @@ import {
   MePreferences,
   MeProfile,
   MeSession,
+  patchMe,
   patchMyPreferences,
   revokeMySession,
 } from "@/lib/api";
 
+import {
+  TIME_ZONE_OPTIONS,
+  initialsFor,
+  isCuratedTimeZone,
+  tailRoles,
+} from "./profile-derive";
 import { DEFAULT_THEME, readTheme, Theme, writeTheme } from "./theme";
 import { initialState, reduce } from "./token-state";
 
@@ -150,7 +167,7 @@ export default function SettingsPage() {
         </p>
       </header>
 
-      <ProfileSection isAdmin={isAdmin} loading={meQuery.isLoading} />
+      <ProfileSection isAdmin={isAdmin} />
       <AppearanceSection />
       <NotificationsSection />
       <ApiTokensSection isAdmin={isAdmin} />
@@ -161,17 +178,32 @@ export default function SettingsPage() {
 
 // --- Section 1: Profile ---------------------------------------------------
 
-function ProfileSection({ isAdmin }: { isAdmin: boolean; loading: boolean }) {
+function ProfileSection({ isAdmin }: { isAdmin: boolean }) {
   // Slice 108 wired GET /v1/me. Falls back to the credential-derived
   // tenant_role badge when the upstream returns a synthetic profile (API-key
   // bearer with no users row).
+  //
+  // Slice 154:
+  //   - Avatar / hero block above the dl rows (initialsFor helper).
+  //   - Tenant Role line shows the multi-role tail (slice 130 `roles`).
+  //   - Time zone is an editable <select> bound to PATCH /v1/me; the
+  //     curated nine-zone list in `profile-derive.ts` covers the v1
+  //     primary-user persona. Zones outside the list still render
+  //     correctly when the backend reports them (synthetic option).
+  const qc = useQueryClient();
   const profileQuery = useQuery({
     queryKey: ["settings-me-profile"],
     queryFn: getMe,
   });
   const profile: MeProfile | undefined = profileQuery.data;
+  const tzMut = useMutation({
+    mutationFn: (time_zone: string) => patchMe({ time_zone }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["settings-me-profile"] });
+    },
+  });
   return (
-    <Card data-testid="settings-section-profile">
+    <Card id="profile" data-testid="settings-section-profile">
       <CardHeader>
         <CardTitle>Profile</CardTitle>
         <CardDescription>
@@ -190,63 +222,193 @@ function ProfileSection({ isAdmin }: { isAdmin: boolean; loading: boolean }) {
             </AlertDescription>
           </Alert>
         ) : (
-          <dl className="grid grid-cols-3 gap-x-4 gap-y-3 text-sm">
-            <dt className="text-muted-foreground">Display name</dt>
-            <dd
-              className="col-span-2 text-foreground"
-              data-testid="settings-profile-display-name"
+          <>
+            <div
+              className="mb-4 flex items-center gap-4"
+              data-testid="settings-profile-hero"
             >
-              {profile?.display_name || (
-                <span className="text-muted-foreground">(unset)</span>
-              )}
-            </dd>
-            <dt className="text-muted-foreground">Email</dt>
-            <dd className="col-span-2 text-foreground">
-              {profile?.email || (
-                <span className="text-muted-foreground">(unset)</span>
-              )}
-            </dd>
-            <dt className="text-muted-foreground">Tenant role</dt>
-            <dd className="col-span-2">
-              {isAdmin ? (
-                <Badge data-testid="settings-profile-role-admin">admin</Badge>
-              ) : (
-                <Badge
-                  variant="outline"
-                  data-testid="settings-profile-role-user"
-                >
-                  user
-                </Badge>
-              )}
-            </dd>
-            <dt className="text-muted-foreground">OIDC subject</dt>
-            <dd className="col-span-2">
-              <code className="text-xs text-muted-foreground">
-                {profile?.idp_subject || "(local user — no IdP backing)"}
-              </code>
-            </dd>
-            <dt className="text-muted-foreground">Time zone</dt>
-            <dd
-              className="col-span-2 text-foreground"
-              data-testid="settings-profile-time-zone"
-            >
-              {profile?.time_zone || (
-                <span className="text-muted-foreground">(browser-derived)</span>
-              )}
-            </dd>
-          </dl>
+              <div
+                className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-lg font-semibold text-primary"
+                aria-hidden="true"
+                data-testid="settings-profile-initials"
+              >
+                {initialsFor({
+                  display_name: profile?.display_name ?? "",
+                  email: profile?.email ?? "",
+                })}
+              </div>
+              <div>
+                <div className="text-sm font-medium text-foreground">
+                  {profile?.display_name || (
+                    <span className="text-muted-foreground">(unset)</span>
+                  )}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {profile?.email || "(no email synced)"}
+                  {profile?.idp_subject ? (
+                    <>
+                      {" "}
+                      &middot; OIDC subject{" "}
+                      <code className="font-mono text-[11px]">
+                        {profile.idp_subject}
+                      </code>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+            <dl className="grid grid-cols-3 gap-x-4 gap-y-3 text-sm">
+              <dt className="text-muted-foreground">Display name</dt>
+              <dd
+                className="col-span-2 text-foreground"
+                data-testid="settings-profile-display-name"
+              >
+                {profile?.display_name || (
+                  <span className="text-muted-foreground">(unset)</span>
+                )}
+              </dd>
+              <dt className="text-muted-foreground">Email</dt>
+              <dd className="col-span-2 text-foreground">
+                {profile?.email || (
+                  <span className="text-muted-foreground">(unset)</span>
+                )}
+                <span className="ml-2 text-xs text-muted-foreground">
+                  (read-only · managed by IdP)
+                </span>
+              </dd>
+              <dt className="text-muted-foreground">Tenant role</dt>
+              <dd
+                className="col-span-2 flex flex-wrap items-center gap-1.5"
+                data-testid="settings-profile-roles"
+              >
+                {isAdmin ? (
+                  <Badge data-testid="settings-profile-role-admin">admin</Badge>
+                ) : (
+                  <Badge
+                    variant="outline"
+                    data-testid="settings-profile-role-user"
+                  >
+                    user
+                  </Badge>
+                )}
+                <RolesTail roles={profile?.roles} isAdmin={isAdmin} />
+              </dd>
+              <dt className="text-muted-foreground">Time zone</dt>
+              <dd
+                className="col-span-2"
+                data-testid="settings-profile-time-zone"
+              >
+                <TimeZonePicker
+                  value={profile?.time_zone ?? null}
+                  pending={tzMut.isPending}
+                  onChange={(next) => tzMut.mutate(next)}
+                />
+                {tzMut.error ? (
+                  <p
+                    className="mt-1 text-xs text-destructive"
+                    data-testid="settings-profile-time-zone-error"
+                  >
+                    {(tzMut.error as Error).message}
+                  </p>
+                ) : null}
+              </dd>
+            </dl>
+          </>
         )}
       </CardContent>
     </Card>
   );
 }
 
+// RolesTail renders the slice-130 `roles` list as the muted
+// "+ grc_engineer + auditor" tail next to the primary admin/user badge.
+// Returns nothing when there are no secondary roles to show.
+function RolesTail({
+  roles,
+  isAdmin,
+}: {
+  roles: string[] | undefined;
+  isAdmin: boolean;
+}) {
+  const tail = tailRoles(roles, isAdmin);
+  if (tail.length === 0) return null;
+  return (
+    <span
+      className="text-xs text-muted-foreground"
+      data-testid="settings-profile-roles-tail"
+    >
+      + {tail.join(" + ")}
+    </span>
+  );
+}
+
+// TimeZonePicker renders a styled <select> bound to PATCH /v1/me. When
+// the current value is outside the curated list, the select prepends an
+// "out-of-band" option so the user still sees their zone honestly. A
+// blank value (server reports `time_zone === null`) selects the empty
+// option which is labeled "(browser-derived)".
+function TimeZonePicker({
+  value,
+  pending,
+  onChange,
+}: {
+  value: string | null;
+  pending: boolean;
+  onChange: (next: string) => void;
+}) {
+  const showOutOfBand =
+    value !== null && value !== "" && !isCuratedTimeZone(value);
+  return (
+    <select
+      className="rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+      value={value ?? ""}
+      disabled={pending}
+      onChange={(e) => onChange(e.target.value)}
+      data-testid="settings-profile-time-zone-select"
+      aria-label="Time zone"
+    >
+      <option value="">(browser-derived)</option>
+      {showOutOfBand ? <option value={value as string}>{value}</option> : null}
+      {TIME_ZONE_OPTIONS.map((z) => (
+        <option key={z} value={z}>
+          {z}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 // --- Section 2: Appearance ------------------------------------------------
 
-const THEMES: { value: Theme; label: string; description: string }[] = [
-  { value: "light", label: "Light", description: "Bright background" },
-  { value: "dark", label: "Dark", description: "Low-light reading" },
-  { value: "system", label: "System", description: "Follow OS preference" },
+// Slice 154: each theme option carries a swatch preview class (the
+// mockup shows a 48-px-tall card-shaped preview above the label so the
+// user picks visually instead of reading three descriptions). The
+// `swatch` class is a Tailwind utility composition — no new components
+// added (Article VIII Anti-Abstraction).
+const THEMES: {
+  value: Theme;
+  label: string;
+  description: string;
+  swatch: string;
+}[] = [
+  {
+    value: "light",
+    label: "Light",
+    description: "Bright background",
+    swatch: "bg-white border border-border",
+  },
+  {
+    value: "dark",
+    label: "Dark",
+    description: "Low-light reading",
+    swatch: "bg-slate-900 border border-slate-700",
+  },
+  {
+    value: "system",
+    label: "System",
+    description: "Follow OS preference",
+    swatch: "bg-gradient-to-br from-white to-slate-900 border border-border",
+  },
 ];
 
 function AppearanceSection() {
@@ -255,7 +417,7 @@ function AppearanceSection() {
   // localStorage with a lazy initializer to avoid a hydration mismatch
   // while sidestepping the react-hooks/set-state-in-effect rule.
   return (
-    <Card data-testid="settings-section-appearance">
+    <Card id="appearance" data-testid="settings-section-appearance">
       <CardHeader>
         <CardTitle>Appearance</CardTitle>
         <CardDescription>
@@ -324,6 +486,11 @@ function AppearanceSelector() {
                 : "rounded-md border border-border bg-background p-3 text-left hover:border-foreground/40"
             }
           >
+            <div
+              className={`mb-2 h-12 rounded ${opt.swatch}`}
+              aria-hidden="true"
+              data-testid={`settings-theme-swatch-${opt.value}`}
+            />
             <div className="text-sm font-medium">{opt.label}</div>
             <div className="text-xs text-muted-foreground">
               {opt.description}
@@ -348,7 +515,13 @@ const NOTIF_EVENTS: { key: NotifEvent; label: string; description: string }[] =
     {
       key: "audit_period_assignment",
       label: "Audit-period assignments",
-      description: "When you are added as a sample reviewer on a period",
+      // Slice 154 F5: the "in-progress" qualifier is load-bearing —
+      // assignment notifications fire only for open periods, not for
+      // historical periods or refreshes (slice 108 D-108-2). Restore
+      // the mockup copy so the user is not surprised by a stale
+      // assignment fire on a frozen period.
+      description:
+        "When you're added as a sample reviewer on an in-progress period",
     },
     {
       key: "policy_ack_due",
@@ -384,7 +557,7 @@ function NotificationsSection() {
     },
   });
   return (
-    <Card data-testid="settings-section-notifications">
+    <Card id="notifications" data-testid="settings-section-notifications">
       <CardHeader>
         <CardTitle>Notifications</CardTitle>
         <CardDescription>
@@ -508,7 +681,7 @@ function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
 
   if (!isAdmin) {
     return (
-      <Card data-testid="settings-section-tokens-non-admin">
+      <Card id="tokens" data-testid="settings-section-tokens-non-admin">
         <CardHeader>
           <CardTitle>Personal API tokens</CardTitle>
           <CardDescription>
@@ -535,7 +708,7 @@ function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
   }
 
   return (
-    <Card data-testid="settings-section-tokens">
+    <Card id="tokens" data-testid="settings-section-tokens">
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -858,7 +1031,7 @@ function SessionsSection() {
     },
   });
   return (
-    <Card data-testid="settings-section-sessions">
+    <Card id="sessions" data-testid="settings-section-sessions">
       <CardHeader>
         <CardTitle>Active sessions</CardTitle>
         <CardDescription>Browsers currently signed in as you.</CardDescription>
