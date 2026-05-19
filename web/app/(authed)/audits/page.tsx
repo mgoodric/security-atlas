@@ -34,8 +34,11 @@
 //            different route segment — Next.js routes /audits and
 //            /audit/[id] independently).
 //   - P0-A2: NO editing frozen periods from the list (read-only render).
-//   - P0-A3: NO period-create UI — the "New audit period" CTA is a
-//            placeholder link to the existing admin flow.
+//   - P0-A3: (originally) NO period-create UI — the "New audit period"
+//            CTA was a placeholder link to the existing admin flow.
+//            UPDATED slice 149: P0-A3 is superseded — slice 149 ships the
+//            create flow at `/audits/new`. Both the toolbar CTA and the
+//            true-zero empty-state CTA now route there.
 //   - P0-A4: NO invented columns — every column is derived from
 //            periodWire (name, framework_version_id, period_start,
 //            period_end, status, frozen_at, frozen_by, created_by).
@@ -353,9 +356,14 @@ function AuditsPageInner() {
       <Button variant="outline" size="sm" disabled>
         Export OSCAL bundle
       </Button>
-      {/* P0-A3: this CTA is a placeholder link — the period-create flow
-          lives elsewhere (admin UI) and is out of scope for this slice. */}
-      <Button size="sm" disabled data-testid="audits-create-cta">
+      {/* Slice 149: re-wired from disabled placeholder to a working
+          link. Routes to /audits/new (slice 149 create form) which
+          posts to /v1/audit-periods via the BFF. */}
+      <Button
+        size="sm"
+        data-testid="audits-create-cta"
+        onClick={() => router.push("/audits/new")}
+      >
         New audit period
       </Button>
     </>
@@ -422,10 +430,10 @@ function AuditsPageInner() {
         body="Create your first period when you start an external audit — sample populations will draw from evidence captured during the period."
         cta={{
           label: "Create audit period",
-          // P0-A3: no in-list create UI. Sends the user to the
-          // existing admin flow placeholder; when slice 042's period
-          // create form lands (or an admin route), update the href.
-          onClick: () => router.push("/admin"),
+          // Slice 149: re-wired from /admin placeholder to the working
+          // create flow at /audits/new. This was the operator-reported
+          // bug (v1.10.0: clicking the CTA bounced to /admin).
+          onClick: () => router.push("/audits/new"),
         }}
       />
     ) : (

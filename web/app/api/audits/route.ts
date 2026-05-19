@@ -1,9 +1,12 @@
-// Slice 102 — BFF proxy for `/audits` list view.
+// Slice 102 — BFF proxy for `/audits` list view (GET).
+// Slice 149 — adds POST so `/audits/new` form can submit through the
+//             same per-page BFF pattern without inventing a second route.
 //
 // Reads the bearer cookie server-side and calls `/v1/audit-periods`
 // upstream. The bearer never reaches the browser. Mirrors the slice
 // 098 pattern (`web/app/api/controls/route.ts`) so the BFF shape stays
-// predictable across the five list-view slices (098/099/100/101/102).
+// predictable across the five list-view slices (098/099/100/101/102),
+// and the slice 105 GET+POST shape (`web/app/api/risks/route.ts`).
 //
 // Why a `/api/audits` route instead of consuming the existing
 // `/api/audit/periods` (slice 042) route:
@@ -25,7 +28,7 @@
 // client. RLS denies cross-tenant reads at the DB layer.
 
 import { cookies } from "next/headers";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api";
 import { SESSION_COOKIE } from "@/lib/auth";
@@ -42,6 +45,41 @@ export async function GET(): Promise<Response> {
   });
   const body = await upstream.text();
   return new NextResponse(body, {
+    status: upstream.status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+// POST /api/audits (slice 149) — forwards an audit-period-create payload
+// to the slice-028 backend write path `POST /v1/audit-periods`. The body
+// shape mirrors `createReq` in `internal/api/auditperiods/handlers.go`
+// exactly — the BFF does not validate or reshape; the upstream is the
+// single source of truth for field validation. Upstream status + body
+// pass through verbatim so the form can surface inline 4xx messages
+// without losing user input.
+export async function POST(req: NextRequest): Promise<Response> {
+  const jar = await cookies();
+  const bearer = jar.get(SESSION_COOKIE)?.value;
+  if (!bearer) {
+    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  }
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    body = {};
+  }
+  const upstream = await fetch(`${apiBaseURL()}/v1/audit-periods`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  const text = await upstream.text();
+  return new NextResponse(text, {
     status: upstream.status,
     headers: { "Content-Type": "application/json" },
   });
