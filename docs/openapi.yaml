@@ -1050,6 +1050,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls:
+    get:
+      summary: GET /v1/controls
+      tags: [controls]
+      operationId: get-v1-controls
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/drift:
     get:
       summary: GET /v1/controls/drift

@@ -358,8 +358,17 @@ func (s *Server) httpHandler() http.Handler {
 	if dbSvc, ok := s.registry.(*schemaregistry.Service); ok && dbSvc != nil {
 		controlsRegistry = dbSvc
 	}
-	controlsH := controlsapi.New(control.NewStore(s.dbPool), controlsRegistry)
+	controlsStore := control.NewStore(s.dbPool)
+	controlsH := controlsapi.New(controlsStore, controlsRegistry)
 	root.Post("/v1/controls:upload-bundle", controlsH.UploadBundle)
+	// Slice 151: GET /v1/controls — bare tenant-control list endpoint. The
+	// slice-151 risk-create form's control-link multi-select consumes this
+	// to render the picker. Distinct from /v1/anchors (slice 098) which
+	// returns the SCF catalog, and distinct from /v1/controls/drift /
+	// /v1/controls/{id}/... — the chi router treats bare /v1/controls and
+	// the /v1/controls/{id}/... patterns as separate routes.
+	controlsListH := controlsapi.NewListHandler(controlsStore)
+	root.Get("/v1/controls", controlsListH.List)
 	// Slice 011: manual control attestation endpoint. Wired only when
 	// the slice-013 ingest service is wired in (this slice writes
 	// evidence records via that service). When the artifact store is

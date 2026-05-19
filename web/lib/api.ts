@@ -164,6 +164,60 @@ export async function fetchControlsList(): Promise<ControlsListResponse> {
   return (await res.json()) as ControlsListResponse;
 }
 
+// ----- Slice 151: tenant control list (for risk-create form picker) -----
+//
+// `TenantControl` mirrors `activeControlWire` in
+// internal/api/controls/list.go. The slice-151 risk-create form's
+// control-link multi-select consumes this shape.
+//
+// IMPORTANT: distinct from the slice 098 `Anchor` type. `Anchor` is the
+// SCF catalog row (global, no tenant); `TenantControl` is a row from
+// the tenant `controls` table. The risk-control link FK requires a
+// tenant control id, not an anchor id — see
+// `migrations/sql/20260511000005_risk_register.sql`.
+export type TenantControl = {
+  id: string;
+  title: string;
+  control_family: string;
+  scf_id: string;
+  lifecycle_state: string;
+  bundle_id: string;
+};
+
+export type TenantControlsListResponse = {
+  controls: TenantControl[];
+  count: number;
+};
+
+// Server-side fn: hit the platform directly with the bearer. Used by the
+// `/api/controls-list` BFF route handler that runs server-side.
+export async function fetchTenantControls(
+  bearer: string,
+): Promise<TenantControl[]> {
+  const res = await apiFetch("/v1/controls", bearer);
+  const body = (await res.json()) as TenantControlsListResponse;
+  return body.controls ?? [];
+}
+
+// Browser-side fn: hits the `/api/controls-list` BFF route the form
+// uses. Returns the controls array on success or throws APIError on a
+// non-2xx upstream.
+export async function fetchTenantControlsList(): Promise<TenantControl[]> {
+  const res = await fetch(`/api/controls-list`);
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // body not JSON — keep the status line
+    }
+    throw new APIError(res.status, msg);
+  }
+  const body = (await res.json()) as TenantControlsListResponse;
+  return body.controls ?? [];
+}
+
 // ----- Slice 024: vendor lite -----
 
 export type VendorCriticality = "low" | "medium" | "high";

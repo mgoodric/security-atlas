@@ -63,6 +63,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/board-packs/{id}/pdf", Tag: "board", Tier: "bearer", Internal: false, Summary: "GET /v1/board-packs/{id}/pdf"},
 	{Method: "GET", Path: "/v1/calendar", Tag: "calendar", Tier: "bearer", Internal: false, Summary: "GET /v1/calendar"},
 	{Method: "GET", Path: "/v1/calendar.ics", Tag: "calendar", Tier: "none", Internal: false, Summary: "GET /v1/calendar.ics"},
+	{Method: "GET", Path: "/v1/controls", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls"},
 	{Method: "GET", Path: "/v1/controls/drift", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/drift"},
 	{Method: "GET", Path: "/v1/controls/{id}/applicability", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/applicability"},
 	{Method: "GET", Path: "/v1/controls/{id}/attest-form", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/attest-form"},

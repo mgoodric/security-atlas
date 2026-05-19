@@ -232,6 +232,53 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 	return result, err
 }
 
+// ActiveControl is the read-side projection returned by List. Carries the
+// columns the slice-151 risk-create form's control-link multi-select needs
+// to render a useful picker (id + title + family + scf code + lifecycle).
+// The struct shape is deliberately minimal — adding fields later is
+// additive and does not break the JSON envelope.
+type ActiveControl struct {
+	ID             uuid.UUID
+	Title          string
+	ControlFamily  string
+	SCFID          string
+	LifecycleState string
+	BundleID       string
+}
+
+// List returns every active (non-superseded) control for the active tenant.
+// RLS enforces tenant isolation — the sqlc query filters by the GUC-resolved
+// tenant id (slice 033 plumbing). Returns an empty slice (never nil) when
+// the tenant has no controls, matching the slice-150 empty-set convention.
+func (s *Store) List(ctx context.Context) ([]ActiveControl, error) {
+	out := []ActiveControl{}
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		rows, err := q.ListActiveControls(ctx, pgUUID(tenantID))
+		if err != nil {
+			return fmt.Errorf("list active controls: %w", err)
+		}
+		for _, r := range rows {
+			scfCode := ""
+			if r.ScfID != nil {
+				scfCode = *r.ScfID
+			}
+			out = append(out, ActiveControl{
+				ID:             uuid.UUID(r.ID.Bytes),
+				Title:          r.Title,
+				ControlFamily:  r.ControlFamily,
+				SCFID:          scfCode,
+				LifecycleState: string(r.LifecycleState),
+				BundleID:       r.BundleID,
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // resolveSCFAnchor accepts either a uuid string or an SCF code (e.g.,
 // "IAC-06") and returns the anchor's uuid. Unknown values fail with
 // ErrSCFAnchorUnknown.

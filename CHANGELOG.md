@@ -35,6 +35,33 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   ("installable, seeded, producing first evidence within 4 hours")
   remains unmet and is the right scope for a successor slice gated on
   slice 141 multi-tenant bootstrap landing.
+- Risk creation form (`/risks/new`) ships the control-link multi-select
+  ([#151](https://github.com/mgoodric/security-atlas/issues/151); slice
+  105 follow-on). Slice 105 shipped `/risks/new` bound to the slice-019
+  `POST /v1/risks` write path but omitted the control-link picker UI,
+  so any user picking the default `mitigate` treatment hit the
+  server-side validation error "treatment=mitigate requires at least
+  one linked_control_id" with nowhere in the UI to satisfy it. Slice
+  151 closes the loop: a new `ControlMultiSelect` component
+  (`web/app/(authed)/risks/new/control-multi-select.tsx`) renders a
+  search-filterable checkbox list bound to a new tenant-control list
+  endpoint, and the form gates submit client-side when
+  `treatment === 'mitigate'` and zero controls are selected. The
+  backend gains a thin `GET /v1/controls` handler
+  (`internal/api/controls/list.go`) that wraps the existing
+  `ListActiveControls` sqlc query so the picker has a list endpoint to
+  consume; this is distinct from the pre-existing
+  `/v1/anchors?include=state` (SCF catalog) used by the `/controls`
+  page. A matching BFF route lives at `/api/controls-list` (the
+  pre-existing `/api/controls` route stays bound to anchors).
+  Validation is extracted to a pure `validateRiskForm` fn so vitest can
+  pin the client-side gate; the empty/loading/error states render
+  graceful messages and the picker disappears when treatment switches
+  away from `mitigate` (selection persists in form state so toggling
+  back restores it). Playwright spec at
+  `web/e2e/risks-create-control-link.spec.ts` is quarantined behind
+  slice 082 per the established precedent (slice 094 / 098 / 100 / 105
+  / 147 / 149 / 157).
 - Dashboard `upcoming` and `top risks` panels now consume the slice-066
   unified rollup and `sort=residual,age` server-side ranking
   ([#157](https://github.com/mgoodric/security-atlas/issues/157); slice
