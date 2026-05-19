@@ -1357,6 +1357,17 @@ type Querier interface {
 	// /v1/policies/{id}/acknowledgment-rate calls those queries directly
 	// per-policy; this slice runs the same math in one round-trip for the
 	// list view.
+	// Slice 159 Option C: the per-policy ack-rate cells are computed in
+	// a CTE that filters `WHERE p.status = 'published'` and is then
+	// LEFT JOINed back to the full policy list. sqlc v1.31.1 sees the
+	// LEFT JOIN as nullable and emits `*int64` (under
+	// `emit_pointers_for_null_types: true`) — non-published policies
+	// get nil pointers for both ack columns. The slice-107 handler is
+	// updated to use the pointer-style API (`r.AckDenominator != nil`
+	// + `*r.AckDenominator`). JSON response shape is unchanged: nil
+	// pointers marshal to `null`, populated pointers marshal to the
+	// bigint value. See
+	// `docs/audit-log/159-sqlc-toolchain-ci-drift-fix-decisions.md`.
 	ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesWithAckRateParams) ([]ListPoliciesWithAckRateRow, error)
 	// Returns the version chain for a policy id by walking predecessor_id.
 	// Recursive CTE keeps the query inside Postgres rather than client-side

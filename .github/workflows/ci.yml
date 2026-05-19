@@ -1150,26 +1150,30 @@ jobs:
       - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
   # ====================================================================
-  # sqlc drift check — informational only, NOT in required-checks.
+  # sqlc drift check — BLOCKING required-check (promoted by slice 159).
   #
   # Installs the pinned sqlc version from SQLC_VERSION (defined in
   # justfile) and runs `sqlc generate`. If the generated tree differs
-  # from what's committed, fails with the diff in the log so the
-  # contributor can re-run locally and commit the regen.
+  # from what's committed, fails the PR with the diff in the log so the
+  # contributor can re-run `just sqlc-generate` locally and commit the
+  # regen.
   #
-  # Why informational (not required): the sqlc binary install via `go
-  # install` may differ slightly from the brew-distributed binary in
-  # edge cases (build tags, embedded version string). Until the install
-  # paths are proven byte-identical across both, this job stays out of
-  # branch protection. Promotion to required-checks is a future-slice
-  # decision per slice 109 anti-criterion P0-A3.
+  # History: slice 109 added this job with `continue-on-error: true` as
+  # an informational signal (P0-A3 explicitly deferred required-checks
+  # promotion until the install paths were proven byte-identical). The
+  # drift surfaced 2026-05-18 during slice 153's PR #330 — the first
+  # PR whose path-filter triggered the real job (prior PRs all hit the
+  # docs-only sibling-stub job below via dorny/paths-filter@v4). Slice
+  # 159 resolved the structural drift via SQL query rewrite (CTE +
+  # LEFT JOIN for policies.sql, drop-redundant-casts for scf_anchors)
+  # and promoted this job to required-checks. The committed bytes are
+  # now byte-identical to a clean `go install`-built pinned-binary run.
   # ====================================================================
   sqlc-drift:
     name: Go · sqlc generate diff
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
@@ -1199,7 +1203,7 @@ jobs:
       - name: Assert no drift in internal/db/dbx/
         run: |
           if ! git diff --exit-code -- internal/db/dbx/; then
-            echo "::warning::sqlc generate produced drift against committed internal/db/dbx/. Run 'just sqlc-generate' locally and commit the diff."
+            echo "::error::sqlc generate produced drift against committed internal/db/dbx/. Run 'just sqlc-generate' locally and commit the diff. See docs/audit-log/159-sqlc-toolchain-ci-drift-fix-decisions.md if a query change re-introduced an untyped derived column."
             exit 1
           fi
           echo "sqlc generate produced no drift — committed dbx tree matches the pinned-binary output."
