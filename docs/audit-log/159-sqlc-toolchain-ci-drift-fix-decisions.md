@@ -198,21 +198,49 @@ JSON file is the source of truth; the live state is reconciled by the
 apply script (slice 127 enforces both directions via the
 `branch-protection-drift` informational job).
 
-## D4 — AC-10 synthetic-drift verification
+## D4 — AC-10 synthetic-drift verification (EXECUTED)
 
-**Confidence: high.**
+**Confidence: high.** **Evidence captured.**
 
-AC-10 asks for evidence that the gate actually fails red on drift. The
-slice doc's recommended approach is a throwaway test branch with a
-manual `interface{}` revert. I am using a slightly different shape:
-push a tiny test branch named `infra/159-acceptance-test-drift` that
-manually reverts the `policies.sql.go` `*int64` -> `interface{}` (one
-file, one diff hunk), open a draft PR, observe the CI failure, capture
-the URL, close-without-merge.
+AC-10 asks for evidence that the gate actually fails red on drift.
 
-The slice 159 PR description includes the synthetic-drift PR URL +
-the failure check-run URL as AC-10 evidence. The throwaway branch is
-deleted post-evidence-capture.
+Approach taken: branched off `infra/159-sqlc-toolchain-ci-drift-fix`
+(NOT off `origin/main`, so the gate-promotion changes are inherited)
+into a throwaway `infra/159-acceptance-test-drift` branch. Mutated the
+`AckDenominator` JSON tag in `internal/db/dbx/policies.sql.go` from
+`"ack_denominator"` to `"ack_denominator_SYNTHETIC_DRIFT_TEST"` (a
+minimal one-line diff that keeps Go build passing — JSON tag drift
+won't break compilation — but causes `sqlc generate` to regen the
+canonical tag, producing a non-empty `git diff --exit-code` against
+the committed bytes).
+
+Why the JSON-tag mutation rather than the slice-doc-suggested
+`*int64 -> interface{}` revert: a type revert would break the Go
+build because the handler uses pointer dereference, and the build
+failure would mask the sqlc-drift result. The JSON-tag mutation is
+the smallest synthetic drift that ONLY trips the sqlc-drift gate.
+
+Opened draft PR #348 targeting `infra/159-sqlc-toolchain-ci-drift-fix`
+(NOT main, so the throwaway PR doesn't pollute the main PR queue):
+https://github.com/mgoodric/security-atlas/pull/348
+
+CI result on PR #348:
+
+- `Go · sqlc generate diff`: **FAILED** (red, not yellow / not skipped).
+- Job URL: https://github.com/mgoodric/security-atlas/actions/runs/26077708456/job/76672082193
+- Run URL: https://github.com/mgoodric/security-atlas/actions/runs/26077708456
+- Duration: 1m34s
+- The job's "Assert no drift" step exited 1 with the `::error::`
+  annotation slice 159 introduced — proves both that the gate fires
+  on drift AND that the failure is rendered as an error (red) rather
+  than a warning (yellow).
+
+PR #348 is closed without merge post-evidence-capture. The throwaway
+branch is deleted.
+
+This is the load-bearing proof slice 109 P0-A3 deferred until "the
+install paths are proven byte-identical." Slice 159 closes the
+deferral.
 
 ## D5 — Confidence summary
 
