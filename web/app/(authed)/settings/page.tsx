@@ -106,6 +106,7 @@ import {
   isCuratedTimeZone,
   tailRoles,
 } from "./profile-derive";
+import { isAnyKind, kindsLabel } from "./allowed-kinds-display";
 import { sessionLine } from "./session-line";
 import { DEFAULT_THEME, readTheme, Theme, writeTheme } from "./theme";
 import { initialState, reduce } from "./token-state";
@@ -880,10 +881,10 @@ function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
                       ) : null}
                     </TableCell>
                     <TableCell className="text-xs">
-                      {c.allowed_kinds.length === 0 ? (
+                      {isAnyKind(c.allowed_kinds) ? (
                         <span className="text-muted-foreground">any</span>
                       ) : (
-                        c.allowed_kinds.join(", ")
+                        kindsLabel(c.allowed_kinds)
                       )}
                     </TableCell>
                     <TableCell className="font-mono text-[10px] text-muted-foreground">

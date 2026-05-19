@@ -36,6 +36,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  isAnyKind,
+  kindsLabel,
+} from "@/app/(authed)/settings/allowed-kinds-display";
+import {
   AdminCredential,
   AdminCredentialIssueRequest,
   AdminCredentialIssueResponse,
@@ -197,10 +201,12 @@ export default function APIKeysPage() {
                     </TableCell>
                     <TableCell className="font-mono">{c.last4}</TableCell>
                     <TableCell className="text-xs">
-                      {c.allowed_kinds.length === 0 ? (
-                        <span className="text-muted-foreground">any</span>
+                      {isAnyKind(c.allowed_kinds) ? (
+                        <span className="text-muted-foreground">
+                          {kindsLabel(c.allowed_kinds)}
+                        </span>
                       ) : (
-                        c.allowed_kinds.join(", ")
+                        kindsLabel(c.allowed_kinds)
                       )}
                     </TableCell>
                     <TableCell>

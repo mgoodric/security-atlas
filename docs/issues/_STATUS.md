@@ -3,7 +3,65 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-19 (batch 65 reconcile · 165 → merged via iter 2 fast-follow)
+**Last reconciled:** 2026-05-19 (batch 67 reconcile · 169 → merged)
+
+## Drift detected — 2026-05-19 (batch 67 reconcile · 169 → merged)
+
+Continuous-loop batch 67 (solo). Slice 169 (apply slice 166 helper to admin/api-keys page) shipped via PR gh#364 squash-merged at `632eeb7`. UNSTABLE merge — same 4 settings.spec.ts AC-1/2/3/4 failures slice 168 owns (orthogonal to this admin/api-keys fix). All required-checks green.
+
+| Row | Transition               | Evidence                                                                                                                                                                                                                                              |
+| --- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 169 | `in-progress` → `merged` | PR gh#364 squash-merged at `632eeb7` (UNSTABLE — Playwright failures orthogonal). 1 import + 4 render lines at `web/app/admin/api-keys/page.tsx:200`. Helper module's 11-test vitest suite covers behavior; no new tests needed for mechanical apply. |
+
+**Counts delta:** in-progress −1 · merged +1.
+
+## Drift detected — 2026-05-19 (batch 67 claim-stake · slice 169 → in-progress)
+
+Continuous-loop solo pickup — slice 169 (apply slice 166 helper to admin/api-keys page). AFK / Quality / 0.1d. Branch `quality/169-admin-api-keys-allowed-kinds` claim-staked off main at `28cb4a1`. Orchestrator-direct (no Engineer subagent — 3-line mechanical helper swap).
+
+| Row | Transition              | Evidence                                                                                                                                                  |
+| --- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 169 | `ready` → `in-progress` | branch `quality/169-admin-api-keys-allowed-kinds` claim-stake; mechanical helper swap at `web/app/admin/api-keys/page.tsx:200`; 1 import + 4 render lines |
+
+**Counts delta:** ready −1 · in-progress +1.
+
+## Drift detected — 2026-05-19 (batch 66 reconcile · 166 → merged)
+
+Continuous-loop batch 66 (solo). Slice 166 (allowed_kinds null-safe deref production fix) shipped via PR gh#362 squash-merged at `e76e5cf`. UNSTABLE merge — only Playwright e2e failed (same 4 settings ACs slice 168 will own; not affected by 166's production code path). All required-checks green.
+
+Engineer's iteration shipped:
+
+- `allowed-kinds-display.ts` (46-line pure helper module exporting `isAnyKind()` + `kindsLabel()`)
+- `allowed-kinds-display.test.ts` (87-line inline vitest, 11 tests covering null + undefined + [] + single-kind + multi-kind + order-preservation + sentinel value lock)
+- `page.tsx` 3-line render-site swap
+- Decisions log + spillover slice 169 (apply the same helper to `admin/api-keys/page.tsx:200` — identical bug pattern caught in P0-A1 audit)
+
+| Row | Transition             | Evidence                                                                                                                                                                                                                                                                                    |
+| --- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 166 | `in-review` → `merged` | PR gh#362 squash-merged at `e76e5cf` (UNSTABLE — Playwright failures are the 4 AC-1/2/3/4 settings ACs slice 168 owns; 166 production fix is orthogonal to those). 503/503 vitest pass. D1 = Option A frontend null-safe deref. Slice 165 fixture workaround KEPT (D4 belt-and-suspenders). |
+
+**Counts delta:** in-review −1 · merged +1.
+
+## Drift detected — 2026-05-19 (slice 166 → in-review)
+
+Continuous-loop spillover pickup complete — slice 166 PR opened as gh#362. Frontend null-safe deref (D1 = Option A) shipped: 46-line pure helper module + 87-line inline vitest regression (11/11 tests green; full suite 503/503) + 3-line render-site swap at `page.tsx:883`. Decisions log committed at `docs/audit-log/166-settings-creds-allowed-kinds-null-crash-decisions.md`. Spillover slice 169 filed for the sibling crash site at `web/app/admin/api-keys/page.tsx:200`.
+
+| Row | Transition                  | Evidence                                                                                                                                            |
+| --- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 166 | `in-progress` → `in-review` | PR gh#362 open; engineer subagent ~30 min wall-clock; AC-1..AC-5 all PASS or PRESERVE; P0-A1..P0-A6 all RESPECTED; 11/11 new vitest + 503/503 total |
+| 169 | (new) → `ready`             | slice doc landed in slice 166 PR; AFK/0.1d follow-on to apply slice 166 helper to admin/api-keys page (same identical bug pattern, dep on 166)      |
+
+**Counts delta:** in-progress −1 · in-review +1 · new ready +1 (169).
+
+## Drift detected — 2026-05-19 (slice 166 → in-progress)
+
+Continuous-loop spillover pickup — slice 166 (quality/JUDGMENT/0.25d, fix production DoS in `/settings` credentials table from slice 165 surfacing). Branch `quality/166-allowed-kinds-null-safe-deref` claim-staked off `main` at `e725893`.
+
+| Row | Transition              | Evidence                                                                                                                                |
+| --- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| 166 | `ready` → `in-progress` | branch `quality/166-allowed-kinds-null-safe-deref` claim-stake commit; engineer subagent picking D1 (Option A frontend null-safe deref) |
+
+**Counts delta:** ready −1 · in-progress +1.
 
 ## Drift detected — 2026-05-19 (batch 65 reconcile · slice 165 → merged · iter 2 fast-follow)
 
@@ -3264,7 +3322,8 @@ Legal values (use exactly these strings):
 | 163 | Settings API tokens — Rotate action                                                  | `merged`    | frontend/163-settings-api-tokens-rotate-action          | gh#351 | 2026-05-18 | 2026-05-18 | batch 63 · solo · frontend · JUDGMENT · 0.5d · merged at a682c38 · D1 = rotate-now-atomic chosen (other 2 options had weak motivation) · D3 caught wire-shape slip (slice doc said `superseded_by`, reality is `rotated_from` on successor) · 492/492 vitest pass · simplify pass caught 3 real quality wins (react-query onSuccess idiom, dead disabled prop, useMemo on predecessor-link inversion)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 164 | Settings Playwright e2e — seed fixture + un-comment AC bodies                        | `merged`    | infra/164-settings-e2e-seed-uncomment                   | gh#354 | 2026-05-18 | 2026-05-19 | batch 64 · SOLO · FINAL slice in v2 backlog · infra/test · AFK · 0.5d · merged at 3092f3e (UNSTABLE — Playwright e2e fails 11/132 settings ACs; ALL un-commented AC bodies fail with single-root-cause signature). Ships fixtures/e2e/settings.sql + harness extension. Engineer stalled mid-simplify-pass (146 pattern, orchestrator close-out). **SPILLOVER**: file slice 165 to diagnose + fix the 11 Playwright failures.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 165 | Diagnose + fix 11 settings.spec.ts AC failures (slice 164 follow-on)                 | `merged`    | quality/165-settings-spec-ac-diagnosis-fix              | gh#358 | 2026-05-19 | 2026-05-19 | batch 65 · SOLO · quality · JUDGMENT · 0.5d · iter 1 merged at `ed4d1e1` (PR #358 — authedPage fixture rebind, 1/11 ACs from red to green) · iter 2 fast-follow ships fixture `allowed_kinds` workaround for production null-deref crash + decisions-log D6 + slice 166 spillover doc · engineer ~50 min cumulative across two iterations · production bug (allowed_kinds null marshal) filed as slice 166                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| 166 | Settings credentials table — null-deref on empty allowed_kinds (slice 165 spillover) | `ready`     | —                                                       | —      | —          | —          | filed 2026-05-19 by slice 165 iter 2; surfaced via Playwright trace — `c.allowed_kinds.length` deref crashes the `/settings` credentials table when backend returns `null` for empty Postgres arrays (pgx + Go `encoding/json` chain). Two narrow fix options: frontend null-safe deref OR backend non-nil marshal. 0.25d Quality                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 166 | Settings credentials table — null-deref on empty allowed_kinds (slice 165 spillover) | `merged`    | quality/166-allowed-kinds-null-safe-deref               | gh#362 | 2026-05-19 | 2026-05-19 | batch 66 · SOLO · spillover · Quality · JUDGMENT · 0.25d · merged at `e76e5cf` (UNSTABLE — Playwright AC-1/2/3/4 failures are slice 168's scope, orthogonal) · D1 = Option A (frontend null-safe deref via pure helper module) · 46-line `allowed-kinds-display.ts` + 87-line inline vitest (11 tests) + 3-line render-site swap at page.tsx:883 · 503/503 vitest pass · P0-A1..P0-A6 all RESPECTED · slice 165 fixture workaround kept (D4 belt-and-suspenders) · spillover slice 169 filed for sibling crash site at admin/api-keys/page.tsx:200                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 169 | Apply slice 166 null-safe allowed_kinds helper to admin/api-keys page                | `merged`    | quality/169-admin-api-keys-allowed-kinds                | gh#364 | 2026-05-19 | 2026-05-19 | batch 67 · SOLO · AFK · Quality · 0.1d · orchestrator-direct (3-line mechanical helper swap, no Engineer subagent) · merged at `632eeb7` (UNSTABLE — Playwright orthogonal) · 1 import + 4 render lines at `web/app/admin/api-keys/page.tsx:200` · uses slice 166's `isAnyKind`/`kindsLabel` from `@/app/(authed)/settings/allowed-kinds-display`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ## Ready set right now
 
