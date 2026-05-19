@@ -6,11 +6,11 @@ narrow fix, and records the call here for the maintainer.
 
 The slice doc framed three cases:
 
-| Case | Root cause                             | Fix scope                                     |
-| ---- | -------------------------------------- | --------------------------------------------- |
-| 1    | Behavior regression on `safeRedirect`  | Wiring fix in `actions.ts` / middleware       |
-| 2    | Intentional UX change OR spec drift    | Update spec assertion + preamble              |
-| 3    | Fixture (`authedPage` / `TEST_BEARER`) | Repair fixture in `web/e2e/fixtures.ts`       |
+| Case | Root cause                             | Fix scope                               |
+| ---- | -------------------------------------- | --------------------------------------- |
+| 1    | Behavior regression on `safeRedirect`  | Wiring fix in `actions.ts` / middleware |
+| 2    | Intentional UX change OR spec drift    | Update spec assertion + preamble        |
+| 3    | Fixture (`authedPage` / `TEST_BEARER`) | Repair fixture in `web/e2e/fixtures.ts` |
 
 ## D-161-1 — Case 2 chosen: spec drift (racy `waitForURL`)
 
@@ -55,7 +55,7 @@ job.
 
    `authedPage.url()` returns the page URL at predicate-evaluation
    time. The predicate compares the candidate URL's origin against
-   *itself*. Both sides are always `http://localhost:3000` →
+   _itself_. Both sides are always `http://localhost:3000` →
    predicate resolves immediately on the first URL evaluated (the
    `/login?from=...` URL the page was already on after `goto()`).
    `waitForURL` returns without waiting for the post-sign-in
@@ -100,10 +100,9 @@ pathname-based predicate that actually waits for the redirect off
 `/login`:
 
 ```ts
-await authedPage.waitForURL(
-  (url) => !url.pathname.startsWith("/login"),
-  { timeout: 5_000 },
-);
+await authedPage.waitForURL((url) => !url.pathname.startsWith("/login"), {
+  timeout: 5_000,
+});
 ```
 
 **Why this shape:**
@@ -123,12 +122,12 @@ await authedPage.waitForURL(
 
 **Alternatives rejected:**
 
-| Option                                          | Why not                                                                                                                                                                                            |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `waitForURL("**/dashboard**")`                  | Pins the wait to `/dashboard`. If the platform's post-sign-in destination ever changes (intentionally), the wait would TIMEOUT rather than RED on the pathname assertion — losing diagnostic info. |
-| `waitForURL((u) => u.origin === baseURL.origin)`| Better than the current shape but `baseURL` is not always set on the page object. The pathname predicate is more robust.                                                                           |
-| Add an explicit `await page.waitForLoadState`   | Doesn't help — `load` was already fired on the `/login` page before the click. The redirect is a separate navigation.                                                                              |
-| `page.waitForRequest('**/dashboard')`           | Watches network not URL state. Fragile against caching / no-network redirects.                                                                                                                     |
+| Option                                           | Why not                                                                                                                                                                                            |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `waitForURL("**/dashboard**")`                   | Pins the wait to `/dashboard`. If the platform's post-sign-in destination ever changes (intentionally), the wait would TIMEOUT rather than RED on the pathname assertion — losing diagnostic info. |
+| `waitForURL((u) => u.origin === baseURL.origin)` | Better than the current shape but `baseURL` is not always set on the page object. The pathname predicate is more robust.                                                                           |
+| Add an explicit `await page.waitForLoadState`    | Doesn't help — `load` was already fired on the `/login` page before the click. The redirect is a separate navigation.                                                                              |
+| `page.waitForRequest('**/dashboard')`            | Watches network not URL state. Fragile against caching / no-network redirects.                                                                                                                     |
 
 **Confidence:** HIGH. The fix is mechanically the smallest correct
 shape that addresses the racy-wait without changing the test's

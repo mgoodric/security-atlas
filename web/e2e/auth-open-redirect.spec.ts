@@ -75,10 +75,9 @@ test.describe("open-redirect defense on signIn", () => {
       // The fix: wait until pathname is no longer `/login`. That's the
       // post-sign-in transition we actually care about. The host-and-
       // pathname assertions below then run on the settled URL.
-      await authedPage.waitForURL(
-        (url) => !url.pathname.startsWith("/login"),
-        { timeout: 5_000 },
-      );
+      await authedPage.waitForURL((url) => !url.pathname.startsWith("/login"), {
+        timeout: 5_000,
+      });
 
       const final = new URL(authedPage.url());
       expect(final.host).not.toBe("evil.example.com");
