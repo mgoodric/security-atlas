@@ -47,6 +47,26 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Fixed
 
+- Playwright `control-detail-empty.spec.ts` fixture file is now present
+  ([#160](https://github.com/mgoodric/security-atlas/issues/160)). Slice
+  152 shipped `web/e2e/control-detail-empty.spec.ts` whose `beforeAll`
+  calls `seedFromFixture("control-detail-empty")`, but the corresponding
+  `fixtures/e2e/control-detail-empty.sql` file was never created. The
+  `Frontend · Playwright e2e` CI job is gated by `dorny/paths-filter@v4`
+  so this stayed latent across docs-only PRs between slice 152's merge
+  and slice 153's PR #330 — slice 153 was the first PR whose file
+  changes pushed the path filter into `code=true`, surfacing
+  `Error: seed: fixture not found at .../fixtures/e2e/control-detail-empty.sql`.
+  This slice adds the missing fixture as a tracer-bullet fix: the
+  "empty state" the spec verifies IS the absence of inserts, so the
+  fixture sets `app.current_tenant` to the slice-082 demo tenant
+  (`00000000-0000-0000-0000-00000000d3a0`) and commits an empty
+  transaction. The harness wiring works; the spec's commented
+  assertions stay commented per slice 152's deferral to slice 112.
+  `fixtures/e2e/README.md`'s per-spec table is updated to include both
+  the new `control-detail-empty.sql` row and the pre-existing
+  `audit-log.sql` row that was missing from the table.
+
 - Logo SVGs render correctly in production-build standalone
   ([#153](https://github.com/mgoodric/security-atlas/issues/153)).
   Operators reported on v1.10.0 Unraid that the header logo + login-
