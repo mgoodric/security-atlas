@@ -410,6 +410,53 @@ noise — not your bug. The two route-mocked specs (`first-time-login`,
 (`Playwright e2e seed-data harness`, status `not-ready`); when it lands,
 the quarantine line comes out and the job again gates the PR.
 
+## Empty-set robustness
+
+Every `GET /v1/*` list or aggregate endpoint MUST return `200 OK` with a
+well-shaped empty envelope on a zero-row database — NEVER `500 Internal
+Server Error`. Slice 150 made this a constitutional invariant after a
+v1.10.0 operator report surfaced three panels (recent drift, board
+metrics, policies) crashing the dashboard on a fresh install.
+
+The convention:
+
+| Surface                    | Empty-row response                                                                                                                                                                                                                     |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| List endpoint              | `{ <plural>: [], count: 0 }` — the plural key is an array, never `null`                                                                                                                                                                |
+| Aggregate panel            | A populated object with zero-valued numerics + an empty array for any embedded list                                                                                                                                                    |
+| Bootstrap-only credentials | List endpoints that key off `cred.UserID` (e.g. `/v1/me/acknowledgments`) MUST return 200 empty when the UserID is not a UUID — bootstrap / service-account credentials are valid callers and the dashboard panel must not 500 on them |
+
+Mechanics:
+
+- The handler's `make(...)` for the row slice goes BEFORE the database
+  call, not after — so the empty slice is the default, and the loop is
+  purely additive.
+- The wire shape uses an empty JSON array `[]`, not `null` — the
+  frontend iterates the array directly.
+- Division-by-zero on rate / percentage fields is a separate concern:
+  return `null` for `percent` when the denominator is zero (the
+  slice-023 `rateResponse` is the canonical shape).
+- A non-UUID identifier on a tenant-scoped read is a SERVICE-ACCOUNT
+  marker, not a 500 — return the empty envelope.
+
+The gate:
+
+- **Per-package integration test.** Every package that owns a list /
+  aggregate endpoint ships an `empty_set_integration_test.go` (build
+  tag `integration`) that exercises the 0-row path against real
+  Postgres + RLS and asserts the wire-shape contract. See
+  `internal/api/freshnessdrift/empty_set_integration_test.go` for the
+  canonical shape.
+- **Cross-cutting sweep.** `internal/api/emptyset/audit_integration_test.go`
+  hits every GET list/aggregate endpoint in one subtest table. Adding
+  a new GET list endpoint to the platform is a constitutional
+  commitment to add a row to that test's `cases` slice.
+
+`go test -tags=integration -p 1 ./internal/api/emptyset/...` is what
+the audit runs locally. The same path runs in CI as part of the `Go ·
+integration (Postgres RLS)` check, so a regression that re-introduces
+a 500-on-empty fails the merge before the PR can land.
+
 ## Linting
 
 Run lint locally against the frontend workspace:

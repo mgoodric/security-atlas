@@ -33,6 +33,26 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   forwards-bearer-and-body, propagates-upstream-4xx). Playwright spec
   at `web/e2e/audits-create.spec.ts` is quarantined behind slice 082
   per the established precedent.
+- Empty-set robustness across `/v1/*` list endpoints — the dashboard
+  panel for `GET /v1/me/acknowledgments` no longer returns 500 on a
+  fresh install when the calling credential is a bootstrap-owner key
+  (UserID is `key_*`, not a UUID). The handler now treats a non-UUID
+  UserID as a service-account marker and returns
+  `{ pending: [], count: 0, window_seconds: <int> }`. The convention
+  is documented in `CONTRIBUTING.md` ("Empty-set robustness") and
+  enforced by a cross-cutting integration sweep at
+  `internal/api/emptyset/audit_integration_test.go` plus per-package
+  empty-tenant tests for `freshnessdrift`, `policies`, `policyacks`,
+  and `dashboard` ([#150](https://github.com/mgoodric/security-atlas/issues/150)).
+  Operator report on v1.10.0 surfaced three panels returning
+  "Could not load this panel · 500 Internal Server Error" on a fresh
+  install; the audit sweep verified the drift / policies / dashboard
+  metrics endpoints were already correct (empty array + 200 envelope)
+  and the only true 500-on-empty path was `/v1/me/acknowledgments`.
+  Every other GET list / aggregate endpoint enumerated in the slice
+  doc's suspect list (`/v1/risks`, `/v1/evidence`, `/v1/audit-periods`,
+  `/v1/board-briefs`, `/v1/vendors`, `/v1/admin/users`, and 25 more)
+  is now covered by the sweep as a regression gate.
 - Compliance calendar OPA admit — `GET /v1/calendar` and
   `POST /v1/calendar/subscription` are now admitted for every
   signed-in role (admin, grc_engineer, auditor, viewer, control_owner)

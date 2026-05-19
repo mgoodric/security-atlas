@@ -122,10 +122,28 @@ type errorBody struct {
 // ----- handlers -----
 
 // MyAcknowledgments serves GET /v1/me/acknowledgments.
+//
+// Slice 150 — empty-set robustness: when the calling credential is a
+// service-account-shaped bootstrap key (UserID is non-empty but not a
+// UUID), the caller has no human "pending acks" — return a 200 with an
+// empty pending list, not a 500. The dashboard panel on a fresh install
+// reads this endpoint with the bootstrap-owner credential; it MUST
+// render an empty list, not the upstream parse error. Real human
+// credentials (post-slice-034 OIDC) carry a UUID UserID and follow the
+// normal path. See docs/issues/150-empty-set-robustness-audit-across-
+// list-endpoints.md AC-5.
 func (h *Handler) MyAcknowledgments(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	if !isUUIDUser(cred.UserID) {
+		writeJSON(w, http.StatusOK, pendingResponse{
+			Pending:       []pendingItem{},
+			Count:         0,
+			WindowSeconds: int64(policy.AcknowledgmentFreshness / time.Second),
+		})
 		return
 	}
 	pending, err := h.store.PendingForUser(ctx, ackCallerFromCred(cred))
@@ -344,6 +362,19 @@ func (h *Handler) tenantCredContext(r *http.Request) (context.Context, credstore
 		return nil, credstore.Credential{}, false
 	}
 	return r.Context(), cred, true
+}
+
+// isUUIDUser reports whether the credential's UserID is a parseable
+// UUID. Slice 150 — a non-UUID UserID is the platform's marker for a
+// service-account / bootstrap credential; the user-pending-acks read
+// path returns an empty envelope rather than 500-ing the dashboard
+// panel. See MyAcknowledgments for the contract.
+func isUUIDUser(id string) bool {
+	if id == "" {
+		return false
+	}
+	_, err := uuid.Parse(id)
+	return err == nil
 }
 
 func ackCallerFromCred(c credstore.Credential) policy.AckCaller {
