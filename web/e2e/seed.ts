@@ -109,11 +109,29 @@ function seedApiKey(databaseURL: string, name: FixtureName): void {
   // — the row matches users.id inserted by fixtures/e2e/settings.sql).
   // The five pre-existing fixtures keep the historical NULL behavior;
   // they don't need a real users row to drive their AC bodies.
+  //
+  // Slice 165: the "settings" fixture ALSO needs `allowed_kinds` to be a
+  // non-empty Postgres array on the harness row. Reason: the /settings
+  // page renders the Personal API Tokens table (slice 062 / 154 / 163)
+  // which calls `c.allowed_kinds.length` per row (page.tsx ~line 883).
+  // pgx decodes both NULL and `ARRAY[]::TEXT[]` to a Go nil slice, which
+  // json.Encoder marshals as `null`, so the frontend's `.length` access
+  // throws and React unmounts the whole settings page into its error
+  // boundary ("This page couldn't load"). Until the production bug is
+  // fixed (see spillover slice 166), seed the harness row with a single
+  // synthetic kind so the resulting JSON array is non-null. Wildcard
+  // semantics on the field are evaluated at evidence-ingest time, not
+  // at credential-list time, so a non-empty allowed_kinds here has no
+  // side-effects on the spec's assertions.
   let issuedByColumn = "";
   let issuedByValue = "";
+  let allowedKindsColumn = "";
+  let allowedKindsValue = "";
   if (name === "settings") {
     issuedByColumn = ", issued_by";
     issuedByValue = `, '${DEMO_USER_ID}'::uuid`;
+    allowedKindsColumn = ", allowed_kinds";
+    allowedKindsValue = `, ARRAY['evidence.kind.v1']::TEXT[]`;
   }
 
   // Composite SQL: clear any prior row with this hash, then insert a
@@ -131,13 +149,13 @@ function seedApiKey(databaseURL: string, name: FixtureName): void {
   // the authz gate.
   const sql = `
     DELETE FROM api_keys WHERE token_hash = decode('${tokenHashHex}', 'hex');
-    INSERT INTO api_keys (tenant_id, token_hash, is_admin, owner_roles, last4${issuedByColumn})
+    INSERT INTO api_keys (tenant_id, token_hash, is_admin, owner_roles, last4${issuedByColumn}${allowedKindsColumn})
     VALUES (
       '${DEMO_TENANT_ID}',
       decode('${tokenHashHex}', 'hex'),
       TRUE,
       ARRAY['admin']::TEXT[],
-      '${TEST_BEARER.slice(-4)}'${issuedByValue}
+      '${TEST_BEARER.slice(-4)}'${issuedByValue}${allowedKindsValue}
     )
     ON CONFLICT (token_hash) DO NOTHING;
   `;
