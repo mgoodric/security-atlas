@@ -83,10 +83,15 @@ test.describe("dashboard view", () => {
     //    await expect(tiles.or(emptyState).first()).toBeVisible();
   });
 
-  test("AC-3: top risks panel binds to /v1/risks?treatment=mitigate", async () => {
-    // The panel's BFF route forwards to GET /v1/risks?treatment=mitigate.
-    // At least one risk row renders; the residual/age sort gap is noted
-    // honestly (no fabricated ranking).
+  test("AC-3: top risks panel binds to /v1/risks?treatment=mitigate&sort=residual,age (slice 157)", async () => {
+    // Slice 157: the top-risks panel was wired by slice 040 to the
+    // unsorted treatment=mitigate list with a labelled `top-risks-sort-gap`
+    // footer naming the residual,age ranking as a follow-up backend gap.
+    // Slice 066 shipped the server-side sort; slice 157 re-points the
+    // panel onto it and drops the gap footer.
+    //
+    // P0-148-3: the `top-risks-sort-gap` testid MUST NOT render after
+    // slice 157.
     //    const requests: string[] = [];
     //    page.on("request", (r) => requests.push(r.url()));
     //    await page.goto("/dashboard");
@@ -94,9 +99,8 @@ test.describe("dashboard view", () => {
     //    expect(
     //      requests.filter((u) => u.includes("/api/dashboard/risks")).length,
     //    ).toBeGreaterThan(0);
-    //    await expect(page.getByTestId("top-risks-sort-gap")).toContainText(
-    //      "sort=residual,age",
-    //    );
+    //    // The gap footer is gone (slice 157):
+    //    await expect(page.getByTestId("top-risks-sort-gap")).toHaveCount(0);
   });
 
   test("AC-4: recent drift panel binds to /v1/controls/drift?since=7d", async () => {
@@ -113,15 +117,28 @@ test.describe("dashboard view", () => {
     //    ).toBeGreaterThan(0);
   });
 
-  test("AC-5: upcoming panel binds to /v1/exceptions/expiring", async () => {
-    // The panel's BFF route forwards to GET /v1/exceptions/expiring?
-    // within=30d. Expiring exceptions render as dated rows; the
-    // board-report / access-review / questionnaire gap is noted honestly.
+  test("AC-5: upcoming panel binds to /v1/upcoming unified rollup (slice 157)", async () => {
+    // Slice 157: the upcoming panel was wired by slice 040 to
+    // `/v1/exceptions/expiring?within=30d` (the only real source on
+    // main at slice-040 time) with a labelled `upcoming-gap` footer
+    // naming the unified-rollup endpoint as a follow-up gap. Slice 066
+    // shipped the unified rollup; slice 157 re-points the panel onto
+    // it (categories: exception / policy_ack / vendor_review /
+    // audit_period).
+    //
+    // P0-148-3: the `upcoming-gap` testid MUST NOT render after slice
+    // 157, and the panel renders the unified rollup row shape with a
+    // category badge per row.
+    //    const requests: string[] = [];
+    //    page.on("request", (r) => requests.push(r.url()));
     //    await page.goto("/dashboard");
     //    await expect(page.getByTestId("upcoming-row").first()).toBeVisible();
-    //    await expect(page.getByTestId("upcoming-gap")).toContainText(
-    //      "upcoming-rollup endpoint",
-    //    );
+    //    await expect(page.getByTestId("upcoming-row-category").first()).toBeVisible();
+    //    expect(
+    //      requests.filter((u) => u.includes("/api/dashboard/upcoming")).length,
+    //    ).toBeGreaterThan(0);
+    //    // The gap footer is gone (slice 157):
+    //    await expect(page.getByTestId("upcoming-gap")).toHaveCount(0);
   });
 
   test("evidence freshness panel binds to /v1/evidence/freshness", async () => {

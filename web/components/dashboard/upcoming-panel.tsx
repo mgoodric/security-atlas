@@ -1,17 +1,23 @@
 "use client";
 
-// Slice 040 — upcoming items panel (AC-5).
+// Slice 040 — upcoming items panel — REBOUND by slice 157.
 //
-// Binds to `GET /v1/exceptions/expiring?within=30d` via the dashboard
-// BFF (slice 028 exception lifecycle). The mockup's "Upcoming · next 30
-// days" panel also wants board-report-due, access-review, and
-// questionnaire-due rows — but there is no unified upcoming-rollup
-// endpoint on main. Exceptions-expiring is the one real source and is
-// bound; the other categories are surfaced as an honest labelled gap
-// rather than fabricated rows (anti-criterion P0-1).
+// Binds to `GET /v1/upcoming` via the dashboard BFF (slice 066 AC-4
+// unified rollup). Each row carries `{due_date, category, title,
+// resource_type, resource_id}` across four categories: exception,
+// policy_ack, vendor_review, audit_period.
+//
+// Slice 040 originally wired this to `/v1/exceptions/expiring?within=30d`
+// (the only real source on main at slice-040 time) and surfaced the
+// unified-rollup gap as a labelled `upcoming-gap` footer. Slice 066
+// shipped the rollup endpoint, and slice 157 closes the loop by
+// re-pointing the panel onto it — dropping both the `ExpiringExceptions`
+// types and the gap footer. See
+// `docs/audit-log/157-dashboard-upcoming-and-top-risks-decisions.md`.
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
-import type { ExpiringExceptionsResponse } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+import type { UpcomingResponse } from "@/lib/api";
 
 function daysUntil(iso: string): number {
   const then = new Date(iso).getTime();
@@ -27,39 +33,68 @@ function dateParts(iso: string): { month: string; day: string } {
   };
 }
 
+// categoryVariant maps a rollup category onto the shadcn Badge
+// variants. Exception is destructive (it's the only category that
+// represents an open accepted-risk window); the other three are neutral
+// "outline" to keep visual weight even across the feed.
+function categoryVariant(
+  category: string,
+): "destructive" | "secondary" | "outline" {
+  if (category === "exception") return "destructive";
+  if (category === "audit_period") return "secondary";
+  return "outline";
+}
+
+// categoryLabel renders the snake_case category name as a short
+// human-readable label.
+function categoryLabel(category: string): string {
+  switch (category) {
+    case "exception":
+      return "Exception";
+    case "policy_ack":
+      return "Policy ack";
+    case "vendor_review":
+      return "Vendor review";
+    case "audit_period":
+      return "Audit period";
+    default:
+      return category;
+  }
+}
+
 export function UpcomingPanel({
   report,
   state,
 }: {
-  report: ExpiringExceptionsResponse | undefined;
+  report: UpcomingResponse | undefined;
   state: PanelState;
 }) {
   return (
     <PanelCard
       title="Upcoming · next 30 days"
-      description="Expiring exceptions"
+      description="Expiring exceptions, policy acknowledgments, vendor reviews, audit milestones"
       state={state}
       skeletonClassName="h-40 w-full"
       testid="upcoming-panel"
     >
-      {!report || report.exceptions.length === 0 ? (
+      {!report || report.upcoming.length === 0 ? (
         <p
           className="py-6 text-sm text-muted-foreground"
           data-testid="upcoming-empty"
         >
-          No exceptions expire in the next 30 days.
+          Nothing due in the next 30 days.
         </p>
       ) : (
         <ul
           className="divide-y divide-foreground/5"
           data-testid="upcoming-list"
         >
-          {report.exceptions.map((exc) => {
-            const { month, day } = dateParts(exc.expires_at);
-            const left = daysUntil(exc.expires_at);
+          {report.upcoming.map((item, idx) => {
+            const { month, day } = dateParts(item.due_date);
+            const left = daysUntil(item.due_date);
             return (
               <li
-                key={exc.id}
+                key={`${item.category}:${item.resource_id}:${idx}`}
                 data-testid="upcoming-row"
                 className="flex items-center gap-3 py-3 text-sm"
               >
@@ -72,11 +107,25 @@ export function UpcomingPanel({
                   </div>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="font-medium">
-                    Exception {exc.id.slice(0, 8)} expires
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant={categoryVariant(item.category)}
+                      data-testid="upcoming-row-category"
+                    >
+                      {categoryLabel(item.category)}
+                    </Badge>
+                    <span
+                      className="truncate font-medium"
+                      data-testid="upcoming-row-title"
+                    >
+                      {item.title}
+                    </span>
                   </div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {exc.justification || "no justification recorded"}
+                  <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                    {item.resource_type}
+                    {item.resource_id
+                      ? ` · ${item.resource_id.slice(0, 12)}`
+                      : ""}
                   </div>
                 </div>
                 <span className="shrink-0 font-mono text-xs text-muted-foreground">
@@ -87,14 +136,6 @@ export function UpcomingPanel({
           })}
         </ul>
       )}
-      <p
-        className="mt-3 border-t border-foreground/5 pt-3 text-xs text-muted-foreground"
-        data-testid="upcoming-gap"
-      >
-        Board-report-due, access-review, and questionnaire-due items need a
-        unified upcoming-rollup endpoint — not on main yet. Only expiring
-        exceptions are shown until then.
-      </p>
     </PanelCard>
   );
 }

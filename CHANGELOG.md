@@ -13,6 +13,33 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Fixed
 
+- Dashboard `upcoming` and `top risks` panels now consume the slice-066
+  unified rollup and `sort=residual,age` server-side ranking
+  ([#157](https://github.com/mgoodric/security-atlas/issues/157); slice
+  066 follow-on; spillover from slice 147). Slice 040 wired the
+  `upcoming` panel to `/v1/exceptions/expiring?within=30d` (the only
+  real source on main at the time) with a labelled `upcoming-gap`
+  footer naming the unified rollup as a follow-up backend gap, and
+  wired `top risks` to the unsorted `treatment=mitigate` list with a
+  `top-risks-sort-gap` footer naming the residual,age ranking as a
+  follow-up. Slice 066 shipped both the rollup endpoint (`/v1/upcoming`
+  merging exceptions, policy acks, vendor reviews, and audit-period
+  milestones) and the server-side ranking (`?sort=residual,age`
+  ordering by residual-score magnitude descending then risk age
+  ascending); slice 147 closed the loop on two other slice-066
+  follow-on panels (framework posture + activity feed); slice 157
+  closes the loop on these two. The `upcoming` panel rewrites to
+  consume the unified rollup row shape with a category badge per row
+  (`exception` -> destructive, `audit_period` -> secondary,
+  `policy_ack` and `vendor_review` -> outline) and a category-agnostic
+  empty-state message. The `top risks` panel drops the
+  "server order (residual/age ranking pending)" header copy and the
+  gap footer. Vitest covers the two re-pointed BFF routes (4 cases
+  each: 401, bearer forwarding plus the upstream URL contract, empty
+  envelope, error propagation). Playwright spec at
+  `web/e2e/dashboard.spec.ts` is updated for AC-3 + AC-5 with the
+  new selectors, quarantined behind slice 082 per the established
+  precedent.
 - Audits page "Create audit period" button no longer redirects to
   `/admin` ([#149](https://github.com/mgoodric/security-atlas/issues/149)).
   Slice 102 shipped `/audits` with the toolbar `audits-create-cta`

@@ -1,14 +1,17 @@
 "use client";
 
-// Slice 040 — top risks aging panel (AC-3).
+// Slice 040 — top risks aging panel — REBOUND by slice 157.
 //
-// Binds to `GET /v1/risks?treatment=mitigate` via the dashboard BFF.
-// The mockup wants the table sorted by `residual × age-in-treatment`,
-// but the ListRisks handler exposes no `sort` param and `residual_score`
-// is an opaque JSON blob with no exposed age field — so this panel
-// renders the returned rows in server order and prints an honest note
-// that the residual/age ranking is a follow-up backend gap. It never
-// fabricates a ranking (anti-criterion P0-1).
+// Binds to `GET /v1/risks?treatment=mitigate&sort=residual,age` via the
+// dashboard BFF (slice 066 AC-3 — ListRisks gained the residual,age
+// server-side sort).
+//
+// Slice 040 originally wired this to the unsorted treatment=mitigate
+// list and rendered rows in the API's server order with a labelled
+// `top-risks-sort-gap` footer noting the residual,age ranking was a
+// follow-up backend gap. Slice 066 shipped the ranking; slice 157
+// closes the loop by re-pointing this panel onto it. See
+// `docs/audit-log/157-dashboard-upcoming-and-top-risks-decisions.md`.
 
 import Link from "next/link";
 
@@ -34,7 +37,7 @@ export function TopRisksPanel({
   return (
     <PanelCard
       title="Top risks · in treatment"
-      description="Risks with treatment = mitigate · server order (residual/age ranking pending)"
+      description="Risks with treatment = mitigate · ranked by residual score, then age in treatment"
       action={
         <Link href="/risks" className="text-xs text-primary hover:underline">
           View register →
@@ -80,15 +83,6 @@ export function TopRisksPanel({
           ))}
         </ul>
       )}
-      <p
-        className="mt-3 border-t border-foreground/5 pt-3 text-xs text-muted-foreground"
-        data-testid="top-risks-sort-gap"
-      >
-        Ranking by residual × age-in-treatment needs a server-side{" "}
-        <span className="font-mono">sort=residual,age</span> capability on{" "}
-        <span className="font-mono">GET /v1/risks</span> — not on main yet. Rows
-        are shown in the API&apos;s server order until then.
-      </p>
     </PanelCard>
   );
 }
