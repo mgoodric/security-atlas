@@ -32,7 +32,7 @@
 //   AC-10 Roles tail badge renders when slice-130 roles array is non-empty (slice 154)
 //   AC-11 Rotate-twice-in-a-row chains predecessors + fresh secret per rotate (slice 163)
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 import { seedFromFixture } from "./seed";
 
@@ -42,14 +42,16 @@ test.beforeAll(() => {
 
 test.describe("/settings user-facing page", () => {
   test("AC-1: profile section renders for any signed-in user", async ({
-    page,
+    authedPage: page,
   }) => {
     await page.goto("/settings");
     await expect(page.getByTestId("settings-section-profile")).toBeVisible();
     await expect(page.getByRole("heading", { name: /Profile/ })).toBeVisible();
   });
 
-  test("AC-2: theme picker persists choice across reload", async ({ page }) => {
+  test("AC-2: theme picker persists choice across reload", async ({
+    authedPage: page,
+  }) => {
     await page.goto("/settings");
     await page.getByTestId("settings-theme-option-dark").click();
     await page.reload();
@@ -59,7 +61,7 @@ test.describe("/settings user-facing page", () => {
   });
 
   test("AC-3: notification toggle persists server-side across reload (slice 164 D1)", async ({
-    page,
+    authedPage: page,
   }) => {
     // Slice 164 D1: the slice 154 commented body for AC-3 asserted the
     // toggle wrote to localStorage. Slice 108 retired that fallback —
@@ -89,7 +91,7 @@ test.describe("/settings user-facing page", () => {
   });
 
   test("AC-4 + P0-A2: token issuance shows plaintext once then never re-displays it", async ({
-    page,
+    authedPage: page,
   }) => {
     await page.goto("/settings");
     await page.getByTestId("settings-token-issue-button").click();
@@ -117,7 +119,7 @@ test.describe("/settings user-facing page", () => {
   });
 
   test("AC-5: active sessions section renders (slice-108 backed; slice-162 metadata line)", async ({
-    page,
+    authedPage: page,
   }) => {
     // Slice 154 AC-5: section renders (slice-108-backed list of session rows).
     // Slice 162: when a session row carries the augmented fields
@@ -150,7 +152,7 @@ test.describe("/settings user-facing page", () => {
   });
 
   test("AC-6: admin cross-link visible only for admin role", async ({
-    page,
+    authedPage: page,
   }) => {
     // The seed bearer is is_admin=true (the slice 082 harness ensures
     // this) so the cross-link must render. The non-admin half of this
@@ -162,7 +164,7 @@ test.describe("/settings user-facing page", () => {
   });
 
   test("AC-7: notifications section renders four event rows with 8 toggles", async ({
-    page,
+    authedPage: page,
   }) => {
     // Slice 154: section coverage parity with the mockup. The four
     // NOTIF_EVENTS keys hard-coded in page.tsx must each render a row
@@ -193,7 +195,7 @@ test.describe("/settings user-facing page", () => {
   });
 
   test("AC-8: time-zone <select> reflects current value + PATCH wires", async ({
-    page,
+    authedPage: page,
   }) => {
     // Slice 154 F4: time zone editor binds to PATCH /v1/me. The select
     // ships nine curated zones plus an out-of-band synthetic option
@@ -222,7 +224,7 @@ test.describe("/settings user-facing page", () => {
   });
 
   test("AC-9: API tokens section renders empty-state or row table", async ({
-    page,
+    authedPage: page,
   }) => {
     // Slice 154 F8: the visible contract is the section's presence +
     // correct empty-state OR table render depending on whether the
@@ -241,7 +243,7 @@ test.describe("/settings user-facing page", () => {
   });
 
   test("AC-11 (slice 163): rotate-twice-in-a-row chains predecessors + fresh secret per rotate", async ({
-    page,
+    authedPage: page,
   }) => {
     // Slice 163 F8 spillover: the Rotate action on a personal API token row
     // mints a successor with a fresh bearer plaintext and leaves the
@@ -335,7 +337,7 @@ test.describe("/settings user-facing page", () => {
   });
 
   test("AC-10: roles tail badge renders when slice-130 roles array is non-empty", async ({
-    page,
+    authedPage: page,
   }) => {
     // Slice 154 F3: the multi-role tail ("+ grc_engineer + auditor")
     // renders next to the primary admin/user badge when /v1/me reports
