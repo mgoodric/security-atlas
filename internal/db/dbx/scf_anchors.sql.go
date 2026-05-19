@@ -306,7 +306,7 @@ worst_per_anchor AS (
             WHEN 2 THEN 'pass'
             WHEN 1 THEN 'na'
         END::evidence_result AS result,
-        CASE MAX(CASE le.freshness_status
+        (CASE MAX(CASE le.freshness_status
                     WHEN 'expired'     THEN 4
                     WHEN 'stale'       THEN 3
                     WHEN 'no_evidence' THEN 2
@@ -317,7 +317,7 @@ worst_per_anchor AS (
             WHEN 3 THEN 'stale'
             WHEN 2 THEN 'no_evidence'
             WHEN 1 THEN 'fresh'
-        END AS freshness_status,
+        END)::text AS freshness_status,
         MAX(le.last_observed_at) AS last_observed_at,
         MAX(le.evaluated_at)     AS evaluated_at
     FROM controls c
@@ -329,8 +329,22 @@ worst_per_anchor AS (
 SELECT
     a.id, a.framework_version_id, a.scf_id, a.family, a.title,
     a.description, a.subtopics, a.created_at, a.updated_at,
-    wpa.result::evidence_result       AS state_result,
-    wpa.freshness_status::text        AS state_freshness_status,
+    -- Slice 159 Option C: drop the explicit ` + "`" + `::evidence_result` + "`" + ` /
+    -- ` + "`" + `::text` + "`" + ` casts on the outer SELECT so sqlc v1.31.1 sees the
+    -- CTE's nullable-via-LEFT-JOIN typing flow through naturally.
+    -- The CTE's ` + "`" + `result` + "`" + ` column is already typed ` + "`" + `evidence_result` + "`" + `
+    -- via the ` + "`" + `END::evidence_result` + "`" + ` inside ` + "`" + `worst_per_anchor` + "`" + `; the
+    -- LEFT JOIN to ` + "`" + `worst_per_anchor` + "`" + ` makes both columns nullable in
+    -- the row shape. With the redundant outer casts, sqlc treated
+    -- the columns as non-nullable; without them, sqlc emits
+    -- ` + "`" + `*EvidenceResult` + "`" + ` / ` + "`" + `*string` + "`" + ` (under
+    -- ` + "`" + `emit_pointers_for_null_types: true` + "`" + `). The slice-104 handler
+    -- adapters switch to nil-check + dereference (pointer-style)
+    -- instead of the ` + "`" + `.Valid` + "`" + ` / ` + "`" + `.EvidenceResult` + "`" + ` / ` + "`" + `.String` + "`" + ` wrapper
+    -- API. JSON response shape is unchanged. See
+    -- ` + "`" + `docs/audit-log/159-sqlc-toolchain-ci-drift-fix-decisions.md` + "`" + `.
+    wpa.result                        AS state_result,
+    wpa.freshness_status              AS state_freshness_status,
     wpa.last_observed_at::timestamptz AS state_last_observed_at,
     wpa.evaluated_at::timestamptz     AS state_evaluated_at
 FROM scf_anchors a
@@ -347,26 +361,17 @@ type ListSCFAnchorsForVersionWithStateParams struct {
 }
 
 type ListSCFAnchorsForVersionWithStateRow struct {
-	ID                 pgtype.UUID        `json:"id"`
-	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
-	ScfID              string             `json:"scf_id"`
-	Family             string             `json:"family"`
-	Title              string             `json:"title"`
-	Description        string             `json:"description"`
-	Subtopics          []byte             `json:"subtopics"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	// StateResult + StateFreshnessStatus are hand-narrowed from sqlc's
-	// inferred non-nullable (`EvidenceResult`, `string`) back to the
-	// nullable shapes (`NullEvidenceResult`, `pgtype.Text`) the
-	// slice-104 handler depends on (slice 109). When no
-	// control_evaluation exists for the anchor, every state_* column
-	// returns NULL via the LEFT JOIN; the handler keys off
-	// `StateResult.Valid` to render `state: null`. sqlc v1.31.1 cannot
-	// type the CASE-WHEN-aggregate-over-LEFT-JOIN expression as
-	// nullable on its own. See `docs/audit-log/109-sqlc-toolchain-pin-decisions.md`.
-	StateResult          NullEvidenceResult `json:"state_result"`
-	StateFreshnessStatus pgtype.Text        `json:"state_freshness_status"`
+	ID                   pgtype.UUID        `json:"id"`
+	FrameworkVersionID   pgtype.UUID        `json:"framework_version_id"`
+	ScfID                string             `json:"scf_id"`
+	Family               string             `json:"family"`
+	Title                string             `json:"title"`
+	Description          string             `json:"description"`
+	Subtopics            []byte             `json:"subtopics"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	StateResult          *EvidenceResult    `json:"state_result"`
+	StateFreshnessStatus *string            `json:"state_freshness_status"`
 	StateLastObservedAt  pgtype.Timestamptz `json:"state_last_observed_at"`
 	StateEvaluatedAt     pgtype.Timestamptz `json:"state_evaluated_at"`
 }
@@ -485,7 +490,7 @@ worst_per_anchor AS (
             WHEN 2 THEN 'pass'
             WHEN 1 THEN 'na'
         END::evidence_result AS result,
-        CASE MAX(CASE le.freshness_status
+        (CASE MAX(CASE le.freshness_status
                     WHEN 'expired'     THEN 4
                     WHEN 'stale'       THEN 3
                     WHEN 'no_evidence' THEN 2
@@ -496,7 +501,7 @@ worst_per_anchor AS (
             WHEN 3 THEN 'stale'
             WHEN 2 THEN 'no_evidence'
             WHEN 1 THEN 'fresh'
-        END AS freshness_status,
+        END)::text AS freshness_status,
         MAX(le.last_observed_at) AS last_observed_at,
         MAX(le.evaluated_at)     AS evaluated_at
     FROM controls c
@@ -508,8 +513,22 @@ worst_per_anchor AS (
 SELECT
     a.id, a.framework_version_id, a.scf_id, a.family, a.title,
     a.description, a.subtopics, a.created_at, a.updated_at,
-    wpa.result::evidence_result       AS state_result,
-    wpa.freshness_status::text        AS state_freshness_status,
+    -- Slice 159 Option C: drop the explicit ` + "`" + `::evidence_result` + "`" + ` /
+    -- ` + "`" + `::text` + "`" + ` casts on the outer SELECT so sqlc v1.31.1 sees the
+    -- CTE's nullable-via-LEFT-JOIN typing flow through naturally.
+    -- The CTE's ` + "`" + `result` + "`" + ` column is already typed ` + "`" + `evidence_result` + "`" + `
+    -- via the ` + "`" + `END::evidence_result` + "`" + ` inside ` + "`" + `worst_per_anchor` + "`" + `; the
+    -- LEFT JOIN to ` + "`" + `worst_per_anchor` + "`" + ` makes both columns nullable in
+    -- the row shape. With the redundant outer casts, sqlc treated
+    -- the columns as non-nullable; without them, sqlc emits
+    -- ` + "`" + `*EvidenceResult` + "`" + ` / ` + "`" + `*string` + "`" + ` (under
+    -- ` + "`" + `emit_pointers_for_null_types: true` + "`" + `). The slice-104 handler
+    -- adapters switch to nil-check + dereference (pointer-style)
+    -- instead of the ` + "`" + `.Valid` + "`" + ` / ` + "`" + `.EvidenceResult` + "`" + ` / ` + "`" + `.String` + "`" + ` wrapper
+    -- API. JSON response shape is unchanged. See
+    -- ` + "`" + `docs/audit-log/159-sqlc-toolchain-ci-drift-fix-decisions.md` + "`" + `.
+    wpa.result                        AS state_result,
+    wpa.freshness_status              AS state_freshness_status,
     wpa.last_observed_at::timestamptz AS state_last_observed_at,
     wpa.evaluated_at::timestamptz     AS state_evaluated_at
 FROM scf_anchors a
@@ -527,19 +546,17 @@ type ListSCFAnchorsLatestWithStateParams struct {
 }
 
 type ListSCFAnchorsLatestWithStateRow struct {
-	ID                 pgtype.UUID        `json:"id"`
-	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
-	ScfID              string             `json:"scf_id"`
-	Family             string             `json:"family"`
-	Title              string             `json:"title"`
-	Description        string             `json:"description"`
-	Subtopics          []byte             `json:"subtopics"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	// Same hand-narrow as ListSCFAnchorsForVersionWithStateRow above —
-	// see that struct's comment + slice 109 decisions log for rationale.
-	StateResult          NullEvidenceResult `json:"state_result"`
-	StateFreshnessStatus pgtype.Text        `json:"state_freshness_status"`
+	ID                   pgtype.UUID        `json:"id"`
+	FrameworkVersionID   pgtype.UUID        `json:"framework_version_id"`
+	ScfID                string             `json:"scf_id"`
+	Family               string             `json:"family"`
+	Title                string             `json:"title"`
+	Description          string             `json:"description"`
+	Subtopics            []byte             `json:"subtopics"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	StateResult          *EvidenceResult    `json:"state_result"`
+	StateFreshnessStatus *string            `json:"state_freshness_status"`
 	StateLastObservedAt  pgtype.Timestamptz `json:"state_last_observed_at"`
 	StateEvaluatedAt     pgtype.Timestamptz `json:"state_evaluated_at"`
 }

@@ -307,13 +307,17 @@ func includesAckRate(r *http.Request) bool {
 func wireFromAckRateRow(r dbx.ListPoliciesWithAckRateRow) policyWithAckRateWire {
 	base := wireFromAckRateBaseColumns(r)
 	out := policyWithAckRateWire{policyWire: base}
-	// Both columns are NULL together (single CASE WHEN status='published'
-	// gates both). When the denominator column is non-NULL we treat the
-	// row as having a populated cell.
-	if r.AckDenominator.Valid && r.AckNumerator.Valid {
+	// Both columns are NULL together — the slice-159 CTE-with-LEFT-JOIN
+	// restructure ensures `ack_cells` only carries rows whose policy is
+	// `status = 'published'`; the LEFT JOIN to the outer policy list
+	// produces NULL for both columns on non-published policies. sqlc
+	// v1.31.1 emits `*int64` (nil = NULL) under
+	// `emit_pointers_for_null_types: true`. The wire shape
+	// (`ack_rate: null` vs populated cell) is unchanged from slice 107.
+	if r.AckDenominator != nil && r.AckNumerator != nil {
 		cell := &policyAckRateCellWire{
-			Numerator:   r.AckNumerator.Int64,
-			Denominator: r.AckDenominator.Int64,
+			Numerator:   *r.AckNumerator,
+			Denominator: *r.AckDenominator,
 		}
 		if cell.Denominator > 0 {
 			pct := (float64(cell.Numerator) / float64(cell.Denominator)) * 100.0

@@ -11,6 +11,15 @@ import (
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 )
 
+// ptrEvidenceResult / ptrString are slice-159 test helpers — the
+// sqlc-emitted nullable types for `state_result` / `state_freshness_status`
+// shifted from `dbx.NullEvidenceResult{...}` / `pgtype.Text{...}` to
+// pointer-style `*dbx.EvidenceResult` / `*string` under
+// `emit_pointers_for_null_types: true`. Helpers keep the test literals
+// readable.
+func ptrEvidenceResult(v dbx.EvidenceResult) *dbx.EvidenceResult { return &v }
+func ptrString(v string) *string                                 { return &v }
+
 // fakeStateRow is a tiny stateRowMeta implementation used by the wire-
 // conversion unit tests. Keeps the tests independent of the sqlc row
 // types so a future column tweak doesn't ripple through.
@@ -121,15 +130,15 @@ func TestLatestRowsToStateWire_RendersSQLAggregatedResultVerbatim(t *testing.T) 
 		{
 			ID: pgtype.UUID{Bytes: [16]byte{0x11}, Valid: true}, ScfID: "AAA-01",
 			Family: "AAA", Title: "first anchor",
-			StateResult:          dbx.NullEvidenceResult{EvidenceResult: "fail", Valid: true},
-			StateFreshnessStatus: pgtype.Text{String: "fresh", Valid: true},
+			StateResult:          ptrEvidenceResult("fail"),
+			StateFreshnessStatus: ptrString("fresh"),
 			StateEvaluatedAt:     pgtype.Timestamptz{Time: evalAt, Valid: true},
 		},
 		{
 			ID: pgtype.UUID{Bytes: [16]byte{0x22}, Valid: true}, ScfID: "AAA-02",
 			Family: "AAA", Title: "second anchor",
-			StateResult:          dbx.NullEvidenceResult{EvidenceResult: "pass", Valid: true},
-			StateFreshnessStatus: pgtype.Text{String: "fresh", Valid: true},
+			StateResult:          ptrEvidenceResult("pass"),
+			StateFreshnessStatus: ptrString("fresh"),
 			StateEvaluatedAt:     pgtype.Timestamptz{Time: evalAt, Valid: true},
 		},
 		{

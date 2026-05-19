@@ -78,6 +78,51 @@ ORDER BY created_at DESC, id ASC;
 -- /v1/policies/{id}/acknowledgment-rate calls those queries directly
 -- per-policy; this slice runs the same math in one round-trip for the
 -- list view.
+-- Slice 159 Option C: the per-policy ack-rate cells are computed in
+-- a CTE that filters `WHERE p.status = 'published'` and is then
+-- LEFT JOINed back to the full policy list. sqlc v1.31.1 sees the
+-- LEFT JOIN as nullable and emits `*int64` (under
+-- `emit_pointers_for_null_types: true`) — non-published policies
+-- get nil pointers for both ack columns. The slice-107 handler is
+-- updated to use the pointer-style API (`r.AckDenominator != nil`
+-- + `*r.AckDenominator`). JSON response shape is unchanged: nil
+-- pointers marshal to `null`, populated pointers marshal to the
+-- bigint value. See
+-- `docs/audit-log/159-sqlc-toolchain-ci-drift-fix-decisions.md`.
+WITH ack_cells AS (
+    SELECT
+        p.id AS policy_id,
+        (SELECT COUNT(DISTINCT k.issued_by)::bigint
+         FROM api_keys k
+         WHERE k.tenant_id = p.tenant_id
+           AND k.revoked_at IS NULL
+           AND k.issued_by IS NOT NULL
+           AND (
+               k.is_admin = true
+               OR k.owner_roles && p.acknowledgment_required_roles
+           )
+        ) AS ack_denominator,
+        (SELECT COUNT(DISTINCT pa.user_id)::bigint
+         FROM policy_acknowledgments pa
+         WHERE pa.tenant_id = p.tenant_id
+           AND pa.policy_version_id = p.id
+           AND pa.acknowledged_at >= sqlc.arg('freshness_cutoff')::timestamptz
+           AND EXISTS (
+               SELECT 1
+               FROM api_keys k
+               WHERE k.tenant_id = pa.tenant_id
+                 AND k.issued_by = pa.user_id
+                 AND k.revoked_at IS NULL
+                 AND (
+                     k.is_admin = true
+                     OR k.owner_roles && p.acknowledgment_required_roles
+                 )
+           )
+        ) AS ack_numerator
+    FROM policies p
+    WHERE p.tenant_id = $1
+      AND p.status = 'published'
+)
 SELECT
     p.id, p.tenant_id, p.title, p.version, p.effective_date, p.body_md,
     p.acknowledgment_required_roles, p.status, p.created_at, p.updated_at,
@@ -85,36 +130,10 @@ SELECT
     p.source_attribution, p.created_by, p.submitted_at, p.submitted_by,
     p.approved_at, p.approved_by, p.published_at, p.published_by,
     p.superseded_at, p.next_review_at,
-    CASE WHEN p.status = 'published' THEN (
-        SELECT COUNT(DISTINCT k.issued_by)::bigint
-        FROM api_keys k
-        WHERE k.tenant_id = p.tenant_id
-          AND k.revoked_at IS NULL
-          AND k.issued_by IS NOT NULL
-          AND (
-              k.is_admin = true
-              OR k.owner_roles && p.acknowledgment_required_roles
-          )
-    ) END AS ack_denominator,
-    CASE WHEN p.status = 'published' THEN (
-        SELECT COUNT(DISTINCT pa.user_id)::bigint
-        FROM policy_acknowledgments pa
-        WHERE pa.tenant_id = p.tenant_id
-          AND pa.policy_version_id = p.id
-          AND pa.acknowledged_at >= sqlc.arg('freshness_cutoff')::timestamptz
-          AND EXISTS (
-              SELECT 1
-              FROM api_keys k
-              WHERE k.tenant_id = pa.tenant_id
-                AND k.issued_by = pa.user_id
-                AND k.revoked_at IS NULL
-                AND (
-                    k.is_admin = true
-                    OR k.owner_roles && p.acknowledgment_required_roles
-                )
-          )
-    ) END AS ack_numerator
+    ac.ack_denominator,
+    ac.ack_numerator
 FROM policies p
+LEFT JOIN ack_cells ac ON ac.policy_id = p.id
 WHERE p.tenant_id = $1
 ORDER BY p.created_at DESC, p.id ASC;
 

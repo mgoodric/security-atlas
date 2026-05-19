@@ -525,9 +525,24 @@ type latestStateRow struct {
 	r dbx.ListSCFAnchorsLatestWithStateRow
 }
 
-func (l latestStateRow) StateValid() bool       { return l.r.StateResult.Valid }
-func (l latestStateRow) StateResult() string    { return string(l.r.StateResult.EvidenceResult) }
-func (l latestStateRow) StateFreshness() string { return l.r.StateFreshnessStatus.String }
+// Slice 159: row adapters switched from `NullEvidenceResult.Valid` /
+// `pgtype.Text.String` API to pointer-style nil-check + dereference.
+// sqlc v1.31.1 emits `*EvidenceResult` / `*string` for the LEFT-JOIN
+// nullable CTE columns under `emit_pointers_for_null_types: true`.
+// The wire shape (`state: null` vs populated cell) is unchanged.
+func (l latestStateRow) StateValid() bool { return l.r.StateResult != nil }
+func (l latestStateRow) StateResult() string {
+	if l.r.StateResult == nil {
+		return ""
+	}
+	return string(*l.r.StateResult)
+}
+func (l latestStateRow) StateFreshness() string {
+	if l.r.StateFreshnessStatus == nil {
+		return ""
+	}
+	return *l.r.StateFreshnessStatus
+}
 func (l latestStateRow) StateEvaluatedAt() time.Time {
 	return l.r.StateEvaluatedAt.Time
 }
@@ -542,9 +557,19 @@ type forVersionStateRow struct {
 	r dbx.ListSCFAnchorsForVersionWithStateRow
 }
 
-func (f forVersionStateRow) StateValid() bool       { return f.r.StateResult.Valid }
-func (f forVersionStateRow) StateResult() string    { return string(f.r.StateResult.EvidenceResult) }
-func (f forVersionStateRow) StateFreshness() string { return f.r.StateFreshnessStatus.String }
+func (f forVersionStateRow) StateValid() bool { return f.r.StateResult != nil }
+func (f forVersionStateRow) StateResult() string {
+	if f.r.StateResult == nil {
+		return ""
+	}
+	return string(*f.r.StateResult)
+}
+func (f forVersionStateRow) StateFreshness() string {
+	if f.r.StateFreshnessStatus == nil {
+		return ""
+	}
+	return *f.r.StateFreshnessStatus
+}
 func (f forVersionStateRow) StateEvaluatedAt() time.Time {
 	return f.r.StateEvaluatedAt.Time
 }
