@@ -482,6 +482,79 @@ the audit runs locally. The same path runs in CI as part of the `Go ·
 integration (Postgres RLS)` check, so a regression that re-introduces
 a 500-on-empty fails the merge before the PR can land.
 
+## Data exports
+
+The slice 135 export library (`internal/export/`) backs three audit-log
+download endpoints — CSV, JSON, and XLSX — under
+`GET /v1/admin/audit-log/export` plus the BFF at
+`web/app/api/audit-log/export/route.ts`. Slice 145 added two
+operator-facing knobs on top of slice 135's baseline:
+
+**1. `?include_payload=<bool>` — forensics vs. external-audit-handoff**
+
+The export emits a `payload_json` column populated with the raw
+audit-log row payload — control titles, evidence kinds, before/after
+diffs, etc. That blob is correct for forensic use cases (internal
+incident response, in-house compliance review) but is more than an
+external auditor or third party needs. The query parameter lets the
+operator choose:
+
+- **`?include_payload=true` (default)** — forensics. Full payload in
+  every row. Preserves the slice 135 wire shape; existing callers see
+  no change.
+- **`?include_payload=false`** — external-audit-handoff. CSV emits an
+  empty cell; JSON emits the literal `null` (not `""`); XLSX emits an
+  empty cell. All other columns (occurred_at, actor_id, tenant_id,
+  kind, target_type, target_id, action, row_id, actor_name) render
+  normally — only `payload_json` is redacted.
+
+The meta-audit row (`me_audit_log WHERE action = 'audit_log_export'`)
+records the `include_payload` value used so an operator can prove
+which export went to which audience. Legacy slice 135 rows that
+predate slice 145 do not carry the key — readers MUST treat absence
+as `true` (the slice 135 default).
+
+curl examples:
+
+```sh
+# Forensics workflow — full payload (default).
+curl -sH "Authorization: Bearer $TOK" \
+  "https://atlas.example/v1/admin/audit-log/export?format=csv&from=2026-04-01T00:00:00Z&to=2026-04-30T23:59:59Z" \
+  -o audit-2026-04-forensics.csv
+
+# External-audit-handoff workflow — payload redacted.
+curl -sH "Authorization: Bearer $TOK" \
+  "https://atlas.example/v1/admin/audit-log/export?format=csv&from=2026-04-01T00:00:00Z&to=2026-04-30T23:59:59Z&include_payload=false" \
+  -o audit-2026-04-handoff.csv
+```
+
+**2. Per-(tenant, user) concurrency cap**
+
+A buggy client or an authenticated misbehaving caller firing N
+concurrent `/export` requests would saturate the per-tenant pgxpool —
+each export streams for minutes, degrading every other endpoint in
+that tenant. Slice 145 adds a process-wide semaphore keyed on
+`(tenant_id, user_id)` with default cap 2. Excess requests get
+`429 Too Many Requests` with a `Retry-After: 30` header AND a JSON
+body explaining the limit so operators reading curl output without
+`-i` still see the message.
+
+Tune via env (no restart of dependent containers needed):
+
+```
+ATLAS_EXPORT_MAX_CONCURRENT_PER_USER=4
+```
+
+The cap is **per-(tenant, user)**, NOT global — a super_admin running
+exports across five tenants is NOT throttled by cap=2 in any single
+tenant. Cross-tenant scope is the granularity at which the DoS lives
+(per-tenant pgxpool), and so it is the granularity at which the cap
+applies.
+
+The 429 outcome path writes a meta-audit row with
+`result=denied:concurrency_cap_exceeded` — operators can grep
+`me_audit_log` for these events to detect a runaway script.
+
 ## Linting
 
 Run lint locally against the frontend workspace:
