@@ -422,7 +422,7 @@ type ListPoliciesWithAckRateRow struct {
 	PublishedBy                 *string            `json:"published_by"`
 	SupersededAt                pgtype.Timestamptz `json:"superseded_at"`
 	NextReviewAt                pgtype.Timestamptz `json:"next_review_at"`
-	AckDenominator              *int64             `json:"ack_denominator"`
+	AckDenominator              *int64             `json:"ack_denominator_SYNTHETIC_DRIFT_TEST"`
 	AckNumerator                *int64             `json:"ack_numerator"`
 }
 
