@@ -54,6 +54,7 @@ sql:
       - "migrations/sql/20260516000003_me_endpoints.sql"
       - "migrations/sql/20260517000000_unified_audit_log.sql"
       - "migrations/sql/20260518000000_audit_sink_failures.sql"
+      - "migrations/sql/20260518100000_sessions_augment_ua_ip_geo.sql"
     queries: "internal/db/queries"
     gen:
       go:

@@ -2,11 +2,18 @@
 -- Persist a new session row. The id is generated server-side by the caller as
 -- a 32-byte crypto/rand string; we pass it in so the cookie and the row share
 -- exact bytes.
+--
+-- Slice 162: now also accepts user_agent + ip_address. The geo_country /
+-- geo_city columns are NOT populated here — they're filled by a future
+-- enrichment hook (per slice 162 P0-162-3). The two captured fields are
+-- nullable: callers that do not provide them (e.g. background-task token
+-- issuance flows that have no http.Request in context) pass NULL.
 INSERT INTO sessions (
-    id, tenant_id, user_id, idp_issuer, idp_subject, expires_at
+    id, tenant_id, user_id, idp_issuer, idp_subject, expires_at,
+    user_agent, ip_address
 )
 VALUES (
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
 RETURNING *;
 

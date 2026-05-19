@@ -92,6 +92,7 @@ import {
   isCuratedTimeZone,
   tailRoles,
 } from "./profile-derive";
+import { sessionLine } from "./session-line";
 import { DEFAULT_THEME, readTheme, Theme, writeTheme } from "./theme";
 import { initialState, reduce } from "./token-state";
 
@@ -1056,40 +1057,56 @@ function SessionsSection() {
           </p>
         ) : (
           <div className="space-y-2">
-            {sessionsQuery.data.map((s: MeSession) => (
-              <div
-                key={s.id}
-                className="flex items-center justify-between gap-3 rounded-md border border-border p-3 text-sm"
-                data-testid="settings-session-row"
-              >
-                <div>
-                  <div className="font-medium">
-                    Session <code className="font-mono">…{s.last4}</code>
+            {sessionsQuery.data.map((s: MeSession) => {
+              // Slice 162: build the augmented session line (UA · IP · geo).
+              // sessionLine() returns "" when none of the fields are present,
+              // so we conditionally render the second line to keep pre-
+              // migration rows visually unchanged (P0-162-1: no fabrication).
+              const metaLine = sessionLine(s);
+              return (
+                <div
+                  key={s.id}
+                  className="flex items-center justify-between gap-3 rounded-md border border-border p-3 text-sm"
+                  data-testid="settings-session-row"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium">
+                      Session <code className="font-mono">…{s.last4}</code>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Created {s.created_at.slice(0, 10)}
+                      {s.last_used_at
+                        ? ` · last used ${s.last_used_at.slice(0, 10)}`
+                        : null}
+                    </div>
+                    {metaLine !== "" ? (
+                      <div
+                        className="mt-0.5 truncate text-xs text-muted-foreground"
+                        data-testid="settings-session-meta"
+                        title={s.user_agent ?? undefined}
+                      >
+                        {metaLine}
+                      </div>
+                    ) : null}
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    Created {s.created_at.slice(0, 10)}
-                    {s.last_used_at
-                      ? ` · last used ${s.last_used_at.slice(0, 10)}`
-                      : null}
+                  <div className="flex items-center gap-2">
+                    {s.is_current ? (
+                      <Badge variant="outline">current</Badge>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => revokeMut.mutate(s.id)}
+                        disabled={revokeMut.isPending}
+                        data-testid="settings-session-revoke"
+                      >
+                        Revoke
+                      </Button>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {s.is_current ? (
-                    <Badge variant="outline">current</Badge>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => revokeMut.mutate(s.id)}
-                      disabled={revokeMut.isPending}
-                      data-testid="settings-session-revoke"
-                    >
-                      Revoke
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </CardContent>

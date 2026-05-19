@@ -73,8 +73,10 @@ func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess, err := h.sessions.Create(ctx, sessions.CreateInput{
-		TenantID: usr.TenantID,
-		UserID:   usr.ID,
+		TenantID:  usr.TenantID,
+		UserID:    usr.ID,
+		UserAgent: userAgent(r),
+		IPAddress: clientIP(r),
 	})
 	if err != nil {
 		writeAuthError(w, http.StatusInternalServerError, "session create failed")
@@ -165,6 +167,8 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		UserID:     usr.ID,
 		IdpIssuer:  result.Issuer,
 		IdpSubject: result.Subject,
+		UserAgent:  userAgent(r),
+		IPAddress:  clientIP(r),
 	})
 	if err != nil {
 		writeAuthError(w, http.StatusInternalServerError, "session create: "+err.Error())

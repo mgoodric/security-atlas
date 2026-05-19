@@ -98,14 +98,42 @@ test.describe("/settings user-facing page", () => {
     //    expect(bodyText).not.toContain(plaintext!);
   });
 
-  test("AC-5: active sessions placeholder visible (spillover banner)", async () => {
+  test("AC-5: active sessions section renders (slice-108 backed; slice-162 metadata line)", async () => {
+    // Slice 154 AC-5: section renders (slice-108-backed list of session rows).
+    // Slice 162: when a session row carries the augmented fields
+    // (user_agent, ip_address, geo_country, geo_city), the per-row
+    // metadata line renders with `data-testid="settings-session-meta"`
+    // containing the formatted "{ua} · {ip} · {city}, {country}" string.
+    // Rows without those fields (pre-slice-162 sessions, or sessions
+    // created by background flows with no http.Request) MUST NOT render
+    // the metadata line element — honest empty, no fabricated placeholder
+    // (P0-162-1).
+    //
+    // Un-comment + seed-fixture wiring lands in slice 164. The
+    // contract is preserved as a reviewable block here.
+    //
     //    await page.goto("/settings");
     //    await expect(
     //      page.getByTestId("settings-section-sessions"),
     //    ).toBeVisible();
+    //    const rows = page.getByTestId("settings-session-row");
+    //    await expect(rows.first()).toBeVisible();
+    //    // Slice 162: at least one row should carry the augmented metadata
+    //    // line (the seed fixture inserts a row with UA + IP + geo).
+    //    const metaRow = page.getByTestId("settings-session-meta").first();
+    //    await expect(metaRow).toBeVisible();
+    //    await expect(metaRow).toContainText("192.0.2.18");
+    //    await expect(metaRow).toContainText("San Francisco");
+    //    // Slice 162 P0-162-1: a session row WITHOUT augmented fields
+    //    // must NOT render a metadata line (no placeholder text). The
+    //    // seed fixture seeds one bare row to exercise the absent path.
+    //    const bareRow = page
+    //      .getByTestId("settings-session-row")
+    //      .filter({ hasText: /^Session\s*…/ })
+    //      .last();
     //    await expect(
-    //      page.getByText(/Session management pending/),
-    //    ).toBeVisible();
+    //      bareRow.getByTestId("settings-session-meta"),
+    //    ).toHaveCount(0);
   });
 
   test("AC-6: admin cross-link visible only for admin role", async () => {

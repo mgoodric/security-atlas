@@ -1578,6 +1578,14 @@ type Session struct {
 	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
 	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
 	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
+	// Slice 162: User-Agent header captured at session create. NULL for pre-migration rows. Truncated to 512 bytes at the application layer (DoS guard).
+	UserAgent *string `json:"user_agent"`
+	// Slice 162: client IP captured at session create. TEXT not INET — see migration header decisions log. Honors X-Forwarded-For only when TRUST_FORWARDED_HEADERS=1.
+	IpAddress *string `json:"ip_address"`
+	// Slice 162: ISO 3166-1 alpha-2 country code. Populated by a future enrichment slice; ships NULL.
+	GeoCountry *string `json:"geo_country"`
+	// Slice 162: city name. Populated by a future enrichment slice; ships NULL.
+	GeoCity *string `json:"geo_city"`
 }
 
 type User struct {
