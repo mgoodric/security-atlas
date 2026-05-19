@@ -105,6 +105,12 @@ ON CONFLICT DO NOTHING;
 -- the PATCH, reloads, and asserts the new state holds). All other
 -- (event, channel) tuples render as enabled=true via the
 -- default-on-missing-row policy in userprefs.Get.
+-- Slice 168 AC-3 fix (test-infra gap): `ON CONFLICT DO NOTHING` left any
+-- stale row from a prior test run untouched, so when AC-3 had flipped
+-- (audit_period_assignment, email) to true in a previous CI run on the
+-- shared docker-compose Postgres, the next run's re-seed never reset it
+-- back to false. AC-3 then opened with a CHECKED toggle and `toggle.check()`
+-- was a no-op. Upsert with DO UPDATE guarantees the seed state every run.
 INSERT INTO user_notification_preferences (
     tenant_id, user_id, event, channel, enabled
 )
@@ -115,7 +121,8 @@ VALUES (
     'email',
     false
 )
-ON CONFLICT DO NOTHING;
+ON CONFLICT (tenant_id, user_id, event, channel) DO UPDATE
+SET enabled = EXCLUDED.enabled;
 
 -- ============================================================
 -- sessions — augmented row + bare row
