@@ -1093,6 +1093,29 @@ export type FrameworkPostureReport = {
   count: number;
 };
 
+// UpcomingItem mirrors `upcomingWire` in
+// internal/api/dashboard/handler.go. One row of the unified upcoming
+// rollup — merges expiring exceptions, policy-ack expirations, vendor
+// reviews, and audit-period milestones into one date-sorted feed.
+// `category` is one of: exception / policy_ack / vendor_review /
+// audit_period.
+export type UpcomingItem = {
+  due_date: string;
+  category: string;
+  title: string;
+  resource_type: string;
+  resource_id: string;
+};
+
+// UpcomingResponse mirrors the Upcoming handler's envelope.
+// `next_cursor` is the opaque base64url keyset token for the next page,
+// or "" when no next page exists.
+export type UpcomingResponse = {
+  upcoming: UpcomingItem[];
+  count: number;
+  next_cursor: string;
+};
+
 // ActivityEvent mirrors `activityWire` in internal/api/dashboard/handler.go.
 // `summary` is forwarded as-is — the slice-062 admin_audit_log_v evidence
 // branch packs an event-type-specific JSON blob whose shape is not
@@ -1136,10 +1159,19 @@ export async function getEvidenceFreshness(
   return (await res.json()) as FreshnessReport;
 }
 
+// getMitigateRisks fetches the dashboard top-risks panel feed —
+// risks with treatment=mitigate, ranked by residual-score magnitude
+// descending then risk age ascending. The `sort=residual,age` ordering
+// is the slice-066 (AC-3) server-side capability that slice 157
+// re-points the dashboard onto; before slice 157 the dashboard rendered
+// the unsorted list with a labelled "ranking pending" footer.
 export async function getMitigateRisks(
   bearer: string,
 ): Promise<DashboardRisk[]> {
-  const res = await apiFetch(`/v1/risks?treatment=mitigate`, bearer);
+  const res = await apiFetch(
+    `/v1/risks?treatment=mitigate&sort=residual,age`,
+    bearer,
+  );
   const body = (await res.json()) as RiskListResponse;
   return body.risks;
 }
@@ -1169,6 +1201,18 @@ export async function getActivity(
   return (await res.json()) as ActivityFeedResponse;
 }
 
+// getUpcoming fetches the dashboard's unified upcoming-rollup feed —
+// expiring exceptions, policy-ack expirations, vendor reviews, and
+// audit-period milestones merged into one date-sorted (ascending)
+// paginated feed. The slice-066 (AC-4) endpoint that slice 157
+// re-points the dashboard onto; before slice 157 the dashboard rendered
+// only the expiring-exceptions subset with a labelled "rollup pending"
+// footer.
+export async function getUpcoming(bearer: string): Promise<UpcomingResponse> {
+  const res = await apiFetch(`/v1/upcoming`, bearer);
+  return (await res.json()) as UpcomingResponse;
+}
+
 // ----- browser-side fns (hit the BFF under /api/dashboard/**) -----
 
 export function fetchDashboardDrift(): Promise<DriftReport> {
@@ -1185,8 +1229,8 @@ export function fetchDashboardRisks(): Promise<DashboardRisk[]> {
   );
 }
 
-export function fetchDashboardUpcoming(): Promise<ExpiringExceptionsResponse> {
-  return bffControlFetch<ExpiringExceptionsResponse>(`/api/dashboard/upcoming`);
+export function fetchDashboardUpcoming(): Promise<UpcomingResponse> {
+  return bffControlFetch<UpcomingResponse>(`/api/dashboard/upcoming`);
 }
 
 export function fetchDashboardFrameworkPosture(): Promise<FrameworkPostureReport> {

@@ -11,9 +11,12 @@
 // API (AC-7, anti-criterion P0-2). Every panel binds to a real backend
 // endpoint via a BFF proxy under `/api/dashboard/**`. Slice 040 shipped
 // four bound panels + two `MissingEndpointPanel` placeholders (framework
-// posture, activity feed); slice 066 shipped the backend endpoints; and
-// slice 147 closed the loop by re-pointing the placeholders. See
-// `docs/audit-log/147-dashboard-placeholders-decisions.md`.
+// posture, activity feed); slice 066 shipped the backend endpoints;
+// slice 147 closed the loop by re-pointing the placeholders; and slice
+// 157 closed the loop on the remaining two slice-066 follow-on panels
+// (upcoming + top-risks residual,age sort). See
+// `docs/audit-log/147-dashboard-placeholders-decisions.md` +
+// `docs/audit-log/157-dashboard-upcoming-and-top-risks-decisions.md`.
 //
 // Data sync: server values live ONLY in the TanStack Query cache and
 // are read during render — there is NO useEffect that seeds state from
