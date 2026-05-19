@@ -37,6 +37,7 @@ import { useEffect } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -49,7 +50,6 @@ import { CoverageTable } from "@/components/control/coverage-table";
 import { FreshnessClock } from "@/components/control/freshness-clock";
 import { UcfMiniViz } from "@/components/control/ucf-mini-viz";
 import {
-  APIError,
   fetchControlCoverage,
   fetchControlEffectiveScope,
   fetchControlEffectiveness,
@@ -57,6 +57,8 @@ import {
   type ControlCoverage,
   type EffectiveScopeResponse,
 } from "@/lib/api";
+
+import { classifyControlDetailError } from "../error-classifier";
 
 export default function ControlDetailPage() {
   const router = useRouter();
@@ -92,26 +94,19 @@ export default function ControlDetailPage() {
     })),
   });
 
-  // 401 from any bound endpoint -> the cookie expired mid-session; bounce
-  // to /login. The (authed) layout + proxy.ts guard the initial load;
-  // this covers token expiry while the page is open.
+  // Slice 152: error-class discriminates `notfound` (empty-state),
+  // `unauthorized` (/login redirect), `other` (destructive Alert).
+  // The classifier is pure logic + vitest-covered (8 cases) so a
+  // regression that mis-routes 404 vs 5xx fails before merge. Full
+  // trail: docs/adr/0004-control-detail-404-empty-state.md.
   const firstError =
     coverageQ.error ?? stateQ.error ?? effectivenessQ.error ?? null;
+  const errorClass = classifyControlDetailError(firstError);
   useEffect(() => {
-    if (firstError instanceof APIError && firstError.status === 401) {
+    if (errorClass === "unauthorized") {
       router.push(`/login?from=/controls/${id}`);
     }
-  }, [firstError, router, id]);
-
-  // out-of-scope set: a framework_version is out of scope when its
-  // effective-scope call resolved with in_scope === false.
-  const outOfScopeFvIds = new Set<string>();
-  scopeQueries.forEach((q) => {
-    const data = q.data as EffectiveScopeResponse | undefined;
-    if (data && data.in_scope === false) {
-      outOfScopeFvIds.add(data.framework_version_id);
-    }
-  });
+  }, [errorClass, router, id]);
 
   if (coverageQ.isLoading) {
     return (
@@ -122,10 +117,58 @@ export default function ControlDetailPage() {
     );
   }
 
-  if (
-    coverageQ.error &&
-    !(coverageQ.error instanceof APIError && coverageQ.error.status === 401)
-  ) {
+  // Slice 152 D1-c: 404 on the coverage call means the id in the URL
+  // does not resolve to a tenant control. On a fresh install the most
+  // common cause is that the operator clicked an SCF anchor row from
+  // the /controls list (which renders ~1,400 catalog-global anchors via
+  // /v1/anchors) whose anchor.id has no instantiated control in their
+  // tenant. The friendly empty-state names the cause honestly — slice
+  // 150 D3 pinned that bare-{id} 404 is a load-bearing PLATFORM
+  // contract; the UI's job is to render it humanely, not to convert it
+  // to 200.
+  if (coverageQ.error && errorClass === "notfound") {
+    return (
+      <div
+        className="rounded-xl border bg-card py-16 px-6 text-center"
+        data-testid="control-detail-empty"
+      >
+        <div className="mx-auto mb-3 text-muted-foreground">
+          <svg
+            className="w-12 h-12 mx-auto"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            aria-hidden
+          >
+            <path
+              d="M9 3.75H6.912a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661V18a2.25 2.25 0 002.25 2.25h15a2.25 2.25 0 002.25-2.25v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </div>
+        <div className="text-sm font-semibold text-foreground mb-1">
+          This SCF anchor has no control instantiated in your tenant yet
+        </div>
+        <div className="text-xs text-muted-foreground mb-4">
+          The id <span className="font-mono">{id}</span> resolves in the global
+          SCF catalog but no tenant control is bound to it. This is the expected
+          state on a fresh install — controls are tenant-scoped and authored
+          separately from the catalog.
+        </div>
+        <Link
+          href="/controls"
+          className={buttonVariants({ size: "sm" })}
+          data-testid="control-detail-empty-cta"
+        >
+          Back to controls list
+        </Link>
+      </div>
+    );
+  }
+
+  if (coverageQ.error && errorClass === "other") {
     return (
       <Alert variant="destructive" data-testid="control-detail-error">
         <AlertTitle>Could not load control</AlertTitle>
@@ -139,6 +182,19 @@ export default function ControlDetailPage() {
   if (!coverageQ.data) {
     return null;
   }
+
+  // out-of-scope set: a framework_version is out of scope when its
+  // effective-scope call resolved with in_scope === false. Computed
+  // here (after the early-return branches above) so the empty-state +
+  // destructive-error paths don't pay for an iteration that their
+  // render does not consume.
+  const outOfScopeFvIds = new Set<string>();
+  scopeQueries.forEach((q) => {
+    const data = q.data as EffectiveScopeResponse | undefined;
+    if (data && data.in_scope === false) {
+      outOfScopeFvIds.add(data.framework_version_id);
+    }
+  });
 
   const coverage = coverageQ.data;
   const { control, anchor, requirements } = coverage;
