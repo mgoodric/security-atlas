@@ -1,0 +1,37 @@
+# atlas-startup-watcher — posts security-atlas startup credentials to Discord
+# (DISCORD_INFRA_CHANNEL_ID per personal-ai's UC-16 channel convention) on
+# every atlas container start.
+#
+# Path on Unraid: /mnt/user/appdata/atlas-startup-watcher/
+# Bring up:        docker compose up -d
+# Stop:            docker compose down
+# Logs:            docker logs atlas-startup-watcher
+#
+# Watchtower discipline: NO label. The watch.sh script is hand-rolled and
+# a docker:cli image bump is unlikely to be backward-compatible enough to
+# auto-pull. Manual upgrade only.
+
+name: atlas-startup-watcher
+
+services:
+  atlas-startup-watcher:
+    image: docker:cli
+    container_name: atlas-startup-watcher
+    restart: unless-stopped
+    volumes:
+      # Read-only docker.sock — needed for `docker events` + `docker logs`
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Read-only mount of atlas's .env so the watcher can grep the stable
+      # fixed-token + default-user email/password without re-reading from
+      # docker exec each time
+      - /mnt/user/appdata/security-atlas/.env:/atlas-env:ro
+      # The watcher script itself
+      - ./watch.sh:/watch.sh:ro
+    environment:
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:?DISCORD_BOT_TOKEN missing in .env}
+      DISCORD_INFRA_CHANNEL_ID: ${DISCORD_INFRA_CHANNEL_ID:?DISCORD_INFRA_CHANNEL_ID missing in .env}
+      ATLAS_HOST: ${ATLAS_HOST:-192.168.1.246}
+      ATLAS_WEB_PORT: ${ATLAS_WEB_PORT:-3015}
+      ATLAS_CONTAINER: ${ATLAS_CONTAINER:-security-atlas-atlas}
+    entrypoint: sh
+    command: /watch.sh
