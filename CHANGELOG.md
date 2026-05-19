@@ -9,6 +9,22 @@ Conventional-Commit messages. Each entry links to its slice issue, the
 merging PR, and the squash-merge commit. For richer per-slice narrative
 see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
+## [Unreleased]
+
+### Added
+
+- **slice 139** — Audit periods + vendors data export (CSV / JSON / XLSX).
+  Two new endpoints (`GET /v1/admin/audit-periods/export`,
+  `GET /v1/admin/vendors/export`) reusing the slice-135 export library
+  + slice-145 concurrency cap. Audit-periods export surfaces freeze
+  metadata columns (`frozen_at`, `frozen_by`, `frozen_hash`) per
+  constitutional invariant #10; cosigned bundle bytes remain
+  slice-030's surface. Vendor export masks `owner_user` emails to
+  `*@domain.tld` per slice 139 D1; un-masked column deferred to v3.
+  Two BFFs at `/api/admin/audit-periods/export` +
+  `/api/admin/vendors/export`; Export buttons on `/audits` +
+  `/vendors` pages.
+
 ## [1.12.0](https://github.com/mgoodric/security-atlas/compare/v1.11.0...v1.12.0) (2026-05-19)
 
 
