@@ -49,8 +49,7 @@ and surfaces the parse error to the handler, which returns 500.
 **Decision:** Fix it in the slice-023 handler
 (`internal/api/policyacks/handlers.go MyAcknowledgments`) by detecting
 the non-UUID case BEFORE calling into the store and returning the
-empty envelope `{pending: [], count: 0, window_seconds: <int>}` with
-200. The semantic is correct: a credential without a real users row
+empty envelope `{pending: [], count: 0, window_seconds: <int>}` with 200. The semantic is correct: a credential without a real users row
 is a service account; service accounts have no human pending
 acknowledgments. The store-level `PendingForUser` flow is left
 unchanged — real human credentials (post-slice-034 OIDC) still go
