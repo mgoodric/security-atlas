@@ -3,7 +3,7 @@
 **Cluster:** Backend / Infra (AI integration surface)
 **Estimate:** 3-5d
 **Type:** JUDGMENT
-**Status:** `not-ready`
+**Status:** `ready` (HITL pattern picked 2026-05-20: **Pattern A** — see D1 below)
 
 ## Narrative
 
@@ -94,12 +94,20 @@ Will be expanded when this slice is picked up. Skeleton:
 
 **Provenance.** Surfaced during slice 172 design via `/idea-to-slice`, captured as follow-up per continuous-batch policy. The maintainer asked for read AND write MCP tools; slice 172 ships read, this slice ships write.
 
-**The HITL approval flow is the load-bearing design decision.** Three viable patterns to evaluate at pickup:
+**The HITL approval flow is the load-bearing design decision. D1 locked 2026-05-20: Pattern A.**
 
-- **Pattern A (recommended starting point)**: AI write creates a draft row with `state='ai_proposed'`; a separate operator action (web UI button + a `confirm_*` MCP tool) flips state to `state='active'` and records the approver. Simple; matches the existing exception-approval flow shape.
-- **Pattern B**: AI write commits directly to a `_proposals` shadow table; operator's review flow merges proposals into the canonical table. More plumbing; cleaner audit trail.
-- **Pattern C**: AI write is rejected at the platform layer when the request carries `ai_assisted=true` AND `human_approved=false`; operator must explicitly "co-sign" the tool call in their MCP client before it commits. Highest UX friction; tightest safety.
+- **Pattern A (PICKED)**: AI write creates a draft row in the canonical table with `state='ai_proposed'`; a separate operator action (web-UI button + a `confirm_*` MCP tool) flips state to `state='active'` and records `human_approver`. Mirrors the existing exception-approval flow shape (slice 138). Simplest plumbing.
+- **Pattern B (rejected)**: AI write commits to a `*_proposals` shadow table; operator merges proposal → canonical. Cleaner audit trail but introduces N new tables + a merge job + new RLS policies per write surface; rejected for v1 as over-engineered for the initial four-tool set.
+- **Pattern C (rejected)**: Platform layer rejects any `ai_assisted=true AND human_approved=false` write; operator co-signs each tool call in the MCP client before it commits. Tightest safety, but turns every write into an interactive ceremony; rejected for v1 as UX-prohibitive.
 
-Engineer evaluates + the maintainer picks at design-grill. This slice doc is a STUB — the full slice gets fleshed out at pickup time (when slice 172 is merged + the operator's HITL approval-flow preference is known).
+**Pattern A implementation guidance:**
+
+1. Every write-tool handler INSERTs the row with `state='ai_proposed'`, `ai_assisted=true`, `ai_model_name`, `ai_model_version`, `human_approved=false`, `human_approver=NULL`, `created_at=now()`.
+2. Every read path that materializes audit-binding artifacts (export bundles, OSCAL emission, board reports, etc.) filters on `state='active'`. `state='ai_proposed'` rows are visible to the operator's approval queue but NOT to any downstream consumer.
+3. The operator approves via either (a) a web-UI button on the row's detail page or (b) a dedicated `confirm_*` MCP tool the operator's MCP client invokes explicitly. Both paths flow through the same server-side handler that flips `state='active'` + sets `human_approved=true` + records `human_approver=<user_id>` + writes one row to the meta-audit log.
+4. The schema-level invariant (per CLAUDE.md §AI-assist boundary): a CHECK constraint or trigger on every table touched by write tools enforces `(ai_assisted=true AND human_approved=true) → human_approver IS NOT NULL`. Engineer picks CHECK vs trigger at impl time (CHECK preferred where the table has no other state-machine transitions; trigger for tables with existing complex state transitions).
+5. The `state` column is added per table touched by write tools — `risks`, `controls`, `evidence`. (Evidence has its own existing append-only model; `push_evidence` writes a record with `state='ai_proposed'` rather than mutating an existing row.)
+
+This slice doc is no longer a stub — design is locked enough for an engineer to pick up. Full grill at pickup time still applies.
 
 **Re-run STRIDE at impl time.** This slice's preliminary threat model is HOLD-pending-review until a fresh pass + maintainer sign-off.
