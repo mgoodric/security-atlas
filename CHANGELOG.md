@@ -13,6 +13,30 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 133** — mkdocs user docs content refresh. Ships 9 new operator
+  pages under `docs-site/docs/`: six per-primitive how-tos
+  (`primitives/controls.md`, `primitives/risks.md`,
+  `primitives/evidence.md`, `primitives/scope.md`,
+  `primitives/framework.md`, `primitives/policy.md`) plus
+  `primitives/index.md` as section landing, an `audit-logs.md` operator
+  guide covering the trio (`decision_audit_log`, `evidence_audit_log`,
+  `me_audit_log`) plus the other six per-domain logs and the unified
+  query API, a `ci-hardening.md` reference mapping required CI checks to
+  the local `just`/`npm`/`pre-commit` commands that reproduce them
+  (covers slices 117 + 127 + 128), and a `connector-authoring.md`
+  walkthrough of the 9-step Evidence-SDK authoring flow with conventions
+  carried forward from slices 003 + 004. `mkdocs.yml` nav extended with
+  a `Primitives:` collapsible section plus three top-level entries; no
+  theme / CSS / plugin changes (P0-A6 honored — slice 058 owns theme).
+  No new screenshots — pages link to the canonical README hero set per
+  the slice 057 / 132 pattern (preserves the docs-site image budget).
+  `mkdocs build --strict` is green with zero broken links, zero
+  warnings. Decisions log at
+  `docs/audit-log/133-mkdocs-content-refresh-decisions.md` (8 decisions,
+  D1 = nested primitives + flat operator surfaces; D2 = link to
+  canonical screenshots, no duplicates; D3 = cover all nine audit logs,
+  not only the trio).
+
 - **slice 138** — Ledger entities export (evidence + policies + exceptions
   + samples). Four new admin endpoints close the per-entity export
   cluster following the slice 137 precedent: `GET
