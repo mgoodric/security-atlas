@@ -49,8 +49,12 @@ tags:
   - name: admin-audit-log
   - name: admin-audit-periods
   - name: admin-credentials
+  - name: admin-evidence
+  - name: admin-exceptions
   - name: admin-feature-flags
   - name: admin-install
+  - name: admin-policies
+  - name: admin-samples
   - name: admin-sso
   - name: admin-users
   - name: admin-vendors
@@ -291,6 +295,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/admin/evidence/export:
+    get:
+      summary: GET /v1/admin/evidence/export
+      tags: [admin-evidence]
+      operationId: get-v1-admin-evidence-export
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/exceptions/export:
+    get:
+      summary: GET /v1/admin/exceptions/export
+      tags: [admin-exceptions]
+      operationId: get-v1-admin-exceptions-export
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/admin/features:
     get:
       summary: GET /v1/admin/features
@@ -330,6 +362,34 @@ paths:
       summary: POST /v1/admin/install/reset-bootstrap
       tags: [admin-install]
       operationId: post-v1-admin-install-reset-bootstrap
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/policies/export:
+    get:
+      summary: GET /v1/admin/policies/export
+      tags: [admin-policies]
+      operationId: get-v1-admin-policies-export
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/samples/export:
+    get:
+      summary: GET /v1/admin/samples/export
+      tags: [admin-samples]
+      operationId: get-v1-admin-samples-export
       security:
         - adminBearer: []
       responses:
