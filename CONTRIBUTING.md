@@ -637,7 +637,7 @@ After the window:
 - A maintainer files a PR removing the `v1.x.x` schema files from `internal/api/schemaregistry/schemas/<kind>/`.
 - `v1` records remain queryable in the evidence ledger forever (append-only invariant); new `v1.x.x` pushes return `400 schema deprecated`.
 
-CI enforces the floor: any PR that removes a schema version file younger than 90 days fails the `schema-removal-age` check. The check has an explicit override label (`[deprecation-override]` on the PR) for emergencies (e.g., a schema was published with a security-sensitive defect and must be unpublished immediately) — overrides require a maintainer's approval and a note in the audit log under `docs/audit-log/`.
+CI enforces the floor: any PR that removes a schema version file younger than 90 days fails the `Schema · removal-age (90-day floor)` check (`.github/workflows/ci.yml::schema-removal-age`, slice 179). The worker script lives at `scripts/check-schema-removal-age.sh`; reproduce locally with `git fetch origin main:main && git diff --diff-filter=D --name-only main...HEAD -- internal/api/schemaregistry/schemas/ | bash scripts/check-schema-removal-age.sh`. The check has an explicit override label (exact spelling `[deprecation-override]` on the PR) for emergencies (e.g., a schema was published with a security-sensitive defect and must be unpublished immediately) — overrides require a maintainer's approval and a note in the audit log under `docs/audit-log/`. Operator workflow: [`internal/api/schemaregistry/schemas/README.md`](./internal/api/schemaregistry/schemas/README.md).
 
 Pattern source: OpenTelemetry semantic-conventions deprecation model. Battle-tested at scale; copy verbatim rather than designing our own.
 

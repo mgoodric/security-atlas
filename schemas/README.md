@@ -18,3 +18,10 @@ This directory remains as a discovery breadcrumb. Add new platform schemas by wr
 - Schema dialect: JSON Schema draft 2020-12
 
 See `internal/api/schemaregistry/embed.go` for the loader contract and `Plans/EVIDENCE_SDK.md` §4.5 for the design.
+
+## Deprecation window (slice 179)
+
+Breaking-major bumps (e.g. `1.x.x → 2.0.0`) MUST keep the old version file in the registry for at least 90 days before removal. The CI job `Schema · removal-age (90-day floor)` enforces the floor against the file's introduction commit on `main`. The exact `[deprecation-override]` PR label bypasses the failure (emergency removals only; requires a maintainer's approval and an audit-log entry under `docs/audit-log/`).
+
+Full operator workflow + local-reproduction commands:
+[`internal/api/schemaregistry/schemas/README.md`](../internal/api/schemaregistry/schemas/README.md).
