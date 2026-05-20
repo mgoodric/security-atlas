@@ -1,11 +1,26 @@
-// Slice 137 — unit tests for the controls-export projection helpers.
+// Slice 137 — unit tests for the controls-export projection helpers
+// + the handler dispatch's early-exit branches.
+//
 // The integration suite (`export_integration_test.go`, build-tag
 // `integration`) exercises the full wire surface against Postgres
-// + RLS; this file covers the pure functions that need no DB.
+// + RLS; this file covers the pure functions that need no DB plus
+// the early-exit handler branches (no-credential, invalid-tenant-id,
+// stub-source dispatch through listControlsForExport) that can be
+// reached without touching the pgxpool.
+//
+// Coverage posture: `internal/api/controls/` is not in the CI
+// integration-test list (`.github/workflows/ci.yml` line 289–310),
+// so unit coverage is the load-bearing measure for this package.
+// The per-package floor is 26% (`cmd/scripts/coverage-thresholds.json`);
+// the integration-only branches of `ExportControls` (which touch a
+// real pgxpool) are validated by `export_integration_test.go`.
 
 package controls
 
 import (
+	"context"
+	"errors"
+	"io"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -13,6 +28,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/export"
 )
@@ -221,4 +237,298 @@ func TestSlice137_DefaultRowCap(t *testing.T) {
 		t.Errorf("defaultControlsExportRowCap = %d; want 500000 (slice 137 D3 lifted cap)",
 			defaultControlsExportRowCap)
 	}
+}
+
+// ===== Constructor + builder surface =====
+//
+// The slice 137 handler exposes a small builder chain (NewExportHandler
+// → WithSource → WithLimiter) that the integration suite leans on for
+// dependency injection. The unit suite exercises the wiring itself —
+// confirming each builder method returns the same handler with the
+// override applied, and that exportLimiter() falls back to the
+// process-wide singleton when no override is set.
+
+// stubSource is a deterministic implementation of controlsExportSource
+// the unit tests use to validate the source-dispatch path in
+// listControlsForExport without standing up a pgxpool.
+type stubSource struct {
+	rows     []controlExportRow
+	exceeded bool
+	err      error
+	calls    int
+}
+
+func (s *stubSource) listForExport(_ context.Context, _ int) ([]controlExportRow, bool, error) {
+	s.calls++
+	return s.rows, s.exceeded, s.err
+}
+
+// NewExportHandler returns a non-nil handler with the pool stored on
+// it; builder methods chain off the same value.
+func TestSlice137_NewExportHandler_StoresPool(t *testing.T) {
+	// The exact pool isn't used in this test (we only inspect the
+	// returned handler's identity). Passing nil is safe because the
+	// constructor never dereferences the pool — only later DB calls
+	// would.
+	h := NewExportHandler(nil)
+	if h == nil {
+		t.Fatal("NewExportHandler returned nil")
+	}
+	if h.source != nil {
+		t.Errorf("source default = %v; want nil (production path uses inline adapter)", h.source)
+	}
+	if h.limiter != nil {
+		t.Errorf("limiter default = %v; want nil (production path resolves DefaultLimiter)", h.limiter)
+	}
+}
+
+// WithSource installs a test source and returns the same handler.
+func TestSlice137_WithSource_Chains(t *testing.T) {
+	h := NewExportHandler(nil)
+	src := &stubSource{}
+	got := h.WithSource(src)
+	if got != h {
+		t.Errorf("WithSource returned a different handler; want self-chain")
+	}
+	if h.source == nil {
+		t.Errorf("WithSource did not install the source on the handler")
+	}
+}
+
+// WithLimiter installs a test limiter and returns the same handler.
+func TestSlice137_WithLimiter_Chains(t *testing.T) {
+	h := NewExportHandler(nil)
+	lim := export.NewLimiter(3)
+	got := h.WithLimiter(lim)
+	if got != h {
+		t.Errorf("WithLimiter returned a different handler; want self-chain")
+	}
+	if h.limiter != lim {
+		t.Errorf("WithLimiter did not install the limiter on the handler")
+	}
+}
+
+// exportLimiter falls back to export.DefaultLimiter() when no
+// override is set. The override path returns the installed limiter
+// verbatim.
+func TestSlice137_ExportLimiter_FallbackAndOverride(t *testing.T) {
+	t.Run("fallback_to_default", func(t *testing.T) {
+		h := NewExportHandler(nil)
+		got := h.exportLimiter()
+		if got == nil {
+			t.Fatal("exportLimiter() returned nil; want DefaultLimiter()")
+		}
+		// Identity is exactly export.DefaultLimiter() — same process-wide singleton.
+		if got != export.DefaultLimiter() {
+			t.Errorf("exportLimiter() did not return DefaultLimiter()")
+		}
+	})
+	t.Run("override_returned_verbatim", func(t *testing.T) {
+		h := NewExportHandler(nil)
+		lim := export.NewLimiter(7)
+		h = h.WithLimiter(lim)
+		got := h.exportLimiter()
+		if got != lim {
+			t.Errorf("exportLimiter() = %p; want override %p", got, lim)
+		}
+	})
+}
+
+// listControlsForExport dispatches to source.listForExport when source
+// is non-nil; the source's return shape flows through verbatim.
+func TestSlice137_ListControlsForExport_StubSourceDispatch(t *testing.T) {
+	now := time.Now().UTC()
+	want := []controlExportRow{
+		{
+			ID:                 uuid.New(),
+			BundleID:           "bundle-stub-1",
+			Version:            1,
+			SCFID:              "IAC-06",
+			SCFAnchorID:        uuid.New(),
+			Title:              "stub control 1",
+			ControlFamily:      "identity-access-management",
+			ImplementationType: "automated",
+			OwnerRole:          "platform-eng",
+			LifecycleState:     "active",
+			ApplicabilityExpr:  "true",
+			FreshnessClass:     "fresh",
+			BundleManifestHash: "sha256:stub",
+			CreatedAt:          now,
+			UpdatedAt:          now,
+		},
+	}
+	src := &stubSource{rows: want, exceeded: false}
+	h := NewExportHandler(nil).WithSource(src)
+
+	got, exceeded, err := h.listControlsForExport(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("listControlsForExport: %v", err)
+	}
+	if exceeded {
+		t.Errorf("exceeded = true; want false (stub source returns exceeded=false)")
+	}
+	if len(got) != len(want) {
+		t.Fatalf("row count = %d; want %d", len(got), len(want))
+	}
+	if got[0].ID != want[0].ID || got[0].BundleID != want[0].BundleID {
+		t.Errorf("row mismatch through stub dispatch: got %+v; want %+v", got[0], want[0])
+	}
+	if src.calls != 1 {
+		t.Errorf("stub source call count = %d; want 1", src.calls)
+	}
+}
+
+// Stub source can return an error — it flows through unchanged.
+func TestSlice137_ListControlsForExport_StubSourceError(t *testing.T) {
+	wantErr := errors.New("stub: simulated source error")
+	src := &stubSource{err: wantErr}
+	h := NewExportHandler(nil).WithSource(src)
+
+	rows, exceeded, err := h.listControlsForExport(context.Background(), 100)
+	if !errors.Is(err, wantErr) {
+		t.Errorf("err = %v; want wrapped %v", err, wantErr)
+	}
+	if rows != nil {
+		t.Errorf("rows = %v; want nil on error", rows)
+	}
+	if exceeded {
+		t.Errorf("exceeded = true; want false on error")
+	}
+}
+
+// Stub source can flag row-cap exceeded — the flag flows through.
+func TestSlice137_ListControlsForExport_StubSourceExceeded(t *testing.T) {
+	src := &stubSource{exceeded: true}
+	h := NewExportHandler(nil).WithSource(src)
+
+	_, exceeded, err := h.listControlsForExport(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !exceeded {
+		t.Errorf("exceeded = false; want true (stub source signals row-cap exceeded)")
+	}
+}
+
+// ===== Handler early-exit branches (no DB needed) =====
+//
+// `ExportControls` exits BEFORE any pool call on two paths:
+//
+//   1. No credential in context → 401
+//   2. Credential's TenantID is not a valid UUID → 500
+//
+// Both are reachable with a nil pool. Every later branch
+// (bad-format, role-gate, concurrency-cap, encoder-resolve,
+// listControlsForExport) writes a meta-audit row before returning,
+// which touches the pool; those are exercised by
+// `export_integration_test.go` against real Postgres.
+
+// 401 path: no credential in context.
+func TestSlice137_ExportControls_NoCredentialReturns401(t *testing.T) {
+	h := NewExportHandler(nil) // pool not touched on this path
+	req := httptest.NewRequest("GET", "/v1/controls/export?format=csv", nil)
+	rec := httptest.NewRecorder()
+	h.ExportControls(rec, req)
+	if rec.Code != 401 {
+		t.Fatalf("status = %d; want 401", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "missing credential") {
+		t.Errorf("body = %q; want substring %q", rec.Body.String(), "missing credential")
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q; want application/json", got)
+	}
+}
+
+// 500 path: credential present but TenantID is not a valid UUID.
+// The handler exits BEFORE the pool is touched because the tenant
+// parse fails synchronously inside ExportControls (no meta-audit
+// write attempted on this path — the tenant id is the meta-audit
+// key, and we don't have one).
+func TestSlice137_ExportControls_InvalidTenantIDReturns500(t *testing.T) {
+	h := NewExportHandler(nil) // pool not touched on this path
+	req := httptest.NewRequest("GET", "/v1/controls/export?format=csv", nil)
+
+	// Inject a credential whose TenantID will NOT parse as a UUID.
+	ctx := authctx.WithCredential(req.Context(), credstore.Credential{
+		ID:       "test-id",
+		TenantID: "not-a-uuid",
+		IsAdmin:  true,
+	})
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	h.ExportControls(rec, req)
+	if rec.Code != 500 {
+		t.Fatalf("status = %d; want 500", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "invalid tenant") {
+		t.Errorf("body = %q; want substring %q", rec.Body.String(), "invalid tenant")
+	}
+}
+
+// ===== Counting writer =====
+//
+// controlsCountingWriter wraps an io.Writer and counts bytes written.
+// Used by ExportControls to record the body byte count for the
+// meta-audit row.
+
+func TestSlice137_ControlsCountingWriter_CountsBytes(t *testing.T) {
+	cw := &controlsCountingWriter{w: io.Discard}
+	chunk1 := []byte("hello,")
+	chunk2 := []byte("world!")
+
+	n, err := cw.Write(chunk1)
+	if err != nil {
+		t.Fatalf("Write(chunk1): %v", err)
+	}
+	if n != len(chunk1) {
+		t.Errorf("n = %d; want %d", n, len(chunk1))
+	}
+
+	n, err = cw.Write(chunk2)
+	if err != nil {
+		t.Fatalf("Write(chunk2): %v", err)
+	}
+	if n != len(chunk2) {
+		t.Errorf("n = %d; want %d", n, len(chunk2))
+	}
+
+	wantTotal := int64(len(chunk1) + len(chunk2))
+	if cw.n != wantTotal {
+		t.Errorf("cw.n = %d; want %d (sum of chunk lengths)", cw.n, wantTotal)
+	}
+}
+
+// Counting writer surfaces the underlying Writer's error AND records
+// the partial byte count returned by the underlying Write call.
+func TestSlice137_ControlsCountingWriter_PropagatesError(t *testing.T) {
+	cw := &controlsCountingWriter{w: &shortErrWriter{accept: 3}}
+	n, err := cw.Write([]byte("hello"))
+	if err == nil {
+		t.Fatalf("Write: want error from underlying short writer; got nil")
+	}
+	if n != 3 {
+		t.Errorf("n = %d; want 3 (partial write before error)", n)
+	}
+	if cw.n != 3 {
+		t.Errorf("cw.n = %d; want 3 (partial bytes accounted)", cw.n)
+	}
+}
+
+// shortErrWriter is a test-only io.Writer that accepts `accept` bytes
+// then returns an error. Used to drive the counting writer's
+// error-propagation branch.
+type shortErrWriter struct {
+	accept int
+}
+
+func (s *shortErrWriter) Write(p []byte) (int, error) {
+	if len(p) <= s.accept {
+		s.accept -= len(p)
+		return len(p), nil
+	}
+	taken := s.accept
+	s.accept = 0
+	return taken, errors.New("short writer: simulated truncation")
 }
