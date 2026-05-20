@@ -13,6 +13,46 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 182** — board-narrative AI-assist foundation pre-commitments.
+  Ships the supporting artifacts that the CLAUDE.md "Board-narrative
+  AI-assist" expansion (shipped in the OQ #14 resolution PR #403)
+  references. Four new artifacts: (1) the canonical tone anti-pattern
+  reference at `docs/governance/board-narrative-tone-anti-patterns.md`
+  with 20 banned phrases (Section 1, exact-match, copy-pasteable into
+  a `forbidden_phrases:` config), 12 banned framings (Section 2,
+  pattern-match: unprompted positive framing, marketing voice, passive-
+  voice deflection, future-tense optimism without commitment, editorial
+  summary at the top, comparative framing without baseline, hedge stack,
+  anthropomorphizing the platform, first-person plural for the platform,
+  hand-wave on causality, inferred intent, audit-binding language
+  without sign-off), 10 permitted phrases commonly mistaken as banned
+  (Section 3, with explicit OK / NOT OK examples), and the living-
+  document discipline (Section 4) for adding new entries via PR with
+  maintainer review under branch protection; (2) ADR-0006 at
+  `docs/adr/0006-board-narrative-ai-assist.md` (slot incremented from
+  the spec's `0002` because slots 0002-0005 were occupied at pickup
+  time per the slice's "ADR slot computation" guidance) capturing the
+  seven coupled sub-decisions (D1 hybrid input · D2 per-section approval
+  · D3 full prompt+response audit trail · D4 all four hallucination
+  guardrails · D5 Llama 3.1 8B + cloud opt-in · D6 inline-edit-default
+  iteration · D7 snapshot-with-each-generation versioning) plus the
+  rejected alternatives per sub-decision; (3) canvas §4.6.7 update at
+  `Plans/canvas/04-evidence-engine.md` abbreviating the seven sub-
+  decisions with cross-links to CLAUDE.md + ADR-0006 + tone reference +
+  cadence doc; (4) local-model recommendation refresh cadence at
+  `docs/operator/maintenance-cadence.md` (new file) with the 6-12 month
+  cadence, the maintainer task (benchmark + score against four D4
+  guardrails + decide + update four cross-referenced docs in one PR +
+  record refresh in `docs/audit-log/model-refresh-<YYYY>-<MM>.md`), and
+  explicit anti-triggers (cloud LLM release, quantization change,
+  larger-hardware model, smaller-hardware quality regression). No
+  board-narrative implementation ships from this slice — foundation-
+  only; board-narrative v0 fires at v2+. The four model references
+  (CLAUDE.md AI-assist boundary, CLAUDE.md tech-stack table, ADR-0006
+  D5 entry, cadence doc Current default line) are required to stay in
+  sync per P0-182-6; any subsequent model-default refresh PR updates
+  all four atomically. (#182)
+
 - **slice 177** — exceptions list-page UI surface. Adds the missing
   `/exceptions` route in `web/app/(authed)/exceptions/page.tsx` —
   tenant-wide register of exception/waiver rows consumed via a new BFF
