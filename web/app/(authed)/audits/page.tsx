@@ -364,6 +364,12 @@ function AuditsPageInner() {
           bundle bytes are NOT in this export's column set
           (P0-A-AP-1). */}
       <AuditPeriodsExportButtons />
+      {/* Slice 138 — samples data export (CSV / JSON / XLSX). Row
+          cap raised to 250K because sample populations at
+          multi-product orgs can be voluminous. INCLUDES audit_period_id
+          link (via populations.audit_period_id) so downstream
+          consumers correlate samples to a specific frozen period. */}
+      <SamplesExportButtons />
       {/* Slice 149: re-wired from disabled placeholder to a working
           link. Routes to /audits/new (slice 149 create form) which
           posts to /v1/audit-periods via the BFF. */}
@@ -541,6 +547,30 @@ function AuditPeriodsExportButtons() {
           href={`/api/admin/audit-periods/export?format=${fmt}`}
           className={buttonVariants({ variant: "outline", size: "sm" })}
           data-testid={`audit-periods-export-${fmt}`}
+        >
+          {fmt.toUpperCase()}
+        </a>
+      ))}
+    </span>
+  );
+}
+
+// SamplesExportButtons renders three direct-download links to the
+// slice 138 samples export BFF — one per format. Sibling of
+// AuditPeriodsExportButtons above; row cap is 250K at v1.
+function SamplesExportButtons() {
+  return (
+    <span
+      className="inline-flex items-center gap-1"
+      data-testid="samples-export-buttons"
+    >
+      <span className="text-xs text-muted-foreground">Samples export:</span>
+      {(["csv", "json", "xlsx"] as const).map((fmt) => (
+        <a
+          key={fmt}
+          href={`/api/admin/samples/export?format=${fmt}`}
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+          data-testid={`samples-export-${fmt}`}
         >
           {fmt.toUpperCase()}
         </a>

@@ -13,6 +13,66 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 138** — Ledger entities export (evidence + policies + exceptions
+  + samples). Four new admin endpoints close the per-entity export
+  cluster following the slice 137 precedent: `GET
+  /v1/admin/evidence/export`, `GET /v1/admin/policies/export`, `GET
+  /v1/admin/exceptions/export`, `GET /v1/admin/samples/export`. All
+  four reuse the slice-135 data-export library + slice-145 per-(tenant,
+  user) concurrency cap; all four emit a `me_audit_log` row on every
+  outcome. Migration
+  `20260520000010_ledger_entities_export_meta_audit.sql` extends the
+  `me_audit_log.action` CHECK to permit the four new action values
+  (`evidence_export`, `policies_export`, `exceptions_export`,
+  `samples_export`). Per-entity nuances:
+  - **Evidence** (D1, LOAD-BEARING): column set EXCLUDES `payload` /
+    `payload_json` at v1 (operational-metadata leak vector — vendor
+    secrets like AWS bucket-policy JSON can ride the payload column).
+    Operators who need payload introspection use the slice 106 evidence-
+    detail page (RLS-protected single-row read), NOT bulk export. Unit
+    test + BFF body-content assertion lock the absence.
+  - **Policies** (D2): full row set including `body_md` and
+    `next_review_at` (slice 094). RLS is the only mitigation per the
+    slice 138 threat-model addendum.
+  - **Exceptions** (D3): emits `duration_days` computed at the handler
+    (`expires_at − requested_at` truncated to whole days); the DB CHECK
+    constraint guarantees `0 <= duration_days <= 365`. INCLUDES owner
+    (`requested_by`), `justification`, full lifecycle timestamps,
+    `compensating_controls` joined with `|`, canonical-JSON
+    `scope_cell_predicate`.
+  - **Samples** (D4): row cap raised to 250,000 (between slice-135
+    default 50K and slice-137 500K) because sample populations at
+    multi-product orgs can be voluminous. JOIN through `populations`
+    surfaces `audit_period_id` (slice 028 freezing fk), `control_id`,
+    `time_window_*`, `frozen_at`, `row_count`.
+
+  Three BFF Export-button surfaces ship: `/evidence` (replaces the
+  prior disabled "Export JSONL" placeholder), `/policies`, `/audits`
+  (samples join the existing audit-periods toolbar). The exceptions
+  Export-button UI is deferred to follow-on slice 177 (no dedicated
+  `/exceptions` list page exists in `(authed)/` at v1); the backend
+  handler + BFF still ship + are discoverable via direct URL.
+
+  Down migration includes defensive `DELETE FROM me_audit_log WHERE
+  action IN (4 new values)` BEFORE the constraint swap — operators
+  with retained forensics MUST archive these rows out-of-band before
+  applying the down (destructive in prod-rollback context; harmless in
+  CI ephemeral-DB context). Plural-of-entity convention matches slice
+  137 / 139 (`controls_export`, `audit_periods_export`,
+  `vendors_export`); slice 136's singular `risk_export` remains the
+  outlier (one register).
+
+  All four target packages (`internal/api/evidence/`,
+  `internal/api/policies/`, `internal/api/exceptions/`,
+  `internal/api/audit/`) are in the coverage-gate `excludes` list per
+  `cmd/scripts/coverage-thresholds.json`, so no coverage-floor lift is
+  required; ~14 unit tests per package still ship for correctness.
+  Eight build-time decisions logged in
+  [`docs/audit-log/138-ledger-entities-export-decisions.md`](docs/audit-log/138-ledger-entities-export-decisions.md).
+  Migration round-trip verified locally (up → down → re-up) against
+  `postgres:16-alpine`. OpenAPI spec extended to 185 routes
+  (`docs/openapi.yaml` regenerated).
+
 - **slice 137** — Controls UCF graph data export (CSV / JSON / XLSX).
   New endpoint `GET /v1/controls/export?format=<csv|json|xlsx>` reuses
   the slice-135 data-export library + slice-145 per-(tenant, user)

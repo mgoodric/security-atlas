@@ -751,6 +751,26 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/admin/audit-periods/export", auditPeriodsExportH.ExportAuditPeriods)
 	vendorsExportH := adminvendors.New(s.dbPool)
 	root.Get("/v1/admin/vendors/export", vendorsExportH.ExportVendors)
+	// Slice 138: per-entity data exports for the ledger entities —
+	// evidence + policies + exceptions + samples. Each closes the
+	// per-entity export cluster with the slice 135 library + slice
+	// 145 concurrency cap. Meta-audit actions:
+	//   `evidence_export` (payload column EXCLUDED at v1 per
+	//    slice 138 P0-A-Ledger-1 — operational-metadata leak vector)
+	//   `policies_export`
+	//   `exceptions_export`
+	//   `samples_export` (row cap 250K per slice doc; samples can
+	//    be voluminous at multi-product orgs)
+	// Migration: 20260520000010_ledger_entities_export_meta_audit.sql.
+	// Same admit set as the slice 137 controls-export route.
+	evidenceExportH := apievidence.NewExportHandler(s.dbPool)
+	root.Get("/v1/admin/evidence/export", evidenceExportH.ExportEvidence)
+	policiesExportH := policiesapi.NewExportHandler(s.dbPool)
+	root.Get("/v1/admin/policies/export", policiesExportH.ExportPolicies)
+	exceptionsExportH := exceptionsapi.NewExportHandler(s.dbPool)
+	root.Get("/v1/admin/exceptions/export", exceptionsExportH.ExportExceptions)
+	samplesExportH := auditapi.NewSamplesExportHandler(s.dbPool)
+	root.Get("/v1/admin/samples/export", samplesExportH.ExportSamples)
 	// Slice 076: metrics catalog + cascade + observation store. Routes
 	// appended per the parallel-batch convention (chi.Mux rejects two
 	// Mounts at "/"). The literal-segment route /v1/metrics/cascade is

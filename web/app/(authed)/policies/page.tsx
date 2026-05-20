@@ -54,7 +54,7 @@ import {
   type ListColumn,
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {
   fetchPoliciesList,
@@ -301,8 +301,28 @@ function PoliciesPageInner() {
     },
   ];
 
+  // Slice 138 — three Export links to the slice 138 policies BFF
+  // (`/api/admin/policies/export?format=...`). Full policy row set
+  // (including body_md) — operators need it for audit prep. RLS is
+  // the only mitigation.
   const actions = (
     <>
+      <div
+        className="flex items-center gap-1"
+        data-testid="policies-export-buttons"
+      >
+        <span className="text-xs text-muted-foreground">Export:</span>
+        {(["csv", "json", "xlsx"] as const).map((fmt) => (
+          <a
+            key={fmt}
+            href={`/api/admin/policies/export?format=${fmt}`}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+            data-testid={`policies-export-${fmt}`}
+          >
+            {fmt.toUpperCase()}
+          </a>
+        ))}
+      </div>
       <Button variant="outline" size="sm" disabled>
         Acknowledgment report
       </Button>
