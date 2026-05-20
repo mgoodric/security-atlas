@@ -1,9 +1,9 @@
 # 155 — Questionnaire feature: design + build (CAIQ / SIG / HECVAT response collection)
 
 **Cluster:** Backend / Frontend / Multi-tenancy
-**Estimate:** 3-5d (large; design-heavy)
+**Estimate:** 3-4d (tracer-bullet scope locked by maintainer 2026-05-20)
 **Type:** JUDGMENT
-**Status:** `not-ready`
+**Status:** `ready` (scope locked 2026-05-20 — see "What this slice ships (v1 tracer-bullet scope)" below)
 
 ## Narrative
 
@@ -25,23 +25,29 @@ This is genuinely new work — not a fix or gap-fill but a substantial feature b
 - PDF export — canvas §4.6.3
 - No AI-assist at v1; opt-in in v2 — canvas §4.6 + CLAUDE.md AI-assist boundary
 
-**Scope discipline (what is OUT for v1):**
+**Scope discipline — TRACER-BULLET LOCK 2026-05-20 (what is OUT for v1):**
 
 - AI-assist (v2)
 - CAIQ + SIG TEMPLATES bundling (licensing-bounded; customer brings file)
 - Cross-tenant questionnaire sharing
 - Vendor-facing portal (where the requesting vendor submits)
+- **Multi-format import (CSV / JSON / Word) — DEFERRED. Excel only for v1.** Spillover slices file as demand surfaces.
+- **HECVAT bundled templates — DEFERRED.** Customer brings the Excel file; library is format-agnostic via the Excel reader. Bundling HECVAT is a follow-on slice that just adds the .xlsx fixtures + a "starter library" UX affordance.
 
-**What this slice ships (v1 scope):**
+**What this slice ships (v1 tracer-bullet scope, locked by maintainer 2026-05-20):**
 
-- Design phase: deliver the missing `Plans/mockups/questionnaire.html` mockup
-- Backend: `internal/api/questionnaires/` package with CRUD + import/export endpoints
-- Frontend: `web/app/(authed)/questionnaires/` route + detail / response views
-- AnswerLibrary: SCF-anchored canonical answers reusable across questionnaires
+- Design phase: deliver the missing `Plans/mockups/questionnaire.html` mockup (mockup-only scope; the load-bearing UX call is what the answer-authoring + citation surface looks like)
+- Backend: `internal/api/questionnaires/` package with CRUD + **Excel import** + Excel export endpoints
+- Frontend: `web/app/(authed)/questionnaires/` route + detail / response views (manual authoring; one citation picker; PDF export button)
+- AnswerLibrary: **skeleton** — SCF-anchored canonical answers reusable across questionnaires. Skeleton = the table + the lookup query + a "previous answer" suggestion picker on the authoring surface. Full library management UI (search, edit, deprecate, version) is a v2 follow-on.
 - Manual answer authoring with citations to evidence records
 - PDF export
 
-This is a significant slice — should be GRILLED via `/idea-to-slice` at pickup with full grill-with-docs + Security STRIDE + grill-me passes before drafting ACs.
+**Why tracer-bullet:** the v1 binary success test is the solo CISO running their next SOC 2 out of atlas. Vendor security questionnaires arrive in their inbox in Excel format 80%+ of the time. Shipping Excel-only ingest + manual authoring + a primitive answer-library closes the gap immediately, and every other format / AI-assist / vendor portal is purely additive — never blocks the v1 success test.
+
+**Load-bearing design decision at pickup:** the AnswerLibrary key shape. Free-text-keyed → glorified word processor. SCF-anchor-keyed → genuine reuse across CAIQ / SIG / vendor-custom questionnaires. The skeleton MUST key on SCF anchor IDs (an answer is "what we say about IAC-06" not "what we said when asked 'do you encrypt data at rest'"). The question-text mapping is a _secondary_ index for fuzzy matching, not the primary key.
+
+This is still a significant slice — should be GRILLED via `/idea-to-slice` at pickup with full grill-with-docs + Security STRIDE + grill-me passes before drafting full ACs against the tracer-bullet scope. The scope lock above is the load-bearing call; the grill produces the implementation ACs.
 
 ## Acceptance criteria (stub — expand at pickup via /idea-to-slice grill)
 
@@ -76,8 +82,8 @@ This is a significant slice — should be GRILLED via `/idea-to-slice` at pickup
 
 ## Notes for the implementing agent
 
-LARGE slice. Likely should split into 2-4 sub-slices once design mockup lands. Marker priority is LOW until design phase completes — the maintainer should NOT pick this up without first delivering the mockup + running `/idea-to-slice` for the comprehensive design.
+LARGE slice — but scope is now tracer-bullet locked (Excel import + manual authoring + AnswerLibrary skeleton + PDF export). Likely still produces 2-3 follow-on spillover slices: (1) CAIQ/SIG ingest (Excel + CSV + JSON for the same library); (2) full AnswerLibrary management UI (search/edit/deprecate/version); (3) vendor-facing portal. Those file as demand surfaces.
 
-This slice is a placeholder so the gap is captured in the canonical `_STATUS.md`; the actual design + build work is its own multi-week effort.
+Maintainer pre-confirm 2026-05-20: scope locked, ready for engineer pickup. Engineer's first step at pickup is delivering the `Plans/mockups/questionnaire.html` mockup against the locked scope (NOT the full canvas §4.6 surface). The mockup IS the design grill input.
 
-Provenance: filed 2026-05-18 from comprehensive front-end-to-back-end gap audit; placeholder slice to capture the missing feature.
+Provenance: filed 2026-05-18 from comprehensive front-end-to-back-end gap audit; scope locked 2026-05-20 by maintainer to tracer-bullet (Excel-only, manual-authoring-first, AnswerLibrary skeleton).

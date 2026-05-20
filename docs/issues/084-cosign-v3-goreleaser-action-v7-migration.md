@@ -3,7 +3,7 @@
 **Cluster:** Infra
 **Estimate:** 0.5d
 **Type:** AFK
-**Status:** not-ready (waiting on follow-on dependency)
+**Status:** `ready` (maintainer green-lit 2026-05-20 — no real users yet, so no release-window blast-radius concern; proceed as solo iteration when picked up)
 
 ## Narrative
 
@@ -64,3 +64,4 @@ This is a real migration — not a single-line bump — and deserves its own sli
 - **The cosign v3 release notes** (https://github.com/sigstore/cosign/releases/tag/v3.0.0) are the canonical source for the breaking changes. The new bundle-format flag set is part of CVE-tracked Sigstore Sigstore-protobuf-bundle work.
 - **Test approach:** same as slice 080 — push a `v0.0.0-slice084-test` tag at the branch tip, observe the workflow, verify the published artifacts cosign-verify cleanly from a clean shell (no environment state from the action), then delete the test tag + the GitHub Release object.
 - **Maintainer-action note:** the `Self-verify signed checksums` step is the authoritative round-trip test. If it passes against a v3-signed artifact, the migration is complete; if it doesn't, either the args migration is incomplete or the verify-blob args also need updating.
+- **Maintainer pre-confirm 2026-05-20:** green-lit for immediate pickup. No real users yet means no concern about release-window blast-radius; the maintainer is the only consumer of release tags, so a botched release is recoverable by deleting + re-tagging. Engineer can push a `v0.0.0-slice084-test` tag freely as the round-trip test fixture (delete on green; leave on red for inspection).
