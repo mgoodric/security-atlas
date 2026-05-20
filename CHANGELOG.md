@@ -13,6 +13,23 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 177** — exceptions list-page UI surface. Adds the missing
+  `/exceptions` route in `web/app/(authed)/exceptions/page.tsx` —
+  tenant-wide register of exception/waiver rows consumed via a new BFF
+  at `web/app/api/exceptions/route.ts` (proxies `GET /v1/exceptions`,
+  whitelists `status` + `control_id` query params, drops any caller-
+  supplied `tenant_id`). Surfaces the slice 138 Export CSV / JSON /
+  XLSX buttons in the toolbar via a new
+  `web/lib/api/exceptions-export.ts` URL helper (mirrors the slice 137
+  controls-export shape). Two filter pills (status + control), eight
+  derived columns (id / control / status / requested_by / requested /
+  expires / days / justification), separate truly-empty vs filter-
+  empty states, row click routes to control detail (the slice 022
+  lifecycle workflow lives there per P0-A-176-1). Adds vitest BFF
+  coverage including cross-tenant isolation assertion + Playwright e2e
+  contract (quarantined behind slice 082 seed harness per the slice
+  101/102 precedent).
+
 - **slice 133** — mkdocs user docs content refresh. Ships 9 new operator
   pages under `docs-site/docs/`: six per-primitive how-tos
   (`primitives/controls.md`, `primitives/risks.md`,
