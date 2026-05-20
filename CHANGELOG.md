@@ -13,6 +13,21 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 172** — MCP (Model Context Protocol) server foundation + six
+  read-only tools. New binary `cmd/atlas-mcp` speaks MCP over stdio
+  (newline-delimited JSON-RPC 2.0, protocol revision `2024-11-05`); six
+  read tools wrap existing platform HTTP endpoints (`list_controls`,
+  `get_control`, `list_risks`, `get_risk`, `list_evidence`,
+  `list_audit_periods`). Bearer-per-process model binds one MCP server
+  to one tenant (RLS enforces isolation server-side). Every outbound
+  request carries `User-Agent: atlas-mcp/<version> (mcp; ai_assisted=read-only)`
+  so platform-side logs can attribute MCP-originated traffic. Hand-rolled
+  JSON-RPC implementation (no third-party MCP framework — see
+  [`docs/audit-log/172-mcp-server-decisions.md`](docs/audit-log/172-mcp-server-decisions.md)
+  D2). Experimental until 30-day soak per slice 116 advisory-vs-required
+  pattern. Write tools deferred to slice 173 (gated on this slice +
+  HITL approval flow per CLAUDE.md "AI-assist boundary").
+
 - **slice 139** — Audit periods + vendors data export (CSV / JSON / XLSX).
   Two new endpoints (`GET /v1/admin/audit-periods/export`,
   `GET /v1/admin/vendors/export`) reusing the slice-135 export library
