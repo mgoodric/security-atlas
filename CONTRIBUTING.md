@@ -601,6 +601,48 @@ short — extend the test rather than weakening the helper. Open-redirect
 findings outside the signIn flow should be filed as follow-on slices
 (per slice 086 P0-A4 — no in-place scope expansion).
 
+## Contributing an `evidence_kind` schema
+
+Schemas live in-tree at `internal/api/schemaregistry/schemas/<kind>/<semver>.json`. The platform embeds them at compile time via `//go:embed`; new schemas land as a PR against this repo. The conventions below are the result of canvas open-question #9 + #17 resolution (see `Plans/canvas/11-open-questions.md`).
+
+**Three rules govern community schema contributions:**
+
+### 1. In-tree until trigger
+
+Schemas stay in-tree (`internal/api/schemaregistry/schemas/`) until **either** (a) the schema count crosses 100 **or** (b) community schema PRs exceed ~1 per week sustained. At that point a maintainer files a slice to migrate to an out-of-tree `security-atlas-schemas` registry repo. Today (16 schemas, low-frequency community contribution) the in-tree model is the right shape.
+
+Practically: open a PR against this repo with the new schema at `internal/api/schemaregistry/schemas/<kind>/1.0.0.json`. The `go test ./internal/api/schemaregistry/...` suite round-trips it through embed-load and Postgres at boot.
+
+### 2. Maintainer-only review (for now)
+
+Every community schema PR requires a maintainer's approval before merge. There is no "verified contributor" tier yet. The expectation is that maintainers scrutinize:
+
+- **JSON Schema correctness** (CI's `go test ./internal/api/schemaregistry/...` already covers this structurally)
+- **Semver discipline** (CI's `CheckAdditiveOver` in `internal/api/schemaregistry/additive.go` rejects non-additive minor bumps)
+- **`x-default-scf-anchors` accuracy** (THE manual checkpoint — does the contributor's claim "my schema covers IAC-06" actually hold? Loose anchor declarations weaken the UCF graph; maintainer review is the load-bearing mitigation)
+- **Naming convention** (`<vendor>.<resource>.<observation>` for connector-produced; `manual.<observation>` for operator-attested)
+
+A "verified contributor" CODEOWNERS-style tier will be designed when **both** (a) >20 community-contributed schemas have landed **and** (b) ≥3 contributors have shipped >5 schemas each. The design happens with those contributors in the room, not speculatively.
+
+### 3. 90-day deprecation window for breaking-major bumps
+
+When a schema's `2.0.0` (or `3.0.0`, etc.) lands, the previous major's latest version stays in the registry for **at least 90 days from the day v2.0.0 lands on `main`**. During the window:
+
+- Both `v1.x.x` and `v2.x.x` are pushable by connectors / SDKs.
+- The platform marks `v1`-versioned records as "deprecated since `<v2.0.0-land-date>`" in the UI.
+- Connector contributors get a 90-day migration runway.
+
+After the window:
+
+- A maintainer files a PR removing the `v1.x.x` schema files from `internal/api/schemaregistry/schemas/<kind>/`.
+- `v1` records remain queryable in the evidence ledger forever (append-only invariant); new `v1.x.x` pushes return `400 schema deprecated`.
+
+CI enforces the floor: any PR that removes a schema version file younger than 90 days fails the `schema-removal-age` check. The check has an explicit override label (`[deprecation-override]` on the PR) for emergencies (e.g., a schema was published with a security-sensitive defect and must be unpublished immediately) — overrides require a maintainer's approval and a note in the audit log under `docs/audit-log/`.
+
+Pattern source: OpenTelemetry semantic-conventions deprecation model. Battle-tested at scale; copy verbatim rather than designing our own.
+
+---
+
 ## AI-assist boundary
 
 The platform supports AI assistance in narrowly-defined places (see [`CLAUDE.md`](./CLAUDE.md) → "AI-assist boundary"). Contributor-side rules:
