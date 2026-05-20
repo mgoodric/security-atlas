@@ -27,6 +27,15 @@ const geistMono = Geist_Mono({
 // image-model text rendering — slice 074 P0-A3 continues to apply).
 // We ship them as light-theme cards: OG scrapers pick once at unfurl
 // time and don't honor prefers-color-scheme.
+//
+// Slice 176 — this RootLayout does NOT render the logo `<img>` element.
+// It only declares the Metadata API's `icons` (favicon stack) + OG /
+// Twitter image URLs, none of which are theme-coupled at runtime (the
+// favicon stack is a single set served to every theme; OG scrapers
+// freeze a single variant at unfurl time). The two mount sites that
+// DO render the logo `<img>` (topbar + login page) were updated to
+// use `<ThemeAwareLogo>`. See
+// docs/audit-log/176-logo-theme-coupling-decisions.md AC-7 audit.
 export const metadata: Metadata = {
   title: "security-atlas",
   description:

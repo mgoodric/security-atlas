@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { VersionFooter } from "@/components/version-footer";
 import { FirstInstallCard } from "@/components/first-install-card";
+import { ThemeAwareLogo } from "@/components/shell/theme-aware-logo";
 
 import { signIn } from "./actions";
 
@@ -39,26 +40,21 @@ export default async function LoginPage({
           075 specifies the logo renders identically on /login (where
           the user is not yet authed) and the (authed) routes. The login
           page does not use the TopBar component, so the logo is placed
-          directly here with the same <picture> theme-aware semantics. */}
+          directly here.
+
+          Slice 176 — swapped the inline `<picture media="prefers-color-scheme">`
+          element for `<ThemeAwareLogo>`. The OS-coupled `<picture>` element
+          was the wrong signal — slice 170's app theme picker writes
+          `data-theme` to `<html>` (light / dark / system) and the logo
+          variant must follow that. See
+          docs/audit-log/176-logo-theme-coupling-decisions.md. */}
         <div className="flex justify-center pb-2">
-          <picture>
-            <source
-              media="(prefers-color-scheme: dark)"
-              srcSet="/logo-dark.svg"
-            />
-            <source
-              media="(prefers-color-scheme: light)"
-              srcSet="/logo-light.svg"
-            />
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/logo-light.svg"
-              alt="security-atlas"
-              width={64}
-              height={64}
-              className="h-16 w-16"
-            />
-          </picture>
+          <ThemeAwareLogo
+            width={64}
+            height={64}
+            className="h-16 w-16"
+            alt="security-atlas"
+          />
         </div>
         <FirstInstallCard />
         <Card>
