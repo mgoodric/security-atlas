@@ -327,6 +327,101 @@ func (q *Queries) ListActiveControls(ctx context.Context, tenantID pgtype.UUID) 
 	return items, nil
 }
 
+const listActiveControlsForExport = `-- name: ListActiveControlsForExport :many
+SELECT id, bundle_id, version, scf_id, scf_anchor_id, title,
+       control_family, implementation_type, owner_role, lifecycle_state,
+       applicability_expr, freshness_class, bundle_manifest_hash,
+       created_at, updated_at
+FROM controls
+WHERE tenant_id = $1 AND superseded_by IS NULL
+ORDER BY bundle_id ASC, version DESC
+LIMIT $2
+`
+
+type ListActiveControlsForExportParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Limit    int32       `json:"limit"`
+}
+
+type ListActiveControlsForExportRow struct {
+	ID                 pgtype.UUID               `json:"id"`
+	BundleID           string                    `json:"bundle_id"`
+	Version            int32                     `json:"version"`
+	ScfID              *string                   `json:"scf_id"`
+	ScfAnchorID        pgtype.UUID               `json:"scf_anchor_id"`
+	Title              string                    `json:"title"`
+	ControlFamily      string                    `json:"control_family"`
+	ImplementationType ControlImplementationType `json:"implementation_type"`
+	OwnerRole          string                    `json:"owner_role"`
+	LifecycleState     ControlLifecycleState     `json:"lifecycle_state"`
+	ApplicabilityExpr  string                    `json:"applicability_expr"`
+	FreshnessClass     *string                   `json:"freshness_class"`
+	BundleManifestHash string                    `json:"bundle_manifest_hash"`
+	CreatedAt          pgtype.Timestamptz        `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz        `json:"updated_at"`
+}
+
+// Slice 137 — controls UCF graph data-export projection.
+//
+// Returns every active (non-superseded) control for the caller's
+// tenant with the canonical export column set (slice 137 D2), capped
+// at $1 rows. The caller passes (row_cap + 1) so the handler can
+// detect the row-cap-exceeded path with no extra round trip.
+//
+// Column projection rationale (see docs/audit-log/137-controls-ucf-
+// export-decisions.md D2):
+//
+//	identity:    id, bundle_id, version, title, control_family
+//	topology:    scf_id, scf_anchor_id (foreign-key join columns;
+//	             downstream consumers reconstruct the UCF graph
+//	             against the public SCF catalog + fw_to_scf_edges)
+//	posture:     implementation_type, owner_role, lifecycle_state
+//	tenant data: applicability_expr (the slice 017 DSL — RLS protects
+//	             tenant isolation, NOT column omission)
+//	integrity:   freshness_class, bundle_manifest_hash
+//	audit:       created_at, updated_at
+//
+// RLS posture: the WHERE tenant_id = $1 clause is belt-and-suspenders
+// alongside the GUC-driven RLS policy (slice 002). The tenancy.ApplyTenant
+// call upstream pins the GUC; the explicit WHERE protects against any
+// future RLS-policy regression. The existing ListActiveControls query
+// carries the same belt-and-suspenders clause.
+func (q *Queries) ListActiveControlsForExport(ctx context.Context, arg ListActiveControlsForExportParams) ([]ListActiveControlsForExportRow, error) {
+	rows, err := q.db.Query(ctx, listActiveControlsForExport, arg.TenantID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveControlsForExportRow
+	for rows.Next() {
+		var i ListActiveControlsForExportRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BundleID,
+			&i.Version,
+			&i.ScfID,
+			&i.ScfAnchorID,
+			&i.Title,
+			&i.ControlFamily,
+			&i.ImplementationType,
+			&i.OwnerRole,
+			&i.LifecycleState,
+			&i.ApplicabilityExpr,
+			&i.FreshnessClass,
+			&i.BundleManifestHash,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listControlVersionsByBundle = `-- name: ListControlVersionsByBundle :many
 SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
        title, lifecycle_state, bundle_manifest_hash, created_at

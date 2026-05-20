@@ -13,6 +13,31 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 137** — Controls UCF graph data export (CSV / JSON / XLSX).
+  New endpoint `GET /v1/controls/export?format=<csv|json|xlsx>` reuses
+  the slice-135 data-export library + slice-145 per-(tenant, user)
+  concurrency cap. Lifted row cap to 500,000 (5x slice-136's 50K) for
+  the UCF graph's larger surface; streaming-memory budget asserted at
+  200 MB at 500K rows. D1 JUDGMENT: flat projection — one row per
+  active tenant control with `scf_id` + `scf_anchor_id` as foreign-key
+  columns; downstream consumers reconstruct framework satisfactions
+  via the public SCF catalog + `fw_to_scf_edges`. 15-column canonical
+  set: identity (id, bundle_id, version, title, control_family),
+  topology (scf_id, scf_anchor_id), posture (implementation_type,
+  owner_role, lifecycle_state), tenant data (applicability_expr —
+  RLS-protected), integrity (freshness_class, bundle_manifest_hash),
+  audit (created_at, updated_at). Migration
+  `20260520000000_controls_export_meta_audit.sql` extends the
+  `me_audit_log.action` CHECK to permit `controls_export`. Down
+  migration includes defensive `DELETE FROM me_audit_log WHERE action
+  = 'controls_export'` BEFORE the constraint swap (operators with
+  retained forensics MUST archive these rows out-of-band before
+  applying the down — surfaced in slice 137 D5). BFF at
+  `/api/controls/export` (slice 110 bearer-only). Export CSV / JSON /
+  XLSX buttons on `/controls` replace the prior disabled placeholder.
+  Eight build-time decisions logged in
+  [`docs/audit-log/137-controls-ucf-export-decisions.md`](docs/audit-log/137-controls-ucf-export-decisions.md).
+
 - **slice 172** — MCP (Model Context Protocol) server foundation + six
   read-only tools. New binary `cmd/atlas-mcp` speaks MCP over stdio
   (newline-delimited JSON-RPC 2.0, protocol revision `2024-11-05`); six
