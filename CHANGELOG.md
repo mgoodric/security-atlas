@@ -53,6 +53,27 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   sync per P0-182-6; any subsequent model-default refresh PR updates
   all four atomically. (#182)
 
+- **slice 179** — Schema-removal age CI check enforcing the 90-day
+  deprecation window for breaking-major bumps of `evidence_kind`
+  schemas. New job `Schema · removal-age (90-day floor)` in
+  `.github/workflows/ci.yml` runs on PRs that touch
+  `internal/api/schemaregistry/schemas/**`; for each file the PR
+  removes, the check reads the file's introduction commit on `main`
+  via `git log --diff-filter=A` and fails when age < 90 days.
+  Bypassable via the exact `[deprecation-override]` PR label (requires
+  a maintainer's approval and an `docs/audit-log/` entry). Worker
+  script at `scripts/check-schema-removal-age.sh` with companion test
+  harness `scripts/check-schema-removal-age_test.sh` (27 fixture-driven
+  assertions covering all-pass / one-violation / override-bypass /
+  empty-input / boundary / stdin / unknown-path / multi-violation).
+  Implementation half of the OQ #9 + #17 resolution (canvas
+  `Plans/canvas/11-open-questions.md`); governance side lives in
+  `CONTRIBUTING.md` "Contributing an `evidence_kind` schema". Operator
+  workflow documented in
+  `internal/api/schemaregistry/schemas/README.md`. NOT a required
+  check in this slice — promotion to branch-protection is a follow-on
+  after the check proves stable (P0-179-4). Decisions log at
+  `docs/audit-log/179-schema-removal-age-decisions.md` (#179).
 - **slice 177** — exceptions list-page UI surface. Adds the missing
   `/exceptions` route in `web/app/(authed)/exceptions/page.tsx` —
   tenant-wide register of exception/waiver rows consumed via a new BFF
