@@ -144,6 +144,8 @@ If a commit was AI-assisted, also include a `Co-authored-by:` trailer naming the
 
 ## Pull request workflow
 
+How the project is governed (BDFL · decision-making · funding posture · bus-factor & succession) is documented in [`GOVERNANCE.md`](./GOVERNANCE.md).
+
 1. Branch from `main` using the pattern `<area>/<short-description>` (for example `evidence/sdk-push-protocol` or `ucf/scf-importer`).
 2. Open a draft PR early. Use the PR template; fill every section.
 3. Run `pre-commit run --all-files` locally before pushing. CI runs the same hooks; passing locally avoids CI churn.
