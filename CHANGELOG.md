@@ -332,6 +332,48 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Fixed
 
+- **slice 176** — Logo variant now follows app theme; README +
+  `docs/images/` regenerated to match slice-167 design
+  ([#176](https://github.com/mgoodric/security-atlas/issues/176)).
+  Two bugs:
+  **Bug A** — the three logo mount sites
+  (`web/components/shell/topbar.tsx`, `web/app/login/page.tsx`, and the
+  audit row for `web/app/layout.tsx` which renders no `<img>`) used a
+  `<picture media="(prefers-color-scheme: ...)">` element that tracked
+  the OS preference, not the app theme picker (slice 070/170's
+  persisted `data-theme` attribute on `<html>`). Operators on OS=dark
+  with explicit app theme "light" were served `/logo-dark.svg`
+  (near-white ink, `#f8fafc`) onto a light app background and could
+  not see the logo at all. Replaced the inline `<picture>` blocks with
+  a new `<ThemeAwareLogo>` component
+  (`web/components/shell/theme-aware-logo.tsx`) that reads
+  `<html data-theme>` directly + uses a `MutationObserver` to re-render
+  on /settings changes + falls back to `prefers-color-scheme` only when
+  the resolved theme is `"system"`. Pure picker logic
+  (`web/lib/theme-aware-logo.ts`) is unit-tested in vitest covering all
+  four (app-theme × OS-pref) combinations (8 tests).
+  **Bug B** — `docs/images/logo-{light,dark}.png` were the pre-slice-167
+  design (slice 167's anti-criterion P0-A4 limited that slice to
+  `web/public/`, deferring the docs/README assets here). Regenerated
+  both PNGs from the slice 167 SVG sources via the same sharp@0.34 +
+  pngquant pipeline; the regenerated files end up byte-identical
+  (SHA-256 matched) to `web/public/logo-{light,dark}.png` because both
+  pipelines are deterministic for the same inputs. Both PNGs are 4638 B
+  / 4746 B gzipped — well under the slice 167 STRIDE-D 16 KB cap.
+  Playwright spec `web/e2e/logo-render.spec.ts` extended with a Bug A
+  regression assertion: sets `<html data-theme="dark">` from a
+  `page.evaluate()` and asserts the rendered `<img src>` flips to the
+  dark variant; toggling back to `"light"` flips it back to the light
+  variant regardless of OS preference. Decisions log at
+  [`docs/audit-log/176-logo-theme-coupling-decisions.md`](docs/audit-log/176-logo-theme-coupling-decisions.md)
+  (D1 = `data-theme` reader + MutationObserver pattern, chosen because
+  slice 170 writes `data-theme` not a Tailwind `dark:` class; D2 =
+  component named `ThemeAwareLogo` colocated at
+  `web/components/shell/`; D3 = sharp + pngquant pipeline matching
+  slice 167; D4 = AC-7 audit confirming `web/app/layout.tsx` renders no
+  `<img>` — only Metadata API `icons` + OG/Twitter image URLs, none of
+  which are theme-coupled at runtime).
+
 - Playwright e2e: settings page coverage gated on CI
   ([#164](https://github.com/mgoodric/security-atlas/issues/164); closes
   slice 154 F11). `web/e2e/settings.spec.ts` joins the gated CI rotation:
