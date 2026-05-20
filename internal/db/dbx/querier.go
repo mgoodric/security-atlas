@@ -878,9 +878,42 @@ type Querier interface {
 	// atlas_migrate. Returns every row regardless of tenant. Never reachable
 	// through the app role under RLS.
 	ListAllEvidenceKindSchemas(ctx context.Context) ([]EvidenceKindSchema, error)
+	// Slice 174: anchor catalog export edges projection. Returns EVERY
+	// fw_to_scf_edges row whose target anchor is in the current SCF
+	// framework_version, joined to framework_requirements +
+	// framework_versions + frameworks so consumers get the natural-key
+	// (`framework_slug:version:code`) without a second query.
+	//
+	// Catalog data — no tenant_id; no RLS clause; bounded result set
+	// (~10K edges at current SCF release: ~1,400 anchors × 3-8 edges
+	// per anchor average). `no_relationship` edges are INCLUDED here
+	// because the export is the canonical catalog dump — operators
+	// doing reconciliation want to see "this anchor explicitly does NOT
+	// map to that requirement" as a recorded fact, not a silent
+	// omission. The slice 008 traversal views filter no_relationship
+	// out for coverage UI; the export does NOT.
+	//
+	// Sorted by anchor_scf_id then framework_slug + framework_version
+	// + requirement_code so the rows group by anchor (matches the
+	// visual ordering of the JSON projection's nested array).
+	ListAllFwToScfEdgesForExport(ctx context.Context) ([]ListAllFwToScfEdgesForExportRow, error)
 	// Used by the seeder to compare existing edges + by the docs reference
 	// generator.
 	ListAllMetricCascadeEdges(ctx context.Context) ([]ListAllMetricCascadeEdgesRow, error)
+	// Slice 174: anchor catalog export. Returns EVERY SCF anchor in the
+	// current SCF framework_version (status='current'), joined to
+	// framework_versions + frameworks so the export carries the framework
+	// provenance (`framework_slug`, `framework_version`) without a
+	// second query. Sorted by `scf_id` for stable output across runs and
+	// across tenants (the global catalog is identical for every tenant,
+	// so the bit-for-bit-identical cross-tenant assertion in the
+	// integration test relies on this stable ordering).
+	//
+	// Catalog data — no tenant_id; no RLS clause; bounded result set
+	// (~1,400 anchors at current SCF release). The `LIMIT` parameter
+	// carries the slice 174 row cap so the handler can detect cap-
+	// exceeded by asking for cap+1.
+	ListAllSCFAnchorsForExport(ctx context.Context, limit int32) ([]ListAllSCFAnchorsForExportRow, error)
 	// Defaults + tenant-private themes in one query. Order: defaults first, then
 	// tenant themes alphabetically. Used by slice 053's "available themes for
 	// this tenant" picker.

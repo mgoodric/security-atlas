@@ -174,6 +174,15 @@ func (s *Server) httpHandler() http.Handler {
 	// when `?include=state` is set. The non-state paths continue to use
 	// the pre-bound `queries`.
 	root.Mount("/", anchors.NewWithPool(queries, s.dbPool).Routes())
+	// Slice 174: UCF anchor catalog data export (CSV / JSON / XLSX).
+	// Reuses the slice 135 export library's CSV encoder + filename
+	// builder; the nested JSON + two-sheet XLSX projections live
+	// inside the anchors package (slice 174 D6). The literal-segment
+	// /v1/anchors/export route sits on the trie alongside the
+	// /v1/anchors/{id} pattern from anchors.Routes(); chi resolves the
+	// static segment ahead of the param segment.
+	anchorsExportH := anchors.NewExportHandler(s.dbPool)
+	root.Get("/v1/anchors/export", anchorsExportH.ExportAnchors)
 
 	// Slice 037: /health liveness probe. Registered after the root Mount
 	// and alongside the other direct routes below — chi panics if a route

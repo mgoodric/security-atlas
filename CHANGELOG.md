@@ -13,6 +13,54 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 174** — UCF anchor catalog export (CSV / JSON / XLSX).
+  New `GET /v1/anchors/export?format=<csv|json|xlsx>` endpoint that
+  exports the SCF anchor catalog (anchor metadata + framework
+  satisfactions inline) in three native projections per the
+  maintainer-locked D1 (2026-05-20): `json` → nested JSON, one
+  object per anchor with a `framework_satisfactions` array;
+  `xlsx` → two-sheet workbook (Sheet 1 = Anchors metadata,
+  Sheet 2 = Edges with `anchor_id` + `anchor_scf_id` join keys
+  at columns A and B for VLOOKUP / XLOOKUP / pivot-table
+  workflows); `csv` → flat-nested fallback with the
+  framework satisfactions JSON-stringified into a trailing
+  column. Reuses the slice 135 export library's CSV cell-
+  injection sanitizer and filename builder; the nested JSON
+  + two-sheet XLSX writers live in `internal/api/anchors/`
+  (slice 174 D6 — the generic library is single-sheet by
+  construction). New per-(tenant, user) meta-audit action
+  `anchors_export` extends the `me_audit_log.action` CHECK
+  constraint via migration
+  `20260520010000_anchors_export_meta_audit.sql`. Two new sqlc
+  queries (`ListAllSCFAnchorsForExport`,
+  `ListAllFwToScfEdgesForExport`) carry the global SCF catalog
+  shape (no tenant_id, no RLS — the catalog is public). Row cap
+  50K anchors (35× headroom over the current ~1,400-anchor
+  catalog); streaming-memory budget 200 MB asserted at
+  50K-synthetic-anchor scale across all three encoders. The
+  XLSX writer emits exactly six zip members (no charts, no
+  named ranges, no VBA — P0-A-174-2 satisfied by construction;
+  test pins the member list). Cross-tenant isolation: because
+  the catalog is global, the integration test asserts the
+  export body is bit-for-bit identical between two distinct
+  tenants (slice 174 D7 — semantic dual of the slice 135
+  cross-tenant invariant). OPA admit-set parity test at
+  `internal/authz/slice174_test.go` enforces that the export
+  admits exactly the role set that admits the underlying
+  `/v1/anchors` read endpoint (slice 135 P0-A9 inheritance);
+  every named role admits per the public-catalog allow rule
+  in `defaults.rego`. BFF at `web/app/api/anchors/export/` is
+  the slice 137 streaming pattern (bearer-only auth, no
+  atlas_session cookie forwarded — slice 110 P0-A2). Export
+  buttons (CSV / JSON / XLSX) on the SCF catalog browse page
+  at `/catalog/scf` wire to the BFF URL helper at
+  `web/lib/api/anchors-export.ts`. `applicability_expr` and
+  every other tenant-private column are explicitly excluded
+  (P0-A-174-1). Decisions log:
+  `docs/audit-log/174-ucf-anchor-catalog-export-decisions.md`
+  records the maintainer's D1 pre-lock plus eight engineer
+  refinements (D2-D9). (#174)
+
 - **slice 181** — GOVERNANCE.md authored — open-governance pre-commitments
   per OQ #5 resolution (#181). New `/GOVERNANCE.md` at repo root with seven
   sections (Model · Maintainership · Decision-making · Contributor
@@ -33,7 +81,6 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   GOVERNANCE.md. No code, no telemetry, no platform behavior change —
   pure governance documentation closing the OQ #5 visibility commitment.
   (#181)
-
 - **slice 182** — board-narrative AI-assist foundation pre-commitments.
   Ships the supporting artifacts that the CLAUDE.md "Board-narrative
   AI-assist" expansion (shipped in the OQ #14 resolution PR #403)
