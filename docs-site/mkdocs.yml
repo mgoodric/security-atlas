@@ -92,6 +92,17 @@ nav:
   - Measuring your program:
       - Overview: metrics.md
       - Reference: metrics-reference.md
+  - Primitives:
+      - Overview: primitives/index.md
+      - Controls: primitives/controls.md
+      - Risks: primitives/risks.md
+      - Evidence: primitives/evidence.md
+      - Scope: primitives/scope.md
+      - Framework: primitives/framework.md
+      - Policy: primitives/policy.md
+  - Audit logs: audit-logs.md
+  - CI hardening: ci-hardening.md
+  - Connector authoring: connector-authoring.md
   - Walkthroughs:
       - Overview: walkthroughs/index.md
       - Evaluation pipeline: walkthroughs/evaluation-pipeline.md
