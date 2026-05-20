@@ -795,6 +795,32 @@ type Querier interface {
 	ListActiveAggregationRules(ctx context.Context, tenantID pgtype.UUID) ([]AggregationRule, error)
 	// Every active (non-superseded) control for the active tenant.
 	ListActiveControls(ctx context.Context, tenantID pgtype.UUID) ([]ListActiveControlsRow, error)
+	// Slice 137 — controls UCF graph data-export projection.
+	//
+	// Returns every active (non-superseded) control for the caller's
+	// tenant with the canonical export column set (slice 137 D2), capped
+	// at $1 rows. The caller passes (row_cap + 1) so the handler can
+	// detect the row-cap-exceeded path with no extra round trip.
+	//
+	// Column projection rationale (see docs/audit-log/137-controls-ucf-
+	// export-decisions.md D2):
+	//
+	//   identity:    id, bundle_id, version, title, control_family
+	//   topology:    scf_id, scf_anchor_id (foreign-key join columns;
+	//                downstream consumers reconstruct the UCF graph
+	//                against the public SCF catalog + fw_to_scf_edges)
+	//   posture:     implementation_type, owner_role, lifecycle_state
+	//   tenant data: applicability_expr (the slice 017 DSL — RLS protects
+	//                tenant isolation, NOT column omission)
+	//   integrity:   freshness_class, bundle_manifest_hash
+	//   audit:       created_at, updated_at
+	//
+	// RLS posture: the WHERE tenant_id = $1 clause is belt-and-suspenders
+	// alongside the GUC-driven RLS policy (slice 002). The tenancy.ApplyTenant
+	// call upstream pins the GUC; the explicit WHERE protects against any
+	// future RLS-policy regression. The existing ListActiveControls query
+	// carries the same belt-and-suspenders clause.
+	ListActiveControlsForExport(ctx context.Context, arg ListActiveControlsForExportParams) ([]ListActiveControlsForExportRow, error)
 	// Slice 062 — admin /v1/admin/audit-log query.
 	//
 	// One query against the admin_audit_log_v view (migration _022). Filters

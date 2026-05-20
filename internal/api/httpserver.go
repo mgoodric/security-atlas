@@ -377,6 +377,14 @@ func (s *Server) httpHandler() http.Handler {
 	// the /v1/controls/{id}/... patterns as separate routes.
 	controlsListH := controlsapi.NewListHandler(controlsStore)
 	root.Get("/v1/controls", controlsListH.List)
+	// Slice 137: controls UCF graph data export (CSV / JSON / XLSX).
+	// Reuses the slice 135 data-export library + slice 145 concurrency
+	// cap. Literal-segment route declared before any /v1/controls/{id}/
+	// patterns so chi's declaration-order match keeps it ahead. Row cap
+	// is 500K (vs slice 136's 50K) per slice 137 D3 — UCF graphs at
+	// multi-product orgs are large.
+	controlsExportH := controlsapi.NewExportHandler(s.dbPool)
+	root.Get("/v1/controls/export", controlsExportH.ExportControls)
 	// Slice 011: manual control attestation endpoint. Wired only when
 	// the slice-013 ingest service is wired in (this slice writes
 	// evidence records via that service). When the artifact store is

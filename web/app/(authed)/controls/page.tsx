@@ -54,12 +54,17 @@ import {
   type ListColumn,
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   fetchControlsList,
   type AnchorWithState,
   type ControlsListResponse,
 } from "@/lib/api";
+import {
+  CONTROLS_EXPORT_FORMATS,
+  CONTROLS_EXPORT_FORMAT_LABELS,
+  buildControlsExportURL,
+} from "@/lib/api/controls-export";
 
 import {
   ALL,
@@ -283,11 +288,26 @@ function ControlsPageInner() {
     },
   ];
 
+  // Slice 137: Export buttons (CSV / JSON / XLSX) wire to the BFF
+  // proxy at `/api/controls/export?format=...`, which forwards to the
+  // platform `GET /v1/controls/export` endpoint. Each link is an
+  // `<a download>` so the browser honours the backend's
+  // Content-Disposition filename; no client-side JS download flow.
+  // Replaces the previous disabled `Export CSV` placeholder.
   const actions = (
     <>
-      <Button variant="outline" size="sm" disabled>
-        Export CSV
-      </Button>
+      {CONTROLS_EXPORT_FORMATS.map((format) => (
+        <a
+          key={format}
+          href={buildControlsExportURL(format)}
+          download
+          rel="noopener"
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+          data-testid={`controls-export-${format}`}
+        >
+          Export {CONTROLS_EXPORT_FORMAT_LABELS[format]}
+        </a>
+      ))}
       <Button size="sm" disabled>
         New control
       </Button>
