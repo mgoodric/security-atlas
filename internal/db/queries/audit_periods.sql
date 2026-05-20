@@ -77,10 +77,13 @@ RETURNING *;
 -- (period_created | period_frozen | freeze_rejected_already_frozen |
 -- population_attached). detail is a free-form JSONB for action-specific
 -- payload (e.g., the rejected freeze attempt records the offending actor).
+--
+-- Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+-- the DB layer; explicit-is-clearer per AC-5).
 INSERT INTO audit_period_audit_log (
-    id, tenant_id, audit_period_id, action, actor, detail, occurred_at
+    id, tenant_id, audit_period_id, action, actor, detail, occurred_at, subject_module
 )
-VALUES ($1, $2, $3, $4, $5, $6, now())
+VALUES ($1, $2, $3, $4, $5, $6, now(), 'core')
 RETURNING *;
 
 -- name: ListAuditPeriodLog :many

@@ -194,11 +194,14 @@ LIMIT 1;
 -- Append-only. Every lifecycle transition (created / activated /
 -- deactivated / reactivated) and every threshold edit writes one row
 -- naming the human actor. The HITL gate's evidence trail.
+--
+-- Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+-- the DB layer; explicit-is-clearer per AC-5).
 INSERT INTO aggregation_rule_audit_log (
     id, tenant_id, rule_id, event,
-    actor, from_status, to_status, detail
+    actor, from_status, to_status, detail, subject_module
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'core')
 RETURNING *;
 
 -- name: ListAggregationRuleAuditLog :many

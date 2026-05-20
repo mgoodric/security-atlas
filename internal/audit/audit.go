@@ -635,15 +635,16 @@ func writeAuditLog(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, e au
 		"reason_code": e.ReasonCode,
 	})
 	sink.EmitDefault(ctx, unifiedlog.Entry{
-		OccurredAt:  time.Now().UTC(),
-		ActorID:     e.Actor,
-		TenantID:    tenantID,
-		Kind:        unifiedlog.KindSample,
-		TargetType:  targetType,
-		TargetID:    targetID,
-		Action:      e.Action,
-		RowID:       auditID,
-		PayloadJSON: sinkPayload,
+		OccurredAt:    time.Now().UTC(),
+		ActorID:       e.Actor,
+		TenantID:      tenantID,
+		Kind:          unifiedlog.KindSample,
+		TargetType:    targetType,
+		TargetID:      targetID,
+		Action:        e.Action,
+		RowID:         auditID,
+		SubjectModule: unifiedlog.SubjectModuleCore,
+		PayloadJSON:   sinkPayload,
 	})
 	return nil
 }

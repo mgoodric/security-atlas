@@ -183,7 +183,7 @@ func (q *Queries) GetAuditPeriodByID(ctx context.Context, arg GetAuditPeriodByID
 }
 
 const listAuditPeriodLog = `-- name: ListAuditPeriodLog :many
-SELECT id, tenant_id, audit_period_id, action, actor, detail, occurred_at
+SELECT id, tenant_id, audit_period_id, action, actor, detail, occurred_at, subject_module
 FROM audit_period_audit_log
 WHERE tenant_id = $1 AND audit_period_id = $2
 ORDER BY occurred_at DESC, id ASC
@@ -213,6 +213,7 @@ func (q *Queries) ListAuditPeriodLog(ctx context.Context, arg ListAuditPeriodLog
 			&i.Actor,
 			&i.Detail,
 			&i.OccurredAt,
+			&i.SubjectModule,
 		); err != nil {
 			return nil, err
 		}
@@ -452,10 +453,10 @@ func (q *Queries) SetPopulationFrozenAt(ctx context.Context, arg SetPopulationFr
 
 const writeAuditPeriodLog = `-- name: WriteAuditPeriodLog :one
 INSERT INTO audit_period_audit_log (
-    id, tenant_id, audit_period_id, action, actor, detail, occurred_at
+    id, tenant_id, audit_period_id, action, actor, detail, occurred_at, subject_module
 )
-VALUES ($1, $2, $3, $4, $5, $6, now())
-RETURNING id, tenant_id, audit_period_id, action, actor, detail, occurred_at
+VALUES ($1, $2, $3, $4, $5, $6, now(), 'core')
+RETURNING id, tenant_id, audit_period_id, action, actor, detail, occurred_at, subject_module
 `
 
 type WriteAuditPeriodLogParams struct {
@@ -471,6 +472,9 @@ type WriteAuditPeriodLogParams struct {
 // (period_created | period_frozen | freeze_rejected_already_frozen |
 // population_attached). detail is a free-form JSONB for action-specific
 // payload (e.g., the rejected freeze attempt records the offending actor).
+//
+// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+// the DB layer; explicit-is-clearer per AC-5).
 func (q *Queries) WriteAuditPeriodLog(ctx context.Context, arg WriteAuditPeriodLogParams) (AuditPeriodAuditLog, error) {
 	row := q.db.QueryRow(ctx, writeAuditPeriodLog,
 		arg.ID,
@@ -489,6 +493,7 @@ func (q *Queries) WriteAuditPeriodLog(ctx context.Context, arg WriteAuditPeriodL
 		&i.Actor,
 		&i.Detail,
 		&i.OccurredAt,
+		&i.SubjectModule,
 	)
 	return i, err
 }

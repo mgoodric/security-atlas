@@ -114,11 +114,11 @@ const insertEvidenceAuditEntry = `-- name: InsertEvidenceAuditEntry :one
 INSERT INTO evidence_audit_log (
     id, tenant_id, credential_id,
     decision, reason_code,
-    idempotency_key, evidence_kind, record_id
+    idempotency_key, evidence_kind, record_id, subject_module
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, $8, 'core'
 )
-RETURNING id, tenant_id, credential_id, decision, reason_code, idempotency_key, evidence_kind, record_id, received_at
+RETURNING id, tenant_id, credential_id, decision, reason_code, idempotency_key, evidence_kind, record_id, received_at, subject_module
 `
 
 type InsertEvidenceAuditEntryParams struct {
@@ -136,6 +136,9 @@ type InsertEvidenceAuditEntryParams struct {
 // log keyed by credential id. The platform layer writes one row per
 // decision; rejections include reason_code (validation, idempotency
 // mismatch, scope violation, etc.).
+//
+// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+// the DB layer; explicit-is-clearer per AC-5).
 func (q *Queries) InsertEvidenceAuditEntry(ctx context.Context, arg InsertEvidenceAuditEntryParams) (EvidenceAuditLog, error) {
 	row := q.db.QueryRow(ctx, insertEvidenceAuditEntry,
 		arg.ID,
@@ -158,6 +161,7 @@ func (q *Queries) InsertEvidenceAuditEntry(ctx context.Context, arg InsertEviden
 		&i.EvidenceKind,
 		&i.RecordID,
 		&i.ReceivedAt,
+		&i.SubjectModule,
 	)
 	return i, err
 }
@@ -263,7 +267,7 @@ func (q *Queries) InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRe
 }
 
 const listEvidenceAuditEntriesByCredential = `-- name: ListEvidenceAuditEntriesByCredential :many
-SELECT id, tenant_id, credential_id, decision, reason_code, idempotency_key, evidence_kind, record_id, received_at
+SELECT id, tenant_id, credential_id, decision, reason_code, idempotency_key, evidence_kind, record_id, received_at, subject_module
 FROM evidence_audit_log
 WHERE tenant_id = $1 AND credential_id = $2
 ORDER BY received_at DESC
@@ -301,6 +305,7 @@ func (q *Queries) ListEvidenceAuditEntriesByCredential(ctx context.Context, arg 
 			&i.EvidenceKind,
 			&i.RecordID,
 			&i.ReceivedAt,
+			&i.SubjectModule,
 		); err != nil {
 			return nil, err
 		}

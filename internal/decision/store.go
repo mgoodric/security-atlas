@@ -858,15 +858,16 @@ func (s *Store) writeAudit(ctx context.Context, q *dbx.Queries, tenantID, decisi
 	// Slice 126: fan out the audit row to the external sink.
 	payload, _ := json.Marshal(map[string]any{"detail": detail})
 	sink.EmitDefault(ctx, unifiedlog.Entry{
-		OccurredAt:  time.Now().UTC(),
-		ActorID:     actor,
-		TenantID:    tenantID,
-		Kind:        unifiedlog.KindDecision,
-		TargetType:  "decision",
-		TargetID:    decisionID.String(),
-		Action:      action,
-		RowID:       auditID,
-		PayloadJSON: payload,
+		OccurredAt:    time.Now().UTC(),
+		ActorID:       actor,
+		TenantID:      tenantID,
+		Kind:          unifiedlog.KindDecision,
+		TargetType:    "decision",
+		TargetID:      decisionID.String(),
+		Action:        action,
+		RowID:         auditID,
+		SubjectModule: unifiedlog.SubjectModuleCore,
+		PayloadJSON:   payload,
 	})
 	return nil
 }

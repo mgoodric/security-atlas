@@ -110,12 +110,15 @@ ORDER BY annotated_at DESC, id ASC;
 -- name: WriteSampleAuditLog :one
 -- Every sample pull writes one row here. The seed -> sample_id mapping
 -- captured in (seed, sample_id) is the re-audit trail (AC-6).
+--
+-- Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+-- the DB layer; explicit-is-clearer per AC-5).
 INSERT INTO sample_audit_log (
     id, tenant_id, action, actor,
     population_id, sample_id, seed,
-    n_requested, n_returned, reason_code
+    n_requested, n_returned, reason_code, subject_module
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'core')
 RETURNING *;
 
 -- name: ListSampleAuditLog :many

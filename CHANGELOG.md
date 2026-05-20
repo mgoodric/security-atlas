@@ -13,6 +13,44 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 180** — Privacy-module foundation: `subject_module` column on
+  all platform audit-log tables (pre-commitment for the deferred privacy
+  sibling module; #180). Migration
+  `20260520020000_audit_log_subject_module.sql` adds
+  `subject_module TEXT NOT NULL DEFAULT 'core'` to each of the nine
+  platform audit-log tables (`decision_audit_log`, `evidence_audit_log`,
+  `exception_audit_log`, `sample_audit_log`, `audit_period_audit_log`,
+  `aggregation_rule_audit_log`, `feature_flag_audit_log`, `me_audit_log`,
+  `walkthrough_audit_log`); idempotent (`ADD COLUMN IF NOT EXISTS`) and
+  reversible (companion `.down.sql`). Existing rows backfill to `'core'`
+  via the DEFAULT — no separate UPDATE. Every existing INSERT call site
+  (eight sqlc-managed + the hand-written `internal/authz/audit.go`
+  decision-audit insert) now writes `subject_module='core'` explicitly
+  (defense-in-depth; the DEFAULT also handles it). The slice 124 unified
+  audit-log UNION query projects `subject_module` through to the
+  canonical `Entry` shape; the slice 124 HTTP wire response
+  (`UnifiedEntry`) gains a `subject_module` field. Pre-commitment for
+  the deferred privacy sibling module per [canvas OQ #7](./Plans/canvas/11-open-questions.md)
+  resolution (2026-05-20): privacy primitives (`DataSubject`,
+  `ProcessingActivity`, `DPIA`, `DataSubjectRequest`, etc.) ship in a
+  dedicated `privacy.*` Postgres schema namespace at v2+ when a real
+  prospect surfaces demand; sibling-discipline documentation lands now
+  in [`CONTRIBUTING.md`](./CONTRIBUTING.md) "Module isolation discipline"
+  covering the four B1–B4 sub-decisions (Postgres schema isolation;
+  shared infrastructure including audit-log + `module:<name>:enabled`
+  feature-flag pattern; cross-module reference seam — privacy → evidence /
+  policy, NOT privacy → controls; lint-rule enforcement placeholder
+  shipping with privacy v0). Canvas note added to [`Plans/canvas/08-audit-workflow.md`](./Plans/canvas/08-audit-workflow.md)
+  §8.2: OSCAL covers security primitives only; privacy exports (when
+  privacy v0 ships) use W3C Data Privacy Vocabulary (DPV) as JSON-LD,
+  NOT OSCAL. Slice is INFRASTRUCTURE-ONLY — no privacy primitives, no
+  `privacy` Postgres schema, no `subject_module` index, no B4 CI lint
+  rule (all premature; land with privacy v0). Integration tests at
+  `internal/db/subject_module_integration_test.go` assert (a) the column
+  is present + DEFAULT 'core' fires on every one of the nine tables and
+  (b) RLS visibility-set under tenant context is unchanged by the new
+  column (constitutional invariant #6 continuity gate). Decisions log:
+  [`docs/audit-log/180-privacy-module-foundation-decisions.md`](./docs/audit-log/180-privacy-module-foundation-decisions.md).
 - **slice 174** — UCF anchor catalog export (CSV / JSON / XLSX).
   New `GET /v1/anchors/export?format=<csv|json|xlsx>` endpoint that
   exports the SCF anchor catalog (anchor metadata + framework

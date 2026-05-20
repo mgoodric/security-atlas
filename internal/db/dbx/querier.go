@@ -711,6 +711,9 @@ type Querier interface {
 	// log keyed by credential id. The platform layer writes one row per
 	// decision; rejections include reason_code (validation, idempotency
 	// mismatch, scope violation, etc.).
+	//
+	// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+	// the DB layer; explicit-is-clearer per AC-5).
 	InsertEvidenceAuditEntry(ctx context.Context, arg InsertEvidenceAuditEntryParams) (EvidenceAuditLog, error)
 	// Insert a new schema row. The caller (slice 014 registry service) parses
 	// semver into major/minor/patch and supplies all three; the DB CHECK
@@ -730,6 +733,9 @@ type Querier interface {
 	// Append a row to the slice 108 audit ledger. before / after are JSONB; the handler
 	// builds them from the wire shape minus any redacted fields. Gated by handler logic on
 	// non-empty diff (anti-criterion ISC-A5).
+	//
+	// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+	// the DB layer; explicit-is-clearer per AC-5).
 	InsertMeAuditLog(ctx context.Context, arg InsertMeAuditLogParams) error
 	// Append one manual entry. The fn_metric_inputs_replicate trigger fires
 	// AFTER INSERT and writes a matching metric_observations row so the
@@ -1637,8 +1643,18 @@ type Querier interface {
 	//
 	// One SQL statement: UNION ALL across the nine per-domain audit-log tables,
 	// each projected to the canonical Entry shape
-	// (occurred_at, actor_id, tenant_id, kind, target_type, target_id, action, payload_json),
+	// (occurred_at, actor_id, tenant_id, kind, target_type, target_id, action,
+	//  payload_json, subject_module),
 	// with WHERE filters applied at each branch.
+	//
+	// Slice 180 (2026-05-20): canonical projection extended with `subject_module`
+	// — the per-row tag identifying which module (`core` / future `privacy` /
+	// future others) owns the writing code path. Every UNION branch reads
+	// `subject_module` from its base table directly (the column defaults to
+	// `'core'` at the DB layer). Slice 180 does NOT change RLS behavior, the
+	// nine source tables, the canonical Kind enum, or the cursor pagination
+	// contract; the only wire-shape change is one additional column on every
+	// returned row.
 	//
 	// RLS-aware: the query runs under `tenancy.ApplyTenant` as `atlas_app`. Every
 	// branch's source-table tenant_read policy fires; rows from other tenants are
@@ -2026,6 +2042,9 @@ type Querier interface {
 	// Append-only. Every lifecycle transition (created / activated /
 	// deactivated / reactivated) and every threshold edit writes one row
 	// naming the human actor. The HITL gate's evidence trail.
+	//
+	// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+	// the DB layer; explicit-is-clearer per AC-5).
 	WriteAggregationRuleAuditLog(ctx context.Context, arg WriteAggregationRuleAuditLogParams) (AggregationRuleAuditLog, error)
 	// ===== aggregation_rule_evaluations (append-only) =====
 	// Append-only. EVERY evaluation cycle writes exactly one row, including
@@ -2037,6 +2056,9 @@ type Querier interface {
 	// (period_created | period_frozen | freeze_rejected_already_frozen |
 	// population_attached). detail is a free-form JSONB for action-specific
 	// payload (e.g., the rejected freeze attempt records the offending actor).
+	//
+	// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+	// the DB layer; explicit-is-clearer per AC-5).
 	WriteAuditPeriodLog(ctx context.Context, arg WriteAuditPeriodLogParams) (AuditPeriodAuditLog, error)
 	// Decision Log audit log (slice 055, migration _030).
 	//
@@ -2057,12 +2079,21 @@ type Querier interface {
 	// system-driven auto-expiry). The exception_audit_log table has
 	// SELECT+INSERT policies only under FORCE RLS so no UPDATE/DELETE path
 	// exists.
+	//
+	// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+	// the DB layer; explicit-is-clearer per AC-5).
 	WriteExceptionAuditLog(ctx context.Context, arg WriteExceptionAuditLogParams) (ExceptionAuditLog, error)
 	// Append-only. Every toggle writes one row. The audit-log table is
 	// append-only by construction (SELECT + INSERT RLS only under FORCE).
+	//
+	// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+	// the DB layer; explicit-is-clearer per AC-5).
 	WriteFeatureFlagAuditLog(ctx context.Context, arg WriteFeatureFlagAuditLogParams) (FeatureFlagAuditLog, error)
 	// Every sample pull writes one row here. The seed -> sample_id mapping
 	// captured in (seed, sample_id) is the re-audit trail (AC-6).
+	//
+	// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+	// the DB layer; explicit-is-clearer per AC-5).
 	WriteSampleAuditLog(ctx context.Context, arg WriteSampleAuditLogParams) (SampleAuditLog, error)
 	// Slice 126 — audit_sink_failures queries.
 	//
@@ -2085,6 +2116,11 @@ type Querier interface {
 	// (walkthrough_created | attachment_added | walkthrough_finalized |
 	// tamper_detected | mutation_rejected_frozen). detail captures action-
 	// specific payload.
+	//
+	// Slice 180: explicit `subject_module='core'` tags every write from the
+	// core (non-privacy) module path. The column defaults to 'core' at the
+	// DB level, so omitting this would still produce a 'core' row; explicit
+	// is clearer and defense-in-depth (AC-5).
 	WriteWalkthroughAuditLog(ctx context.Context, arg WriteWalkthroughAuditLogParams) (WalkthroughAuditLog, error)
 }
 

@@ -794,15 +794,16 @@ type AggregationRule struct {
 }
 
 type AggregationRuleAuditLog struct {
-	ID         pgtype.UUID        `json:"id"`
-	TenantID   pgtype.UUID        `json:"tenant_id"`
-	RuleID     pgtype.UUID        `json:"rule_id"`
-	Event      string             `json:"event"`
-	Actor      string             `json:"actor"`
-	FromStatus *string            `json:"from_status"`
-	ToStatus   *string            `json:"to_status"`
-	Detail     []byte             `json:"detail"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	RuleID        pgtype.UUID        `json:"rule_id"`
+	Event         string             `json:"event"`
+	Actor         string             `json:"actor"`
+	FromStatus    *string            `json:"from_status"`
+	ToStatus      *string            `json:"to_status"`
+	Detail        []byte             `json:"detail"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	SubjectModule string             `json:"subject_module"`
 }
 
 type AggregationRuleEvaluation struct {
@@ -896,6 +897,7 @@ type AuditPeriodAuditLog struct {
 	Actor         string             `json:"actor"`
 	Detail        []byte             `json:"detail"`
 	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule string             `json:"subject_module"`
 }
 
 type AuditSinkFailure struct {
@@ -1028,6 +1030,7 @@ type DecisionAuditLog struct {
 	PolicyHits    []string           `json:"policy_hits"`
 	RequestPath   string             `json:"request_path"`
 	RequestMethod string             `json:"request_method"`
+	SubjectModule string             `json:"subject_module"`
 }
 
 type DecisionControl struct {
@@ -1078,6 +1081,7 @@ type EvidenceAuditLog struct {
 	EvidenceKind   *string            `json:"evidence_kind"`
 	RecordID       pgtype.UUID        `json:"record_id"`
 	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+	SubjectModule  string             `json:"subject_module"`
 }
 
 type EvidenceFreshness struct {
@@ -1161,15 +1165,16 @@ type Exception struct {
 }
 
 type ExceptionAuditLog struct {
-	ID          pgtype.UUID        `json:"id"`
-	TenantID    pgtype.UUID        `json:"tenant_id"`
-	ExceptionID pgtype.UUID        `json:"exception_id"`
-	Action      string             `json:"action"`
-	Actor       string             `json:"actor"`
-	FromState   *string            `json:"from_state"`
-	ToState     string             `json:"to_state"`
-	Reason      string             `json:"reason"`
-	OccurredAt  pgtype.Timestamptz `json:"occurred_at"`
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	ExceptionID   pgtype.UUID        `json:"exception_id"`
+	Action        string             `json:"action"`
+	Actor         string             `json:"actor"`
+	FromState     *string            `json:"from_state"`
+	ToState       string             `json:"to_state"`
+	Reason        string             `json:"reason"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule string             `json:"subject_module"`
 }
 
 type FeatureFlag struct {
@@ -1184,14 +1189,15 @@ type FeatureFlag struct {
 }
 
 type FeatureFlagAuditLog struct {
-	ID          pgtype.UUID        `json:"id"`
-	TenantID    pgtype.UUID        `json:"tenant_id"`
-	FlagKey     string             `json:"flag_key"`
-	FromEnabled bool               `json:"from_enabled"`
-	ToEnabled   bool               `json:"to_enabled"`
-	Actor       string             `json:"actor"`
-	Reason      string             `json:"reason"`
-	OccurredAt  pgtype.Timestamptz `json:"occurred_at"`
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	FlagKey       string             `json:"flag_key"`
+	FromEnabled   bool               `json:"from_enabled"`
+	ToEnabled     bool               `json:"to_enabled"`
+	Actor         string             `json:"actor"`
+	Reason        string             `json:"reason"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule string             `json:"subject_module"`
 }
 
 type Framework struct {
@@ -1271,13 +1277,14 @@ type LocalCredential struct {
 }
 
 type MeAuditLog struct {
-	ID         pgtype.UUID        `json:"id"`
-	TenantID   pgtype.UUID        `json:"tenant_id"`
-	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
-	UserID     pgtype.UUID        `json:"user_id"`
-	Action     string             `json:"action"`
-	Before     []byte             `json:"before"`
-	After      []byte             `json:"after"`
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	UserID        pgtype.UUID        `json:"user_id"`
+	Action        string             `json:"action"`
+	Before        []byte             `json:"before"`
+	After         []byte             `json:"after"`
+	SubjectModule string             `json:"subject_module"`
 }
 
 type MetricCascadeEdge struct {
@@ -1501,17 +1508,18 @@ type SampleAnnotation struct {
 }
 
 type SampleAuditLog struct {
-	ID           pgtype.UUID        `json:"id"`
-	TenantID     pgtype.UUID        `json:"tenant_id"`
-	Action       string             `json:"action"`
-	Actor        string             `json:"actor"`
-	PopulationID pgtype.UUID        `json:"population_id"`
-	SampleID     pgtype.UUID        `json:"sample_id"`
-	Seed         *string            `json:"seed"`
-	NRequested   *int32             `json:"n_requested"`
-	NReturned    *int32             `json:"n_returned"`
-	ReasonCode   string             `json:"reason_code"`
-	OccurredAt   pgtype.Timestamptz `json:"occurred_at"`
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	Action        string             `json:"action"`
+	Actor         string             `json:"actor"`
+	PopulationID  pgtype.UUID        `json:"population_id"`
+	SampleID      pgtype.UUID        `json:"sample_id"`
+	Seed          *string            `json:"seed"`
+	NRequested    *int32             `json:"n_requested"`
+	NReturned     *int32             `json:"n_returned"`
+	ReasonCode    string             `json:"reason_code"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule string             `json:"subject_module"`
 }
 
 type SampleEvidence struct {
@@ -1679,4 +1687,5 @@ type WalkthroughAuditLog struct {
 	Actor         string             `json:"actor"`
 	Detail        []byte             `json:"detail"`
 	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule string             `json:"subject_module"`
 }

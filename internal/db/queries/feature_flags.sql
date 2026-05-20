@@ -47,10 +47,13 @@ RETURNING *;
 -- name: WriteFeatureFlagAuditLog :one
 -- Append-only. Every toggle writes one row. The audit-log table is
 -- append-only by construction (SELECT + INSERT RLS only under FORCE).
+--
+-- Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+-- the DB layer; explicit-is-clearer per AC-5).
 INSERT INTO feature_flag_audit_log (
-    id, tenant_id, flag_key, from_enabled, to_enabled, actor, reason
+    id, tenant_id, flag_key, from_enabled, to_enabled, actor, reason, subject_module
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'core')
 RETURNING *;
 
 -- name: ListFeatureFlagAuditLog :many

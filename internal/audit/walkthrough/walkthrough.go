@@ -666,15 +666,16 @@ func writeLog(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, walkthrou
 		wtID = uuid.UUID(walkthroughID.Bytes).String()
 	}
 	sink.EmitDefault(ctx, unifiedlog.Entry{
-		OccurredAt:  time.Now().UTC(),
-		ActorID:     actor,
-		TenantID:    tenantID,
-		Kind:        unifiedlog.KindWalkthrough,
-		TargetType:  "walkthrough",
-		TargetID:    wtID,
-		Action:      action,
-		RowID:       auditID,
-		PayloadJSON: detailJSON,
+		OccurredAt:    time.Now().UTC(),
+		ActorID:       actor,
+		TenantID:      tenantID,
+		Kind:          unifiedlog.KindWalkthrough,
+		TargetType:    "walkthrough",
+		TargetID:      wtID,
+		Action:        action,
+		RowID:         auditID,
+		SubjectModule: unifiedlog.SubjectModuleCore,
+		PayloadJSON:   detailJSON,
 	})
 	return nil
 }

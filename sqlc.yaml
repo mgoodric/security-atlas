@@ -55,6 +55,7 @@ sql:
       - "migrations/sql/20260517000000_unified_audit_log.sql"
       - "migrations/sql/20260518000000_audit_sink_failures.sql"
       - "migrations/sql/20260518100000_sessions_augment_ua_ip_geo.sql"
+      - "migrations/sql/20260520020000_audit_log_subject_module.sql"
     queries: "internal/db/queries"
     gen:
       go:

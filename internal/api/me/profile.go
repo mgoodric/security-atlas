@@ -351,15 +351,16 @@ func (h *ProfileHandler) writeAuditLog(ctx context.Context, tenantID, userID uui
 		"after":  json.RawMessage(afterJSON),
 	})
 	sink.EmitDefault(ctx, unifiedlog.Entry{
-		OccurredAt:  time.Now().UTC(),
-		ActorID:     userID.String(),
-		TenantID:    tenantID,
-		Kind:        unifiedlog.KindMe,
-		TargetType:  "user",
-		TargetID:    userID.String(),
-		Action:      action,
-		RowID:       uuid.New(),
-		PayloadJSON: sinkPayload,
+		OccurredAt:    time.Now().UTC(),
+		ActorID:       userID.String(),
+		TenantID:      tenantID,
+		Kind:          unifiedlog.KindMe,
+		TargetType:    "user",
+		TargetID:      userID.String(),
+		Action:        action,
+		RowID:         uuid.New(),
+		SubjectModule: unifiedlog.SubjectModuleCore,
+		PayloadJSON:   sinkPayload,
 	})
 	return nil
 }

@@ -645,6 +645,70 @@ Pattern source: OpenTelemetry semantic-conventions deprecation model. Battle-tes
 
 ---
 
+## Module isolation discipline
+
+> Pre-commitment for the deferred privacy sibling module. The privacy module
+> primitives (DataSubject / ProcessingActivity / DPIA / DataSubjectRequest
+> etc.) are v2+ work, gated on a real prospect surfacing demand — but the
+> shape of the eventual privacy module is locked NOW so when the work fires
+> it drops in cleanly. Canvas resolution: [`Plans/canvas/11-open-questions.md`](./Plans/canvas/11-open-questions.md) item #7, resolved 2026-05-20.
+
+Privacy and core (security primitives — Control / Risk / Evidence / Scope / Framework / Policy and their dependents) live as **sibling modules** on a shared platform spine. Four sub-decisions define the seam.
+
+### B1 — Postgres schema isolation
+
+The privacy module's primitives land in a dedicated **Postgres `privacy` schema namespace** (not just a naming convention; an actual `CREATE SCHEMA privacy` statement that lands when the privacy v0 slice fires). Core primitives stay in the default `public` schema. `pg_dump --schema=privacy` works as a backup unit; `pg_dump --schema=public --exclude-schema=privacy` produces a privacy-free dump for the user who wants core-only operation.
+
+Slice 180 does NOT create the `privacy` schema yet — empty schemas are confusing. The namespace lands with privacy v0 when there's something to put in it.
+
+### B2 — Shared infrastructure (no separate deployment)
+
+Both modules use the same:
+
+- **AuthN / AuthZ:** OIDC RP (slice 034) + RBAC (slice 014) + ABAC via OPA (slice 018). The privacy module does NOT ship its own auth stack.
+- **Tenancy:** `app.current_tenant` GUC + the slice 036 four-policy RLS pattern. Every privacy table will carry `tenant_id UUID NOT NULL` + the four policies (`tenant_read` / `tenant_write` / `tenant_update` / `tenant_delete`) verbatim.
+- **Audit-log ledger:** the nine platform audit-log tables (`decision_audit_log` / `evidence_audit_log` / `exception_audit_log` / `sample_audit_log` / `audit_period_audit_log` / `aggregation_rule_audit_log` / `feature_flag_audit_log` / `me_audit_log` / `walkthrough_audit_log`) each carry a `subject_module TEXT NOT NULL DEFAULT 'core'` column (slice 180 migration). Core writes tag `'core'`; privacy writes tag `'privacy'`. The slice 124 unified-audit-log endpoint projects the column through.
+- **Feature-flag system:** per-tenant module toggles (see B2.1 below).
+- **Evidence citation seam:** privacy records reference `evidence.id` (citation) and `policy.id` (governing policy) directly (see B3 for the constraint).
+
+**B2.1 Feature-flag pattern (`module:<name>:enabled`).** Each sibling module is gated by a per-tenant boolean flag named `module:<name>:enabled`. The privacy module's toggle is `module:privacy:enabled` (default `false` per-tenant; privacy surfaces hidden until an operator opts in via `POST /v1/admin/tenants/:id/flags`). The pattern composes with the slice 059 feature-flag store. Lifecycle:
+
+| Step                      | Behavior                                                                                                                                  |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Flag absent / `false`     | Module's HTTP routes return `404` on every endpoint; module's UI surfaces are not rendered in the frontend nav.                           |
+| Flag flipped `true`       | Module surfaces appear; module routes accept requests. The flip itself writes a row in `feature_flag_audit_log`.                          |
+| Flag flipped back `false` | Module surfaces disappear from the UI but the underlying schema remains; module data is dormant, not destroyed.                           |
+| Flag never flipped        | Module's migrations have applied (the column / schema exists) but no module code path can be reached. Self-host bundles default this way. |
+
+The flag's concrete implementation (the privacy v0 admin endpoint + the `module:privacy:enabled` registration with the feature-flag store) ships WITH privacy v0 — slice 180 documents the convention so privacy v0's engineer follows the established pattern.
+
+### B3 — Cross-module reference seam
+
+The privacy module's tables MAY reference these core tables directly (via FK):
+
+- `evidence_records(id)` — for evidence citations on processing-activity records
+- `policies(id)` — for governing policy links on processing-activity records
+
+The privacy module's tables MUST NOT reference these core tables directly:
+
+- `controls(id)` — privacy → security mapping happens at the **framework-satisfaction layer** (GDPR Art. 32 is a framework whose requirements satisfy SCF anchors; the privacy → security relationship is `gdpr_art32_requirement → SCF_anchor → control`, not `processing_activity → control`).
+
+Rationale: data-flow records (privacy) and control-state records (security) are independent concerns. Coupling them at the FK layer creates the exact "everything is a control" anti-pattern that drives Vanta/Drata users to spreadsheets — every privacy-side change risks invalidating control state and vice versa. Routing the relationship through the framework layer preserves the UCF invariant (canvas §3.5, "SCF is the canonical control catalog") and lets the privacy module evolve on its own cadence.
+
+### B4 — Lint-rule enforcement (placeholder until privacy v0)
+
+When privacy v0 lands, a CI lint rule fails any PR whose diff touches BOTH `internal/api/privacy/**` AND `internal/api/controls/**`. Escape-hatch: applying the `[cross-module-ok]` PR label permits a single PR through for genuine cross-cutting work (e.g., a refactor that touches a shared utility).
+
+Slice 180 does NOT add the lint rule yet — with no `internal/api/privacy/` directory existing, the rule would lint nothing. The rule ships alongside the first `internal/api/privacy/` files in privacy v0. Until then, this section is the operator-facing notice that the rule is coming.
+
+### What this means for your PR today
+
+You probably don't write privacy code today (the module doesn't exist). The things to know:
+
+1. If you add a new audit-log INSERT call site, set `subject_module='core'` explicitly. The DB default also handles it, but explicit-is-clearer (slice 180 AC-5). The convention is documented inline in every sqlc query that writes an audit-log row.
+2. If you add a tenth audit-log table, extend slice 180's migration shape: `ALTER TABLE <new>_audit_log ADD COLUMN IF NOT EXISTS subject_module TEXT NOT NULL DEFAULT 'core'`. The slice 124 UNION query then needs the new branch projected through.
+3. If a PR review surfaces a "should this be a privacy primitive?" question, surface it as a separate design-grill slice — do NOT introduce the primitive without OQ #7 → privacy v0 firing first.
+
 ## AI-assist boundary
 
 The platform supports AI assistance in narrowly-defined places (see [`CLAUDE.md`](./CLAUDE.md) → "AI-assist boundary"). Contributor-side rules:

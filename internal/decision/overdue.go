@@ -233,15 +233,16 @@ func (n *Notifier) sweepTenant(ctx context.Context, tenantID uuid.UUID, today ti
 		// Slice 126: fan out the audit row to the external sink.
 		sinkPayload, _ := json.Marshal(map[string]any{"detail": detail})
 		sink.EmitDefault(tenantCtx, unifiedlog.Entry{
-			OccurredAt:  time.Now().UTC(),
-			ActorID:     SystemActor,
-			TenantID:    tenantID,
-			Kind:        unifiedlog.KindDecision,
-			TargetType:  "decision",
-			TargetID:    d.ID.String(),
-			Action:      ActionOverdueNotified,
-			RowID:       auditID,
-			PayloadJSON: sinkPayload,
+			OccurredAt:    time.Now().UTC(),
+			ActorID:       SystemActor,
+			TenantID:      tenantID,
+			Kind:          unifiedlog.KindDecision,
+			TargetType:    "decision",
+			TargetID:      d.ID.String(),
+			Action:        ActionOverdueNotified,
+			RowID:         auditID,
+			SubjectModule: unifiedlog.SubjectModuleCore,
+			PayloadJSON:   sinkPayload,
 		})
 		emitted++
 	}

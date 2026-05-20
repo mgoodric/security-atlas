@@ -49,15 +49,16 @@ func emitSinkException(ctx context.Context, tenantID, exceptionID, auditID uuid.
 		"reason":     reason,
 	})
 	sink.EmitDefault(ctx, unifiedlog.Entry{
-		OccurredAt:  time.Now().UTC(),
-		ActorID:     actor,
-		TenantID:    tenantID,
-		Kind:        unifiedlog.KindException,
-		TargetType:  "exception",
-		TargetID:    exceptionID.String(),
-		Action:      action,
-		RowID:       auditID,
-		PayloadJSON: payload,
+		OccurredAt:    time.Now().UTC(),
+		ActorID:       actor,
+		TenantID:      tenantID,
+		Kind:          unifiedlog.KindException,
+		TargetType:    "exception",
+		TargetID:      exceptionID.String(),
+		Action:        action,
+		RowID:         auditID,
+		SubjectModule: unifiedlog.SubjectModuleCore,
+		PayloadJSON:   payload,
 	})
 }
 

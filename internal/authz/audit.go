@@ -100,13 +100,15 @@ func (w *AuditWriter) Write(ctx context.Context, rec AuditRecord) (uuid.UUID, er
 	}
 
 	id := uuid.New()
+	// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+	// the DB layer; explicit-is-clearer per AC-5).
 	const stmt = `
 		INSERT INTO decision_audit_log
 			(decision_id, tenant_id, user_id, user_roles,
 			 action, resource_type, resource_id,
 			 result, reason, policy_hits,
-			 request_path, request_method)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			 request_path, request_method, subject_module)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'core')
 	`
 
 	tx, err := w.pool.Begin(ctx)
