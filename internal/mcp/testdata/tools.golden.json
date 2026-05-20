@@ -1,0 +1,153 @@
+{
+  "tools": [
+    {
+      "name": "list_controls",
+      "description": "List the bearer tenant's active controls (UCF anchors with framework satisfactions joined). Returns canonical control rows.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "framework_id": {
+            "description": "Framework filter (NOT YET SUPPORTED in v1 — passing this returns a tool error so callers know the contract; v2 will land per-framework filtering).",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Result cap; default 100, max 500. Server-side cap is the bigger of these and the platform's own ceiling.",
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "scope": {
+            "description": "Scope cell filter (NOT YET SUPPORTED in v1 — same posture as framework_id).",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_control",
+      "description": "Fetch a single control by UUID or SCF anchor short code. Returns the canonical control row plus its scope and current state.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor_id": {
+            "description": "The control identifier. Accepts either the tenant control UUID OR the SCF anchor short code (e.g., \"IAC-06\"). Required.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "anchor_id"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_risks",
+      "description": "List risks from the bearer tenant's risk register. Optional filters: status (treatment), category. RLS scopes to the caller's tenant.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "description": "Filter by risk category (free-form string matching the platform's risk_categories list). Optional.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Result cap; default 100, max 500.",
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "scope": {
+            "description": "Scope cell filter (NOT YET SUPPORTED in v1; the platform /v1/risks endpoint does not accept a scope query param yet).",
+            "type": "string"
+          },
+          "status": {
+            "description": "Filter by treatment status: avoid | accept | transfer | mitigate. Optional; default returns all treatments.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_risk",
+      "description": "Fetch a single risk by UUID. Returns the canonical risk row + linked controls. When the platform's residual-deriver is wired, also returns the derived residual score and per-link effectiveness.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "risk_id": {
+            "description": "Risk UUID. Required.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "risk_id"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_evidence",
+      "description": "List evidence records from the bearer tenant's ledger. payload_json is NEVER included in the response (P0-A5). Optional filters: control_id, kind, result.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "control_id": {
+            "description": "Filter to evidence records for one control (UUID). Optional; when absent the tool returns the tenant-wide ledger window.",
+            "type": "string"
+          },
+          "freshness": {
+            "description": "Freshness filter (NOT YET SUPPORTED in v1; the platform /v1/evidence endpoint does not accept a freshness filter). Filter results client-side using observed_at.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Filter by evidence_kind (e.g., \"aws.s3.bucket_encryption.v1\"). Optional.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Result cap; default 100, max 500.",
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "result": {
+            "description": "Filter by evidence result. Optional.",
+            "enum": [
+              "pass",
+              "fail",
+              "na",
+              "inconclusive"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_audit_periods",
+      "description": "List audit periods for the bearer tenant (open / frozen / closed). Includes freeze metadata (frozen_at, frozen_hash, frozen_by) when applicable.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "description": "Result cap; default 100, max 500.",
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "status": {
+            "description": "Filter by audit period status. Optional; default returns all statuses.",
+            "enum": [
+              "open",
+              "frozen",
+              "closed"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  ]
+}
