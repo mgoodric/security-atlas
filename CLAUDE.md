@@ -93,6 +93,37 @@ Schema-level enforcement: `ai_assisted=true` records cannot have `human_approved
 
 **Inference backend:** local Ollama is the default (no data leaves deployment). Cloud LLMs (Anthropic / OpenAI / Bedrock) are opt-in per-tenant with a visible banner indicating routing.
 
+#### Board-narrative AI-assist (load-bearing — OQ #14 resolved 2026-05-20)
+
+Board narratives are the highest-risk AI-assist surface because board members are typically non-technical and take outputs at face value. The hallucination cost is asymmetric vs. other AI-assist surfaces. Seven design decisions lock the shape when board-narrative v0 ships:
+
+1. **Input shape = hybrid.** LLM sees a deterministic pre-computation rollup PLUS cited evidence excerpts for every claim. NOT raw evidence records (too expensive, model wanders). NOT pure rollup (compounds hallucination).
+2. **Approval granularity = per-section.** Narrative split into numbered sections; each approve/edit/reject independently. NOT per-narrative (too coarse). NOT per-claim (too friction-heavy).
+3. **Audit trail = full prompt + full response, every time.** System prompt + evidence inputs + generated draft + operator edits + final approved text. Forensically airtight; storage cost small (few KB per section).
+4. **Mandatory citations** for every factual claim — validated to resolve to real evidence/control/risk IDs before the operator sees the draft; unresolved citation rejects the draft.
+5. **Numeric claim verification** — every number ("94% fresh", "47 controls", "12 exceptions") auto-checked against the pre-computation; draft auto-rejected if numbers don't match ground truth.
+6. **Section-shape enforcement** — LLM constrained to a numbered template; freestyle output rejected.
+7. **Editor-mode operator UX** — operator edits inline; cannot approve text with unresolved citations.
+
+**Tone discipline (banned phrases in the system prompt):** the LLM voice for board narratives is measured, factual, slightly defensive. Marketing-y / overly-positive framing is rejected. The non-exhaustive ban list:
+
+- "we are proud to report"
+- "exceeded expectations"
+- "industry-leading"
+- "best-in-class"
+- "world-class"
+- "robust" (when used as filler, not when describing a specific control posture)
+- "leverage" (as a verb, when "use" works)
+- any unprompted superlative
+
+Full updated list maintained at slice 182's tone-anti-pattern reference document.
+
+**Schema-level extensions when board-narrative v0 ships:** the `ai_assisted=true ↔ human_approver` invariant extends to require additional columns on board-narrative records: `prompt_version TEXT NOT NULL`, `model_name TEXT NOT NULL`, `model_version TEXT NOT NULL`, `model_provider TEXT NOT NULL` (e.g., `'ollama-local'` or `'anthropic-api'`). Old reports stay immutable — versioning is snapshot-at-generation, not retroactive.
+
+**Default local model + refresh cadence:** Llama 3.1 8B Instruct as the default for board narratives at v0 (runs on 8-12GB GPU; commodity hardware). Quality caveat explicitly documented for operators. Cloud LLM opt-in per tenant for higher quality. **Default model recommendation refreshes every 6-12 months** as local models improve — the refresh is a documented maintenance task, not a slice (maintainer reviews + updates the operator docs).
+
+**Implementation timing:** board-narrative v0 is v2+ work. Foundation pre-commitments land via slice 182.
+
 **This boundary governs the product at runtime — not the development process.** It is constitutional and unchanged. Separately, the _slice-development_ workflow has a `JUDGMENT` slice type (formerly `HITL`): when building a slice, Claude makes the subjective build-time calls itself (control-text accuracy, UX copy, rule-DSL shape, OSCAL conformance choices) and records them in a decisions log rather than blocking the merge on a human sign-off — the maintainer iterates post-deployment. That is a process choice about _how we build_. It does NOT touch this boundary, which is about _how the shipped product behaves_: the product still never publishes an audit-binding artifact without one-click human approval. Never conflate the two. See `Plans/prompts/04-per-slice-template.md` "Slice types".
 
 ### Licensing constraints (do not violate)
