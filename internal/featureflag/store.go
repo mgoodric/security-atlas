@@ -267,15 +267,16 @@ func (s *Store) Set(ctx context.Context, key string, enabled bool, actor, reason
 			action = "enable"
 		}
 		sink.EmitDefault(ctx, unifiedlog.Entry{
-			OccurredAt:  time.Now().UTC(),
-			ActorID:     actor,
-			TenantID:    tenantID,
-			Kind:        unifiedlog.KindFeatureFlag,
-			TargetType:  "feature_flag",
-			TargetID:    key,
-			Action:      action,
-			RowID:       auditID,
-			PayloadJSON: ffPayload,
+			OccurredAt:    time.Now().UTC(),
+			ActorID:       actor,
+			TenantID:      tenantID,
+			Kind:          unifiedlog.KindFeatureFlag,
+			TargetType:    "feature_flag",
+			TargetID:      key,
+			Action:        action,
+			RowID:         auditID,
+			SubjectModule: unifiedlog.SubjectModuleCore,
+			PayloadJSON:   ffPayload,
 		})
 
 		out = flagFromRow(row, def)

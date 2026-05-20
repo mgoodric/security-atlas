@@ -131,11 +131,14 @@ WHERE status = 'active';
 -- system-driven auto-expiry). The exception_audit_log table has
 -- SELECT+INSERT policies only under FORCE RLS so no UPDATE/DELETE path
 -- exists.
+--
+-- Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+-- the DB layer; explicit-is-clearer per AC-5).
 INSERT INTO exception_audit_log (
     id, tenant_id, exception_id,
-    action, actor, from_state, to_state, reason
+    action, actor, from_state, to_state, reason, subject_module
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'core')
 RETURNING *;
 
 -- name: ListExceptionAuditLog :many

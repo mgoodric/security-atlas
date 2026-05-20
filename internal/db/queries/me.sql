@@ -33,9 +33,12 @@ DO UPDATE SET
 -- Append a row to the slice 108 audit ledger. before / after are JSONB; the handler
 -- builds them from the wire shape minus any redacted fields. Gated by handler logic on
 -- non-empty diff (anti-criterion ISC-A5).
+--
+-- Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+-- the DB layer; explicit-is-clearer per AC-5).
 INSERT INTO me_audit_log (
-    tenant_id, user_id, action, before, after
+    tenant_id, user_id, action, before, after, subject_module
 )
 VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4, $5, 'core'
 );

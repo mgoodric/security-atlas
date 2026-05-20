@@ -102,10 +102,15 @@ ORDER BY sha256_hash;
 -- (walkthrough_created | attachment_added | walkthrough_finalized |
 -- tamper_detected | mutation_rejected_frozen). detail captures action-
 -- specific payload.
+--
+-- Slice 180: explicit `subject_module='core'` tags every write from the
+-- core (non-privacy) module path. The column defaults to 'core' at the
+-- DB level, so omitting this would still produce a 'core' row; explicit
+-- is clearer and defense-in-depth (AC-5).
 INSERT INTO walkthrough_audit_log (
-    id, tenant_id, walkthrough_id, action, actor, detail, occurred_at
+    id, tenant_id, walkthrough_id, action, actor, detail, occurred_at, subject_module
 )
-VALUES ($1, $2, $3, $4, $5, $6, now())
+VALUES ($1, $2, $3, $4, $5, $6, now(), 'core')
 RETURNING *;
 
 -- name: ListWalkthroughAuditLog :many

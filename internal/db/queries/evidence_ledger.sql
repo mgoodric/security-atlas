@@ -60,12 +60,15 @@ SELECT count(*) FROM evidence_records WHERE tenant_id = $1;
 -- log keyed by credential id. The platform layer writes one row per
 -- decision; rejections include reason_code (validation, idempotency
 -- mismatch, scope violation, etc.).
+--
+-- Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+-- the DB layer; explicit-is-clearer per AC-5).
 INSERT INTO evidence_audit_log (
     id, tenant_id, credential_id,
     decision, reason_code,
-    idempotency_key, evidence_kind, record_id
+    idempotency_key, evidence_kind, record_id, subject_module
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, $8, 'core'
 )
 RETURNING *;
 

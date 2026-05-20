@@ -34,15 +34,16 @@ func emitSinkAggregationRule(ctx context.Context, tenantID, ruleID, auditID uuid
 		"to_status":   toStatus,
 	})
 	sink.EmitDefault(ctx, unifiedlog.Entry{
-		OccurredAt:  time.Now().UTC(),
-		ActorID:     actor,
-		TenantID:    tenantID,
-		Kind:        unifiedlog.KindAggregationRule,
-		TargetType:  "aggregation_rule",
-		TargetID:    ruleID.String(),
-		Action:      event,
-		RowID:       auditID,
-		PayloadJSON: payload,
+		OccurredAt:    time.Now().UTC(),
+		ActorID:       actor,
+		TenantID:      tenantID,
+		Kind:          unifiedlog.KindAggregationRule,
+		TargetType:    "aggregation_rule",
+		TargetID:      ruleID.String(),
+		Action:        event,
+		RowID:         auditID,
+		SubjectModule: unifiedlog.SubjectModuleCore,
+		PayloadJSON:   payload,
 	})
 }
 

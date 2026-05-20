@@ -68,17 +68,26 @@ const (
 // credential id like "key_foo" or a literal like "seeder", not a UUID).
 // Consumers MUST tolerate `null`; the frontend falls back to a truncated
 // actor_id render.
+//
+// SubjectModule (slice 180) tags which module owns the writing code path.
+// Today every row carries `"core"`. When the privacy sibling module ships
+// (v2+), privacy-side audit-log writes will carry `"privacy"`. Future
+// consumers can filter by module client-side; the platform does not yet
+// expose a server-side `module=` filter (deferred until privacy v0 lands
+// and real query patterns inform the index decision — see canvas OQ #7
+// resolution and slice 180's threat-model `D — Denial of service` note).
 type UnifiedEntry struct {
-	OccurredAt  time.Time       `json:"occurred_at"`
-	ActorID     string          `json:"actor_id"`
-	ActorName   *string         `json:"actor_name"`
-	TenantID    uuid.UUID       `json:"tenant_id"`
-	Kind        string          `json:"kind"`
-	TargetType  string          `json:"target_type"`
-	TargetID    string          `json:"target_id"`
-	Action      string          `json:"action"`
-	RowID       uuid.UUID       `json:"row_id"`
-	PayloadJSON json.RawMessage `json:"payload_json"`
+	OccurredAt    time.Time       `json:"occurred_at"`
+	ActorID       string          `json:"actor_id"`
+	ActorName     *string         `json:"actor_name"`
+	TenantID      uuid.UUID       `json:"tenant_id"`
+	Kind          string          `json:"kind"`
+	TargetType    string          `json:"target_type"`
+	TargetID      string          `json:"target_id"`
+	Action        string          `json:"action"`
+	RowID         uuid.UUID       `json:"row_id"`
+	SubjectModule string          `json:"subject_module"`
+	PayloadJSON   json.RawMessage `json:"payload_json"`
 }
 
 // UnifiedListResponse is the GET /v1/admin/audit-log/unified shape.
@@ -210,15 +219,16 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 			"after":  json.RawMessage(resultBlob),
 		})
 		sink.EmitDefault(ctx, unifiedlog.Entry{
-			OccurredAt:  time.Now().UTC(),
-			ActorID:     userIdentifier,
-			TenantID:    tenantID,
-			Kind:        unifiedlog.KindMe,
-			TargetType:  "user",
-			TargetID:    uID.String(),
-			Action:      metaAuditAction,
-			RowID:       uuid.New(),
-			PayloadJSON: sinkPayload,
+			OccurredAt:    time.Now().UTC(),
+			ActorID:       userIdentifier,
+			TenantID:      tenantID,
+			Kind:          unifiedlog.KindMe,
+			TargetType:    "user",
+			TargetID:      uID.String(),
+			Action:        metaAuditAction,
+			RowID:         uuid.New(),
+			SubjectModule: unifiedlog.SubjectModuleCore,
+			PayloadJSON:   sinkPayload,
 		})
 		return nil
 	})
@@ -230,16 +240,17 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 	out := make([]UnifiedEntry, 0, len(entries))
 	for _, e := range entries {
 		out = append(out, UnifiedEntry{
-			OccurredAt:  e.OccurredAt,
-			ActorID:     e.ActorID,
-			ActorName:   e.ActorName,
-			TenantID:    e.TenantID,
-			Kind:        string(e.Kind),
-			TargetType:  e.TargetType,
-			TargetID:    e.TargetID,
-			Action:      e.Action,
-			RowID:       e.RowID,
-			PayloadJSON: e.PayloadJSON,
+			OccurredAt:    e.OccurredAt,
+			ActorID:       e.ActorID,
+			ActorName:     e.ActorName,
+			TenantID:      e.TenantID,
+			Kind:          string(e.Kind),
+			TargetType:    e.TargetType,
+			TargetID:      e.TargetID,
+			Action:        e.Action,
+			RowID:         e.RowID,
+			SubjectModule: e.SubjectModule,
+			PayloadJSON:   e.PayloadJSON,
 		})
 	}
 	writeJSON(w, http.StatusOK, UnifiedListResponse{
