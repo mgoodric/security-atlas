@@ -13,6 +13,27 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 181** — GOVERNANCE.md authored — open-governance pre-commitments
+  per OQ #5 resolution (#181). New `/GOVERNANCE.md` at repo root with seven
+  sections (Model · Maintainership · Decision-making · Contributor
+  agreements · Funding posture · Re-evaluation trigger · Bus-factor &
+  succession) explicitly committing to pure-community OSS posture under
+  Apache 2.0 with NO hosted SaaS / NO enterprise edition / NO CLA. Time-
+  bounded re-evaluation locked at **2028-05-20** OR 100 deployed self-
+  hosts (proxied by GitHub release-download stats — no in-product
+  telemetry). Bus-factor section names sole admin (`@mgoodric`) and
+  commits to recruiting at least one co-maintainer by 2027-05-20.
+  Quarterly governance-checkin convention defined; first checkin
+  (`docs/audit-log/governance-checkin-2026-Q2.md`) committed as baseline.
+  New `.github/FUNDING.yml` enables the GitHub Sponsors button (set up
+  but NOT marketed — no prominent README link, per anti-criterion
+  P0-181-4). README gains a new "Project status" section (≤8 lines)
+  after the title surfacing the model + re-evaluation date + link to
+  GOVERNANCE.md. CONTRIBUTING.md "Pull request workflow" cross-links to
+  GOVERNANCE.md. No code, no telemetry, no platform behavior change —
+  pure governance documentation closing the OQ #5 visibility commitment.
+  (#181)
+
 - **slice 182** — board-narrative AI-assist foundation pre-commitments.
   Ships the supporting artifacts that the CLAUDE.md "Board-narrative
   AI-assist" expansion (shipped in the OQ #14 resolution PR #403)
