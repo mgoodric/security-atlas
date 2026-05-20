@@ -60,7 +60,7 @@ import {
   type ListColumn,
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   fetchAuditPeriods,
   type AuditPeriod,
@@ -356,6 +356,20 @@ function AuditsPageInner() {
       <Button variant="outline" size="sm" disabled>
         Export OSCAL bundle
       </Button>
+      {/* Slice 139 — audit-periods data export (CSV / JSON / XLSX).
+          Distinct from the slice 030 OSCAL bundle (which is the
+          cosigned audit-binding artifact). This export is the
+          operator-facing data dump including freeze metadata —
+          frozen_at / frozen_by / frozen_hash columns. Cosigned
+          bundle bytes are NOT in this export's column set
+          (P0-A-AP-1). */}
+      <AuditPeriodsExportButtons />
+      {/* Slice 138 — samples data export (CSV / JSON / XLSX). Row
+          cap raised to 250K because sample populations at
+          multi-product orgs can be voluminous. INCLUDES audit_period_id
+          link (via populations.audit_period_id) so downstream
+          consumers correlate samples to a specific frozen period. */}
+      <SamplesExportButtons />
       {/* Slice 149: re-wired from disabled placeholder to a working
           link. Routes to /audits/new (slice 149 create form) which
           posts to /v1/audit-periods via the BFF. */}
@@ -508,5 +522,59 @@ export default function AuditsListPage() {
     >
       <AuditsPageInner />
     </Suspense>
+  );
+}
+
+// AuditPeriodsExportButtons renders three direct-download links to the
+// slice-139 audit-periods export BFF — one per format. Each is an
+// `<a>` (not a fetch) so the browser's native file-save dialog
+// handles the download. The BFF streams the platform response back
+// unchanged. The row cap + concurrency cap + role gate live
+// server-side.
+//
+// `data-testid` tokens are stable contract points for the Playwright
+// e2e spec (`web/e2e/audit-periods-export.spec.ts`).
+function AuditPeriodsExportButtons() {
+  return (
+    <span
+      className="inline-flex items-center gap-1"
+      data-testid="audit-periods-export-buttons"
+    >
+      <span className="text-xs text-muted-foreground">Export:</span>
+      {(["csv", "json", "xlsx"] as const).map((fmt) => (
+        <a
+          key={fmt}
+          href={`/api/admin/audit-periods/export?format=${fmt}`}
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+          data-testid={`audit-periods-export-${fmt}`}
+        >
+          {fmt.toUpperCase()}
+        </a>
+      ))}
+    </span>
+  );
+}
+
+// SamplesExportButtons renders three direct-download links to the
+// slice 138 samples export BFF — one per format. Sibling of
+// AuditPeriodsExportButtons above; row cap is 250K at v1.
+function SamplesExportButtons() {
+  return (
+    <span
+      className="inline-flex items-center gap-1"
+      data-testid="samples-export-buttons"
+    >
+      <span className="text-xs text-muted-foreground">Samples export:</span>
+      {(["csv", "json", "xlsx"] as const).map((fmt) => (
+        <a
+          key={fmt}
+          href={`/api/admin/samples/export?format=${fmt}`}
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+          data-testid={`samples-export-${fmt}`}
+        >
+          {fmt.toUpperCase()}
+        </a>
+      ))}
+    </span>
   );
 }

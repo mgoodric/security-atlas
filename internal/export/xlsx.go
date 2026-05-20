@@ -60,7 +60,18 @@ func (*xlsxExporter) FileExt() string { return "xlsx" }
 // is built into a small per-row XML fragment buffer then written out.
 // Total per-row allocation is bounded — no full result-set buffering
 // (slice 135 P0-A7).
-func (*xlsxExporter) WriteRows(w io.Writer, header []string, rows iter.Seq[[]string]) error {
+func (e *xlsxExporter) WriteRows(w io.Writer, header []string, rows iter.Seq[[]string]) error {
+	return e.WriteRowsWithOpts(w, header, rows, WriteOpts{})
+}
+
+// WriteRowsWithOpts ignores opts — XLSX is structurally a tabular
+// format where the slice 145 redaction case is best represented as an
+// empty cell. An external auditor opening the .xlsx in Excel sees
+// "this column is blank for every row" which is the same visual
+// affordance as a redaction box on a paper report. The other two
+// slice 145 mitigations (`null` for JSON, CSV-injection sanitizer
+// untouched) are honored where they live.
+func (*xlsxExporter) WriteRowsWithOpts(w io.Writer, header []string, rows iter.Seq[[]string], _ WriteOpts) error {
 	zw := zip.NewWriter(w)
 
 	// 1. [Content_Types].xml

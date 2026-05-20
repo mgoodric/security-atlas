@@ -60,7 +60,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useReducer, useState } from "react";
+import { useEffect, useMemo, useReducer, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -473,15 +473,31 @@ function AppearanceSection() {
 }
 
 function AppearanceSelector() {
-  // The selector mounts client-side only (parent is a "use client"
-  // page). useState with a lazy initializer reads localStorage exactly
-  // once on first render, sidestepping the
-  // react-hooks/set-state-in-effect rule. The initializer is guarded so
-  // SSR (no window) returns the default.
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window === "undefined") return DEFAULT_THEME;
-    return readTheme(window.localStorage);
-  });
+  // Slice 170 D1 (Pattern A: useEffect post-mount sync) — the prior
+  // implementation used `useState` with an SSR-guarded lazy initializer.
+  // That initializer runs exactly once per server-or-client render PASS,
+  // and React reuses the server-rendered state on hydration: the client
+  // never re-ran the initializer, so `localStorage` was never consulted
+  // on a fresh page load. Result: the picker always booted to
+  // `DEFAULT_THEME` regardless of the user's persisted choice. The fix:
+  // seed state with `DEFAULT_THEME` (matching the SSR pass for
+  // hydration-mismatch safety per AC-2) and read `localStorage` in a
+  // single-shot `useEffect` after mount. The post-mount setState causes
+  // a one-frame flicker from "system" to the stored value; per slice 170
+  // P0-A5 / Notes-for-Implementing-Agent, that's acceptable below the
+  // fold. See docs/audit-log/170-settings-theme-picker-hydration-decisions.md.
+  const [theme, setTheme] = useState<Theme>(DEFAULT_THEME);
+  useEffect(() => {
+    // Post-mount synchronization from a non-React state source
+    // (localStorage) is the canonical pattern for this scenario; see
+    // react.dev "synchronizing with external systems". The set-state runs
+    // exactly once on mount and seeds the picker from the persisted
+    // choice. Removing this would re-introduce the slice 170 hydration
+    // bug. The react-hooks/set-state-in-effect rule is intentionally
+    // disabled on the next line.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTheme(readTheme(window.localStorage));
+  }, []);
 
   function choose(next: Theme) {
     setTheme(next);

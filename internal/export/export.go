@@ -133,6 +133,40 @@ type Exporter interface {
 	// the same length as the header. Cells are opaque strings — the
 	// caller stringifies typed values before yielding the row.
 	WriteRows(w io.Writer, header []string, rows iter.Seq[[]string]) error
+
+	// WriteRowsWithOpts is the slice-145 variant that accepts encoder
+	// options — currently a set of column names whose JSON rendering
+	// should emit `null` when the cell value is empty (used by the
+	// `?include_payload=false` audit-log redaction path). CSV + XLSX
+	// implementations ignore [WriteOpts.NullForEmpty] — they emit the
+	// empty cell verbatim, which is the same behavior an external
+	// auditor expects from a redacted-handoff workflow.
+	//
+	// WriteRows MUST behave identically to WriteRowsWithOpts with a
+	// zero-valued [WriteOpts] (backwards-compat for slice 135 callers
+	// that have not yet adopted the opts variant).
+	WriteRowsWithOpts(w io.Writer, header []string, rows iter.Seq[[]string], opts WriteOpts) error
+}
+
+// WriteOpts carries per-call encoder options. The zero value is
+// equivalent to the slice 135 WriteRows behavior — no nulling, no
+// special-casing — so call sites that don't need the options can
+// continue to use WriteRows.
+//
+// Slice 145 introduces [WriteOpts.NullForEmpty] to support the
+// `?include_payload=false` audit-log export workflow without
+// disturbing the slice 135 wire shape.
+type WriteOpts struct {
+	// NullForEmpty is the set of header-column names whose JSON
+	// rendering MUST emit the literal `null` token when the cell
+	// value is the empty string. CSV + XLSX implementations ignore
+	// this — they emit an empty cell either way, which is what
+	// downstream auditors expect from a redacted CSV / XLSX export.
+	//
+	// The set is keyed on the exact header string (byte-for-byte
+	// equality with one of the entries in `header`). Headers not in
+	// the set render normally.
+	NullForEmpty map[string]bool
 }
 
 // ResolveExporter returns the encoder for the given format, or an error
@@ -163,7 +197,16 @@ func (*csvExporter) Format() Format      { return FormatCSV }
 func (*csvExporter) ContentType() string { return "text/csv; charset=utf-8" }
 func (*csvExporter) FileExt() string     { return "csv" }
 
-func (*csvExporter) WriteRows(w io.Writer, header []string, rows iter.Seq[[]string]) error {
+func (e *csvExporter) WriteRows(w io.Writer, header []string, rows iter.Seq[[]string]) error {
+	return e.WriteRowsWithOpts(w, header, rows, WriteOpts{})
+}
+
+// WriteRowsWithOpts ignores opts — CSV emits empty cells verbatim for
+// the slice-145 redaction case, which is the rendering external
+// auditors expect ("cell is empty" = "column was redacted on
+// handoff"). The slice 135 cell-injection sanitizer is still applied
+// to every cell.
+func (*csvExporter) WriteRowsWithOpts(w io.Writer, header []string, rows iter.Seq[[]string], _ WriteOpts) error {
 	cw := csv.NewWriter(w)
 	if err := cw.Write(sanitizeCSVCells(header)); err != nil {
 		return fmt.Errorf("csv header: %w", err)
@@ -221,7 +264,18 @@ func (*jsonExporter) Format() Format      { return FormatJSON }
 func (*jsonExporter) ContentType() string { return "application/json" }
 func (*jsonExporter) FileExt() string     { return "json" }
 
-func (*jsonExporter) WriteRows(w io.Writer, header []string, rows iter.Seq[[]string]) error {
+func (e *jsonExporter) WriteRows(w io.Writer, header []string, rows iter.Seq[[]string]) error {
+	return e.WriteRowsWithOpts(w, header, rows, WriteOpts{})
+}
+
+// WriteRowsWithOpts honors [WriteOpts.NullForEmpty]: when a column
+// name appears in that set AND the row's cell for that column is the
+// empty string, the JSON output emits the literal `null` token (not
+// the empty string `""`). Slice 145 uses this to render the
+// `?include_payload=false` audit-log export's payload_json column as
+// `null` rather than `""` — which is the contract downstream
+// consumers (jq, scripts) expect for a redacted field.
+func (*jsonExporter) WriteRowsWithOpts(w io.Writer, header []string, rows iter.Seq[[]string], opts WriteOpts) error {
 	// Streamed assembly: opening bracket, comma between rows, closing
 	// bracket. encoding/json's standard Encoder appends a newline per
 	// Encode call and writes the full value at once; for streaming we
@@ -238,7 +292,7 @@ func (*jsonExporter) WriteRows(w io.Writer, header []string, rows iter.Seq[[]str
 		for i, k := range header {
 			obj[k] = row[i]
 		}
-		blob, err := jsonMarshalOrdered(header, obj)
+		blob, err := jsonMarshalOrderedWithOpts(header, obj, opts)
 		if err != nil {
 			return fmt.Errorf("json row marshal: %w", err)
 		}
@@ -258,11 +312,11 @@ func (*jsonExporter) WriteRows(w io.Writer, header []string, rows iter.Seq[[]str
 	return nil
 }
 
-// jsonMarshalOrdered marshals an object preserving header column order.
-// The stdlib `map[string]string` would sort keys alphabetically; the
-// slice 135 contract requires keys in header declaration order so the
-// JSON output mirrors the CSV column order downstream consumers expect.
-func jsonMarshalOrdered(header []string, obj map[string]string) ([]byte, error) {
+// jsonMarshalOrderedWithOpts marshals an object preserving header column order
+// (slice 135 contract — the stdlib map encoder would sort keys alphabetically).
+// Renders nullable-set columns as the JSON `null` token when their cell value
+// is the empty string (slice 145 AC-2).
+func jsonMarshalOrderedWithOpts(header []string, obj map[string]string, opts WriteOpts) ([]byte, error) {
 	var b strings.Builder
 	b.WriteByte('{')
 	for i, k := range header {
@@ -276,12 +330,24 @@ func jsonMarshalOrdered(header []string, obj map[string]string) ([]byte, error) 
 		if err != nil {
 			return nil, err
 		}
-		vb, err := json.Marshal(obj[k])
+		b.Write(kb)
+		b.WriteByte(':')
+
+		v := obj[k]
+		if v == "" && opts.NullForEmpty[k] {
+			// Slice 145: redacted column renders as the literal
+			// `null` token, not the empty string. Downstream
+			// consumers (jq, scripts, importers) treat `null` as
+			// "field absent" while `""` is "field present but
+			// blank" — meaningfully different for the
+			// `?include_payload=false` redaction workflow.
+			b.WriteString("null")
+			continue
+		}
+		vb, err := json.Marshal(v)
 		if err != nil {
 			return nil, err
 		}
-		b.Write(kb)
-		b.WriteByte(':')
 		b.Write(vb)
 	}
 	b.WriteByte('}')

@@ -45,7 +45,7 @@ import {
   type ListColumn,
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -305,11 +305,31 @@ function EvidencePageInner() {
     },
   ];
 
+  // Slice 138 — three Export links to the slice 138 evidence BFF
+  // (`/api/admin/evidence/export?format=...`). Each is an `<a>` so the
+  // browser's native file-save dialog handles the download; the BFF
+  // streams the platform response back unchanged. Per slice 138
+  // P0-A-Ledger-1, the canonical column set EXCLUDES payload — operators
+  // who need payload introspection use the evidence-detail page (RLS-
+  // protected read), not bulk export.
   const actions = (
     <>
-      <Button variant="outline" size="sm" disabled>
-        Export JSONL
-      </Button>
+      <div
+        className="flex items-center gap-1"
+        data-testid="evidence-export-buttons"
+      >
+        <span className="text-xs text-muted-foreground">Export:</span>
+        {(["csv", "json", "xlsx"] as const).map((fmt) => (
+          <a
+            key={fmt}
+            href={`/api/admin/evidence/export?format=${fmt}`}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+            data-testid={`evidence-export-${fmt}`}
+          >
+            {fmt.toUpperCase()}
+          </a>
+        ))}
+      </div>
       <Button size="sm" disabled>
         Push evidence
       </Button>

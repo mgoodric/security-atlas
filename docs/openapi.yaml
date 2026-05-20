@@ -47,11 +47,17 @@ servers:
 
 tags:
   - name: admin-audit-log
+  - name: admin-audit-periods
   - name: admin-credentials
+  - name: admin-evidence
+  - name: admin-exceptions
   - name: admin-feature-flags
   - name: admin-install
+  - name: admin-policies
+  - name: admin-samples
   - name: admin-sso
   - name: admin-users
+  - name: admin-vendors
   - name: artifacts
   - name: audit-notes
   - name: audit-periods
@@ -208,6 +214,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/admin/audit-periods/export:
+    get:
+      summary: GET /v1/admin/audit-periods/export
+      tags: [admin-audit-periods]
+      operationId: get-v1-admin-audit-periods-export
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/admin/credentials:
     get:
       summary: GET /v1/admin/credentials
@@ -275,6 +295,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/admin/evidence/export:
+    get:
+      summary: GET /v1/admin/evidence/export
+      tags: [admin-evidence]
+      operationId: get-v1-admin-evidence-export
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/exceptions/export:
+    get:
+      summary: GET /v1/admin/exceptions/export
+      tags: [admin-exceptions]
+      operationId: get-v1-admin-exceptions-export
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/admin/features:
     get:
       summary: GET /v1/admin/features
@@ -314,6 +362,34 @@ paths:
       summary: POST /v1/admin/install/reset-bootstrap
       tags: [admin-install]
       operationId: post-v1-admin-install-reset-bootstrap
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/policies/export:
+    get:
+      summary: GET /v1/admin/policies/export
+      tags: [admin-policies]
+      operationId: get-v1-admin-policies-export
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/samples/export:
+    get:
+      summary: GET /v1/admin/samples/export
+      tags: [admin-samples]
+      operationId: get-v1-admin-samples-export
       security:
         - adminBearer: []
       responses:
@@ -411,6 +487,20 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/vendors/export:
+    get:
+      summary: GET /v1/admin/vendors/export
+      tags: [admin-vendors]
+      operationId: get-v1-admin-vendors-export
+      security:
+        - adminBearer: []
       responses:
         default:
           description: Default response envelope.
@@ -1069,6 +1159,20 @@ paths:
       summary: GET /v1/controls/drift
       tags: [controls]
       operationId: get-v1-controls-drift
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/export:
+    get:
+      summary: GET /v1/controls/export
+      tags: [controls]
+      operationId: get-v1-controls-export
       security:
         - bearer: []
       responses:
@@ -2507,6 +2611,20 @@ paths:
       summary: POST /v1/risks/aggregate
       tags: [risks]
       operationId: post-v1-risks-aggregate
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/risks/export:
+    get:
+      summary: GET /v1/risks/export
+      tags: [risks]
+      operationId: get-v1-risks-export
       security:
         - bearer: []
       responses:

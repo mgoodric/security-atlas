@@ -13,9 +13,11 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/mgoodric/security-atlas/internal/api/adminauditlog"
+	"github.com/mgoodric/security-atlas/internal/api/adminauditperiods"
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
 	"github.com/mgoodric/security-atlas/internal/api/adminsso"
 	"github.com/mgoodric/security-atlas/internal/api/adminusers"
+	"github.com/mgoodric/security-atlas/internal/api/adminvendors"
 	aggregationrulesapi "github.com/mgoodric/security-atlas/internal/api/aggregationrules"
 	"github.com/mgoodric/security-atlas/internal/api/anchors"
 	artifactsapi "github.com/mgoodric/security-atlas/internal/api/artifacts"
@@ -274,6 +276,12 @@ func (s *Server) httpHandler() http.Handler {
 	// alongside /v1/risks/heatmap, before the generic /v1/risks/{id}, so
 	// chi's declaration-order match keeps it ahead of the UUID-id route.
 	root.Get("/v1/risks/theme-heatmap", risksH.ThemeHeatmap)
+	// Slice 136: risk register data export (CSV / JSON / XLSX). Reuses
+	// the slice 135 data-export library + slice 145 concurrency cap.
+	// Literal-segment route declared before the generic /v1/risks/{id}
+	// so chi's declaration-order match keeps it ahead.
+	risksExportH := risksapi.NewExportHandler(s.dbPool)
+	root.Get("/v1/risks/export", risksExportH.ExportRisks)
 	// Slice 053: manual aggregation + live recompute. Literal-segment
 	// routes (/aggregate, /{id}/aggregation) declared before the generic
 	// /v1/risks/{id} so chi's declaration-order match keeps them ahead.
@@ -369,6 +377,14 @@ func (s *Server) httpHandler() http.Handler {
 	// the /v1/controls/{id}/... patterns as separate routes.
 	controlsListH := controlsapi.NewListHandler(controlsStore)
 	root.Get("/v1/controls", controlsListH.List)
+	// Slice 137: controls UCF graph data export (CSV / JSON / XLSX).
+	// Reuses the slice 135 data-export library + slice 145 concurrency
+	// cap. Literal-segment route declared before any /v1/controls/{id}/
+	// patterns so chi's declaration-order match keeps it ahead. Row cap
+	// is 500K (vs slice 136's 50K) per slice 137 D3 — UCF graphs at
+	// multi-product orgs are large.
+	controlsExportH := controlsapi.NewExportHandler(s.dbPool)
+	root.Get("/v1/controls/export", controlsExportH.ExportControls)
 	// Slice 011: manual control attestation endpoint. Wired only when
 	// the slice-013 ingest service is wired in (this slice writes
 	// evidence records via that service). When the artifact store is
@@ -723,6 +739,38 @@ func (s *Server) httpHandler() http.Handler {
 	// format-encoder swap on the response body (CSV / JSON / XLSX).
 	// Meta-audit row written on EVERY outcome (slice 135 P0-A4).
 	root.Get("/v1/admin/audit-log/export", auditLogH.ExportUnified)
+	// Slice 139: per-entity data exports for audit_periods + vendors.
+	// Both reuse the slice-135 export library; both go through the
+	// slice-145 per-(tenant, user) concurrency cap; both emit a
+	// meta-audit row on every outcome (`audit_periods_export` +
+	// `vendors_export` — migration 20260519000000). Route mounts
+	// registered onto the root per the parallel-batch convention
+	// (chi.Mux rejects two Mounts at "/"). Same admit set as the
+	// slice-135 audit-log export (admin OR auditor OR grc_engineer).
+	auditPeriodsExportH := adminauditperiods.New(s.dbPool)
+	root.Get("/v1/admin/audit-periods/export", auditPeriodsExportH.ExportAuditPeriods)
+	vendorsExportH := adminvendors.New(s.dbPool)
+	root.Get("/v1/admin/vendors/export", vendorsExportH.ExportVendors)
+	// Slice 138: per-entity data exports for the ledger entities —
+	// evidence + policies + exceptions + samples. Each closes the
+	// per-entity export cluster with the slice 135 library + slice
+	// 145 concurrency cap. Meta-audit actions:
+	//   `evidence_export` (payload column EXCLUDED at v1 per
+	//    slice 138 P0-A-Ledger-1 — operational-metadata leak vector)
+	//   `policies_export`
+	//   `exceptions_export`
+	//   `samples_export` (row cap 250K per slice doc; samples can
+	//    be voluminous at multi-product orgs)
+	// Migration: 20260520000010_ledger_entities_export_meta_audit.sql.
+	// Same admit set as the slice 137 controls-export route.
+	evidenceExportH := apievidence.NewExportHandler(s.dbPool)
+	root.Get("/v1/admin/evidence/export", evidenceExportH.ExportEvidence)
+	policiesExportH := policiesapi.NewExportHandler(s.dbPool)
+	root.Get("/v1/admin/policies/export", policiesExportH.ExportPolicies)
+	exceptionsExportH := exceptionsapi.NewExportHandler(s.dbPool)
+	root.Get("/v1/admin/exceptions/export", exceptionsExportH.ExportExceptions)
+	samplesExportH := auditapi.NewSamplesExportHandler(s.dbPool)
+	root.Get("/v1/admin/samples/export", samplesExportH.ExportSamples)
 	// Slice 076: metrics catalog + cascade + observation store. Routes
 	// appended per the parallel-batch convention (chi.Mux rejects two
 	// Mounts at "/"). The literal-segment route /v1/metrics/cascade is
