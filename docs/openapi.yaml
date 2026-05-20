@@ -609,6 +609,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/anchors/export:
+    get:
+      summary: GET /v1/anchors/export
+      tags: [ucf]
+      operationId: get-v1-anchors-export
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/anchors/{id}:
     get:
       summary: GET /v1/anchors/{id}

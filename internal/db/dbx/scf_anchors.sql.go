@@ -158,6 +158,181 @@ func (q *Queries) InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams
 	return i, err
 }
 
+const listAllFwToScfEdgesForExport = `-- name: ListAllFwToScfEdgesForExport :many
+SELECT
+    e.id                          AS edge_id,
+    e.scf_anchor_id               AS anchor_id,
+    a.scf_id                      AS anchor_scf_id,
+    e.framework_requirement_id    AS framework_requirement_id,
+    r.code                        AS framework_requirement_code,
+    r.title                       AS framework_requirement_title,
+    f.slug                        AS framework_slug,
+    fv.version                    AS framework_version,
+    e.relationship_type,
+    e.strength,
+    e.source_attribution,
+    e.rationale
+FROM fw_to_scf_edges e
+JOIN scf_anchors a                ON a.id = e.scf_anchor_id
+JOIN framework_versions afv       ON afv.id = a.framework_version_id
+JOIN frameworks af                ON af.id = afv.framework_id
+JOIN framework_requirements r     ON r.id = e.framework_requirement_id
+JOIN framework_versions fv        ON fv.id = r.framework_version_id
+JOIN frameworks f                 ON f.id = fv.framework_id
+WHERE af.slug = 'scf'
+  AND afv.status = 'current'
+  AND af.tenant_id IS NULL
+ORDER BY a.scf_id, f.slug, fv.version, r.code
+`
+
+type ListAllFwToScfEdgesForExportRow struct {
+	EdgeID                    pgtype.UUID                `json:"edge_id"`
+	AnchorID                  pgtype.UUID                `json:"anchor_id"`
+	AnchorScfID               string                     `json:"anchor_scf_id"`
+	FrameworkRequirementID    pgtype.UUID                `json:"framework_requirement_id"`
+	FrameworkRequirementCode  string                     `json:"framework_requirement_code"`
+	FrameworkRequirementTitle string                     `json:"framework_requirement_title"`
+	FrameworkSlug             string                     `json:"framework_slug"`
+	FrameworkVersion          string                     `json:"framework_version"`
+	RelationshipType          StrmRelationshipType       `json:"relationship_type"`
+	Strength                  float64                    `json:"strength"`
+	SourceAttribution         CrosswalkSourceAttribution `json:"source_attribution"`
+	Rationale                 string                     `json:"rationale"`
+}
+
+// Slice 174: anchor catalog export edges projection. Returns EVERY
+// fw_to_scf_edges row whose target anchor is in the current SCF
+// framework_version, joined to framework_requirements +
+// framework_versions + frameworks so consumers get the natural-key
+// (`framework_slug:version:code`) without a second query.
+//
+// Catalog data — no tenant_id; no RLS clause; bounded result set
+// (~10K edges at current SCF release: ~1,400 anchors × 3-8 edges
+// per anchor average). `no_relationship` edges are INCLUDED here
+// because the export is the canonical catalog dump — operators
+// doing reconciliation want to see "this anchor explicitly does NOT
+// map to that requirement" as a recorded fact, not a silent
+// omission. The slice 008 traversal views filter no_relationship
+// out for coverage UI; the export does NOT.
+//
+// Sorted by anchor_scf_id then framework_slug + framework_version
+// + requirement_code so the rows group by anchor (matches the
+// visual ordering of the JSON projection's nested array).
+func (q *Queries) ListAllFwToScfEdgesForExport(ctx context.Context) ([]ListAllFwToScfEdgesForExportRow, error) {
+	rows, err := q.db.Query(ctx, listAllFwToScfEdgesForExport)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAllFwToScfEdgesForExportRow
+	for rows.Next() {
+		var i ListAllFwToScfEdgesForExportRow
+		if err := rows.Scan(
+			&i.EdgeID,
+			&i.AnchorID,
+			&i.AnchorScfID,
+			&i.FrameworkRequirementID,
+			&i.FrameworkRequirementCode,
+			&i.FrameworkRequirementTitle,
+			&i.FrameworkSlug,
+			&i.FrameworkVersion,
+			&i.RelationshipType,
+			&i.Strength,
+			&i.SourceAttribution,
+			&i.Rationale,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllSCFAnchorsForExport = `-- name: ListAllSCFAnchorsForExport :many
+SELECT
+    a.id,
+    a.scf_id,
+    a.family,
+    a.title,
+    a.description,
+    a.subtopics,
+    a.created_at,
+    a.updated_at,
+    fv.id           AS framework_version_id,
+    fv.version      AS framework_version,
+    f.slug          AS framework_slug
+FROM scf_anchors a
+JOIN framework_versions fv ON fv.id = a.framework_version_id
+JOIN frameworks f          ON f.id = fv.framework_id
+WHERE f.slug = 'scf'
+  AND fv.status = 'current'
+  AND f.tenant_id IS NULL
+ORDER BY a.scf_id
+LIMIT $1
+`
+
+type ListAllSCFAnchorsForExportRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	ScfID              string             `json:"scf_id"`
+	Family             string             `json:"family"`
+	Title              string             `json:"title"`
+	Description        string             `json:"description"`
+	Subtopics          []byte             `json:"subtopics"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	FrameworkVersion   string             `json:"framework_version"`
+	FrameworkSlug      string             `json:"framework_slug"`
+}
+
+// Slice 174: anchor catalog export. Returns EVERY SCF anchor in the
+// current SCF framework_version (status='current'), joined to
+// framework_versions + frameworks so the export carries the framework
+// provenance (`framework_slug`, `framework_version`) without a
+// second query. Sorted by `scf_id` for stable output across runs and
+// across tenants (the global catalog is identical for every tenant,
+// so the bit-for-bit-identical cross-tenant assertion in the
+// integration test relies on this stable ordering).
+//
+// Catalog data — no tenant_id; no RLS clause; bounded result set
+// (~1,400 anchors at current SCF release). The `LIMIT` parameter
+// carries the slice 174 row cap so the handler can detect cap-
+// exceeded by asking for cap+1.
+func (q *Queries) ListAllSCFAnchorsForExport(ctx context.Context, limit int32) ([]ListAllSCFAnchorsForExportRow, error) {
+	rows, err := q.db.Query(ctx, listAllSCFAnchorsForExport, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAllSCFAnchorsForExportRow
+	for rows.Next() {
+		var i ListAllSCFAnchorsForExportRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScfID,
+			&i.Family,
+			&i.Title,
+			&i.Description,
+			&i.Subtopics,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FrameworkVersionID,
+			&i.FrameworkVersion,
+			&i.FrameworkSlug,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFrameworkVersionsBySlug = `-- name: ListFrameworkVersionsBySlug :many
 SELECT fv.id, fv.tenant_id, fv.framework_id, fv.version, fv.effective_from, fv.effective_to, fv.status, fv.requirement_count, fv.oscal_catalog_uri, fv.created_at
 FROM framework_versions fv

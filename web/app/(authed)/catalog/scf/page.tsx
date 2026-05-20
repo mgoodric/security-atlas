@@ -13,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -23,6 +24,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { APIError, listAnchors } from "@/lib/api";
+import {
+  ANCHORS_EXPORT_FORMATS,
+  ANCHORS_EXPORT_FORMAT_LABELS,
+  buildAnchorsExportURL,
+} from "@/lib/api/anchors-export";
 
 export default function SCFCatalogPage() {
   const router = useRouter();
@@ -39,12 +45,33 @@ export default function SCFCatalogPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">SCF Anchors</h1>
-        <p className="text-sm text-muted-foreground">
-          Browse the Secure Controls Framework anchor catalog. Click any anchor
-          to see the framework requirements that map to it.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">SCF Anchors</h1>
+          <p className="text-sm text-muted-foreground">
+            Browse the Secure Controls Framework anchor catalog. Click any
+            anchor to see the framework requirements that map to it.
+          </p>
+        </div>
+        {/* Slice 174: Export buttons (CSV / JSON / XLSX) wire to the
+            BFF proxy at `/api/anchors/export?format=...`, which
+            forwards to the platform `GET /v1/anchors/export`
+            endpoint. Each link is an `<a download>` so the browser
+            honours the backend's Content-Disposition filename. */}
+        <div className="flex flex-wrap gap-2">
+          {ANCHORS_EXPORT_FORMATS.map((format) => (
+            <a
+              key={format}
+              href={buildAnchorsExportURL(format)}
+              download
+              rel="noopener"
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+              data-testid={`anchors-export-${format}`}
+            >
+              Export {ANCHORS_EXPORT_FORMAT_LABELS[format]}
+            </a>
+          ))}
+        </div>
       </div>
 
       {isLoading ? <AnchorSkeletons /> : null}
