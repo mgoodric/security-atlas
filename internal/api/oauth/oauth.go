@@ -76,6 +76,8 @@ type Handler struct {
 	cfg          Config
 	tokenEP      *TokenEndpoint
 	authorizeEP  *AuthorizeEndpoint
+	revokeEP     *RevocationEndpoint
+	introspectEP *IntrospectionEndpoint
 	discoveryDoc []byte
 }
 
@@ -111,9 +113,29 @@ func (h *Handler) AttachAuthorizeEndpoint(ep *AuthorizeEndpoint) {
 	h.rebuildDiscovery()
 }
 
+// AttachRevocationEndpoint wires the slice-190 `/oauth/revoke` handler
+// per RFC 7009. When attached, the discovery document is regenerated
+// to advertise the revocation_endpoint_auth_methods_supported list.
+// Optional — when nil, the `/oauth/revoke` route stays a 501 stub.
+func (h *Handler) AttachRevocationEndpoint(ep *RevocationEndpoint) {
+	h.revokeEP = ep
+	h.rebuildDiscovery()
+}
+
+// AttachIntrospectionEndpoint wires the slice-190 `/oauth/introspect`
+// handler per RFC 7662. When attached, the discovery document is
+// regenerated to advertise the introspection_endpoint_auth_methods_supported
+// list. Optional — when nil, the `/oauth/introspect` route stays a
+// 501 stub.
+func (h *Handler) AttachIntrospectionEndpoint(ep *IntrospectionEndpoint) {
+	h.introspectEP = ep
+	h.rebuildDiscovery()
+}
+
 // rebuildDiscovery snapshots the current grant-type state into the
 // pre-marshaled discovery JSON. Called from New, AttachTokenEndpoint,
-// and AttachAuthorizeEndpoint.
+// AttachAuthorizeEndpoint, AttachRevocationEndpoint, and
+// AttachIntrospectionEndpoint.
 func (h *Handler) rebuildDiscovery() {
 	grantTypes := []string{}
 	if h.tokenEP != nil {
@@ -126,7 +148,8 @@ func (h *Handler) rebuildDiscovery() {
 			grantTypes = append(grantTypes, GrantTypeAuthorizationCode)
 		}
 	}
-	doc, err := json.Marshal(discoveryDocument(h.cfg.Issuer, grantTypes))
+	doc, err := json.Marshal(discoveryDocument(h.cfg.Issuer, grantTypes,
+		h.revokeEP != nil, h.introspectEP != nil))
 	if err != nil {
 		// json.Marshal of a fixed-shape map[string]any with string +
 		// []string + bool values cannot fail in practice; if it does,
@@ -154,8 +177,16 @@ func (h *Handler) Mount(r chi.Router) {
 	} else {
 		r.Get(PathAuthorize, stubHandler("189"))
 	}
-	r.Post(PathRevoke, stubHandler("190"))
-	r.Post(PathIntrospect, stubHandler("190"))
+	if h.revokeEP != nil {
+		r.Post(PathRevoke, h.revokeEP.ServeHTTP)
+	} else {
+		r.Post(PathRevoke, stubHandler("190"))
+	}
+	if h.introspectEP != nil {
+		r.Post(PathIntrospect, h.introspectEP.ServeHTTP)
+	} else {
+		r.Post(PathIntrospect, stubHandler("190"))
+	}
 }
 
 // serveJWKS returns the verification-key set as a JSON Web Key Set
@@ -203,8 +234,8 @@ func (h *Handler) serveDiscovery(w http.ResponseWriter, _ *http.Request) {
 // don't accept would be dishonest to clients. RFC 6749 §2.3.1
 // recommends accepting BOTH, but does not REQUIRE it; future-slice
 // work can re-add basic auth if operator demand surfaces.
-func discoveryDocument(issuer string, grantTypesSupported []string) map[string]any {
-	return map[string]any{
+func discoveryDocument(issuer string, grantTypesSupported []string, revocationActive, introspectionActive bool) map[string]any {
+	doc := map[string]any{
 		"issuer":                                issuer,
 		"jwks_uri":                              issuer + PathJWKS,
 		"token_endpoint":                        issuer + PathToken,
@@ -227,6 +258,21 @@ func discoveryDocument(issuer string, grantTypesSupported []string) map[string]a
 		"code_challenge_methods_supported":      []string{"S256"},
 		"token_endpoint_auth_methods_supported": []string{"client_secret_post"},
 	}
+	// Slice 190: only advertise the revocation + introspection auth
+	// method lists when the corresponding endpoints are wired. RFC
+	// 8414 §2 allows omitting both fields when those endpoints are
+	// not implemented; stubbed-only deployments stay quiet.
+	if revocationActive {
+		doc["revocation_endpoint_auth_methods_supported"] = []string{
+			"client_secret_basic", "client_secret_post",
+		}
+	}
+	if introspectionActive {
+		doc["introspection_endpoint_auth_methods_supported"] = []string{
+			"client_secret_basic", "client_secret_post",
+		}
+	}
+	return doc
 }
 
 // stubHandler returns a `slice_pending` 501 response pointing at the

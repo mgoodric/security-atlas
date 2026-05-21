@@ -3,7 +3,7 @@
 **Cluster:** Backend / Auth
 **Estimate:** 2-3d
 **Type:** JUDGMENT
-**Status:** `not-ready` (fourth slot in the auth-substrate-v2 spine; gate: 189 merged)
+**Status:** `in-review`
 
 ## Narrative
 

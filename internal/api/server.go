@@ -34,6 +34,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
+	"github.com/mgoodric/security-atlas/internal/auth/revocation"
+	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/oscal"
@@ -102,6 +104,17 @@ type Server struct {
 	// the AS surface leave it nil and the `.well-known/*` routes are
 	// simply absent. See docs/adr/0003-oauth-authorization-server.md.
 	oauthHandler *oauth.Handler
+	// Slice 190: JWT validation middleware deps. When wired via
+	// AttachJWTValidator, the HTTP server attaches the JWT middleware
+	// BEFORE the legacy bearer middleware on /v1/* paths. The two
+	// auth paths coexist during the slice 191 cutover window.
+	// jwtSigner is the tokensign.Signer that verifies inbound JWTs;
+	// jwtRevoked is the slice 190 revocation list; jwtIssuer +
+	// jwtAudience tighten the claim check.
+	jwtSigner   *tokensign.Signer
+	jwtRevoked  *revocation.Store
+	jwtIssuer   string
+	jwtAudience string
 }
 
 // AttachOAuthHandler wires the slice-187 OAuth AS scaffolding (JWKS,
@@ -110,6 +123,21 @@ type Server struct {
 // Unit servers that don't need the AS endpoints leave it unset.
 func (s *Server) AttachOAuthHandler(h *oauth.Handler) {
 	s.oauthHandler = h
+}
+
+// AttachJWTValidator wires the slice-190 JWT validation middleware
+// dependencies. cmd/atlas constructs the signer + revocation store
+// once at startup; when both are non-nil the HTTP server prepends
+// the JWT middleware to the /v1/* chain ahead of the legacy bearer
+// middleware. issuer + audience MUST match the OAuth AS's
+// discovery-document values. Slice 191 retires the legacy path; in
+// the meantime, both auth methods coexist (decision D3 in
+// docs/audit-log/190-jwt-middleware-r2-decisions.md).
+func (s *Server) AttachJWTValidator(signer *tokensign.Signer, revoked *revocation.Store, issuer, audience string) {
+	s.jwtSigner = signer
+	s.jwtRevoked = revoked
+	s.jwtIssuer = issuer
+	s.jwtAudience = audience
 }
 
 // AttachAuthz wires the slice-035 OPA engine + decision audit writer.

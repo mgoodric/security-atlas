@@ -34,6 +34,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthcode"
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
+	"github.com/mgoodric/security-atlas/internal/auth/revocation"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
@@ -358,6 +359,33 @@ func main() {
 			// operation; sweepCancel is invoked at process shutdown
 			// (handled by the parent process lifecycle).
 			_ = sweepCancel
+
+			// Slice 190: wire the /oauth/revoke (RFC 7009) +
+			// /oauth/introspect (RFC 7662) endpoints, the JWT
+			// validation middleware on /v1/*, and the revocation-
+			// list sweeper goroutine.
+			revokedStore := revocation.New(pool)
+			revokeEP := oauthapi.NewRevocationEndpoint(signer, revokedStore, clients, oauthapi.RevocationEndpointConfig{
+				Issuer: issuer,
+			})
+			introspectEP := oauthapi.NewIntrospectionEndpoint(signer, revokedStore, clients, oauthapi.IntrospectionEndpointConfig{
+				Issuer: issuer,
+			})
+			oauthHandler.AttachRevocationEndpoint(revokeEP)
+			oauthHandler.AttachIntrospectionEndpoint(introspectEP)
+			logger.Info("atlas: OAuth revocation + introspection endpoints wired")
+
+			// Slice 190: attach the JWT validator to the HTTP server
+			// so it prepends jwtmw to the /v1/* chain.
+			srv.AttachJWTValidator(signer, revokedStore, issuer, issuer)
+			logger.Info("atlas: JWT validation middleware wired", "issuer", issuer)
+
+			// Slice 190: revocation-list sweeper goroutine. DELETEs
+			// rows where expires_at < now() every 5 minutes (decision
+			// D4 — matches the auth-code sweeper interval).
+			revSweepCtx, revSweepCancel := context.WithCancel(context.Background())
+			go runRevokedTokenSweeper(revSweepCtx, revokedStore, logger)
+			_ = revSweepCancel
 		}
 		srv.AttachOAuthHandler(oauthHandler)
 		// Surface the active signing key id (not the key bytes — never
@@ -988,5 +1016,41 @@ func doSweep(ctx context.Context, store *oauthcode.Store, grace time.Duration, l
 	}
 	if n > 0 {
 		logger.Info("atlas: oauth_auth_codes swept", "rows_deleted", n)
+	}
+}
+
+// runRevokedTokenSweeper is the slice-190 revocation-list sweeper.
+// Every 5 minutes it DELETEs oauth_revoked_tokens rows whose
+// expires_at < now() — those tokens have already failed the JWT
+// validator's exp check, so the revocation row is dead weight. The
+// goroutine runs until ctx is cancelled (process shutdown). Decision
+// D4 in docs/audit-log/190-jwt-middleware-r2-decisions.md.
+func runRevokedTokenSweeper(ctx context.Context, store *revocation.Store, logger *slog.Logger) {
+	const interval = 5 * time.Minute
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	// Run once immediately so the first cleanup doesn't wait the
+	// full interval.
+	doRevokedSweep(ctx, store, logger)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			doRevokedSweep(ctx, store, logger)
+		}
+	}
+}
+
+func doRevokedSweep(ctx context.Context, store *revocation.Store, logger *slog.Logger) {
+	sweepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	n, err := store.Sweep(sweepCtx)
+	if err != nil {
+		logger.Warn("atlas: oauth_revoked_tokens sweep failed", "err", err)
+		return
+	}
+	if n > 0 {
+		logger.Info("atlas: oauth_revoked_tokens swept", "rows_deleted", n)
 	}
 }
