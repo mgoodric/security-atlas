@@ -30,6 +30,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/evidence"
 	"github.com/mgoodric/security-atlas/internal/api/idemstore"
+	"github.com/mgoodric/security-atlas/internal/api/oauth"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
@@ -95,6 +96,20 @@ type Server struct {
 	// GET /metrics returns 404 (default off — P0-A3). Auth-exempted via
 	// the same pattern slice 092 used for /v1/version (AC-16).
 	metricsHandler http.Handler
+	// Slice 187: OAuth Authorization Server scaffolding (JWKS + OIDC
+	// discovery + /oauth/* 501 stubs). Mounted only when cmd/atlas has
+	// wired it via AttachOAuthHandler — unit servers that don't need
+	// the AS surface leave it nil and the `.well-known/*` routes are
+	// simply absent. See docs/adr/0003-oauth-authorization-server.md.
+	oauthHandler *oauth.Handler
+}
+
+// AttachOAuthHandler wires the slice-187 OAuth AS scaffolding (JWKS,
+// OIDC discovery, /oauth/* 501 stubs). cmd/atlas constructs the handler
+// once at startup with the filesystem keystore + configured issuer URL.
+// Unit servers that don't need the AS endpoints leave it unset.
+func (s *Server) AttachOAuthHandler(h *oauth.Handler) {
+	s.oauthHandler = h
 }
 
 // AttachAuthz wires the slice-035 OPA engine + decision audit writer.

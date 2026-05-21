@@ -140,7 +140,15 @@ func (s *Server) httpHandler() http.Handler {
 	// path; broader prefixes would widen the unauthenticated read
 	// surface. When metricsHandler is nil (default off — P0-A3), the
 	// route is absent and the exemption is a harmless no-match.
-	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics"))
+	// Slice 187: `/.well-known/` (JWKS + OIDC discovery) is bearer-exempt
+	// per RFC 8414 §3 — discovery + JWKS MUST be reachable without auth
+	// so clients can bootstrap key material before they hold a token.
+	// `/oauth/` is exempt because the 501-stub handlers in this slice
+	// (and the real grant flows in slices 188-192) terminate auth at
+	// their own layer (OAuth client authentication), not via the
+	// platform bearer middleware. See
+	// docs/adr/0003-oauth-authorization-server.md § Endpoint exemptions.
+	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/"))
 	// Slice 033: lift the authenticated credential's tenant id onto the
 	// request context so every downstream handler — and every database
 	// transaction it opens — runs under the right `app.current_tenant`
@@ -159,7 +167,7 @@ func (s *Server) httpHandler() http.Handler {
 		// same reason as /health — a metadata probe shouldn't reach OPA.
 		// Slice 073: /v1/install-state is added too — public metadata, same
 		// reasoning as the bearer-exempt above.
-		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics"))
+		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/"))
 	}
 	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
 	// tenancy / authz so the cache lives inside the same request-context
@@ -219,6 +227,18 @@ func (s *Server) httpHandler() http.Handler {
 	// above gates the path because /v1/install/* is NOT in the exempt list.
 	root.Get("/v1/install-state", s.handleInstallState)
 	root.Post("/v1/install/mark-first-signin", s.handleMarkFirstSignin)
+	// Slice 187: OAuth Authorization Server scaffolding. The handler
+	// owns six routes — JWKS, OIDC discovery, and four 501-stubs for
+	// /oauth/token (188), /oauth/authorize (189), /oauth/revoke (190),
+	// /oauth/introspect (190). Mounted directly on the root router
+	// (NOT via a second Mount("/")) per the established
+	// parallel-batch convention. Routes are bearer- and authz-exempt
+	// via the exemption lists above. Only mounted when cmd/atlas has
+	// wired the handler via AttachOAuthHandler — unit servers that
+	// don't need the AS surface leave the routes absent.
+	if s.oauthHandler != nil {
+		s.oauthHandler.Mount(root)
+	}
 	// Slice 008: UCF graph traversal HTTP API. Three read endpoints
 	// query the requirement-anchor-control graph through the SCF spine
 	// (canvas §3 / Plans/UCF_GRAPH_MODEL.md). Routes are appended

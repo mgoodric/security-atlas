@@ -61,6 +61,29 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ## [Unreleased]
 
+### Added
+
+- **slice 187** — OAuth Authorization Server scaffolding (JWT signing
+  infrastructure + JWKS endpoint + OIDC discovery document). Foundation
+  slice for the auth-substrate-v2 spine (OQ #21 Reading D resolution).
+  Ships `internal/auth/keystore` + `internal/auth/keystore/fsstore`
+  (filesystem-backed ES256 keystore with file-mode 0600 + multi-key
+  rotation support), `internal/auth/jwt` (RFC 7519 + RFC 9068 claim
+  types + the locked `atlas:*` custom claims + temporal/identity
+  validation), `internal/auth/tokensign` (go-jose/v4-backed sign/verify
+  primitives), `internal/api/oauth` (JWKS at `/.well-known/jwks.json`,
+  OIDC discovery at `/.well-known/openid-configuration`, and 501-stub
+  handlers for `/oauth/token` · `/oauth/authorize` · `/oauth/revoke` ·
+  `/oauth/introspect` that point at the future slices 188-192).
+  Discovery doc honestly advertises `grant_types_supported: []` until
+  the grant slices land. Foundation only — NO `/oauth/*` real handlers,
+  NO JWT validation middleware on `/v1/*`, NO SDK/frontend migration
+  (those are slices 188-192). Wired via `ATLAS_ISSUER_URL` env var; no
+  DB schema changes. ADR-0003 captures the architectural rationale,
+  token shape, ES256 decision, key rotation strategy, and threat-model
+  summary. JUDGMENT slice — decisions D1-D5 recorded at
+  `docs/audit-log/187-oauth-as-scaffolding-decisions.md`.
+
 ### Fixed
 
 - **slice 183** — UI honesty fix (F-178-1/2/3/7/8 closure): the
