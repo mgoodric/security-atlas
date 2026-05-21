@@ -83,6 +83,35 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   token shape, ES256 decision, key rotation strategy, and threat-model
   summary. JUDGMENT slice — decisions D1-D5 recorded at
   `docs/audit-log/187-oauth-as-scaffolding-decisions.md`.
+- **slice 188** — OAuth `/oauth/token` endpoint + RFC 8693 token
+  exchange. Spine slot 2 of 6 in the auth-substrate-v2 spine, building
+  on slice 187's scaffolding. Lights up `POST /oauth/token` with two
+  grant types: RFC 6749 §4.4 `client_credentials` (machine clients
+  acquire JWT access tokens) and RFC 8693 token-exchange (the
+  load-bearing primitive for slice 192's tenant-switcher). Ships
+  `internal/auth/oauthclient` (DB-backed OAuth client registry +
+  argon2id-hashed secrets), two new migrations
+  (`oauth_clients` non-tenant-scoped + `oauth_token_exchanges`
+  append-only via two-policy RLS matching slice 030's
+  `decisions_audit` precedent), the `internal/api/oauth.TokenEndpoint`
+  handler (form-body Content-Type validation; per-client token-bucket
+  rate limiter keyed on `client_id` — NEVER source IP per P0-188-9;
+  default 60/min/client, configurable via
+  `ATLAS_OAUTH_TOKEN_RATE_PER_MIN`), and the
+  `atlas-cli oauth issue-client <name>` operator helper. Constitutional
+  safety invariants enforced: token-exchange NEVER elevates
+  `atlas:super_admin` (copies from verified subject_token; P0-188-4);
+  signature verification ALWAYS runs before the allowlist check
+  (P0-188-5); audit log is append-only (P0-188-8). The minted-JWT
+  shape matches slice 187's locked claim contract: `sub =
+  oauth_client:<id>` for client_credentials machine tokens;
+  `current_tenant_id` swapped for token-exchange while
+  `available_tenants` + `roles` + `super_admin` are preserved.
+  Discovery doc updated to advertise both grant types when the
+  TokenEndpoint is wired. JUDGMENT slice — decisions D1-D4 recorded at
+  `docs/audit-log/188-oauth-token-endpoint-decisions.md`. ADR-0003
+  carries the slice 188 addendum covering the three load-bearing
+  invariants.
 
 ### Fixed
 

@@ -129,6 +129,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newOscalCmd())
 	root.AddCommand(newFeaturesCmd())
 	root.AddCommand(newBootstrapCmd())
+	root.AddCommand(newOAuthCmd())
 	root.AddCommand(newVersionCmd())
 	return root
 }

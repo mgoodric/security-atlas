@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -30,8 +31,10 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
+	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
+	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	metricscatalog "github.com/mgoodric/security-atlas/internal/catalog/metrics"
@@ -289,13 +292,44 @@ func main() {
 	// external issuer URL, and attach to the server. JWKS + discovery
 	// are bearer/authz-exempt per RFC 8414 §3; see
 	// docs/adr/0003-oauth-authorization-server.md.
+	//
+	// Slice 188 extends this block: when the DB pool is wired AND the
+	// issuer URL is set, the OAuth handler also gets a TokenEndpoint
+	// that lights up `POST /oauth/token` with client_credentials +
+	// token-exchange grants. The TokenEndpoint pulls oauth_clients
+	// rows for authentication and writes oauth_token_exchanges audit
+	// rows on every successful exchange.
 	if issuer := os.Getenv("ATLAS_ISSUER_URL"); issuer != "" {
 		ks, err := fsstore.Open(fsstore.ResolvePath(""))
 		if err != nil {
 			logger.Error("atlas: open OAuth keystore", "err", err)
 			os.Exit(1)
 		}
-		srv.AttachOAuthHandler(oauthapi.New(ks, oauthapi.Config{Issuer: issuer}))
+		oauthHandler := oauthapi.New(ks, oauthapi.Config{Issuer: issuer})
+
+		// Slice 188: wire the token endpoint when the DB pool exists.
+		// The unit / in-memory cmd/atlas paths (no DATABASE_URL) leave
+		// the token endpoint absent; `/oauth/token` returns the slice
+		// 187 501-stub response in that mode.
+		if pool != nil {
+			signer := tokensign.New(ks)
+			clients := oauthclient.New(pool)
+			ratePerMin := oauthapi.DefaultTokenRatePerMin
+			if env := os.Getenv("ATLAS_OAUTH_TOKEN_RATE_PER_MIN"); env != "" {
+				if v, err := strconv.Atoi(env); err == nil && v > 0 {
+					ratePerMin = v
+				}
+			}
+			ep := oauthapi.NewTokenEndpoint(signer, clients, oauthapi.TokenEndpointConfig{
+				Issuer:        issuer,
+				AuditPool:     pool,
+				RatePerMinute: ratePerMin,
+			})
+			oauthHandler.AttachTokenEndpoint(ep)
+			logger.Info("atlas: OAuth token endpoint wired",
+				"rate_per_min", ratePerMin)
+		}
+		srv.AttachOAuthHandler(oauthHandler)
 		// Surface the active signing key id (not the key bytes — never
 		// the bytes) so operators can correlate JWKS responses with the
 		// running process at startup.

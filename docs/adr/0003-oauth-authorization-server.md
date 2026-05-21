@@ -131,6 +131,20 @@ The slice-190 R2 middleware that gates `/v1/*` MUST honor the same exemption lis
 
 **Reading D — internal OAuth 2.0 Authorization Server with JWT access tokens carrying tenant-in-claim (chosen).** See above.
 
+## Slice 188 addendum — `/oauth/token` endpoint + token-exchange invariants
+
+Slice 188 (2026-05-21) lit up `POST /oauth/token` with two grants — `client_credentials` (RFC 6749 §4.4) and token-exchange (RFC 8693). The slice locks four invariants on top of the slice-187 scaffolding:
+
+**1. Token-exchange super_admin non-elevation (load-bearing safety).** The token-exchange handler MUST copy `atlas:super_admin` from the verified subject_token; it MUST NOT compute it, infer it from form parameters, or accept it from the request body. The exchange path is a tenant-swap verb, NOT a privilege-grant verb. `super_admin=true` is granted exclusively at OIDC login time (slice 142). P0-188-4 enforces this; AC-15 covers it with an integration test (`TestTokenEndpoint_TokenExchange_NeverElevatesSuperAdmin`).
+
+**2. Signature-before-allowlist.** The token-exchange handler MUST verify the subject_token's JWS signature against the local keystore BEFORE reading any claim (including `atlas:available_tenants`) from the token. An unverified subject_token can claim arbitrary allowlists; only a signature-verified token is trusted as the basis for the tenant gate. P0-188-5 enforces this; the unit test `TestTokenEndpoint_TokenExchange_RejectsBadSignature` demonstrates the negative case (a foreign-signed token cannot influence the allowlist gate).
+
+**3. Per-client rate limit (DoS mitigation).** The token endpoint runs a token-bucket limiter keyed on `client_id`. Default 60/min/client; configurable via `ATLAS_OAUTH_TOKEN_RATE_PER_MIN`. Returns 429 + `Retry-After`. The limit MUST be per-client, NOT per-IP — IP-based limits are bypassable behind NAT. P0-188-9 enforces this.
+
+**4. Audit-log append-only invariant.** Every successful token-exchange writes one row to `oauth_token_exchanges` (append-only via two-policy RLS scoped to the target tenant — matches slice 030's `decisions_audit` precedent). The write is best-effort post-sign — the JWT response does not block on the audit-write commit (D3, slice 188 decisions log). The audit row is forensically airtight (jti + iss + sub + exchanged_at + ip_address); the absence of an UPDATE/DELETE policy under FORCE RLS makes mutation impossible from atlas_app.
+
+**Discovery doc updates.** `grant_types_supported` advertises `["client_credentials", "urn:ietf:params:oauth:grant-type:token-exchange"]` exactly when a TokenEndpoint is wired. `token_endpoint_auth_methods_supported` is tightened to `["client_secret_post"]` — slice 188 does NOT implement HTTP Basic auth; advertising what we don't accept would mislead clients (a follow-on slice can re-add Basic when operator demand surfaces).
+
 ## References
 
 - [`Plans/canvas/11-open-questions.md`](../../Plans/canvas/11-open-questions.md) #21 — resolution block
@@ -138,6 +152,8 @@ The slice-190 R2 middleware that gates `/v1/*` MUST honor the same exemption lis
 - [ADR-0002 — Bearer-token storage](./0002-bearer-token-storage.md) — the predecessor decision the AS layer composes with, not replaces (`api_keys.token_hash` retains its HMAC-keyed shape during the deprecation window)
 - [`docs/issues/187-oauth-as-scaffolding-jwt-signing.md`](../issues/187-oauth-as-scaffolding-jwt-signing.md) — foundation slice
 - [`docs/audit-log/187-oauth-as-scaffolding-decisions.md`](../audit-log/187-oauth-as-scaffolding-decisions.md) — D1-D5 decisions log
+- [`docs/issues/188-oauth-token-endpoint-token-exchange.md`](../issues/188-oauth-token-endpoint-token-exchange.md) — slice 188 spec
+- [`docs/audit-log/188-oauth-token-endpoint-decisions.md`](../audit-log/188-oauth-token-endpoint-decisions.md) — slice 188 D1-D4 decisions log
 - RFC 9068 — https://datatracker.ietf.org/doc/html/rfc9068
 - RFC 8693 — https://datatracker.ietf.org/doc/html/rfc8693
 
