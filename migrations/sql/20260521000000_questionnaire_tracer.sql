@@ -32,10 +32,12 @@
 --   - questionnaires.tenant_id           → not a FK target (tenants live
 --                                          outside this schema)
 --   - questionnaire_questions.questionnaire_id → questionnaires(id) CASCADE
---   - questionnaire_questions.scf_anchor_id    → scf_anchors(id) RESTRICT, NULLABLE
---                                                (NULL = "needs manual mapping" — D5)
+--   - questionnaire_questions.scf_anchor_id    → free-form TEXT (no FK; see
+--                                                column comment for v2 spillover)
+--                                                NULL = "needs manual mapping" — D5
 --   - questionnaire_answers.question_id        → questionnaire_questions(id) CASCADE
---   - answer_library.scf_anchor_id             → scf_anchors(id) RESTRICT, NOT NULL
+--   - answer_library.scf_anchor_id             → free-form TEXT (no FK; see
+--                                                questionnaire_questions comment)
 --
 -- NOT-NULL discipline: all new tables are NEW (zero ALTER on existing),
 -- so no slice-002 integration_test.go helper-fixture patches required.
@@ -121,8 +123,13 @@ CREATE TABLE questionnaire_questions (
     -- vendor questionnaire labels this differently ("yes/no/na",
     -- "Yes/No/N.A.", "scaled 1-5", "Free text").
     answer_type      TEXT NOT NULL DEFAULT '',
-    -- Mapping to the canonical SCF anchor. NULL means "needs mapping".
-    scf_anchor_id    TEXT NULL REFERENCES scf_anchors (id) ON DELETE RESTRICT,
+    -- Mapping to the canonical SCF anchor (free-form scf_id string like
+    -- "IAC-06" as read from the Excel import). NULL means "needs mapping".
+    -- Tracer-bullet: no FK constraint — `scf_anchors.scf_id` is unique only
+    -- within `framework_version_id`, so a single-column FK isn't expressible.
+    -- v2 spillover will resolve to scf_anchors.id (UUID) at import time +
+    -- track the framework_version_id for proper cross-version semantics.
+    scf_anchor_id    TEXT NULL,
     -- Display-ordering within the questionnaire. Stable on re-render.
     sort_order       INTEGER NOT NULL DEFAULT 0,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -227,7 +234,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON questionnaire_answers TO atlas_app;
 CREATE TABLE answer_library (
     id              UUID PRIMARY KEY,
     tenant_id       UUID NOT NULL,
-    scf_anchor_id   TEXT NOT NULL REFERENCES scf_anchors (id) ON DELETE RESTRICT,
+    -- Free-form scf_id string (e.g. "IAC-06"). See questionnaire_questions
+    -- comment for the v2 spillover that will resolve to scf_anchors.id (UUID).
+    scf_anchor_id   TEXT NOT NULL,
     -- The canonical-answer text the operator wants to reuse.
     canonical_text  TEXT NOT NULL,
     -- Where this canonical answer originated. Free-form (e.g.,
