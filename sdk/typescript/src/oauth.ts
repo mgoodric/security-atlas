@@ -69,6 +69,22 @@ export interface OAuthClientOptions {
   fetchImpl?: typeof fetch;
 }
 
+/**
+ * trimTrailingSlashes returns ``s`` with trailing "/" characters
+ * removed. Used to normalize the issuer URL before appending
+ * ``/oauth/token``. Done with an iterative substring slice instead
+ * of a `/\/+$/` regex per CodeQL js/redos guidance — the regex is
+ * polynomial-time on adversarial inputs, even though in practice
+ * the issuerUrl is operator-supplied config (not user input).
+ */
+function trimTrailingSlashes(s: string): string {
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 47 /* "/" */) {
+    end--;
+  }
+  return end === s.length ? s : s.slice(0, end);
+}
+
 /** OAuthError is the base class for SDK errors. */
 export class OAuthError extends Error {
   constructor(message: string) {
@@ -129,7 +145,7 @@ export class OAuthClient {
     this.httpTimeoutMs = opts.httpTimeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS;
     this.now = opts.now ?? (() => Date.now());
     this.fetchImpl = opts.fetchImpl ?? fetch;
-    this.tokenUrl = opts.issuerUrl.replace(/\/+$/, "") + "/oauth/token";
+    this.tokenUrl = trimTrailingSlashes(opts.issuerUrl) + "/oauth/token";
   }
 
   /**
