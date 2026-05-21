@@ -380,6 +380,34 @@ func main() {
 			srv.AttachJWTValidator(signer, revokedStore, issuer, issuer)
 			logger.Info("atlas: JWT validation middleware wired", "issuer", issuer)
 
+			// Slice 191: wire the RFC 8628 device-authorization endpoint
+			// + the device-code grant + the internal approve/deny
+			// handlers. Together these light up the `atlas login`
+			// CLI flow.
+			deviceCodes := oauthapi.NewDeviceCodeStore(pool)
+			deviceAuthEP := oauthapi.NewDeviceAuthorizationEndpoint(clients, deviceCodes, oauthapi.DeviceAuthorizationConfig{
+				Issuer: issuer,
+			})
+			deviceApprovalEP := oauthapi.NewDeviceApprovalEndpoint(deviceCodes, oauthapi.DeviceApprovalConfig{})
+			ep.AttachDeviceCodeStore(deviceCodes)
+			oauthHandler.AttachDeviceAuthorizationEndpoint(deviceAuthEP)
+			oauthHandler.AttachDeviceApprovalEndpoint(deviceApprovalEP)
+			logger.Info("atlas: OAuth device-authorization endpoints wired",
+				"interval_seconds", oauthapi.DevicePollInterval)
+
+			// Slice 191: the migration URL the 410 responder surfaces
+			// in its body. Defaults to the docs-site path relative to
+			// the issuer when ATLAS_OAUTH_DEPRECATION_URL is unset; an
+			// override lets self-host operators point at their own
+			// migration runbook.
+			migrationURL := os.Getenv("ATLAS_OAUTH_DEPRECATION_URL")
+			if migrationURL == "" {
+				migrationURL = issuer + "/docs/migration/oauth"
+			}
+			srv.AttachDeprecationMigrationURL(migrationURL)
+			logger.Info("atlas: legacy bearer deprecation responder wired",
+				"migration_url", migrationURL)
+
 			// Slice 190: revocation-list sweeper goroutine. DELETEs
 			// rows where expires_at < now() every 5 minutes (decision
 			// D4 — matches the auth-code sweeper interval).

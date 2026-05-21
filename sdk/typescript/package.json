@@ -1,9 +1,28 @@
 {
   "name": "@security-atlas/sdk",
   "private": true,
-  "version": "0.0.0",
-  "description": "security-atlas TypeScript SDK for evidence push (lands in slice 003). Will flip to private:false when slice 003 ships a publishable build.",
+  "version": "0.1.0",
+  "description": "security-atlas TypeScript SDK — OAuth client_credentials helper (slice 191).",
   "engines": {
     "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
   }
 }

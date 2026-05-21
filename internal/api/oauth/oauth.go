@@ -72,13 +72,15 @@ type Config struct {
 // stub) and the discovery document gains `authorization_code` in
 // grant_types_supported.
 type Handler struct {
-	store        keystore.KeyStore
-	cfg          Config
-	tokenEP      *TokenEndpoint
-	authorizeEP  *AuthorizeEndpoint
-	revokeEP     *RevocationEndpoint
-	introspectEP *IntrospectionEndpoint
-	discoveryDoc []byte
+	store          keystore.KeyStore
+	cfg            Config
+	tokenEP        *TokenEndpoint
+	authorizeEP    *AuthorizeEndpoint
+	revokeEP       *RevocationEndpoint
+	introspectEP   *IntrospectionEndpoint
+	deviceAuthEP   *DeviceAuthorizationEndpoint
+	deviceApproval *DeviceApprovalEndpoint
+	discoveryDoc   []byte
 }
 
 // New constructs a Handler. The store provides verification keys for
@@ -132,6 +134,24 @@ func (h *Handler) AttachIntrospectionEndpoint(ep *IntrospectionEndpoint) {
 	h.rebuildDiscovery()
 }
 
+// AttachDeviceAuthorizationEndpoint wires the slice-191 RFC 8628
+// device-authorization handler. When attached, the discovery
+// document advertises `device_authorization_endpoint` and adds the
+// device-code grant URN to `grant_types_supported`.
+func (h *Handler) AttachDeviceAuthorizationEndpoint(ep *DeviceAuthorizationEndpoint) {
+	h.deviceAuthEP = ep
+	h.rebuildDiscovery()
+}
+
+// AttachDeviceApprovalEndpoint wires the slice-191 internal approve
+// + deny handlers. These endpoints are NOT in RFC 8628 — they are
+// the atlas-internal hooks the device approval UI posts to. No
+// discovery surface change because the endpoints are not part of
+// the public OAuth contract.
+func (h *Handler) AttachDeviceApprovalEndpoint(ep *DeviceApprovalEndpoint) {
+	h.deviceApproval = ep
+}
+
 // rebuildDiscovery snapshots the current grant-type state into the
 // pre-marshaled discovery JSON. Called from New, AttachTokenEndpoint,
 // AttachAuthorizeEndpoint, AttachRevocationEndpoint, and
@@ -147,9 +167,15 @@ func (h *Handler) rebuildDiscovery() {
 		if h.authorizeEP != nil {
 			grantTypes = append(grantTypes, GrantTypeAuthorizationCode)
 		}
+		// Slice 191: the device-code grant lights up when BOTH the
+		// token endpoint is wired AND the device-authorization
+		// endpoint is attached — same honest-advertising discipline.
+		if h.deviceAuthEP != nil {
+			grantTypes = append(grantTypes, GrantTypeDeviceCode)
+		}
 	}
 	doc, err := json.Marshal(discoveryDocument(h.cfg.Issuer, grantTypes,
-		h.revokeEP != nil, h.introspectEP != nil))
+		h.revokeEP != nil, h.introspectEP != nil, h.deviceAuthEP != nil))
 	if err != nil {
 		// json.Marshal of a fixed-shape map[string]any with string +
 		// []string + bool values cannot fail in practice; if it does,
@@ -186,6 +212,18 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Post(PathIntrospect, h.introspectEP.ServeHTTP)
 	} else {
 		r.Post(PathIntrospect, stubHandler("190"))
+	}
+	if h.deviceAuthEP != nil {
+		r.Post(PathDeviceAuthorization, h.deviceAuthEP.ServeHTTP)
+	} else {
+		r.Post(PathDeviceAuthorization, stubHandler("191"))
+	}
+	if h.deviceApproval != nil {
+		r.Post(PathDeviceApprove, h.deviceApproval.ServeApprove)
+		r.Post(PathDeviceDeny, h.deviceApproval.ServeDeny)
+	} else {
+		r.Post(PathDeviceApprove, stubHandler("191"))
+		r.Post(PathDeviceDeny, stubHandler("191"))
 	}
 }
 
@@ -234,7 +272,7 @@ func (h *Handler) serveDiscovery(w http.ResponseWriter, _ *http.Request) {
 // don't accept would be dishonest to clients. RFC 6749 §2.3.1
 // recommends accepting BOTH, but does not REQUIRE it; future-slice
 // work can re-add basic auth if operator demand surfaces.
-func discoveryDocument(issuer string, grantTypesSupported []string, revocationActive, introspectionActive bool) map[string]any {
+func discoveryDocument(issuer string, grantTypesSupported []string, revocationActive, introspectionActive, deviceAuthActive bool) map[string]any {
 	doc := map[string]any{
 		"issuer":                                issuer,
 		"jwks_uri":                              issuer + PathJWKS,
@@ -271,6 +309,13 @@ func discoveryDocument(issuer string, grantTypesSupported []string, revocationAc
 		doc["introspection_endpoint_auth_methods_supported"] = []string{
 			"client_secret_basic", "client_secret_post",
 		}
+	}
+	// Slice 191: advertise the device-authorization endpoint when
+	// it's wired. RFC 8628 §4 mandates the
+	// `device_authorization_endpoint` discovery field for AS that
+	// implement the grant.
+	if deviceAuthActive {
+		doc["device_authorization_endpoint"] = issuer + PathDeviceAuthorization
 	}
 	return doc
 }

@@ -115,6 +115,21 @@ type Server struct {
 	jwtRevoked  *revocation.Store
 	jwtIssuer   string
 	jwtAudience string
+
+	// Slice 191: the migration URL surfaced in the 410 deprecation
+	// responder's body so operators see a machine-readable path to
+	// the OAuth migration guide. Empty falls back to omitting the
+	// field; cmd/atlas wires it via AttachDeprecationMigrationURL.
+	deprecationMigrationURL string
+}
+
+// AttachDeprecationMigrationURL wires the slice-191 410 responder's
+// `migration_url` body field. cmd/atlas sets this to the operator-
+// facing docs path (e.g., `https://atlas.example.com/docs/migration/oauth`)
+// at startup. P0-191-3: the URL MUST be present so clients hitting
+// the 410 know where to go.
+func (s *Server) AttachDeprecationMigrationURL(url string) {
+	s.deprecationMigrationURL = url
 }
 
 // AttachOAuthHandler wires the slice-187 OAuth AS scaffolding (JWKS,

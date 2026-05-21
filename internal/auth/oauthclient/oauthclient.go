@@ -201,6 +201,43 @@ func (s *Store) Verify(ctx context.Context, clientID, secretPlaintext string) (*
 	return &c, nil
 }
 
+// Lookup is the secret-less read path the slice-191 device
+// authorization flow uses to validate that a client_id is
+// registered. Returns ErrUnknownClient when no row matches or when
+// the matched row is disabled — the device flow's security model
+// is that the JWT mint is gated by the human approval step
+// (RFC 8628 §5.1), not by holding a static client_secret, so this
+// path deliberately does NOT verify a secret. It is NOT a
+// substitute for Verify on the client_credentials hot path.
+func (s *Store) Lookup(ctx context.Context, clientID string) (*Client, error) {
+	if clientID == "" {
+		return nil, ErrUnknownClient
+	}
+	const q = `
+		SELECT id, client_id, name, disabled_at, created_at
+		FROM oauth_clients
+		WHERE client_id = $1
+	`
+	var (
+		c        Client
+		disabled *time.Time
+	)
+	err := s.pool.QueryRow(ctx, q, clientID).Scan(
+		&c.ID, &c.ClientID, &c.Name, &disabled, &c.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUnknownClient
+		}
+		return nil, fmt.Errorf("oauthclient: query: %w", err)
+	}
+	if disabled != nil {
+		return nil, ErrUnknownClient
+	}
+	c.DisabledAt = disabled
+	return &c, nil
+}
+
 // generateSecret produces a 32-byte random secret encoded as
 // URL-safe base64 (no padding). 32 bytes is 256 bits of entropy —
 // brute-force is computationally infeasible. URL-safe encoding lets
