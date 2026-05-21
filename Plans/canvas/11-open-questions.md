@@ -81,6 +81,26 @@ These are decisions the canvas does **not** resolve. Each is a real choice with 
 
     **Resolution gate:** before any code lands on slice 141 substantive work (beyond the data-model halves that Reading C would ship anyway) OR before slice 141.5 picks up. The escalation context at the loop's `continuous-batch-escalation.md` is the primary source-of-truth for the engineer's analysis until this OQ resolves.
 
+    > **RESOLVED 2026-05-20**: **Reading D — OAuth 2.0 Authorization Server with JWT access tokens carrying tenant-in-claim**. Maintainer rationale: "we have no users yet; I don't want to implement something just to replace it." Pre-PMF is the right time to commit to the long-term standards-based architecture rather than ship a bespoke session model that we'd later need to migrate away from. **Reading C is explicitly rejected** — no interim bespoke session work; slice 141 stays parked until the auth-substrate spine lands.
+    >
+    > **Spine shape (filed as a multi-slice arc starting with slice 187):**
+    > - Slice 187 — OAuth AS scaffolding: JWT signing keypair (RS256/ES256) · JWKS endpoint · `.well-known/openid-configuration` discovery doc · key rotation pattern · internal token-signing service
+    > - Slice 188 — `/oauth/token` endpoint: RFC 6749 + RFC 8693; grant types `authorization_code` + `client_credentials` + `refresh_token` + `urn:ietf:params:oauth:grant-type:token-exchange`
+    > - Slice 189 — `/oauth/authorize` + PKCE (RFC 7636) wrapping slice 034's OIDC RP flow; frontend OAuth client integration with refresh-token UX
+    > - Slice 190 — JWT validation middleware replacing bearer middleware on `/v1/*`; R2 middleware becomes a pure claim check (`atlas:current_tenant_id` ∈ `atlas:available_tenants`); `/oauth/revoke` + `/oauth/introspect` (RFC 7009 + RFC 7662) + `jti` revocation list
+    > - Slice 191 — SDK migration to OAuth `client_credentials` grant × 4 languages (Go, Python, TypeScript, Java); CLI device-code flow (RFC 8628); API-key → client-credentials migration tool
+    > - Slice 192 — Multi-tenant switch via `grant_type=token-exchange` (the slice 141.5 successor); frontend header tenant switcher + login picker; closes out slice 141's vCISO success criterion
+    >
+    > **Slice 141 status:** flipped to `not-ready`, gated on slice 192. The data-model halves (user_tenants, super_admins stub, sessions migration) move into slice 192's scope — they were entangled with the auth substrate decision and shouldn't ship on a substrate we're replacing.
+    >
+    > **Standards committed:** RFC 6749 (OAuth 2.0 core) · RFC 7519 (JWT) · RFC 7636 (PKCE) · RFC 7009 (Revocation) · RFC 7662 (Introspection) · RFC 8628 (Device Authorization Grant) · RFC 8693 (Token Exchange) · RFC 9068 (JWT Profile for OAuth 2.0 Access Tokens). Optional v3 layering: RFC 9449 (DPoP) for token binding. Composes with existing OIDC RP at slice 034 (the RP authenticates the human; the new AS layer mints the atlas JWT).
+    >
+    > **Token shape (locked):** `iss` = atlas's external URL; `sub` = OIDC subject; `aud` = atlas API; `exp`/`iat`/`jti` per RFC 9068; custom claims `atlas:idp_issuer` · `atlas:current_tenant_id` · `atlas:available_tenants[]` · `atlas:roles{tenant_id → [role]}` · `atlas:super_admin`. ADR captures the full shape at slice 187 design time.
+    >
+    > **Consumer migration:** wire protocol stays `Authorization: Bearer <opaque>`. SDK acquisition flows change (API key → OAuth `client_credentials` grant). Existing API keys get a migration tool (slice 191). 90-day deprecation window per OQ #9+#17 governance — old API keys keep working during the window.
+    >
+    > **Why this commitment now (pre-PMF):** no production users yet → no migration debt to other parties → cheapest time to commit. "Standards-based authn/authz" is a load-bearing trust signal for the security-conscious ICP; "we use the same OAuth + JWT standards your IdP issues" is a stronger story than any bespoke session model. ADR-0003 (filed at slice 187 design time) will capture the full architectural rationale.
+
 ---
 
 [← Canvas index](../ARCHITECTURE_CANVAS.md) · [← 10. Roadmap](./10-roadmap.md) · [Sources →](./sources.md)
