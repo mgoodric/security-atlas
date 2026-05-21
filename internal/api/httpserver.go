@@ -39,6 +39,7 @@ import (
 	featuresapi "github.com/mgoodric/security-atlas/internal/api/features"
 	fwscopesapi "github.com/mgoodric/security-atlas/internal/api/frameworkscopes"
 	freshnessdriftapi "github.com/mgoodric/security-atlas/internal/api/freshnessdrift"
+	mcpwriteproposalsapi "github.com/mgoodric/security-atlas/internal/api/mcpwriteproposals"
 	meapi "github.com/mgoodric/security-atlas/internal/api/me"
 	metricsapi "github.com/mgoodric/security-atlas/internal/api/metrics"
 	orgunitsapi "github.com/mgoodric/security-atlas/internal/api/orgunits"
@@ -77,6 +78,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/freshness"
+	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
 	"github.com/mgoodric/security-atlas/internal/risk"
@@ -549,6 +551,22 @@ func (s *Server) httpHandler() http.Handler {
 	root.Patch("/v1/exceptions/{id}/approve", exceptionsH.Approve)
 	root.Patch("/v1/exceptions/{id}/deny", exceptionsH.Deny)
 	root.Patch("/v1/exceptions/{id}/activate", exceptionsH.Activate)
+	// Slice 173: MCP write tools + HITL approval flow. Routes appended per
+	// the parallel-batch convention (chi rejects two Mounts at "/"). The
+	// MCP write tools (running in the cmd/atlas-mcp binary) call POST
+	// /v1/mcp/write-proposals to file a draft; operators confirm or reject
+	// via the same surface. The Store ships with the four canonical
+	// Appliers (create_risk, update_control_state, push_evidence,
+	// update_risk_treatment) registered; on confirm, the Applier executes
+	// inside the same transaction as the state flip so a downstream-write
+	// failure rolls the proposal back to state=ai_proposed.
+	mcpWriteStore := writeproposals.RegisterDefaultAppliers(writeproposals.NewStore(s.dbPool))
+	mcpWriteH := mcpwriteproposalsapi.New(mcpWriteStore)
+	root.Post("/v1/mcp/write-proposals", mcpWriteH.CreateProposal)
+	root.Get("/v1/mcp/write-proposals", mcpWriteH.ListProposals)
+	root.Get("/v1/mcp/write-proposals/{id}", mcpWriteH.GetProposal)
+	root.Post("/v1/mcp/write-proposals/{id}/confirm", mcpWriteH.ConfirmProposal)
+	root.Post("/v1/mcp/write-proposals/{id}/reject", mcpWriteH.RejectProposal)
 	// Slice 055: Decision Log CRUD + linkage (canvas Â§6.7). Routes appended
 	// per the parallel-batch convention -- chi.Mux rejects two Mounts at
 	// "/", so individual routes register onto the root. The literal-segment

@@ -148,6 +148,180 @@
         },
         "type": "object"
       }
+    },
+    {
+      "name": "create_risk",
+      "description": "Propose a new risk register entry. The proposal is staged at state='ai_proposed' until an authorized approver confirms or rejects it. Use confirm_write(proposal_id) to commit. No audit-binding artifact is published until a human approves.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "description": "Risk category slug (e.g., operational, technical, legal).",
+            "type": "string"
+          },
+          "description": {
+            "description": "Free-text risk narrative.",
+            "maxLength": 4000,
+            "type": "string"
+          },
+          "inherent_score": {
+            "description": "Methodology-shaped scoring envelope; structure depends on methodology.",
+            "type": "object"
+          },
+          "methodology": {
+            "description": "Optional; defaults to nist_800_30. Other valid values: qualitative_5x5, fair.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Short risk title.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "treatment": {
+            "description": "Optional; defaults to avoid (safest).",
+            "enum": [
+              "avoid",
+              "accept",
+              "transfer",
+              "mitigate"
+            ],
+            "type": "string"
+          },
+          "treatment_owner": {
+            "description": "User/credential id responsible for the treatment plan.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "category"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "update_control_state",
+      "description": "Propose a control-state override (manual.control_state_override.v1 evidence record). Constitutional invariant #2 forbids direct writes to control_evaluations; this tool routes through evidence so the eval engine observes the override on the same pipeline as connector-pushed evidence. Proposal sits at state='ai_proposed' until confirmed.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "control_id": {
+            "description": "Control UUID to override.",
+            "type": "string"
+          },
+          "rationale": {
+            "description": "Why this override is needed; required by the operator before confirm.",
+            "maxLength": 4000,
+            "type": "string"
+          },
+          "state": {
+            "description": "Proposed override state.",
+            "enum": [
+              "pass",
+              "fail",
+              "na",
+              "inconclusive"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "control_id",
+          "state"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "push_evidence",
+      "description": "Propose an evidence record append. Same wire shape as the push SDK (slice 003) but mediated by HITL approval because the LLM is the origin. Proposal sits at state='ai_proposed' until an approver confirms.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "control_id": {
+            "description": "Control UUID this evidence supports.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "evidence_kind slug (e.g., aws.s3.bucket_encryption.v1).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "observed_at": {
+            "description": "ISO-8601 timestamp; defaults to now if omitted.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "payload": {
+            "description": "Evidence payload (structured per evidence_kind schema). Bounded.",
+            "type": "object"
+          },
+          "result": {
+            "enum": [
+              "pass",
+              "fail",
+              "na",
+              "inconclusive"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "control_id",
+          "kind",
+          "result"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "update_risk_treatment",
+      "description": "Propose a risk treatment change (and optionally a treatment_owner reassignment). Proposal sits at state='ai_proposed' until an approver confirms.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "risk_id": {
+            "description": "Risk UUID to update.",
+            "type": "string"
+          },
+          "treatment": {
+            "enum": [
+              "avoid",
+              "accept",
+              "transfer",
+              "mitigate"
+            ],
+            "type": "string"
+          },
+          "treatment_owner": {
+            "description": "Optional; the user/credential id that owns the new treatment plan.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "risk_id",
+          "treatment"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "confirm_write",
+      "description": "Confirm an ai_proposed write proposal. Requires the caller's credential to hold the approver role; the platform runs the canonical Applier inside the same transaction as the state flip. Idempotent: a second call on an applied proposal returns a 409 conflict.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "proposal_id": {
+            "description": "Proposal UUID to confirm. The caller's credential MUST hold the approver role.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposal_id"
+        ],
+        "type": "object"
+      }
     }
   ]
 }
