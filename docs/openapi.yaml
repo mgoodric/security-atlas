@@ -81,6 +81,7 @@ tags:
   - name: schemas
   - name: scopes
   - name: system
+  - name: tenants
   - name: ucf
   - name: vendors
   - name: walkthroughs
@@ -3194,6 +3195,26 @@ paths:
       operationId: get-v1-scopes-dimensions
       security:
         - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/tenants/{id}:
+    patch:
+      summary: PATCH /v1/tenants/{id} — rename a tenant (per-tenant admin or super_admin)
+      tags: [tenants]
+      operationId: patch-v1-tenants-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         default:
           description: Default response envelope.

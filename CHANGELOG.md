@@ -63,6 +63,33 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 144** — Rename-tenant flow (per-tenant admin or super_admin).
+  Ships `PATCH /v1/tenants/{id}` to mutate a tenant's `name` field; the
+  new value appears immediately in the slice-192 `<TenantSwitcher>`
+  dropdown for everyone scoped to that tenant. Adds the `tenants` table
+  to the schema for the first time — slice 192 referenced it (via the
+  `GET /v1/me/tenants` name-enrichment SELECT) but no migration created
+  it; slice 144 backfills under FORCE RLS using the slice-002 four-policy
+  pattern + a case-insensitive UNIQUE expression index on `LOWER(name)`
+  to block trivial impersonation. Authority gate is dual-leg:
+  `cred.IsAdmin` (slice-034 credential path) OR `claims.SuperAdmin` /
+  `claims.Roles[CURRENT][admin]` (slice-187 JWT path) — either grants
+  rename authority on the caller's CURRENT tenant only. Cross-tenant
+  rename is denied by RLS regardless of role. Server-side validation:
+  trims input, NFC-normalizes, caps at 64 UTF-8 bytes, rejects control
+  characters + null bytes; duplicate names raise 409. Single-transaction
+  write: `UPDATE tenants` + `INSERT me_audit_log (action='tenant_rename')`
+  commit together; the audit row surfaces in the slice-124 unified
+  aggregator as `kind=me action=tenant_rename`. Frontend adds a Tenant
+  section to `/settings` (admin-role-gated) with a name input + Save
+  button that wires to the new `/api/tenants/[id]` BFF route. Out of
+  scope (per slice doc): slug rename (affects URLs), tenant branding /
+  logo / metadata fields, tenant rename history UI (audit-log captures
+  the trail), Playwright e2e on the rename flow (deferred — would need
+  `fixtures/e2e/settings.sql` extension; 0.5d AFK budget honored), and
+  Unicode confusables detection (accepted-risk per the migration header
+  D5 — full guard requires libicu or a heavy Go library).
+
 - **slice 192** — Multi-tenant switch via OAuth token-exchange +
   frontend tenant switcher. **Closes the v2 vCISO operator persona**
   (originally specified as slice 141, PARKED 2026-05-20). vCISOs
