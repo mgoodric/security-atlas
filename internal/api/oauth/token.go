@@ -61,6 +61,7 @@ const (
 	// by slice 189 to redeem `oauth_auth_codes` rows minted by the
 	// authorize endpoint.
 	GrantTypeAuthorizationCode = "authorization_code"
+	// (GrantTypeDeviceCode is declared in device_authorization.go.)
 
 	// Subject token type for RFC 8693 — atlas accepts JWT subject
 	// tokens only in v1. Future-slice work can add SAML2 / etc.
@@ -93,13 +94,15 @@ const (
 // TokenEndpoint owns the dependencies and state required to serve
 // `POST /oauth/token`.
 type TokenEndpoint struct {
-	signer    *tokensign.Signer
-	clients   *oauthclient.Store
-	codes     *oauthcode.Store // slice 189 — wired via AttachAuthCodeStore
-	issuer    string
-	auditPool *pgxpool.Pool
-	limiter   *tokenBucketLimiter
-	now       func() time.Time
+	signer      *tokensign.Signer
+	clients     *oauthclient.Store
+	codes       *oauthcode.Store // slice 189 — wired via AttachAuthCodeStore
+	deviceCodes *DeviceCodeStore // slice 191 — wired via AttachDeviceCodeStore
+	devicePoll  *devicePollTracker
+	issuer      string
+	auditPool   *pgxpool.Pool
+	limiter     *tokenBucketLimiter
+	now         func() time.Time
 }
 
 // TokenEndpointConfig is the constructor parameter bag for
@@ -185,6 +188,8 @@ func (t *TokenEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		t.handleTokenExchange(w, r)
 	case GrantTypeAuthorizationCode:
 		t.handleAuthorizationCode(w, r)
+	case GrantTypeDeviceCode:
+		t.handleDeviceCode(w, r)
 	case "":
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "grant_type is required")
 	default:

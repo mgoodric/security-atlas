@@ -31,7 +31,61 @@ func newOAuthCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newOAuthIssueClientCmd())
 	cmd.AddCommand(newOAuthAddRedirectURICmd())
+	cmd.AddCommand(newOAuthMigrateAPIKeyCmd())
 	return cmd
+}
+
+// newOAuthMigrateAPIKeyCmd wires `atlas-cli oauth migrate-api-key
+// <api_key>` — slice 191 AC-24..AC-26.
+//
+// The command takes a legacy slice-034 bearer token, looks up the
+// credential's identity via apikeystore, then issues a NEW OAuth
+// client_credentials pair under a name derived from the legacy
+// credential. The plaintext client_id + client_secret are printed
+// to stdout ONCE; the operator MUST record them. Source API key
+// is NOT auto-deleted (P0-191-9 implicit + AC-26) — the operator
+// runs 'atlas credentials revoke' separately after confirming the
+// new credentials work.
+//
+// EXIT codes:
+//
+//	0 — issued; client_id + client_secret printed
+//	1 — unknown source key OR duplicate name OR any other failure
+//
+// P0-191-9: secret prints to stdout EXACTLY ONCE; never persisted
+// to disk by this command.
+func newOAuthMigrateAPIKeyCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "migrate-api-key <api_key>",
+		Short: "issue an OAuth client mirroring the supplied legacy API key",
+		Long: `Issue a new OAuth client_credentials pair scoped to the same
+identity as the supplied slice-034 legacy API key.
+
+This is the operator-facing migration tool: take an existing API key
+that an SDK consumer is using, generate an equivalent OAuth client,
+hand the new credentials to the consumer, then revoke the old API
+key separately.
+
+The plaintext client_secret is printed to stdout EXACTLY ONCE
+(P0-191-9). Record it now; it is unrecoverable.
+
+Requires DATABASE_URL in the environment (atlas_app role connection).
+
+Example:
+  DATABASE_URL=postgres://... atlas-cli oauth migrate-api-key atlas_...
+  source: name=ci-pipeline tenant=...
+  client_id: 0e3b4a7e-...
+  client_secret: A1b2C3d4...
+
+Note: the source API key is NOT auto-deleted. Run
+'atlas-cli credentials revoke <key_id>' separately after the new
+credentials are confirmed working.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			apiKey := args[0]
+			return runMigrateAPIKey(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), apiKey)
+		},
+	}
 }
 
 // newOAuthAddRedirectURICmd wires `atlas-cli oauth add-redirect-uri
