@@ -37,7 +37,10 @@ func TestSchemaStability(t *testing.T) {
 	// constants, so the client URL is irrelevant — we never make an
 	// HTTP call here).
 	client, _ := mcp.NewClient("http://localhost:8080", "test-bearer", "v0.0.0-test")
-	all := tools.All(client)
+	// Slice 173 expanded the surface to include write tools; the snapshot
+	// now covers all 11 tools so a drift in any input schema (read OR
+	// write) trips the gate.
+	all := tools.AllWithWrites(client)
 
 	type entry struct {
 		Name        string          `json:"name"`
@@ -98,7 +101,7 @@ func TestToolsListMatchesCanonicalOrder(t *testing.T) {
 	t.Parallel()
 
 	client, _ := mcp.NewClient("http://localhost:8080", "test-bearer", "v0.0.0-test")
-	server := mcp.NewServer("atlas-mcp", "v0.0.0-test", tools.All(client), nil)
+	server := mcp.NewServer("atlas-mcp", "v0.0.0-test", tools.AllWithWrites(client), nil)
 
 	var out bytes.Buffer
 	if err := server.Run(context.Background(),

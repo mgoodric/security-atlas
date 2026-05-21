@@ -84,10 +84,13 @@
       <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/></svg>
       Policies
     </a>
-    <a href="#" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
-      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z"/></svg>
-      Vendors
-    </a>
+    <!-- Slice 183 (F-178-7): the `Vendors` entry previously had
+         `href="#"` because no `vendors.html` mockup exists. The
+         production sidebar ships a real `/vendors` route (slice 092);
+         the mockup is one iteration behind. Per slice 183 AC-4 the
+         entry is removed (the mockup is not the source of truth for
+         shipped surfaces) — a future slice can re-add it with a
+         backing `vendors.html` mockup file. -->
     <a href="board-pack.html" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
       <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/></svg>
       Board Packs
@@ -96,10 +99,13 @@
       <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/></svg>
       Settings
     </a>
-    <a href="#" class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-slate-700 hover:bg-slate-100">
-      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
-      Admin
-    </a>
+    <!-- Slice 183 (F-178-8): the trailing `Admin` / generic
+         profile-help anchor previously rendered with `href="#"` and
+         doesn't correspond to any production route. The production
+         sidebar handles admin visibility conditionally on the
+         caller's roles (slice 186 territory). Per slice 183 AC-4 the
+         entry is removed from the mockup — the mockup is design-doc
+         reference, not a shipped surface. -->
   </div>
 </nav>
 

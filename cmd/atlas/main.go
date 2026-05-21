@@ -23,11 +23,13 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
+	oauthapi "github.com/mgoodric/security-atlas/internal/api/oauth"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/audit/auditor"
 	auditsink "github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
+	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
@@ -278,6 +280,28 @@ func main() {
 	// P0-A3), the route stays absent and GET /metrics returns 404.
 	if otelResult.PrometheusHandler != nil {
 		srv.AttachMetricsHandler(otelResult.PrometheusHandler)
+	}
+
+	// Slice 187: OAuth Authorization Server scaffolding. Open the
+	// filesystem-backed keystore (which generates a fresh ES256 keypair
+	// on first boot, or rehydrates the existing keypair on subsequent
+	// boots), construct the OIDC discovery handler with the configured
+	// external issuer URL, and attach to the server. JWKS + discovery
+	// are bearer/authz-exempt per RFC 8414 §3; see
+	// docs/adr/0003-oauth-authorization-server.md.
+	if issuer := os.Getenv("ATLAS_ISSUER_URL"); issuer != "" {
+		ks, err := fsstore.Open(fsstore.ResolvePath(""))
+		if err != nil {
+			logger.Error("atlas: open OAuth keystore", "err", err)
+			os.Exit(1)
+		}
+		srv.AttachOAuthHandler(oauthapi.New(ks, oauthapi.Config{Issuer: issuer}))
+		// Surface the active signing key id (not the key bytes — never
+		// the bytes) so operators can correlate JWKS responses with the
+		// running process at startup.
+		if sk, _, err := ks.Get(context.Background()); err == nil {
+			logger.Info("atlas: OAuth AS scaffolding wired", "issuer", issuer, "signing_kid", sk.KeyID)
+		}
 	}
 
 	// Slice 065 bug #1 / AC-3 note: the two bootstrap credential-issuance

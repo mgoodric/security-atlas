@@ -150,7 +150,7 @@ jobs:
       - name: Go · coverage gate
         run: go run ./cmd/scripts/coverage-gate -profile=coverage.txt
       - name: Upload unit coverage to Codecov
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.txt
@@ -322,7 +322,7 @@ jobs:
             ./internal/authz/... \
             ./internal/control/...
       - name: Upload integration coverage to Codecov
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.txt
@@ -584,7 +584,7 @@ jobs:
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - name: Install uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
       - name: Set up Python
         run: uv python install 3.11
       - name: Sync oscal-bridge env
@@ -1069,6 +1069,263 @@ jobs:
           disable-sudo: true
 
       - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
+
+  # ====================================================================
+  # Slice 178 — UI honesty audit (advisory).
+  #
+  # Runs the `web/e2e-audit/` Playwright project against the same
+  # seeded slice-037 docker-compose stack the `Frontend · Playwright
+  # e2e` job uses. Categorizes findings as HONESTY-GAP / SHIP-GAP /
+  # MOCKUP-STALE and posts a sticky PR comment summarizing them. The
+  # job is INFORMATIONAL — it never blocks merge (P0-178-6 +
+  # .github/branch-protection.json is NOT modified by this slice).
+  #
+  # Promotion to a required check is a future slice once the harness
+  # proves stable across 5+ PRs (slice 178 deferred items).
+  # ====================================================================
+  frontend-ui-honesty:
+    name: Frontend · UI honesty (advisory)
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: security_atlas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable
+      ATLAS_APP_PASSWORD: ${{ secrets.CI_ATLAS_APP_PASSWORD || 'ci-ephemeral' }}
+      MINIO_ENDPOINT: http://localhost:9000
+      MINIO_BUCKET: atlas-artifacts-test
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      NATS_URL: nats://localhost:4222
+      ATLAS_HTTP_URL: http://localhost:8080
+      PLATFORM_BASE_URL: http://localhost:3000
+      # Slice 178 — same neutral test token shape as slice 069
+      # (P0-178-8 / P0-A9). The seeded-stack run uses fixture data
+      # only (P0-178-2); the audit cannot leak real tenant data.
+      TEST_BEARER: test-bearer-e2e
+      BEARER_HASH_KEY: test-bearer-hash-key-32-bytes-ok!!
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+          # Playwright's `--with-deps` still needs sudo for chromium's
+          # system libs. Same exception as slice 069 / 117 D5.
+          disable-sudo: false
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: "1.26"
+          cache: true
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install workspaces
+        run: npm install --no-audit --no-fund
+      - name: Validate mockup-spec manifest (schema + file-existence)
+        # AC-10a / P0-178-11. Runs the manifest validator's vitest
+        # smoke test which calls `loadManifest()` end-to-end. Fails
+        # fast if the manifest is malformed or references a missing
+        # mockup file, before the expensive bring-up below.
+        working-directory: web
+        run: npx vitest run e2e-audit/lib/manifest.test.ts
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/live; then
+              echo "minio ready"; break
+            fi
+            sleep 2
+          done
+          docker run --rm --network host \
+            -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
+            minio/mc mb -p local/atlas-artifacts-test
+      - name: Start NATS JetStream
+        run: |
+          docker run -d --name nats \
+            -p 4222:4222 \
+            -p 8222:8222 \
+            nats:2.10-alpine -js -sd /data --http_port 8222
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8222/healthz; then
+              echo "nats ready"; break
+            fi
+            sleep 2
+          done
+      - name: Bootstrap Postgres roles + migrations
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
+          for f in migrations/sql/*.sql; do
+            case "$f" in
+              *.down.sql) ;;
+              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
+            esac
+          done
+      - name: Build atlas server
+        run: go build -o /usr/local/bin/atlas ./cmd/atlas
+      - name: Build web workspace
+        working-directory: web
+        run: npm run build
+      - name: Install Playwright chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Start atlas server
+        run: |
+          atlas serve > /tmp/atlas.log 2>&1 &
+          echo "ATLAS_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/health; then
+              echo "atlas ready"; break
+            fi
+            sleep 2
+          done
+      - name: Start web server
+        working-directory: web
+        run: |
+          (PORT=3000 npm start > /tmp/web.log 2>&1) &
+          echo "WEB_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/; then
+              echo "web ready"; break
+            fi
+            sleep 2
+          done
+      - name: Run UI honesty audit
+        working-directory: web
+        # Soft-fail: the harness writes the report regardless of
+        # finding count. A nonzero exit from Playwright means the
+        # harness itself broke (page render 5xx, auth fail) — surface
+        # that, but still post the comment from whatever report
+        # `afterAll` managed to write.
+        continue-on-error: true
+        id: audit
+        run: |
+          set +e
+          npx playwright test --config=e2e-audit/playwright.config.ts
+          rc=$?
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+          # Pick the newest report file the spec wrote.
+          report_md=$(ls -t e2e-audit/reports/ui-honesty-*.md 2>/dev/null | head -1)
+          report_json=$(ls -t e2e-audit/reports/ui-honesty-*.json 2>/dev/null | head -1)
+          echo "report_md=$report_md" >> "$GITHUB_OUTPUT"
+          echo "report_json=$report_json" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Build sticky comment body
+        # Slice 089 / 120 sticky-comment shape. Hidden HTML marker
+        # makes the comment idempotent — re-running the workflow
+        # updates the same comment instead of stacking.
+        run: |
+          {
+            echo "<!-- atlas-ui-honesty-marker -->"
+            echo "## Frontend · UI honesty (advisory) — slice 178"
+            echo
+            if [ -n "${{ steps.audit.outputs.report_json }}" ] && [ -f "web/${{ steps.audit.outputs.report_json }}" ]; then
+              total=$(jq -r '.summary.total' "web/${{ steps.audit.outputs.report_json }}")
+              honesty=$(jq -r '.summary.honestyGap' "web/${{ steps.audit.outputs.report_json }}")
+              ship=$(jq -r '.summary.shipGap' "web/${{ steps.audit.outputs.report_json }}")
+              stale=$(jq -r '.summary.mockupStale' "web/${{ steps.audit.outputs.report_json }}")
+              if [ "$total" = "0" ]; then
+                echo "No UI honesty findings on this run against the seeded slice-037 docker-compose stack. "
+                echo "(10 routes audited; HONESTY-GAP / SHIP-GAP / MOCKUP-STALE all zero.)"
+              else
+                echo "$total finding(s) across 10 audited routes:"
+                echo
+                echo '| category | count |'
+                echo '|---|---|'
+                echo "| HONESTY-GAP | $honesty |"
+                echo "| SHIP-GAP | $ship |"
+                echo "| MOCKUP-STALE | $stale |"
+                echo
+                echo "Per-route breakdown:"
+                echo
+                echo '| route | findings |'
+                echo '|---|---|'
+                jq -r '.summary.byRoute | to_entries | sort_by(.key) | .[] | "| `\(.key)` | \(.value) |"' "web/${{ steps.audit.outputs.report_json }}"
+                echo
+                echo "Full Markdown report + screenshots are attached as a workflow artifact (\`ui-honesty-report-${{ github.run_id }}\`). "
+                echo "Each substantive finding should file as a spillover slice per slice 178 AC-17 — see [\`web/e2e-audit/README.md\`](../blob/main/web/e2e-audit/README.md) for the spillover discipline."
+              fi
+            else
+              echo "Harness failed to produce a report. Exit code from Playwright: \`${{ steps.audit.outputs.exit_code }}\`. "
+              echo "Check the workflow logs + the `playwright-report/` artifact for the harness failure."
+            fi
+            echo
+            echo "---"
+            echo "_Informational only — never blocks merge. Reproduce locally: see [\`web/e2e-audit/README.md\`](../blob/main/web/e2e-audit/README.md). Slice 178 · ${{ github.run_id }}._"
+          } > comment-body.md
+      - name: Post or update sticky PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          existing=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.body | startswith("<!-- atlas-ui-honesty-marker -->")) | .id' \
+            | head -1)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/${existing}" \
+              -f body="$(cat comment-body.md)" >/dev/null
+            echo "Updated existing sticky comment id=$existing"
+          else
+            gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" --body-file comment-body.md
+            echo "Posted new sticky comment"
+          fi
+      - name: Upload audit reports as artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ui-honesty-report-${{ github.run_id }}
+          path: |
+            web/e2e-audit/reports/
+            comment-body.md
+          if-no-files-found: warn
+      - name: Dump server logs on failure
+        if: failure()
+        run: |
+          echo "=== atlas log ==="
+          cat /tmp/atlas.log || true
+          echo "=== web log ==="
+          cat /tmp/web.log || true
+
+  frontend-ui-honesty-stub:
+    name: Frontend · UI honesty (advisory)
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - run: echo "Non-PR push OR docs-only change — UI honesty audit skipped (slice 178)."
 
   # ====================================================================
   # Slice 089 — Dependency vulnerability scanning.

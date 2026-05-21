@@ -94,11 +94,24 @@ test.describe("/audits list view", () => {
     //    expect(title).toMatch(/ends in \d+d — start fieldwork soon/);
   });
 
-  test("AC-7: row click navigates to /audits/[id]", async () => {
+  test("AC-7 (slice 184): rows are NOT clickable — detail page is a future slice", async () => {
+    //    // Slice 184 reversed the original AC-7 behavior (row click →
+    //    // /audits/[id]) because the destination did not exist and 404'd
+    //    // on every click (slice-178 first-pass F-178-4 HONESTY-GAP).
+    //    // Until the per-period detail page lands, rows are read-only.
     //    await page.goto("/audits");
     //    const firstRow = page.getByTestId("list-table-row").first();
+    //    // The list-table component drops `cursor-pointer` when
+    //    // onRowClick is undefined — we assert the absence of the class
+    //    // as a cheap proxy for the row no longer signaling "clickable".
+    //    await expect(firstRow).not.toHaveClass(/cursor-pointer/);
+    //    // Clicking must NOT navigate away from /audits.
     //    await firstRow.click();
-    //    await expect(page).toHaveURL(/\/audits\/[^/]+$/);
+    //    await expect(page).toHaveURL(/\/audits(\?.*)?$/);
+    //    // The honesty banner must be visible.
+    //    await expect(
+    //      page.getByTestId("audits-detail-coming-soon-banner"),
+    //    ).toBeVisible();
   });
 
   test("P0-A1: /audits is distinct from /audit/[controlId] — no collision", async () => {

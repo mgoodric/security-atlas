@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/ui-honesty-manifest/1.0.0.json",
+  "x-slice": 178,
+  "title": "UI honesty audit — mockup-spec manifest",
+  "description": "Data-only (no test logic embedded — P0-178-7) mapping of audited routes to (a) their source-of-truth mockup file under Plans/mockups/ and (b) the testid fingerprints the harness compares the live UI against.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "route",
+      "mockupPath",
+      "expectedTestIds",
+      "allowedExtraTestIds"
+    ],
+    "properties": {
+      "route": {
+        "type": "string",
+        "pattern": "^/",
+        "description": "Path the harness navigates to under the auth fixture's baseURL. Concrete paths only — :id substitution happens at test time."
+      },
+      "mockupPath": {
+        "type": ["string", "null"],
+        "description": "Relative path under Plans/mockups/ to the source-of-truth iteration-1 HTML mockup, OR null if the route post-dates the mockup set (e.g. /calendar). When non-null the file MUST exist on disk (CI validates via the schema check + a file-existence step).",
+        "pattern": "^[a-z0-9][a-z0-9./_-]*\\.html$"
+      },
+      "expectedTestIds": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "uniqueItems": true,
+        "description": "TestIds the manifest expects to see in the live UI for this route. Their absence triggers a SHIP-GAP finding (skipped for null-mockup routes)."
+      },
+      "allowedExtraTestIds": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "uniqueItems": true,
+        "description": "TestIds the live UI may carry without being flagged as a HONESTY-GAP — typically post-mockup additions whose backing slice has shipped."
+      },
+      "staleMockupTestIds": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "uniqueItems": true,
+        "description": "TestIds the mockup describes that the slice owner has marked as indefinitely deferred. Surfaced as MOCKUP-STALE so the mockup gets updated."
+      },
+      "notes": {
+        "type": "string",
+        "description": "Human-readable context — usually a pointer to the slice number that introduced the route OR a parity-status note."
+      }
+    }
+  }
+}

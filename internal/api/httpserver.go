@@ -39,12 +39,14 @@ import (
 	featuresapi "github.com/mgoodric/security-atlas/internal/api/features"
 	fwscopesapi "github.com/mgoodric/security-atlas/internal/api/frameworkscopes"
 	freshnessdriftapi "github.com/mgoodric/security-atlas/internal/api/freshnessdrift"
+	mcpwriteproposalsapi "github.com/mgoodric/security-atlas/internal/api/mcpwriteproposals"
 	meapi "github.com/mgoodric/security-atlas/internal/api/me"
 	metricsapi "github.com/mgoodric/security-atlas/internal/api/metrics"
 	orgunitsapi "github.com/mgoodric/security-atlas/internal/api/orgunits"
 	oscalexportapi "github.com/mgoodric/security-atlas/internal/api/oscalexport"
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	policyacksapi "github.com/mgoodric/security-atlas/internal/api/policyacks"
+	questionnairesapi "github.com/mgoodric/security-atlas/internal/api/questionnaires"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
@@ -76,7 +78,9 @@ import (
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/freshness"
+	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/policy"
+	"github.com/mgoodric/security-atlas/internal/questionnaire"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
 	"github.com/mgoodric/security-atlas/internal/scope"
@@ -140,7 +144,15 @@ func (s *Server) httpHandler() http.Handler {
 	// path; broader prefixes would widen the unauthenticated read
 	// surface. When metricsHandler is nil (default off — P0-A3), the
 	// route is absent and the exemption is a harmless no-match.
-	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics"))
+	// Slice 187: `/.well-known/` (JWKS + OIDC discovery) is bearer-exempt
+	// per RFC 8414 §3 — discovery + JWKS MUST be reachable without auth
+	// so clients can bootstrap key material before they hold a token.
+	// `/oauth/` is exempt because the 501-stub handlers in this slice
+	// (and the real grant flows in slices 188-192) terminate auth at
+	// their own layer (OAuth client authentication), not via the
+	// platform bearer middleware. See
+	// docs/adr/0003-oauth-authorization-server.md § Endpoint exemptions.
+	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/"))
 	// Slice 033: lift the authenticated credential's tenant id onto the
 	// request context so every downstream handler — and every database
 	// transaction it opens — runs under the right `app.current_tenant`
@@ -159,7 +171,7 @@ func (s *Server) httpHandler() http.Handler {
 		// same reason as /health — a metadata probe shouldn't reach OPA.
 		// Slice 073: /v1/install-state is added too — public metadata, same
 		// reasoning as the bearer-exempt above.
-		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics"))
+		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/"))
 	}
 	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
 	// tenancy / authz so the cache lives inside the same request-context
@@ -219,6 +231,18 @@ func (s *Server) httpHandler() http.Handler {
 	// above gates the path because /v1/install/* is NOT in the exempt list.
 	root.Get("/v1/install-state", s.handleInstallState)
 	root.Post("/v1/install/mark-first-signin", s.handleMarkFirstSignin)
+	// Slice 187: OAuth Authorization Server scaffolding. The handler
+	// owns six routes — JWKS, OIDC discovery, and four 501-stubs for
+	// /oauth/token (188), /oauth/authorize (189), /oauth/revoke (190),
+	// /oauth/introspect (190). Mounted directly on the root router
+	// (NOT via a second Mount("/")) per the established
+	// parallel-batch convention. Routes are bearer- and authz-exempt
+	// via the exemption lists above. Only mounted when cmd/atlas has
+	// wired the handler via AttachOAuthHandler — unit servers that
+	// don't need the AS surface leave the routes absent.
+	if s.oauthHandler != nil {
+		s.oauthHandler.Mount(root)
+	}
 	// Slice 008: UCF graph traversal HTTP API. Three read endpoints
 	// query the requirement-anchor-control graph through the SCF spine
 	// (canvas §3 / Plans/UCF_GRAPH_MODEL.md). Routes are appended
@@ -527,6 +551,22 @@ func (s *Server) httpHandler() http.Handler {
 	root.Patch("/v1/exceptions/{id}/approve", exceptionsH.Approve)
 	root.Patch("/v1/exceptions/{id}/deny", exceptionsH.Deny)
 	root.Patch("/v1/exceptions/{id}/activate", exceptionsH.Activate)
+	// Slice 173: MCP write tools + HITL approval flow. Routes appended per
+	// the parallel-batch convention (chi rejects two Mounts at "/"). The
+	// MCP write tools (running in the cmd/atlas-mcp binary) call POST
+	// /v1/mcp/write-proposals to file a draft; operators confirm or reject
+	// via the same surface. The Store ships with the four canonical
+	// Appliers (create_risk, update_control_state, push_evidence,
+	// update_risk_treatment) registered; on confirm, the Applier executes
+	// inside the same transaction as the state flip so a downstream-write
+	// failure rolls the proposal back to state=ai_proposed.
+	mcpWriteStore := writeproposals.RegisterDefaultAppliers(writeproposals.NewStore(s.dbPool))
+	mcpWriteH := mcpwriteproposalsapi.New(mcpWriteStore)
+	root.Post("/v1/mcp/write-proposals", mcpWriteH.CreateProposal)
+	root.Get("/v1/mcp/write-proposals", mcpWriteH.ListProposals)
+	root.Get("/v1/mcp/write-proposals/{id}", mcpWriteH.GetProposal)
+	root.Post("/v1/mcp/write-proposals/{id}/confirm", mcpWriteH.ConfirmProposal)
+	root.Post("/v1/mcp/write-proposals/{id}/reject", mcpWriteH.RejectProposal)
 	// Slice 055: Decision Log CRUD + linkage (canvas Â§6.7). Routes appended
 	// per the parallel-batch convention -- chi.Mux rejects two Mounts at
 	// "/", so individual routes register onto the root. The literal-segment
@@ -682,6 +722,17 @@ func (s *Server) httpHandler() http.Handler {
 	boardPackGen := board.NewPackGenerator(boardPackStore, freshnessStore, driftStore)
 	boardPackH := boardapi.NewPack(boardPackGen, boardPackStore)
 	boardPackH.RegisterRoutes(root)
+	// Slice 155: questionnaire tracer-bullet — Excel import + manual
+	// authoring + AnswerLibrary skeleton (SCF-anchor keyed) + PDF export.
+	// Routes appended per the parallel-batch convention (chi rejects two
+	// Mounts at "/"). Tenant scoping enforced by RLS via the Store; the
+	// PDF render reuses the chromedp pattern established by
+	// internal/board/pdf.go (slice 022/027/137 precedent — zero new
+	// go.mod dependency for PDF). NO AI-assist at v1 — the AnswerLibrary
+	// suggestion path is a deterministic SCF-anchor lookup, not inference.
+	questionnaireStore := questionnaire.NewStore(s.dbPool)
+	questionnairesH := questionnairesapi.New(questionnaireStore)
+	questionnairesH.RegisterRoutes(root)
 	// Slice 034: admin credentials HTTP API + auth routes. Routes append
 	// per the parallel-batch convention. Admin-credential routes require
 	// the bearer auth middleware (admin gate inside the handler). The

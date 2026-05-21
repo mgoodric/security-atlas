@@ -67,8 +67,29 @@ export default defineConfig({
       // public-IP slip would publish real customer data to the public
       // README permanently.
       "scripts/**/*.test.ts",
+      // Slice 178: the UI honesty audit harness's pure-logic modules
+      // (mockup-diff categorization + read-only guardrail detection +
+      // manifest validator) are covered here as node-env vitest. The
+      // Playwright spec at `e2e-audit/ui-honesty.spec.ts` is excluded
+      // from vitest (`exclude: e2e-audit/**/*.spec.ts` below) and runs
+      // via the `Frontend · UI honesty (advisory)` job instead.
+      "e2e-audit/lib/**/*.test.ts",
+      // Slice 183: pure-logic helpers that two or more components
+      // share are colocated under `components/<area>/` (the helper
+      // can't live in app/(authed)/<route>/ because it must be
+      // importable by sibling components). The include is intentionally
+      // narrow — only `.test.ts` (no `.test.tsx`), matching the
+      // node-env / no-JSX precedent — so the JSX view modules are
+      // never accidentally entered by the unit runner.
+      "components/**/*.test.ts",
     ],
-    exclude: ["**/node_modules/**", "**/.next/**", "**/dist/**", "e2e/**"],
+    exclude: [
+      "**/node_modules/**",
+      "**/.next/**",
+      "**/dist/**",
+      "e2e/**",
+      "e2e-audit/**/*.spec.ts",
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
@@ -79,6 +100,10 @@ export default defineConfig({
         "app/[(]authed[)]/**/*.ts",
         "app/audit-log/**/*.ts",
         "proxy.ts",
+        // Slice 183: shared component-area pure-logic modules
+        // (e.g. components/calendar/link-for.ts) — see vitest
+        // `include` block for the discipline.
+        "components/**/*.ts",
       ],
       exclude: [
         "**/*.test.ts",
@@ -87,6 +112,7 @@ export default defineConfig({
         "app/api/**/*.tsx",
         "app/[(]authed[)]/**/*.tsx",
         "app/audit-log/**/*.tsx",
+        "components/**/*.tsx",
       ],
     },
   },

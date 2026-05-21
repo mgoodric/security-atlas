@@ -9,9 +9,190 @@ Conventional-Commit messages. Each entry links to its slice issue, the
 merging PR, and the squash-merge commit. For richer per-slice narrative
 see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
+## [1.13.0](https://github.com/mgoodric/security-atlas/compare/v1.12.0...v1.13.0) (2026-05-21)
+
+
+### Features
+
+* **catalog:** slice 174 — UCF anchor catalog export (all three formats) ([#410](https://github.com/mgoodric/security-atlas/issues/410)) ([79eb829](https://github.com/mgoodric/security-atlas/commit/79eb8295a92865485b77411c27a32f147545a021))
+* **export:** slice 136 — risk register data export (CSV / JSON / XLSX) ([#378](https://github.com/mgoodric/security-atlas/issues/378)) ([c80bec3](https://github.com/mgoodric/security-atlas/commit/c80bec31d0c9549b2c70bff21b978d8f5a5409d3)), closes [#136](https://github.com/mgoodric/security-atlas/issues/136)
+* **export:** slice 137 — controls UCF graph data export (CSV / JSON / XLSX) ([#384](https://github.com/mgoodric/security-atlas/issues/384)) ([4300cde](https://github.com/mgoodric/security-atlas/commit/4300cde295ff5c65eb5ded615350ff8c218bd063))
+* **export:** slice 138 — ledger entities export (evidence + policies + exceptions + samples) ([#387](https://github.com/mgoodric/security-atlas/issues/387)) ([a171a0a](https://github.com/mgoodric/security-atlas/commit/a171a0aa568aecd1a14161b4fe7ef4fa0a9d888e))
+* **export:** slice 139 — audit periods + vendors data export (CSV / JSON / XLSX) ([#379](https://github.com/mgoodric/security-atlas/issues/379)) ([3522c64](https://github.com/mgoodric/security-atlas/commit/3522c644f2d913b300e39653d0d175deeebddcec))
+* **export:** slice 145 — payload-redaction flag + per-tenant concurrency cap ([#375](https://github.com/mgoodric/security-atlas/issues/375)) ([637b8dc](https://github.com/mgoodric/security-atlas/commit/637b8dce82ab755b69e4ac0b80a31cfc26b4e6dd))
+* **infra:** slice 084 — cosign v3 + goreleaser-action v7 coordinated migration ([#425](https://github.com/mgoodric/security-atlas/issues/425)) ([f15839a](https://github.com/mgoodric/security-atlas/commit/f15839a3732dc7addf4440fc7f126d8e05ddd20f)), closes [#084](https://github.com/mgoodric/security-atlas/issues/084)
+* **infra:** slice 179 — schema-removal-age CI check (90-day deprecation window) ([#406](https://github.com/mgoodric/security-atlas/issues/406)) ([f06c323](https://github.com/mgoodric/security-atlas/commit/f06c323f77d143ea1f328d8ecbecd02447458ddc))
+* **infra:** slice 180 — privacy-module foundation (audit-log subject_module + sibling discipline docs) ([#413](https://github.com/mgoodric/security-atlas/issues/413)) ([125205b](https://github.com/mgoodric/security-atlas/commit/125205b7a2a44bf85f5a0170f4dbbffc4f3a5a63))
+* **mcp:** slice 172 — MCP server foundation + 6 read-only tools ([#382](https://github.com/mgoodric/security-atlas/issues/382)) ([95dd94d](https://github.com/mgoodric/security-atlas/commit/95dd94d9629198c0d1d0b8f43ced7c526a44b9e7))
+* **quality:** slice 178 — UI honesty audit harness + first-pass audit ([#414](https://github.com/mgoodric/security-atlas/issues/414)) ([69ce7df](https://github.com/mgoodric/security-atlas/commit/69ce7df05d4355420c355ad08261bc6d8b0a4136))
+* **ui:** slice 177 — exceptions list-page surface (with slice 138 Export buttons) ([#393](https://github.com/mgoodric/security-atlas/issues/393)) ([ee0163a](https://github.com/mgoodric/security-atlas/commit/ee0163acddc48d63e318502d9680badbea317edc))
+
+
+### Bug Fixes
+
+* **brand:** slice 176 — logo follows app theme + README docs PNG refresh ([#394](https://github.com/mgoodric/security-atlas/issues/394)) ([6eb0701](https://github.com/mgoodric/security-atlas/commit/6eb07017330b5d872c64716a164364cfd0b11fab))
+* **ui-honesty:** slice 183 — calendar dead-link family + dashboard mockup refresh ([#422](https://github.com/mgoodric/security-atlas/issues/422)) ([f40fa6f](https://github.com/mgoodric/security-atlas/commit/f40fa6f9890131519a49cb9fccecd44599e49334))
+* **ui-honesty:** slice 184 — /audits row-click 404 ([#417](https://github.com/mgoodric/security-atlas/issues/417)) ([e058f25](https://github.com/mgoodric/security-atlas/commit/e058f2514c65cb9ceee32f86da4d02aedb9b121d))
+* **ui-honesty:** slice 185 — /risks row-click goes to hierarchy not detail ([#418](https://github.com/mgoodric/security-atlas/issues/418)) ([c509ca8](https://github.com/mgoodric/security-atlas/commit/c509ca8c02341465712584137d2061981fa53e80))
+* **ui-honesty:** slice 186 — sidebar Admin entry role-gated to admin-only ([#421](https://github.com/mgoodric/security-atlas/issues/421)) ([471f779](https://github.com/mgoodric/security-atlas/commit/471f77961e19cbeb7e1741ab0a20a3de1f55517e))
+
+
+### Dependencies
+
+* **deps:** bump the actions group across 1 directory with 2 updates ([#426](https://github.com/mgoodric/security-atlas/issues/426)) ([5bb9b56](https://github.com/mgoodric/security-atlas/commit/5bb9b564784bb68b085581c163eef3a39f5c9b11))
+
+
+### Documentation
+
+* **canvas:** resolve OQ [#14](https://github.com/mgoodric/security-atlas/issues/14) — board-narrative AI-assist + file slice 182 ([#403](https://github.com/mgoodric/security-atlas/issues/403)) ([8b267dd](https://github.com/mgoodric/security-atlas/commit/8b267dd94154623748f7a7cee76806cd1305e786))
+* **canvas:** resolve OQ [#2](https://github.com/mgoodric/security-atlas/issues/2) — OpenGRC concept-borrow inventory delivered ([#398](https://github.com/mgoodric/security-atlas/issues/398)) ([1a5b898](https://github.com/mgoodric/security-atlas/commit/1a5b8982f67533cefa7c2a36e81fb8556516ccf6))
+* **canvas:** resolve OQ [#5](https://github.com/mgoodric/security-atlas/issues/5) — pure community OSS time-bounded + file slice 181 ([#402](https://github.com/mgoodric/security-atlas/issues/402)) ([7bcb4ad](https://github.com/mgoodric/security-atlas/commit/7bcb4ad38bce309a90c8b822db7be2b8addb5414))
+* **canvas:** resolve OQ [#7](https://github.com/mgoodric/security-atlas/issues/7) — privacy as sibling module + file slice 180 foundation ([#401](https://github.com/mgoodric/security-atlas/issues/401)) ([bdb39b9](https://github.com/mgoodric/security-atlas/commit/bdb39b9748976c3ad23245e20aea8ba341aebccc))
+* **canvas:** resolve OQ [#9](https://github.com/mgoodric/security-atlas/issues/9) + [#17](https://github.com/mgoodric/security-atlas/issues/17) — schema-registry governance + file slice 179 ([#400](https://github.com/mgoodric/security-atlas/issues/400)) ([9ed80f3](https://github.com/mgoodric/security-atlas/commit/9ed80f3eb0766433a8e95b14825343aead0c6102))
+* **governance:** slice 181 - open-governance pre-commitments (GOVERNANCE.md + funding signals + bus-factor plan) ([#409](https://github.com/mgoodric/security-atlas/issues/409)) ([67092db](https://github.com/mgoodric/security-atlas/commit/67092db6cda24ddfddf1726bcb8282d6373025ab))
+* **governance:** slice 182 — board-narrative AI-assist foundation ([#405](https://github.com/mgoodric/security-atlas/issues/405)) ([6622e8e](https://github.com/mgoodric/security-atlas/commit/6622e8ee408064c780f3bc8d1622493e6068338c)), closes [#182](https://github.com/mgoodric/security-atlas/issues/182)
+* **issues:** add slice 176 — logo follows app theme + README/docs refresh ([#386](https://github.com/mgoodric/security-atlas/issues/386)) ([5e33027](https://github.com/mgoodric/security-atlas/commit/5e33027b3d9c67a9fba273b1cb03d62ce551bd49))
+* **issues:** add slice 178 — UI honesty audit harness + first-pass audit ([#399](https://github.com/mgoodric/security-atlas/issues/399)) ([1a7862e](https://github.com/mgoodric/security-atlas/commit/1a7862e7e0a055f03874fa4a27b2a10d75036e7d))
+* **issues:** add slices 172 + 173 — MCP server foundation (read) + write spillover ([#380](https://github.com/mgoodric/security-atlas/issues/380)) ([278ade9](https://github.com/mgoodric/security-atlas/commit/278ade9530a7610fb8af6a2f5380af1611c6ecd2))
+* **issues:** re-scope slice 134 — slice-070 walkthroughs refresh (HITL) ([#390](https://github.com/mgoodric/security-atlas/issues/390)) ([ca928f5](https://github.com/mgoodric/security-atlas/commit/ca928f583727a6cfb74c6a5df046dc30068db1c4))
+* **issues:** slice 173 — lock HITL D1 to Pattern A (draft-then-confirm) ([#396](https://github.com/mgoodric/security-atlas/issues/396)) ([0de83f6](https://github.com/mgoodric/security-atlas/commit/0de83f62774a771188c7f9bed64f060daefc37af))
+* **issues:** tier A+B maintainer decisions — 084 + 155 + 174 → ready · 141 pre-confirm ([#397](https://github.com/mgoodric/security-atlas/issues/397)) ([3ec7901](https://github.com/mgoodric/security-atlas/commit/3ec790182f687c330130b53d403027bd6b6928df))
+* **user:** slice 133 — per-primitive how-tos + audit-log + CI hardening + connector authoring ([#389](https://github.com/mgoodric/security-atlas/issues/389)) ([b64cb06](https://github.com/mgoodric/security-atlas/commit/b64cb069f3de6e8c7cd43dc6bfbb2197832c7a7d))
+
 ## [Unreleased]
 
 ### Added
+
+- **slice 187** — OAuth Authorization Server scaffolding (JWT signing
+  infrastructure + JWKS endpoint + OIDC discovery document). Foundation
+  slice for the auth-substrate-v2 spine (OQ #21 Reading D resolution).
+  Ships `internal/auth/keystore` + `internal/auth/keystore/fsstore`
+  (filesystem-backed ES256 keystore with file-mode 0600 + multi-key
+  rotation support), `internal/auth/jwt` (RFC 7519 + RFC 9068 claim
+  types + the locked `atlas:*` custom claims + temporal/identity
+  validation), `internal/auth/tokensign` (go-jose/v4-backed sign/verify
+  primitives), `internal/api/oauth` (JWKS at `/.well-known/jwks.json`,
+  OIDC discovery at `/.well-known/openid-configuration`, and 501-stub
+  handlers for `/oauth/token` · `/oauth/authorize` · `/oauth/revoke` ·
+  `/oauth/introspect` that point at the future slices 188-192).
+  Discovery doc honestly advertises `grant_types_supported: []` until
+  the grant slices land. Foundation only — NO `/oauth/*` real handlers,
+  NO JWT validation middleware on `/v1/*`, NO SDK/frontend migration
+  (those are slices 188-192). Wired via `ATLAS_ISSUER_URL` env var; no
+  DB schema changes. ADR-0003 captures the architectural rationale,
+  token shape, ES256 decision, key rotation strategy, and threat-model
+  summary. JUDGMENT slice — decisions D1-D5 recorded at
+  `docs/audit-log/187-oauth-as-scaffolding-decisions.md`.
+
+### Fixed
+
+- **slice 183** — UI honesty fix (F-178-1/2/3/7/8 closure): the
+  compliance calendar's `linkFor(ev)` helper in
+  `web/components/calendar/agenda-view.tsx` and
+  `web/components/calendar/month-grid-view.tsx` previously returned a
+  string-typed href whose `exception` branch pointed at the
+  non-existent `/admin/exceptions/<id>` route (F-178-2), whose `policy`
+  branch pointed at the non-existent `/policies/<id>` route (F-178-3),
+  and whose `default` branch returned `"#"` (F-178-1). The slice 178
+  audit categorized all three as HONESTY-GAP findings. This slice
+  extracts `linkFor` to a shared module at
+  `web/components/calendar/link-for.ts` and switches the return shape
+  to a tagged-union `{ kind: "link"; href } | { kind: "static"; reason }`.
+  Exception and policy events now render as a non-linked `<span>` with
+  a `title` tooltip explaining the placeholder ("Per-exception detail
+  page is a future slice — view the exception register at /exceptions";
+  same shape for policy). The `default` branch calls `assertNever` —
+  TypeScript closes the union to the four known event types at compile
+  time, and a divergent runtime payload throws rather than silently
+  emitting `<a href="#">`. Audit and control events keep their existing
+  link branches. Future slices that ship `/admin/exceptions/[id]` or
+  `/policies/[id]` flip the static branch to a link branch in the
+  shared helper (one edit site, both calendar views update). Pure-logic
+  vitest at `web/components/calendar/link-for.test.ts` (7 tests, all
+  passing) covers each branch plus a regression guard that no branch
+  ever returns `"#"`. `web/vitest.config.ts` extended to include
+  `components/**/*.test.ts` (and `components/**/*.ts` in coverage)
+  for shared component-area helpers; the narrow `.test.ts`-only glob
+  preserves the node-env / no-JSX precedent. Bundled mockup refresh
+  (Amendment 2 trivial-batching): `Plans/mockups/dashboard.html` drops
+  the sidebar `Vendors` entry (F-178-7 — `href="#"`; no `vendors.html`
+  mockup exists and the production sidebar already ships a real
+  `/vendors` route) and the trailing generic-`#` `Admin` entry
+  (F-178-8 — production sidebar handles admin visibility conditionally
+  on caller roles, slice 186 territory); body-anchor `href="#"`s
+  inside cards were not flagged by slice 178 and remain as
+  iteration-1 mockup placeholders (out of scope). Per P0-183-1 the
+  backing detail pages are NOT shipped in this slice; per P0-183-2 the
+  BFF `CalendarResponse` wire shape is unchanged; per P0-183-3 the
+  slice 178 audit harness + manifest are untouched.
+
+### Changed
+
+- **slice 084** — release-signing toolchain coordinated migration to the
+  cosign v3 + Sigstore protobuf-bundle stack: `.github/workflows/
+release.yml` bumps `sigstore/cosign-installer@v3 → @v4.1.2` (SHA
+  `6f9f17788090df1f26f669e9d70d6ae9567deba6`), `cosign-release: v2.4.1
+→ v3.0.6`, and `goreleaser/goreleaser-action@v6 → @v7.2.2` (SHA
+  `5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89`) — the three upstreams
+  co-evolve on the new bundle format and must move together (slice 080
+  iteration log + slice 084 decisions log document the cascade).
+  `.goreleaser.yaml` `signs:` block migrates from the legacy two-file
+  output (`--output-signature=${signature}` + `--output-certificate=
+${certificate}` → `.pem` + `.sig` assets) to the single Sigstore
+  protobuf-bundle output (`--bundle=${signature}` → single
+  `.sigstore.json` asset containing leaf cert + signature + Rekor
+  inclusion proof). cosign v3.0.6 explicitly disallows the v2-compat
+  opt-out (`--new-bundle-format` is rejected per sigstore/cosign#4762),
+  so the migration is forward-only. Consumer-side `verify-blob` snippet
+  in the GitHub Release notes header (rendered from `.goreleaser.yaml
+release.header`), the Self-verify step in `release.yml`, and `docs/
+RELEASE_READINESS.md §11.1` migrate together to the new shape:
+  `cosign verify-blob --certificate-identity-regexp <...> --certificate-
+oidc-issuer <...> --bundle <bundle-file> <artifact>` (no more
+  `--certificate <pem> --signature <sig>`). Verifying any release shipped
+  by this slice or later requires cosign v3.x on PATH; older releases
+  shipped on the v2 stack stay verifiable with their original
+  `.pem` + `.sig` assets + a cosign v2.x binary (immutable per slice
+  080 P0-A1). `COSIGN_EXPERIMENTAL: "1"` env var dropped because cosign
+  v3 makes keyless OIDC + new bundle the default + only behavior — the
+  variable is silently ignored on v3 and removing it avoids documenting
+  intent the tool no longer honors. Full args-shape rationale +
+  version-cascade documentation at `docs/audit-log/084-cosign-v3-
+goreleaser-action-v7-migration-decisions.md`. P0-A2 honored: cosign
+  signing chain preserved end-to-end (only the on-wire format changes);
+  audit-binding properties of release artifacts (Sigstore keyless OIDC
+  signing, Rekor transparency-log entry, signed checksums) are
+  identical to the v2-stack shape. Round-trip-verified via a
+  `v0.0.0-slice084-test` test tag at the branch tip (Self-verify step
+  green; cleanup deletes the tag + GitHub Release object on landing).
+
+### Added
+
+- **slice 178** — UI honesty audit harness at `web/e2e-audit/` +
+  first-pass audit committed at
+  `docs/audit-log/178-ui-honesty-first-pass.md`. New Playwright
+  project (separate from `web/e2e/`) that iterates ten v1 routes
+  per the data-only manifest at `web/e2e-audit/mockup-spec.json`
+  and categorizes findings as HONESTY-GAP (forward-looking UI
+  without backing functionality), SHIP-GAP (mockup ahead of live),
+  or MOCKUP-STALE (mockup behind live). Three AC-5 heuristics:
+  dead anchors (`href="#"` or 404 on probe), `disabled` "coming
+  soon" buttons, elements gated on unset `data-feature-flag`s.
+  Read-only by construction (P0-178-1): the
+  `makeReadOnly(page)` decorator wraps `page.click` +
+  `locator.click` to throw on form-submit / destructive-button
+  targets; 31 vitest unit tests cover the diff categorization,
+  guardrail detection, and manifest validation. New
+  informational CI job `Frontend · UI honesty (advisory)` runs
+  against the seeded slice-037 docker-compose stack on every PR
+  touching `web/`, posts a sticky comment with the
+  HONESTY-GAP / SHIP-GAP / MOCKUP-STALE breakdown per route
+  (slice 089 + 120 sticky-comment shape). Job is INFORMATIONAL
+  only — never blocks merge; `.github/branch-protection.json` is
+  NOT modified (P0-178-6). First-pass audit produced 8
+  substantive findings (6 HONESTY-GAP + 2 MOCKUP-STALE) filed as
+  spillover slices #183 / #184 / #185 / #186 per AC-17
+  one-slice-per-fix discipline.
 
 - **slice 180** — Privacy-module foundation: `subject_module` column on
   all platform audit-log tables (pre-commitment for the deferred privacy
@@ -333,6 +514,49 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   `/api/admin/vendors/export`; Export buttons on `/audits` +
   `/vendors` pages.
 
+### Fixed
+
+- **slice 186** — UI honesty fix (F-178-6 closure): the sidebar `/admin`
+  nav entry is now role-gated to admin-only callers. The entry was
+  previously rendered to every signed-in user; non-admin callers
+  clicked it and bounced off the slice-060 admin-layout authz gate,
+  losing confidence in the affordance honesty of the chrome. The
+  Sidebar component (`web/components/shell/sidebar.tsx`) is now an
+  async server component that fetches the slice-130 BFF
+  `/api/admin/me` and filters the `/admin` item out of the nav list
+  when `shouldShowAdminEntry(body)` returns false. The predicate
+  lives at `web/lib/admin-nav.ts` (pure logic, 18-case vitest matrix
+  at `web/lib/admin-nav.test.ts`) so the slice-069 no-JSX-rendering
+  constraint is honored; the predicate admits on `is_admin === true`
+  OR `roles[]` containing any of `admin` / `super_admin` /
+  `tenant_admin`. P0-186-1: the server-side authz gate at
+  `web/app/admin/layout.tsx` is unchanged — this is UI chrome only.
+  P0-186-4: fetch failure / empty body / non-200 / missing `roles`
+  field collapses to "hide the Admin entry" (fail-closed). The
+  Playwright spec `web/e2e/admin-bootstrap.spec.ts` gains two new
+  quarantined assertions (admin bearer sees the entry; non-admin
+  bearer does not) — both unlock when the slice-082 seed-data
+  harness lands TEST_ADMIN_BEARER + TEST_VIEWER_BEARER fixtures.
+  Resolves slice 178 first-pass audit finding F-178-6.
+
+- **slice 185** — UI honesty fix (F-178-5 closure): `/risks` row-click
+  previously routed to `/risks/hierarchy?focus=<id>` as a "no 404"
+  stand-in for a per-risk detail page that does not yet exist. That
+  affordance advertised "click row to see risk detail" but delivered
+  the org-tree hierarchy view — an honesty-gap. The row-click handler
+  is removed from `web/app/(authed)/risks/page.tsx`; the `<ListTable>`
+  primitive drops the `cursor-pointer` class automatically when
+  `onRowClick` is unset (no change to the shared shell). The existing
+  hierarchy workflow is preserved via an explicit per-row `View in
+  hierarchy →` link (new `actions` column) that carries the same
+  `?focus=<id>` href (P0-185-2). A new banner above the table
+  ("Per-risk detail page is a future slice") sets honest expectations
+  (AC-3). Playwright spec `web/e2e/risks-list.spec.ts` gains three
+  new quarantined assertions (AC-185-1/2/3) — row carries no
+  `cursor-pointer` class, the explicit link is present and reaches
+  `/risks/hierarchy`, the banner is visible. Shipping the per-risk
+  detail page itself (Option B) stays a separate slice per P0-185-1.
+
 ## [1.12.0](https://github.com/mgoodric/security-atlas/compare/v1.11.0...v1.12.0) (2026-05-19)
 
 
@@ -498,6 +722,34 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   `docs/audit-log/162-sessions-wire-shape-decisions.md`.
 
 ### Fixed
+
+- **slice 184** — UI honesty: `/audits` row-click no longer 404s
+  ([#184](https://github.com/mgoodric/security-atlas/issues/184); closes
+  slice-178 first-pass F-178-4 HONESTY-GAP). The audits-list page
+  (`web/app/(authed)/audits/page.tsx`) previously rendered every
+  audit-period row as a clickable target that pushed
+  `/audits/{id}` — a route that does not exist and 404'd with the
+  standard Next.js not-found UI. The slice-178 UI-honesty audit
+  categorized this as a HONESTY-GAP: the live UI promised a
+  per-period detail page that the codebase does not yet ship.
+  This slice resolves the gap via Option A (per the slice 184
+  doc): the `onRowClick` prop is removed from the `ListTable`,
+  the `ListTable` primitive drops both the click handler and the
+  `cursor-pointer` class when `onRowClick` is undefined, and a new
+  shadcn `Alert` banner above the table
+  (`data-testid="audits-detail-coming-soon-banner"`) surfaces the
+  disclosure: "Per-period detail view is coming in a future slice."
+  Option B (ship the actual detail page) was deferred to a separate
+  slice once the detail-page UX is decided — see
+  `docs/audit-log/184-audits-row-click-404-decisions.md` D1 for the
+  trade-off. Playwright spec `web/e2e/audits-list.spec.ts` AC-7 is
+  reversed (not deleted) — the spec now asserts the absence of
+  `cursor-pointer`, the absence of navigation on click, and the
+  presence of the banner; still quarantined behind the slice 082
+  seed harness as before. No backend change, no data-contract
+  change, no audit harness change (P0-184-2 / P0-184-3 honored).
+  Decisions log:
+  [`docs/audit-log/184-audits-row-click-404-decisions.md`](./docs/audit-log/184-audits-row-click-404-decisions.md).
 
 - **slice 176** — Logo variant now follows app theme; README +
   `docs/images/` regenerated to match slice-167 design

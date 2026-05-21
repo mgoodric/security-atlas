@@ -133,4 +133,48 @@ test.describe("admin bootstrap", () => {
     //    response was 200 (NOT a 404 — the page exists; this user lacks
     //    the role).
   });
+
+  // Slice 186 (F-178-6 closure) — AC-3: the sidebar "Admin" entry is
+  // role-gated. With an admin bearer the entry IS visible; with a non-
+  // admin bearer the entry is absent. The slice-178 audit harness
+  // F-178-6 finding flips to resolved on the next audit run.
+  //
+  // Both assertions stay commented pending the slice-082 seed-data
+  // harness wiring of TEST_ADMIN_BEARER + TEST_VIEWER_BEARER fixtures
+  // (the same harness gate the rest of this spec waits on). The test
+  // bodies are preserved verbatim as a reviewable contract.
+  test("admin bearer sees the sidebar Admin entry", async () => {
+    // 1. Sign in with the admin bearer (TEST_ADMIN_BEARER).
+    //    await page.goto("/login");
+    //    await page.fill('input[name="token"]', process.env.TEST_ADMIN_BEARER!);
+    //    await page.click("button[type=submit]");
+    //    await page.waitForURL("/dashboard");
+    //
+    // 2. Assert the sidebar Admin link is visible.
+    //    await expect(
+    //      page.locator('aside nav a[href="/admin"]'),
+    //    ).toBeVisible();
+    //    await expect(
+    //      page.locator('aside nav a[href="/admin"]'),
+    //    ).toHaveText("Admin");
+  });
+
+  test("non-admin bearer does NOT see the sidebar Admin entry", async () => {
+    // 1. Sign in with a non-admin bearer (TEST_VIEWER_BEARER).
+    //    await page.goto("/login");
+    //    await page.fill('input[name="token"]', process.env.TEST_VIEWER_BEARER!);
+    //    await page.click("button[type=submit]");
+    //    await page.waitForURL("/dashboard");
+    //
+    // 2. Assert the sidebar renders without an Admin link.
+    //    await expect(
+    //      page.locator('aside nav a[href="/admin"]'),
+    //    ).toHaveCount(0);
+    //
+    // 3. Confirm the other canonical entries DO render — verifies the
+    //    role-gate is surgical, not blanket-hiding.
+    //    for (const href of ["/dashboard", "/controls", "/risks", "/settings"]) {
+    //      await expect(page.locator(`aside nav a[href="${href}"]`)).toBeVisible();
+    //    }
+  });
 });

@@ -73,8 +73,10 @@ tags:
   - name: framework-scopes
   - name: frameworks
   - name: install
+  - name: mcp
   - name: me
   - name: policies
+  - name: questionnaires
   - name: risks
   - name: schemas
   - name: scopes
@@ -1963,6 +1965,93 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/mcp/write-proposals:
+    get:
+      summary: GET /v1/mcp/write-proposals
+      tags: [mcp]
+      operationId: get-v1-mcp-write-proposals
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/mcp/write-proposals
+      tags: [mcp]
+      operationId: post-v1-mcp-write-proposals
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mcp/write-proposals/{id}:
+    get:
+      summary: GET /v1/mcp/write-proposals/{id}
+      tags: [mcp]
+      operationId: get-v1-mcp-write-proposals-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mcp/write-proposals/{id}/confirm:
+    post:
+      summary: POST /v1/mcp/write-proposals/{id}/confirm
+      tags: [mcp]
+      operationId: post-v1-mcp-write-proposals-id-confirm
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mcp/write-proposals/{id}/reject:
+    post:
+      summary: POST /v1/mcp/write-proposals/{id}/reject
+      tags: [mcp]
+      operationId: post-v1-mcp-write-proposals-id-reject
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/me:
     get:
       summary: GET /v1/me
@@ -2538,6 +2627,138 @@ paths:
       summary: GET /v1/populations/{id}
       tags: [audit-samples]
       operationId: get-v1-populations-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires:
+    get:
+      summary: GET /v1/questionnaires
+      tags: [questionnaires]
+      operationId: get-v1-questionnaires
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/questionnaires
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}:
+    get:
+      summary: GET /v1/questionnaires/{id}
+      tags: [questionnaires]
+      operationId: get-v1-questionnaires-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/answers/{qid}:
+    patch:
+      summary: PATCH /v1/questionnaires/{id}/answers/{qid}
+      tags: [questionnaires]
+      operationId: patch-v1-questionnaires-id-answers-qid
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/export-pdf:
+    post:
+      summary: POST /v1/questionnaires/{id}/export-pdf
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-export-pdf
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/import-excel:
+    post:
+      summary: POST /v1/questionnaires/{id}/import-excel
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-import-excel
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/suggestions:
+    get:
+      summary: GET /v1/questionnaires/{id}/suggestions
+      tags: [questionnaires]
+      operationId: get-v1-questionnaires-id-suggestions
       security:
         - bearer: []
       parameters:

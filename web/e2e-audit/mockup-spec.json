@@ -1,0 +1,213 @@
+[
+  {
+    "route": "/dashboard",
+    "mockupPath": "dashboard.html",
+    "expectedTestIds": [
+      "program-dashboard",
+      "framework-tile",
+      "freshness-bucket",
+      "recent-drift-list",
+      "top-risks-list",
+      "upcoming-list",
+      "activity-feed-list"
+    ],
+    "allowedExtraTestIds": [
+      "framework-tile-coverage",
+      "framework-tile-freshness",
+      "framework-tile-trend",
+      "framework-posture-empty",
+      "framework-posture-list",
+      "evidence-freshness-empty",
+      "evidence-freshness-list",
+      "evidence-freshness-stale-total",
+      "recent-drift-empty",
+      "recent-drift-row",
+      "drift-delta",
+      "top-risks-empty",
+      "top-risk-row",
+      "upcoming-empty",
+      "upcoming-row",
+      "upcoming-row-title",
+      "upcoming-row-category",
+      "activity-feed-empty",
+      "activity-feed-filters",
+      "activity-feed-row",
+      "activity-feed-row-event-type",
+      "activity-feed-row-ts",
+      "activity-filter-chip"
+    ],
+    "notes": "Slice 040 program dashboard. Six bound panels; slice 147 + 157 closed the placeholder loop."
+  },
+  {
+    "route": "/controls",
+    "mockupPath": "controls.html",
+    "expectedTestIds": ["controls-row-scf-id"],
+    "allowedExtraTestIds": ["controls-load-error", "list-empty-state"],
+    "notes": "Slice 016 + 134 controls list. Manifest is intentionally minimal — the row testid presence proves the table rendered."
+  },
+  {
+    "route": "/controls/:id",
+    "mockupPath": "control.html",
+    "expectedTestIds": [
+      "control-detail",
+      "control-header",
+      "control-title",
+      "coverage-section",
+      "freshness-section",
+      "effective-scope-section",
+      "evidence-stream-section",
+      "policies-section",
+      "risks-section",
+      "ucf-viz-section",
+      "audit-log-section"
+    ],
+    "allowedExtraTestIds": [
+      "control-detail-empty",
+      "control-detail-empty-cta",
+      "control-detail-error",
+      "control-detail-loading",
+      "effective-scope-row",
+      "evidence-stream-placeholder",
+      "kpi-card",
+      "kpi-strip",
+      "lifecycle-badge",
+      "scf-anchor-pill"
+    ],
+    "notes": "Slice 014 + 015 + 050 control detail page. `:id` resolves at test time to the first shipped anchor from the seeded fixture."
+  },
+  {
+    "route": "/evidence",
+    "mockupPath": "evidence.html",
+    "expectedTestIds": ["evidence-row-hash"],
+    "allowedExtraTestIds": [
+      "evidence-empty-clear",
+      "evidence-empty-connector",
+      "evidence-empty-title",
+      "evidence-export-buttons",
+      "evidence-load-error",
+      "evidence-row-drawer",
+      "evidence-row-evidence-kind",
+      "evidence-row-observed-at",
+      "evidence-row-result",
+      "evidence-row-scope",
+      "evidence-row-source",
+      "evidence-drawer-full-hash",
+      "evidence-drawer-result",
+      "evidence-drawer-source-json",
+      "list-empty-state"
+    ],
+    "notes": "Slice 022 + 075 evidence list. Empty state allowed for fixture-light tenants."
+  },
+  {
+    "route": "/audits",
+    "mockupPath": "audits.html",
+    "expectedTestIds": [
+      "audits-row-name",
+      "audits-row-period",
+      "audits-row-status-pill"
+    ],
+    "allowedExtraTestIds": [
+      "audits-create-cta",
+      "audits-load-error",
+      "audits-row-created-by",
+      "audits-row-framework-version",
+      "audits-row-frozen-meta",
+      "audits-row-frozen-meta-empty",
+      "audits-row-lock",
+      "audits-row-lock-icon",
+      "audits-row-status-cell",
+      "audits-row-urgent-cue",
+      "audit-periods-export-buttons",
+      "samples-export-buttons",
+      "list-empty-state"
+    ],
+    "notes": "Slice 048 + 049 audits list."
+  },
+  {
+    "route": "/risks",
+    "mockupPath": "risks.html",
+    "expectedTestIds": ["risks-row-title", "risks-row-severity"],
+    "allowedExtraTestIds": [
+      "risks-load-error",
+      "risks-row-id",
+      "risks-row-residual",
+      "risks-row-treatment",
+      "risks-hierarchy-link",
+      "list-empty-state"
+    ],
+    "notes": "Slice 042 + 077 risks list. The 'Hierarchy view ->' page-header link is the canonical cross-link (slice 100)."
+  },
+  {
+    "route": "/policies",
+    "mockupPath": "policies.html",
+    "expectedTestIds": ["policies-row-title", "policies-row-status"],
+    "allowedExtraTestIds": [
+      "policies-ack-rate-caption",
+      "policies-ack-rate-cell",
+      "policies-ack-rate-missing",
+      "policies-export-buttons",
+      "policies-load-error",
+      "list-empty-state"
+    ],
+    "notes": "Slice 043 + 069 policies list."
+  },
+  {
+    "route": "/board-packs",
+    "mockupPath": "board-pack.html",
+    "expectedTestIds": [],
+    "allowedExtraTestIds": ["board-pack-view"],
+    "notes": "Slice 032 + 098 board packs index. Empty fixture is common — the list-view header carries no testid, the detail page does."
+  },
+  {
+    "route": "/settings",
+    "mockupPath": "settings.html",
+    "expectedTestIds": [
+      "settings-page",
+      "settings-section-profile",
+      "settings-section-tokens"
+    ],
+    "allowedExtraTestIds": [
+      "settings-admin-cross-link",
+      "settings-fresh-token-bearer",
+      "settings-fresh-token-callout",
+      "settings-fresh-token-dismiss",
+      "settings-fresh-token-rotated-meta",
+      "settings-fresh-token-title",
+      "settings-profile-display-name",
+      "settings-profile-hero",
+      "settings-profile-initials",
+      "settings-profile-role-admin",
+      "settings-profile-role-user",
+      "settings-profile-roles",
+      "settings-profile-roles-tail",
+      "settings-profile-time-zone",
+      "settings-profile-time-zone-error",
+      "settings-profile-time-zone-select",
+      "settings-section-appearance",
+      "settings-section-notifications",
+      "settings-section-sessions",
+      "settings-section-tokens-non-admin",
+      "settings-session-meta",
+      "settings-session-revoke",
+      "settings-session-row",
+      "settings-sessions-empty",
+      "settings-token-issue-button",
+      "settings-token-issue-form",
+      "settings-token-revoke-button",
+      "settings-token-revoke-modal",
+      "settings-token-rotate-button",
+      "settings-token-rotate-modal",
+      "settings-token-rotated-to-link",
+      "settings-token-row",
+      "settings-tokens-loading"
+    ],
+    "notes": "Slice 062 + 154 + 163 + 164 settings page. Token management surface is the most testid-dense section in the app."
+  },
+  {
+    "route": "/calendar",
+    "mockupPath": null,
+    "expectedTestIds": [],
+    "allowedExtraTestIds": [],
+    "notes": "Slice 094 compliance calendar. NO mockup counterpart exists (route post-dates iteration-1 mockup set). Diff runs HONESTY-GAP heuristics only; SHIP-GAP / MOCKUP-STALE checks are skipped per AC-10 manifest semantics (mockupPath=null). A future slice can backfill a `calendar.html` mockup if maintainer wants mockup parity."
+  }
+]
