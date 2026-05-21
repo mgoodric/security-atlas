@@ -144,6 +144,8 @@ If a commit was AI-assisted, also include a `Co-authored-by:` trailer naming the
 
 ## Pull request workflow
 
+How the project is governed (BDFL · decision-making · funding posture · bus-factor & succession) is documented in [`GOVERNANCE.md`](./GOVERNANCE.md).
+
 1. Branch from `main` using the pattern `<area>/<short-description>` (for example `evidence/sdk-push-protocol` or `ucf/scf-importer`).
 2. Open a draft PR early. Use the PR template; fill every section.
 3. Run `pre-commit run --all-files` locally before pushing. CI runs the same hooks; passing locally avoids CI churn.
@@ -600,6 +602,112 @@ shape. The unit test is the long-term gate that keeps the helper
 short — extend the test rather than weakening the helper. Open-redirect
 findings outside the signIn flow should be filed as follow-on slices
 (per slice 086 P0-A4 — no in-place scope expansion).
+
+## Contributing an `evidence_kind` schema
+
+Schemas live in-tree at `internal/api/schemaregistry/schemas/<kind>/<semver>.json`. The platform embeds them at compile time via `//go:embed`; new schemas land as a PR against this repo. The conventions below are the result of canvas open-question #9 + #17 resolution (see `Plans/canvas/11-open-questions.md`).
+
+**Three rules govern community schema contributions:**
+
+### 1. In-tree until trigger
+
+Schemas stay in-tree (`internal/api/schemaregistry/schemas/`) until **either** (a) the schema count crosses 100 **or** (b) community schema PRs exceed ~1 per week sustained. At that point a maintainer files a slice to migrate to an out-of-tree `security-atlas-schemas` registry repo. Today (16 schemas, low-frequency community contribution) the in-tree model is the right shape.
+
+Practically: open a PR against this repo with the new schema at `internal/api/schemaregistry/schemas/<kind>/1.0.0.json`. The `go test ./internal/api/schemaregistry/...` suite round-trips it through embed-load and Postgres at boot.
+
+### 2. Maintainer-only review (for now)
+
+Every community schema PR requires a maintainer's approval before merge. There is no "verified contributor" tier yet. The expectation is that maintainers scrutinize:
+
+- **JSON Schema correctness** (CI's `go test ./internal/api/schemaregistry/...` already covers this structurally)
+- **Semver discipline** (CI's `CheckAdditiveOver` in `internal/api/schemaregistry/additive.go` rejects non-additive minor bumps)
+- **`x-default-scf-anchors` accuracy** (THE manual checkpoint — does the contributor's claim "my schema covers IAC-06" actually hold? Loose anchor declarations weaken the UCF graph; maintainer review is the load-bearing mitigation)
+- **Naming convention** (`<vendor>.<resource>.<observation>` for connector-produced; `manual.<observation>` for operator-attested)
+
+A "verified contributor" CODEOWNERS-style tier will be designed when **both** (a) >20 community-contributed schemas have landed **and** (b) ≥3 contributors have shipped >5 schemas each. The design happens with those contributors in the room, not speculatively.
+
+### 3. 90-day deprecation window for breaking-major bumps
+
+When a schema's `2.0.0` (or `3.0.0`, etc.) lands, the previous major's latest version stays in the registry for **at least 90 days from the day v2.0.0 lands on `main`**. During the window:
+
+- Both `v1.x.x` and `v2.x.x` are pushable by connectors / SDKs.
+- The platform marks `v1`-versioned records as "deprecated since `<v2.0.0-land-date>`" in the UI.
+- Connector contributors get a 90-day migration runway.
+
+After the window:
+
+- A maintainer files a PR removing the `v1.x.x` schema files from `internal/api/schemaregistry/schemas/<kind>/`.
+- `v1` records remain queryable in the evidence ledger forever (append-only invariant); new `v1.x.x` pushes return `400 schema deprecated`.
+
+CI enforces the floor: any PR that removes a schema version file younger than 90 days fails the `Schema · removal-age (90-day floor)` check (`.github/workflows/ci.yml::schema-removal-age`, slice 179). The worker script lives at `scripts/check-schema-removal-age.sh`; reproduce locally with `git fetch origin main:main && git diff --diff-filter=D --name-only main...HEAD -- internal/api/schemaregistry/schemas/ | bash scripts/check-schema-removal-age.sh`. The check has an explicit override label (exact spelling `[deprecation-override]` on the PR) for emergencies (e.g., a schema was published with a security-sensitive defect and must be unpublished immediately) — overrides require a maintainer's approval and a note in the audit log under `docs/audit-log/`. Operator workflow: [`internal/api/schemaregistry/schemas/README.md`](./internal/api/schemaregistry/schemas/README.md).
+
+Pattern source: OpenTelemetry semantic-conventions deprecation model. Battle-tested at scale; copy verbatim rather than designing our own.
+
+---
+
+## Module isolation discipline
+
+> Pre-commitment for the deferred privacy sibling module. The privacy module
+> primitives (DataSubject / ProcessingActivity / DPIA / DataSubjectRequest
+> etc.) are v2+ work, gated on a real prospect surfacing demand — but the
+> shape of the eventual privacy module is locked NOW so when the work fires
+> it drops in cleanly. Canvas resolution: [`Plans/canvas/11-open-questions.md`](./Plans/canvas/11-open-questions.md) item #7, resolved 2026-05-20.
+
+Privacy and core (security primitives — Control / Risk / Evidence / Scope / Framework / Policy and their dependents) live as **sibling modules** on a shared platform spine. Four sub-decisions define the seam.
+
+### B1 — Postgres schema isolation
+
+The privacy module's primitives land in a dedicated **Postgres `privacy` schema namespace** (not just a naming convention; an actual `CREATE SCHEMA privacy` statement that lands when the privacy v0 slice fires). Core primitives stay in the default `public` schema. `pg_dump --schema=privacy` works as a backup unit; `pg_dump --schema=public --exclude-schema=privacy` produces a privacy-free dump for the user who wants core-only operation.
+
+Slice 180 does NOT create the `privacy` schema yet — empty schemas are confusing. The namespace lands with privacy v0 when there's something to put in it.
+
+### B2 — Shared infrastructure (no separate deployment)
+
+Both modules use the same:
+
+- **AuthN / AuthZ:** OIDC RP (slice 034) + RBAC (slice 014) + ABAC via OPA (slice 018). The privacy module does NOT ship its own auth stack.
+- **Tenancy:** `app.current_tenant` GUC + the slice 036 four-policy RLS pattern. Every privacy table will carry `tenant_id UUID NOT NULL` + the four policies (`tenant_read` / `tenant_write` / `tenant_update` / `tenant_delete`) verbatim.
+- **Audit-log ledger:** the nine platform audit-log tables (`decision_audit_log` / `evidence_audit_log` / `exception_audit_log` / `sample_audit_log` / `audit_period_audit_log` / `aggregation_rule_audit_log` / `feature_flag_audit_log` / `me_audit_log` / `walkthrough_audit_log`) each carry a `subject_module TEXT NOT NULL DEFAULT 'core'` column (slice 180 migration). Core writes tag `'core'`; privacy writes tag `'privacy'`. The slice 124 unified-audit-log endpoint projects the column through.
+- **Feature-flag system:** per-tenant module toggles (see B2.1 below).
+- **Evidence citation seam:** privacy records reference `evidence.id` (citation) and `policy.id` (governing policy) directly (see B3 for the constraint).
+
+**B2.1 Feature-flag pattern (`module:<name>:enabled`).** Each sibling module is gated by a per-tenant boolean flag named `module:<name>:enabled`. The privacy module's toggle is `module:privacy:enabled` (default `false` per-tenant; privacy surfaces hidden until an operator opts in via `POST /v1/admin/tenants/:id/flags`). The pattern composes with the slice 059 feature-flag store. Lifecycle:
+
+| Step                      | Behavior                                                                                                                                  |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Flag absent / `false`     | Module's HTTP routes return `404` on every endpoint; module's UI surfaces are not rendered in the frontend nav.                           |
+| Flag flipped `true`       | Module surfaces appear; module routes accept requests. The flip itself writes a row in `feature_flag_audit_log`.                          |
+| Flag flipped back `false` | Module surfaces disappear from the UI but the underlying schema remains; module data is dormant, not destroyed.                           |
+| Flag never flipped        | Module's migrations have applied (the column / schema exists) but no module code path can be reached. Self-host bundles default this way. |
+
+The flag's concrete implementation (the privacy v0 admin endpoint + the `module:privacy:enabled` registration with the feature-flag store) ships WITH privacy v0 — slice 180 documents the convention so privacy v0's engineer follows the established pattern.
+
+### B3 — Cross-module reference seam
+
+The privacy module's tables MAY reference these core tables directly (via FK):
+
+- `evidence_records(id)` — for evidence citations on processing-activity records
+- `policies(id)` — for governing policy links on processing-activity records
+
+The privacy module's tables MUST NOT reference these core tables directly:
+
+- `controls(id)` — privacy → security mapping happens at the **framework-satisfaction layer** (GDPR Art. 32 is a framework whose requirements satisfy SCF anchors; the privacy → security relationship is `gdpr_art32_requirement → SCF_anchor → control`, not `processing_activity → control`).
+
+Rationale: data-flow records (privacy) and control-state records (security) are independent concerns. Coupling them at the FK layer creates the exact "everything is a control" anti-pattern that drives Vanta/Drata users to spreadsheets — every privacy-side change risks invalidating control state and vice versa. Routing the relationship through the framework layer preserves the UCF invariant (canvas §3.5, "SCF is the canonical control catalog") and lets the privacy module evolve on its own cadence.
+
+### B4 — Lint-rule enforcement (placeholder until privacy v0)
+
+When privacy v0 lands, a CI lint rule fails any PR whose diff touches BOTH `internal/api/privacy/**` AND `internal/api/controls/**`. Escape-hatch: applying the `[cross-module-ok]` PR label permits a single PR through for genuine cross-cutting work (e.g., a refactor that touches a shared utility).
+
+Slice 180 does NOT add the lint rule yet — with no `internal/api/privacy/` directory existing, the rule would lint nothing. The rule ships alongside the first `internal/api/privacy/` files in privacy v0. Until then, this section is the operator-facing notice that the rule is coming.
+
+### What this means for your PR today
+
+You probably don't write privacy code today (the module doesn't exist). The things to know:
+
+1. If you add a new audit-log INSERT call site, set `subject_module='core'` explicitly. The DB default also handles it, but explicit-is-clearer (slice 180 AC-5). The convention is documented inline in every sqlc query that writes an audit-log row.
+2. If you add a tenth audit-log table, extend slice 180's migration shape: `ALTER TABLE <new>_audit_log ADD COLUMN IF NOT EXISTS subject_module TEXT NOT NULL DEFAULT 'core'`. The slice 124 UNION query then needs the new branch projected through.
+3. If a PR review surfaces a "should this be a privacy primitive?" question, surface it as a separate design-grill slice — do NOT introduce the primitive without OQ #7 → privacy v0 firing first.
 
 ## AI-assist boundary
 

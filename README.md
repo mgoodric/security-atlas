@@ -27,6 +27,18 @@ The spine is the [Secure Controls Framework](https://securecontrolsframework.com
 
 ---
 
+## Project status
+
+security-atlas is a **pure-community open-source project** under the
+[Apache 2.0 license](./LICENSE). There is **no hosted SaaS** offered by
+the project owners and **no enterprise edition** with proprietary
+features. This posture is time-bounded — the maintainer will re-evaluate
+on **2028-05-20** (or earlier, if release-download stats cross 100
+deployed self-hosts). The full governance model, funding posture, and
+bus-factor / succession plan live in [`GOVERNANCE.md`](./GOVERNANCE.md).
+
+---
+
 ## Why security-atlas
 
 Existing GRC tools optimize for the first-SOC-2-in-90-days SMB sale. They model controls per-framework, store evidence in a vendor cloud, and the Year-2 renewal cliff is well-documented.

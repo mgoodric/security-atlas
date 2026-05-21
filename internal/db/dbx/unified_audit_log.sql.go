@@ -24,8 +24,10 @@ WITH unified AS (
         resource_id    AS target_id,
         action,
         decision_id    AS row_id,
+        subject_module,
         (to_jsonb(d) - 'tenant_id' - 'occurred_at' - 'user_id'
-            - 'action' - 'resource_type' - 'resource_id')::jsonb AS payload_json
+            - 'action' - 'resource_type' - 'resource_id'
+            - 'subject_module')::jsonb AS payload_json
     FROM decision_audit_log d
 
     UNION ALL
@@ -40,8 +42,9 @@ WITH unified AS (
         COALESCE(record_id::text, '') AS target_id,
         decision       AS action,
         id             AS row_id,
+        subject_module,
         (to_jsonb(e) - 'tenant_id' - 'received_at' - 'credential_id'
-            - 'decision' - 'record_id')::jsonb AS payload_json
+            - 'decision' - 'record_id' - 'subject_module')::jsonb AS payload_json
     FROM evidence_audit_log e
 
     UNION ALL
@@ -56,8 +59,9 @@ WITH unified AS (
         exception_id::text AS target_id,
         action,
         id             AS row_id,
+        subject_module,
         (to_jsonb(x) - 'tenant_id' - 'occurred_at' - 'actor'
-            - 'action' - 'exception_id')::jsonb AS payload_json
+            - 'action' - 'exception_id' - 'subject_module')::jsonb AS payload_json
     FROM exception_audit_log x
 
     UNION ALL
@@ -72,8 +76,9 @@ WITH unified AS (
         COALESCE(sample_id::text, '') AS target_id,
         action,
         id             AS row_id,
+        subject_module,
         (to_jsonb(s) - 'tenant_id' - 'occurred_at' - 'actor'
-            - 'action' - 'sample_id')::jsonb AS payload_json
+            - 'action' - 'sample_id' - 'subject_module')::jsonb AS payload_json
     FROM sample_audit_log s
 
     UNION ALL
@@ -88,8 +93,9 @@ WITH unified AS (
         audit_period_id::text AS target_id,
         action,
         id             AS row_id,
+        subject_module,
         (to_jsonb(p) - 'tenant_id' - 'occurred_at' - 'actor'
-            - 'action' - 'audit_period_id')::jsonb AS payload_json
+            - 'action' - 'audit_period_id' - 'subject_module')::jsonb AS payload_json
     FROM audit_period_audit_log p
 
     UNION ALL
@@ -104,8 +110,9 @@ WITH unified AS (
         rule_id::text  AS target_id,
         event          AS action,
         id             AS row_id,
+        subject_module,
         (to_jsonb(r) - 'tenant_id' - 'created_at' - 'actor'
-            - 'event' - 'rule_id')::jsonb AS payload_json
+            - 'event' - 'rule_id' - 'subject_module')::jsonb AS payload_json
     FROM aggregation_rule_audit_log r
 
     UNION ALL
@@ -124,8 +131,9 @@ WITH unified AS (
             ELSE 'feature_flag.flip'
         END            AS action,
         id             AS row_id,
+        subject_module,
         (to_jsonb(f) - 'tenant_id' - 'occurred_at' - 'actor'
-            - 'flag_key')::jsonb AS payload_json
+            - 'flag_key' - 'subject_module')::jsonb AS payload_json
     FROM feature_flag_audit_log f
 
     UNION ALL
@@ -140,8 +148,9 @@ WITH unified AS (
         user_id::text  AS target_id,
         action,
         id             AS row_id,
+        subject_module,
         (to_jsonb(m) - 'tenant_id' - 'occurred_at' - 'user_id'
-            - 'action')::jsonb AS payload_json
+            - 'action' - 'subject_module')::jsonb AS payload_json
     FROM me_audit_log m
 
     UNION ALL
@@ -156,8 +165,9 @@ WITH unified AS (
         walkthrough_id::text AS target_id,
         action,
         id             AS row_id,
+        subject_module,
         (to_jsonb(w) - 'tenant_id' - 'occurred_at' - 'actor'
-            - 'action' - 'walkthrough_id')::jsonb AS payload_json
+            - 'action' - 'walkthrough_id' - 'subject_module')::jsonb AS payload_json
     FROM walkthrough_audit_log w
 )
 SELECT
@@ -169,6 +179,7 @@ SELECT
     unified.target_id,
     unified.action,
     unified.row_id,
+    unified.subject_module,
     unified.payload_json,
     u.display_name AS actor_name
 FROM unified
@@ -216,24 +227,37 @@ type ListUnifiedAuditLogParams struct {
 }
 
 type ListUnifiedAuditLogRow struct {
-	OccurredAt  pgtype.Timestamptz `json:"occurred_at"`
-	ActorID     string             `json:"actor_id"`
-	TenantID    pgtype.UUID        `json:"tenant_id"`
-	Kind        string             `json:"kind"`
-	TargetType  string             `json:"target_type"`
-	TargetID    string             `json:"target_id"`
-	Action      string             `json:"action"`
-	RowID       pgtype.UUID        `json:"row_id"`
-	PayloadJson []byte             `json:"payload_json"`
-	ActorName   *string            `json:"actor_name"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	ActorID       string             `json:"actor_id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	Kind          string             `json:"kind"`
+	TargetType    string             `json:"target_type"`
+	TargetID      string             `json:"target_id"`
+	Action        string             `json:"action"`
+	RowID         pgtype.UUID        `json:"row_id"`
+	SubjectModule string             `json:"subject_module"`
+	PayloadJson   []byte             `json:"payload_json"`
+	ActorName     *string            `json:"actor_name"`
 }
 
 // Slice 124 — unified audit-log aggregation query.
 //
 // One SQL statement: UNION ALL across the nine per-domain audit-log tables,
 // each projected to the canonical Entry shape
-// (occurred_at, actor_id, tenant_id, kind, target_type, target_id, action, payload_json),
+// (occurred_at, actor_id, tenant_id, kind, target_type, target_id, action,
+//
+//	payload_json, subject_module),
+//
 // with WHERE filters applied at each branch.
+//
+// Slice 180 (2026-05-20): canonical projection extended with `subject_module`
+// — the per-row tag identifying which module (`core` / future `privacy` /
+// future others) owns the writing code path. Every UNION branch reads
+// `subject_module` from its base table directly (the column defaults to
+// `'core'` at the DB layer). Slice 180 does NOT change RLS behavior, the
+// nine source tables, the canonical Kind enum, or the cursor pagination
+// contract; the only wire-shape change is one additional column on every
+// returned row.
 //
 // RLS-aware: the query runs under `tenancy.ApplyTenant` as `atlas_app`. Every
 // branch's source-table tenant_read policy fires; rows from other tenants are
@@ -302,6 +326,7 @@ func (q *Queries) ListUnifiedAuditLog(ctx context.Context, arg ListUnifiedAuditL
 			&i.TargetID,
 			&i.Action,
 			&i.RowID,
+			&i.SubjectModule,
 			&i.PayloadJson,
 			&i.ActorName,
 		); err != nil {

@@ -285,7 +285,7 @@ func (q *Queries) ListWalkthroughAttachments(ctx context.Context, arg ListWalkth
 }
 
 const listWalkthroughAuditLog = `-- name: ListWalkthroughAuditLog :many
-SELECT id, tenant_id, walkthrough_id, action, actor, detail, occurred_at
+SELECT id, tenant_id, walkthrough_id, action, actor, detail, occurred_at, subject_module
 FROM walkthrough_audit_log
 WHERE tenant_id = $1 AND walkthrough_id = $2
 ORDER BY occurred_at DESC, id ASC
@@ -313,6 +313,7 @@ func (q *Queries) ListWalkthroughAuditLog(ctx context.Context, arg ListWalkthrou
 			&i.Actor,
 			&i.Detail,
 			&i.OccurredAt,
+			&i.SubjectModule,
 		); err != nil {
 			return nil, err
 		}
@@ -446,10 +447,10 @@ func (q *Queries) UpdateWalkthroughHash(ctx context.Context, arg UpdateWalkthrou
 
 const writeWalkthroughAuditLog = `-- name: WriteWalkthroughAuditLog :one
 INSERT INTO walkthrough_audit_log (
-    id, tenant_id, walkthrough_id, action, actor, detail, occurred_at
+    id, tenant_id, walkthrough_id, action, actor, detail, occurred_at, subject_module
 )
-VALUES ($1, $2, $3, $4, $5, $6, now())
-RETURNING id, tenant_id, walkthrough_id, action, actor, detail, occurred_at
+VALUES ($1, $2, $3, $4, $5, $6, now(), 'core')
+RETURNING id, tenant_id, walkthrough_id, action, actor, detail, occurred_at, subject_module
 `
 
 type WriteWalkthroughAuditLogParams struct {
@@ -465,6 +466,11 @@ type WriteWalkthroughAuditLogParams struct {
 // (walkthrough_created | attachment_added | walkthrough_finalized |
 // tamper_detected | mutation_rejected_frozen). detail captures action-
 // specific payload.
+//
+// Slice 180: explicit `subject_module='core'` tags every write from the
+// core (non-privacy) module path. The column defaults to 'core' at the
+// DB level, so omitting this would still produce a 'core' row; explicit
+// is clearer and defense-in-depth (AC-5).
 func (q *Queries) WriteWalkthroughAuditLog(ctx context.Context, arg WriteWalkthroughAuditLogParams) (WalkthroughAuditLog, error) {
 	row := q.db.QueryRow(ctx, writeWalkthroughAuditLog,
 		arg.ID,
@@ -483,6 +489,7 @@ func (q *Queries) WriteWalkthroughAuditLog(ctx context.Context, arg WriteWalkthr
 		&i.Actor,
 		&i.Detail,
 		&i.OccurredAt,
+		&i.SubjectModule,
 	)
 	return i, err
 }

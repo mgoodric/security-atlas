@@ -300,3 +300,82 @@ LEFT JOIN worst_per_anchor wpa ON wpa.anchor_id = a.id
 WHERE a.framework_version_id = $1
 ORDER BY a.scf_id
 LIMIT $2 OFFSET $3;
+
+-- name: ListAllSCFAnchorsForExport :many
+-- Slice 174: anchor catalog export. Returns EVERY SCF anchor in the
+-- current SCF framework_version (status='current'), joined to
+-- framework_versions + frameworks so the export carries the framework
+-- provenance (`framework_slug`, `framework_version`) without a
+-- second query. Sorted by `scf_id` for stable output across runs and
+-- across tenants (the global catalog is identical for every tenant,
+-- so the bit-for-bit-identical cross-tenant assertion in the
+-- integration test relies on this stable ordering).
+--
+-- Catalog data — no tenant_id; no RLS clause; bounded result set
+-- (~1,400 anchors at current SCF release). The `LIMIT` parameter
+-- carries the slice 174 row cap so the handler can detect cap-
+-- exceeded by asking for cap+1.
+SELECT
+    a.id,
+    a.scf_id,
+    a.family,
+    a.title,
+    a.description,
+    a.subtopics,
+    a.created_at,
+    a.updated_at,
+    fv.id           AS framework_version_id,
+    fv.version      AS framework_version,
+    f.slug          AS framework_slug
+FROM scf_anchors a
+JOIN framework_versions fv ON fv.id = a.framework_version_id
+JOIN frameworks f          ON f.id = fv.framework_id
+WHERE f.slug = 'scf'
+  AND fv.status = 'current'
+  AND f.tenant_id IS NULL
+ORDER BY a.scf_id
+LIMIT $1;
+
+-- name: ListAllFwToScfEdgesForExport :many
+-- Slice 174: anchor catalog export edges projection. Returns EVERY
+-- fw_to_scf_edges row whose target anchor is in the current SCF
+-- framework_version, joined to framework_requirements +
+-- framework_versions + frameworks so consumers get the natural-key
+-- (`framework_slug:version:code`) without a second query.
+--
+-- Catalog data — no tenant_id; no RLS clause; bounded result set
+-- (~10K edges at current SCF release: ~1,400 anchors × 3-8 edges
+-- per anchor average). `no_relationship` edges are INCLUDED here
+-- because the export is the canonical catalog dump — operators
+-- doing reconciliation want to see "this anchor explicitly does NOT
+-- map to that requirement" as a recorded fact, not a silent
+-- omission. The slice 008 traversal views filter no_relationship
+-- out for coverage UI; the export does NOT.
+--
+-- Sorted by anchor_scf_id then framework_slug + framework_version
+-- + requirement_code so the rows group by anchor (matches the
+-- visual ordering of the JSON projection's nested array).
+SELECT
+    e.id                          AS edge_id,
+    e.scf_anchor_id               AS anchor_id,
+    a.scf_id                      AS anchor_scf_id,
+    e.framework_requirement_id    AS framework_requirement_id,
+    r.code                        AS framework_requirement_code,
+    r.title                       AS framework_requirement_title,
+    f.slug                        AS framework_slug,
+    fv.version                    AS framework_version,
+    e.relationship_type,
+    e.strength,
+    e.source_attribution,
+    e.rationale
+FROM fw_to_scf_edges e
+JOIN scf_anchors a                ON a.id = e.scf_anchor_id
+JOIN framework_versions afv       ON afv.id = a.framework_version_id
+JOIN frameworks af                ON af.id = afv.framework_id
+JOIN framework_requirements r     ON r.id = e.framework_requirement_id
+JOIN framework_versions fv        ON fv.id = r.framework_version_id
+JOIN frameworks f                 ON f.id = fv.framework_id
+WHERE af.slug = 'scf'
+  AND afv.status = 'current'
+  AND af.tenant_id IS NULL
+ORDER BY a.scf_id, f.slug, fv.version, r.code;

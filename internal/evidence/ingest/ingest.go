@@ -571,15 +571,16 @@ func (s *Service) writeAudit(ctx context.Context, cred credstore.Credential, ide
 			"reason_code":     truncate(reason, 1024),
 		})
 		sink.EmitDefault(tenantCtx, unifiedlog.Entry{
-			OccurredAt:  time.Now().UTC(),
-			ActorID:     cred.ID,
-			TenantID:    tenantUUID,
-			Kind:        unifiedlog.KindEvidence,
-			TargetType:  "evidence_record",
-			TargetID:    recordIDStr,
-			Action:      decision.String(),
-			RowID:       auditID,
-			PayloadJSON: payload,
+			OccurredAt:    time.Now().UTC(),
+			ActorID:       cred.ID,
+			TenantID:      tenantUUID,
+			Kind:          unifiedlog.KindEvidence,
+			TargetType:    "evidence_record",
+			TargetID:      recordIDStr,
+			Action:        decision.String(),
+			RowID:         auditID,
+			SubjectModule: unifiedlog.SubjectModuleCore,
+			PayloadJSON:   payload,
 		})
 		return nil
 	})

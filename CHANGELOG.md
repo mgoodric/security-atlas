@@ -13,6 +13,214 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 180** — Privacy-module foundation: `subject_module` column on
+  all platform audit-log tables (pre-commitment for the deferred privacy
+  sibling module; #180). Migration
+  `20260520020000_audit_log_subject_module.sql` adds
+  `subject_module TEXT NOT NULL DEFAULT 'core'` to each of the nine
+  platform audit-log tables (`decision_audit_log`, `evidence_audit_log`,
+  `exception_audit_log`, `sample_audit_log`, `audit_period_audit_log`,
+  `aggregation_rule_audit_log`, `feature_flag_audit_log`, `me_audit_log`,
+  `walkthrough_audit_log`); idempotent (`ADD COLUMN IF NOT EXISTS`) and
+  reversible (companion `.down.sql`). Existing rows backfill to `'core'`
+  via the DEFAULT — no separate UPDATE. Every existing INSERT call site
+  (eight sqlc-managed + the hand-written `internal/authz/audit.go`
+  decision-audit insert) now writes `subject_module='core'` explicitly
+  (defense-in-depth; the DEFAULT also handles it). The slice 124 unified
+  audit-log UNION query projects `subject_module` through to the
+  canonical `Entry` shape; the slice 124 HTTP wire response
+  (`UnifiedEntry`) gains a `subject_module` field. Pre-commitment for
+  the deferred privacy sibling module per [canvas OQ #7](./Plans/canvas/11-open-questions.md)
+  resolution (2026-05-20): privacy primitives (`DataSubject`,
+  `ProcessingActivity`, `DPIA`, `DataSubjectRequest`, etc.) ship in a
+  dedicated `privacy.*` Postgres schema namespace at v2+ when a real
+  prospect surfaces demand; sibling-discipline documentation lands now
+  in [`CONTRIBUTING.md`](./CONTRIBUTING.md) "Module isolation discipline"
+  covering the four B1–B4 sub-decisions (Postgres schema isolation;
+  shared infrastructure including audit-log + `module:<name>:enabled`
+  feature-flag pattern; cross-module reference seam — privacy → evidence /
+  policy, NOT privacy → controls; lint-rule enforcement placeholder
+  shipping with privacy v0). Canvas note added to [`Plans/canvas/08-audit-workflow.md`](./Plans/canvas/08-audit-workflow.md)
+  §8.2: OSCAL covers security primitives only; privacy exports (when
+  privacy v0 ships) use W3C Data Privacy Vocabulary (DPV) as JSON-LD,
+  NOT OSCAL. Slice is INFRASTRUCTURE-ONLY — no privacy primitives, no
+  `privacy` Postgres schema, no `subject_module` index, no B4 CI lint
+  rule (all premature; land with privacy v0). Integration tests at
+  `internal/db/subject_module_integration_test.go` assert (a) the column
+  is present + DEFAULT 'core' fires on every one of the nine tables and
+  (b) RLS visibility-set under tenant context is unchanged by the new
+  column (constitutional invariant #6 continuity gate). Decisions log:
+  [`docs/audit-log/180-privacy-module-foundation-decisions.md`](./docs/audit-log/180-privacy-module-foundation-decisions.md).
+- **slice 174** — UCF anchor catalog export (CSV / JSON / XLSX).
+  New `GET /v1/anchors/export?format=<csv|json|xlsx>` endpoint that
+  exports the SCF anchor catalog (anchor metadata + framework
+  satisfactions inline) in three native projections per the
+  maintainer-locked D1 (2026-05-20): `json` → nested JSON, one
+  object per anchor with a `framework_satisfactions` array;
+  `xlsx` → two-sheet workbook (Sheet 1 = Anchors metadata,
+  Sheet 2 = Edges with `anchor_id` + `anchor_scf_id` join keys
+  at columns A and B for VLOOKUP / XLOOKUP / pivot-table
+  workflows); `csv` → flat-nested fallback with the
+  framework satisfactions JSON-stringified into a trailing
+  column. Reuses the slice 135 export library's CSV cell-
+  injection sanitizer and filename builder; the nested JSON
+  + two-sheet XLSX writers live in `internal/api/anchors/`
+  (slice 174 D6 — the generic library is single-sheet by
+  construction). New per-(tenant, user) meta-audit action
+  `anchors_export` extends the `me_audit_log.action` CHECK
+  constraint via migration
+  `20260520010000_anchors_export_meta_audit.sql`. Two new sqlc
+  queries (`ListAllSCFAnchorsForExport`,
+  `ListAllFwToScfEdgesForExport`) carry the global SCF catalog
+  shape (no tenant_id, no RLS — the catalog is public). Row cap
+  50K anchors (35× headroom over the current ~1,400-anchor
+  catalog); streaming-memory budget 200 MB asserted at
+  50K-synthetic-anchor scale across all three encoders. The
+  XLSX writer emits exactly six zip members (no charts, no
+  named ranges, no VBA — P0-A-174-2 satisfied by construction;
+  test pins the member list). Cross-tenant isolation: because
+  the catalog is global, the integration test asserts the
+  export body is bit-for-bit identical between two distinct
+  tenants (slice 174 D7 — semantic dual of the slice 135
+  cross-tenant invariant). OPA admit-set parity test at
+  `internal/authz/slice174_test.go` enforces that the export
+  admits exactly the role set that admits the underlying
+  `/v1/anchors` read endpoint (slice 135 P0-A9 inheritance);
+  every named role admits per the public-catalog allow rule
+  in `defaults.rego`. BFF at `web/app/api/anchors/export/` is
+  the slice 137 streaming pattern (bearer-only auth, no
+  atlas_session cookie forwarded — slice 110 P0-A2). Export
+  buttons (CSV / JSON / XLSX) on the SCF catalog browse page
+  at `/catalog/scf` wire to the BFF URL helper at
+  `web/lib/api/anchors-export.ts`. `applicability_expr` and
+  every other tenant-private column are explicitly excluded
+  (P0-A-174-1). Decisions log:
+  `docs/audit-log/174-ucf-anchor-catalog-export-decisions.md`
+  records the maintainer's D1 pre-lock plus eight engineer
+  refinements (D2-D9). (#174)
+
+- **slice 181** — GOVERNANCE.md authored — open-governance pre-commitments
+  per OQ #5 resolution (#181). New `/GOVERNANCE.md` at repo root with seven
+  sections (Model · Maintainership · Decision-making · Contributor
+  agreements · Funding posture · Re-evaluation trigger · Bus-factor &
+  succession) explicitly committing to pure-community OSS posture under
+  Apache 2.0 with NO hosted SaaS / NO enterprise edition / NO CLA. Time-
+  bounded re-evaluation locked at **2028-05-20** OR 100 deployed self-
+  hosts (proxied by GitHub release-download stats — no in-product
+  telemetry). Bus-factor section names sole admin (`@mgoodric`) and
+  commits to recruiting at least one co-maintainer by 2027-05-20.
+  Quarterly governance-checkin convention defined; first checkin
+  (`docs/audit-log/governance-checkin-2026-Q2.md`) committed as baseline.
+  New `.github/FUNDING.yml` enables the GitHub Sponsors button (set up
+  but NOT marketed — no prominent README link, per anti-criterion
+  P0-181-4). README gains a new "Project status" section (≤8 lines)
+  after the title surfacing the model + re-evaluation date + link to
+  GOVERNANCE.md. CONTRIBUTING.md "Pull request workflow" cross-links to
+  GOVERNANCE.md. No code, no telemetry, no platform behavior change —
+  pure governance documentation closing the OQ #5 visibility commitment.
+  (#181)
+- **slice 182** — board-narrative AI-assist foundation pre-commitments.
+  Ships the supporting artifacts that the CLAUDE.md "Board-narrative
+  AI-assist" expansion (shipped in the OQ #14 resolution PR #403)
+  references. Four new artifacts: (1) the canonical tone anti-pattern
+  reference at `docs/governance/board-narrative-tone-anti-patterns.md`
+  with 20 banned phrases (Section 1, exact-match, copy-pasteable into
+  a `forbidden_phrases:` config), 12 banned framings (Section 2,
+  pattern-match: unprompted positive framing, marketing voice, passive-
+  voice deflection, future-tense optimism without commitment, editorial
+  summary at the top, comparative framing without baseline, hedge stack,
+  anthropomorphizing the platform, first-person plural for the platform,
+  hand-wave on causality, inferred intent, audit-binding language
+  without sign-off), 10 permitted phrases commonly mistaken as banned
+  (Section 3, with explicit OK / NOT OK examples), and the living-
+  document discipline (Section 4) for adding new entries via PR with
+  maintainer review under branch protection; (2) ADR-0006 at
+  `docs/adr/0006-board-narrative-ai-assist.md` (slot incremented from
+  the spec's `0002` because slots 0002-0005 were occupied at pickup
+  time per the slice's "ADR slot computation" guidance) capturing the
+  seven coupled sub-decisions (D1 hybrid input · D2 per-section approval
+  · D3 full prompt+response audit trail · D4 all four hallucination
+  guardrails · D5 Llama 3.1 8B + cloud opt-in · D6 inline-edit-default
+  iteration · D7 snapshot-with-each-generation versioning) plus the
+  rejected alternatives per sub-decision; (3) canvas §4.6.7 update at
+  `Plans/canvas/04-evidence-engine.md` abbreviating the seven sub-
+  decisions with cross-links to CLAUDE.md + ADR-0006 + tone reference +
+  cadence doc; (4) local-model recommendation refresh cadence at
+  `docs/operator/maintenance-cadence.md` (new file) with the 6-12 month
+  cadence, the maintainer task (benchmark + score against four D4
+  guardrails + decide + update four cross-referenced docs in one PR +
+  record refresh in `docs/audit-log/model-refresh-<YYYY>-<MM>.md`), and
+  explicit anti-triggers (cloud LLM release, quantization change,
+  larger-hardware model, smaller-hardware quality regression). No
+  board-narrative implementation ships from this slice — foundation-
+  only; board-narrative v0 fires at v2+. The four model references
+  (CLAUDE.md AI-assist boundary, CLAUDE.md tech-stack table, ADR-0006
+  D5 entry, cadence doc Current default line) are required to stay in
+  sync per P0-182-6; any subsequent model-default refresh PR updates
+  all four atomically. (#182)
+
+- **slice 179** — Schema-removal age CI check enforcing the 90-day
+  deprecation window for breaking-major bumps of `evidence_kind`
+  schemas. New job `Schema · removal-age (90-day floor)` in
+  `.github/workflows/ci.yml` runs on PRs that touch
+  `internal/api/schemaregistry/schemas/**`; for each file the PR
+  removes, the check reads the file's introduction commit on `main`
+  via `git log --diff-filter=A` and fails when age < 90 days.
+  Bypassable via the exact `[deprecation-override]` PR label (requires
+  a maintainer's approval and an `docs/audit-log/` entry). Worker
+  script at `scripts/check-schema-removal-age.sh` with companion test
+  harness `scripts/check-schema-removal-age_test.sh` (27 fixture-driven
+  assertions covering all-pass / one-violation / override-bypass /
+  empty-input / boundary / stdin / unknown-path / multi-violation).
+  Implementation half of the OQ #9 + #17 resolution (canvas
+  `Plans/canvas/11-open-questions.md`); governance side lives in
+  `CONTRIBUTING.md` "Contributing an `evidence_kind` schema". Operator
+  workflow documented in
+  `internal/api/schemaregistry/schemas/README.md`. NOT a required
+  check in this slice — promotion to branch-protection is a follow-on
+  after the check proves stable (P0-179-4). Decisions log at
+  `docs/audit-log/179-schema-removal-age-decisions.md` (#179).
+- **slice 177** — exceptions list-page UI surface. Adds the missing
+  `/exceptions` route in `web/app/(authed)/exceptions/page.tsx` —
+  tenant-wide register of exception/waiver rows consumed via a new BFF
+  at `web/app/api/exceptions/route.ts` (proxies `GET /v1/exceptions`,
+  whitelists `status` + `control_id` query params, drops any caller-
+  supplied `tenant_id`). Surfaces the slice 138 Export CSV / JSON /
+  XLSX buttons in the toolbar via a new
+  `web/lib/api/exceptions-export.ts` URL helper (mirrors the slice 137
+  controls-export shape). Two filter pills (status + control), eight
+  derived columns (id / control / status / requested_by / requested /
+  expires / days / justification), separate truly-empty vs filter-
+  empty states, row click routes to control detail (the slice 022
+  lifecycle workflow lives there per P0-A-176-1). Adds vitest BFF
+  coverage including cross-tenant isolation assertion + Playwright e2e
+  contract (quarantined behind slice 082 seed harness per the slice
+  101/102 precedent).
+
+- **slice 133** — mkdocs user docs content refresh. Ships 9 new operator
+  pages under `docs-site/docs/`: six per-primitive how-tos
+  (`primitives/controls.md`, `primitives/risks.md`,
+  `primitives/evidence.md`, `primitives/scope.md`,
+  `primitives/framework.md`, `primitives/policy.md`) plus
+  `primitives/index.md` as section landing, an `audit-logs.md` operator
+  guide covering the trio (`decision_audit_log`, `evidence_audit_log`,
+  `me_audit_log`) plus the other six per-domain logs and the unified
+  query API, a `ci-hardening.md` reference mapping required CI checks to
+  the local `just`/`npm`/`pre-commit` commands that reproduce them
+  (covers slices 117 + 127 + 128), and a `connector-authoring.md`
+  walkthrough of the 9-step Evidence-SDK authoring flow with conventions
+  carried forward from slices 003 + 004. `mkdocs.yml` nav extended with
+  a `Primitives:` collapsible section plus three top-level entries; no
+  theme / CSS / plugin changes (P0-A6 honored — slice 058 owns theme).
+  No new screenshots — pages link to the canonical README hero set per
+  the slice 057 / 132 pattern (preserves the docs-site image budget).
+  `mkdocs build --strict` is green with zero broken links, zero
+  warnings. Decisions log at
+  `docs/audit-log/133-mkdocs-content-refresh-decisions.md` (8 decisions,
+  D1 = nested primitives + flat operator surfaces; D2 = link to
+  canonical screenshots, no duplicates; D3 = cover all nine audit logs,
+  not only the trio).
+
 - **slice 138** — Ledger entities export (evidence + policies + exceptions
   + samples). Four new admin endpoints close the per-entity export
   cluster following the slice 137 precedent: `GET
@@ -290,6 +498,48 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   `docs/audit-log/162-sessions-wire-shape-decisions.md`.
 
 ### Fixed
+
+- **slice 176** — Logo variant now follows app theme; README +
+  `docs/images/` regenerated to match slice-167 design
+  ([#176](https://github.com/mgoodric/security-atlas/issues/176)).
+  Two bugs:
+  **Bug A** — the three logo mount sites
+  (`web/components/shell/topbar.tsx`, `web/app/login/page.tsx`, and the
+  audit row for `web/app/layout.tsx` which renders no `<img>`) used a
+  `<picture media="(prefers-color-scheme: ...)">` element that tracked
+  the OS preference, not the app theme picker (slice 070/170's
+  persisted `data-theme` attribute on `<html>`). Operators on OS=dark
+  with explicit app theme "light" were served `/logo-dark.svg`
+  (near-white ink, `#f8fafc`) onto a light app background and could
+  not see the logo at all. Replaced the inline `<picture>` blocks with
+  a new `<ThemeAwareLogo>` component
+  (`web/components/shell/theme-aware-logo.tsx`) that reads
+  `<html data-theme>` directly + uses a `MutationObserver` to re-render
+  on /settings changes + falls back to `prefers-color-scheme` only when
+  the resolved theme is `"system"`. Pure picker logic
+  (`web/lib/theme-aware-logo.ts`) is unit-tested in vitest covering all
+  four (app-theme × OS-pref) combinations (8 tests).
+  **Bug B** — `docs/images/logo-{light,dark}.png` were the pre-slice-167
+  design (slice 167's anti-criterion P0-A4 limited that slice to
+  `web/public/`, deferring the docs/README assets here). Regenerated
+  both PNGs from the slice 167 SVG sources via the same sharp@0.34 +
+  pngquant pipeline; the regenerated files end up byte-identical
+  (SHA-256 matched) to `web/public/logo-{light,dark}.png` because both
+  pipelines are deterministic for the same inputs. Both PNGs are 4638 B
+  / 4746 B gzipped — well under the slice 167 STRIDE-D 16 KB cap.
+  Playwright spec `web/e2e/logo-render.spec.ts` extended with a Bug A
+  regression assertion: sets `<html data-theme="dark">` from a
+  `page.evaluate()` and asserts the rendered `<img src>` flips to the
+  dark variant; toggling back to `"light"` flips it back to the light
+  variant regardless of OS preference. Decisions log at
+  [`docs/audit-log/176-logo-theme-coupling-decisions.md`](docs/audit-log/176-logo-theme-coupling-decisions.md)
+  (D1 = `data-theme` reader + MutationObserver pattern, chosen because
+  slice 170 writes `data-theme` not a Tailwind `dark:` class; D2 =
+  component named `ThemeAwareLogo` colocated at
+  `web/components/shell/`; D3 = sharp + pngquant pipeline matching
+  slice 167; D4 = AC-7 audit confirming `web/app/layout.tsx` renders no
+  `<img>` — only Metadata API `icons` + OG/Twitter image URLs, none of
+  which are theme-coupled at runtime).
 
 - Playwright e2e: settings page coverage gated on CI
   ([#164](https://github.com/mgoodric/security-atlas/issues/164); closes

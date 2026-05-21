@@ -367,7 +367,7 @@ func (q *Queries) ListSampleAnnotations(ctx context.Context, arg ListSampleAnnot
 }
 
 const listSampleAuditLog = `-- name: ListSampleAuditLog :many
-SELECT id, tenant_id, action, actor, population_id, sample_id, seed, n_requested, n_returned, reason_code, occurred_at
+SELECT id, tenant_id, action, actor, population_id, sample_id, seed, n_requested, n_returned, reason_code, occurred_at, subject_module
 FROM sample_audit_log
 WHERE tenant_id = $1
 ORDER BY occurred_at DESC, id ASC
@@ -400,6 +400,7 @@ func (q *Queries) ListSampleAuditLog(ctx context.Context, arg ListSampleAuditLog
 			&i.NReturned,
 			&i.ReasonCode,
 			&i.OccurredAt,
+			&i.SubjectModule,
 		); err != nil {
 			return nil, err
 		}
@@ -503,10 +504,10 @@ const writeSampleAuditLog = `-- name: WriteSampleAuditLog :one
 INSERT INTO sample_audit_log (
     id, tenant_id, action, actor,
     population_id, sample_id, seed,
-    n_requested, n_returned, reason_code
+    n_requested, n_returned, reason_code, subject_module
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, tenant_id, action, actor, population_id, sample_id, seed, n_requested, n_returned, reason_code, occurred_at
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'core')
+RETURNING id, tenant_id, action, actor, population_id, sample_id, seed, n_requested, n_returned, reason_code, occurred_at, subject_module
 `
 
 type WriteSampleAuditLogParams struct {
@@ -524,6 +525,9 @@ type WriteSampleAuditLogParams struct {
 
 // Every sample pull writes one row here. The seed -> sample_id mapping
 // captured in (seed, sample_id) is the re-audit trail (AC-6).
+//
+// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+// the DB layer; explicit-is-clearer per AC-5).
 func (q *Queries) WriteSampleAuditLog(ctx context.Context, arg WriteSampleAuditLogParams) (SampleAuditLog, error) {
 	row := q.db.QueryRow(ctx, writeSampleAuditLog,
 		arg.ID,
@@ -550,6 +554,7 @@ func (q *Queries) WriteSampleAuditLog(ctx context.Context, arg WriteSampleAuditL
 		&i.NReturned,
 		&i.ReasonCode,
 		&i.OccurredAt,
+		&i.SubjectModule,
 	)
 	return i, err
 }

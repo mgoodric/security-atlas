@@ -27,6 +27,8 @@ This role is **first-class**, not an afterthought. Auditors who can do their wor
 
 We commit to OSCAL JSON v1.1.x compatibility and ship an `oscal-export` CLI alongside the UI export.
 
+> **OSCAL covers security primitives only.** The OSCAL schema family (catalog / profile / component-definition / SSP / AP / AR / POA&M) is purpose-built for security control programs (NIST 800-53 / FedRAMP / etc.). It does NOT carry data-subject, processing-activity, DPIA, or other privacy primitives. When the privacy sibling module ships (privacy v0, v2+ per [canvas OQ #7 resolution](./11-open-questions.md)), privacy-side exports use **W3C Data Privacy Vocabulary (DPV) as JSON-LD** — NOT OSCAL. The two export wire formats live side-by-side: an audit-period export bundle for a privacy-aware tenant will contain BOTH an OSCAL `assessment-results` document (security) AND a DPV-JSON-LD `Activity` graph (privacy). Audit periods are shared; their export bundles are split by module. Foundation pre-commitment landed via slice 180 (audit-log `subject_module` column).
+
 ## 8.3 Walkthrough and sample-pull primitives
 
 - `Population(control, scope_predicate, time_window)` — defines what a sample is drawn from.

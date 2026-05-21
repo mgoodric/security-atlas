@@ -43,6 +43,12 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      # Slice 179 — narrow filter for the schema-removal-age check. The
+      # check only runs when a PR touches the canonical
+      # `internal/api/schemaregistry/schemas/` tree, so we gate the job
+      # on this output instead of the broader `code` output (P0-179-4
+      # — the job is NOT required and stays out of branch-protection).
+      schemas: ${{ steps.filter.outputs.schemas }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
@@ -58,7 +64,14 @@ jobs:
           # push commit on main). Anything else — markdown, plan docs,
           # license, changelog — is `code: false` and the expensive jobs
           # short-circuit via stub-sibling.
+          #
+          # `schemas: true` if the PR touches the canonical evidence_kind
+          # schema directory — slice 179's narrower gate for the
+          # schema-removal-age job. Independent of `code` (also matches
+          # when present).
           filters: |
+            schemas:
+              - 'internal/api/schemaregistry/schemas/**'
             code:
               - '**/*.go'
               - '**/*.ts'
@@ -1332,6 +1345,125 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "Non-PR push OR docs-only change — phantom audit skipped (slice 120)."
+
+  # ====================================================================
+  # Schema-removal age gate — slice 179.
+  #
+  # Enforces the 90-day deprecation window for breaking-major bumps of
+  # `evidence_kind` JSON Schemas. Triggered ONLY by PRs that touch
+  # `internal/api/schemaregistry/schemas/**`. For each schema-version
+  # file the PR REMOVES (D-filter), the script reads the file's
+  # introduction commit on `main` and rejects the removal if the file
+  # is younger than 90 days. The `[deprecation-override]` PR label
+  # bypasses the failure for emergencies (e.g., schema published with a
+  # security defect must be unpublished immediately) — the override
+  # also requires a maintainer's approval and an audit-log entry under
+  # `docs/audit-log/` documenting the rationale (P0-179-3).
+  #
+  # NOT a required check (P0-179-4) — informational until the check
+  # proves stable across at least one schema-deletion PR. Promotion to
+  # branch-protection required-checks is a follow-on slice.
+  #
+  # Trust root: introduction date is read ONLY from `git log` on
+  # `origin/main` (P0-179-1). The PR cannot forge a younger
+  # introduction date because it cannot rewrite `main`'s history.
+  #
+  # Local repro:
+  #   git diff --diff-filter=D --name-only origin/main...HEAD \
+  #     -- internal/api/schemaregistry/schemas/ \
+  #     | bash scripts/check-schema-removal-age.sh
+  #
+  # Docs:
+  #   - CONTRIBUTING.md "Contributing an `evidence_kind` schema"
+  #     (governance side of the OQ #9 + #17 resolution).
+  #   - internal/api/schemaregistry/schemas/README.md (slice 179 block).
+  # ====================================================================
+  schema-removal-age:
+    name: Schema · removal-age (90-day floor)
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.schemas == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          # Need full main history so `git log --diff-filter=A` can
+          # resolve the introduction commit for every removed file.
+          # Shallow clones miss the introduction commit and the script
+          # would (correctly, per P0-179-6) refuse to evaluate.
+          fetch-depth: 0
+
+      - name: Ensure `main` is available as a local ref
+        run: |
+          # On pull_request events `actions/checkout` lands in a detached
+          # HEAD at the merge commit; `main` may not be present as a
+          # local ref. `git fetch origin main:main` makes `main` a
+          # tracked local branch so the script's default
+          # SCHEMA_REMOVAL_MAIN_REF ('main') resolves cleanly.
+          git fetch --no-tags origin main:main || true
+          git rev-parse --verify main
+
+      - name: Compute removed-schema list (D-filter)
+        id: diff
+        run: |
+          # AC-7: removed-file list across the PR's full delta versus
+          # origin/main, filtered to the canonical schema tree.
+          removed_file="${RUNNER_TEMP}/removed-schemas.txt"
+          git diff --diff-filter=D --name-only \
+            origin/main...HEAD \
+            -- internal/api/schemaregistry/schemas/ \
+            > "$removed_file"
+          count=$(wc -l < "$removed_file" | tr -d ' ')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "path=$removed_file" >> "$GITHUB_OUTPUT"
+          if [ "$count" -eq 0 ]; then
+            echo "No schema-version files removed by this PR — script will exit 0 quietly."
+          else
+            echo "Removed schema-version files ($count):"
+            sed 's/^/  /' "$removed_file"
+          fi
+
+      - name: Resolve override label
+        id: override
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # AC-8 + P0-179-2: the override label is the EXACT string
+          # `[deprecation-override]`. No other label bypasses the check.
+          # Bash `==` comparison against an array element guarantees
+          # exact-match semantics (no glob, no substring).
+          labels_json="$(gh pr view "$PR_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --json labels --jq '[.labels[].name]' 2>/dev/null || echo '[]')"
+          echo "PR labels: $labels_json"
+          override="0"
+          # jq selects exact-match; emits 'true' or empty.
+          match=$(printf '%s' "$labels_json" | jq -r 'map(select(. == "[deprecation-override]")) | length')
+          if [ "$match" -ge 1 ]; then
+            override="1"
+            echo "::notice::[deprecation-override] label present — SCHEMA_REMOVAL_OVERRIDE=1 will bypass any violations. Verify the corresponding audit-log entry under docs/audit-log/ is present in this PR (P0-179-3)."
+          fi
+          echo "value=$override" >> "$GITHUB_OUTPUT"
+
+      - name: Run schema-removal age check
+        env:
+          SCHEMA_REMOVAL_OVERRIDE: ${{ steps.override.outputs.value }}
+        run: |
+          # AC-1 + AC-9: pipe the removed-file list into the script and
+          # let its exit code propagate. Override env var, when set to
+          # '1' by the previous step, suppresses non-zero exit on
+          # floor violations (AC-5).
+          bash scripts/check-schema-removal-age.sh \
+            < "${{ steps.diff.outputs.path }}"
 
   npm-audit:
     name: Frontend · npm audit

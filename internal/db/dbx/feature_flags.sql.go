@@ -53,7 +53,7 @@ func (q *Queries) GetFeatureFlag(ctx context.Context, arg GetFeatureFlagParams) 
 }
 
 const listFeatureFlagAuditLog = `-- name: ListFeatureFlagAuditLog :many
-SELECT id, tenant_id, flag_key, from_enabled, to_enabled, actor, reason, occurred_at
+SELECT id, tenant_id, flag_key, from_enabled, to_enabled, actor, reason, occurred_at, subject_module
 FROM feature_flag_audit_log
 WHERE tenant_id = $1
 ORDER BY occurred_at DESC, id ASC
@@ -80,6 +80,7 @@ func (q *Queries) ListFeatureFlagAuditLog(ctx context.Context, tenantID pgtype.U
 			&i.Actor,
 			&i.Reason,
 			&i.OccurredAt,
+			&i.SubjectModule,
 		); err != nil {
 			return nil, err
 		}
@@ -92,7 +93,7 @@ func (q *Queries) ListFeatureFlagAuditLog(ctx context.Context, tenantID pgtype.U
 }
 
 const listFeatureFlagAuditLogForKey = `-- name: ListFeatureFlagAuditLogForKey :many
-SELECT id, tenant_id, flag_key, from_enabled, to_enabled, actor, reason, occurred_at
+SELECT id, tenant_id, flag_key, from_enabled, to_enabled, actor, reason, occurred_at, subject_module
 FROM feature_flag_audit_log
 WHERE tenant_id = $1 AND flag_key = $2
 ORDER BY occurred_at DESC, id ASC
@@ -122,6 +123,7 @@ func (q *Queries) ListFeatureFlagAuditLogForKey(ctx context.Context, arg ListFea
 			&i.Actor,
 			&i.Reason,
 			&i.OccurredAt,
+			&i.SubjectModule,
 		); err != nil {
 			return nil, err
 		}
@@ -227,10 +229,10 @@ func (q *Queries) UpsertFeatureFlag(ctx context.Context, arg UpsertFeatureFlagPa
 
 const writeFeatureFlagAuditLog = `-- name: WriteFeatureFlagAuditLog :one
 INSERT INTO feature_flag_audit_log (
-    id, tenant_id, flag_key, from_enabled, to_enabled, actor, reason
+    id, tenant_id, flag_key, from_enabled, to_enabled, actor, reason, subject_module
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, tenant_id, flag_key, from_enabled, to_enabled, actor, reason, occurred_at
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'core')
+RETURNING id, tenant_id, flag_key, from_enabled, to_enabled, actor, reason, occurred_at, subject_module
 `
 
 type WriteFeatureFlagAuditLogParams struct {
@@ -245,6 +247,9 @@ type WriteFeatureFlagAuditLogParams struct {
 
 // Append-only. Every toggle writes one row. The audit-log table is
 // append-only by construction (SELECT + INSERT RLS only under FORCE).
+//
+// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+// the DB layer; explicit-is-clearer per AC-5).
 func (q *Queries) WriteFeatureFlagAuditLog(ctx context.Context, arg WriteFeatureFlagAuditLogParams) (FeatureFlagAuditLog, error) {
 	row := q.db.QueryRow(ctx, writeFeatureFlagAuditLog,
 		arg.ID,
@@ -265,6 +270,7 @@ func (q *Queries) WriteFeatureFlagAuditLog(ctx context.Context, arg WriteFeature
 		&i.Actor,
 		&i.Reason,
 		&i.OccurredAt,
+		&i.SubjectModule,
 	)
 	return i, err
 }

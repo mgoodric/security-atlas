@@ -386,7 +386,7 @@ func (q *Queries) ListActiveAggregationRules(ctx context.Context, tenantID pgtyp
 }
 
 const listAggregationRuleAuditLog = `-- name: ListAggregationRuleAuditLog :many
-SELECT id, tenant_id, rule_id, event, actor, from_status, to_status, detail, created_at
+SELECT id, tenant_id, rule_id, event, actor, from_status, to_status, detail, created_at, subject_module
 FROM aggregation_rule_audit_log
 WHERE tenant_id = $1 AND rule_id = $2
 ORDER BY created_at DESC, id ASC
@@ -416,6 +416,7 @@ func (q *Queries) ListAggregationRuleAuditLog(ctx context.Context, arg ListAggre
 			&i.ToStatus,
 			&i.Detail,
 			&i.CreatedAt,
+			&i.SubjectModule,
 		); err != nil {
 			return nil, err
 		}
@@ -705,10 +706,10 @@ const writeAggregationRuleAuditLog = `-- name: WriteAggregationRuleAuditLog :one
 
 INSERT INTO aggregation_rule_audit_log (
     id, tenant_id, rule_id, event,
-    actor, from_status, to_status, detail
+    actor, from_status, to_status, detail, subject_module
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, tenant_id, rule_id, event, actor, from_status, to_status, detail, created_at
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'core')
+RETURNING id, tenant_id, rule_id, event, actor, from_status, to_status, detail, created_at, subject_module
 `
 
 type WriteAggregationRuleAuditLogParams struct {
@@ -726,6 +727,9 @@ type WriteAggregationRuleAuditLogParams struct {
 // Append-only. Every lifecycle transition (created / activated /
 // deactivated / reactivated) and every threshold edit writes one row
 // naming the human actor. The HITL gate's evidence trail.
+//
+// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+// the DB layer; explicit-is-clearer per AC-5).
 func (q *Queries) WriteAggregationRuleAuditLog(ctx context.Context, arg WriteAggregationRuleAuditLogParams) (AggregationRuleAuditLog, error) {
 	row := q.db.QueryRow(ctx, writeAggregationRuleAuditLog,
 		arg.ID,
@@ -748,6 +752,7 @@ func (q *Queries) WriteAggregationRuleAuditLog(ctx context.Context, arg WriteAgg
 		&i.ToStatus,
 		&i.Detail,
 		&i.CreatedAt,
+		&i.SubjectModule,
 	)
 	return i, err
 }

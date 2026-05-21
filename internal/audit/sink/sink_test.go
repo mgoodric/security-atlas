@@ -57,15 +57,16 @@ func (b *safeBuffer) Bytes() []byte {
 // is deterministic so per-test assertions are stable.
 func makeEntry(action string) unifiedlog.Entry {
 	return unifiedlog.Entry{
-		OccurredAt:  time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC),
-		ActorID:     "test-actor-id-1",
-		TenantID:    uuid.MustParse("11111111-1111-1111-1111-111111111111"),
-		Kind:        unifiedlog.KindMe,
-		TargetType:  "user",
-		TargetID:    "user-1",
-		Action:      action,
-		RowID:       uuid.MustParse("22222222-2222-2222-2222-222222222222"),
-		PayloadJSON: json.RawMessage(`{"before":{},"after":{"k":"v"}}`),
+		OccurredAt:    time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC),
+		ActorID:       "test-actor-id-1",
+		TenantID:      uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+		Kind:          unifiedlog.KindMe,
+		TargetType:    "user",
+		TargetID:      "user-1",
+		Action:        action,
+		RowID:         uuid.MustParse("22222222-2222-2222-2222-222222222222"),
+		SubjectModule: unifiedlog.SubjectModuleCore,
+		PayloadJSON:   json.RawMessage(`{"before":{},"after":{"k":"v"}}`),
 	}
 }
 

@@ -534,15 +534,16 @@ func (h *Handler) writeExportMetaAudit(ctx context.Context, tenantID uuid.UUID, 
 			"after":  json.RawMessage(resultBlob),
 		})
 		sink.EmitDefault(ctx, unifiedlog.Entry{
-			OccurredAt:  time.Now().UTC(),
-			ActorID:     userIdentifier,
-			TenantID:    tenantID,
-			Kind:        unifiedlog.KindMe,
-			TargetType:  "user",
-			TargetID:    uID.String(),
-			Action:      metaAuditActionExport,
-			RowID:       uuid.New(),
-			PayloadJSON: sinkPayload,
+			OccurredAt:    time.Now().UTC(),
+			ActorID:       userIdentifier,
+			TenantID:      tenantID,
+			Kind:          unifiedlog.KindMe,
+			TargetType:    "user",
+			TargetID:      uID.String(),
+			Action:        metaAuditActionExport,
+			RowID:         uuid.New(),
+			SubjectModule: unifiedlog.SubjectModuleCore,
+			PayloadJSON:   sinkPayload,
 		})
 		return nil
 	})

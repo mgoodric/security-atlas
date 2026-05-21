@@ -67,6 +67,20 @@ const (
 	KindWalkthrough     Kind = "walkthrough"
 )
 
+// SubjectModule constants (slice 180). The module identifier tagged onto
+// every audit-log write. `SubjectModuleCore` covers every primitive shipping
+// today (Control / Risk / Evidence / Scope / Framework / Policy and their
+// dependents). When the privacy sibling module lands (v2+, gated on canvas
+// OQ #7 resolution), its writes will tag a `"privacy"` value defined in the
+// privacy module's package — NOT here — to preserve module isolation.
+//
+// The DB column defaults to `'core'` so legacy rows and any future write
+// path that forgets to set the field explicitly still land as core (safer
+// default than `""` or `"unknown"`).
+const (
+	SubjectModuleCore = "core"
+)
+
 // AllKinds is the canonical list in declaration order. Used by tests + the
 // handler's CSV parser to validate request-side kind filters.
 var AllKinds = []Kind{
@@ -107,17 +121,25 @@ func IsCanonical(k Kind) bool {
 // callers and credential-only callers (their actor_id is a credential id
 // like "key_foo" rather than a UUID, or a system actor like "seeder").
 // The wire shape exposes nil as JSON `null`; consumers must tolerate it.
+//
+// SubjectModule (slice 180) tags which module owns the writing code path.
+// Every row shipped today tags `"core"`; when the privacy sibling module
+// lands (v2+), its writes tag `"privacy"`. The column defaults to `"core"`
+// at the DB layer so legacy rows + any future write that forgets to set
+// the column explicitly still land as `"core"` (a safer default than
+// `""` or `"unknown"`).
 type Entry struct {
-	OccurredAt  time.Time       `json:"occurred_at"`
-	ActorID     string          `json:"actor_id"`
-	ActorName   *string         `json:"actor_name"`
-	TenantID    uuid.UUID       `json:"tenant_id"`
-	Kind        Kind            `json:"kind"`
-	TargetType  string          `json:"target_type"`
-	TargetID    string          `json:"target_id"`
-	Action      string          `json:"action"`
-	RowID       uuid.UUID       `json:"row_id"`
-	PayloadJSON json.RawMessage `json:"payload_json"`
+	OccurredAt    time.Time       `json:"occurred_at"`
+	ActorID       string          `json:"actor_id"`
+	ActorName     *string         `json:"actor_name"`
+	TenantID      uuid.UUID       `json:"tenant_id"`
+	Kind          Kind            `json:"kind"`
+	TargetType    string          `json:"target_type"`
+	TargetID      string          `json:"target_id"`
+	Action        string          `json:"action"`
+	RowID         uuid.UUID       `json:"row_id"`
+	SubjectModule string          `json:"subject_module"`
+	PayloadJSON   json.RawMessage `json:"payload_json"`
 }
 
 // Cursor is the opaque pagination token's deserialized form. The HTTP layer
@@ -206,16 +228,17 @@ func Query(ctx context.Context, q *dbx.Queries, params QueryParams) ([]Entry, *C
 	entries := make([]Entry, 0, len(rows))
 	for _, r := range rows {
 		entries = append(entries, Entry{
-			OccurredAt:  r.OccurredAt.Time,
-			ActorID:     r.ActorID,
-			ActorName:   r.ActorName,
-			TenantID:    r.TenantID.Bytes,
-			Kind:        Kind(r.Kind),
-			TargetType:  r.TargetType,
-			TargetID:    r.TargetID,
-			Action:      r.Action,
-			RowID:       r.RowID.Bytes,
-			PayloadJSON: json.RawMessage(r.PayloadJson),
+			OccurredAt:    r.OccurredAt.Time,
+			ActorID:       r.ActorID,
+			ActorName:     r.ActorName,
+			TenantID:      r.TenantID.Bytes,
+			Kind:          Kind(r.Kind),
+			TargetType:    r.TargetType,
+			TargetID:      r.TargetID,
+			Action:        r.Action,
+			RowID:         r.RowID.Bytes,
+			SubjectModule: r.SubjectModule,
+			PayloadJSON:   json.RawMessage(r.PayloadJson),
 		})
 	}
 

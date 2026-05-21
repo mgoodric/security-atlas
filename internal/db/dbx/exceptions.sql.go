@@ -342,7 +342,7 @@ func (q *Queries) GetExceptionByID(ctx context.Context, arg GetExceptionByIDPara
 }
 
 const listExceptionAuditLog = `-- name: ListExceptionAuditLog :many
-SELECT id, tenant_id, exception_id, action, actor, from_state, to_state, reason, occurred_at
+SELECT id, tenant_id, exception_id, action, actor, from_state, to_state, reason, occurred_at, subject_module
 FROM exception_audit_log
 WHERE tenant_id = $1 AND exception_id = $2
 ORDER BY occurred_at ASC, id ASC
@@ -372,6 +372,7 @@ func (q *Queries) ListExceptionAuditLog(ctx context.Context, arg ListExceptionAu
 			&i.ToState,
 			&i.Reason,
 			&i.OccurredAt,
+			&i.SubjectModule,
 		); err != nil {
 			return nil, err
 		}
@@ -584,10 +585,10 @@ func (q *Queries) ListTenantsWithActiveExceptions(ctx context.Context) ([]pgtype
 const writeExceptionAuditLog = `-- name: WriteExceptionAuditLog :one
 INSERT INTO exception_audit_log (
     id, tenant_id, exception_id,
-    action, actor, from_state, to_state, reason
+    action, actor, from_state, to_state, reason, subject_module
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, tenant_id, exception_id, action, actor, from_state, to_state, reason, occurred_at
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'core')
+RETURNING id, tenant_id, exception_id, action, actor, from_state, to_state, reason, occurred_at, subject_module
 `
 
 type WriteExceptionAuditLogParams struct {
@@ -605,6 +606,9 @@ type WriteExceptionAuditLogParams struct {
 // system-driven auto-expiry). The exception_audit_log table has
 // SELECT+INSERT policies only under FORCE RLS so no UPDATE/DELETE path
 // exists.
+//
+// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
+// the DB layer; explicit-is-clearer per AC-5).
 func (q *Queries) WriteExceptionAuditLog(ctx context.Context, arg WriteExceptionAuditLogParams) (ExceptionAuditLog, error) {
 	row := q.db.QueryRow(ctx, writeExceptionAuditLog,
 		arg.ID,
@@ -627,6 +631,7 @@ func (q *Queries) WriteExceptionAuditLog(ctx context.Context, arg WriteException
 		&i.ToState,
 		&i.Reason,
 		&i.OccurredAt,
+		&i.SubjectModule,
 	)
 	return i, err
 }

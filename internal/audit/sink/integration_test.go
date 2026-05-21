@@ -251,15 +251,16 @@ func queryRowCountViaTx(t *testing.T, pool *pgxpool.Pool, tenant uuid.UUID) int6
 // distinguish records.
 func makeIntegrationEntry(tenant uuid.UUID, i int) unifiedlog.Entry {
 	return unifiedlog.Entry{
-		OccurredAt:  time.Date(2026, 5, 18, 12, 0, i, 0, time.UTC),
-		ActorID:     "integration-actor",
-		TenantID:    tenant,
-		Kind:        unifiedlog.KindMe,
-		TargetType:  "user",
-		TargetID:    "user-integration",
-		Action:      "preferences.update",
-		RowID:       uuid.New(),
-		PayloadJSON: json.RawMessage(`{"seq":` + intToStr(i) + `}`),
+		OccurredAt:    time.Date(2026, 5, 18, 12, 0, i, 0, time.UTC),
+		ActorID:       "integration-actor",
+		TenantID:      tenant,
+		Kind:          unifiedlog.KindMe,
+		TargetType:    "user",
+		TargetID:      "user-integration",
+		Action:        "preferences.update",
+		RowID:         uuid.New(),
+		SubjectModule: unifiedlog.SubjectModuleCore,
+		PayloadJSON:   json.RawMessage(`{"seq":` + intToStr(i) + `}`),
 	}
 }
 
