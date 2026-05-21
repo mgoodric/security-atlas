@@ -137,14 +137,14 @@ func runDeviceCodeLogin(ctx context.Context, w io.Writer, issuerURL, clientID st
 
 	// Step 2: tell the user where to go and what to type.
 	if auth.VerificationURIComplete != "" {
-		fmt.Fprintf(w, "Visit %s\n", auth.VerificationURIComplete)
-		fmt.Fprintf(w, "  (or go to %s and enter code %s)\n",
+		_, _ = fmt.Fprintf(w, "Visit %s\n", auth.VerificationURIComplete)
+		_, _ = fmt.Fprintf(w, "  (or go to %s and enter code %s)\n",
 			auth.VerificationURI, auth.UserCode)
 	} else {
-		fmt.Fprintf(w, "Visit %s and enter code %s\n",
+		_, _ = fmt.Fprintf(w, "Visit %s and enter code %s\n",
 			auth.VerificationURI, auth.UserCode)
 	}
-	fmt.Fprintf(w, "Waiting for approval (up to %d seconds)...\n", auth.ExpiresIn)
+	_, _ = fmt.Fprintf(w, "Waiting for approval (up to %d seconds)...\n", auth.ExpiresIn)
 
 	// Step 3: poll until success or until expires_in elapses.
 	interval := auth.Interval
@@ -179,7 +179,7 @@ func runDeviceCodeLogin(ctx context.Context, w io.Writer, issuerURL, clientID st
 			// RFC 8628 §3.5 — lengthen the interval. Honor the
 			// recommendation by adding the original interval.
 			interval += auth.Interval
-			fmt.Fprintf(w, "Server requested slow_down; new interval = %ds\n", interval)
+			_, _ = fmt.Fprintf(w, "Server requested slow_down; new interval = %ds\n", interval)
 			continue
 		case "expired_token":
 			return errors.New("device code expired; re-run 'atlas login'")

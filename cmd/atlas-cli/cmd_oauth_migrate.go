@@ -68,7 +68,7 @@ func runMigrateAPIKey(ctx context.Context, stdout, stderr io.Writer, apiKey stri
 	if err != nil {
 		return fmt.Errorf("look up source API key: %w", err)
 	}
-	fmt.Fprintf(stdout, "source: id=%s tenant=%s admin=%t approver=%t roles=%v\n",
+	_, _ = fmt.Fprintf(stdout, "source: id=%s tenant=%s admin=%t approver=%t roles=%v\n",
 		src.ID, src.TenantID, src.IsAdmin, src.IsApprover, src.OwnerRoles)
 
 	// Issue a new OAuth client. The name carries the legacy
@@ -85,12 +85,12 @@ func runMigrateAPIKey(ctx context.Context, stdout, stderr io.Writer, apiKey stri
 	}
 
 	// P0-191-9: print plaintext secret to stdout EXACTLY ONCE.
-	fmt.Fprintf(stdout, "client_id: %s\n", newClient.ClientID)
-	fmt.Fprintf(stdout, "client_secret: %s\n", secret)
-	fmt.Fprintln(stderr)
-	fmt.Fprintln(stderr, "Record the client_secret NOW — it is unrecoverable.")
-	fmt.Fprintln(stderr, "After confirming the new credentials work, revoke the legacy")
-	fmt.Fprintf(stderr, "API key with: atlas-cli credentials revoke %s\n", src.ID)
+	_, _ = fmt.Fprintf(stdout, "client_id: %s\n", newClient.ClientID)
+	_, _ = fmt.Fprintf(stdout, "client_secret: %s\n", secret)
+	_, _ = fmt.Fprintln(stderr)
+	_, _ = fmt.Fprintln(stderr, "Record the client_secret NOW — it is unrecoverable.")
+	_, _ = fmt.Fprintln(stderr, "After confirming the new credentials work, revoke the legacy")
+	_, _ = fmt.Fprintf(stderr, "API key with: atlas-cli credentials revoke %s\n", src.ID)
 	return nil
 }
 

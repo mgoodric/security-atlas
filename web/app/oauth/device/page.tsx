@@ -31,7 +31,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 interface ApprovalState {
@@ -39,7 +39,21 @@ interface ApprovalState {
   message: string;
 }
 
+// Next.js 16 build step bails any client component that calls
+// useSearchParams() outside a <Suspense> boundary (the
+// missing-suspense-with-csr-bailout error). The page export wraps
+// the real UI in <Suspense> so the prerender pass can stub the
+// search-param read; the inner component is what actually reads
+// the URL at runtime.
 export default function DeviceApprovalPage() {
+  return (
+    <Suspense fallback={null}>
+      <DeviceApprovalForm />
+    </Suspense>
+  );
+}
+
+function DeviceApprovalForm() {
   // Pre-fill from `?user_code=` via useSearchParams — the
   // verification_uri_complete shortcut sends the user here with
   // the code already in the URL. Computing the initial state from
