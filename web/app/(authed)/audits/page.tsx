@@ -491,17 +491,49 @@ function AuditsPageInner() {
         />
       }
     >
+      {/* Slice 184 — per-period detail honesty banner.
+          Surfaces the same disclosure that lives in code comments to
+          the user, since the user cannot read code comments. Closes
+          the slice-178 first-pass F-178-4 HONESTY-GAP finding by
+          replacing the 404-on-click row affordance (removed below)
+          with an explicit "future slice" notice above the table.
+          When the detail page lands, this banner is deleted and the
+          onRowClick is restored. */}
+      <Alert data-testid="audits-detail-coming-soon-banner" className="mb-3">
+        <AlertTitle>
+          Per-period detail view is coming in a future slice
+        </AlertTitle>
+        <AlertDescription>
+          Rows in this table are not clickable yet. The per-audit-period detail
+          page (frozen-status meta, sample-population summary, OSCAL export
+          controls) is tracked separately. Today this page is the period-level
+          index; for the per-control walk-through inside an open period, use the
+          audit workspace.
+        </AlertDescription>
+      </Alert>
       <ListTable<AuditPeriod>
         columns={columns}
         rows={visible}
         rowKey={(p) => p.id}
-        // AC-7: row click navigates to a per-period detail page. The
-        // route is a placeholder — the per-period detail page is a
-        // future slice. Today this routes to /audits/{id} which 404s
-        // with the standard Next.js not-found UI; that is the correct
-        // placeholder behavior per the slice text ("placeholder OR
-        // drawer"). When the detail slice lands, no page change here.
-        onRowClick={(p) => router.push(`/audits/${encodeURIComponent(p.id)}`)}
+        // Slice 184 — onRowClick intentionally omitted.
+        //
+        // Previously: row click pushed `/audits/${id}` which 404'd with
+        // the standard Next.js not-found UI. The slice-178 first-pass
+        // UI-honesty audit categorized this as a HONESTY-GAP (F-178-4):
+        // the LIVE UI does not say "detail page coming soon" — it just
+        // presents clickable rows that 404. Filed as spillover slice
+        // #184 per slice-178 AC-17 one-slice-per-fix discipline.
+        //
+        // Resolution (Option A per slice 184): remove the click
+        // affordance entirely until the detail page ships. ListTable
+        // (web/components/list/list-table.tsx) drops `cursor-pointer`
+        // and the click handler when `onRowClick` is undefined — see
+        // lines 93-94 of that file. The banner above the table carries
+        // the disclosure to the user.
+        //
+        // When the per-period detail page ships, restore the prop:
+        //   onRowClick={(p) => router.push(`/audits/${encodeURIComponent(p.id)}`)}
+        // and delete the banner above.
         emptyFallback={emptyState}
       />
     </ListPage>
