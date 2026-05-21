@@ -40,9 +40,11 @@ That's it for v1. No "plugin everything" surface. Plugins are installed per-depl
 
 ## 9.5 Auth model
 
-**OIDC for authentication, RBAC + ABAC for authorization.**
+**OIDC for authentication, internal OAuth 2.0 Authorization Server for token issuance, RBAC + ABAC for authorization.**
 
-OIDC because every credible IdP speaks it; we ship as a relying party only, never as an IdP. RBAC for coarse roles (`admin`, `grc_engineer`, `control_owner`, `auditor`, `viewer`). ABAC for the fine cuts that matter (`auditor X can only see scope cells within audit_period Y for client Z`). Authorization decisions live in OPA — same engine that evaluates control policies, so the security model is auditable in the same substrate as the controls.
+OIDC because every credible IdP speaks it; we ship as a relying party only, never as an IdP. atlas-as-OIDC-RP authenticates the human via the external IdP; the atlas-AS layer (RFC 9068 JWT Profile · RFC 8693 Token Exchange · RFC 7636 PKCE · RFC 8628 Device Authorization Grant · RFC 7009 Revocation · RFC 7662 Introspection) mints the atlas JWT access tokens that carry tenant-in-claim. The slice 187 foundation ships the JWT signing keypair, JWKS endpoint, OIDC discovery doc, and the JWT claim types; the rest of the spine (188-192) ships the grant flows, JWT validation middleware, frontend OAuth client, SDK migration, and multi-tenant tenant-switch. See [`docs/adr/0003-oauth-authorization-server.md`](../../docs/adr/0003-oauth-authorization-server.md) for the architectural rationale and [`Plans/canvas/11-open-questions.md`](./11-open-questions.md) item 21 for the resolution context.
+
+RBAC for coarse roles (`admin`, `grc_engineer`, `control_owner`, `auditor`, `viewer`). ABAC for the fine cuts that matter (`auditor X can only see scope cells within audit_period Y for client Z`). Authorization decisions live in OPA — same engine that evaluates control policies, so the security model is auditable in the same substrate as the controls.
 
 ## 9.6 CI/CD
 

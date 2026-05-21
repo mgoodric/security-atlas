@@ -180,6 +180,14 @@ The same version also renders in the bottom-right of every page in the web UI �
 
 ---
 
+## Authentication
+
+security-atlas authenticates request hot-path traffic via an internal OAuth 2.0 Authorization Server that issues JWT access tokens carrying tenant-in-claim (RFC 9068 JWT Profile + RFC 8693 Token Exchange). The architectural commitment is captured in [ADR-0003](./docs/adr/0003-oauth-authorization-server.md); the resolution context lives in [`Plans/canvas/11-open-questions.md`](./Plans/canvas/11-open-questions.md) item 21.
+
+Slice 187 ships the cryptographic + discovery scaffolding (JWT signing keypair · JWKS endpoint at `/.well-known/jwks.json` · OIDC discovery at `/.well-known/openid-configuration`). The remaining auth-substrate-v2 spine slices (188-192) ship the OAuth grant flows, JWT validation middleware, frontend OAuth client, SDK migration, and multi-tenant tenant-switch. Existing bearer-token API keys (slice 034) remain valid through a 90-day deprecation window once the OAuth flows are live.
+
+The atlas AS is layered on the slice-034 OIDC RP: the RP authenticates the human via an external IdP (atlas-as-OIDC-RP); the AS layer mints the atlas JWT (atlas-as-issuer). Two distinct roles, one server process.
+
 ## Security
 
 security-atlas treats security as a first-class concern. The project ships with:
