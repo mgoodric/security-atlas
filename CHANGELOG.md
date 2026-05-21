@@ -9,6 +9,56 @@ Conventional-Commit messages. Each entry links to its slice issue, the
 merging PR, and the squash-merge commit. For richer per-slice narrative
 see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
+## [1.13.0](https://github.com/mgoodric/security-atlas/compare/v1.12.0...v1.13.0) (2026-05-21)
+
+
+### Features
+
+* **catalog:** slice 174 — UCF anchor catalog export (all three formats) ([#410](https://github.com/mgoodric/security-atlas/issues/410)) ([79eb829](https://github.com/mgoodric/security-atlas/commit/79eb8295a92865485b77411c27a32f147545a021))
+* **export:** slice 136 — risk register data export (CSV / JSON / XLSX) ([#378](https://github.com/mgoodric/security-atlas/issues/378)) ([c80bec3](https://github.com/mgoodric/security-atlas/commit/c80bec31d0c9549b2c70bff21b978d8f5a5409d3)), closes [#136](https://github.com/mgoodric/security-atlas/issues/136)
+* **export:** slice 137 — controls UCF graph data export (CSV / JSON / XLSX) ([#384](https://github.com/mgoodric/security-atlas/issues/384)) ([4300cde](https://github.com/mgoodric/security-atlas/commit/4300cde295ff5c65eb5ded615350ff8c218bd063))
+* **export:** slice 138 — ledger entities export (evidence + policies + exceptions + samples) ([#387](https://github.com/mgoodric/security-atlas/issues/387)) ([a171a0a](https://github.com/mgoodric/security-atlas/commit/a171a0aa568aecd1a14161b4fe7ef4fa0a9d888e))
+* **export:** slice 139 — audit periods + vendors data export (CSV / JSON / XLSX) ([#379](https://github.com/mgoodric/security-atlas/issues/379)) ([3522c64](https://github.com/mgoodric/security-atlas/commit/3522c644f2d913b300e39653d0d175deeebddcec))
+* **export:** slice 145 — payload-redaction flag + per-tenant concurrency cap ([#375](https://github.com/mgoodric/security-atlas/issues/375)) ([637b8dc](https://github.com/mgoodric/security-atlas/commit/637b8dce82ab755b69e4ac0b80a31cfc26b4e6dd))
+* **infra:** slice 084 — cosign v3 + goreleaser-action v7 coordinated migration ([#425](https://github.com/mgoodric/security-atlas/issues/425)) ([f15839a](https://github.com/mgoodric/security-atlas/commit/f15839a3732dc7addf4440fc7f126d8e05ddd20f)), closes [#084](https://github.com/mgoodric/security-atlas/issues/084)
+* **infra:** slice 179 — schema-removal-age CI check (90-day deprecation window) ([#406](https://github.com/mgoodric/security-atlas/issues/406)) ([f06c323](https://github.com/mgoodric/security-atlas/commit/f06c323f77d143ea1f328d8ecbecd02447458ddc))
+* **infra:** slice 180 — privacy-module foundation (audit-log subject_module + sibling discipline docs) ([#413](https://github.com/mgoodric/security-atlas/issues/413)) ([125205b](https://github.com/mgoodric/security-atlas/commit/125205b7a2a44bf85f5a0170f4dbbffc4f3a5a63))
+* **mcp:** slice 172 — MCP server foundation + 6 read-only tools ([#382](https://github.com/mgoodric/security-atlas/issues/382)) ([95dd94d](https://github.com/mgoodric/security-atlas/commit/95dd94d9629198c0d1d0b8f43ced7c526a44b9e7))
+* **quality:** slice 178 — UI honesty audit harness + first-pass audit ([#414](https://github.com/mgoodric/security-atlas/issues/414)) ([69ce7df](https://github.com/mgoodric/security-atlas/commit/69ce7df05d4355420c355ad08261bc6d8b0a4136))
+* **ui:** slice 177 — exceptions list-page surface (with slice 138 Export buttons) ([#393](https://github.com/mgoodric/security-atlas/issues/393)) ([ee0163a](https://github.com/mgoodric/security-atlas/commit/ee0163acddc48d63e318502d9680badbea317edc))
+
+
+### Bug Fixes
+
+* **brand:** slice 176 — logo follows app theme + README docs PNG refresh ([#394](https://github.com/mgoodric/security-atlas/issues/394)) ([6eb0701](https://github.com/mgoodric/security-atlas/commit/6eb07017330b5d872c64716a164364cfd0b11fab))
+* **ui-honesty:** slice 183 — calendar dead-link family + dashboard mockup refresh ([#422](https://github.com/mgoodric/security-atlas/issues/422)) ([f40fa6f](https://github.com/mgoodric/security-atlas/commit/f40fa6f9890131519a49cb9fccecd44599e49334))
+* **ui-honesty:** slice 184 — /audits row-click 404 ([#417](https://github.com/mgoodric/security-atlas/issues/417)) ([e058f25](https://github.com/mgoodric/security-atlas/commit/e058f2514c65cb9ceee32f86da4d02aedb9b121d))
+* **ui-honesty:** slice 185 — /risks row-click goes to hierarchy not detail ([#418](https://github.com/mgoodric/security-atlas/issues/418)) ([c509ca8](https://github.com/mgoodric/security-atlas/commit/c509ca8c02341465712584137d2061981fa53e80))
+* **ui-honesty:** slice 186 — sidebar Admin entry role-gated to admin-only ([#421](https://github.com/mgoodric/security-atlas/issues/421)) ([471f779](https://github.com/mgoodric/security-atlas/commit/471f77961e19cbeb7e1741ab0a20a3de1f55517e))
+
+
+### Dependencies
+
+* **deps:** bump the actions group across 1 directory with 2 updates ([#426](https://github.com/mgoodric/security-atlas/issues/426)) ([5bb9b56](https://github.com/mgoodric/security-atlas/commit/5bb9b564784bb68b085581c163eef3a39f5c9b11))
+
+
+### Documentation
+
+* **canvas:** resolve OQ [#14](https://github.com/mgoodric/security-atlas/issues/14) — board-narrative AI-assist + file slice 182 ([#403](https://github.com/mgoodric/security-atlas/issues/403)) ([8b267dd](https://github.com/mgoodric/security-atlas/commit/8b267dd94154623748f7a7cee76806cd1305e786))
+* **canvas:** resolve OQ [#2](https://github.com/mgoodric/security-atlas/issues/2) — OpenGRC concept-borrow inventory delivered ([#398](https://github.com/mgoodric/security-atlas/issues/398)) ([1a5b898](https://github.com/mgoodric/security-atlas/commit/1a5b8982f67533cefa7c2a36e81fb8556516ccf6))
+* **canvas:** resolve OQ [#5](https://github.com/mgoodric/security-atlas/issues/5) — pure community OSS time-bounded + file slice 181 ([#402](https://github.com/mgoodric/security-atlas/issues/402)) ([7bcb4ad](https://github.com/mgoodric/security-atlas/commit/7bcb4ad38bce309a90c8b822db7be2b8addb5414))
+* **canvas:** resolve OQ [#7](https://github.com/mgoodric/security-atlas/issues/7) — privacy as sibling module + file slice 180 foundation ([#401](https://github.com/mgoodric/security-atlas/issues/401)) ([bdb39b9](https://github.com/mgoodric/security-atlas/commit/bdb39b9748976c3ad23245e20aea8ba341aebccc))
+* **canvas:** resolve OQ [#9](https://github.com/mgoodric/security-atlas/issues/9) + [#17](https://github.com/mgoodric/security-atlas/issues/17) — schema-registry governance + file slice 179 ([#400](https://github.com/mgoodric/security-atlas/issues/400)) ([9ed80f3](https://github.com/mgoodric/security-atlas/commit/9ed80f3eb0766433a8e95b14825343aead0c6102))
+* **governance:** slice 181 - open-governance pre-commitments (GOVERNANCE.md + funding signals + bus-factor plan) ([#409](https://github.com/mgoodric/security-atlas/issues/409)) ([67092db](https://github.com/mgoodric/security-atlas/commit/67092db6cda24ddfddf1726bcb8282d6373025ab))
+* **governance:** slice 182 — board-narrative AI-assist foundation ([#405](https://github.com/mgoodric/security-atlas/issues/405)) ([6622e8e](https://github.com/mgoodric/security-atlas/commit/6622e8ee408064c780f3bc8d1622493e6068338c)), closes [#182](https://github.com/mgoodric/security-atlas/issues/182)
+* **issues:** add slice 176 — logo follows app theme + README/docs refresh ([#386](https://github.com/mgoodric/security-atlas/issues/386)) ([5e33027](https://github.com/mgoodric/security-atlas/commit/5e33027b3d9c67a9fba273b1cb03d62ce551bd49))
+* **issues:** add slice 178 — UI honesty audit harness + first-pass audit ([#399](https://github.com/mgoodric/security-atlas/issues/399)) ([1a7862e](https://github.com/mgoodric/security-atlas/commit/1a7862e7e0a055f03874fa4a27b2a10d75036e7d))
+* **issues:** add slices 172 + 173 — MCP server foundation (read) + write spillover ([#380](https://github.com/mgoodric/security-atlas/issues/380)) ([278ade9](https://github.com/mgoodric/security-atlas/commit/278ade9530a7610fb8af6a2f5380af1611c6ecd2))
+* **issues:** re-scope slice 134 — slice-070 walkthroughs refresh (HITL) ([#390](https://github.com/mgoodric/security-atlas/issues/390)) ([ca928f5](https://github.com/mgoodric/security-atlas/commit/ca928f583727a6cfb74c6a5df046dc30068db1c4))
+* **issues:** slice 173 — lock HITL D1 to Pattern A (draft-then-confirm) ([#396](https://github.com/mgoodric/security-atlas/issues/396)) ([0de83f6](https://github.com/mgoodric/security-atlas/commit/0de83f62774a771188c7f9bed64f060daefc37af))
+* **issues:** tier A+B maintainer decisions — 084 + 155 + 174 → ready · 141 pre-confirm ([#397](https://github.com/mgoodric/security-atlas/issues/397)) ([3ec7901](https://github.com/mgoodric/security-atlas/commit/3ec790182f687c330130b53d403027bd6b6928df))
+* **user:** slice 133 — per-primitive how-tos + audit-log + CI hardening + connector authoring ([#389](https://github.com/mgoodric/security-atlas/issues/389)) ([b64cb06](https://github.com/mgoodric/security-atlas/commit/b64cb069f3de6e8c7cd43dc6bfbb2197832c7a7d))
+
 ## [Unreleased]
 
 ### Fixed
