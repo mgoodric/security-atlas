@@ -59,8 +59,16 @@ type Config struct {
 // Handler bundles the keystore + the discovery config and exposes the
 // HTTP entrypoints via Mount. The discovery JSON is pre-marshaled at
 // construction time so the GET hot path is a single Write call.
+//
+// Slice 188 added an optional token endpoint: when AttachTokenEndpoint
+// is called with a non-nil TokenEndpoint, the `/oauth/token` route
+// dispatches to client-credentials + token-exchange handlers instead
+// of returning a 501 stub, and the discovery document advertises the
+// supported grant types.
 type Handler struct {
 	store        keystore.KeyStore
+	cfg          Config
+	tokenEP      *TokenEndpoint
 	discoveryDoc []byte
 }
 
@@ -68,8 +76,34 @@ type Handler struct {
 // JWKS; the cfg.Issuer drives every absolute URL in the discovery doc.
 // The discovery JSON is pre-marshaled once here — issuer is fixed at
 // process startup, so building the map per request is pure waste.
+//
+// To enable the real `/oauth/token` handler (slice 188), call
+// AttachTokenEndpoint AFTER New but BEFORE Mount. Mount snapshots the
+// then-current grant-types set into the discovery document.
 func New(store keystore.KeyStore, cfg Config) *Handler {
-	doc, err := json.Marshal(discoveryDocument(cfg.Issuer))
+	h := &Handler{store: store, cfg: cfg}
+	h.rebuildDiscovery()
+	return h
+}
+
+// AttachTokenEndpoint wires the slice-188 grant handlers and
+// regenerates the discovery document with the supported grant types
+// list. Optional — when nil, the `/oauth/token` route stays a 501
+// stub and discovery advertises an empty grant_types_supported.
+func (h *Handler) AttachTokenEndpoint(ep *TokenEndpoint) {
+	h.tokenEP = ep
+	h.rebuildDiscovery()
+}
+
+// rebuildDiscovery snapshots the current grant-type state into the
+// pre-marshaled discovery JSON. Called from New and from
+// AttachTokenEndpoint.
+func (h *Handler) rebuildDiscovery() {
+	grantTypes := []string{}
+	if h.tokenEP != nil {
+		grantTypes = []string{GrantTypeClientCredentials, GrantTypeTokenExchange}
+	}
+	doc, err := json.Marshal(discoveryDocument(h.cfg.Issuer, grantTypes))
 	if err != nil {
 		// json.Marshal of a fixed-shape map[string]any with string +
 		// []string + bool values cannot fail in practice; if it does,
@@ -77,17 +111,21 @@ func New(store keystore.KeyStore, cfg Config) *Handler {
 		// right behavior.
 		panic("oauth: marshal discovery document: " + err.Error())
 	}
-	return &Handler{store: store, discoveryDoc: doc}
+	h.discoveryDoc = doc
 }
 
-// Mount registers the slice-187 OAuth endpoints on the supplied chi
-// router. Callers MUST pass the root router — not a Mount("/") submount
-// — so the two `/.well-known/*` paths sit at the absolute root per
+// Mount registers the OAuth endpoints on the supplied chi router.
+// Callers MUST pass the root router — not a Mount("/") submount —
+// so the two `/.well-known/*` paths sit at the absolute root per
 // the standards.
 func (h *Handler) Mount(r chi.Router) {
 	r.Get(PathJWKS, h.serveJWKS)
 	r.Get(PathDiscovery, h.serveDiscovery)
-	r.Post(PathToken, stubHandler("188"))
+	if h.tokenEP != nil {
+		r.Post(PathToken, h.tokenEP.ServeHTTP)
+	} else {
+		r.Post(PathToken, stubHandler("188"))
+	}
 	r.Get(PathAuthorize, stubHandler("189"))
 	r.Post(PathRevoke, stubHandler("190"))
 	r.Post(PathIntrospect, stubHandler("190"))
@@ -127,9 +165,18 @@ func (h *Handler) serveDiscovery(w http.ResponseWriter, _ *http.Request) {
 }
 
 // discoveryDocument is split out so tests can call it directly and
-// other slices in the spine can extend it (188 will append
-// `client_credentials` to grant_types_supported, etc.).
-func discoveryDocument(issuer string) map[string]any {
+// other slices in the spine can extend it (188 appended
+// `client_credentials` + token-exchange to grant_types_supported when
+// the token endpoint is wired).
+//
+// Slice 188 also tightened token_endpoint_auth_methods_supported to
+// `client_secret_post` only — the slice-188 handler accepts secrets
+// in the form body but does NOT implement the HTTP Basic
+// authentication scheme (`client_secret_basic`). Advertising what we
+// don't accept would be dishonest to clients. RFC 6749 §2.3.1
+// recommends accepting BOTH, but does not REQUIRE it; future-slice
+// work can re-add basic auth if operator demand surfaces.
+func discoveryDocument(issuer string, grantTypesSupported []string) map[string]any {
 	return map[string]any{
 		"issuer":                                issuer,
 		"jwks_uri":                              issuer + PathJWKS,
@@ -137,7 +184,7 @@ func discoveryDocument(issuer string) map[string]any {
 		"authorization_endpoint":                issuer + PathAuthorize,
 		"revocation_endpoint":                   issuer + PathRevoke,
 		"introspection_endpoint":                issuer + PathIntrospect,
-		"grant_types_supported":                 []string{},
+		"grant_types_supported":                 grantTypesSupported,
 		"id_token_signing_alg_values_supported": []string{tokensign.SignatureAlgorithmString},
 		"subject_types_supported":               []string{"public"},
 		"scopes_supported":                      []string{"openid"},
@@ -151,7 +198,7 @@ func discoveryDocument(issuer string) map[string]any {
 		},
 		"response_types_supported":              []string{"code"},
 		"code_challenge_methods_supported":      []string{"S256"},
-		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post"},
+		"token_endpoint_auth_methods_supported": []string{"client_secret_post"},
 	}
 }
 
