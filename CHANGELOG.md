@@ -13,6 +13,32 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 178** — UI honesty audit harness at `web/e2e-audit/` +
+  first-pass audit committed at
+  `docs/audit-log/178-ui-honesty-first-pass.md`. New Playwright
+  project (separate from `web/e2e/`) that iterates ten v1 routes
+  per the data-only manifest at `web/e2e-audit/mockup-spec.json`
+  and categorizes findings as HONESTY-GAP (forward-looking UI
+  without backing functionality), SHIP-GAP (mockup ahead of live),
+  or MOCKUP-STALE (mockup behind live). Three AC-5 heuristics:
+  dead anchors (`href="#"` or 404 on probe), `disabled` "coming
+  soon" buttons, elements gated on unset `data-feature-flag`s.
+  Read-only by construction (P0-178-1): the
+  `makeReadOnly(page)` decorator wraps `page.click` +
+  `locator.click` to throw on form-submit / destructive-button
+  targets; 31 vitest unit tests cover the diff categorization,
+  guardrail detection, and manifest validation. New
+  informational CI job `Frontend · UI honesty (advisory)` runs
+  against the seeded slice-037 docker-compose stack on every PR
+  touching `web/`, posts a sticky comment with the
+  HONESTY-GAP / SHIP-GAP / MOCKUP-STALE breakdown per route
+  (slice 089 + 120 sticky-comment shape). Job is INFORMATIONAL
+  only — never blocks merge; `.github/branch-protection.json` is
+  NOT modified (P0-178-6). First-pass audit produced 8
+  substantive findings (6 HONESTY-GAP + 2 MOCKUP-STALE) filed as
+  spillover slices #183 / #184 / #185 / #186 per AC-17
+  one-slice-per-fix discipline.
+
 - **slice 180** — Privacy-module foundation: `subject_module` column on
   all platform audit-log tables (pre-commitment for the deferred privacy
   sibling module; #180). Migration

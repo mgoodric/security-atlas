@@ -99,5 +99,15 @@ docs-site/docs/openapi.yaml
 web/playwright-report/
 web/test-results/
 
+### Slice 178 — UI honesty audit harness raw reports.
+### The harness writes per-run JSON / markdown / screenshots under
+### web/e2e-audit/reports/. Seeded-stack runs upload the directory as a
+### CI artifact (informational job); the curated first-pass summary is
+### committed separately at docs/audit-log/178-ui-honesty-first-pass.md.
+### Operator-local prod runs (PLATFORM_BASE_URL override) write under
+### web/e2e-audit/reports/local-prod/ which is double-locked to never
+### be committed (P0-178-3 — real-tenant data must not leak).
+web/e2e-audit/reports/
+
 ### Slice 057 — README capture pipeline bundled artifact
 web/scripts/.capture-readme-screenshots.bundled.js

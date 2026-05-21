@@ -67,8 +67,21 @@ export default defineConfig({
       // public-IP slip would publish real customer data to the public
       // README permanently.
       "scripts/**/*.test.ts",
+      // Slice 178: the UI honesty audit harness's pure-logic modules
+      // (mockup-diff categorization + read-only guardrail detection +
+      // manifest validator) are covered here as node-env vitest. The
+      // Playwright spec at `e2e-audit/ui-honesty.spec.ts` is excluded
+      // from vitest (`exclude: e2e-audit/**/*.spec.ts` below) and runs
+      // via the `Frontend · UI honesty (advisory)` job instead.
+      "e2e-audit/lib/**/*.test.ts",
     ],
-    exclude: ["**/node_modules/**", "**/.next/**", "**/dist/**", "e2e/**"],
+    exclude: [
+      "**/node_modules/**",
+      "**/.next/**",
+      "**/dist/**",
+      "e2e/**",
+      "e2e-audit/**/*.spec.ts",
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
