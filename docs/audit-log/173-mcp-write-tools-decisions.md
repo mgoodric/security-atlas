@@ -21,7 +21,7 @@ Pre-locked design decisions enumerated in the slice doc:
   state=ai_proposed; a separate confirm action flips to state=applied
   and runs the canonical Applier inside the same transaction.
 - **Schema invariant.** `(ai_assisted=true AND human_approved=true) →
-  human_approver IS NOT NULL` enforced at the DB layer; engineer picks
+human_approver IS NOT NULL` enforced at the DB layer; engineer picks
   CHECK vs trigger at impl time.
 
 All seven design calls below honor every constitutional invariant
@@ -45,7 +45,7 @@ walks through the Pattern A/B/C trade-offs in detail; the short version:
   surface (risks, controls, evidence) — N new tables + a merge job +
   per-table RLS policies. Over-engineered for v1's four-tool set.
 - _Pattern C_ (rejected): platform rejects every `ai_assisted=true AND
-  human_approved=false` write; operator co-signs each tool call in the
+human_approved=false` write; operator co-signs each tool call in the
   MCP client before it commits. Tightest safety, but UX-prohibitive.
 
 This decision is binding for slice 173; future slices may revisit if
@@ -72,7 +72,7 @@ shape; the engineer evaluated both at impl time.
 
 Tiebreaker: invariant #2 (ingestion + evaluation separated) reads
 naturally onto a separate proposal table — the proposal is the AI's
-*proposal*, the canonical row is the platform's *commitment*. Distinct
+_proposal_, the canonical row is the platform's _commitment_. Distinct
 identities deserve distinct tables.
 
 ### D3 — CHECK vs trigger for the AI-assist invariant
@@ -109,7 +109,7 @@ When an operator invokes `confirm_write`:
    inside that tx — `INSERT INTO risks`, `INSERT INTO evidence_records`,
    `UPDATE risks SET treatment=...`.
 3. The store flips the proposal to state=applied + human_approved=true
-   + human_approver + applied_subject in the same tx.
+   - human_approver + applied_subject in the same tx.
 4. Tx commits. All-or-nothing.
 
 Alternative considered: applier opens its own tx via the domain
@@ -129,7 +129,7 @@ the store so the lockstep is visible.
 
 **Chose: TEXT.**
 
-v1's `credstore.Credential.ID` is a token-shaped string ("key_..."),
+v1's `credstore.Credential.ID` is a token-shaped string ("key\_..."),
 not a UUID. Slice 034 (OIDC RP) will eventually populate these with
 real user IDs from the IdP; the column type stays TEXT so both shapes
 fit without a second migration. The CHECK constraint defends against
@@ -156,8 +156,9 @@ The slice doc invites a write-side meta-audit row analogous to slice
 every write produces a `mcp_write_proposals` row with `created_by` +
 `ai_model_name` + `ai_model_version` + `tool_input`; every confirm
 adds `human_approver` + `applied_at`; every reject adds `rejected_at`
-+ `reject_reason`. That's a forensic-grade trail without duplicating
-rows into `me_audit_log` (slice 124's surface).
+
+- `reject_reason`. That's a forensic-grade trail without duplicating
+  rows into `me_audit_log` (slice 124's surface).
 
 Follow-on: slice 174 may extend `me_audit_log` with the
 `mcp_write_proposal_created` / `_confirmed` / `_rejected` actions
@@ -261,17 +262,17 @@ all preliminary threats have explicit mitigations + tests.
 
 ## Acceptance criteria coverage
 
-| AC                                            | Verified by                                                            |
-| --------------------------------------------- | ---------------------------------------------------------------------- |
-| AC-1..AC-4 four write tools                   | `internal/mcp/tools/writes.go` + schema-stability snapshot             |
-| AC-5 meta-audit row on every write            | Every Create → mcp_write_proposals row with ai_model + actor + input   |
-| AC-6 HITL approval for audit-binding writes   | `Store.Confirm` + `IsApprover` gate (`TestHTTP_ConfirmRequiresApprover`) |
-| AC-7 cross-tenant test                        | `TestList_CrossTenantIsolation`, `TestHTTP_CrossTenantIsolation`       |
-| AC-8 write-quota integration test             | `TestCreate_EnforcesPendingCap`                                        |
-| AC-9 schema-snapshot test                     | `TestSchemaStability` covers all 11 tools                              |
-| AC-10 stdio transport unchanged               | cmd/atlas-mcp/main.go single addition: `tools.AllWithWrites`           |
-| AC-11..AC-15 per-tool happy + sad paths       | tools_test.go + writeproposals tests                                   |
-| AC-16 decisions log                           | this file                                                              |
+| AC                                          | Verified by                                                              |
+| ------------------------------------------- | ------------------------------------------------------------------------ |
+| AC-1..AC-4 four write tools                 | `internal/mcp/tools/writes.go` + schema-stability snapshot               |
+| AC-5 meta-audit row on every write          | Every Create → mcp_write_proposals row with ai_model + actor + input     |
+| AC-6 HITL approval for audit-binding writes | `Store.Confirm` + `IsApprover` gate (`TestHTTP_ConfirmRequiresApprover`) |
+| AC-7 cross-tenant test                      | `TestList_CrossTenantIsolation`, `TestHTTP_CrossTenantIsolation`         |
+| AC-8 write-quota integration test           | `TestCreate_EnforcesPendingCap`                                          |
+| AC-9 schema-snapshot test                   | `TestSchemaStability` covers all 11 tools                                |
+| AC-10 stdio transport unchanged             | cmd/atlas-mcp/main.go single addition: `tools.AllWithWrites`             |
+| AC-11..AC-15 per-tool happy + sad paths     | tools_test.go + writeproposals tests                                     |
+| AC-16 decisions log                         | this file                                                                |
 
 ## Schema-level enforcement summary
 
