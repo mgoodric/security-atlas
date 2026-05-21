@@ -20,6 +20,20 @@
 //             hierarchy), 115 (admin-bootstrap). Slice 116 promotes the
 //             job to required-checks after all five spec un-skips +
 //             ≥5 clean runs each.
+// Slice 193 — AC-5 ("upcoming panel binds to /v1/upcoming") failed on
+//             slice 111's first post-rebase CI run. Diagnosis verdict:
+//             H1 fixture gap — `fixtures/e2e/dashboard.sql` seeded the
+//             exception with `status='approved'`, but `/v1/upcoming`
+//             (`ListUpcomingItems`) filters on `status='active'`. Fix
+//             flipped the status + switched to `ON CONFLICT (id) DO
+//             UPDATE` per slice 168 precedent. See
+//             `docs/audit-log/193-dashboard-upcoming-fixture-decisions.md`.
+//             This preamble note also serves as the `web/**` touchpoint
+//             that fires the CI Playwright path filter — without it,
+//             a fixture-only change leaves the binding gate
+//             un-exercised (filed as follow-on observation; the path
+//             filter should add `fixtures/**` so future
+//             fixture-only PRs trigger the e2e job).
 //
 // Run locally:
 //   cd web
