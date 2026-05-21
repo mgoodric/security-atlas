@@ -103,7 +103,9 @@ export interface InitLoginFlowParams {
 //
 // The function does NOT return — control transfers to the IdP / atlas
 // AS via window.location.assign.
-export async function initLoginFlow(params: InitLoginFlowParams): Promise<void> {
+export async function initLoginFlow(
+  params: InitLoginFlowParams,
+): Promise<void> {
   const verifier = generateCodeVerifier();
   const challenge = await generateCodeChallenge(verifier);
   const state = generateState();

@@ -126,7 +126,8 @@ describe("initLoginFlow + completeLoginFlow sessionStorage discipline", () => {
     // btoa is in node 20+; ensure it's present
     if (typeof globalThis.btoa === "undefined") {
       // @ts-expect-error stub
-      globalThis.btoa = (s: string) => Buffer.from(s, "binary").toString("base64");
+      globalThis.btoa = (s: string) =>
+        Buffer.from(s, "binary").toString("base64");
     }
   });
 
@@ -173,8 +174,12 @@ describe("initLoginFlow + completeLoginFlow sessionStorage discipline", () => {
     expect(url.searchParams.get("response_type")).toBe("code");
     expect(url.searchParams.get("client_id")).toBe("client-456");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
-    expect(url.searchParams.get("code_challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(url.searchParams.get("code_challenge")).toMatch(
+      /^[A-Za-z0-9_-]{43}$/,
+    );
     expect(url.searchParams.get("state")).toMatch(/^[A-Za-z0-9_-]{22}$/);
-    expect(url.searchParams.get("tenant_id")).toBe("00000000-0000-0000-0000-000000000002");
+    expect(url.searchParams.get("tenant_id")).toBe(
+      "00000000-0000-0000-0000-000000000002",
+    );
   });
 });

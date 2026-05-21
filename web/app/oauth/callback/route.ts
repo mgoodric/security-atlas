@@ -67,7 +67,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // The authorize endpoint surfaced an error per RFC 6749 §4.1.2.1.
     // Show a minimal error page; future UX can pretty this up.
     return new NextResponse(
-      `<!DOCTYPE html><html><body><h1>Sign-in failed</h1><p>${escapeHtml(error)}</p></body></html>`,
+      `<!DOCTYPE html><html><body><h1>Sign-in failed</h1><p>${escapeHtml(
+        error,
+      )}</p></body></html>`,
       { status: 400, headers: { "Content-Type": "text/html; charset=utf-8" } },
     );
   }
@@ -136,12 +138,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   let body: { access_token?: string; expires_in?: number };
   try {
-    body = (await request.json()) as { access_token?: string; expires_in?: number };
+    body = (await request.json()) as {
+      access_token?: string;
+      expires_in?: number;
+    };
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
   if (!body.access_token || typeof body.access_token !== "string") {
-    return NextResponse.json({ error: "missing_access_token" }, { status: 400 });
+    return NextResponse.json(
+      { error: "missing_access_token" },
+      { status: 400 },
+    );
   }
   const maxAge =
     typeof body.expires_in === "number" && body.expires_in > 0
