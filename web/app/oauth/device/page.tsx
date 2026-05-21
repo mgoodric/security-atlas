@@ -31,7 +31,8 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 interface ApprovalState {
   status: "idle" | "submitting" | "approved" | "denied" | "error";
@@ -39,24 +40,18 @@ interface ApprovalState {
 }
 
 export default function DeviceApprovalPage() {
-  const [userCode, setUserCode] = useState("");
+  // Pre-fill from `?user_code=` via useSearchParams — the
+  // verification_uri_complete shortcut sends the user here with
+  // the code already in the URL. Computing the initial state from
+  // the URL avoids the cascading-render anti-pattern of writing
+  // setState inside useEffect (react-hooks/set-state-in-effect).
+  const searchParams = useSearchParams();
+  const initialUserCode = (searchParams?.get("user_code") || "").toUpperCase();
+  const [userCode, setUserCode] = useState(initialUserCode);
   const [state, setState] = useState<ApprovalState>({
     status: "idle",
     message: "",
   });
-
-  // Pre-fill the user_code field from `?user_code=` if present —
-  // the verification_uri_complete shortcut sends the user here
-  // with the code already in the URL. The user only needs to
-  // click Approve.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const fromURL = params.get("user_code") || "";
-    if (fromURL) {
-      setUserCode(fromURL.toUpperCase());
-    }
-  }, []);
 
   async function post(action: "approve" | "deny") {
     if (!userCode) {
