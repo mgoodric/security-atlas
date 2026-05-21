@@ -145,6 +145,22 @@ Slice 188 (2026-05-21) lit up `POST /oauth/token` with two grants — `client_cr
 
 **Discovery doc updates.** `grant_types_supported` advertises `["client_credentials", "urn:ietf:params:oauth:grant-type:token-exchange"]` exactly when a TokenEndpoint is wired. `token_endpoint_auth_methods_supported` is tightened to `["client_secret_post"]` — slice 188 does NOT implement HTTP Basic auth; advertising what we don't accept would mislead clients (a follow-on slice can re-add Basic when operator demand surfaces).
 
+## Slice 189 addendum — `/oauth/authorize` + PKCE + redirect-URI registry
+
+Slice 189 (2026-05-21) lit up `GET /oauth/authorize` (RFC 6749 §4.1 Authorization Code grant) hardened with PKCE S256 (RFC 7636) and extended `/oauth/token` with the `authorization_code` grant. Four invariants land on top of the slice-187/188 scaffolding:
+
+**1. PKCE S256 is mandatory for the browser flow.** The `code_challenge_method` parameter is restricted to `S256` at three layers: the application handler (`authorize.go` rejects `plain` with 400), the DB CHECK constraint (`oauth_auth_codes_method_s256_only`), and the discovery document (`code_challenge_methods_supported = ["S256"]`). `plain` is forbidden because the Next.js frontend cannot safely hold a `client_secret`, and PKCE is the load-bearing primitive for public-client safety per OAuth 2.1 §4.5. P0-189-1 enforces this; the unit test `TestComputePKCEChallengeS256` exercises the RFC 7636 Appendix B vector; the integration test `TestIntegrationAuthorizeFlow_PlainPKCERejected` covers the negative path.
+
+**2. Redirect-URI registration is the open-redirect gate.** The `oauth_client_redirect_uris` table (UNIQUE on `(client_id, redirect_uri)`) is the source of truth — the authorize handler validates the requested `redirect_uri` against this registry BEFORE issuing any code OR generating any browser redirect. Unregistered URIs return 400 with no `Location` header set, so an attacker cannot use the authorize endpoint as an open redirector. P0-189-2 enforces this; the integration test `TestIntegrationAuthorizeFlow_UnregisteredRedirectURIRejected` explicitly verifies the absence of a leak. Operators register URIs via `atlas-cli oauth add-redirect-uri <client_id> <redirect_uri>` (rejects non-https non-localhost URIs at the CLI layer).
+
+**3. Authorization codes are one-shot.** The `oauth_auth_codes` table has a nullable `consumed_at` column; the redemption path uses a `SELECT … FOR UPDATE` + `UPDATE … WHERE consumed_at IS NULL RETURNING …` pattern inside one transaction. A second redemption attempt returns 0 rows and is collapsed to `invalid_grant`. Codes expire 60 seconds after issuance; the sweeper goroutine DELETEs rows older than 1 hour (grace beyond the TTL avoids races with in-flight redemptions). P0-189-3 enforces this; the integration test `TestIntegrationAuthorizeCodeRedemption_CodeReuse` exercises the path.
+
+**4. Frontend verifier never persists beyond the tab session.** The Next.js `web/lib/auth/oauth-client.ts` module stores the PKCE `code_verifier` in `sessionStorage` (NOT `localStorage` — P0-189-8). The verifier is cleared after a successful redemption. The JWT-bearing `atlas_jwt` cookie minted by the callback route is HttpOnly + Secure (production) + SameSite=Lax + Path=/ (P0-189-9). The vitest unit test verifies the localStorage-bypass + sessionStorage-write discipline.
+
+**Cookie strategy (D1 slice 189):** the OAuth flow mints a NEW `atlas_jwt` cookie carrying the JWT directly. The slice-034 `atlas_session` opaque session-id cookie continues to exist alongside (slice 190 retires it). This is the cleanest migration path — `atlas_session` reads (slice 108/110 `/v1/me/sessions*`) keep working unchanged while slice 190's JWT validation middleware reads from `atlas_jwt`.
+
+**Discovery doc updates.** When BOTH a `TokenEndpoint` AND an `AuthorizeEndpoint` are wired, `grant_types_supported` adds `"authorization_code"` to the slice-188 list. `response_types_supported` is unchanged (`["code"]` — slice 187 set it). `code_challenge_methods_supported` is unchanged (`["S256"]` — slice 187 set it).
+
 ## References
 
 - [`Plans/canvas/11-open-questions.md`](../../Plans/canvas/11-open-questions.md) #21 — resolution block

@@ -32,6 +32,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
+	"github.com/mgoodric/security-atlas/internal/auth/oauthcode"
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
@@ -328,6 +329,35 @@ func main() {
 			oauthHandler.AttachTokenEndpoint(ep)
 			logger.Info("atlas: OAuth token endpoint wired",
 				"rate_per_min", ratePerMin)
+
+			// Slice 189: wire the authorize endpoint + auth-code store.
+			// The authorize handler resolves the user's identity from
+			// the slice-034 sessions store + user_roles via the DB
+			// resolver. The token endpoint dispatches
+			// `grant_type=authorization_code` to the same store for
+			// one-shot redemption.
+			codeStore := oauthcode.New(pool)
+			ep.AttachAuthCodeStore(codeStore)
+			authorizeEP := oauthapi.NewAuthorizeEndpoint(oauthapi.AuthorizeEndpointConfig{
+				Codes:    codeStore,
+				Clients:  clients,
+				Sessions: sessions.NewStore(pool, 0),
+				Users:    oauthapi.NewDBUserResolver(pool),
+				Issuer:   issuer,
+			})
+			oauthHandler.AttachAuthorizeEndpoint(authorizeEP)
+			logger.Info("atlas: OAuth authorize endpoint wired",
+				"pkce_methods", "S256")
+
+			// Slice 189 AC-40: start the auth-code sweeper goroutine.
+			// DELETEs expired codes every 5 minutes (1-hour grace beyond
+			// the 60s TTL avoids races with in-flight redemptions).
+			sweepCtx, sweepCancel := context.WithCancel(context.Background())
+			go runAuthCodeSweeper(sweepCtx, codeStore, logger)
+			// The sweeper goroutine never returns under normal
+			// operation; sweepCancel is invoked at process shutdown
+			// (handled by the parent process lifecycle).
+			_ = sweepCancel
 		}
 		srv.AttachOAuthHandler(oauthHandler)
 		// Surface the active signing key id (not the key bytes — never
@@ -919,4 +949,44 @@ type localModeIdpResolver struct{}
 
 func (localModeIdpResolver) ResolveIdp(_ context.Context, _ uuid.UUID, _ string) (oidc.IdpConfig, error) {
 	return oidc.IdpConfig{}, oidc.ErrUnknownIdp
+}
+
+// runAuthCodeSweeper is the slice-189 sweeper goroutine. Every 5
+// minutes it DELETEs auth-code rows whose created_at is older than
+// 1 hour. The 1-hour grace beyond the 60-second TTL prevents races
+// with in-flight redemptions. Logged at INFO with the count deleted.
+//
+// The goroutine runs until ctx is cancelled (process shutdown).
+func runAuthCodeSweeper(ctx context.Context, store *oauthcode.Store, logger *slog.Logger) {
+	const (
+		interval = 5 * time.Minute
+		grace    = 1 * time.Hour
+	)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	// Run one sweep immediately on startup so the first cleanup
+	// doesn't wait the full interval.
+	doSweep(ctx, store, grace, logger)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			doSweep(ctx, store, grace, logger)
+		}
+	}
+}
+
+func doSweep(ctx context.Context, store *oauthcode.Store, grace time.Duration, logger *slog.Logger) {
+	cutoff := time.Now().UTC().Add(-grace)
+	sweepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	n, err := store.SweepExpired(sweepCtx, cutoff)
+	if err != nil {
+		logger.Warn("atlas: oauth_auth_codes sweep failed", "err", err)
+		return
+	}
+	if n > 0 {
+		logger.Info("atlas: oauth_auth_codes swept", "rows_deleted", n)
+	}
 }

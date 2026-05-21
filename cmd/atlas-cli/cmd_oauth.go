@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
+	"github.com/mgoodric/security-atlas/internal/auth/oauthcode"
 )
 
 // newOAuthCmd wires `atlas-cli oauth ...` — operator-only helpers
@@ -29,7 +30,101 @@ func newOAuthCmd() *cobra.Command {
 		Short: "OAuth client lifecycle (issue / rotate)",
 	}
 	cmd.AddCommand(newOAuthIssueClientCmd())
+	cmd.AddCommand(newOAuthAddRedirectURICmd())
 	return cmd
+}
+
+// newOAuthAddRedirectURICmd wires `atlas-cli oauth add-redirect-uri
+// <client_id> <redirect_uri>` — slice 189 AC-14.
+//
+// Registers a redirect URI for a given OAuth client. The
+// `/oauth/authorize` handler validates incoming `redirect_uri` query
+// parameters against this registry — unregistered URIs are rejected
+// before any browser redirect, preventing open-redirect abuse (P0-189-2).
+//
+// Security policy: URIs MUST start with `https://` OR with
+// `http://localhost` (self-host dev allowance). Plain-HTTP non-
+// localhost URIs are rejected at the CLI layer to prevent
+// misconfiguration that would silently bypass HTTPS for the auth-
+// code transport.
+//
+// EXIT codes:
+//
+//	0 — URI registered
+//	1 — duplicate (oauthcode.ErrDuplicateRedirectURI), policy
+//	    violation (non-https non-localhost), or any other failure
+func newOAuthAddRedirectURICmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "add-redirect-uri <client_id> <redirect_uri>",
+		Short: "register a redirect URI for an OAuth client",
+		Long: `Register a redirect URI that the /oauth/authorize handler will accept
+for the given client_id. Unregistered URIs are rejected with 400 —
+this is the open-redirect prevention gate (P0-189-2).
+
+URIs MUST start with https:// or http://localhost. Plain-HTTP non-
+localhost URIs are rejected.
+
+Requires DATABASE_URL in the environment (atlas_app role connection).
+
+Example:
+  DATABASE_URL=postgres://... atlas-cli oauth add-redirect-uri \
+    0e3b4a7e-...  https://atlas.example.com/oauth/callback`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientID := args[0]
+			redirectURI := args[1]
+			if clientID == "" || redirectURI == "" {
+				return fmt.Errorf("client_id and redirect_uri are required")
+			}
+			if !isAllowedRedirectURIScheme(redirectURI) {
+				return fmt.Errorf(
+					"redirect_uri must start with https:// or http://localhost (got %q)",
+					redirectURI)
+			}
+			dsn := os.Getenv("DATABASE_URL")
+			if dsn == "" {
+				return fmt.Errorf("DATABASE_URL is required for `oauth add-redirect-uri`")
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			pool, err := pgxpool.New(ctx, dsn)
+			if err != nil {
+				return fmt.Errorf("open pgxpool: %w", err)
+			}
+			defer pool.Close()
+
+			store := oauthcode.New(pool)
+			if err := store.RegisterRedirectURI(ctx, clientID, redirectURI); err != nil {
+				if errors.Is(err, oauthcode.ErrDuplicateRedirectURI) {
+					return fmt.Errorf("redirect_uri %q already registered for client %q",
+						redirectURI, clientID)
+				}
+				return fmt.Errorf("register: %w", err)
+			}
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(),
+				"registered: client_id=%s redirect_uri=%s\n",
+				clientID, redirectURI); err != nil {
+				return fmt.Errorf("write to stdout: %w", err)
+			}
+			return nil
+		},
+	}
+}
+
+// isAllowedRedirectURIScheme returns true iff the URI starts with
+// `https://` OR `http://localhost`. Defense-in-depth at the CLI
+// layer; the DB layer accepts any non-empty string, so this gate
+// runs before the persistence call.
+func isAllowedRedirectURIScheme(uri string) bool {
+	const httpsPrefix = "https://"
+	const localhostPrefix = "http://localhost"
+	if len(uri) >= len(httpsPrefix) && uri[:len(httpsPrefix)] == httpsPrefix {
+		return true
+	}
+	if len(uri) >= len(localhostPrefix) && uri[:len(localhostPrefix)] == localhostPrefix {
+		return true
+	}
+	return false
 }
 
 // newOAuthIssueClientCmd wires `atlas-cli oauth issue-client <name>`.
