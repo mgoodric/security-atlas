@@ -53,6 +53,46 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   BFF `CalendarResponse` wire shape is unchanged; per P0-183-3 the
   slice 178 audit harness + manifest are untouched.
 
+### Changed
+
+- **slice 084** — release-signing toolchain coordinated migration to the
+  cosign v3 + Sigstore protobuf-bundle stack: `.github/workflows/
+release.yml` bumps `sigstore/cosign-installer@v3 → @v4.1.2` (SHA
+  `6f9f17788090df1f26f669e9d70d6ae9567deba6`), `cosign-release: v2.4.1
+→ v3.0.6`, and `goreleaser/goreleaser-action@v6 → @v7.2.2` (SHA
+  `5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89`) — the three upstreams
+  co-evolve on the new bundle format and must move together (slice 080
+  iteration log + slice 084 decisions log document the cascade).
+  `.goreleaser.yaml` `signs:` block migrates from the legacy two-file
+  output (`--output-signature=${signature}` + `--output-certificate=
+${certificate}` → `.pem` + `.sig` assets) to the single Sigstore
+  protobuf-bundle output (`--bundle=${signature}` → single
+  `.sigstore.json` asset containing leaf cert + signature + Rekor
+  inclusion proof). cosign v3.0.6 explicitly disallows the v2-compat
+  opt-out (`--new-bundle-format` is rejected per sigstore/cosign#4762),
+  so the migration is forward-only. Consumer-side `verify-blob` snippet
+  in the GitHub Release notes header (rendered from `.goreleaser.yaml
+release.header`), the Self-verify step in `release.yml`, and `docs/
+RELEASE_READINESS.md §11.1` migrate together to the new shape:
+  `cosign verify-blob --certificate-identity-regexp <...> --certificate-
+oidc-issuer <...> --bundle <bundle-file> <artifact>` (no more
+  `--certificate <pem> --signature <sig>`). Verifying any release shipped
+  by this slice or later requires cosign v3.x on PATH; older releases
+  shipped on the v2 stack stay verifiable with their original
+  `.pem` + `.sig` assets + a cosign v2.x binary (immutable per slice
+  080 P0-A1). `COSIGN_EXPERIMENTAL: "1"` env var dropped because cosign
+  v3 makes keyless OIDC + new bundle the default + only behavior — the
+  variable is silently ignored on v3 and removing it avoids documenting
+  intent the tool no longer honors. Full args-shape rationale +
+  version-cascade documentation at `docs/audit-log/084-cosign-v3-
+goreleaser-action-v7-migration-decisions.md`. P0-A2 honored: cosign
+  signing chain preserved end-to-end (only the on-wire format changes);
+  audit-binding properties of release artifacts (Sigstore keyless OIDC
+  signing, Rekor transparency-log entry, signed checksums) are
+  identical to the v2-stack shape. Round-trip-verified via a
+  `v0.0.0-slice084-test` test tag at the branch tip (Self-verify step
+  green; cleanup deletes the tag + GitHub Release object on landing).
+
 ### Added
 
 - **slice 178** — UI honesty audit harness at `web/e2e-audit/` +

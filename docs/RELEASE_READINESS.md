@@ -384,21 +384,28 @@ gh run list --repo "$REPO" --workflow=release.yml --branch "$TAG" --limit 1
 gh release view "$TAG" --repo "$REPO" --json assets \
   --jq '.assets[].name' | sort
 # expect: 10 archives (5 OS/arch × {bundle, cli-only} minus 2 windows-arm64
-# ignored entries) + checksums.txt + checksums.txt.pem + checksums.txt.sig.
+# ignored entries) + checksums.txt + checksums.txt.sigstore.json.
 # The Homebrew formula update lands on mgoodric/homebrew-tap, not here.
+#
+# Note: pre-slice-084 releases (v1.x through whatever shipped on the cosign
+# v2 stack) emitted `checksums.txt.pem` + `checksums.txt.sig` instead of the
+# single `.sigstore.json` bundle. Old releases stay verifiable with the
+# legacy two-file flow + a cosign v2 binary; new releases require cosign
+# v3.x. The cutover tag is recorded in the slice 084 decisions log.
 
 # 3. The checksums file is cosign-verifiable end-to-end.
+#    Requires cosign v3.x (brew install cosign on macOS / release binaries
+#    elsewhere — see https://github.com/sigstore/cosign/releases).
 VERSION="${TAG#v}"
 TMP=$(mktemp -d)
 cd "$TMP"
-for ext in "" .pem .sig; do
-  curl -fsSL -O "https://github.com/${REPO}/releases/download/${TAG}/security-atlas_${VERSION}_checksums.txt${ext}"
+for asset in "" .sigstore.json; do
+  curl -fsSL -O "https://github.com/${REPO}/releases/download/${TAG}/security-atlas_${VERSION}_checksums.txt${asset}"
 done
 cosign verify-blob \
   --certificate-identity-regexp "https://github.com/${REPO}/\\.github/workflows/release\\.yml@.*" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate "security-atlas_${VERSION}_checksums.txt.pem" \
-  --signature  "security-atlas_${VERSION}_checksums.txt.sig" \
+  --bundle "security-atlas_${VERSION}_checksums.txt.sigstore.json" \
   "security-atlas_${VERSION}_checksums.txt"
 # expect: Verified OK
 cd - >/dev/null && rm -rf "$TMP"
