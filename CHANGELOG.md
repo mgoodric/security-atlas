@@ -525,6 +525,34 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Fixed
 
+- **slice 184** — UI honesty: `/audits` row-click no longer 404s
+  ([#184](https://github.com/mgoodric/security-atlas/issues/184); closes
+  slice-178 first-pass F-178-4 HONESTY-GAP). The audits-list page
+  (`web/app/(authed)/audits/page.tsx`) previously rendered every
+  audit-period row as a clickable target that pushed
+  `/audits/{id}` — a route that does not exist and 404'd with the
+  standard Next.js not-found UI. The slice-178 UI-honesty audit
+  categorized this as a HONESTY-GAP: the live UI promised a
+  per-period detail page that the codebase does not yet ship.
+  This slice resolves the gap via Option A (per the slice 184
+  doc): the `onRowClick` prop is removed from the `ListTable`,
+  the `ListTable` primitive drops both the click handler and the
+  `cursor-pointer` class when `onRowClick` is undefined, and a new
+  shadcn `Alert` banner above the table
+  (`data-testid="audits-detail-coming-soon-banner"`) surfaces the
+  disclosure: "Per-period detail view is coming in a future slice."
+  Option B (ship the actual detail page) was deferred to a separate
+  slice once the detail-page UX is decided — see
+  `docs/audit-log/184-audits-row-click-404-decisions.md` D1 for the
+  trade-off. Playwright spec `web/e2e/audits-list.spec.ts` AC-7 is
+  reversed (not deleted) — the spec now asserts the absence of
+  `cursor-pointer`, the absence of navigation on click, and the
+  presence of the banner; still quarantined behind the slice 082
+  seed harness as before. No backend change, no data-contract
+  change, no audit harness change (P0-184-2 / P0-184-3 honored).
+  Decisions log:
+  [`docs/audit-log/184-audits-row-click-404-decisions.md`](./docs/audit-log/184-audits-row-click-404-decisions.md).
+
 - **slice 176** — Logo variant now follows app theme; README +
   `docs/images/` regenerated to match slice-167 design
   ([#176](https://github.com/mgoodric/security-atlas/issues/176)).
