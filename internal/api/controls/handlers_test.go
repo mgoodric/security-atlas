@@ -52,14 +52,45 @@ func TestUpload_RequiresAdmin(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/controls:upload-bundle", strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
+	// A non-admin HUMAN credential (UserID is a plain UUID — not a
+	// machine-actor prefix) must be rejected. Slice 196 widened the
+	// handler to admit machine-actor credentials too (the bootstrap
+	// container's OAuth client_credentials JWT lands as UserID =
+	// "oauth_client:..."); this test pins the human-non-admin path
+	// still 403s.
 	ctx := authctx.WithCredential(req.Context(), credstore.Credential{
-		ID:       "key_001",
+		ID:       "user-001",
 		TenantID: "00000000-0000-0000-0000-000000000001",
+		UserID:   "11111111-2222-3333-4444-555555555555",
 		IsAdmin:  false,
 	})
 	h.UploadBundle(rr, req.WithContext(ctx))
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected 403; got %d", rr.Code)
+	}
+}
+
+// TestUpload_AdmitsMachineActor pins the slice 196 widening: a
+// machine-actor credential (UserID prefixed with "oauth_client:")
+// passes the handler-level auth gate even with IsAdmin=false. The
+// downstream path (tenancy + parse) is what fails here (we send a
+// bogus body) — the load-bearing assertion is that the handler did
+// NOT short-circuit at 403.
+func TestUpload_AdmitsMachineActor(t *testing.T) {
+	t.Parallel()
+	h := New(nil, nil)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/controls:upload-bundle", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := authctx.WithCredential(req.Context(), credstore.Credential{
+		ID:       "jwt:abc-123",
+		TenantID: "00000000-0000-0000-0000-000000000001",
+		UserID:   "oauth_client:0e3b4a7e-1111-2222-3333-444455556666",
+		IsAdmin:  false,
+	})
+	h.UploadBundle(rr, req.WithContext(ctx))
+	if rr.Code == http.StatusForbidden {
+		t.Fatalf("machine-actor was rejected with 403; want admit and proceed past auth gate (body=%s)", rr.Body.String())
 	}
 }
 

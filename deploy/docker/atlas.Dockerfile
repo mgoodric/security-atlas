@@ -46,11 +46,24 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${BUILD_TIME}" \
     -o /out/atlas ./cmd/atlas
 
+# Slice 196: pre-create the runtime data directories with nonroot
+# ownership (uid 65532, the distroless `nonroot` user) so the
+# downstream COPY --chown lands them in the distroless image with the
+# right ownership. The slice 187 OAuth keystore writes to
+# /var/lib/atlas/keys at first boot, the slice 073 bootstrap-token
+# file lands at /var/lib/atlas/bootstrap-token, and the docker-compose
+# bundle mounts a named volume at /var/lib/atlas (so reboots preserve
+# both). Distroless has no shell, so we mkdir + chown in the builder
+# stage and COPY across.
+RUN mkdir -p /out/var/lib/atlas/keys \
+    && chown -R 65532:65532 /out/var/lib/atlas
+
 # ----- Stage 2: runtime -----
 FROM gcr.io/distroless/static-debian12:nonroot
 
 # distroless/static-debian12:nonroot runs as uid 65532 (no root, no shell).
 COPY --from=builder /out/atlas /usr/local/bin/atlas
+COPY --from=builder --chown=nonroot:nonroot /out/var/lib/atlas /var/lib/atlas
 
 # Slice 072: OCI image annotations. Standard names from
 # https://github.com/opencontainers/image-spec/blob/main/annotations.md

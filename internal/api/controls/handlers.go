@@ -16,9 +16,27 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
+
+// isMachineActor reports whether the credential is a non-human caller.
+// Mirrors `internal/authz.BuildInput`'s is_machine_actor predicate so
+// the handler-level + OPA-level checks stay symmetric:
+//
+//   - empty UserID         — slice-034 api_keys without a bound user
+//   - "key_..."            — slice-014/034 api_keys (legacy bearer)
+//   - "oauth_client:..."   — slice 188 OAuth client_credentials JWTs
+//
+// Slice 196 introduces the OAuth-client prefix to support the
+// atlas-bootstrap container's migration off the slice-037 fixed-token
+// admin credential.
+func isMachineActor(cred credstore.Credential) bool {
+	return cred.UserID == "" ||
+		strings.HasPrefix(cred.UserID, "key_") ||
+		strings.HasPrefix(cred.UserID, "oauth_client:")
+}
 
 // Handler exposes POST /v1/controls:upload-bundle.
 type Handler struct {
@@ -63,15 +81,25 @@ type uploadResp struct {
 // AC-5: bad applicability_expr is rejected.
 // AC-6: re-upload supersedes prior version.
 //
-// Auth: admin credential only. The schema-registry upload (slice 014) uses
-// the same gate; control authorship is similarly a privileged admin path.
+// Auth: admin credential OR machine-actor credential (the slice-196
+// bootstrap container drives this endpoint via OAuth client_credentials).
+// The schema-registry upload (slice 014) uses the same gate; control
+// authorship is similarly a privileged path.
+//
+// Slice 196: the slice-035 OPA system.rego carve-out admits
+// `action=upload-bundle, resource=controls, is_machine_actor=true`
+// at the policy layer; this handler-level check is the symmetric
+// peer — without it, the OAuth-driven bootstrap upload short-circuits
+// at the handler before OPA even fires. The two checks together pin
+// the invariant: only admins OR bootstrap-style machine actors can
+// upload bundles.
 func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	if !cred.IsAdmin {
+	if !cred.IsAdmin && !isMachineActor(cred) {
 		writeError(w, http.StatusForbidden, "admin credential required")
 		return
 	}
