@@ -223,6 +223,18 @@ func FromContext(ctx context.Context) *jwt.AtlasClaims {
 	return v
 }
 
+// WithClaimsForTest injects an AtlasClaims into ctx so tests can
+// exercise handlers that read FromContext without standing up the
+// full middleware chain. Test-only by convention — production code
+// MUST NOT call this; the middleware is the only legitimate setter.
+//
+// Added in slice 192 to support the /v1/me/tenants integration test
+// harness. The helper is package-public because the consumer
+// (internal/api/me) lives in a different package.
+func WithClaimsForTest(ctx context.Context, c *jwt.AtlasClaims) context.Context {
+	return context.WithValue(ctx, ctxKey{}, c)
+}
+
 // extractJWT looks for a JWT in (a) the Authorization header with a
 // "Bearer " prefix where the value starts with the JWT shape `eyJ`,
 // then (b) the configured cookie.

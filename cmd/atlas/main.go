@@ -339,11 +339,38 @@ func main() {
 			// one-shot redemption.
 			codeStore := oauthcode.New(pool)
 			ep.AttachAuthCodeStore(codeStore)
+			// Slice 192: pass the BYPASSRLS authPool to the resolver
+			// so it can enumerate the OIDC subject's tenant
+			// memberships across the `users` table (the cross-tenant
+			// lookup that powers the tenant-switcher's
+			// available_tenants[] claim). When DATABASE_URL is unset
+			// the resolver falls back to the slice-189 single-tenant
+			// snapshot.
+			//
+			// The authPool wired here is constructed locally because
+			// the apikey-path authPool (declared at line ~521) is
+			// scoped inside a sibling `if pool != nil` block that
+			// runs AFTER this one. Both initialisations open the
+			// same migrate-role connection (DATABASE_URL ->
+			// BYPASSRLS) — duplicating the pool is acceptable
+			// because pgxpool gives each its own connection slot;
+			// future refactor can hoist them into a single
+			// initialisation higher in this function.
+			var resolverAuthPool *pgxpool.Pool
+			if migURL := os.Getenv("DATABASE_URL"); migURL != "" {
+				apCtx, apCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				ap, err := atlasotel.NewTracedPool(apCtx, migURL)
+				apCancel()
+				if err == nil {
+					resolverAuthPool = ap
+					defer ap.Close()
+				}
+			}
 			authorizeEP := oauthapi.NewAuthorizeEndpoint(oauthapi.AuthorizeEndpointConfig{
 				Codes:    codeStore,
 				Clients:  clients,
 				Sessions: sessions.NewStore(pool, 0),
-				Users:    oauthapi.NewDBUserResolver(pool),
+				Users:    oauthapi.NewDBUserResolverWithAuthPool(pool, resolverAuthPool),
 				Issuer:   issuer,
 			})
 			oauthHandler.AttachAuthorizeEndpoint(authorizeEP)
@@ -526,6 +553,14 @@ func main() {
 		apikeySvc := apikeystore.NewStore(pool, authPool, hasher, 0)
 		srv.AttachAPIKeyStore(apikeySvc)
 		fmt.Fprintf(os.Stderr, "atlas: api_keys store wired (BEARER_HASH_KEY ok)\n")
+
+		// Slice 192: wire the BYPASSRLS authPool into the Server so
+		// GET /v1/me/tenants can run its bounded `SELECT id, name
+		// FROM tenants WHERE id = ANY($1)` query against the
+		// caller's verified JWT available_tenants[] claim.
+		// authPool MAY be nil (DATABASE_URL unset); the handler
+		// falls back to returning tenant IDs without name enrichment.
+		srv.AttachAuthPool(authPool)
 
 		// Slice 073: platform_status reader/writer. Read pool is the
 		// RLS-bound app pool (public_read RLS policy is USING (true));

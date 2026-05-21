@@ -121,7 +121,22 @@ type Server struct {
 	// the OAuth migration guide. Empty falls back to omitting the
 	// field; cmd/atlas wires it via AttachDeprecationMigrationURL.
 	deprecationMigrationURL string
+
+	// Slice 192: BYPASSRLS pool used by GET /v1/me/tenants for
+	// the bounded `SELECT id, name FROM tenants WHERE id = ANY(...)`
+	// query keyed on the caller's verified JWT
+	// `atlas:available_tenants[]` claim. P0-192-2 enforces the
+	// query is bounded by the claim's tenant list — no full table
+	// scan. Wired by cmd/atlas/main.go when DATABASE_URL is set;
+	// nil for in-memory unit servers.
+	authPool *pgxpool.Pool
 }
+
+// AttachAuthPool wires the BYPASSRLS migrate-role pool used by the
+// slice-192 GET /v1/me/tenants handler for tenant-name enrichment.
+// Same pool already in use by slice 034's api-key auth path + slice
+// 073's platform_status writer.
+func (s *Server) AttachAuthPool(p *pgxpool.Pool) { s.authPool = p }
 
 // AttachDeprecationMigrationURL wires the slice-191 410 responder's
 // `migration_url` body field. cmd/atlas sets this to the operator-
