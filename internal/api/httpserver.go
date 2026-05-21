@@ -64,6 +64,7 @@ import (
 	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/audit/walkthrough"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
+	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
 	"github.com/mgoodric/security-atlas/internal/auth/userprefs"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
@@ -116,6 +117,25 @@ func (s *Server) httpHandler() http.Handler {
 	// internal/api/securityheaders/middleware.go.
 	root.Use(securityheaders.Middleware)
 	root.Use(corsMiddleware)
+	// Slice 190: JWT validation middleware. When wired via
+	// AttachJWTValidator, this runs BEFORE the legacy bearer
+	// middleware (slice 034) so a JWT-bearing request is gated by
+	// the OAuth AS signature + claim + revocation pipeline. The
+	// middleware naturally passes through requests with no
+	// JWT-shaped Authorization header AND no JWT cookie — the
+	// downstream legacy bearer middleware then handles the opaque
+	// bearer path. Exempt prefixes mirror the legacy middleware so
+	// `/oauth/*` (which authenticates itself via client_credentials)
+	// is not double-gated. P0-190-9 — JWT middleware operates only
+	// on `/v1/*` effectively, by virtue of letting all other paths
+	// fall through to their own handling.
+	if s.jwtSigner != nil && s.jwtRevoked != nil {
+		root.Use(jwtBypass(jwtmw.Middleware(s.jwtSigner, s.jwtRevoked, jwtmw.Options{
+			ExpectedIssuer:   s.jwtIssuer,
+			ExpectedAudience: s.jwtAudience,
+			CookieName:       jwtmw.DefaultCookieName,
+		}), "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/"))
+	}
 	// Slice 034: /auth/* (login/callback/logout) is bearer-exempt — users
 	// don't have a bearer yet at the moment they sign in. The middleware
 	// must skip the prefix. Note: /v1/admin/credentials* DOES go through
@@ -973,11 +993,43 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// jwtBypass wraps the slice 190 JWT validation middleware so requests
+// whose path matches any exempt prefix skip the middleware entirely.
+// The exempt set mirrors the legacy bearer middleware's exemption
+// list — `/oauth/*` (authenticates itself), `/.well-known/*` (RFC
+// 8414 §3 mandates unauth access), `/health` (liveness), `/metrics`
+// (opt-in scrape endpoint), and the public metadata routes
+// (`/v1/version`, `/v1/install-state`, `/v1/calendar.ics`, `/auth/`).
+// On a non-exempt path, the JWT middleware runs; on an exempt path,
+// the chain proceeds directly to the next middleware.
+//
+// Slice 190 P0-190-9: the JWT middleware MUST operate only on /v1/*
+// — by skipping every non-/v1 prefix above we satisfy that
+// constraint without coupling jwtmw to chi route specifics.
+func jwtBypass(mw func(http.Handler) http.Handler, exempt ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		wrapped := mw(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			for _, p := range exempt {
+				if p != "" && strings.HasPrefix(r.URL.Path, p) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			wrapped.ServeHTTP(w, r)
+		})
+	}
+}
+
 // httpAuthMiddlewareWithExemptions is the HTTP auth middleware that:
 //  1. Skips bearer auth for request paths whose prefix matches any exempt.
 //     The /auth/* routes need this because the user has no bearer yet at
 //     the moment of sign-in.
-//  2. Stacks a DB-backed apikeystore.Store as a fallback for tokens that
+//  2. Skips bearer auth when the slice 190 JWT middleware has already
+//     authenticated the request (jwtmw.FromContext returns a non-nil
+//     claims pointer). This is the coexistence contract: JWT first,
+//     legacy as fall-through.
+//  3. Stacks a DB-backed apikeystore.Store as a fallback for tokens that
 //     the in-memory credstore does not know about. Connector pushes use
 //     DB-backed keys; bootstrap admin credentials use in-memory.
 func httpAuthMiddlewareWithExemptions(store *credstore.Store, apikeys *apikeystore.Store, exempt ...string) func(http.Handler) http.Handler {
@@ -988,6 +1040,14 @@ func httpAuthMiddlewareWithExemptions(store *credstore.Store, apikeys *apikeysto
 					next.ServeHTTP(w, r)
 					return
 				}
+			}
+			// Slice 190 coexistence: if the JWT middleware ran earlier
+			// in the chain and set claims on the context, accept that
+			// auth and pass through. Decision D3: JWT first, legacy
+			// as fall-through.
+			if claims := jwtmw.FromContext(r.Context()); claims != nil {
+				next.ServeHTTP(w, r)
+				return
 			}
 			token, ok := extractBearerFromHTTP(r)
 			if !ok {
