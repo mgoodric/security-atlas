@@ -1,6 +1,9 @@
 "use client";
 
 // Slice 094 — month-grid view (toggle).
+// Slice 183 — `linkFor` extracted to `./link-for`; exception / policy
+// rows in the day popover now render as a non-linked span with a
+// tooltip instead of an `<a>` to a route that 404s.
 //
 // Standard 7-column × N-row month calendar. The grid is hand-rolled
 // per anti-criterion P0-A6 (no FullCalendar / react-big-calendar). Day
@@ -8,14 +11,16 @@
 // the Saturday after the last day of the month.
 //
 // Click on a day opens an inline popover listing that day's events.
-// Each event row links to the canonical detail page (see agenda-view
-// for the routing map).
+// Each event row's link disposition is the shared `linkFor` helper —
+// see `./link-for.ts` for the routing map.
 
 import Link from "next/link";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import type { CalendarEvent } from "@/lib/api";
+
+import { linkFor } from "./link-for";
 
 type Props = {
   events: CalendarEvent[];
@@ -66,21 +71,6 @@ function eventsByDay(events: CalendarEvent[]): Map<string, CalendarEvent[]> {
     m.set(key, arr);
   }
   return m;
-}
-
-function linkFor(ev: CalendarEvent): string {
-  switch (ev.type) {
-    case "audit":
-      return `/audits/${ev.related_entity_id}`;
-    case "exception":
-      return `/admin/exceptions/${ev.related_entity_id}`;
-    case "policy":
-      return `/policies/${ev.related_entity_id}`;
-    case "control":
-      return `/controls/${ev.related_entity_id}`;
-    default:
-      return "#";
-  }
 }
 
 export function MonthGridView({ events, anchor, onPrev, onNext }: Props) {
@@ -200,12 +190,10 @@ export function MonthGridView({ events, anchor, onPrev, onNext }: Props) {
             </Button>
           </div>
           <ul className="mt-2 divide-y rounded-md border bg-card">
-            {(byDay.get(openDay) ?? []).map((ev) => (
-              <li key={`${ev.type}-${ev.id}`} className="p-3">
-                <Link
-                  href={linkFor(ev)}
-                  className="flex items-start gap-3 -m-3 p-3 hover:bg-muted/50 rounded-md transition-colors"
-                >
+            {(byDay.get(openDay) ?? []).map((ev) => {
+              const target = linkFor(ev);
+              const rowBody = (
+                <>
                   <span
                     aria-hidden
                     className={`mt-1.5 inline-block h-2.5 w-2.5 rounded-full ${
@@ -219,9 +207,33 @@ export function MonthGridView({ events, anchor, onPrev, onNext }: Props) {
                       {ev.cadence ? ` · ${ev.cadence}` : ""}
                     </p>
                   </div>
-                </Link>
-              </li>
-            ))}
+                </>
+              );
+              return (
+                <li key={`${ev.type}-${ev.id}`} className="p-3">
+                  {target.kind === "link" ? (
+                    <Link
+                      href={target.href}
+                      className="flex items-start gap-3 -m-3 p-3 hover:bg-muted/50 rounded-md transition-colors"
+                    >
+                      {rowBody}
+                    </Link>
+                  ) : (
+                    // Slice 183 — no `data-testid` here on purpose; see
+                    // `agenda-view.tsx` for the rationale (would trip
+                    // the slice 178 HONESTY-GAP heuristic, manifest is
+                    // frozen per P0-183-3).
+                    <span
+                      title={target.reason}
+                      aria-label={target.reason}
+                      className="flex items-start gap-3 -m-3 p-3 rounded-md cursor-help"
+                    >
+                      {rowBody}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
             {(byDay.get(openDay) ?? []).length === 0 && (
               <li className="p-3 text-sm text-muted-foreground">
                 No events on this day.

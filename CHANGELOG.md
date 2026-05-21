@@ -11,6 +11,48 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ## [Unreleased]
 
+### Fixed
+
+- **slice 183** — UI honesty fix (F-178-1/2/3/7/8 closure): the
+  compliance calendar's `linkFor(ev)` helper in
+  `web/components/calendar/agenda-view.tsx` and
+  `web/components/calendar/month-grid-view.tsx` previously returned a
+  string-typed href whose `exception` branch pointed at the
+  non-existent `/admin/exceptions/<id>` route (F-178-2), whose `policy`
+  branch pointed at the non-existent `/policies/<id>` route (F-178-3),
+  and whose `default` branch returned `"#"` (F-178-1). The slice 178
+  audit categorized all three as HONESTY-GAP findings. This slice
+  extracts `linkFor` to a shared module at
+  `web/components/calendar/link-for.ts` and switches the return shape
+  to a tagged-union `{ kind: "link"; href } | { kind: "static"; reason }`.
+  Exception and policy events now render as a non-linked `<span>` with
+  a `title` tooltip explaining the placeholder ("Per-exception detail
+  page is a future slice — view the exception register at /exceptions";
+  same shape for policy). The `default` branch calls `assertNever` —
+  TypeScript closes the union to the four known event types at compile
+  time, and a divergent runtime payload throws rather than silently
+  emitting `<a href="#">`. Audit and control events keep their existing
+  link branches. Future slices that ship `/admin/exceptions/[id]` or
+  `/policies/[id]` flip the static branch to a link branch in the
+  shared helper (one edit site, both calendar views update). Pure-logic
+  vitest at `web/components/calendar/link-for.test.ts` (7 tests, all
+  passing) covers each branch plus a regression guard that no branch
+  ever returns `"#"`. `web/vitest.config.ts` extended to include
+  `components/**/*.test.ts` (and `components/**/*.ts` in coverage)
+  for shared component-area helpers; the narrow `.test.ts`-only glob
+  preserves the node-env / no-JSX precedent. Bundled mockup refresh
+  (Amendment 2 trivial-batching): `Plans/mockups/dashboard.html` drops
+  the sidebar `Vendors` entry (F-178-7 — `href="#"`; no `vendors.html`
+  mockup exists and the production sidebar already ships a real
+  `/vendors` route) and the trailing generic-`#` `Admin` entry
+  (F-178-8 — production sidebar handles admin visibility conditionally
+  on caller roles, slice 186 territory); body-anchor `href="#"`s
+  inside cards were not flagged by slice 178 and remain as
+  iteration-1 mockup placeholders (out of scope). Per P0-183-1 the
+  backing detail pages are NOT shipped in this slice; per P0-183-2 the
+  BFF `CalendarResponse` wire shape is unchanged; per P0-183-3 the
+  slice 178 audit harness + manifest are untouched.
+
 ### Added
 
 - **slice 178** — UI honesty audit harness at `web/e2e-audit/` +
