@@ -89,14 +89,10 @@ export async function captureDeadAnchors(page: Page): Promise<DeadAnchor[]> {
       dead.push({ href: a.href, text: a.text });
       continue;
     }
-    // Skip external + special schemes (mailto, tel, javascript).
-    if (
-      a.href.startsWith("http://") ||
-      a.href.startsWith("https://") ||
-      a.href.startsWith("mailto:") ||
-      a.href.startsWith("tel:") ||
-      a.href.startsWith("javascript:")
-    ) {
+    // Skip external + special-scheme URLs (anything with a scheme, including
+    // http/https external, mailto, tel, javascript, data, vbscript, file,
+    // blob, ftp, ws/wss, etc.). Case-insensitive per RFC 3986 §3.1.
+    if (/^[a-z][a-z0-9+\-.]*:/i.test(a.href)) {
       // Allow internal-host http(s) only via the resolvedURL check
       // below; bare http://external.com is left alone.
       const pageHost = new URL(page.url()).host;
