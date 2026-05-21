@@ -3,7 +3,7 @@
 **Cluster:** Backend / Infra (AI integration surface)
 **Estimate:** 3-5d
 **Type:** JUDGMENT
-**Status:** `ready` (HITL pattern picked 2026-05-20: **Pattern A** — see D1 below)
+**Status:** `in-review` (HITL pattern picked 2026-05-20: **Pattern A** — see D1 below)
 
 ## Narrative
 
