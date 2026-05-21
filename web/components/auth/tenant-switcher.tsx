@@ -36,6 +36,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { switchTenant } from "@/lib/auth/switch-tenant";
+import {
+  onTenantSwitched,
+  postTenantSwitched,
+} from "@/lib/auth/tenant-broadcast";
 
 const REFETCH_INTERVAL_MS = 60 * 1000; // D1 — 60s cache
 
@@ -75,6 +79,10 @@ export function TenantSwitcher() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [evicted, setEvicted] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // Holds the latest fetchTenants closure so out-of-effect callers
+  // (the slice 199 broadcast subscriber below) can request an
+  // immediate re-fetch without duplicating the fetch logic.
+  const fetchTenantsRef = useRef<(() => Promise<void>) | null>(null);
 
   // Initial fetch + periodic re-fetch (D1: every 60s when
   // foregrounded; pause when backgrounded).
@@ -114,6 +122,12 @@ export function TenantSwitcher() {
       }
     };
 
+    // Expose the latest fetchTenants closure to out-of-effect
+    // callers (slice 199 broadcast subscriber). Updated on every
+    // mount so a stale closure cannot fire against a torn-down
+    // tab.
+    fetchTenantsRef.current = fetchTenants;
+
     // Kick off the first fetch via queueMicrotask so the setState
     // calls happen in a microtask callback, not synchronously in
     // the effect body.
@@ -145,8 +159,42 @@ export function TenantSwitcher() {
       cancelled = true;
       stop();
       document.removeEventListener("visibilitychange", onVisibility);
+      fetchTenantsRef.current = null;
     };
   }, []);
+
+  // Slice 199 — cross-tab BroadcastChannel sync.
+  //
+  // When a sibling tab successfully switches tenants, it posts a
+  // `tenant-switched` message on the `atlas-tenant` channel. This
+  // effect subscribes, and on receipt:
+  //
+  //   1. Re-fetches /api/me/tenants so the dropdown's current-tenant
+  //      flag updates immediately (no waiting on the 60s tick).
+  //   2. Calls router.refresh() so server components re-render
+  //      against the new JWT cookie (cookies are shared per origin,
+  //      so the sibling's token-exchange has already replaced this
+  //      tab's atlas_jwt cookie before the broadcast arrived).
+  //
+  // The subscriber does NOT call postTenantSwitched — that would
+  // create the infinite loop P0-199-4 forbids. The post path is
+  // only invoked from onPick (a user action), never from a receive.
+  //
+  // The helper is a no-op in SSR / older browsers (P0-199-1); the
+  // returned unsubscribe is callable unconditionally.
+  useEffect(() => {
+    const unsub = onTenantSwitched(() => {
+      // Don't trust the broadcast payload (P0-199-2). The receive
+      // handler re-validates by re-fetching the JWT-gated, RLS-
+      // backed /api/me/tenants and rendering from that.
+      const refetch = fetchTenantsRef.current;
+      if (refetch) {
+        void refetch();
+      }
+      router.refresh();
+    });
+    return unsub;
+  }, [router]);
 
   // Close on outside click + Escape.
   useEffect(() => {
@@ -188,6 +236,13 @@ export function TenantSwitcher() {
           return;
         }
         setOpen(false);
+        // Slice 199 — notify sibling tabs in the same origin that
+        // the tenant switched. Same-origin scope by construction
+        // (BroadcastChannel). Graceful no-op when the API is
+        // unavailable. MUST run before router.refresh() so the
+        // broadcast goes out promptly — router.refresh() does not
+        // block on it, but the ordering documents intent.
+        postTenantSwitched(targetId);
         // Hard refresh so server components re-render with the new
         // tenant scope (the JWT cookie carries it).
         router.refresh();
