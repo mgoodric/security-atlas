@@ -1,25 +1,37 @@
 "use client";
 
 // Slice 094 — agenda view (default).
+// Slice 183 — `linkFor` extracted to `./link-for` and switched to a
+// tagged-union return so exception / policy events render as a
+// non-linked span with a tooltip instead of an `<a>` that 404s.
 //
 // Vertical list of events grouped by month header. Each row: date +
 // type icon (color dot) + title + linked entity. Overdue control events
 // render with a red dot for visual urgency (AC-13a).
 //
-// Per-event links go to the canonical detail page:
-//   audit       -> /audits/[id]   (placeholder until that page ships)
-//   exception   -> /admin/exceptions/[id]   (placeholder)
-//   policy      -> /policies/[id]   (placeholder)
-//   control     -> /controls/[id]   (real page from slice 041)
+// Per-event link disposition (see `./link-for.ts` for the source of
+// truth):
+//   audit     -> /audits/[id]            (link; placeholder page —
+//                                          calendar dead-link follow-on
+//                                          is slice 184's responsibility
+//                                          on the audits-list side; the
+//                                          calendar branch stays a link
+//                                          until that detail page ships)
+//   exception -> static span + tooltip   (slice 183 AC-2; no detail
+//                                          route exists)
+//   policy    -> static span + tooltip   (slice 183 AC-3; no detail
+//                                          route exists)
+//   control   -> /controls/[id]          (real page from slice 041)
 //
-// Anti-criterion P0-A5 compliance: links point to placeholders when the
-// per-page slices haven't shipped; the user sees a friendly "page coming
-// soon" rather than a hard 404. The calendar links update automatically
-// when the page slices land.
+// Anti-criterion P0-A5 compliance preserved: where a per-page slice has
+// not shipped, the calendar surface is an honest non-link rather than
+// a 404 anchor.
 
 import Link from "next/link";
 
 import type { CalendarEvent } from "@/lib/api";
+
+import { linkFor } from "./link-for";
 
 type Props = {
   events: CalendarEvent[];
@@ -39,21 +51,6 @@ const TYPE_LABEL: Record<string, string> = {
   policy: "Policy",
   control: "Control review",
 };
-
-function linkFor(ev: CalendarEvent): string {
-  switch (ev.type) {
-    case "audit":
-      return `/audits/${ev.related_entity_id}`;
-    case "exception":
-      return `/admin/exceptions/${ev.related_entity_id}`;
-    case "policy":
-      return `/policies/${ev.related_entity_id}`;
-    case "control":
-      return `/controls/${ev.related_entity_id}`;
-    default:
-      return "#";
-  }
-}
 
 function monthKey(iso: string): string {
   const d = new Date(iso);
@@ -127,37 +124,60 @@ export function AgendaView({ events, truncated }: Props) {
               const dotClass = isOverdue
                 ? "bg-red-500"
                 : TYPE_COLOR[ev.type] ?? "bg-muted";
+              const target = linkFor(ev);
+              const rowBody = (
+                <>
+                  <span
+                    aria-label={
+                      isOverdue ? "Overdue" : TYPE_LABEL[ev.type] ?? ev.type
+                    }
+                    className={`mt-1.5 inline-block h-2.5 w-2.5 shrink-0 rounded-full ${dotClass}`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-baseline gap-x-2">
+                      <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                        {TYPE_LABEL[ev.type] ?? ev.type}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        · {dayLabel(ev.starts_at)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-sm font-medium truncate">
+                      {ev.title}
+                    </p>
+                    {cadenceLabel(ev) && (
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {cadenceLabel(ev)}
+                      </p>
+                    )}
+                  </div>
+                </>
+              );
               return (
                 <li key={`${ev.type}-${ev.id}`} className="p-3">
-                  <Link
-                    href={linkFor(ev)}
-                    className="flex items-start gap-3 hover:bg-muted/50 -m-3 p-3 rounded-md transition-colors"
-                  >
+                  {target.kind === "link" ? (
+                    <Link
+                      href={target.href}
+                      className="flex items-start gap-3 hover:bg-muted/50 -m-3 p-3 rounded-md transition-colors"
+                    >
+                      {rowBody}
+                    </Link>
+                  ) : (
+                    // Slice 183 — no `data-testid` here on purpose:
+                    // adding one would trip the slice 178 HONESTY-GAP
+                    // heuristic (unexpected testid not in the manifest's
+                    // expected/allowed sets). The non-link element is
+                    // structurally a `<span>` so the dead-anchor
+                    // heuristic ignores it; the tooltip + aria-label
+                    // carries the disclosure copy.
                     <span
-                      aria-label={
-                        isOverdue ? "Overdue" : TYPE_LABEL[ev.type] ?? ev.type
-                      }
-                      className={`mt-1.5 inline-block h-2.5 w-2.5 shrink-0 rounded-full ${dotClass}`}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-baseline gap-x-2">
-                        <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                          {TYPE_LABEL[ev.type] ?? ev.type}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          · {dayLabel(ev.starts_at)}
-                        </span>
-                      </div>
-                      <p className="mt-0.5 text-sm font-medium truncate">
-                        {ev.title}
-                      </p>
-                      {cadenceLabel(ev) && (
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {cadenceLabel(ev)}
-                        </p>
-                      )}
-                    </div>
-                  </Link>
+                      title={target.reason}
+                      aria-label={target.reason}
+                      className="flex items-start gap-3 -m-3 p-3 rounded-md cursor-help"
+                    >
+                      {rowBody}
+                    </span>
+                  )}
                 </li>
               );
             })}

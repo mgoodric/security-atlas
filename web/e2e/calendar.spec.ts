@@ -59,6 +59,40 @@ test.describe("compliance calendar", () => {
     //    await expect(page.getByRole("dialog")).toBeVisible();
   });
 
+  test("AC-183-1: exception events render as a static span, NOT an <a> (no 404)", async () => {
+    // Slice 183 (F-178-2 closure). When the seed harness lands and
+    // surfaces at least one exception event in the calendar window,
+    // assert that the row carries the disclosure tooltip and is NOT
+    // rendered as an <a> pointing at the non-existent
+    // `/admin/exceptions/<id>` route. Same shape as slice 184's
+    // AC-184-1 / slice 185's AC-185-1 quarantined specs.
+    //
+    //    await page.goto("/calendar");
+    // Find an exception row (the agenda renders the type label in an
+    // uppercase span; the row text contains "Exception").
+    //    const exceptionRow = page.locator("li", { hasText: "Exception" }).first();
+    //    await expect(exceptionRow).toBeVisible();
+    // Assert no <a> descendant — the row is a <span>, not a <Link>.
+    //    await expect(exceptionRow.locator("a")).toHaveCount(0);
+    // Assert the disclosure tooltip is present (title attribute).
+    //    const tooltip = await exceptionRow.locator("span").first().getAttribute("title");
+    //    expect(tooltip).toMatch(/exception/i);
+    //    expect(tooltip).toMatch(/future slice/i);
+  });
+
+  test("AC-183-2: policy events render as a static span, NOT an <a> (no 404)", async () => {
+    // Slice 183 (F-178-3 closure). Same shape as AC-183-1 for policy
+    // events. The previous `/policies/<id>` href was a dead link.
+    //
+    //    await page.goto("/calendar");
+    //    const policyRow = page.locator("li", { hasText: "Policy" }).first();
+    //    await expect(policyRow).toBeVisible();
+    //    await expect(policyRow.locator("a")).toHaveCount(0);
+    //    const tooltip = await policyRow.locator("span").first().getAttribute("title");
+    //    expect(tooltip).toMatch(/policy/i);
+    //    expect(tooltip).toMatch(/future slice/i);
+  });
+
   test("AC-12: filter checkbox hides events of that type", async () => {
     //    await page.goto("/calendar");
     //    const initial = await page.locator("ul li").count();

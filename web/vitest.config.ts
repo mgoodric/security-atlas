@@ -74,6 +74,14 @@ export default defineConfig({
       // from vitest (`exclude: e2e-audit/**/*.spec.ts` below) and runs
       // via the `Frontend · UI honesty (advisory)` job instead.
       "e2e-audit/lib/**/*.test.ts",
+      // Slice 183: pure-logic helpers that two or more components
+      // share are colocated under `components/<area>/` (the helper
+      // can't live in app/(authed)/<route>/ because it must be
+      // importable by sibling components). The include is intentionally
+      // narrow — only `.test.ts` (no `.test.tsx`), matching the
+      // node-env / no-JSX precedent — so the JSX view modules are
+      // never accidentally entered by the unit runner.
+      "components/**/*.test.ts",
     ],
     exclude: [
       "**/node_modules/**",
@@ -92,6 +100,10 @@ export default defineConfig({
         "app/[(]authed[)]/**/*.ts",
         "app/audit-log/**/*.ts",
         "proxy.ts",
+        // Slice 183: shared component-area pure-logic modules
+        // (e.g. components/calendar/link-for.ts) — see vitest
+        // `include` block for the discipline.
+        "components/**/*.ts",
       ],
       exclude: [
         "**/*.test.ts",
@@ -100,6 +112,7 @@ export default defineConfig({
         "app/api/**/*.tsx",
         "app/[(]authed[)]/**/*.tsx",
         "app/audit-log/**/*.tsx",
+        "components/**/*.tsx",
       ],
     },
   },
