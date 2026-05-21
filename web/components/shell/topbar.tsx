@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { signOut } from "@/app/login/actions";
+import { TenantSwitcher } from "@/components/auth/tenant-switcher";
 import { Button } from "@/components/ui/button";
 import { ThemeAwareLogo } from "@/components/shell/theme-aware-logo";
 
@@ -44,11 +45,22 @@ export function TopBar() {
         </Link>
         <span className="text-xs text-muted-foreground">v0 · self-host</span>
       </div>
-      <form action={signOut}>
-        <Button type="submit" variant="ghost" size="sm">
-          Sign out
-        </Button>
-      </form>
+      <div className="flex items-center gap-3">
+        {/*
+          Slice 192: persistent multi-tenant switcher. Renders only
+          when the operator has ≥2 tenants in their JWT's
+          atlas:available_tenants[] claim (the component returns
+          null otherwise — canvas §11 #13). The switcher fetches
+          /api/me/tenants on mount and on a 60s interval (D1) to
+          detect membership-removed transitions (P0-192-7).
+        */}
+        <TenantSwitcher />
+        <form action={signOut}>
+          <Button type="submit" variant="ghost" size="sm">
+            Sign out
+          </Button>
+        </form>
+      </div>
     </header>
   );
 }

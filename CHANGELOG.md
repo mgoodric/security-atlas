@@ -63,6 +63,27 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 192** — Multi-tenant switch via OAuth token-exchange +
+  frontend tenant switcher. **Closes the v2 vCISO operator persona**
+  (originally specified as slice 141, PARKED 2026-05-20). vCISOs
+  hosting atlas for multiple client tenants can now switch between
+  client contexts from a persistent header dropdown without
+  re-authenticating — each switch is one RFC 8693 token-exchange
+  call against `/oauth/token`. Ships: `GET /v1/me/tenants` backend
+  handler (reads verified JWT claim only, PK-bounded SELECT —
+  P0-192-2); `<TenantSwitcher>` React component mounted in TopBar
+  (HIDDEN when `tenants.length <= 1` per canvas §11 #13);
+  `switchTenant()` client + BFF route at
+  `/api/auth/switch-tenant` (pure proxy to slice 188's
+  token-exchange grant); `/oauth/select-tenant` login picker page
+  for operators with ≥2 tenants; membership-removed UX banner with
+  60s re-fetch cadence; expanded `DBUserResolver` that enumerates
+  the OIDC subject's full tenant set via cross-tenant `users`
+  lookup. Honest "eventual eviction" semantics documented at
+  `docs-site/docs/tenant-membership.md` — operators can call
+  `/oauth/revoke` (slice 190) for immediate eviction. **Closes the
+  auth-substrate-v2 spine** (slot 6 of 6); ADR-0003 addendum + slice
+  141 `_STATUS.md` row flipped to `merged-via-spine-completion`.
 - **slice 187** — OAuth Authorization Server scaffolding (JWT signing
   infrastructure + JWKS endpoint + OIDC discovery document). Foundation
   slice for the auth-substrate-v2 spine (OQ #21 Reading D resolution).

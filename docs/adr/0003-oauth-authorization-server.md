@@ -161,6 +161,39 @@ Slice 189 (2026-05-21) lit up `GET /oauth/authorize` (RFC 6749 §4.1 Authorizati
 
 **Discovery doc updates.** When BOTH a `TokenEndpoint` AND an `AuthorizeEndpoint` are wired, `grant_types_supported` adds `"authorization_code"` to the slice-188 list. `response_types_supported` is unchanged (`["code"]` — slice 187 set it). `code_challenge_methods_supported` is unchanged (`["S256"]` — slice 187 set it).
 
+## Slice 192 addendum — spine completion: multi-tenant switch + frontend tenant switcher
+
+Slice 192 (2026-05-21) closes the auth-substrate-v2 spine. With slice 192 merged, OQ #21 Reading D is fully implemented end-to-end:
+
+- 187 ✅ keystore + JWT signing + JWKS + discovery
+- 188 ✅ `/oauth/token` + RFC 8693 token-exchange
+- 189 ✅ `/oauth/authorize` + PKCE + frontend OAuth client
+- 190 ✅ JWT validation middleware + revoke + introspect (cutover)
+- 191 ✅ SDK migration + RFC 8628 device-code + slice 034 partial retirement
+- **192 ✅ multi-tenant switch + frontend tenant switcher**
+
+**Slice 192 ships:**
+
+- **`GET /v1/me/tenants` handler** (`internal/api/me/tenants.go`) — reads the caller's verified JWT claim `atlas:available_tenants[]` and enriches with tenant names via a PK-bounded `SELECT id, name FROM tenants WHERE id = ANY(...)` on the BYPASSRLS pool. No full table scan; the bounded set is the JWT claim's tenant list (P0-192-2).
+- **Frontend tenant-switcher dropdown** (`web/components/auth/tenant-switcher.tsx`) — mounted in the persistent header `TopBar`. Hidden when `tenants.length <= 1` (canvas §11 #13 commitment, P0-192-1).
+- **`switchTenant()` client function** (`web/lib/auth/switch-tenant.ts`) — calls a BFF route which in turn POSTs to `/oauth/token` with `grant_type=urn:ietf:params:oauth:grant-type:token-exchange` (slice 188's primitive). The BFF rotates the `atlas_jwt` cookie on success; the frontend calls `router.refresh()` so server components re-render.
+- **Login picker page** (`web/app/oauth/select-tenant/page.tsx`) — destination for operators with ≥2 tenants; defensive single-tenant redirect to `/dashboard`.
+- **Membership-removed UX banner** — surfaces when the periodic re-fetch (60s, D1) reveals the current tenant has been removed from the operator's available set. Default action: switch to the first available alternative (P0-192-7).
+- **DBUserResolver expansion** (`internal/api/oauth/user_resolver.go`) — the OAuth authorize flow's user-identity snapshot now enumerates ALL tenants the OIDC subject belongs to via a cross-tenant `users` lookup on the BYPASSRLS pool. The JWT minted at code-redemption carries an honest `atlas:available_tenants[]`.
+
+**Eventual eviction invariant.** Slice 192 documents the OAuth standard contract: when an admin removes a user from a tenant, the user's existing JWTs continue to validate until expiry. To force immediate eviction, the admin calls `/oauth/revoke` (slice 190). The operator-facing doc at `docs-site/docs/tenant-membership.md` explains the contract; P0-192-8 commits to documenting it rather than apologising for it.
+
+**Closure of slice 141 (P0-192-11).** Slice 141 (the original "multi-tenant login + switcher" spec, PARKED 2026-05-20 when OQ #21 Reading D resolved the substrate ambiguity at the canvas level) is closed atomically with this slice's merge. Its `_STATUS.md` row flips from `not-ready` to a new status `merged-via-spine-completion` — the historical fact is that slice 141's intent shipped, but via slices 187-192 rather than via the original schema rewrite spec.
+
+**Spine completion summary.** A vCISO hosting atlas for N client tenants can:
+
+1. Sign in once via OIDC.
+2. Receive a JWT carrying `atlas:available_tenants[]` with all N tenant UUIDs.
+3. Use the persistent header dropdown to switch between client tenants without re-authenticating — each switch is one RFC 8693 token-exchange call against `/oauth/token` (slice 188).
+4. See the membership-removed banner when an admin removes them from a tenant.
+
+The binary vCISO success criterion from slice 141 is fulfilled.
+
 ## References
 
 - [`Plans/canvas/11-open-questions.md`](../../Plans/canvas/11-open-questions.md) #21 — resolution block

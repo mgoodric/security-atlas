@@ -596,6 +596,14 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/me/sessions", meSessionsH.ListSessions)
 	root.Delete("/v1/me/sessions", meSessionsH.RevokeOtherSessions)
 	root.Delete("/v1/me/sessions/{id}", meSessionsH.RevokeSession)
+	// Slice 192: GET /v1/me/tenants — multi-tenant directory.
+	// Reads the caller's verified JWT claim
+	// `atlas:available_tenants[]` and enriches with tenant names
+	// from the BYPASSRLS authPool (PK-bounded query — P0-192-2).
+	// When authPool is nil (test harness), the handler still
+	// renders honest tenant IDs without name enrichment.
+	meTenantsH := meapi.NewTenants(s.authPool)
+	root.Get("/v1/me/tenants", meTenantsH.ListTenants)
 	// Slice 021: exception / waiver workflow. Routes appended per the
 	// parallel-batch convention -- chi.Mux rejects two Mounts at "/", so
 	// individual routes are registered onto the root. Literal-segment
