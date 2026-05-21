@@ -361,6 +361,29 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Fixed
 
+- **slice 186** — UI honesty fix (F-178-6 closure): the sidebar `/admin`
+  nav entry is now role-gated to admin-only callers. The entry was
+  previously rendered to every signed-in user; non-admin callers
+  clicked it and bounced off the slice-060 admin-layout authz gate,
+  losing confidence in the affordance honesty of the chrome. The
+  Sidebar component (`web/components/shell/sidebar.tsx`) is now an
+  async server component that fetches the slice-130 BFF
+  `/api/admin/me` and filters the `/admin` item out of the nav list
+  when `shouldShowAdminEntry(body)` returns false. The predicate
+  lives at `web/lib/admin-nav.ts` (pure logic, 18-case vitest matrix
+  at `web/lib/admin-nav.test.ts`) so the slice-069 no-JSX-rendering
+  constraint is honored; the predicate admits on `is_admin === true`
+  OR `roles[]` containing any of `admin` / `super_admin` /
+  `tenant_admin`. P0-186-1: the server-side authz gate at
+  `web/app/admin/layout.tsx` is unchanged — this is UI chrome only.
+  P0-186-4: fetch failure / empty body / non-200 / missing `roles`
+  field collapses to "hide the Admin entry" (fail-closed). The
+  Playwright spec `web/e2e/admin-bootstrap.spec.ts` gains two new
+  quarantined assertions (admin bearer sees the entry; non-admin
+  bearer does not) — both unlock when the slice-082 seed-data
+  harness lands TEST_ADMIN_BEARER + TEST_VIEWER_BEARER fixtures.
+  Resolves slice 178 first-pass audit finding F-178-6.
+
 - **slice 185** — UI honesty fix (F-178-5 closure): `/risks` row-click
   previously routed to `/risks/hierarchy?focus=<id>` as a "no 404"
   stand-in for a per-risk detail page that does not yet exist. That
