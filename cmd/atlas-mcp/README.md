@@ -1,13 +1,21 @@
 # atlas-mcp
 
 Model Context Protocol (MCP) server for security-atlas — stdio transport,
-six read-only tools that wrap the platform's existing HTTP API.
+six read-only tools (slice 172) plus five write tools (slice 173) that
+wrap the platform's existing HTTP API.
 
-**Status: EXPERIMENTAL (slice 172).** The tool surface, input schemas,
-and response shapes are subject to change while the surface is in
-30-day soak (per the slice 116 advisory-vs-required pattern). Pin your
+**Status: EXPERIMENTAL (slices 172 + 173).** The tool surface, input
+schemas, and response shapes are subject to change while the surface is
+in 30-day soak (per the slice 116 advisory-vs-required pattern). Pin your
 MCP client config to a specific `atlas-mcp` version while the surface
 stabilizes.
+
+**Write tools require HITL approval.** Every write tool files a proposal
+at `state='ai_proposed'`; no audit-binding artifact is published until
+an authorized approver calls `confirm_write` (or clicks Approve in the
+web UI). The schema-level CHECK constraint `mcp_wp_ai_assist_invariant`
+guarantees this contract at the database layer. See
+`docs/audit-log/173-mcp-write-tools-decisions.md` for the full design.
 
 ## What it does
 
@@ -17,10 +25,12 @@ client (Claude Desktop, Claude Code, or any other MCP-aware tool)
 launches it as a subprocess, passes credentials via env, and consumes
 JSON-RPC responses from stdout.
 
-The six tools all wrap existing security-atlas HTTP endpoints; nothing
-new is created at the platform layer. RLS-based tenant isolation is
-enforced by the platform; the MCP server is a 1-tenant-per-process
-veneer over that surface.
+All eleven tools wrap existing security-atlas HTTP endpoints; nothing
+new is mutated at the platform layer without a corresponding handler.
+RLS-based tenant isolation is enforced by the platform; the MCP server
+is a 1-tenant-per-process veneer over that surface.
+
+### Read tools (slice 172)
 
 | Tool                 | Wraps endpoint                                              | Returns                                                   |
 | -------------------- | ----------------------------------------------------------- | --------------------------------------------------------- |
@@ -34,6 +44,40 @@ veneer over that surface.
 Defaults: every list tool returns up to 100 results; pass `limit=N`
 (max 500) to override. Asking for more than 500 returns a tool error
 (P0-A9 — no "give me all" footgun).
+
+### Write tools (slice 173 — HITL approval, Pattern A draft-then-confirm)
+
+| Tool                    | Wraps endpoint                              | Effect                                                                |
+| ----------------------- | ------------------------------------------- | --------------------------------------------------------------------- |
+| `create_risk`           | `POST /v1/mcp/write-proposals`              | Files a draft risk; state=`ai_proposed`                               |
+| `update_control_state`  | `POST /v1/mcp/write-proposals`              | Files a draft control-state override (synthesised as evidence)        |
+| `push_evidence`         | `POST /v1/mcp/write-proposals`              | Files a draft evidence record append                                  |
+| `update_risk_treatment` | `POST /v1/mcp/write-proposals`              | Files a draft treatment + owner change                                |
+| `confirm_write`         | `POST /v1/mcp/write-proposals/{id}/confirm` | Approver-only: flips state to `applied`; the Applier writes canonical |
+
+**HITL flow.** Write tools NEVER commit to the canonical tables directly.
+Each write inserts a row into `mcp_write_proposals` with `state=
+'ai_proposed', ai_assisted=true, human_approved=false, human_approver=
+NULL`. An authorized approver (the operator's `IsApprover` or `IsAdmin`
+credential) confirms via either (a) the `confirm_write` MCP tool or
+(b) the web-UI Approve button. The platform then runs the canonical
+Applier inside the same transaction as the state flip; a failure rolls
+the proposal back to `ai_proposed`.
+
+**Schema-level enforcement.** The CHECK constraint
+`mcp_wp_ai_assist_invariant` blocks any row that claims `ai_assisted=true
+AND human_approved=true` without `human_approver` set. This is the
+database-level peer to CLAUDE.md's "AI-assist boundary (hard)".
+
+**User-Agent.** Write tools send `User-Agent: atlas-mcp/<version> (mcp;
+ai_assisted=write)` — distinct from the read tools'
+`atlas-mcp/<version> (mcp; ai_assisted=read-only)`. Platform-side audit
+aggregators distinguish the two.
+
+**Pending-cap.** Each (tenant, operator) credential may have at most 5
+proposals at `state=ai_proposed` at once. A sixth proposal returns a
+`429 Too Many Requests` tool error; the operator must confirm or reject
+existing proposals before filing more.
 
 ## Install
 
@@ -61,6 +105,13 @@ leak the token to any process on the host (P0-A1).
 ```bash
 export ATLAS_BEARER_TOKEN="<your-bearer-token>"
 export ATLAS_BASE_URL="https://atlas.example.com"   # defaults to http://localhost:8080
+
+# Slice 173 — write tool AI provenance (optional; defaults are placeholders).
+# Operators running a local Ollama model set these to the model tag + a
+# version string the audit log can reference. The write tool stores the
+# (name, version) pair on every proposal it files.
+export ATLAS_MCP_AI_MODEL_NAME="llama3.1:8b-instruct-q5"
+export ATLAS_MCP_AI_MODEL_VERSION="2026-05-01"
 atlas-mcp
 ```
 

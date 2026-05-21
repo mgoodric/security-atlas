@@ -21,6 +21,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -42,10 +43,16 @@ import (
 //
 //  1. grep for `atlas-mcp/` to find MCP-originated traffic
 //  2. grep for `(mcp; ai_assisted=read-only)` to scope to read tools
+//  3. grep for `(mcp; ai_assisted=write)` to scope to write tools (slice 173)
 //
-// Slice 173 will use a sibling template with `ai_assisted=write` so
-// reads and writes are distinguishable in aggregator dashboards.
+// Slice 173 added the write template; the read template stays unchanged.
 const UserAgentTemplate = "atlas-mcp/%s (mcp; ai_assisted=read-only)"
+
+// UserAgentWriteTemplate is the slice-173 sibling for write tools. Write
+// tools file proposals (HITL approval) rather than committing directly,
+// so the User-Agent makes that distinction visible in platform-side
+// audit aggregations.
+const UserAgentWriteTemplate = "atlas-mcp/%s (mcp; ai_assisted=write)"
 
 // MaxResponseBytes caps a single HTTP response read. A platform endpoint
 // returning more is a contract violation that surfaces as an error.
@@ -58,10 +65,11 @@ const DefaultTimeout = 30 * time.Second
 // Client is the HTTP client every tool uses to call the platform API.
 // Construct once at process start; share across tool invocations.
 type Client struct {
-	baseURL    *url.URL
-	bearer     string
-	userAgent  string
-	httpClient *http.Client
+	baseURL        *url.URL
+	bearer         string
+	userAgent      string
+	writeUserAgent string
+	httpClient     *http.Client
 }
 
 // NewClient constructs a Client. baseURL must parse to a valid http or
@@ -85,9 +93,10 @@ func NewClient(baseURL, bearer, version string) (*Client, error) {
 		version = "dev"
 	}
 	return &Client{
-		baseURL:   u,
-		bearer:    bearer,
-		userAgent: fmt.Sprintf(UserAgentTemplate, version),
+		baseURL:        u,
+		bearer:         bearer,
+		userAgent:      fmt.Sprintf(UserAgentTemplate, version),
+		writeUserAgent: fmt.Sprintf(UserAgentWriteTemplate, version),
 		httpClient: &http.Client{
 			Timeout: DefaultTimeout,
 			Transport: &http.Transport{
@@ -108,6 +117,9 @@ func NewClient(baseURL, bearer, version string) (*Client, error) {
 // UserAgent returns the canonical User-Agent string. Exposed so tests
 // can assert P0-A4 compliance without reflecting into the client.
 func (c *Client) UserAgent() string { return c.userAgent }
+
+// WriteUserAgent returns the slice-173 write-tool User-Agent string.
+func (c *Client) WriteUserAgent() string { return c.writeUserAgent }
 
 // Get performs an authenticated GET against the platform. `path` is a
 // route relative to the base URL (e.g., "/v1/controls"); `params` is an
@@ -157,6 +169,74 @@ func (c *Client) Get(ctx context.Context, path string, params url.Values, out an
 	return nil
 }
 
+// PostJSON performs an authenticated POST against the platform with a
+// JSON body. Mirrors Get's contract: `path` is route-relative; `body`
+// is marshalled with encoding/json; the response is unmarshalled into
+// `out` (nil to skip). 429 + Retry-After are surfaced as HTTPError.
+//
+// Slice 173 — write tools dispatch through this method with the write
+// User-Agent.
+func (c *Client) PostJSON(ctx context.Context, path string, body any, out any) error {
+	return c.doJSONBody(ctx, http.MethodPost, path, body, out, c.writeUserAgent)
+}
+
+// doJSONBody is the shared write-shaped HTTP path. Body marshalled to
+// JSON; if body is nil, the request body is empty (Content-Length 0).
+func (c *Client) doJSONBody(ctx context.Context, method, path string, body any, out any, userAgent string) error {
+	if !strings.HasPrefix(path, "/") {
+		return fmt.Errorf("path must start with /: %q", path)
+	}
+	var bodyBytes []byte
+	if body != nil {
+		marshalled, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("marshal body: %w", err)
+		}
+		bodyBytes = marshalled
+	}
+	full := *c.baseURL
+	full.Path = strings.TrimRight(full.Path, "/") + path
+
+	req, err := http.NewRequestWithContext(ctx, method, full.String(), bytesReader(bodyBytes))
+	if err != nil {
+		return fmt.Errorf("new request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.bearer)
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", "application/json")
+	if bodyBytes != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("http %s %s: %w", method, path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body2, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBytes+1))
+	if err != nil {
+		return fmt.Errorf("read body: %w", err)
+	}
+	if int64(len(body2)) > MaxResponseBytes {
+		return fmt.Errorf("response body exceeds %d bytes (P0 cap)", MaxResponseBytes)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return &HTTPError{
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(body2)),
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
+		}
+	}
+	if out == nil {
+		return nil
+	}
+	if err := json.Unmarshal(body2, out); err != nil {
+		return fmt.Errorf("unmarshal response: %w", err)
+	}
+	return nil
+}
+
 // newRequest builds an *http.Request with the User-Agent + bearer header
 // set. Centralizing here ensures no tool can skip P0-A4 / P0-A1's
 // header rules.
@@ -182,6 +262,15 @@ func (c *Client) newRequest(ctx context.Context, method, path string, params url
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "application/json")
 	return req, nil
+}
+
+// bytesReader returns nil for nil input so the http.NewRequest body is
+// truly absent rather than a non-nil zero-length reader.
+func bytesReader(b []byte) io.Reader {
+	if b == nil {
+		return nil
+	}
+	return bytes.NewReader(b)
 }
 
 // HTTPError carries the salient fields of a non-2xx platform response.

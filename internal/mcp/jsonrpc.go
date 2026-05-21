@@ -332,12 +332,19 @@ func errorResp(id json.RawMessage, code int, message string) *rpcResponse {
 
 // CanonicalToolOrder defines the stable order in which `tools/list`
 // returns tools. Match the order documented in cmd/atlas-mcp/README.md
-// and the slice doc's tool surface (D3).
+// and the slice doc's tool surface (D3 / slice 172 + slice 173).
 var CanonicalToolOrder = []string{
+	// Slice 172 — read tools
 	"list_controls",
 	"get_control",
 	"list_risks",
 	"get_risk",
 	"list_evidence",
 	"list_audit_periods",
+	// Slice 173 — write tools (HITL approval)
+	"create_risk",
+	"update_control_state",
+	"push_evidence",
+	"update_risk_treatment",
+	"confirm_write",
 }

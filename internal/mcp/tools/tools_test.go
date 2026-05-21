@@ -326,18 +326,171 @@ func TestListAuditPeriods_StatusEnumValidation(t *testing.T) {
 
 // ===== All() wires correctly =====
 
-func TestAll_WiresSixTools(t *testing.T) {
+func TestAll_WiresSixReadTools(t *testing.T) {
 	t.Parallel()
 
 	client, _ := mcp.NewClient("http://localhost:8080", "test-bearer", "v0.0.0-test")
 	all := tools.All(client)
 	if len(all) != 6 {
-		t.Fatalf("All() = %d tools, want 6 (P0-A10)", len(all))
+		t.Fatalf("All() = %d tools, want 6 read tools (slice 172 P0-A10)", len(all))
 	}
-	// Names must match CanonicalToolOrder exactly.
+	// Read tools are the first six entries of CanonicalToolOrder.
+	for i, want := range mcp.CanonicalToolOrder[:6] {
+		if got := all[i].Definition().Name; got != want {
+			t.Errorf("all[%d] = %q, want %q (CanonicalToolOrder)", i, got, want)
+		}
+	}
+}
+
+// TestAllWithWrites_WiresElevenTools — slice 173 expands the surface to
+// 11 tools (6 reads + 5 writes). Order is fixed by mcp.CanonicalToolOrder.
+func TestAllWithWrites_WiresElevenTools(t *testing.T) {
+	t.Parallel()
+
+	client, _ := mcp.NewClient("http://localhost:8080", "test-bearer", "v0.0.0-test")
+	all := tools.AllWithWrites(client)
+	if len(all) != 11 {
+		t.Fatalf("AllWithWrites() = %d tools, want 11 (6 reads + 5 writes)", len(all))
+	}
 	for i, want := range mcp.CanonicalToolOrder {
 		if got := all[i].Definition().Name; got != want {
 			t.Errorf("all[%d] = %q, want %q (CanonicalToolOrder)", i, got, want)
 		}
 	}
+}
+
+// ===== slice 173 write tools =====
+
+// TestCreateRiskTool_DispatchesToWriteProposals — the write tool POSTs to
+// /v1/mcp/write-proposals with tool_name=create_risk.
+func TestCreateRiskTool_DispatchesToWriteProposals(t *testing.T) {
+	t.Parallel()
+
+	gotPath := ""
+	gotBody := []byte{}
+	client, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotBody, _ = readAll(r)
+		_, _ = fmt.Fprint(w, `{"proposal":{"id":"p1","state":"ai_proposed","tool_name":"create_risk"}}`)
+	})
+	defer srv.Close()
+
+	tool := tools.NewCreateRisk(client)
+	out, err := tool.Handle(context.Background(),
+		json.RawMessage(`{"title":"Test","category":"operational"}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if gotPath != "/v1/mcp/write-proposals" {
+		t.Errorf("path = %q, want /v1/mcp/write-proposals", gotPath)
+	}
+	if !strings.Contains(string(gotBody), `"tool_name":"create_risk"`) {
+		t.Errorf("body missing tool_name=create_risk: %s", gotBody)
+	}
+	if !strings.Contains(string(gotBody), `"ai_model_name"`) {
+		t.Errorf("body missing ai_model_name: %s", gotBody)
+	}
+	p := out.(map[string]any)
+	if p["state"] != "ai_proposed" {
+		t.Errorf("proposal state = %v, want ai_proposed", p["state"])
+	}
+}
+
+// TestWriteTools_UseWriteUserAgent — slice 173 anti-criterion: write
+// tools carry ai_assisted=write in the User-Agent, distinct from reads.
+func TestWriteTools_UseWriteUserAgent(t *testing.T) {
+	t.Parallel()
+
+	gotUA := ""
+	client, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		_, _ = fmt.Fprint(w, `{"proposal":{"id":"p1","state":"ai_proposed"}}`)
+	})
+	defer srv.Close()
+
+	tool := tools.NewCreateRisk(client)
+	_, err := tool.Handle(context.Background(),
+		json.RawMessage(`{"title":"T","category":"c"}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !strings.Contains(gotUA, "ai_assisted=write") {
+		t.Errorf("User-Agent missing ai_assisted=write: %q", gotUA)
+	}
+	if strings.Contains(gotUA, "ai_assisted=read-only") {
+		t.Errorf("User-Agent must not include read-only for write tools: %q", gotUA)
+	}
+}
+
+// TestConfirmWriteTool_PathParam — confirm_write builds the
+// /v1/mcp/write-proposals/{id}/confirm path correctly.
+func TestConfirmWriteTool_PathParam(t *testing.T) {
+	t.Parallel()
+
+	id := "550e8400-e29b-41d4-a716-446655440000"
+	gotPath := ""
+	client, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = fmt.Fprint(w, `{"proposal":{"id":"`+id+`","state":"applied"}}`)
+	})
+	defer srv.Close()
+
+	tool := tools.NewConfirmWrite(client)
+	out, err := tool.Handle(context.Background(),
+		json.RawMessage(`{"proposal_id":"`+id+`"}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	wantPath := "/v1/mcp/write-proposals/" + id + "/confirm"
+	if gotPath != wantPath {
+		t.Errorf("path = %q, want %q", gotPath, wantPath)
+	}
+	p := out.(map[string]any)
+	if p["state"] != "applied" {
+		t.Errorf("state = %v, want applied", p["state"])
+	}
+}
+
+// TestConfirmWriteTool_RequiresUUID — defense-in-depth: a non-UUID
+// proposal_id is rejected before round-tripping.
+func TestConfirmWriteTool_RequiresUUID(t *testing.T) {
+	t.Parallel()
+
+	client, srv := newTestClient(t, func(http.ResponseWriter, *http.Request) {
+		t.Errorf("HTTP should not be hit on bad UUID")
+	})
+	defer srv.Close()
+
+	tool := tools.NewConfirmWrite(client)
+	_, err := tool.Handle(context.Background(), json.RawMessage(`{"proposal_id":"not-uuid"}`))
+	if err == nil || !strings.Contains(err.Error(), "must be a UUID") {
+		t.Errorf("expected UUID error, got: %v", err)
+	}
+}
+
+// TestPushEvidenceTool_RequiresFields — the input schema declares
+// control_id+kind+result required; an empty arg list errors.
+func TestPushEvidenceTool_RequiresFields(t *testing.T) {
+	t.Parallel()
+
+	client, srv := newTestClient(t, func(http.ResponseWriter, *http.Request) {
+		t.Errorf("HTTP should not be hit on empty input")
+	})
+	defer srv.Close()
+
+	tool := tools.NewPushEvidence(client)
+	_, err := tool.Handle(context.Background(), json.RawMessage(``))
+	if err == nil || !strings.Contains(err.Error(), "requires arguments") {
+		t.Errorf("expected requires-arguments error, got: %v", err)
+	}
+}
+
+// readAll is a tiny helper so the import set stays small.
+func readAll(r *http.Request) ([]byte, error) {
+	buf := make([]byte, r.ContentLength)
+	if r.ContentLength <= 0 {
+		return nil, nil
+	}
+	_, err := r.Body.Read(buf)
+	return buf, err
 }

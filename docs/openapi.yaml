@@ -73,6 +73,7 @@ tags:
   - name: framework-scopes
   - name: frameworks
   - name: install
+  - name: mcp
   - name: me
   - name: policies
   - name: questionnaires
@@ -1957,6 +1958,93 @@ paths:
       operationId: post-v1-install-mark-first-signin
       security:
         - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mcp/write-proposals:
+    get:
+      summary: GET /v1/mcp/write-proposals
+      tags: [mcp]
+      operationId: get-v1-mcp-write-proposals
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/mcp/write-proposals
+      tags: [mcp]
+      operationId: post-v1-mcp-write-proposals
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mcp/write-proposals/{id}:
+    get:
+      summary: GET /v1/mcp/write-proposals/{id}
+      tags: [mcp]
+      operationId: get-v1-mcp-write-proposals-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mcp/write-proposals/{id}/confirm:
+    post:
+      summary: POST /v1/mcp/write-proposals/{id}/confirm
+      tags: [mcp]
+      operationId: post-v1-mcp-write-proposals-id-confirm
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mcp/write-proposals/{id}/reject:
+    post:
+      summary: POST /v1/mcp/write-proposals/{id}/reject
+      tags: [mcp]
+      operationId: post-v1-mcp-write-proposals-id-reject
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         default:
           description: Default response envelope.

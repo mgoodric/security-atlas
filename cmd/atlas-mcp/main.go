@@ -60,8 +60,10 @@ var (
 
 // Env-var names. Centralized so the README + tests reference one place.
 const (
-	envBearer = "ATLAS_BEARER_TOKEN"
-	envURL    = "ATLAS_BASE_URL"
+	envBearer      = "ATLAS_BEARER_TOKEN"
+	envURL         = "ATLAS_BASE_URL"
+	envAIModelName = "ATLAS_MCP_AI_MODEL_NAME"
+	envAIModelVer  = "ATLAS_MCP_AI_MODEL_VERSION"
 )
 
 func main() {
@@ -112,7 +114,26 @@ func run(args []string, stdin *os.File, stdout, stderr *os.File) (int, error) {
 		return 2, fmt.Errorf("init client: %w", err)
 	}
 
-	toolset := tools.All(client)
+	// Slice 173: AI provenance for write tools. Each write proposal
+	// stores the model identity verbatim; ATLAS_MCP_AI_MODEL_NAME +
+	// ATLAS_MCP_AI_MODEL_VERSION override the defaults baked into
+	// internal/mcp/tools/writes.go. Operators running a local Ollama
+	// model set these to the model tag (e.g., "llama3.1:8b-instruct-q5"
+	// and the release date).
+	if v := strings.TrimSpace(os.Getenv(envAIModelName)); v != "" {
+		tools.AIModelName = v
+	}
+	if v := strings.TrimSpace(os.Getenv(envAIModelVer)); v != "" {
+		tools.AIModelVersion = v
+	}
+
+	// Slice 173: tools.AllWithWrites returns the slice-172 read tools
+	// plus the slice-173 write tools (create_risk, update_control_state,
+	// push_evidence, update_risk_treatment, confirm_write). The write
+	// tools never commit directly — they file a proposal at state=
+	// ai_proposed and an operator confirms via confirm_write or the
+	// web UI.
+	toolset := tools.AllWithWrites(client)
 	logEnv := newStderrLogger(stderr)
 
 	// Wrap each tool with the P0-A7 one-line stderr envelope. The
