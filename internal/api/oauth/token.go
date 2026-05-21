@@ -48,6 +48,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
+	"github.com/mgoodric/security-atlas/internal/auth/oauthcode"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -56,6 +57,10 @@ import (
 const (
 	GrantTypeClientCredentials = "client_credentials"
 	GrantTypeTokenExchange     = "urn:ietf:params:oauth:grant-type:token-exchange"
+	// GrantTypeAuthorizationCode is the RFC 6749 §4.1 grant — added
+	// by slice 189 to redeem `oauth_auth_codes` rows minted by the
+	// authorize endpoint.
+	GrantTypeAuthorizationCode = "authorization_code"
 
 	// Subject token type for RFC 8693 — atlas accepts JWT subject
 	// tokens only in v1. Future-slice work can add SAML2 / etc.
@@ -90,6 +95,7 @@ const (
 type TokenEndpoint struct {
 	signer    *tokensign.Signer
 	clients   *oauthclient.Store
+	codes     *oauthcode.Store // slice 189 — wired via AttachAuthCodeStore
 	issuer    string
 	auditPool *pgxpool.Pool
 	limiter   *tokenBucketLimiter
@@ -177,6 +183,8 @@ func (t *TokenEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		t.handleClientCredentials(w, r)
 	case GrantTypeTokenExchange:
 		t.handleTokenExchange(w, r)
+	case GrantTypeAuthorizationCode:
+		t.handleAuthorizationCode(w, r)
 	case "":
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "grant_type is required")
 	default:

@@ -65,10 +65,17 @@ type Config struct {
 // dispatches to client-credentials + token-exchange handlers instead
 // of returning a 501 stub, and the discovery document advertises the
 // supported grant types.
+//
+// Slice 189 added an optional authorize endpoint: when
+// AttachAuthorizeEndpoint is called with a non-nil AuthorizeEndpoint,
+// the `/oauth/authorize` route serves the real handler (vs the 501
+// stub) and the discovery document gains `authorization_code` in
+// grant_types_supported.
 type Handler struct {
 	store        keystore.KeyStore
 	cfg          Config
 	tokenEP      *TokenEndpoint
+	authorizeEP  *AuthorizeEndpoint
 	discoveryDoc []byte
 }
 
@@ -95,13 +102,29 @@ func (h *Handler) AttachTokenEndpoint(ep *TokenEndpoint) {
 	h.rebuildDiscovery()
 }
 
+// AttachAuthorizeEndpoint wires the slice-189 authorize handler and
+// regenerates the discovery document so `authorization_code` joins
+// grant_types_supported. Optional — when nil, the `/oauth/authorize`
+// route stays a 501 stub.
+func (h *Handler) AttachAuthorizeEndpoint(ep *AuthorizeEndpoint) {
+	h.authorizeEP = ep
+	h.rebuildDiscovery()
+}
+
 // rebuildDiscovery snapshots the current grant-type state into the
-// pre-marshaled discovery JSON. Called from New and from
-// AttachTokenEndpoint.
+// pre-marshaled discovery JSON. Called from New, AttachTokenEndpoint,
+// and AttachAuthorizeEndpoint.
 func (h *Handler) rebuildDiscovery() {
 	grantTypes := []string{}
 	if h.tokenEP != nil {
-		grantTypes = []string{GrantTypeClientCredentials, GrantTypeTokenExchange}
+		grantTypes = append(grantTypes, GrantTypeClientCredentials, GrantTypeTokenExchange)
+		// Slice 189: the authorization_code grant lights up when BOTH
+		// the token endpoint is wired AND the authorize endpoint has
+		// been attached. Advertising the grant without the matching
+		// authorize route would be dishonest to clients.
+		if h.authorizeEP != nil {
+			grantTypes = append(grantTypes, GrantTypeAuthorizationCode)
+		}
 	}
 	doc, err := json.Marshal(discoveryDocument(h.cfg.Issuer, grantTypes))
 	if err != nil {
@@ -126,7 +149,11 @@ func (h *Handler) Mount(r chi.Router) {
 	} else {
 		r.Post(PathToken, stubHandler("188"))
 	}
-	r.Get(PathAuthorize, stubHandler("189"))
+	if h.authorizeEP != nil {
+		r.Get(PathAuthorize, h.authorizeEP.ServeHTTP)
+	} else {
+		r.Get(PathAuthorize, stubHandler("189"))
+	}
 	r.Post(PathRevoke, stubHandler("190"))
 	r.Post(PathIntrospect, stubHandler("190"))
 }
