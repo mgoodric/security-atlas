@@ -38,24 +38,30 @@ Slice 187 ships the **scaffolding** of the OAuth Authorization Server — the cr
 ## Threat model
 
 **S — Spoofing.** A malicious caller forges a JWT claiming arbitrary identity / tenant.
+
 - Mitigation: every JWT carries an `iss` claim matching the atlas instance URL + is signed with the private key. JWKS serves only the public-key half. Forgery requires the private key.
 - The keystore is filesystem-backed; OS-level file permissions are the trust root (mode 0600, owned by the atlas binary's run user).
 - Threat: filesystem keystore is read by another process on the same host. Mitigation: container/k8s deployment with the keystore mounted from a Secret; self-host deploys document the file-permissions baseline in `docs/RELEASE_READINESS.md` and CONTRIBUTING.
 
 **T — Tampering.** A forwarded JWT is mutated by an intermediary.
+
 - Mitigation: JWT signature validation rejects any mutation. Standard.
 
 **R — Repudiation.** JWT issuance + validation needs to be logged for forensic recoverability.
+
 - Slice 187 doesn't issue tokens (that's 188) but ships the keystore. Mitigation: keystore reads are logged at INFO; key rotation events logged at WARN.
 
 **I — Information disclosure.** Private signing key leaked via filesystem, debug logs, or backup.
+
 - Mitigations: keystore file mode 0600; key material never logged (only key IDs); explicit `.gitignore` entries for the keystore path; CI integration test asserts no key bytes appear in logs or git history.
 
 **D — Denial of service.** JWKS endpoint hammered to generate signing-key load.
+
 - JWKS is read-only public-key material; serving it is `O(1)` and key load is zero (no signing on read). Standard caching headers (Cache-Control: max-age=3600, ETag).
 - OIDC discovery doc same shape.
 
 **E — Elevation of privilege.** A caller induces the AS to mint a token with elevated claims.
+
 - Slice 187 doesn't have a token endpoint — no minting surface yet. Subsequent slices honor the elevation guards.
 
 **Verdict.** `has-mitigations` — filesystem keystore is the load-bearing trust root; document the file-permissions baseline; CI pins key material absence from logs + git.
