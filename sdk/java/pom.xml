@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  security-atlas Java SDK.
+
+  Slice 195 ships this module — the Java port of slice 191's OAuth
+  client_credentials helper. Companion to the Go SDK
+  (`pkg/sdk-go/oauth/`), Python SDK (`sdk/python/pyatlas/oauth.py`),
+  and TypeScript SDK (`sdk/typescript/src/oauth.ts`).
+
+  Discipline:
+    - Java 17 LTS baseline (matches modern JDK floor).
+    - Zero runtime dependencies — only `java.net.http.HttpClient`
+      from the JDK and a small hand-rolled JSON reader.
+    - JUnit 5 (junit-jupiter 5.10.x) test-scoped only.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.security-atlas</groupId>
+  <artifactId>atlas-sdk</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <name>security-atlas Java SDK</name>
+  <description>OAuth 2.0 client_credentials helper for security-atlas.</description>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <junit.jupiter.version>5.10.2</junit.jupiter.version>
+    <maven.surefire.version>3.2.5</maven.surefire.version>
+  </properties>
+
+  <dependencies>
+    <!--
+      JUnit 5 (Jupiter API + Engine). Test-scoped — never on the
+      runtime classpath of consumers. Slice 195 P0-195-2 + AC-5
+      forbid runtime dependencies; this is the only allowed dep.
+    -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.jupiter.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>${maven.surefire.version}</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>
