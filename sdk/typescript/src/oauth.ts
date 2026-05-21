@@ -115,7 +115,6 @@ interface TokenResponse {
 export class OAuthClient {
   private readonly clientId: string;
   private readonly clientSecret: string;
-  private readonly issuerUrl: string;
   private readonly audience?: string;
   private readonly refreshLeewayMs: number;
   private readonly httpTimeoutMs: number;
@@ -139,7 +138,6 @@ export class OAuthClient {
     }
     this.clientId = opts.clientId;
     this.clientSecret = opts.clientSecret;
-    this.issuerUrl = opts.issuerUrl;
     this.audience = opts.audience;
     this.refreshLeewayMs = opts.refreshLeewayMs ?? DEFAULT_REFRESH_LEEWAY_MS;
     this.httpTimeoutMs = opts.httpTimeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS;
