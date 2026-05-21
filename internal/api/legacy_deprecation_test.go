@@ -11,10 +11,15 @@ import (
 // legacyTokenForTest constructs a string with the prefix the slice 191
 // 410 responder detects, without ever appearing in source as a literal
 // "atlas_<bytes>" form. This avoids tripping GitGuardian's prefix-based
-// secret scanner while still exercising the production code path
-// (which keys solely on the prefix).
+// secret scanner while still exercising the production code path.
+//
+// The 410 responder fires on `atlas_` prefix EXCEPT for the
+// `atlas_test_` integration-test prefix (slice 191 partial-cutover
+// compromise — see internal/api/httpserver.go legacyBearerDeprecation
+// for the carve-out). To exercise the 410 path, we MUST use a value
+// that starts "atlas_" but NOT "atlas_test_".
 func legacyTokenForTest(suffix string) string {
-	return "atl" + "as_" + suffix
+	return "atl" + "as_prod_" + suffix
 }
 
 // TestLegacyBearerDeprecation_410OnLegacyPrefix is the load-bearing
@@ -90,6 +95,25 @@ func TestLegacyBearerDeprecation_PassesNoAuth(t *testing.T) {
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 	if !called {
 		t.Fatal("no-auth request should fall through")
+	}
+}
+
+// TestLegacyBearerDeprecation_PassesAtlasTestPrefix is the partial-
+// cutover carve-out: `atlas_test_` integration-test bearers MUST
+// fall through to the legacy bearer middleware so the existing
+// integration test suite continues to pass. Slice 197 spillover
+// removes this carve-out when test fixtures migrate to JWT.
+func TestLegacyBearerDeprecation_PassesAtlasTestPrefix(t *testing.T) {
+	mw := legacyBearerDeprecation("https://atlas/docs/migration/oauth")
+	called := false
+	handler := mw(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		called = true
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/v1/anything", nil)
+	req.Header.Set("Authorization", "Bearer "+"atl"+"as_test_"+"integration_fixture")
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+	if !called {
+		t.Fatal("atlas_test_ prefix should fall through to legacy middleware")
 	}
 }
 

@@ -138,26 +138,48 @@ even if a future operator wants client-side aggression.
 
 **Confidence**: high. RFC default; broad ecosystem precedent.
 
-## Cutover-order verification (P0-191-11)
+## Cutover-order verification (P0-191-11) — PARTIAL CUTOVER
 
-The cutover commit (the single commit containing the
-`internal/api/httpserver.go` change) adds the
-`legacyBearerDeprecation` middleware to the chain BEFORE
-removing the `httpAuthMiddlewareWithExemptions` call. The diff
-order matches the production-safe order:
+**Strict reading of P0-191-11 was NOT achieved in this slice.**
+Slice 191's PR-time CI (Go · integration (Postgres RLS)) caught a
+cascade: ~60 integration tests across multiple
+`internal/api/*/integration_test.go` files issue slice-034 bearers
+via `credstore.Issue()` in fixtures and expect them to
+authenticate. Removing the `httpAuthMiddlewareWithExemptions`
+mount breaks every one of those tests.
+
+The pragmatic compromise (decided at PR-review time after CI red):
 
 ```
-+ root.Use(legacyBearerDeprecation(...))    // ADDED first
++ root.Use(legacyBearerDeprecation(...))    // ADDED — 410s `atlas_` PROD bearers
   ... (slice 190 JWT middleware unchanged) ...
-- root.Use(httpAuthMiddlewareWithExemptions(...))   // REMOVED in same commit
+  root.Use(httpAuthMiddlewareWithExemptions(...))   // KEPT (was set to be removed)
 ```
 
-A reverse-order deploy would open an auth-bypass window: the
-JWT middleware passes through non-JWT bearers, the legacy
-middleware is gone, and handlers without per-handler auth would
-serve unauthenticated requests until the new mount is in place.
-The single-commit cutover with add-before-remove eliminates that
-window.
+The `legacyBearerDeprecation` responder fires on `atlas_` prefix
+EXCEPT for `atlas_test_` (the integration-test prefix from
+`bearer.PrefixTest`). Real production legacy api*keys
+(`atlas-cli credentials issue` output uses `atlas*` PROD prefix)
+get 410 + migration_url. Test fixtures fall through to the slice
+034 middleware and continue to work.
+
+This honors P0-191-3 (migration URL in body), P0-191-10 (no JWT
+enforcement on /oauth/_ or /.well-known/_), and the SPIRIT of
+P0-191-11 (production legacy bearers cannot reach handlers).
+P0-191-11's strict letter ("middleware mount REMOVED") is
+deferred to slice 197.
+
+**Spillover: slice 197** files the full retirement work — migrate
+every integration test fixture to JWT, then remove the legacy
+mount + the `atlas_test_` carve-out. Filed at
+`docs/issues/197-complete-slice-034-bearer-retirement.md`.
+
+**Why ship partial vs. revert:** the OAuth surfaces, SDKs, CLI,
+410 responder for production bearers, RFC 8628 device-code flow,
+and `atlas oauth migrate-api-key` are all complete and load-bearing
+on their own. Reverting them to fix a test-fixture scope miss
+would forfeit weeks of work. The partial cutover gives operators
+the migration path now; slice 197 closes the test-fixture loop next.
 
 ## Migration URL in body (P0-191-3)
 

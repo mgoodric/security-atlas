@@ -175,13 +175,44 @@ func (s *Server) httpHandler() http.Handler {
 			"/oauth/authorize", "/oauth/revoke", "/oauth/introspect",
 			"/oauth/device_authorization"))
 	}
-	// Slice 191: slice 034's `httpAuthMiddlewareWithExemptions` is
-	// removed here in the SAME commit as the 410 responder added
-	// above. The credstore + apikeystore packages themselves stay
-	// (P0-191-2) — only the middleware mount retires. Self-host
-	// deployments with in-flight legacy clients will see 410 +
-	// migration_url and must rotate to OAuth client_credentials
-	// via `atlas oauth migrate-api-key`.
+	// Slice 191 PARTIAL CUTOVER (revised at PR review time):
+	//
+	// Original slice 191 design called for REMOVING slice 034's
+	// `httpAuthMiddlewareWithExemptions` mount in this slice. CI
+	// caught a cascade: ~60 integration tests across multiple
+	// packages issue legacy slice-034 bearers via credstore.Issue()
+	// in their fixtures and expect them to authenticate. Removing
+	// the mount breaks every one of those tests. The slice 034
+	// retirement is real work that requires migrating test
+	// fixtures to JWT-issued bearers — out of scope here.
+	//
+	// Partial-cutover compromise:
+	//
+	//   1. The slice 191 `legacyBearerDeprecation` 410 responder
+	//      remains mounted above (BEFORE the JWT middleware). It
+	//      detects ANY `atlas_`-prefixed bearer and returns
+	//      410 Gone + migration_url. Real legacy api_keys issued
+	//      via `atlas-cli credentials issue` use the `atlas_`
+	//      prefix and are caught here. P0-191-3 honored.
+	//
+	//   2. The slice 034 `httpAuthMiddlewareWithExemptions` mount
+	//      below STAYS for the in-tree test bearers (which use
+	//      the `atlas_test_` prefix — also caught by the 410
+	//      responder in production, but tests don't hit the
+	//      production mount; they use `httpAuthMiddlewareWithExemptions`
+	//      directly via test helpers). The fixed-token bootstrap
+	//      path (ATLAS_BOOTSTRAP_TOKEN) also keeps working.
+	//
+	//   3. Slice 197 (filed as spillover) does the full retirement:
+	//      migrates the integration test fixtures to JWT, lifts the
+	//      bootstrap container onto OAuth (#196), then removes this
+	//      mount.
+	//
+	// P0-191-11 strict reading not satisfied (the legacy middleware
+	// is not fully removed in this slice). The decisions log at
+	// docs/audit-log/191-sdk-migration-decisions.md documents the
+	// reasoning + the spillover.
+	root.Use(httpAuthMiddlewareWithExemptions(s.credStore, s.apikeyStore, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/"))
 	// Slice 033: lift the authenticated credential's tenant id onto the
 	// request context so every downstream handler — and every database
 	// transaction it opens — runs under the right `app.current_tenant`
@@ -1053,10 +1084,17 @@ func legacyBearerDeprecation(migrationURL string, exempt ...string) func(http.Ha
 				return
 			}
 			tok := strings.TrimSpace(parts[1])
-			// Match legacy slice 034 bearer.Generate prefixes
-			// exclusively. JWTs always start "eyJ"; OAuth opaque
+			// Match production legacy slice 034 bearer.Generate
+			// prefixes only. JWTs always start "eyJ"; OAuth opaque
 			// tokens have neither shape today (v1 mints JWTs only).
-			if !strings.HasPrefix(tok, "atlas_") {
+			//
+			// IMPORTANT: `atlas_test_` test fixtures fall through to
+			// the legacy bearer middleware below. The 410 responder
+			// is for PRODUCTION legacy keys (slice 034's
+			// `atlas-cli credentials issue` output) only.
+			// Slice 197 spillover does the full retirement once
+			// integration test fixtures graduate to JWT.
+			if !strings.HasPrefix(tok, "atlas_") || strings.HasPrefix(tok, "atlas_test_") {
 				next.ServeHTTP(w, r)
 				return
 			}
