@@ -819,6 +819,17 @@ type AggregationRuleEvaluation struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type AnswerLibrary struct {
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	ScfAnchorID    string             `json:"scf_anchor_id"`
+	CanonicalText  string             `json:"canonical_text"`
+	SourceLabel    string             `json:"source_label"`
+	SourceAnswerID pgtype.UUID        `json:"source_answer_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ApiKey struct {
 	ID             pgtype.UUID        `json:"id"`
 	TenantID       pgtype.UUID        `json:"tenant_id"`
@@ -1443,6 +1454,44 @@ type Population struct {
 	CreatedBy       string             `json:"created_by"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	AuditPeriodID   pgtype.UUID        `json:"audit_period_id"`
+}
+
+type Questionnaire struct {
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	Name           string             `json:"name"`
+	SourceLabel    string             `json:"source_label"`
+	SourceFilename string             `json:"source_filename"`
+	Status         string             `json:"status"`
+	Notes          string             `json:"notes"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type QuestionnaireAnswer struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	QuestionID  pgtype.UUID        `json:"question_id"`
+	AnswerValue string             `json:"answer_value"`
+	Narrative   string             `json:"narrative"`
+	Citations   []byte             `json:"citations"`
+	AuthoredBy  string             `json:"authored_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type QuestionnaireQuestion struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	QuestionnaireID pgtype.UUID        `json:"questionnaire_id"`
+	Code            string             `json:"code"`
+	Text            string             `json:"text"`
+	Domain          string             `json:"domain"`
+	AnswerType      string             `json:"answer_type"`
+	ScfAnchorID     *string            `json:"scf_anchor_id"`
+	SortOrder       int32              `json:"sort_order"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Risk struct {

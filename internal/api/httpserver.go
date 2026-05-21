@@ -45,6 +45,7 @@ import (
 	oscalexportapi "github.com/mgoodric/security-atlas/internal/api/oscalexport"
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	policyacksapi "github.com/mgoodric/security-atlas/internal/api/policyacks"
+	questionnairesapi "github.com/mgoodric/security-atlas/internal/api/questionnaires"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
@@ -77,6 +78,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/policy"
+	"github.com/mgoodric/security-atlas/internal/questionnaire"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
 	"github.com/mgoodric/security-atlas/internal/scope"
@@ -702,6 +704,17 @@ func (s *Server) httpHandler() http.Handler {
 	boardPackGen := board.NewPackGenerator(boardPackStore, freshnessStore, driftStore)
 	boardPackH := boardapi.NewPack(boardPackGen, boardPackStore)
 	boardPackH.RegisterRoutes(root)
+	// Slice 155: questionnaire tracer-bullet — Excel import + manual
+	// authoring + AnswerLibrary skeleton (SCF-anchor keyed) + PDF export.
+	// Routes appended per the parallel-batch convention (chi rejects two
+	// Mounts at "/"). Tenant scoping enforced by RLS via the Store; the
+	// PDF render reuses the chromedp pattern established by
+	// internal/board/pdf.go (slice 022/027/137 precedent — zero new
+	// go.mod dependency for PDF). NO AI-assist at v1 — the AnswerLibrary
+	// suggestion path is a deterministic SCF-anchor lookup, not inference.
+	questionnaireStore := questionnaire.NewStore(s.dbPool)
+	questionnairesH := questionnairesapi.New(questionnaireStore)
+	questionnairesH.RegisterRoutes(root)
 	// Slice 034: admin credentials HTTP API + auth routes. Routes append
 	// per the parallel-batch convention. Admin-credential routes require
 	// the bearer auth middleware (admin gate inside the handler). The
