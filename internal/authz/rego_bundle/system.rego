@@ -30,3 +30,32 @@ allow if {
     input.user.attrs.is_machine_actor == true
     has_role("grc_engineer")
 }
+
+# Slice 196 — atlas-bootstrap container OAuth migration. The one-shot
+# bootstrap container drives `atlas-cli controls upload` via an OAuth
+# client_credentials JWT (slice 188). That JWT has no per-tenant role
+# bindings (slice 188's handleClientCredentials emits an empty Roles map
+# and SuperAdmin=false on purpose), so the human-RBAC rules cannot
+# admit it. The pre-slice-196 bootstrap path sidestepped this by
+# minting an IsAdmin=true fixed-token credential via
+# IssueBootstrapFixedAdminCredential; this carve-out is the symmetric
+# OPA admit for the new OAuth flow.
+#
+# The rule is scoped THREE ways to keep the surface narrow:
+#   - action == "upload-bundle"     — only the slice-037 upload path;
+#                                     does not grant general controls writes.
+#   - resource.type == "controls"   — does not grant uploads to any other
+#                                     resource type.
+#   - is_machine_actor == true      — does not admit any human caller
+#                                     (which would let an
+#                                     authenticated-but-role-less user
+#                                     upload bundles).
+#
+# Pair this rule with the slice-196 widening of is_machine_actor in
+# internal/authz/input.go which adds `oauth_client:` to the recognised
+# machine-actor UserID prefixes.
+allow if {
+    input.action == "upload-bundle"
+    input.resource.type == "controls"
+    input.user.attrs.is_machine_actor == true
+}

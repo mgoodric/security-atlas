@@ -29,9 +29,17 @@
 #   DATABASE_URL                 atlas_migrate connection string (BYPASSRLS)
 #   ATLAS_HTTP_URL               e.g. http://atlas:8080
 #   ATLAS_BOOTSTRAP_TENANT       default tenant UUID
-#   ATLAS_BOOTSTRAP_TOKEN        pre-shared admin token (matches atlas env)
 #   ATLAS_DEFAULT_USER_EMAIL     default local sign-in email
 #   ATLAS_DEFAULT_USER_PASSWORD  default local sign-in password
+#
+# Slice 196: ATLAS_BOOTSTRAP_TOKEN is no longer consumed by this script.
+# Phase 6 issues an OAuth client at runtime via `atlas-cli oauth
+# issue-client`, persists credentials to
+# ${ATLAS_DATA_DIR}/oauth-bootstrap-credentials.json (mode 0600), and
+# drives `atlas-cli controls upload --client-id ... --client-secret ...`.
+# The atlas service still consumes ATLAS_BOOTSTRAP_TOKEN to mint the
+# slice-037 fixed-token admin credential (AC-4 transitional — keeps
+# the legacy operator path warm; spillover slice will retire it).
 #
 # This script connects to Postgres as atlas_migrate (BYPASSRLS) — the only
 # context allowed to write across the RLS boundary during bootstrap.
@@ -150,14 +158,90 @@ until wget -q -O /dev/null "$ATLAS_HTTP_URL/health" 2>/dev/null; do
 done
 log "atlas /health is up"
 
-# ----- Phase 6: upload the 50 SOC 2 control bundles -----
+# ----- Phase 6a: ensure an OAuth client for bundle upload -----
+#
+# Slice 196 migrates this bootstrap step off the pre-shared
+# ATLAS_BOOTSTRAP_TOKEN onto OAuth client_credentials. The client is
+# issued ONCE per deployment + persisted to a 0600 file under
+# ${ATLAS_DATA_DIR}; subsequent re-runs of this container reuse the
+# persisted credentials.
+#
+# Uniqueness (P0-196-3): the client name carries an 8-hex-char
+# fingerprint derived from ATLAS_BOOTSTRAP_TENANT so multi-instance
+# docker-compose runs with distinct tenants get distinct client names
+# (avoiding ErrDuplicateName collisions across deployments).
+# Single-deployment re-runs reuse the persisted file before ever
+# calling oauth issue-client.
+ATLAS_DATA_DIR="${ATLAS_DATA_DIR:-/var/lib/atlas-bootstrap}"
+OAUTH_CREDS_FILE="${ATLAS_DATA_DIR}/oauth-bootstrap-credentials.json"
+TENANT_SHORT="$(printf '%s' "$ATLAS_BOOTSTRAP_TENANT" | tr -d -- '-' | cut -c1-8)"
+OAUTH_CLIENT_NAME="atlas-bootstrap-controls-${TENANT_SHORT}"
+
+mkdir -p "$ATLAS_DATA_DIR"
+chmod 0700 "$ATLAS_DATA_DIR" 2>/dev/null || true
+
+if [ -s "$OAUTH_CREDS_FILE" ]; then
+    log "reusing persisted OAuth bootstrap credentials at $OAUTH_CREDS_FILE"
+else
+    log "issuing OAuth bootstrap client '$OAUTH_CLIENT_NAME' ..."
+    # `oauth issue-client` prints two lines to stdout:
+    #   client_id: <uuid>
+    #   client_secret: <plaintext>
+    # Capture, parse, persist. If the client already exists in the DB
+    # (ErrDuplicateName — credentials file was wiped but DB row remains),
+    # fall back to a unix-second-suffixed retry name so bootstrap stays
+    # idempotent against operator volume wipes.
+    set +e
+    ISSUE_OUT="$(atlas-cli oauth issue-client "$OAUTH_CLIENT_NAME" 2>&1)"
+    ISSUE_RC=$?
+    set -e
+    if [ "$ISSUE_RC" -ne 0 ]; then
+        case "$ISSUE_OUT" in
+            *"already exists"*)
+                RETRY_NAME="${OAUTH_CLIENT_NAME}-retry-$(date -u +%s)"
+                log "  '$OAUTH_CLIENT_NAME' already exists — issuing '$RETRY_NAME' instead"
+                ISSUE_OUT="$(atlas-cli oauth issue-client "$RETRY_NAME")"
+                OAUTH_CLIENT_NAME="$RETRY_NAME"
+                ;;
+            *)
+                log "ERROR: oauth issue-client failed: $ISSUE_OUT"
+                exit 1
+                ;;
+        esac
+    fi
+    OAUTH_CLIENT_ID="$(printf '%s\n' "$ISSUE_OUT" | sed -n 's/^client_id: //p')"
+    OAUTH_CLIENT_SECRET="$(printf '%s\n' "$ISSUE_OUT" | sed -n 's/^client_secret: //p')"
+    if [ -z "$OAUTH_CLIENT_ID" ] || [ -z "$OAUTH_CLIENT_SECRET" ]; then
+        log "ERROR: failed to parse client_id / client_secret from issue-client output"
+        exit 1
+    fi
+    # Persist with mode 0600 BEFORE writing content so the secret never
+    # lives in a world-readable file for any window.
+    (umask 0177 && printf '{"client_id":"%s","client_secret":"%s","name":"%s"}\n' \
+        "$OAUTH_CLIENT_ID" "$OAUTH_CLIENT_SECRET" "$OAUTH_CLIENT_NAME" \
+        > "$OAUTH_CREDS_FILE")
+    chmod 0600 "$OAUTH_CREDS_FILE"
+    log "persisted OAuth bootstrap credentials to $OAUTH_CREDS_FILE (mode 0600)"
+fi
+
+# Read credentials (always — both first-run and reuse paths land here).
+OAUTH_CLIENT_ID="$(sed -n 's/.*"client_id":"\([^"]*\)".*/\1/p' "$OAUTH_CREDS_FILE")"
+OAUTH_CLIENT_SECRET="$(sed -n 's/.*"client_secret":"\([^"]*\)".*/\1/p' "$OAUTH_CREDS_FILE")"
+if [ -z "$OAUTH_CLIENT_ID" ] || [ -z "$OAUTH_CLIENT_SECRET" ]; then
+    log "ERROR: persisted credentials file at $OAUTH_CREDS_FILE missing client_id/secret"
+    exit 1
+fi
+
+# ----- Phase 6b: upload the 50 SOC 2 control bundles -----
 log "uploading control bundles from $CONTROLS_DIR ..."
 uploaded=0
 for dir in "$CONTROLS_DIR"/*/; do
     [ -f "$dir/control.yaml" ] || continue
     atlas-cli controls upload "$dir" \
         --endpoint "$ATLAS_HTTP_URL" \
-        --token "$ATLAS_BOOTSTRAP_TOKEN"
+        --issuer "$ATLAS_HTTP_URL" \
+        --client-id "$OAUTH_CLIENT_ID" \
+        --client-secret "$OAUTH_CLIENT_SECRET"
     uploaded=$((uploaded + 1))
 done
 log "uploaded $uploaded control bundles"
@@ -171,6 +255,15 @@ log "uploaded $uploaded control bundles"
 # by atlas on the first successful sign-in (load-bearing P0-A1 safety
 # property: long-lived bootstrap tokens on disk are a credential leak
 # shape this slice does not introduce).
+#
+# Slice 196: ATLAS_BOOTSTRAP_TOKEN is no longer wired into the
+# atlas-bootstrap service env in docker-compose.yml — the upload path
+# moved to OAuth client_credentials above. The block below stays only
+# as a backwards-compat null path: if an operator points a legacy
+# bootstrap that still passes ATLAS_BOOTSTRAP_TOKEN at this script
+# (e.g., a Helm chart that hasn't been re-templated yet), the
+# grep-line + file write still happen — the slice-037 fixed-token
+# legacy mint at cmd/atlas/main.go also continues to work.
 if [ -n "${ATLAS_BOOTSTRAP_TOKEN:-}" ]; then
     echo "ATLAS_BOOTSTRAP_TOKEN=${ATLAS_BOOTSTRAP_TOKEN}  # one-time use, see docs-site/docs/troubleshooting/first-login.md"
     TOKEN_FILE="${ATLAS_DATA_DIR:-/var/lib/atlas}/bootstrap-token"

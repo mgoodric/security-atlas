@@ -68,8 +68,21 @@ func BuildInput(r *http.Request, attrs map[string]interface{}) Input {
 	action := actionFromMethodAndPath(r.Method, r.URL.Path)
 	resourceType, resourceID := resourceFromPath(r.URL.Path)
 
+	// is_machine_actor: true for non-human callers. Recognised prefixes:
+	//   - empty UserID         — slice-034 api_keys without a bound user
+	//   - "key_..."            — slice-014/034 api_keys (legacy bearer)
+	//   - "oauth_client:..."   — slice 188 OAuth client_credentials JWTs
+	//                            (jwtmw synthesises the credstore.Credential
+	//                            with UserID = claims.Subject which the
+	//                            slice 188 token handler sets to
+	//                            MachineSubjectPrefix + client_id).
+	// The slice-196 bootstrap migration uses the third form to land an
+	// OAuth-client identity that the slice-035 system.rego carve-out can
+	// match for the controls:upload-bundle path.
 	userAttrs := map[string]interface{}{
-		"is_machine_actor": cred.UserID == "" || strings.HasPrefix(cred.UserID, "key_"),
+		"is_machine_actor": cred.UserID == "" ||
+			strings.HasPrefix(cred.UserID, "key_") ||
+			strings.HasPrefix(cred.UserID, "oauth_client:"),
 	}
 	for k, v := range attrs {
 		userAttrs[k] = v
