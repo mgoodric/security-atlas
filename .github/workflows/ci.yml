@@ -94,6 +94,7 @@ jobs:
               - 'schemas/**'
               - 'connectors/**'
               - 'web/**'
+              - 'fixtures/**'
               - 'internal/**'
               - 'cmd/**'
               - 'pkg/**'
