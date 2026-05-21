@@ -252,7 +252,17 @@ func (a *AuthorizeEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Pragmatic check: the redirect URI registry IS the
 	// authorize-mode source of truth. A client_id with no registered
 	// redirect URI cannot use the authorize endpoint, period.
-	registered, err := a.codes.IsRedirectURIRegistered(r.Context(), clientID, redirectURI)
+	//
+	// CodeQL alert #36 / slice 189 D5: we use LookupRedirectURI (not
+	// IsRedirectURIRegistered) so the redirect target value flows
+	// from the DB row rather than the URL query string. The lookup's
+	// WHERE clause enforces exact equality, so `registeredURI` always
+	// equals `redirectURI` on success — but the taint-flow chain
+	// passes through Postgres, which CodeQL recognises as a
+	// sanitizer boundary for the open-redirect query. The runtime
+	// security guarantee is the SAME (open-redirect prevention via
+	// the registry); the change is for static-analysis clarity.
+	registeredURI, registered, err := a.codes.LookupRedirectURI(r.Context(), clientID, redirectURI)
 	if err != nil {
 		writeOAuthError(w, http.StatusInternalServerError, "server_error",
 			"registry lookup failed")
@@ -327,7 +337,7 @@ func (a *AuthorizeEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, ierr := a.codes.Insert(r.Context(), oauthcode.InsertParams{
 		Code:                code,
 		ClientID:            clientID,
-		RedirectURI:         redirectURI,
+		RedirectURI:         registeredURI,
 		CodeChallenge:       codeChallenge,
 		CodeChallengeMethod: oauthcode.PKCEMethodS256,
 		UserID:              identity.UserID,
@@ -348,7 +358,11 @@ func (a *AuthorizeEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Build the redirect URL via url.Parse so we honor existing query
 	// strings on the registered URI (rare, but RFC 6749 §3.1.2
 	// permits them).
-	target, perr := url.Parse(redirectURI)
+	//
+	// Note: we use `registeredURI` (DB-sourced) rather than
+	// `redirectURI` (URL-query-sourced). See the LookupRedirectURI
+	// call site comment above + slice 189 D5 + CodeQL alert #36.
+	target, perr := url.Parse(registeredURI)
 	if perr != nil {
 		// Should not happen — the URI was registered, so it parsed
 		// once. Defense in depth.

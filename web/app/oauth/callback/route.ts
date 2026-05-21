@@ -91,6 +91,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // Embedded inline so the page works without a separate bundled
   // entry point; the script is small and the page's only job is
   // completing the flow.
+  //
+  // SECURITY (CodeQL alert #35 / slice 189 D5):
+  //
+  // `code` and `state` flow from URL query params (caller-controlled).
+  // `JSON.stringify` produces a string-literal that is JS-safe but
+  // NOT HTML-safe — a value containing `</script>` would close the
+  // inline <script> context and allow attacker-controlled HTML to
+  // follow. The jsonForScriptTag helper escapes the three characters
+  // that matter inside a <script> tag (`<`, `>`, `&`) using their
+  // Unicode escape sequences, which are valid JS string literals AND
+  // invisible to the HTML parser.
+  //
+  // The error-handling branch uses textContent on freshly-constructed
+  // DOM nodes rather than innerHTML so the error string is rendered
+  // as text — no escape sequence required and no attribute-injection
+  // surface.
   const script = `
     (async () => {
       try {
@@ -108,8 +124,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         if (!clientId) throw new Error('atlas-oauth-client-id meta missing');
         const result = await completeLoginFlow({
           issuer, clientId, redirectUri,
-          code: ${JSON.stringify(code)},
-          state: ${JSON.stringify(state)},
+          code: ${jsonForScriptTag(code)},
+          state: ${jsonForScriptTag(state)},
         });
         // Hand the JWT off to the server-side cookie-setter.
         const finalize = await fetch('/oauth/callback', {
@@ -120,8 +136,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         if (!finalize.ok) throw new Error('finalize failed: ' + finalize.status);
         window.location.assign(result.returnTo || '/');
       } catch (e) {
-        document.body.innerHTML = '<h1>Sign-in failed</h1><p>' +
-          (e && e.message ? String(e.message).replace(/[<>&]/g, '') : 'unknown error') + '</p>';
+        // textContent renders as text — no HTML/attribute injection
+        // surface, no escape sequence required.
+        document.body.replaceChildren();
+        const h1 = document.createElement('h1');
+        h1.textContent = 'Sign-in failed';
+        const p = document.createElement('p');
+        p.textContent = (e && e.message) ? String(e.message) : 'unknown error';
+        document.body.appendChild(h1);
+        document.body.appendChild(p);
       }
     })();
   `;
@@ -130,6 +153,28 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       `<p>Completing sign-in...</p><script type="module">${script}</script></body></html>`,
     { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } },
   );
+}
+
+// jsonForScriptTag serialises a string value as a JS-safe AND
+// HTML-safe literal for embedding inside an inline <script> tag.
+//
+// The three escapes (`<`, `>`, `&`) are the standard JSON-in-HTML
+// safety net per OWASP / Rails / Django guidance:
+//
+//   - `</script>` cannot terminate the script context (`<` escaped)
+//   - HTML comment markers (`<!--`, `-->`) cannot start (`<`, `>` escaped)
+//   - HTML entity sequences cannot smuggle through (`&` escaped)
+//
+// The resulting string is still valid JSON AND valid JS — Unicode
+// escapes (`<` etc.) are parsed back to the original characters
+// at runtime, so the value seen by the application code is unchanged.
+//
+// CodeQL alert #35 (XSS via inline script template).
+export function jsonForScriptTag(v: unknown): string {
+  return JSON.stringify(v)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026");
 }
 
 // POST /oauth/callback — the server-side finalize endpoint. Receives

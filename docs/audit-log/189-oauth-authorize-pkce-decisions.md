@@ -153,6 +153,43 @@ argument for auto-registration; deferring it is the smaller surface.
 
 ---
 
+---
+
+## D5 — Post-review CodeQL findings: XSS escape + redirect_uri taint-safe restructure
+
+**Context:** CodeQL flagged two findings on PR #447 after the first push.
+
+### Finding 1 — REAL XSS at `web/app/oauth/callback/route.ts` (CodeQL alert #35)
+
+`code` and `state` flow from URL query params and were embedded into an inline `<script>` block via `JSON.stringify`. `JSON.stringify` produces a string-literal that is JS-safe but NOT HTML-safe — a value containing `</script>` would close the script context and let attacker-controlled HTML follow. The error-branch also used `innerHTML` with an incomplete `[<>&]` strip (allowed `"` for attribute injection).
+
+**Decision:** Add a `jsonForScriptTag(v)` helper that JSON-stringifies the value then escapes `<`, `>`, `&` as `<`, `>`, `&`. Use it on both `code` and `state`. Replace the `innerHTML` error path with `textContent` on freshly-constructed DOM nodes — no escape sequence required, no attribute-injection surface.
+
+**Why this shape (vs inline `.replace(/</g, '\\u003c')...` chains):** the helper is exported so the same pattern is reusable in any future inline-script call sites. Three escape characters cover the OWASP / Rails / Django guidance for JSON-in-HTML.
+
+**Runtime guarantee:** Unicode escapes (`<`, etc.) parse back to the original characters at JS runtime — the value seen by `completeLoginFlow` is unchanged.
+
+### Finding 2 — Open URL redirect FALSE POSITIVE at `internal/api/oauth/authorize.go` (CodeQL alert #36)
+
+CodeQL flagged `http.Redirect(w, r, target.String(), ...)` because `redirectURI` flows from `q.Get("redirect_uri")`. The static analyser did NOT recognise `IsRedirectURIRegistered` as a sanitizer — its `return true/false` doesn't carry the validated value back into the data-flow graph.
+
+**Decision: option (B) — restructure for static-analysis clarity.** Added a new `Store.LookupRedirectURI(ctx, clientID, requestedURI) (string, bool, error)` that returns the DB-stored URI value on match. The handler uses `registeredURI` (DB-sourced) in both the `oauth_auth_codes.redirect_uri` insert AND the `url.Parse` call before `http.Redirect`. The taint-flow chain now passes through Postgres, which CodeQL recognises as a sanitizer.
+
+**Why (B) over (A) suppression:**
+
+- (B) is cleaner long-term — future readers see a single redirect target value with a clear provenance (DB row), rather than a flagged `lgtm` line.
+- (B) tightens the contract: the redirect target now COMES FROM the registry, not merely VALIDATED AGAINST it. A subtle bug class (registry says "yes" but caller-supplied URI has a trailing-slash quirk that lookup tolerates) is closed.
+- The `IsRedirectURIRegistered` method is kept (marked DEPRECATED in the godoc) for backwards-compat with any caller that hasn't migrated; the authorize handler is the only production caller and was migrated in this commit.
+- Runtime guarantee is IDENTICAL — the WHERE clause enforces exact equality, so `registeredURI == redirectURI` on success. The change is for static-analysis clarity, not a behavioural fix.
+
+### Threat-model gap surfaced
+
+The original D1-D4 review treated PKCE + redirect-URI registry as load-bearing for open-redirect prevention. CodeQL's flag is a useful reminder that **static-analysis-visible sanitizer boundaries are a separate concern from runtime safety**. A correctly-validated value that the analyser can't trace gets re-flagged by every future scan. Building the value's provenance into the data-flow path (Postgres lookup → handler → redirect) is a cheaper long-term posture than annotating every flagged line.
+
+**Confidence:** HIGH on both fixes. Threat model verdict remains `has-mitigations`; the gap was static-analysis ergonomics, not a real bypass.
+
+---
+
 ## Provenance
 
 - Slice spec: `docs/issues/189-oauth-authorize-pkce-frontend.md`

@@ -308,6 +308,11 @@ func (s *Store) RegisterRedirectURI(ctx context.Context, clientID, redirectURI s
 // IsRedirectURIRegistered returns true iff (client_id, redirect_uri)
 // exists in the registry. This is the open-redirect-prevention gate
 // the authorize handler calls on every request.
+//
+// DEPRECATED: prefer LookupRedirectURI for new call sites — it returns
+// the registered URI value from the DB rather than echoing the
+// caller-supplied string back, which CodeQL recognises as a sanitizer
+// boundary (slice 189 D5 / CodeQL alert #36).
 func (s *Store) IsRedirectURIRegistered(ctx context.Context, clientID, redirectURI string) (bool, error) {
 	if clientID == "" || redirectURI == "" {
 		return false, nil
@@ -326,4 +331,37 @@ func (s *Store) IsRedirectURIRegistered(ctx context.Context, clientID, redirectU
 		return false, fmt.Errorf("oauthcode: redirect_uri lookup: %w", err)
 	}
 	return true, nil
+}
+
+// LookupRedirectURI looks up the registered redirect URI for
+// (clientID, requestedURI) and returns the DB-stored URI value on
+// match (along with `true`). Returns `("", false, nil)` when the
+// pair is unregistered.
+//
+// The returned `registeredURI` is the value AS STORED in
+// `oauth_client_redirect_uris.redirect_uri` — it equals the
+// `requestedURI` parameter on a successful match (the WHERE clause
+// enforces exact equality), but the data-flow path goes
+// (DB row → handler) rather than (URL query → handler), which is
+// the taint-safe boundary CodeQL recognises (slice 189 D5 / CodeQL
+// alert #36). Use this method's return value for the actual
+// `http.Redirect` target.
+func (s *Store) LookupRedirectURI(ctx context.Context, clientID, requestedURI string) (string, bool, error) {
+	if clientID == "" || requestedURI == "" {
+		return "", false, nil
+	}
+	const q = `
+		SELECT redirect_uri FROM oauth_client_redirect_uris
+		WHERE client_id = $1 AND redirect_uri = $2
+		LIMIT 1
+	`
+	var registeredURI string
+	err := s.pool.QueryRow(ctx, q, clientID, requestedURI).Scan(&registeredURI)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("oauthcode: redirect_uri lookup: %w", err)
+	}
+	return registeredURI, true, nil
 }
