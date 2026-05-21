@@ -578,6 +578,9 @@ type Querier interface {
 	// 409 (vs 404) when the row exists but is not currently in force.
 	GetPolicyForAcknowledge(ctx context.Context, arg GetPolicyForAcknowledgeParams) (Policy, error)
 	GetPopulationByID(ctx context.Context, arg GetPopulationByIDParams) (Population, error)
+	// Fetch one questionnaire by id. RLS scopes the lookup to the caller's
+	// tenant; a cross-tenant id returns ErrNoRows.
+	GetQuestionnaireByID(ctx context.Context, arg GetQuestionnaireByIDParams) (Questionnaire, error)
 	// Lookup an existing parent risk by the sha256 idempotency key stored on
 	// inherent_score. Used by slice 053's POST /v1/risks/aggregate to satisfy
 	// AC-7: same (parent_title, child_set) returns the existing parent
@@ -642,6 +645,8 @@ type Querier interface {
 	// per ADR 0002 — computed by the application layer before this call. last4 is
 	// the last four characters of the plaintext bearer (safe to surface).
 	InsertAPIKey(ctx context.Context, arg InsertAPIKeyParams) (ApiKey, error)
+	// Save an answer to the canonical library, keyed on SCF anchor.
+	InsertAnswerLibraryEntry(ctx context.Context, arg InsertAnswerLibraryEntryParams) (AnswerLibrary, error)
 	// Slice 031: monthly board brief pinned-snapshot queries.
 	//
 	// The board brief is an append-only frozen snapshot (canvas §7.5). These
@@ -762,6 +767,22 @@ type Querier interface {
 	// the same tx as SupersedePolicyAtPublish so the version chain stays
 	// atomic. The caller supplies the new row's id and version string.
 	InsertPublishedPolicy(ctx context.Context, arg InsertPublishedPolicyParams) (Policy, error)
+	// Slice 155: questionnaire tracer-bullet queries.
+	//
+	// CRUD against the four new tables (questionnaires, questionnaire_questions,
+	// questionnaire_answers, answer_library). Every query is tenant-bound via
+	// the leading $1 parameter (defense-in-depth behind RLS). Decision D6
+	// carves the AnswerLibrary "give me priors for this anchor" query out to
+	// the pgx layer instead of sqlc — the conditional LIMIT shape doesn't
+	// generate cleanly through sqlc v1.31.1 on PostgreSQL with pgx/v5 — so
+	// it's NOT in this file.
+	// Create one new draft questionnaire. status defaults to 'draft' and is
+	// not set explicitly here (the table default applies).
+	InsertQuestionnaire(ctx context.Context, arg InsertQuestionnaireParams) (Questionnaire, error)
+	// Append one question (from Excel import OR manual authoring). The
+	// (questionnaire_id, code) UNIQUE constraint protects against duplicate
+	// imports of the same row.
+	InsertQuestionnaireQuestion(ctx context.Context, arg InsertQuestionnaireQuestionParams) (QuestionnaireQuestion, error)
 	// Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
 	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
@@ -955,6 +976,9 @@ type Querier interface {
 	// release. When no SCF release is pinned, callers use the unfiltered
 	// variant above.
 	ListAnchorsForRequirementWithEdgesByFrameworkVersion(ctx context.Context, arg ListAnchorsForRequirementWithEdgesByFrameworkVersionParams) ([]ListAnchorsForRequirementWithEdgesByFrameworkVersionRow, error)
+	// All answers for a questionnaire, joined to the questions table so
+	// callers can render the questionnaire end-to-end in a single read.
+	ListAnswersForQuestionnaire(ctx context.Context, arg ListAnswersForQuestionnaireParams) ([]QuestionnaireAnswer, error)
 	// Per-artifact recent history. Used by the admin view (slice 040) and
 	// the audit-export bundler (slice 029). Cap at 100 rows.
 	ListArtifactAccessLog(ctx context.Context, arg ListArtifactAccessLogParams) ([]ArtifactAccessLog, error)
@@ -1463,6 +1487,11 @@ type Querier interface {
 	// Sample populations attached to one audit period. The slice-026
 	// populations table carries audit_period_id (slice 028 added the FK).
 	ListPopulationsForPeriod(ctx context.Context, arg ListPopulationsForPeriodParams) ([]ListPopulationsForPeriodRow, error)
+	// Enumerate every questionnaire for the tenant, most recently updated
+	// first. Powers the questionnaires landing page.
+	ListQuestionnaires(ctx context.Context, tenantID pgtype.UUID) ([]Questionnaire, error)
+	// Enumerate every question for a questionnaire in stable display order.
+	ListQuestionsForQuestionnaire(ctx context.Context, arg ListQuestionsForQuestionnaireParams) ([]QuestionnaireQuestion, error)
 	// The last N failures for the caller's tenant, newest first. Used by
 	// ops paths (a future admin UI surface) and by the integration test
 	// asserting projected-Entry fields landed correctly.
@@ -1949,6 +1978,8 @@ type Querier interface {
 	// parent lifecycle).
 	UpdateMetaRiskInherentScore(ctx context.Context, arg UpdateMetaRiskInherentScoreParams) (Risk, error)
 	UpdateOrgUnit(ctx context.Context, arg UpdateOrgUnitParams) (OrgUnit, error)
+	// Resolve a `needs_mapping` question by assigning it an SCF anchor.
+	UpdateQuestionAnchor(ctx context.Context, arg UpdateQuestionAnchorParams) (QuestionnaireQuestion, error)
 	// Full-update path (PATCH handler reads existing, mutates fields, writes).
 	// updated_at is set explicitly so the schema's per-row default doesn't
 	// silently keep stale values.
@@ -2025,6 +2056,9 @@ type Querier interface {
 	// passed explicitly so the WITH CHECK clauses can verify against the
 	// caller's GUC.
 	UpsertMetricTarget(ctx context.Context, arg UpsertMetricTargetParams) (MetricTarget, error)
+	// Insert-or-update the single answer for a question. The unique
+	// constraint on question_id makes this an upsert via ON CONFLICT.
+	UpsertQuestionnaireAnswer(ctx context.Context, arg UpsertQuestionnaireAnswerParams) (QuestionnaireAnswer, error)
 	// One annotation per (sample, evidence_record). Re-annotating overwrites
 	// result + notes (the audit log still captures every attempt via
 	// WriteSampleAuditLog).

@@ -75,6 +75,7 @@ tags:
   - name: install
   - name: me
   - name: policies
+  - name: questionnaires
   - name: risks
   - name: schemas
   - name: scopes
@@ -2538,6 +2539,138 @@ paths:
       summary: GET /v1/populations/{id}
       tags: [audit-samples]
       operationId: get-v1-populations-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires:
+    get:
+      summary: GET /v1/questionnaires
+      tags: [questionnaires]
+      operationId: get-v1-questionnaires
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/questionnaires
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}:
+    get:
+      summary: GET /v1/questionnaires/{id}
+      tags: [questionnaires]
+      operationId: get-v1-questionnaires-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/answers/{qid}:
+    patch:
+      summary: PATCH /v1/questionnaires/{id}/answers/{qid}
+      tags: [questionnaires]
+      operationId: patch-v1-questionnaires-id-answers-qid
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/export-pdf:
+    post:
+      summary: POST /v1/questionnaires/{id}/export-pdf
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-export-pdf
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/import-excel:
+    post:
+      summary: POST /v1/questionnaires/{id}/import-excel
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-import-excel
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/suggestions:
+    get:
+      summary: GET /v1/questionnaires/{id}/suggestions
+      tags: [questionnaires]
+      operationId: get-v1-questionnaires-id-suggestions
       security:
         - bearer: []
       parameters:
