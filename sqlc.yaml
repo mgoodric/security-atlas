@@ -57,6 +57,7 @@ sql:
       - "migrations/sql/20260518100000_sessions_augment_ua_ip_geo.sql"
       - "migrations/sql/20260520020000_audit_log_subject_module.sql"
       - "migrations/sql/20260521000000_questionnaire_tracer.sql"
+      - "migrations/sql/20260521010000_tenants_rename.sql"
     queries: "internal/db/queries"
     gen:
       go:

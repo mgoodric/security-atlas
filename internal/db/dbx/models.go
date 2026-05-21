@@ -1645,6 +1645,17 @@ type Session struct {
 	GeoCity *string `json:"geo_city"`
 }
 
+// Slice 144: canonical tenant identity row. Adopted late — through v1, tenant_id was a bare UUID with no parent. The slice-192 `GET /v1/me/tenants` handler reads `name` from here; `PATCH /v1/tenants/{id}` (slice 144) mutates it under per-tenant admin or super_admin authority.
+type Tenant struct {
+	ID pgtype.UUID `json:"id"`
+	// Slice 144: human-readable label rendered in the slice-192 tenant-switcher. Application-side normalized to NFC + trimmed + capped at 64 UTF-8 bytes (Go layer). Case-insensitive UNIQUE via `idx_tenants_lower_name`.
+	Name string `json:"name"`
+	// Slice 144: carried forward from slice 141 intent. Future slice 198 (OIDC-first-install bootstrap) flips this on the install-time tenant row to serialize concurrent first-installer OIDC callbacks via `idx_tenants_bootstrap_singleton`.
+	IsBootstrapTenant bool               `json:"is_bootstrap_tenant"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type User struct {
 	ID          pgtype.UUID        `json:"id"`
 	TenantID    pgtype.UUID        `json:"tenant_id"`

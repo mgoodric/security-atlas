@@ -200,6 +200,7 @@ export default function SettingsPage() {
       </header>
 
       <ProfileSection isAdmin={isAdmin} />
+      {isAdmin ? <TenantSection /> : null}
       <AppearanceSection />
       <NotificationsSection />
       <ApiTokensSection isAdmin={isAdmin} />
@@ -442,6 +443,209 @@ const THEMES: {
     swatch: "bg-gradient-to-br from-white to-slate-900 border border-border",
   },
 ];
+
+// --- Section 1.5: Tenant (admin/super_admin only) -------------------------
+//
+// Slice 144: rename-tenant flow. Admins see a tenant-name input field
+// + Save button. Renders only when the caller holds the admin role on
+// the CURRENT tenant (per slice 097 D3 pattern: client-side via
+// getSessionMe + an upstream-enforced 403 from the platform). The
+// platform's authority gate is the canonical guard; the
+// hide-when-not-admin is UX-only and not load-bearing.
+//
+// The section reads the current tenant via `GET /v1/me/tenants` (the
+// slice 192 BFF route already shipped) and PATCHes via the slice 144
+// BFF route `/api/tenants/[id]`. Errors map 1:1 to the wire response:
+// 409 (duplicate name) renders an inline conflict notice; 400 renders
+// the upstream error message.
+
+type MeTenantRow = {
+  id: string;
+  name: string;
+  current: boolean;
+};
+
+type MeTenantsResponse = {
+  tenants: MeTenantRow[];
+};
+
+async function fetchMyTenants(): Promise<MeTenantsResponse> {
+  const res = await fetch(`/api/me/tenants`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`list my tenants: ${res.status}`);
+  }
+  return (await res.json()) as MeTenantsResponse;
+}
+
+async function patchTenantName(
+  id: string,
+  name: string,
+): Promise<{ tenant: { name: string } }> {
+  const res = await fetch(`/api/tenants/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    let parsed: { error?: string } = {};
+    try {
+      parsed = JSON.parse(body) as { error?: string };
+    } catch {
+      // body might be plaintext; fall through
+    }
+    const err = new Error(
+      parsed.error ?? `rename tenant: ${res.status}`,
+    ) as Error & {
+      status?: number;
+    };
+    err.status = res.status;
+    throw err;
+  }
+  return (await res.json()) as { tenant: { name: string } };
+}
+
+function TenantSection() {
+  const qc = useQueryClient();
+  const tenantsQuery = useQuery({
+    queryKey: ["settings-my-tenants"],
+    queryFn: fetchMyTenants,
+  });
+  const currentTenant = tenantsQuery.data?.tenants.find((t) => t.current);
+  const [draft, setDraft] = useState<string>("");
+  const [conflict, setConflict] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  // Seed the draft from the loaded current tenant exactly once after
+  // the query resolves. The draft is intentionally allowed to diverge
+  // from `currentTenant.name` afterwards so the user can edit without
+  // a re-fetch resetting their input. Same post-mount-sync pattern as
+  // AppearanceSelector (slice 170 D1) — syncing from a non-React
+  // state source (TanStack Query cache) into local component state
+  // is the canonical case for the disabled rule.
+  useEffect(() => {
+    if (currentTenant && draft === "") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDraft(currentTenant.name);
+    }
+  }, [currentTenant, draft]);
+
+  const renameMut = useMutation({
+    mutationFn: (next: string) =>
+      patchTenantName(currentTenant?.id ?? "", next),
+    onSuccess: (resp) => {
+      setConflict(null);
+      setSuccess(`Renamed to "${resp.tenant.name}".`);
+      qc.invalidateQueries({ queryKey: ["settings-my-tenants"] });
+      // Also invalidate the slice 192 switcher cache.
+      qc.invalidateQueries({ queryKey: ["tenant-switcher"] });
+    },
+    onError: (err: Error & { status?: number }) => {
+      setSuccess(null);
+      if (err.status === 409) {
+        setConflict(
+          "Another tenant already uses that name. Pick a different one.",
+        );
+      } else if (err.status === 403) {
+        setConflict("You do not have permission to rename this tenant.");
+      } else {
+        setConflict(err.message);
+      }
+    },
+  });
+
+  const disabled =
+    !currentTenant ||
+    renameMut.isPending ||
+    draft.trim() === "" ||
+    draft.trim() === currentTenant?.name;
+
+  return (
+    <Card id="tenant" data-testid="settings-section-tenant">
+      <CardHeader>
+        <CardTitle>Tenant</CardTitle>
+        <CardDescription>
+          Rename your current tenant. The new name shows up immediately in the
+          tenant switcher for everyone on this tenant.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {tenantsQuery.isLoading ? (
+          <Skeleton className="h-10 w-full" />
+        ) : tenantsQuery.error ? (
+          <Alert variant="destructive">
+            <AlertTitle>Could not load tenant</AlertTitle>
+            <AlertDescription>
+              {(tenantsQuery.error as Error).message}
+            </AlertDescription>
+          </Alert>
+        ) : !currentTenant ? (
+          <Alert>
+            <AlertTitle>No current tenant</AlertTitle>
+            <AlertDescription>
+              You are not currently scoped to a tenant. Sign back in or pick a
+              tenant from the switcher first.
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <>
+            <dl className="grid grid-cols-3 gap-x-4 gap-y-3 text-sm">
+              <dt className="text-muted-foreground">Tenant ID</dt>
+              <dd
+                className="col-span-2 font-mono text-xs text-foreground"
+                data-testid="settings-tenant-id"
+              >
+                {currentTenant.id}
+              </dd>
+              <dt className="text-muted-foreground">Name</dt>
+              <dd className="col-span-2">
+                <Input
+                  value={draft}
+                  onChange={(e) => {
+                    setDraft(e.target.value);
+                    setConflict(null);
+                    setSuccess(null);
+                  }}
+                  maxLength={64}
+                  aria-label="Tenant name"
+                  data-testid="settings-tenant-name-input"
+                />
+              </dd>
+            </dl>
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                onClick={() => renameMut.mutate(draft.trim())}
+                disabled={disabled}
+                data-testid="settings-tenant-save-btn"
+              >
+                {renameMut.isPending ? "Saving…" : "Save name"}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Up to 64 bytes. Names are case-insensitive unique across the
+                deployment.
+              </p>
+            </div>
+            {conflict ? (
+              <Alert variant="destructive">
+                <AlertDescription data-testid="settings-tenant-error">
+                  {conflict}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            {success ? (
+              <Alert>
+                <AlertDescription data-testid="settings-tenant-success">
+                  {success}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function AppearanceSection() {
   // The theme starts at DEFAULT_THEME during SSR (no localStorage on the

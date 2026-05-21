@@ -53,6 +53,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
 	"github.com/mgoodric/security-atlas/internal/api/securityheaders"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
+	tenantsapi "github.com/mgoodric/security-atlas/internal/api/tenants"
 	themesapi "github.com/mgoodric/security-atlas/internal/api/themes"
 	"github.com/mgoodric/security-atlas/internal/api/ucfcoverage"
 	"github.com/mgoodric/security-atlas/internal/api/vendors"
@@ -604,6 +605,15 @@ func (s *Server) httpHandler() http.Handler {
 	// renders honest tenant IDs without name enrichment.
 	meTenantsH := meapi.NewTenants(s.authPool)
 	root.Get("/v1/me/tenants", meTenantsH.ListTenants)
+	// Slice 144: PATCH /v1/tenants/{id} — rename a tenant.
+	// Gated on per-tenant admin (slice-034 cred.IsAdmin OR
+	// slice-187 JWT roles[CURRENT][admin]) OR super_admin
+	// (slice-187 JWT atlas:super_admin claim). RLS on the
+	// tenants table is the load-bearing second leg —
+	// cross-tenant rename is impossible at the DB layer
+	// regardless of the role gate.
+	tenantsH := tenantsapi.New(s.dbPool)
+	root.Patch("/v1/tenants/{id}", tenantsH.PatchTenant)
 	// Slice 021: exception / waiver workflow. Routes appended per the
 	// parallel-batch convention -- chi.Mux rejects two Mounts at "/", so
 	// individual routes are registered onto the root. Literal-segment
