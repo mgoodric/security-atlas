@@ -359,6 +359,26 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   `/api/admin/vendors/export`; Export buttons on `/audits` +
   `/vendors` pages.
 
+### Fixed
+
+- **slice 185** — UI honesty fix (F-178-5 closure): `/risks` row-click
+  previously routed to `/risks/hierarchy?focus=<id>` as a "no 404"
+  stand-in for a per-risk detail page that does not yet exist. That
+  affordance advertised "click row to see risk detail" but delivered
+  the org-tree hierarchy view — an honesty-gap. The row-click handler
+  is removed from `web/app/(authed)/risks/page.tsx`; the `<ListTable>`
+  primitive drops the `cursor-pointer` class automatically when
+  `onRowClick` is unset (no change to the shared shell). The existing
+  hierarchy workflow is preserved via an explicit per-row `View in
+  hierarchy →` link (new `actions` column) that carries the same
+  `?focus=<id>` href (P0-185-2). A new banner above the table
+  ("Per-risk detail page is a future slice") sets honest expectations
+  (AC-3). Playwright spec `web/e2e/risks-list.spec.ts` gains three
+  new quarantined assertions (AC-185-1/2/3) — row carries no
+  `cursor-pointer` class, the explicit link is present and reaches
+  `/risks/hierarchy`, the banner is visible. Shipping the per-risk
+  detail page itself (Option B) stays a separate slice per P0-185-1.
+
 ## [1.12.0](https://github.com/mgoodric/security-atlas/compare/v1.11.0...v1.12.0) (2026-05-19)
 
 

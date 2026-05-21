@@ -35,6 +35,21 @@
 //     (id, title, category, treatment, treatment_owner, residual_score,
 //     severity, review_due_at).
 //   - P0-A4: neutral test-* tokens.
+//
+// Slice 185 amendment — UI honesty (F-178-5 closure):
+//   The row-click affordance was removed. Previously rows routed to
+//   `/risks/hierarchy?focus=<id>` as a "no 404" stand-in for a
+//   per-risk detail page, creating an honesty-gap (the row promised
+//   a detail destination it could not deliver). Replaced by:
+//     1. an explicit per-row "View in hierarchy" link in a new
+//        `actions` column (AC-2 — preserves the prior workflow);
+//     2. a banner above the table (AC-3 — "Per-risk detail page is
+//        a future slice");
+//     3. removal of `onRowClick` from the `<ListTable>` call site,
+//        which makes the `ListTable` primitive drop the
+//        `cursor-pointer` class automatically (AC-1).
+//   Option B (ship `/risks/[id]/page.tsx`) stays as a separate
+//   future slice per P0-185-1.
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
@@ -65,7 +80,6 @@ import {
   clearFilters,
   DEFAULT_FILTERS,
   formatResidualScore,
-  isDefault,
   residualClass,
   setFilter,
   severityBand,
@@ -277,6 +291,27 @@ function RisksPageInner() {
           <span className="text-xs text-muted-foreground">—</span>
         ),
     },
+    // Slice 185 (AC-2): explicit per-row "View in hierarchy" link
+    // replaces the implicit row-click affordance. The link preserves
+    // the existing `?focus=<id>` workflow (P0-185-2) so users who
+    // relied on the row-click reaching the hierarchy view still have
+    // a one-click path; the difference is that the affordance now
+    // truthfully advertises its destination instead of pretending to
+    // be a row-as-detail link.
+    {
+      id: "actions",
+      header: "",
+      align: "right",
+      cell: (row) => (
+        <Link
+          href={`/risks/hierarchy?focus=${encodeURIComponent(row.id)}`}
+          data-testid="risks-row-hierarchy-link"
+          className="text-xs text-primary hover:underline"
+        >
+          View in hierarchy →
+        </Link>
+      ),
+    },
   ];
 
   // AC-6: Page-header `Hierarchy view ->` link on /risks navigates to
@@ -395,18 +430,18 @@ function RisksPageInner() {
     />
   );
 
-  // AC-7: Row click navigates to a per-risk detail page placeholder.
-  // The slice-019 backend exposes `GET /v1/risks/{id}` already; a
-  // dedicated per-risk detail route lives in a future slice. Today
-  // we route to `/risks/hierarchy?focus=<id>` so the existing
-  // hierarchy view at least scopes the user toward that risk without
-  // a 404. When the per-risk detail page ships, this single line
-  // flips to `router.push(/risks/${id})` without touching the
-  // table layer.
-  const onRowClick = (row: Risk) => {
-    if (isDefault(filters) && visible.length === 0) return;
-    router.push(`/risks/hierarchy?focus=${encodeURIComponent(row.id)}`);
-  };
+  // Slice 185 (AC-1, AC-3): the row-click affordance is intentionally
+  // ABSENT. The previous implementation routed `onRowClick` to
+  // `/risks/hierarchy?focus=<id>` as a "no 404" stand-in for a
+  // per-risk detail page that does not yet exist. That created an
+  // honesty-gap: the row advertised "click to view risk detail" but
+  // delivered the hierarchy view. The fix is to remove the row-level
+  // affordance entirely; the explicit per-row "View in hierarchy"
+  // link (AC-2, see the `actions` column above) preserves the
+  // existing workflow. The future per-risk detail page is a separate
+  // slice (Option B in slice 185's spec); when it ships, this page
+  // gains a per-row link to `/risks/${id}` without re-introducing
+  // row-as-link semantics.
 
   return (
     <ListPage
@@ -421,11 +456,20 @@ function RisksPageInner() {
         />
       }
     >
+      {/* Slice 185 (AC-3): honest banner above the table — the
+          per-risk detail page is a future slice. Without this users
+          would reasonably expect the row itself to be the link. */}
+      <Alert data-testid="risks-detail-future-slice-banner" className="mb-4">
+        <AlertTitle>Per-risk detail page is a future slice</AlertTitle>
+        <AlertDescription>
+          Use the per-row <span className="font-medium">View in hierarchy</span>{" "}
+          link to scope the org-tree view to a specific risk.
+        </AlertDescription>
+      </Alert>
       <ListTable<Risk>
         columns={columns}
         rows={visible}
         rowKey={(row) => row.id}
-        onRowClick={onRowClick}
         emptyFallback={emptyState}
       />
     </ListPage>

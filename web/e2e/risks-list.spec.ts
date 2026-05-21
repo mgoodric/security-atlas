@@ -82,4 +82,48 @@ test.describe("/risks list view", () => {
     //      page.getByRole("link", { name: "Risk hierarchy" }),
     //    ).toHaveCount(0);
   });
+
+  // Slice 185 (AC-4) — F-178-5 honesty fix. Rows are no longer clickable;
+  // the affordance is an explicit per-row "View in hierarchy" link plus a
+  // banner above the table. The prior implementation routed the row
+  // click to `/risks/hierarchy?focus=<id>`, which advertised "row =
+  // detail" but delivered the hierarchy. These assertions stay
+  // quarantined with the rest of the spec until the slice 082 seed
+  // harness lands.
+  test("AC-185-1: /risks rows expose no cursor-pointer affordance and ignore clicks", async () => {
+    //    await page.goto("/risks");
+    //    const firstRow = page.getByTestId("list-table-row").first();
+    //    await expect(firstRow).toBeVisible();
+    //    // The row no longer carries the cursor-pointer class (slice
+    //    // 098 `ListTable` only sets it when `onRowClick` is wired).
+    //    await expect(firstRow).not.toHaveClass(/cursor-pointer/);
+    //    // Clicking the body of the row (a non-anchor cell) must NOT
+    //    // navigate. We click the title cell, which is plain text.
+    //    const titleCell = firstRow.getByTestId("list-cell-title");
+    //    await titleCell.click();
+    //    await expect(page).toHaveURL(/\/risks(\?.*)?$/);
+  });
+
+  test("AC-185-2: each row exposes an explicit `View in hierarchy` link", async () => {
+    //    await page.goto("/risks");
+    //    const links = page.getByTestId("risks-row-hierarchy-link");
+    //    const count = await links.count();
+    //    expect(count).toBeGreaterThan(0);
+    //    const firstHref = await links.first().getAttribute("href");
+    //    expect(firstHref).toMatch(/^\/risks\/hierarchy\?focus=/);
+    //    // Following the link reaches the hierarchy view (workflow
+    //    // preservation per P0-185-2).
+    //    await links.first().click();
+    //    await expect(page).toHaveURL(/\/risks\/hierarchy/);
+  });
+
+  test("AC-185-3: future-slice banner explains the missing per-risk detail page", async () => {
+    //    await page.goto("/risks");
+    //    await expect(
+    //      page.getByTestId("risks-detail-future-slice-banner"),
+    //    ).toBeVisible();
+    //    await expect(
+    //      page.getByText(/Per-risk detail page is a future slice/),
+    //    ).toBeVisible();
+  });
 });
