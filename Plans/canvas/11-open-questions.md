@@ -41,6 +41,45 @@ These are decisions the canvas does **not** resolve. Each is a real choice with 
     > **RESOLVED 2026-05-11**: four-state lifecycle `draft → review → approved → activated`, approval ≠ activation (auditor signs the predicate; org picks `effective_from`). Approval evidence = system-signed in-app attestation (`approver_user_id`, `approved_at`, predicate-diff hash) plus optional file upload for offline-signed memos. Any predicate edit invalidates approval and bounces the row back to `draft` — strict re-approval matches PCI's reduce-aggressively pattern, cheaper to relax later than to discover audit-period drift. Full decision context in [`docs/adr/0001-framework-scope-workflow.md`](../../docs/adr/0001-framework-scope-workflow.md). Unblocks slice 018.
 20. **Docs site generator (mkdocs Material vs Docusaurus).** The platform documentation needs a static-site generator that matches the repo's existing toolchain, ships with light/dark mode and search out of the box, and does not introduce a Node toolchain just for docs builds.
     > **RESOLVED 2026-05-14** (at slice 058): **mkdocs Material**. Python-only — matches the repo's existing `uv` toolchain; built-in dark mode + search; lighter than Docusaurus; common in OSS Python/Go projects. Invoked in isolation via `uv tool run --with-requirements docs-site/requirements.txt` so it never pollutes the monorepo's `uv` workspace. The docs site lives at `docs-site/`; `just docs-serve` and `just docs-build` are the local entrypoints; `.github/workflows/docs-publish.yml` runs `mkdocs build --strict` on PRs and deploys to GitHub Pages on release tags. Full decision context in [`docs/audit-log/058-user-docs-scaffold-decisions.md`](../../docs/audit-log/058-user-docs-scaffold-decisions.md). See [`docs/issues/058-user-docs-scaffold.md`](../../docs/issues/058-user-docs-scaffold.md).
+21. **Authentication substrate — bespoke session model vs OAuth Authorization Server with tenant-in-claim.** Surfaced 2026-05-20 during slice 141 escalation (E-1 spec ambiguity; see [`~/.claude/MEMORY/STATE/continuous-batch-escalation.md`](../../docs/audit-log/141-escalation-context.md) — _maintainer note: that path is the loop's local escalation file; preserve here as load-bearing context_). The engineer surfaced that slice 141's R2 eviction middleware + `userTenants.Lookup` design assumes a request-hot-path authentication substrate where every authenticated request carries the OIDC subject identity (`idp_issuer` + `idp_subject`). **That substrate does not exist on `main` today** — current auth is bearer-token-only via `credstore.Credential` (no idp fields); the `atlas_session` cookie carries idp identity in the `Session` struct but is read only by side-handlers, not on the request hot path. The architecturally cleanest resolution is to commit to a **standards-based OAuth 2.0 Authorization Server inside atlas** that issues JWT access tokens carrying tenant claims directly — but this is multi-slice-spine work and warrants explicit canvas commitment before code lands.
+
+    **The four reading shapes (engineer's framing + maintainer's standards-based addition):**
+
+    - **Reading A — Heavy bearer-to-cookie migration.** Cut `/v1/*` from bearer to session-cookie-derived credentials; API keys on a separate URL path. Bigger than the engineer's "+5-7d" estimate when SDK + CLI + connector + MCP + docs migration are counted; realized cost ~4-6 weeks calendar. Custom session model. Not standards-based.
+
+    - **Reading B — Dual-auth substrate.** Bearer stays primary; parallel `atlas_session` cookie resolution populates `cred.IdpIssuer`/`cred.IdpSubject` when present. R2 no-op for pure-bearer callers. **Forces revision of AC-13's "no third state" rule.** ~2-3 weeks. Custom; not standards-based.
+
+    - **Reading C — Narrow / defer.** Slice 141 ships only the data-model + bootstrap halves (user_tenants, super_admins stub, sessions.tenant_id rename, OIDC bootstrap, login picker). R2 + switch endpoint defer to "slice 141.5." 1-2d immediately; auth substrate question still unresolved at 141.5 time. Matches slice-110 precedent. Custom; not standards-based.
+
+    - **Reading D — OAuth Authorization Server with JWT access tokens carrying tenant-in-claim** (RFC 9068 JWT Profile + RFC 8693 Token Exchange + RFC 6749 + PKCE + Device Code).
+
+      - Token claims include `atlas:current_tenant_id`, `atlas:available_tenants[]`, `atlas:roles[<tenant>]`, `atlas:super_admin`. R2 middleware becomes a pure claim check — no DB lookup per request; no `atlas_auth` role gymnastics; no chicken-and-egg sessions-table read.
+      - Tenant switching = `grant_type=urn:ietf:params:oauth:grant-type:token-exchange` against `/oauth/token`. Server validates the requested `current_tenant_id` is in the subject token's `available_tenants` claim, issues a new JWT. The "no third state" problem dissolves — there's only one auth mechanism.
+      - Consumer-facing wire protocol unchanged (`Authorization: Bearer <opaque>`). Token acquisition changes: SDKs absorb via OAuth `client_credentials` grant; CLI uses RFC 8628 device-code; browser uses authorization-code + PKCE. **No header-shape breaking change** at the protocol level.
+      - Builds: JWT signing + JWKS rotation, `/oauth/token` + `/oauth/authorize` + `/oauth/revoke` + `/oauth/introspect` + `.well-known/openid-configuration`, JWT validation middleware, frontend OAuth client + refresh-token UX, SDK migration ×4 languages, CLI device-code, API-key → client-credentials migration tool. ~4-5 weeks of engineering across ~6 slices.
+      - Sustainable architectural commitment; standards-based; portable across IdPs; positions the project credibly for the OSS security-conscious ICP ("we use the same standards your IdP does"). Composes cleanly with the slice 034 OIDC RP (RP authenticates the human; AS layer mints the atlas JWT). Compatible with future SPIFFE/SVID + mTLS for connector flows.
+
+    **What load-bears the decision:**
+
+    - **Long-term architectural posture vs short-term velocity.** Reading C ships the data-model unblocks in 1-2d; Reading D defers slice 141 by a full quarter.
+    - **Consumer migration cost.** Reading A breaks SDK acquisition flows and forces a 90-day deprecation window per OQ #9+#17 governance. Reading D changes SDK acquisition (OAuth grant) but keeps the wire protocol identical.
+    - **OSS positioning.** "Standards-based authn/authz" is a load-bearing trust signal for the security-conscious ICP. Reading D earns it; A/B/C do not.
+    - **OAuth AS scope creep.** Building an AS inside atlas adds significant surface area (token endpoints, revocation, key rotation, JWKS). Trade-off vs delegating to an external AS like Hydra, Authelia, or Keycloak — though delegation creates a hard dependency for self-host operators.
+    - **Slice 141 unblocks 142/143/144.** Reading C ships the data-model halves immediately; Readings A/B/D all delay 141's data-model work.
+
+    **What this decision is NOT:**
+
+    - Not about whether to use OIDC for human auth (slice 034 already locked OIDC RP).
+    - Not about deprecating API keys for machine flows — they continue to exist; under Reading D they become long-lived JWTs or `client_credentials`-grant flows.
+    - Not about external IdP dependency — atlas still uses an external OIDC IdP to verify human identity; the AS layer is internal to atlas.
+
+    **Recommended sequence if Reading D wins:**
+
+    1. Resolve slice 141 via Reading C as an interim — ship the data-model + bootstrap halves; defer R2 + switch endpoint.
+    2. File a new multi-slice spine: "auth-substrate-v2" — covering OAuth AS scaffolding (~6 slices: AS core · token endpoint · authorize+PKCE · revocation+introspection · JWT validation middleware · SDK migration).
+    3. After the spine lands, slice 141.5 becomes trivial — switch endpoint is `grant_type=token-exchange`; R2 is a 50-line claim check.
+
+    **Resolution gate:** before any code lands on slice 141 substantive work (beyond the data-model halves that Reading C would ship anyway) OR before slice 141.5 picks up. The escalation context at the loop's `continuous-batch-escalation.md` is the primary source-of-truth for the engineer's analysis until this OQ resolves.
 
 ---
 
