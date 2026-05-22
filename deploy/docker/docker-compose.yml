@@ -306,6 +306,21 @@ services:
       # Slice 037: fixed-token admin credential for the bootstrap uploader.
       ATLAS_BOOTSTRAP_TENANT: ${ATLAS_BOOTSTRAP_TENANT:-00000000-0000-4000-8000-000000000001}
       ATLAS_BOOTSTRAP_TOKEN: ${ATLAS_BOOTSTRAP_TOKEN:?}
+      # Slice 201: opt-in test-mode env-gate. When ATLAS_TEST_MODE=1,
+      # the atlas server mounts POST /v1/test/issue-jwt — a JWT mint
+      # endpoint the Playwright e2e harness uses to obtain a bearer
+      # before each test invocation. The endpoint is ALSO per-request
+      # gated on the same env (defense in depth). Default is the empty
+      # string, NOT "1", so production deployments stay safe. The
+      # self-host test bundle's `.env.test` sets it to "1"; production
+      # .env files leave it unset.
+      #
+      # P0-201-2 invariant: this endpoint MUST NEVER be exposed in
+      # production. Setting ATLAS_TEST_MODE=1 on a production
+      # deployment is a security regression — operators MUST gate the
+      # endpoint at the network layer if they choose to enable it for
+      # internal QA.
+      ATLAS_TEST_MODE: ${ATLAS_TEST_MODE:-}
       # Local-HTTP default: cookies are not Secure-flagged. Set to "true"
       # once the deployment is behind TLS.
       ATLAS_SECURE_COOKIES: ${ATLAS_SECURE_COOKIES:-false}
