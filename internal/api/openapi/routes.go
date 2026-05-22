@@ -22,6 +22,7 @@ type RouteSpec struct {
 
 // RouteSpecs is the canonical route list. See package doc.
 var RouteSpecs = []RouteSpec{
+	{Method: "DELETE", Path: "/v1/admin/super-admins/{user_id}", Tag: "admin-super-admins", Tier: "adminBearer", Internal: false, Summary: "DELETE /v1/admin/super-admins/{user_id}"},
 	{Method: "DELETE", Path: "/v1/decisions/{id}/links/{kind}/{targetID}", Tag: "decisions", Tier: "bearer", Internal: false, Summary: "DELETE /v1/decisions/{id}/links/{kind}/{targetID}"},
 	{Method: "DELETE", Path: "/v1/me/sessions", Tag: "me", Tier: "bearer", Internal: false, Summary: "DELETE /v1/me/sessions"},
 	{Method: "DELETE", Path: "/v1/me/sessions/{id}", Tag: "me", Tier: "bearer", Internal: false, Summary: "DELETE /v1/me/sessions/{id}"},
@@ -45,6 +46,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/admin/policies/export", Tag: "admin-policies", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/policies/export"},
 	{Method: "GET", Path: "/v1/admin/samples/export", Tag: "admin-samples", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/samples/export"},
 	{Method: "GET", Path: "/v1/admin/sso", Tag: "admin-sso", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/sso"},
+	{Method: "GET", Path: "/v1/admin/super-admins", Tag: "admin-super-admins", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/super-admins"},
 	{Method: "GET", Path: "/v1/admin/users", Tag: "admin-users", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/users"},
 	{Method: "GET", Path: "/v1/admin/users/{id}", Tag: "admin-users", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/users/{id}"},
 	{Method: "GET", Path: "/v1/admin/vendors/export", Tag: "admin-vendors", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/vendors/export"},
@@ -175,6 +177,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/admin/credentials/{id}/rotate", Tag: "admin-credentials", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/credentials/{id}/rotate"},
 	{Method: "POST", Path: "/v1/admin/install/reset-bootstrap", Tag: "admin-install", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/install/reset-bootstrap"},
 	{Method: "POST", Path: "/v1/admin/sso/preflight", Tag: "admin-sso", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/sso/preflight"},
+	{Method: "POST", Path: "/v1/admin/super-admins", Tag: "admin-super-admins", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/super-admins"},
 	{Method: "POST", Path: "/v1/aggregation-rules", Tag: "risks", Tier: "bearer", Internal: false, Summary: "POST /v1/aggregation-rules"},
 	{Method: "POST", Path: "/v1/artifacts:upload", Tag: "artifacts", Tier: "bearer", Internal: false, Summary: "POST /v1/artifacts:upload"},
 	{Method: "POST", Path: "/v1/audit-notes", Tag: "audit-notes", Tier: "bearer", Internal: false, Summary: "POST /v1/audit-notes"},
