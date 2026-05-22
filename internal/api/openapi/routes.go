@@ -216,6 +216,10 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/samples/{id}/annotations", Tag: "audit-samples", Tier: "bearer", Internal: false, Summary: "POST /v1/samples/{id}/annotations"},
 	{Method: "POST", Path: "/v1/schemas", Tag: "schemas", Tier: "bearer", Internal: false, Summary: "POST /v1/schemas"},
 	{Method: "POST", Path: "/v1/scopes/cells", Tag: "scopes", Tier: "bearer", Internal: false, Summary: "POST /v1/scopes/cells"},
+	// Slice 201: test-only JWT mint, env-gated by ATLAS_TEST_MODE=1. Mounted ONLY
+	// when the env var is set at boot time; absent in production builds. Marked
+	// Internal:true so it does NOT appear in the public Redoc surface.
+	{Method: "POST", Path: "/v1/test/issue-jwt", Tag: "system", Tier: "none", Internal: true, Summary: "Mint a test JWT (env-gated by ATLAS_TEST_MODE; absent in production)"},
 	{Method: "POST", Path: "/v1/vendors", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "POST /v1/vendors"},
 	{Method: "POST", Path: "/v1/walkthroughs", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "POST /v1/walkthroughs"},
 	{Method: "POST", Path: "/v1/walkthroughs/{id}/attachments", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "POST /v1/walkthroughs/{id}/attachments"},

@@ -1025,7 +1025,16 @@ jobs:
         working-directory: web
         run: npx playwright install --with-deps chromium
       - name: Start atlas server
+        # Slice 201: ATLAS_KEYSTORE_PATH + ATLAS_DATA_DIR point at /tmp (the
+        # CI runner cannot write to the default /var/lib/security-atlas/).
+        # Without these, fsstore.Open fails with EACCES, the OAuth keystore
+        # never wires, s.jwtSigner stays nil, and the /v1/test/issue-jwt
+        # endpoint returns 404 — breaking the Playwright global-setup.
+        env:
+          ATLAS_KEYSTORE_PATH: /tmp/atlas-ci/keys
+          ATLAS_DATA_DIR: /tmp/atlas-ci
         run: |
+          mkdir -p /tmp/atlas-ci/keys
           atlas serve > /tmp/atlas.log 2>&1 &
           echo "ATLAS_PID=$!" >> "$GITHUB_ENV"
           for i in $(seq 1 30); do
@@ -1206,7 +1215,16 @@ jobs:
         working-directory: web
         run: npx playwright install --with-deps chromium
       - name: Start atlas server
+        # Slice 201: ATLAS_KEYSTORE_PATH + ATLAS_DATA_DIR point at /tmp (the
+        # CI runner cannot write to the default /var/lib/security-atlas/).
+        # Without these, fsstore.Open fails with EACCES, the OAuth keystore
+        # never wires, s.jwtSigner stays nil, and the /v1/test/issue-jwt
+        # endpoint returns 404 — breaking the Playwright global-setup.
+        env:
+          ATLAS_KEYSTORE_PATH: /tmp/atlas-ci/keys
+          ATLAS_DATA_DIR: /tmp/atlas-ci
         run: |
+          mkdir -p /tmp/atlas-ci/keys
           atlas serve > /tmp/atlas.log 2>&1 &
           echo "ATLAS_PID=$!" >> "$GITHUB_ENV"
           for i in $(seq 1 30); do
