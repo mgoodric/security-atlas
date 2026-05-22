@@ -241,9 +241,96 @@ SQL
 fi
 
 # ---------------------------------------------------------------------
-# Bring up the full bundle.
+# Staged bring-up — slice 202 race-condition fix.
+#
+# Background: the atlas server's boot-time schema importer
+# (cmd/atlas/main.go ~L640 — `ImportPlatformSchemas`) runs ONCE without
+# retry. It inserts the platform-bundled evidence_kind schemas into
+# `evidence_kind_schemas`. The cache-reload loop right after it retries
+# (90s) but only re-READS — it does NOT re-IMPORT. So if the importer
+# loses the race against atlas-bootstrap's phase-2 forward migrations
+# (i.e. atlas starts BEFORE migrations/sql/20260511000002_schema_registry.sql
+# has created `evidence_kind_schemas`), the table is missing, the import fails with
+# `relation "evidence_kind_schemas" does not exist (SQLSTATE 42P01)`,
+# rows are NEVER inserted, the cache stays empty, and bootstrap phase 6's
+# `controls upload` 400s on every bundle with `evidence_kind ... is not
+# registered in the schema registry`.
+#
+# Surfaced as the slice 202 spillover from slice 131 PR #484 CI run
+# 26293268087 (bundled mode). External mode passed on the same run, but
+# the race exists identically there too — the fix applies uniformly.
+#
+# The fix: bring up postgres + atlas-bootstrap FIRST, then poll for the
+# sentinel table `evidence_kind_schemas` to exist (proving bootstrap
+# phase-2 migrations completed and the importer would find its target),
+# then bring up the rest (atlas + web). atlas-bootstrap is by now in its
+# phase-5 wait-loop for atlas /health; atlas starts, its schema import
+# succeeds against the fully-migrated DB, /health returns 200,
+# atlas-bootstrap phase 5-6 completes naturally.
+#
+# Why this is deterministic, not a sleep (P0-A3): the sentinel is the
+# OUTPUT of the racing step — the migration that creates the table.
+# `evidence_kind_schemas` not existing means migrations have not
+# advanced to that file; its existence means they have. There is no
+# clock-based wait — just polling on a real state transition.
+#
+# Why this is harness-only and not a compose change (P0-A1): the
+# alternative — gating atlas on `service_completed_successfully` of
+# atlas-bootstrap — is a documented deadlock (see compose file's atlas
+# block ~L243), because bootstrap phase 5-6 BLOCKS on atlas /health.
+# A bootstrap-side healthcheck would require a Go change. A new sentinel
+# service would add a compose primitive. CI-time polling is the
+# least-invasive shape and matches slice 200's pattern.
 # ---------------------------------------------------------------------
-log "docker compose up -d (full bundle)"
+log "docker compose up -d postgres + atlas-bootstrap (stage 1: apply migrations)"
+"${COMPOSE[@]}" up -d --build postgres atlas-bootstrap
+
+log "polling evidence_kind_schemas existence (sentinel of phase-2 migrations complete)"
+# Postgres container is healthy by now (atlas-bootstrap depends_on
+# postgres:service_healthy + minio-mc:service_completed_successfully, so
+# docker compose has already gated on both). atlas-bootstrap is RUNNING
+# — its phase-1 wait-for-Postgres succeeded; phase-2 forward migrations
+# are applying. Poll every 2s for up to 4 minutes (matches the existing
+# atlas-bootstrap-exit ceiling at line ~260) for the
+# `evidence_kind_schemas` relation to exist. Using `to_regclass()`
+# instead of the `schema_migrations` ledger row is deliberate: the
+# relation check is exactly what the atlas importer queries and is
+# also robust against a migration whose CREATE TABLE is committed
+# before the matching ledger row's INSERT.
+SCHEMA_READY=""
+for i in $(seq 1 120); do
+    if "${COMPOSE[@]}" exec -T postgres psql -U postgres -d security_atlas -t -A \
+        -c "SELECT to_regclass('public.evidence_kind_schemas') IS NOT NULL" 2>/dev/null \
+        | tr -d '[:space:]' | grep -qx 't'; then
+        SCHEMA_READY=1
+        break
+    fi
+    # Bail early if atlas-bootstrap has already exited NON-ZERO — no
+    # point waiting for a sentinel that will never appear (e.g.
+    # migration failure unrelated to the race). The exit-0 assertion
+    # below will catch it with the proper diagnostic; we just stop
+    # spinning.
+    BSC="$("${COMPOSE[@]}" ps -aq atlas-bootstrap)"
+    if [ -n "${BSC}" ]; then
+        STATE="$(docker inspect -f '{{.State.Status}}' "${BSC}" 2>/dev/null || true)"
+        RC="$(docker inspect -f '{{.State.ExitCode}}' "${BSC}" 2>/dev/null || true)"
+        if [ "${STATE}" = "exited" ] && [ "${RC}" != "0" ]; then
+            fail "atlas-bootstrap exited ${RC} during stage-1 migration phase"
+        fi
+    fi
+    sleep 2
+done
+[ -n "${SCHEMA_READY}" ] || fail "evidence_kind_schemas relation not created within ~4 min (stage-1 migrations stalled)"
+log "evidence_kind_schemas exists — stage-1 migrations complete"
+
+# ---------------------------------------------------------------------
+# Stage 2: bring up the rest (atlas + web). atlas's boot-time schema
+# importer now finds evidence_kind_schemas already migrated; the
+# importer succeeds, the cache loads, /health returns 200,
+# atlas-bootstrap phase 5-6 (which is blocked on atlas /health) wakes
+# and uploads control bundles.
+# ---------------------------------------------------------------------
+log "docker compose up -d (stage 2: atlas + web)"
 "${COMPOSE[@]}" up -d --build
 
 # ---------------------------------------------------------------------
