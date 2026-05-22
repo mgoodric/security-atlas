@@ -49,14 +49,14 @@ is_super_admin if {
     input.user.attrs.is_super_admin == true
 }
 
-# Super_admin authority on the slice-142 management surface.
+# Super_admin authority on the slice-142 + slice-143 management surfaces.
 #
-# Action set: read (list) + write (POST grant) + revoke (DELETE demote).
-# DELETE on /v1/admin/super-admins/{user_id} maps to action='revoke'
-# via internal/authz/input.go's transitionActions promotion when the
-# terminal path segment matches a known transition verb. We list the
-# verbs explicitly here so the rule is grep-discoverable from the
-# handler code.
+# Action set: read (list) + write (POST grant / POST create) + revoke
+# (DELETE demote). DELETE on /v1/admin/super-admins/{user_id} maps to
+# action='revoke' via internal/authz/input.go's transitionActions
+# promotion when the terminal path segment matches a known transition
+# verb. We list the verbs explicitly here so the rule is grep-
+# discoverable from the handler code.
 allow if {
     is_super_admin
     input.resource.type == "admin"
@@ -64,13 +64,21 @@ allow if {
     super_admin_actions[input.action]
 }
 
-# The slice-142 management surface lives under /v1/admin/super-admins/...
-# which BuildInput resolves to resource.type="admin", resource.id="super-admins"
-# (or "super-admins" + a path segment downstream). We allow both the
-# collection ("super-admins") and the targeted form (user-id path param)
-# by matching only on the constant first downstream segment.
+# The platform-global management surfaces live under /v1/admin/<resource>/...
+# which BuildInput resolves to resource.type="admin", resource.id=<resource>.
+# Slice 142 added "super-admins"; slice 143 adds "tenants" (the create-
+# tenant flow). We allow each by matching only on the constant first
+# downstream segment.
+#
+# IMPORTANT: this does NOT grant super_admin write authority on per-
+# tenant resources (controls, evidence, risks, policies, vendors).
+# Those need per-tenant role grants — super_admin is the PLATFORM
+# identity-management role, not a tenant-write override. A super_admin
+# who ALSO holds 'admin' on tenant X gets that authority via
+# admin.rego in the standard way.
 super_admin_resource_segments := {
     "super-admins",
+    "tenants",
 }
 
 super_admin_actions := {

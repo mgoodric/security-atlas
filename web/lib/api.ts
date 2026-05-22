@@ -811,6 +811,69 @@ export async function demoteSuperAdmin(
   }
 }
 
+// ===== Slice 143 — Admin tenants (create-tenant flow, super_admin-gated) =====
+//
+// Wire shape mirrors `internal/api/admintenants/handler.go`:
+//   GET   /v1/admin/tenants   -> { items: TenantRow[] }
+//   POST  /v1/admin/tenants   -> { tenant: TenantRow, creator_admin_user_id?: string }
+//
+// Both routes are super_admin-gated server-side. The frontend renders
+// the list + a "Create tenant" form (name + slug + "Join as admin"
+// checkbox) on /admin/tenants.
+
+export type TenantRow = {
+  id: string;
+  name: string;
+  slug?: string | null;
+  is_bootstrap_tenant: boolean;
+  created_at: string;
+  created_by_user_id?: string | null;
+};
+
+export type TenantListResponse = { items: TenantRow[] };
+
+export type CreateTenantRequest = {
+  name: string;
+  slug: string;
+  creator_joins_as?: "admin" | "none";
+};
+
+export type CreateTenantResponse = {
+  tenant: TenantRow;
+  creator_admin_user_id?: string | null;
+};
+
+export async function listAdminTenants(bearer: string): Promise<TenantRow[]> {
+  const res = await apiFetch(`/v1/admin/tenants`, bearer);
+  const body = (await res.json()) as TenantListResponse;
+  return body.items ?? [];
+}
+
+export async function createAdminTenant(
+  bearer: string,
+  req: CreateTenantRequest,
+): Promise<CreateTenantResponse> {
+  const res = await fetch(`${apiBaseURL()}/v1/admin/tenants`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) msg = body.error;
+    } catch {
+      // fall through with the status-line message
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as CreateTenantResponse;
+}
+
 // ===== Slice 063 — Admin SSO config (binds to slice 062 backend) =====
 //
 // Wire shape mirrors `internal/api/adminsso/handler.go`:
