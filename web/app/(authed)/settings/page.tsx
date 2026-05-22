@@ -99,6 +99,7 @@ import {
   patchMyPreferences,
   revokeMySession,
 } from "@/lib/api";
+import { applyThemeClass } from "@/lib/theme-class";
 
 import {
   TIME_ZONE_OPTIONS,
@@ -663,14 +664,13 @@ function AppearanceSection() {
       </CardHeader>
       <CardContent className="space-y-3">
         <AppearanceSelector />
-        <Alert>
-          <AlertTitle>Dark-mode stylesheet pending</AlertTitle>
-          <AlertDescription>
-            Your selection is saved to <code>localStorage</code> and applied via
-            the <code>data-theme</code> attribute on the root element. Visual
-            dark-mode tokens land in a follow-up.
-          </AlertDescription>
-        </Alert>
+        {/*
+         * Slice 203 — the slice-170 "Dark-mode stylesheet pending" banner is
+         * retired. The class wire is live: selecting Dark or System (with
+         * OS=dark) now activates the `.dark { ... }` token block in
+         * globals.css; data-theme stays written for ThemeAwareLogo
+         * compatibility.
+         */}
       </CardContent>
     </Card>
   );
@@ -707,11 +707,23 @@ function AppearanceSelector() {
     setTheme(next);
     if (typeof window !== "undefined") {
       writeTheme(window.localStorage, next);
-      // Best-effort: set a data-theme attribute on <html> so any
-      // future CSS that keys off it picks up the change immediately.
-      // The v1 build does not ship dark-mode stylesheet tokens (see
-      // banner above); the persistence is the contract.
+      // Slice 170 contract: set `data-theme` on <html> -- the
+      // ThemeAwareLogo (slice 176) keys off this attribute, and any
+      // future consumer that prefers attribute-based reads stays
+      // wire-compatible. P0-A1 (slice 203): data-theme remains the
+      // source-of-truth; the class below is in ADDITION, not a
+      // replacement.
       document.documentElement.setAttribute("data-theme", next);
+      // Slice 203: write the `dark` class so the Tailwind v4 custom
+      // variant `@custom-variant dark (&:is(.dark *))` configured in
+      // `web/app/globals.css:5` matches and the `.dark { ... }` token
+      // block at globals.css:86+ activates. Without this, the picker
+      // persists a choice but the page never themes (the slice-170
+      // deferred-work banner).
+      const prefersDark = window.matchMedia(
+        "(prefers-color-scheme: dark)",
+      ).matches;
+      applyThemeClass(document.documentElement, next, prefersDark);
     }
   }
 
