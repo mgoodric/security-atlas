@@ -129,6 +129,21 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 // It verifies state (CSRF), exchanges code, upserts user, and sets the
 // session cookie. The tenant_id is bound to the flow via the IdP cookie's
 // preceding /auth/oidc/login resolution.
+//
+// Slice 198 — OIDC-first-install bootstrap branch:
+//
+// AFTER the OIDC callback succeeds but BEFORE the standard UpsertOIDC
+// call, the handler invokes BootstrapFirstInstallOrUpsert. When the
+// tenants table is empty, the bootstrap branch atomically creates the
+// Default Tenant + the OIDC user + the admin role + the super_admin
+// grant + the audit-log row, and the handler establishes the session
+// against the newly-synthesized tenant_id (the URL query parameter is
+// ignored on this branch — the operator's browser hit /auth/oidc/login
+// with no tenants yet, so any tenant_id they supplied is a placeholder).
+//
+// On the established-install branch (count(*) > 0), the bootstrap call
+// returns Bootstrapped=false and the handler falls through to the
+// existing UpsertOIDC + session-create path unchanged.
 func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// Tenant is recovered from the flow cookies by the resolver.
 	tenantIDStr := r.URL.Query().Get("tenant_id")
@@ -151,16 +166,55 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadGateway, "OIDC callback: "+err.Error())
 		return
 	}
-	usr, err := h.users.UpsertOIDC(ctx, users.UpsertOIDCInput{
-		TenantID:    result.TenantID,
+
+	// Slice 198 bootstrap branch. The call is a no-op (returns
+	// Bootstrapped=false) when the Store has no auth pool wired OR
+	// when count(*) FROM tenants > 0 — i.e., on every login after the
+	// first install. The branch returns ErrBootstrapUnavailable when
+	// the auth pool isn't wired; on that path we fall through to the
+	// existing UpsertOIDC code (which itself enforces the
+	// pre-slice-198 "tenant_id required" guarantee).
+	boot, bootErr := h.users.BootstrapFirstInstallOrUpsert(r.Context(), users.BootstrapInput{
 		Email:       result.Email,
 		DisplayName: result.DisplayName,
 		Issuer:      result.Issuer,
 		Subject:     result.Subject,
 	})
-	if err != nil {
-		writeAuthError(w, http.StatusInternalServerError, "user upsert: "+err.Error())
+	if bootErr != nil && !errors.Is(bootErr, users.ErrBootstrapUnavailable) {
+		writeAuthError(w, http.StatusInternalServerError, "bootstrap: "+bootErr.Error())
 		return
+	}
+
+	var usr users.User
+	if boot.Bootstrapped {
+		// Bootstrap branch already created the user row under the
+		// synthesized tenant. Skip UpsertOIDC and proceed straight to
+		// session establishment under the new tenant.
+		bootCtx, ctxErr := tenancy.WithTenant(r.Context(), boot.TenantID.String())
+		if ctxErr != nil {
+			writeAuthError(w, http.StatusInternalServerError, "bootstrap tenant context: "+ctxErr.Error())
+			return
+		}
+		usr, err = h.users.GetByID(bootCtx, boot.TenantID, boot.UserID)
+		if err != nil {
+			writeAuthError(w, http.StatusInternalServerError, "bootstrap reload user: "+err.Error())
+			return
+		}
+		// Replace ctx so the session creation below writes under the
+		// new tenant.
+		ctx = bootCtx
+	} else {
+		usr, err = h.users.UpsertOIDC(ctx, users.UpsertOIDCInput{
+			TenantID:    result.TenantID,
+			Email:       result.Email,
+			DisplayName: result.DisplayName,
+			Issuer:      result.Issuer,
+			Subject:     result.Subject,
+		})
+		if err != nil {
+			writeAuthError(w, http.StatusInternalServerError, "user upsert: "+err.Error())
+			return
+		}
 	}
 	sess, err := h.sessions.Create(ctx, sessions.CreateInput{
 		TenantID:   usr.TenantID,
