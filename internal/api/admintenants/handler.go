@@ -130,10 +130,6 @@ const (
 	// the new tenant's seed cell.
 	defaultScopeCellLabel = "All"
 
-	// defaultScopeCellEnv is the value the seed cell pins for the
-	// `environment` dimension.
-	defaultScopeCellEnv = "prod"
-
 	// adminRoleGrantedBy is the granted_by audit string the user_roles
 	// row carries when the creator joins as admin. Mirrors the
 	// slice-198 bootstrap pattern.
