@@ -196,31 +196,25 @@ type boardPackFixture struct {
 	PublishedAt time.Time
 }
 
-// frameworkScopeFixture is one row of `framework_scopes`.
-type frameworkScopeFixture struct {
-	ID                 uuid.UUID
-	FrameworkVersionID uuid.UUID
-	Name               string
-	Predicate          string // JSON-AST text; "{}" or "true" for the demo's whole-tenant scope
-	Status             string // draft | approved | active | retired
-}
-
 // fixtureSet is the in-memory dataset the seeder writes in one tx.
+//
+// Note: framework_scopes rows are NOT pre-built as fixtures — they are
+// generated inside Apply() (writeFrameworkScopes path) once the seeder
+// reads the available framework_versions from the catalog.
 type fixtureSet struct {
-	tenant        tenantRow
-	scope         scopeRow
-	user          userRow
-	controls      []controlFixture
-	risks         []riskFixture
-	policies      []policyFixture
-	vendors       []vendorFixture
-	auditPeriods  []auditPeriodFixture
-	evidence      []evidenceFixture
-	walkthroughs  []walkthroughFixture
-	exceptions    []exceptionFixture
-	boardBriefs   []boardBriefFixture
-	boardPacks    []boardPackFixture
-	frameworkScps []frameworkScopeFixture
+	tenant       tenantRow
+	scope        scopeRow
+	user         userRow
+	controls     []controlFixture
+	risks        []riskFixture
+	policies     []policyFixture
+	vendors      []vendorFixture
+	auditPeriods []auditPeriodFixture
+	evidence     []evidenceFixture
+	walkthroughs []walkthroughFixture
+	exceptions   []exceptionFixture
+	boardBriefs  []boardBriefFixture
+	boardPacks   []boardPackFixture
 	// frameworkVersionIDs is the pool of catalog framework_versions
 	// rows the seeder discovered (read at apply time from the
 	// scf_anchors + frameworks tables). The fixture builder cannot

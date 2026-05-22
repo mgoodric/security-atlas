@@ -543,7 +543,7 @@ func validateSlug(slug string) error {
 	}
 	// Inline matcher to avoid an import cycle.
 	first := slug[0]
-	if !(first >= 'a' && first <= 'z') && !(first >= '0' && first <= '9') {
+	if !((first >= 'a' && first <= 'z') || (first >= '0' && first <= '9')) {
 		return fmt.Errorf("demoseed: --tenant-slug must start with [a-z0-9]")
 	}
 	for i := 1; i < len(slug); i++ {
@@ -556,13 +556,8 @@ func validateSlug(slug string) error {
 			return fmt.Errorf("demoseed: --tenant-slug has invalid char %q", string(c))
 		}
 	}
-	if !strings.HasPrefix(slug, "demo-") {
-		// Soft-enforce the demo- prefix so the slug is obviously a
-		// demo tenant in any UI. Not a P0 — operators may need a
-		// custom slug for screenshots — but emit a clear warning at
-		// the CLI; the seeder allows it.
-		// (This restriction is informational only; we still accept.)
-	}
+	// Note: "demo-" prefix is recommended for UI clarity but not enforced
+	// — operators may need a custom slug for screenshots.
 	return nil
 }
 

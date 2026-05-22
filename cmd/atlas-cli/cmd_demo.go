@@ -169,7 +169,7 @@ func runDemoSeed(cmd *cobra.Command, _ []string) error {
 	}
 
 	if res.Idempotent {
-		fmt.Fprintf(cmd.OutOrStdout(),
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(),
 			"demo seed: tenant %q already seeded (id=%s); no changes made. Rotate the password via /v1/admin/users if needed.\n",
 			res.TenantSlug, res.TenantID,
 		)
@@ -177,7 +177,7 @@ func runDemoSeed(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Status line: AC-15 — tenant slug + user email + one-time password.
-	fmt.Fprintf(cmd.OutOrStdout(),
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(),
 		"\n=== Slice 205 demo seed complete ===\n"+
 			"  tenant_slug : %s\n"+
 			"  tenant_id   : %s\n"+
@@ -237,7 +237,7 @@ func runDemoTeardown(cmd *cobra.Command, _ []string) error {
 	if err := seeder.Teardown(ctx, demoTeardownTenantSlug, uuid.Nil, uuid.Nil); err != nil {
 		return fmt.Errorf("demo teardown: %w", err)
 	}
-	fmt.Fprintf(cmd.OutOrStdout(),
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(),
 		"demo teardown: tenant %q deleted.\n", demoTeardownTenantSlug,
 	)
 	return nil
