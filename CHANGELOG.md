@@ -9,6 +9,49 @@ Conventional-Commit messages. Each entry links to its slice issue, the
 merging PR, and the squash-merge commit. For richer per-slice narrative
 see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
+## [1.14.0](https://github.com/mgoodric/security-atlas/compare/v1.13.0...v1.14.0) (2026-05-22)
+
+
+### Features
+
+* **auth:** OAuth /oauth/authorize + PKCE + frontend OAuth client ([#189](https://github.com/mgoodric/security-atlas/issues/189)) ([#447](https://github.com/mgoodric/security-atlas/issues/447)) ([140b0d1](https://github.com/mgoodric/security-atlas/commit/140b0d1610d7877872c342014caa854485fbf992))
+* **auth:** OAuth /oauth/token endpoint + RFC 8693 token exchange ([#188](https://github.com/mgoodric/security-atlas/issues/188)) ([#442](https://github.com/mgoodric/security-atlas/issues/442)) ([c0e7531](https://github.com/mgoodric/security-atlas/commit/c0e753140d04380dc942953cc495b1266bb2dfec))
+* **auth:** OAuth AS scaffolding — JWT signing + JWKS + OIDC discovery ([#187](https://github.com/mgoodric/security-atlas/issues/187)) ([#432](https://github.com/mgoodric/security-atlas/issues/432)) ([ac42517](https://github.com/mgoodric/security-atlas/commit/ac425179884c03f8650e751d22087237439c80db))
+* **auth:** SDK migration to client_credentials + RFC 8628 device-code CLI + slice 034 bearer retirement ([#191](https://github.com/mgoodric/security-atlas/issues/191)) ([#454](https://github.com/mgoodric/security-atlas/issues/454)) ([8f0d265](https://github.com/mgoodric/security-atlas/commit/8f0d265cb7899ad774c482fe8a95a22d533902ff))
+* **auth:** slice 142 — super_admin role full schema + management surface ([#480](https://github.com/mgoodric/security-atlas/issues/480)) ([ea674f6](https://github.com/mgoodric/security-atlas/commit/ea674f676cfdc0ab6a674f55365fbb4c2735cb28))
+* **auth:** slice 190 — JWT validation middleware on /v1/* + /oauth/revoke + /oauth/introspect (CUTOVER) ([#190](https://github.com/mgoodric/security-atlas/issues/190)) ([#451](https://github.com/mgoodric/security-atlas/issues/451)) ([3df5df1](https://github.com/mgoodric/security-atlas/commit/3df5df1602b4d23374f2b88c5c5875abc30df894))
+* **auth:** slice 192 — multi-tenant switch via OAuth token-exchange + frontend tenant switcher (closes slice 141) ([#192](https://github.com/mgoodric/security-atlas/issues/192)) ([#458](https://github.com/mgoodric/security-atlas/issues/458)) ([b0b5280](https://github.com/mgoodric/security-atlas/commit/b0b5280a2419356ebd9682815a4802d9c23ff50f))
+* **auth:** slice 197 — complete slice 034 bearer-middleware retirement ([#471](https://github.com/mgoodric/security-atlas/issues/471)) ([00a682c](https://github.com/mgoodric/security-atlas/commit/00a682c88a86120b4a7010fbb800f3f53cc86615))
+* **auth:** slice 198 — OIDC first-install bootstrap (closes slice 192 AC-11/AC-12) ([#477](https://github.com/mgoodric/security-atlas/issues/477)) ([12a6219](https://github.com/mgoodric/security-atlas/commit/12a6219f0938ad9374c0ccacc329a77ff369cdac))
+* **bootstrap:** slice 196 — migrate atlas-bootstrap container to OAuth client_credentials ([#465](https://github.com/mgoodric/security-atlas/issues/465)) ([3b8f0f1](https://github.com/mgoodric/security-atlas/commit/3b8f0f1865bfb2739e2e3502eeda21f387fd5868))
+* **e2e:** slice 111 — enable full assertions in dashboard.spec.ts ([#111](https://github.com/mgoodric/security-atlas/issues/111)) ([#441](https://github.com/mgoodric/security-atlas/issues/441)) ([8c3b355](https://github.com/mgoodric/security-atlas/commit/8c3b3551216e9b59dda2f1bc6be895183ff5431c))
+* **frontend:** cross-tab BroadcastChannel tenant-switch sync ([#199](https://github.com/mgoodric/security-atlas/issues/199)) ([#461](https://github.com/mgoodric/security-atlas/issues/461)) ([cf82f0d](https://github.com/mgoodric/security-atlas/commit/cf82f0d4a70bcd3c3293a7ebca8d009c91341aad))
+* **mcp:** MCP server write tools + HITL approval (Pattern A draft-then-confirm) ([#173](https://github.com/mgoodric/security-atlas/issues/173)) ([#437](https://github.com/mgoodric/security-atlas/issues/437)) ([34508fa](https://github.com/mgoodric/security-atlas/commit/34508faf3b676ba909efb9ca0697c29562a8ef6f))
+* **quality:** slice 201 — migrate Playwright e2e fixtures to JWT-via-tokensign ([#474](https://github.com/mgoodric/security-atlas/issues/474)) ([d4bb38f](https://github.com/mgoodric/security-atlas/commit/d4bb38fc53d5edbb00cc4a27f0cf3aaa0f183594))
+* **questionnaires:** tracer-bullet — Excel import + manual + AnswerLibrary + PDF ([#155](https://github.com/mgoodric/security-atlas/issues/155)) ([#433](https://github.com/mgoodric/security-atlas/issues/433)) ([12da637](https://github.com/mgoodric/security-atlas/commit/12da637de40bd0461fea9919ac66d49bb24fcb0b))
+* **sdk-java:** OAuth client_credentials helper ([#195](https://github.com/mgoodric/security-atlas/issues/195)) ([#457](https://github.com/mgoodric/security-atlas/issues/457)) ([b89ee7a](https://github.com/mgoodric/security-atlas/commit/b89ee7aaa932c828599666077fa8cd6996f122f4))
+* **tenants:** slice 144 — rename-tenant flow (PATCH /v1/tenants/{id}) ([#462](https://github.com/mgoodric/security-atlas/issues/462)) ([dd2e876](https://github.com/mgoodric/security-atlas/commit/dd2e8762c6245913269c4187898cb5f0e61469ae))
+
+
+### Bug Fixes
+
+* **ci:** slice 194 — add fixtures/** to Playwright path filter ([#194](https://github.com/mgoodric/security-atlas/issues/194)) ([#450](https://github.com/mgoodric/security-atlas/issues/450)) ([4159fb8](https://github.com/mgoodric/security-atlas/commit/4159fb8a7568e8995fac2bdccea590dfa00bb077))
+* **e2e:** slice 193 — dashboard.spec AC-5 upcoming-row fix (slice 111 spillover) ([#193](https://github.com/mgoodric/security-atlas/issues/193)) ([#446](https://github.com/mgoodric/security-atlas/issues/446)) ([de1b20a](https://github.com/mgoodric/security-atlas/commit/de1b20abb68c1fee4db43f4e0ae52599ff346ac1))
+* **quality:** slice 200 — fix self-host bundle external-mode postgres init regression ([#468](https://github.com/mgoodric/security-atlas/issues/468)) ([293a661](https://github.com/mgoodric/security-atlas/commit/293a661d390976b08ad3721326610809dd50c4dd))
+
+
+### Dependencies
+
+* **deps:** bump mkdocs-git-revision-date-localized-plugin from 1.2.6 to 1.5.2 ([a058040](https://github.com/mgoodric/security-atlas/commit/a0580402a11cc56c6c00f78c163145c602a401ed))
+
+
+### Documentation
+
+* **canvas:** file OQ [#21](https://github.com/mgoodric/security-atlas/issues/21) — authentication substrate (bespoke vs OAuth AS) ([#429](https://github.com/mgoodric/security-atlas/issues/429)) ([0111d76](https://github.com/mgoodric/security-atlas/commit/0111d767a59ddcd81708fc9b0f215c1992550e1e))
+* **canvas:** resolve OQ [#21](https://github.com/mgoodric/security-atlas/issues/21) — Reading D OAuth AS + JWT tenant-in-claim · file slice 187 ([#430](https://github.com/mgoodric/security-atlas/issues/430)) ([e4b9cb4](https://github.com/mgoodric/security-atlas/commit/e4b9cb4fb2711cd8e7b6494dbea8ef9e8d20055f))
+* **issues:** file auth-substrate-v2 spine specs (188-192) + unblock slice 111 ([#439](https://github.com/mgoodric/security-atlas/issues/439)) ([b5e84ad](https://github.com/mgoodric/security-atlas/commit/b5e84adf564dd4aced94bd54be60d58b50b66c43))
+* **issues:** file slice 193 — dashboard.spec AC-5 upcoming-row fix (slice 111 spillover) ([#443](https://github.com/mgoodric/security-atlas/issues/443)) ([05aa114](https://github.com/mgoodric/security-atlas/commit/05aa1142805a5180b0bc8beb3320292ad47848aa))
+
 ## [1.13.0](https://github.com/mgoodric/security-atlas/compare/v1.12.0...v1.13.0) (2026-05-21)
 
 
