@@ -173,6 +173,29 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   Production compose unchanged. Both `bundled` and `external`
   matrix modes use the staged shape.
 
+## [1.15.0](https://github.com/mgoodric/security-atlas/compare/v1.14.0...v1.15.0) (2026-05-22)
+
+
+### Features
+
+* **admin:** slice 143 — create-tenant flow (super_admin-gated) ([#485](https://github.com/mgoodric/security-atlas/issues/485)) ([7332695](https://github.com/mgoodric/security-atlas/commit/7332695477339533e85c199deb0e985a5a5165cb))
+* **controls:** slice 175 — control bundle history export (lineage including superseded) ([#495](https://github.com/mgoodric/security-atlas/issues/495)) ([fac1450](https://github.com/mgoodric/security-atlas/commit/fac14500e3db435b4e3d177b3e29b7029d29cd71))
+* **demoseed:** slice 205 — comprehensive demo seed dataset ([#500](https://github.com/mgoodric/security-atlas/issues/500)) ([072f9a7](https://github.com/mgoodric/security-atlas/commit/072f9a7e2a2918fabab1dce8c116faa221850bf2))
+* **infra:** slice 116 — promote Frontend · Playwright e2e to required-check ([#494](https://github.com/mgoodric/security-atlas/issues/494)) ([963e60e](https://github.com/mgoodric/security-atlas/commit/963e60e8547830ac6bc16fbb02ca1ed4accf67f8))
+
+
+### Bug Fixes
+
+* **auth:** slice 206 — migrate BFF cookie from sa_session_token to atlas_jwt ([#503](https://github.com/mgoodric/security-atlas/issues/503)) ([be6a5cc](https://github.com/mgoodric/security-atlas/commit/be6a5cc33692160780fa8a4c88bac48f63b83f71))
+* **self-host:** slice 202 — bundled mode atlas waits for atlas-bootstrap completion ([#490](https://github.com/mgoodric/security-atlas/issues/490)) ([bd8c797](https://github.com/mgoodric/security-atlas/commit/bd8c79744ffd999950b3745b07f2d8084109a851))
+* **test:** slice 131 — replace SET LOCAL $1 with canonical tenancy.ApplyTenant pattern ([#484](https://github.com/mgoodric/security-atlas/issues/484)) ([29ab44d](https://github.com/mgoodric/security-atlas/commit/29ab44d4b391da595245fe142c2ccd455277e648))
+* **theme:** slice 203 — wire dark-mode CSS so settings actually themes the UI ([#499](https://github.com/mgoodric/security-atlas/issues/499)) ([d7a0b10](https://github.com/mgoodric/security-atlas/commit/d7a0b10d9f2bcf6754ec19e04326f8ae766169cb))
+
+
+### Documentation
+
+* **issues:** add slice 205 — comprehensive demo seed dataset ([#497](https://github.com/mgoodric/security-atlas/issues/497)) ([28f16b2](https://github.com/mgoodric/security-atlas/commit/28f16b21b5f361e0bfbbf6a1498a89b97ec36e2f))
+
 ## [1.14.0](https://github.com/mgoodric/security-atlas/compare/v1.13.0...v1.14.0) (2026-05-22)
 
 
