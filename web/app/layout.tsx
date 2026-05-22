@@ -2,7 +2,70 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
+import { ThemeClassSync } from "@/components/shell/theme-class-sync";
+
 import { Providers } from "./providers";
+
+// Slice 203 -- early-paint dark-mode bootstrap.
+//
+// Background: slice 170 wired the /settings picker to write the
+// operator's choice to localStorage + <html data-theme>; slice 176
+// wired the logo to read the attribute. Neither slice wrote the
+// `class="dark"` token that the Tailwind v4 dark variant in
+// `web/app/globals.css:5` (`@custom-variant dark (&:is(.dark *))`)
+// actually keys off. Selecting "Dark" therefore swapped the logo
+// (light-ink) but left the page in light mode -> light-ink logo on
+// white background = invisible. Slice 203 closes that gap.
+//
+// This script is the FIRST thing that runs in the browser, BEFORE
+// React hydrates. It reads `localStorage` synchronously and applies
+// the class so the page paints in the correct theme on the very first
+// frame. A useEffect-only implementation would flash light mode for
+// one frame on every page load for users with persisted dark theme;
+// that flash is what `next-themes` and every serious-dark-mode
+// implementation removes via exactly this technique.
+//
+// The script logic mirrors `web/lib/theme-class.ts:applyThemeClass`
+// LITERALLY (cannot import in a `dangerouslySetInnerHTML` string).
+// Tests pin the helper; the script must stay in sync with the helper
+// or the slice's bug returns (one-frame flash). The pinned storage key
+// matches `THEME_STORAGE_KEY` in `web/app/(authed)/settings/theme.ts`.
+//
+// Wrapped in try/catch so that a denied-localStorage browser (Safari
+// private mode pre-2023, or a privacy extension) does not throw and
+// block the rest of the page from hydrating. On exception the page
+// falls through to its default (no class set; light mode renders),
+// matching the legacy behavior.
+//
+// P0-A3: NO new dependency. `next-themes` does exactly this but
+// brings a context provider + a useTheme hook surface area we don't
+// need (the picker UI is already wired; only the wire to the class
+// is missing). The 14-line inline script is the smallest-possible
+// solution.
+//
+// P0-A6: this script is load-bearing. DO NOT move it into a useEffect
+// "to tidy it up" -- a useEffect runs after hydration, which is what
+// reintroduces the flash. The inline script is the WHOLE point.
+const THEME_BOOTSTRAP_SCRIPT = `
+(function(){
+  try {
+    var k = "security-atlas.settings.theme";
+    var raw = window.localStorage.getItem(k);
+    var theme = (raw === "light" || raw === "dark" || raw === "system") ? raw : "system";
+    var isDark = theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    var html = document.documentElement;
+    if (isDark) { html.classList.add("dark"); } else { html.classList.remove("dark"); }
+    // Also seed data-theme so first-paint logo variant matches first-paint
+    // page chrome (slice 176 contract). Without this seed, the logo
+    // observer fires on mount instead of on first paint -- a sub-frame
+    // visual but a real one.
+    if (!html.getAttribute("data-theme")) { html.setAttribute("data-theme", theme); }
+  } catch (e) {
+    // localStorage denied (Safari private / extension) -- fall through
+    // to the light-mode default. The page still renders correctly.
+  }
+})();
+`;
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -88,9 +151,34 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      // suppressHydrationWarning: the bootstrap script below MAY add a
+      // `dark` class to <html> before React hydrates. React's
+      // server-rendered HTML omits that class (the server has no
+      // localStorage); without this suppression every authed page logs
+      // a hydration mismatch warning on dark-mode boot. The class is
+      // the load-bearing observable behavior; the className-list mismatch
+      // is the expected side effect of fixing the original bug. This is
+      // the documented next-themes / next/font pattern.
+      suppressHydrationWarning
     >
+      <head>
+        {/*
+         * `dangerouslySetInnerHTML`: the string is a module-level
+         * constant compiled from source above, not user data; see the
+         * THEME_BOOTSTRAP_SCRIPT block for the rationale + the
+         * non-negotiable "this MUST be in <head>, not in useEffect"
+         * argument. The CSP at `web/proxy.ts:65` is report-only, so
+         * this inline script does not violate an enforced directive;
+         * an enforced `script-src 'self'` cutover would need a nonce
+         * (handled identically to Next.js's own hydration scripts).
+         */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
+      </head>
       <body className="min-h-full flex flex-col">
-        <Providers>{children}</Providers>
+        <Providers>
+          <ThemeClassSync />
+          {children}
+        </Providers>
       </body>
     </html>
   );
