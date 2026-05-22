@@ -543,7 +543,7 @@ func validateSlug(slug string) error {
 	}
 	// Inline matcher to avoid an import cycle.
 	first := slug[0]
-	if !((first >= 'a' && first <= 'z') || (first >= '0' && first <= '9')) {
+	if (first < 'a' || first > 'z') && (first < '0' || first > '9') {
 		return fmt.Errorf("demoseed: --tenant-slug must start with [a-z0-9]")
 	}
 	for i := 1; i < len(slug); i++ {
