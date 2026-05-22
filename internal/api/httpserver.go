@@ -18,6 +18,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
 	"github.com/mgoodric/security-atlas/internal/api/adminsso"
 	"github.com/mgoodric/security-atlas/internal/api/adminsuperadmins"
+	"github.com/mgoodric/security-atlas/internal/api/admintenants"
 	"github.com/mgoodric/security-atlas/internal/api/adminusers"
 	"github.com/mgoodric/security-atlas/internal/api/adminvendors"
 	aggregationrulesapi "github.com/mgoodric/security-atlas/internal/api/aggregationrules"
@@ -884,6 +885,19 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/admin/super-admins", superAdminsH.List)
 	root.Post("/v1/admin/super-admins", superAdminsH.Grant)
 	root.Delete("/v1/admin/super-admins/{user_id}", superAdminsH.Demote)
+
+	// Slice 143: create-tenant flow. super_admin-gated; the handler
+	// reads jwtmw.FromContext().SuperAdmin; the OPA super_admin.rego
+	// admits the `tenants` resource segment as the second leg. The
+	// POST handler uses the BYPASSRLS authPool for the cross-tenant
+	// transaction because the new tenant_id ≠ the actor's session
+	// tenant and the slice-002 four-policy RLS on `tenants` (slice
+	// 144) would block an atlas_app INSERT keyed on a row whose `id`
+	// does not match the GUC. When authPool is nil (test harness
+	// without DATABASE_URL), the handler returns 503.
+	adminTenantsH := admintenants.New(s.dbPool, s.authPool)
+	root.Get("/v1/admin/tenants", adminTenantsH.List)
+	root.Post("/v1/admin/tenants", adminTenantsH.Create)
 	auditLogH := adminauditlog.New(s.dbPool)
 	root.Get("/v1/admin/audit-log", auditLogH.List)
 	// Slice 124: unified audit-log aggregation read across all nine

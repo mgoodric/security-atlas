@@ -57,6 +57,7 @@ tags:
   - name: admin-samples
   - name: admin-sso
   - name: admin-super-admins
+  - name: admin-tenants
   - name: admin-users
   - name: admin-vendors
   - name: artifacts
@@ -484,6 +485,33 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/tenants:
+    get:
+      summary: GET /v1/admin/tenants
+      tags: [admin-tenants]
+      operationId: get-v1-admin-tenants
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/admin/tenants
+      tags: [admin-tenants]
+      operationId: post-v1-admin-tenants
+      security:
+        - adminBearer: []
       responses:
         default:
           description: Default response envelope.

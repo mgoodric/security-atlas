@@ -106,6 +106,9 @@ function AdminBreadcrumb({ children }: { children: React.ReactNode }) {
         <Link href="/admin/super-admins" className="hover:text-foreground">
           Super admins
         </Link>
+        <Link href="/admin/tenants" className="hover:text-foreground">
+          Tenants
+        </Link>
       </nav>
       {children}
     </div>

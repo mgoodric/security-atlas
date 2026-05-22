@@ -9,6 +9,34 @@ Conventional-Commit messages. Each entry links to its slice issue, the
 merging PR, and the squash-merge commit. For richer per-slice narrative
 see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
+## Unreleased
+
+### Features
+
+* **admin:** slice 143 — create-tenant flow (super_admin-gated). Adds
+  `POST /v1/admin/tenants` + `GET /v1/admin/tenants` + the matching
+  `/admin/tenants` management page. Seeds each new tenant with one
+  builtin `environment` scope dimension and a default `All` scope
+  cell. Soft rate-limit: 100 tenants per super_admin per rolling 24h
+  window. Dual-writes `super_admin_audit_log` + `me_audit_log`
+  (mirroring the slice-142 pattern). Tenant deletion remains out of
+  scope.
+
+### Schema
+
+* **tenants:** new nullable `slug TEXT` column + partial UNIQUE
+  index on non-NULL slugs; new nullable `created_by_user_id UUID`
+  column (slice 143).
+* **super_admin_audit_log.action CHECK:** extended to admit
+  `tenant_create` (slice 143).
+* **me_audit_log.action CHECK:** extended to admit `tenant_create`
+  (slice 143).
+* **users_idp_principal_unique:** relaxed from a global UNIQUE on
+  `(idp_issuer, idp_subject)` to a per-tenant UNIQUE on `(tenant_id,
+  idp_issuer, idp_subject)` so the slice-192 multi-tenant identity
+  design is no longer in latent conflict with the schema (slice 143
+  D6).
+
 ## [1.14.0](https://github.com/mgoodric/security-atlas/compare/v1.13.0...v1.14.0) (2026-05-22)
 
 
