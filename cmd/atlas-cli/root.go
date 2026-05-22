@@ -131,6 +131,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newBootstrapCmd())
 	root.AddCommand(newOAuthCmd())
 	root.AddCommand(newLoginCmd())
+	root.AddCommand(newDemoCmd())
 	root.AddCommand(newVersionCmd())
 	return root
 }
