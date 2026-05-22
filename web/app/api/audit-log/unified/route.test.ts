@@ -3,7 +3,7 @@
 // AC-7. The BFF is a narrow forwarder over the slice-124
 // `GET /v1/admin/audit-log/unified` endpoint. Behavior under test:
 //
-//   * No `sa_session_token` (bearer) cookie -> 401 { error }.
+//   * No `SESSION_COOKIE` (post-slice-206: `atlas_jwt`) cookie -> 401 { error }.
 //   * Bearer present, params present -> upstream fetch carries
 //     `Authorization: Bearer <bearer>` and the full query string.
 //   * Backend 400 (missing from/to or malformed) -> pass-through unchanged.

@@ -21,6 +21,25 @@ import { SESSION_COOKIE } from "@/lib/auth";
 // page to decide whether to render the first-install guidance card).
 // Exact-equality match per the P0-A1 discipline above.
 //
+// Slice 206: /v1/* and /metrics are exempt from the redirect-to-login
+// gate. The Next.js host proxies direct curl-style traffic to the Go
+// platform (the deployed self-host setup terminates HTTP on the Next.js
+// process and reverse-proxies /v1/* to the atlas backend). Without this
+// exemption, an unauthenticated curl to /v1/me would 307 to /login
+// (the matcher catches everything except _next/*), masking the
+// backend's real 401 response. P0-A2 contract: the exemption ONLY
+// removes the Next.js-layer redirect — the backend's slice-190 jwtmw
+// middleware still enforces auth on every /v1/* request and returns
+// 401 on missing/invalid JWT. Verified via:
+//
+//   curl -i http://<host>:<port>/v1/me
+//   # → HTTP/1.1 401 Unauthorized
+//   # → WWW-Authenticate: Bearer realm="atlas", error="invalid_token"
+//   # → {"error":"invalid_token"}
+//
+// /metrics is the slice-121 OTel runtime metrics endpoint; same
+// treatment — it's a platform surface, not a Next.js page.
+//
 // Slice 123: PUBLIC_STATIC_FILES is the explicit allow-list of static
 // assets that live under web/public/ at the URL root and are referenced
 // from the unauthenticated login page (favicon set + PWA icons + OG /
@@ -89,6 +108,8 @@ export function proxy(request: NextRequest) {
   if (
     pathname.startsWith("/login") ||
     pathname.startsWith("/_next") ||
+    pathname.startsWith("/v1/") ||
+    pathname === "/metrics" ||
     pathname === "/api/version" ||
     pathname === "/api/install-state" ||
     PUBLIC_STATIC_FILES.has(pathname)

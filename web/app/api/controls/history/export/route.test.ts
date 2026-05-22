@@ -2,7 +2,7 @@
 //
 // Coverage matrix mirrors the slice 137 `/api/controls/export` tests:
 //
-//   * No `sa_session_token` (bearer) cookie -> 401 { error }.
+//   * No `SESSION_COOKIE` (post-slice-206: `atlas_jwt`) cookie -> 401 { error }.
 //   * Bearer present, query string forwarded verbatim to the upstream
 //     /v1/controls/history/export path; bearer attached as
 //     Authorization: Bearer ...

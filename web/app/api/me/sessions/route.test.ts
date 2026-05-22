@@ -2,7 +2,7 @@
 //
 // Behavior under test:
 //
-//   * No `sa_session_token` (bearer) cookie -> 401 { error }
+//   * No `SESSION_COOKIE` (post-slice-206: `atlas_jwt`) cookie -> 401 { error }
 //   * Bearer present, `atlas_session` present -> upstream fetch carries
 //     BOTH `Authorization: Bearer <bearer>` AND
 //     `Cookie: atlas_session=<value>` headers.

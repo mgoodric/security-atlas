@@ -2,7 +2,7 @@
 //
 // AC-3/4 coverage matrix (mirrors slice 135 audit-log/export tests):
 //
-//   * No `sa_session_token` cookie  -> 401 { error }
+//   * No `SESSION_COOKIE` (post-slice-206: `atlas_jwt`) cookie  -> 401 { error }
 //   * Bearer present                 -> happy path: stream body + headers
 //   * Backend 400 / 403 / 413 / 429  -> JSON error body + status passthrough
 //   * Slice 110 P0-A2: atlas_session cookie MUST NOT be forwarded

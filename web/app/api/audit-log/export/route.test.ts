@@ -2,7 +2,7 @@
 //
 // AC-13. Coverage matrix:
 //
-//   * No `sa_session_token` (bearer) cookie -> 401 { error }.
+//   * No `SESSION_COOKIE` (post-slice-206: `atlas_jwt`) cookie -> 401 { error }.
 //   * Bearer present, query string forwarded verbatim to the
 //     upstream /v1/admin/audit-log/export path; bearer attached as
 //     Authorization: Bearer ...

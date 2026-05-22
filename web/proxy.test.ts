@@ -167,7 +167,7 @@ describe("proxy (Next.js 16 request interceptor)", () => {
     const res = proxy(
       makeRequest({
         pathname: "/dashboard",
-        cookies: { sa_session_token: "test-bearer-fixture" },
+        cookies: { atlas_jwt: "test-bearer-fixture" },
       }),
     );
     expect(res.kind).toBe("next");
@@ -236,7 +236,7 @@ describe("proxy (Next.js 16 request interceptor)", () => {
     const res = proxy(
       makeRequest({
         pathname: "/dashboard",
-        cookies: { sa_session_token: "test-bearer-fixture" },
+        cookies: { atlas_jwt: "test-bearer-fixture" },
       }),
     );
     expect(res.kind).toBe("next");
@@ -258,5 +258,72 @@ describe("proxy (Next.js 16 request interceptor)", () => {
     const res = proxy(makeRequest({ pathname: "/og-image.png" }));
     expect(res.kind).toBe("next");
     assertSecurityHeaders(res);
+  });
+
+  // ---- Slice 206: /v1/* and /metrics exemptions ----
+  //
+  // P0-A2 contract: these exemptions only remove the Next.js redirect-
+  // to-login. The backend's slice-190 jwtmw middleware still gates the
+  // request and returns 401 on missing auth. The exemption exists so an
+  // unauthenticated curl to /v1/me surfaces the real backend 401 instead
+  // of being masked by a Next.js 307 → /login.
+  test.each([
+    ["/v1/me"],
+    ["/v1/anchors"],
+    ["/v1/install-state"],
+    ["/v1/oauth/token"],
+  ])(
+    "exempts %s (backend pass-through; backend still enforces auth)",
+    (path) => {
+      const res = proxy(makeRequest({ pathname: path }));
+      expect(res.kind).toBe("next");
+    },
+  );
+
+  test("exempts /metrics (slice-121 OTel runtime metrics endpoint)", () => {
+    const res = proxy(makeRequest({ pathname: "/metrics" }));
+    expect(res.kind).toBe("next");
+  });
+
+  test("does NOT exempt /metricsasdf (exact-equality on /metrics)", () => {
+    // P0-A1-style discipline: a literal `/metrics` exemption must NOT
+    // leak adjacent paths. A future /metrics-export route would NOT
+    // inherit the exemption.
+    const res = proxy(makeRequest({ pathname: "/metricsasdf" }));
+    expect(res.kind).toBe("redirect");
+  });
+
+  test("does NOT exempt /v1 (no trailing slash; not the backend prefix)", () => {
+    // /v1 alone is not the platform URL prefix — the platform mounts at
+    // /v1/. Bare /v1 (no trailing /) is a 404 on the backend; keeping
+    // it gated avoids masking the 404 with a 307 to /login but also
+    // doesn't expand the exemption.
+    const res = proxy(makeRequest({ pathname: "/v1" }));
+    expect(res.kind).toBe("redirect");
+  });
+
+  // ---- Slice 206: the SESSION_COOKIE constant now resolves to
+  //      `atlas_jwt`. The cookie-presence path uses the new name.
+  test("authenticated user with atlas_jwt cookie passes through", () => {
+    const res = proxy(
+      makeRequest({
+        pathname: "/dashboard",
+        cookies: { atlas_jwt: "test-bearer-fixture" },
+      }),
+    );
+    expect(res.kind).toBe("next");
+  });
+
+  test("legacy sa_session_token cookie no longer authenticates", () => {
+    // Operator note: any browser still holding the pre-slice-206
+    // `sa_session_token` cookie is treated as unauthenticated. They
+    // bounce to /login once; the OAuth callback then sets atlas_jwt.
+    const res = proxy(
+      makeRequest({
+        pathname: "/dashboard",
+        cookies: { sa_session_token: "leftover-from-pre-slice-206" },
+      }),
+    );
+    expect(res.kind).toBe("redirect");
   });
 });

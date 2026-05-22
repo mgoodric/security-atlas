@@ -11,10 +11,11 @@
 //     buffering. A 100-MB XLSX export should never materialise in
 //     the BFF's memory (slice 135 P0-A7).
 //
-//   - Bearer auth: the same `sa_session_token` cookie the slice-125
-//     unified-read BFF uses. Slice 110 P0-A2 narrow-scope rule —
-//     `atlas_session` cookie is NOT forwarded; the audit-log export
-//     endpoint authenticates on the bearer alone, same as the read.
+//   - Bearer auth: the same `SESSION_COOKIE` (post-slice-206:
+//     `atlas_jwt`) the slice-125 unified-read BFF uses. Slice 110
+//     P0-A2 narrow-scope rule — `atlas_session` cookie is NOT
+//     forwarded; the audit-log export endpoint authenticates on the
+//     bearer alone, same as the read.
 //
 //   - Header passthrough: Content-Type, Content-Disposition, and the
 //     security headers the backend emits (X-Content-Type-Options) all
