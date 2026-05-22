@@ -2,6 +2,19 @@
 
 This directory holds the security-atlas web app's Playwright e2e suite. Each spec is one user-flow contract; the assertions in a spec drive the BFF + RSC paths against a real platform bring-up.
 
+## CI status: required-check (as of slice 116)
+
+`Frontend · Playwright e2e` is a **required status check** on `main` (`.github/branch-protection.json` → `required_status_checks.contexts`). A red Playwright run blocks merge. The slice-061 docs-only fastpath is preserved: when a PR touches no code (`changes.outputs.code != 'true'`), the `frontend-playwright-stub` job posts pass under the same check name so docs-only PRs resolve the check in seconds.
+
+Promotion history:
+
+| Slice | What                                                                                                              |
+| ----- | ----------------------------------------------------------------------------------------------------------------- |
+| 069   | Job introduced; `continue-on-error: true`; informational only                                                     |
+| 079   | Quarantined (the 5 specs lacked seed-data preconditions)                                                          |
+| 082   | Seed-data harness landed; `continue-on-error` removed; job fails red on spec failure (still not a required-check) |
+| 116   | Promoted to required-check in `branch-protection.json` after ≥5 clean PR runs across slices 142/143/198/201/202   |
+
 ## Files
 
 | File                      | What it covers                                                                                              |
@@ -48,6 +61,27 @@ npm run test:e2e
 #  or one file:  npx playwright test e2e/dashboard.spec.ts
 #  or headed:    npx playwright test --headed
 ```
+
+## Seed-harness contract for spec authors
+
+A spec's preconditions (the test user, tenant rows, seeded controls/evidence/policies it asserts against) MUST be establishable by the docker-compose bring-up the CI job uses. Concretely:
+
+1. **Where preconditions live.** SQL fixtures live under `fixtures/e2e/*.sql`; the harness applies them via `web/e2e/seed.ts` after `atlas-bootstrap` finishes phase-2 migrations and before any `page.goto(...)` runs. Add a new fixture file next to the existing ones; name it `<spec-feature>.sql`; load it from `seed.ts`.
+
+2. **What the harness guarantees.**
+
+   - Postgres + NATS + MinIO are healthy.
+   - The atlas server is reachable on `http://localhost:8080`; the web app on `http://localhost:3000`.
+   - `atlas-bootstrap` has run; `evidence_kind_schemas` (and the other phase-2 tables) exist.
+   - A long-lived test JWT is minted at runtime via `POST /v1/test/issue-jwt` (gated by `ATLAS_TEST_MODE=1`) and written into `process.env.TEST_BEARER` by Playwright `globalSetup`. The auth fixture (`e2e/fixtures.ts`) injects it as a `sa_session_token` cookie.
+
+3. **What the harness does NOT do.**
+
+   - It does not fabricate UI state the spec wasn't seeded for. If a spec asserts "12 controls visible", the fixture must `INSERT INTO controls ...` 12 rows.
+   - It does not patch around flakes. A spec that intermittently fails MUST file as a spillover slice (root-cause it; never tolerate a flaky required-check — flakiness is worse than no required-check per slice 116 P0).
+   - It does not isolate tests per-spec — fixtures are additive within a CI run. Two specs asserting against the same table must use distinct row sets (different `tenant_id`, different `id` prefix, etc.).
+
+4. **Now that the job is a required-check (slice 116).** Adding a spec that fails locally and was merged "to see if CI catches it" will block every other PR until reverted. Run `npm run test:e2e` locally before pushing. If the new spec can only run against CI (e.g., needs a service the local compose doesn't ship), file a spillover slice for the local harness gap first.
 
 ## How to add a new spec
 
