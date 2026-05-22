@@ -40,10 +40,7 @@
 
 import { useEffect } from "react";
 
-import {
-  parseTheme,
-  THEME_STORAGE_KEY,
-} from "@/app/(authed)/settings/theme";
+import { parseTheme, THEME_STORAGE_KEY } from "@/app/(authed)/settings/theme";
 import { applyThemeClass } from "@/lib/theme-class";
 
 export function ThemeClassSync() {
