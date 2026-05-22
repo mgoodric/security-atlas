@@ -14,20 +14,28 @@
 //   2. `fixtures/e2e/<name>.sql` — per-spec rows (risks, drift, audit
 //      period, org tree, feature flags, etc.). One file per spec.
 //
-// Then inserts an `api_keys` row whose `token_hash` matches
-// HMAC-SHA256("test-bearer-e2e", BEARER_HASH_KEY) so the platform's
-// bearer middleware accepts the cookie value the e2e fixture sets.
+// Idempotent: every fixture INSERT uses `ON CONFLICT DO NOTHING`.
 //
-// Idempotent: every fixture INSERT uses `ON CONFLICT DO NOTHING`; the
-// api_keys row is upserted via DELETE-then-INSERT keyed on `token_hash`.
+// Slice 201 — credential issuance moved out of seed.
 //
-// Hard rule (P0-A3): every credential / token literal in this file is
-// a neutral test string. NO `ghp_*`, `sk_*`, `eyJ*`, `AKIA*` —
-// GitGuardian flags them even in test files (slice 069 P0-A9 + slice
-// 082 P0-A3).
+// Before slice 197: this module ALSO inserted an `api_keys` row whose
+// `token_hash` matched HMAC-SHA256("test-bearer-e2e", BEARER_HASH_KEY).
+// The slice 034 bearer middleware accepted the cookie value the e2e
+// fixture set via the `atlas_test_` carve-out. Slice 197 removed both
+// the middleware mount and the carve-out — the api_keys row is no
+// longer consulted by any code path, so this module no longer inserts
+// it. Credential issuance is now the responsibility of
+// `web/e2e/global-setup.ts`, which POSTs to the env-gated
+// `/v1/test/issue-jwt` endpoint and writes the resulting JWT into
+// `process.env.TEST_BEARER`.
+//
+// The `users` row that backed the slice 164 `/v1/me` resolution path
+// continues to be inserted by `fixtures/e2e/settings.sql` directly —
+// the JWT minted by global-setup uses the SAME deterministic UUID
+// (DEMO_USER_ID, re-exported below) as its `sub` claim so jwtmw's
+// synthesized credential's UserID matches the seeded row.
 
 import { execFileSync } from "node:child_process";
-import { createHmac } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -40,17 +48,10 @@ export const DEMO_CONTROL_ID = "33333333-3333-3333-3333-333333330001";
 export const DEMO_FRAMEWORK_VERSION_ID = "11111111-1111-1111-1111-111111110002";
 export const DEMO_AUDIT_PERIOD_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0001";
 // Slice 164: the principal /v1/me resolves to under the "settings"
-// fixture. fixtures/e2e/settings.sql inserts a users row with this UUID
-// and `seedApiKey()` sets `api_keys.issued_by` to it (only for the
-// "settings" fixture) so the profile handler resolves a real users row
-// (non-synthetic profile path).
+// fixture. fixtures/e2e/settings.sql inserts a users row with this UUID.
+// Slice 201: the global-setup module also uses this UUID as the JWT
+// `sub` claim so the synthesized credential's UserID matches.
 export const DEMO_USER_ID = "44444444-4444-4444-4444-444444440001";
-
-// The neutral test bearer the Playwright fixture sets as the session
-// cookie. The platform's bearer middleware HMACs this with
-// BEARER_HASH_KEY and looks up the row in api_keys; the harness inserts
-// that row.
-export const TEST_BEARER = "test-bearer-e2e";
 
 // The seven fixture names the harness understands. Each maps to one
 // per-spec SQL file under fixtures/e2e/.
@@ -81,91 +82,12 @@ function runPsql(databaseURL: string, sqlPath: string): void {
   });
 }
 
-function hexHmacSha256(key: string, message: string): string {
-  return createHmac("sha256", key).update(message).digest("hex");
-}
-
-function seedApiKey(databaseURL: string, name: FixtureName): void {
-  // The platform requires BEARER_HASH_KEY to be >=32 bytes (see
-  // internal/auth/bearer/bearer.go HashKeyMinBytes). The harness uses
-  // the env value the atlas server boots with so the hash matches at
-  // verify time. If the env is missing or short, fall back to a
-  // 32-byte test string and document that the atlas process MUST be
-  // booted with the same value (the CI workflow sets it; local devs
-  // need to export it before running the suite).
-  const key =
-    process.env.BEARER_HASH_KEY ?? "test-bearer-hash-key-32-bytes-ok!!"; // 33 chars, ASCII
-
-  if (key.length < 32) {
-    throw new Error(
-      `seed: BEARER_HASH_KEY must be at least 32 bytes; got ${key.length}`,
-    );
-  }
-  const tokenHashHex = hexHmacSha256(key, TEST_BEARER);
-
-  // Slice 164: for the "settings" fixture, the api_keys row's
-  // `issued_by` is set to DEMO_USER_ID so the profile handler resolves
-  // a real users row (slice 108 synthetic-profile fallback is bypassed
-  // — the row matches users.id inserted by fixtures/e2e/settings.sql).
-  // The five pre-existing fixtures keep the historical NULL behavior;
-  // they don't need a real users row to drive their AC bodies.
-  //
-  // Slice 165: the "settings" fixture ALSO needs `allowed_kinds` to be a
-  // non-empty Postgres array on the harness row. Reason: the /settings
-  // page renders the Personal API Tokens table (slice 062 / 154 / 163)
-  // which calls `c.allowed_kinds.length` per row (page.tsx ~line 883).
-  // pgx decodes both NULL and `ARRAY[]::TEXT[]` to a Go nil slice, which
-  // json.Encoder marshals as `null`, so the frontend's `.length` access
-  // throws and React unmounts the whole settings page into its error
-  // boundary ("This page couldn't load"). Until the production bug is
-  // fixed (see spillover slice 166), seed the harness row with a single
-  // synthetic kind so the resulting JSON array is non-null. Wildcard
-  // semantics on the field are evaluated at evidence-ingest time, not
-  // at credential-list time, so a non-empty allowed_kinds here has no
-  // side-effects on the spec's assertions.
-  let issuedByColumn = "";
-  let issuedByValue = "";
-  let allowedKindsColumn = "";
-  let allowedKindsValue = "";
-  if (name === "settings") {
-    issuedByColumn = ", issued_by";
-    issuedByValue = `, '${DEMO_USER_ID}'::uuid`;
-    allowedKindsColumn = ", allowed_kinds";
-    allowedKindsValue = `, ARRAY['evidence.kind.v1']::TEXT[]`;
-  }
-
-  // Composite SQL: clear any prior row with this hash, then insert a
-  // fresh admin row in the demo tenant. The DELETE handles the
-  // re-run case across separate test invocations; the `ON CONFLICT
-  // (token_hash) DO NOTHING` clause handles the parallel-worker case
-  // within ONE test invocation (Playwright defaults to multiple
-  // workers, each calling `seedFromFixture()` via test.beforeAll —
-  // the DELETEs see no row, then the INSERTs race; without ON
-  // CONFLICT the second insert fails the UNIQUE constraint on
-  // token_hash). All workers within ONE invocation insert identical
-  // row content (deterministic from TEST_BEARER + BEARER_HASH_KEY +
-  // fixture name), so DO NOTHING is the right semantics. Slice 122 fix.
-  // is_admin=true so the admin-bootstrap spec's /admin routes pass
-  // the authz gate.
-  const sql = `
-    DELETE FROM api_keys WHERE token_hash = decode('${tokenHashHex}', 'hex');
-    INSERT INTO api_keys (tenant_id, token_hash, is_admin, owner_roles, last4${issuedByColumn}${allowedKindsColumn})
-    VALUES (
-      '${DEMO_TENANT_ID}',
-      decode('${tokenHashHex}', 'hex'),
-      TRUE,
-      ARRAY['admin']::TEXT[],
-      '${TEST_BEARER.slice(-4)}'${issuedByValue}${allowedKindsValue}
-    )
-    ON CONFLICT (token_hash) DO NOTHING;
-  `;
-  execFileSync("psql", [databaseURL, "-v", "ON_ERROR_STOP=1", "-c", sql], {
-    stdio: "inherit",
-  });
-}
-
-// seedFromFixture applies the base seed + the named per-spec fixture +
-// the api_keys row. Throws on any psql failure.
+// seedFromFixture applies the base seed + the named per-spec fixture.
+// Throws on any psql failure.
+//
+// Slice 201: credential issuance is no longer part of seeding. See
+// `web/e2e/global-setup.ts` for the JWT mint that runs once per
+// Playwright invocation.
 export function seedFromFixture(name: FixtureName): void {
   const databaseURL = process.env.DATABASE_URL;
   if (!databaseURL) {
@@ -181,7 +103,4 @@ export function seedFromFixture(name: FixtureName): void {
   // 2. Per-spec rows.
   const specSql = resolve(fixturesDir(), "e2e", `${name}.sql`);
   runPsql(databaseURL, specSql);
-
-  // 3. The API key the Playwright fixture's cookie matches.
-  seedApiKey(databaseURL, name);
 }

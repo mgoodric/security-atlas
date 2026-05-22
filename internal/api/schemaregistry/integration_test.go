@@ -15,10 +15,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 )
 
 const (
@@ -90,19 +92,15 @@ func setupHTTP(t *testing.T, tenant string, admin bool) (*httptest.Server, strin
 		SchemaRegistry: svc,
 	})
 	srv.AttachDB(appPool)
+	// Slice 197: JWT bearer via slice 190 path. AdminFor matches the
+	// legacy IssueBootstrapAdminCredential (SuperAdmin=true → jwtmw
+	// synthesizes IsAdmin=true on the credential); ViewerFor matches
+	// IssueBootstrapCredential (no elevation).
 	var bearer string
 	if admin {
-		_, b, err := srv.IssueBootstrapAdminCredential(tenant)
-		if err != nil {
-			t.Fatalf("IssueBootstrapAdminCredential: %v", err)
-		}
-		bearer = b
+		bearer = srv.IssueTestJWT(t, testjwt.AdminFor(uuid.MustParse(tenant)))
 	} else {
-		_, b, err := srv.IssueBootstrapCredential(tenant)
-		if err != nil {
-			t.Fatalf("IssueBootstrapCredential: %v", err)
-		}
-		bearer = b
+		bearer = srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenant)))
 	}
 	handler := srv.HTTPHandlerForTests()
 	if handler == nil {
@@ -425,10 +423,7 @@ func TestRegister_TenantIsolated(t *testing.T) {
 	}
 	srvB := api.New(api.Config{RotationGrace: time.Hour, SchemaRegistry: svcB})
 	srvB.AttachDB(app)
-	_, bearerB, err := srvB.IssueBootstrapAdminCredential(tenantB)
-	if err != nil {
-		t.Fatalf("IssueBootstrapAdminCredential B: %v", err)
-	}
+	bearerB := srvB.IssueTestJWT(t, testjwt.AdminFor(uuid.MustParse(tenantB)))
 	handlerB := srvB.HTTPHandlerForTests()
 	tsB := httptest.NewServer(handlerB)
 	t.Cleanup(tsB.Close)

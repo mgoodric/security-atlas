@@ -41,15 +41,15 @@ ${EDITOR:-vi} deploy/docker/.env
 
 At minimum, set strong values for every `CHANGE_ME` in `.env`:
 
-| Variable                      | How to generate                                       |
-| ----------------------------- | ----------------------------------------------------- |
-| `POSTGRES_PASSWORD`           | `openssl rand -hex 24`                                |
-| `ATLAS_APP_PASSWORD`          | `openssl rand -hex 24`                                |
-| `MINIO_ROOT_PASSWORD`         | `openssl rand -hex 24`                                |
-| `BEARER_HASH_KEY`             | `openssl rand -hex 32` (32-byte key for token hashes) |
-| `ATLAS_BOOTSTRAP_TOKEN`       | `openssl rand -hex 32` (one-shot admin token)         |
-| `ATLAS_DEFAULT_USER_EMAIL`    | the email you will sign in with                       |
-| `ATLAS_DEFAULT_USER_PASSWORD` | the password you will sign in with                    |
+| Variable                      | How to generate                                              |
+| ----------------------------- | ------------------------------------------------------------ |
+| `POSTGRES_PASSWORD`           | `openssl rand -hex 24`                                       |
+| `ATLAS_APP_PASSWORD`          | `openssl rand -hex 24`                                       |
+| `MINIO_ROOT_PASSWORD`         | `openssl rand -hex 24`                                       |
+| `BEARER_HASH_KEY`             | `openssl rand -hex 32` (32-byte key for token hashes)        |
+| `ATLAS_BOOTSTRAP_TOKEN`       | `openssl rand -hex 32` (legacy fixed-token admin credential) |
+| `ATLAS_DEFAULT_USER_EMAIL`    | the email you will sign in with                              |
+| `ATLAS_DEFAULT_USER_PASSWORD` | the password you will sign in with                           |
 
 ## Step 2 — bring it up
 
@@ -94,6 +94,44 @@ sign-in. OIDC is a later configuration step, not a prerequisite.
     mode 0600). The file is atomically deleted on first successful
     sign-in. If you get stuck, see
     [Troubleshooting → First-time login](troubleshooting/first-login.md).
+<!-- prettier-ignore-end -->
+
+## Bootstrap credentials — what gets created
+
+First boot creates **two distinct credentials** the operator should know
+about. They live at different lifecycle layers and are managed
+separately.
+
+| Credential                       | Purpose                                                                                  | Where it lives                                                                                                                                                    |
+| -------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Default user (local sign-in)** | The human account you sign in with at the web UI on first boot                           | `ATLAS_DEFAULT_USER_EMAIL` + `ATLAS_DEFAULT_USER_PASSWORD` in your `.env`                                                                                         |
+| **Bootstrap OAuth client**       | Machine identity the one-shot `atlas-bootstrap` container uses to upload control bundles | Issued at runtime by `atlas-bootstrap`; persisted to `/var/lib/atlas-bootstrap/oauth-bootstrap-credentials.json` (mode 0600) on the `atlas-bootstrap-data` volume |
+
+The bootstrap OAuth client is created automatically — you do not
+configure it. It is named `atlas-bootstrap-controls-<8-hex-tenant>` and
+its `client_secret` never leaves the `atlas-bootstrap-data` volume
+inside the docker network. To inspect it:
+
+```sh
+docker compose -f deploy/docker/docker-compose.yml run --rm \
+  --entrypoint sh atlas-bootstrap \
+  -c 'cat /var/lib/atlas-bootstrap/oauth-bootstrap-credentials.json'
+```
+
+Re-running `docker compose up` reuses the existing client (idempotent).
+A `docker compose down -v` wipes the volume; the next bring-up issues a
+new client.
+
+<!-- prettier-ignore-start -->
+!!! info "Legacy fixed-token credential"
+
+    The `ATLAS_BOOTSTRAP_TOKEN` from your `.env` is the **operator
+    sign-in convenience credential** (slice 037). The `atlas` service
+    still mints it as a one-shot fixed-token admin credential so the
+    `/login` page's three orthogonal first-time-sign-in paths
+    continue to work. It is independent of the bootstrap OAuth client
+    above; you rotate them separately. A future release will retire
+    the fixed-token credential entirely.
 <!-- prettier-ignore-end -->
 
 ## What's seeded for you

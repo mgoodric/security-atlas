@@ -36,6 +36,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 )
 
 // setupHTTPServerWithSrv mirrors setupHTTPServer but ALSO returns the
@@ -76,10 +77,10 @@ func setupHTTPServerWithSrv(t *testing.T) (*httptest.Server, *api.Server, string
 	appPool := openPoolDSN(t, appDSN(t))
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(appPool)
-	_, bearer, err := srv.IssueBootstrapCredential(tenantA)
-	if err != nil {
-		t.Fatalf("IssueBootstrapCredential: %v", err)
-	}
+	// Slice 197: mint JWT via slice 190 path. ViewerFor matches the
+	// legacy IssueBootstrapCredential shape (no admin/approver/owner
+	// elevation).
+	bearer := srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenantA)))
 	handler := srv.HTTPHandlerForTests()
 	if handler == nil {
 		t.Fatal("HTTPHandlerForTests returned nil")
@@ -296,10 +297,7 @@ func TestListAnchors_IncludeStateRollsUpWorstStatePerAnchor_TenantIsolated(t *te
 	// has no controls anywhere.
 	tenantB := "22222222-2222-2222-2222-222222222222"
 	t.Cleanup(func() { cleanupTenantState(t, admin, tenantB) })
-	_, bearerB, err := srv.IssueBootstrapCredential(tenantB)
-	if err != nil {
-		t.Fatalf("IssueBootstrapCredential(B): %v", err)
-	}
+	bearerB := srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenantB)))
 	respB, bodyB := get(t, ts, "/v1/anchors?include=state", bearerB)
 	if respB.StatusCode != http.StatusOK {
 		t.Fatalf("tenant B status = %d; body=%s", respB.StatusCode, bodyB)

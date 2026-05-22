@@ -34,6 +34,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
+	"github.com/mgoodric/security-atlas/internal/auth/revocation"
+	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/oscal"
@@ -102,6 +104,47 @@ type Server struct {
 	// the AS surface leave it nil and the `.well-known/*` routes are
 	// simply absent. See docs/adr/0003-oauth-authorization-server.md.
 	oauthHandler *oauth.Handler
+	// Slice 190: JWT validation middleware deps. When wired via
+	// AttachJWTValidator, the HTTP server attaches the JWT middleware
+	// BEFORE the legacy bearer middleware on /v1/* paths. The two
+	// auth paths coexist during the slice 191 cutover window.
+	// jwtSigner is the tokensign.Signer that verifies inbound JWTs;
+	// jwtRevoked is the slice 190 revocation list; jwtIssuer +
+	// jwtAudience tighten the claim check.
+	jwtSigner   *tokensign.Signer
+	jwtRevoked  *revocation.Store
+	jwtIssuer   string
+	jwtAudience string
+
+	// Slice 191: the migration URL surfaced in the 410 deprecation
+	// responder's body so operators see a machine-readable path to
+	// the OAuth migration guide. Empty falls back to omitting the
+	// field; cmd/atlas wires it via AttachDeprecationMigrationURL.
+	deprecationMigrationURL string
+
+	// Slice 192: BYPASSRLS pool used by GET /v1/me/tenants for
+	// the bounded `SELECT id, name FROM tenants WHERE id = ANY(...)`
+	// query keyed on the caller's verified JWT
+	// `atlas:available_tenants[]` claim. P0-192-2 enforces the
+	// query is bounded by the claim's tenant list — no full table
+	// scan. Wired by cmd/atlas/main.go when DATABASE_URL is set;
+	// nil for in-memory unit servers.
+	authPool *pgxpool.Pool
+}
+
+// AttachAuthPool wires the BYPASSRLS migrate-role pool used by the
+// slice-192 GET /v1/me/tenants handler for tenant-name enrichment.
+// Same pool already in use by slice 034's api-key auth path + slice
+// 073's platform_status writer.
+func (s *Server) AttachAuthPool(p *pgxpool.Pool) { s.authPool = p }
+
+// AttachDeprecationMigrationURL wires the slice-191 410 responder's
+// `migration_url` body field. cmd/atlas sets this to the operator-
+// facing docs path (e.g., `https://atlas.example.com/docs/migration/oauth`)
+// at startup. P0-191-3: the URL MUST be present so clients hitting
+// the 410 know where to go.
+func (s *Server) AttachDeprecationMigrationURL(url string) {
+	s.deprecationMigrationURL = url
 }
 
 // AttachOAuthHandler wires the slice-187 OAuth AS scaffolding (JWKS,
@@ -110,6 +153,21 @@ type Server struct {
 // Unit servers that don't need the AS endpoints leave it unset.
 func (s *Server) AttachOAuthHandler(h *oauth.Handler) {
 	s.oauthHandler = h
+}
+
+// AttachJWTValidator wires the slice-190 JWT validation middleware
+// dependencies. cmd/atlas constructs the signer + revocation store
+// once at startup; when both are non-nil the HTTP server prepends
+// the JWT middleware to the /v1/* chain ahead of the legacy bearer
+// middleware. issuer + audience MUST match the OAuth AS's
+// discovery-document values. Slice 191 retires the legacy path; in
+// the meantime, both auth methods coexist (decision D3 in
+// docs/audit-log/190-jwt-middleware-r2-decisions.md).
+func (s *Server) AttachJWTValidator(signer *tokensign.Signer, revoked *revocation.Store, issuer, audience string) {
+	s.jwtSigner = signer
+	s.jwtRevoked = revoked
+	s.jwtIssuer = issuer
+	s.jwtAudience = audience
 }
 
 // AttachAuthz wires the slice-035 OPA engine + decision audit writer.

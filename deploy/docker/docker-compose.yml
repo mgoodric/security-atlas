@@ -193,12 +193,33 @@ services:
       ATLAS_APP_PASSWORD: ${ATLAS_APP_PASSWORD:?}
       ATLAS_HTTP_URL: http://atlas:8080
       ATLAS_BOOTSTRAP_TENANT: ${ATLAS_BOOTSTRAP_TENANT:-00000000-0000-4000-8000-000000000001}
-      ATLAS_BOOTSTRAP_TOKEN: ${ATLAS_BOOTSTRAP_TOKEN:?}
+      # Slice 196: ATLAS_BOOTSTRAP_TOKEN is NO LONGER wired into the
+      # bootstrap container. Phase 6 of bootstrap.sh now issues an
+      # OAuth client at runtime via `atlas-cli oauth issue-client`,
+      # persists credentials to
+      # ${ATLAS_DATA_DIR}/oauth-bootstrap-credentials.json (mode 0600
+      # on the atlas-bootstrap-data named volume below), and drives
+      # `atlas-cli controls upload --client-id ... --client-secret ...`.
+      # The atlas service block further down KEEPS the env var
+      # (AC-4 transitional) so the slice-037 fixed-token credential
+      # at cmd/atlas/main.go still mints — operators with legacy
+      # integrations expecting the static token can keep using it
+      # until a spillover slice retires the path. P0-196-2: the
+      # client_secret is NEVER baked into any image layer; it lives
+      # only on the runtime-mounted volume.
+      ATLAS_DATA_DIR: /var/lib/atlas-bootstrap
       ATLAS_DEFAULT_USER_EMAIL: ${ATLAS_DEFAULT_USER_EMAIL:-admin@example.com}
       ATLAS_DEFAULT_USER_PASSWORD: ${ATLAS_DEFAULT_USER_PASSWORD:?}
       REPO_ROOT: /repo
     volumes:
       - ../..:/repo:ro
+      # Slice 196: dedicated writable volume for the OAuth bootstrap
+      # credentials file. Persists across `docker compose run --rm
+      # atlas-bootstrap` re-runs so the second + later runs reuse the
+      # already-issued OAuth client (idempotency — see bootstrap.sh
+      # phase 6a). Owned by the in-container `postgres` user (the
+      # bootstrap image runs as USER postgres).
+      - atlas-bootstrap-data:/var/lib/atlas-bootstrap
     restart: "no"
 
   # --------------------------------------------------------------------
@@ -259,12 +280,47 @@ services:
       DATABASE_URL: ${DATABASE_URL_MIGRATE:?}
       ATLAS_HTTP_ADDR: ":8080"
       ATLAS_GRPC_ADDR: ":50051"
+      # Slice 196: enable the slice 187/188 OAuth issuer + token endpoint
+      # in the self-host bundle. Without these, /oauth/token returns
+      # 404 and the bootstrap container's OAuth client_credentials
+      # token acquisition fails. ATLAS_ISSUER_URL is also baked into
+      # every JWT's `iss` claim and must match what the bootstrap
+      # container passes as --issuer (it passes ATLAS_HTTP_URL —
+      # http://atlas:8080).
+      ATLAS_ISSUER_URL: http://atlas:8080
+      ATLAS_KEYSTORE_PATH: /var/lib/atlas/keys
+      ATLAS_DATA_DIR: /var/lib/atlas
+      # Slice 196: the bootstrap container uploads 50 control bundles
+      # via 50 separate `atlas-cli controls upload` invocations (one
+      # per bundle directory) — each acquires its own JWT, so the
+      # default 60/min token rate limit gets exhausted on idempotent
+      # re-runs (50 first run + 50 re-run within the same minute
+      # window = 100 acquires, capped at 60). 600/min gives ample
+      # headroom for the load-bearing self-host bundle e2e idempotency
+      # assertion. The rate-limit envelope is per-client_id so other
+      # OAuth clients are unaffected.
+      ATLAS_OAUTH_TOKEN_RATE_PER_MIN: ${ATLAS_OAUTH_TOKEN_RATE_PER_MIN:-600}
       NATS_URL: nats://nats:4222
       # Slice 034: HMAC key for api_keys.token_hash. Refuse-to-boot if unset.
       BEARER_HASH_KEY: ${BEARER_HASH_KEY:?}
       # Slice 037: fixed-token admin credential for the bootstrap uploader.
       ATLAS_BOOTSTRAP_TENANT: ${ATLAS_BOOTSTRAP_TENANT:-00000000-0000-4000-8000-000000000001}
       ATLAS_BOOTSTRAP_TOKEN: ${ATLAS_BOOTSTRAP_TOKEN:?}
+      # Slice 201: opt-in test-mode env-gate. When ATLAS_TEST_MODE=1,
+      # the atlas server mounts POST /v1/test/issue-jwt — a JWT mint
+      # endpoint the Playwright e2e harness uses to obtain a bearer
+      # before each test invocation. The endpoint is ALSO per-request
+      # gated on the same env (defense in depth). Default is the empty
+      # string, NOT "1", so production deployments stay safe. The
+      # self-host test bundle's `.env.test` sets it to "1"; production
+      # .env files leave it unset.
+      #
+      # P0-201-2 invariant: this endpoint MUST NEVER be exposed in
+      # production. Setting ATLAS_TEST_MODE=1 on a production
+      # deployment is a security regression — operators MUST gate the
+      # endpoint at the network layer if they choose to enable it for
+      # internal QA.
+      ATLAS_TEST_MODE: ${ATLAS_TEST_MODE:-}
       # Local-HTTP default: cookies are not Secure-flagged. Set to "true"
       # once the deployment is behind TLS.
       ATLAS_SECURE_COOKIES: ${ATLAS_SECURE_COOKIES:-false}
@@ -292,6 +348,15 @@ services:
     ports:
       - "${ATLAS_HTTP_PORT:-8080}:8080"
       - "${ATLAS_GRPC_PORT:-50051}:50051"
+    volumes:
+      # Slice 196: persistent atlas data dir — slice 187 OAuth signing
+      # keystore lives under /var/lib/atlas/keys and MUST survive
+      # restarts (otherwise every JWT issued before the restart is
+      # invalidated). Slice 073 bootstrap-token file at
+      # /var/lib/atlas/bootstrap-token also lives here. atlas.Dockerfile
+      # pre-creates the directory tree with nonroot ownership so the
+      # named volume mount inherits the right uid.
+      - atlas-data:/var/lib/atlas
     healthcheck:
       test: ["CMD", "/usr/local/bin/atlas", "--version"]
       interval: 10s
@@ -342,3 +407,16 @@ volumes:
   pg-data:
   minio-data:
   nats-data:
+  # Slice 196: atlas data dir — slice 187 OAuth keystore + slice 073
+  # bootstrap-token file. Persisted across restarts so JWT signing
+  # keys survive `docker compose down` without `-v`.
+  atlas-data:
+  # Slice 196: atlas-bootstrap OAuth client credentials persistence.
+  # The atlas-bootstrap service writes
+  # /var/lib/atlas-bootstrap/oauth-bootstrap-credentials.json (mode
+  # 0600) on first run and reuses it on every subsequent run. This is
+  # NOT shared with any other service — only atlas-bootstrap mounts
+  # it. Removing the volume on `docker compose down -v` is safe: the
+  # next bring-up will issue a new OAuth client (the old DB row is
+  # detected by the ErrDuplicateName fallback in bootstrap.sh).
+  atlas-bootstrap-data:

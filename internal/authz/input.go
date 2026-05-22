@@ -7,6 +7,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 )
 
 // Input is the canonical decision input passed to OPA. The schema is
@@ -68,8 +69,28 @@ func BuildInput(r *http.Request, attrs map[string]interface{}) Input {
 	action := actionFromMethodAndPath(r.Method, r.URL.Path)
 	resourceType, resourceID := resourceFromPath(r.URL.Path)
 
+	// is_machine_actor: true for non-human callers. Recognised prefixes:
+	//   - empty UserID         — slice-034 api_keys without a bound user
+	//   - "key_..."            — slice-014/034 api_keys (legacy bearer)
+	//   - "oauth_client:..."   — slice 188 OAuth client_credentials JWTs
+	//                            (jwtmw synthesises the credstore.Credential
+	//                            with UserID = claims.Subject which the
+	//                            slice 188 token handler sets to
+	//                            MachineSubjectPrefix + client_id).
+	// The slice-196 bootstrap migration uses the third form to land an
+	// OAuth-client identity that the slice-035 system.rego carve-out can
+	// match for the controls:upload-bundle path.
 	userAttrs := map[string]interface{}{
-		"is_machine_actor": cred.UserID == "" || strings.HasPrefix(cred.UserID, "key_"),
+		"is_machine_actor": cred.UserID == "" ||
+			strings.HasPrefix(cred.UserID, "key_") ||
+			strings.HasPrefix(cred.UserID, "oauth_client:"),
+		// is_super_admin: slice 142. Surfaces the platform-global
+		// super_admin bit from the verified JWT's `atlas:super_admin`
+		// claim. The policies/authz/super_admin.rego rule keys on this
+		// attribute. Falls back to false when no JWT is on the context
+		// (legacy bearer path; super_admin is JWT-only at v1).
+		"is_super_admin": jwtmw.FromContext(r.Context()) != nil &&
+			jwtmw.FromContext(r.Context()).SuperAdmin,
 	}
 	for k, v := range attrs {
 		userAttrs[k] = v

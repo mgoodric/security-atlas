@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 )
 
 func appDSN(t *testing.T) string {
@@ -73,10 +74,9 @@ func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string) {
 	app := openPool(t, appDSN(t))
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(app)
-	_, bearer, err := srv.IssueBootstrapCredential(tenant)
-	if err != nil {
-		t.Fatalf("IssueBootstrapCredential: %v", err)
-	}
+	// Slice 197: JWT bearer via slice 190 path. ViewerFor mirrors
+	// the legacy IssueBootstrapCredential default (no elevation).
+	bearer := srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenant)))
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests nil")

@@ -63,6 +63,125 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 142** — super_admin role full schema + management surface
+  (slice 198 follow-on). Promotes slice 198's `super_admins` stub
+  (`user_id, granted_at, granted_via`) to a management-grade schema:
+  extends `granted_via` CHECK to admit `'manual_grant'` (the runtime
+  provenance value); grants INSERT + DELETE on `super_admins` to
+  `atlas_app` (the table is NOT under RLS — slice 198 D3 — but the
+  per-handler transaction sets the tenant GUC for the parallel
+  `me_audit_log` write). Adds the platform-global
+  `super_admin_audit_log` table (no tenant_id, no RLS — super_admin
+  is platform-global by definition); SELECT + INSERT only via the
+  slice-036 append-only pattern (no UPDATE/DELETE grants). Extends
+  `me_audit_log.action` CHECK with `'super_admin_grant'` +
+  `'super_admin_revoke'` so the slice-124 unified aggregator surfaces
+  every grant/demote event to admins/auditors of the actor's session
+  tenant via the existing `kind='me'` UNION branch (the
+  super_admin_audit_log row is the platform-global forensic anchor;
+  the me_audit_log row is the tenant-scoped surface). Adds new OPA
+  policy `policies/authz/super_admin.rego` exposing `is_super_admin`
+  (sourced from the verified JWT's `atlas:super_admin` claim via
+  `input.user.attrs.is_super_admin`); the policy is NARROW —
+  resource.type="admin" + resource.id="super-admins" — and does NOT
+  silently elevate super_admin authority across other resources.
+  Three new endpoints: `GET /v1/admin/super-admins` lists every
+  super_admin (LEFT JOIN users for display_name + email under session
+  tenant RLS); `POST /v1/admin/super-admins` grants super_admin
+  (idempotent ON CONFLICT DO NOTHING); `DELETE
+  /v1/admin/super-admins/{user_id}` demotes super_admin. LOAD-BEARING
+  last-super_admin safety rail (P0-SA-1): the DELETE handler
+  acquires a `pg_advisory_xact_lock(0x142142142142)` before
+  `count(*) FROM super_admins` — concurrent demotes block on the
+  same advisory lock so they cannot each read a stale count==2 and
+  proceed; the loser sees count==1 post-DELETE and returns 409
+  Conflict ("Cannot demote the last super_admin"). Advisory lock
+  chosen over `SELECT FOR UPDATE` because atlas_app lacks the
+  Postgres UPDATE privilege required for row-level locking on
+  super_admins (the table is functionally append+delete only). New
+  frontend management page at `web/app/admin/super-admins/page.tsx`
+  binds to the new BFF routes; surfaces grant form + per-row demote
+  with confirmation dialog + inline 409 error rendering. AC-by-AC
+  PASS: 12/12. Integration test asserts both single-demote 409 +
+  concurrent-demote serialisation under race. OPA matrix asserts
+  super_admin allows the management surface but does NOT grant
+  blanket write across other resources. Out of scope (per slice
+  doc): super_admin granting tenant membership into arbitrary
+  tenants (P0-SA-3); email notifications on grant/demote;
+  time-bounded grants (P0-SA-4).
+
+- **slice 198** — OIDC first-install bootstrap (closes slice 192 AC-11/AC-12).
+  Ships the OIDC-first-install path that creates the Default Tenant +
+  super_admin grant atomically when the `tenants` table is empty. Adds the
+  `super_admins` table (platform-global, NOT tenant-scoped, no RLS) — slice
+  192's user_resolver explicitly deferred this storage primitive to slice
+  198. Extends `me_audit_log.action` CHECK to admit
+  `'bootstrap_first_install'` (slice 144 precedent for `'tenant_rename'`).
+  New `users.Store.BootstrapFirstInstallOrUpsert` method runs the
+  `count(*) FROM tenants == 0` gate; on empty, writes five rows in a single
+  BYPASSRLS transaction (tenants + users + user_roles + super_admins +
+  me_audit_log). Race-handling reuses slice 144's
+  `idx_tenants_bootstrap_singleton` partial UNIQUE index: concurrent
+  first-installers race; the loser trips SQLSTATE 23505, retries the count
+  check, and falls through to `Bootstrapped: false`. The OIDC callback
+  handler invokes the bootstrap branch AFTER `HandleCallback` succeeds but
+  BEFORE the existing `UpsertOIDC` call; on `Bootstrapped: true`, the
+  handler reloads the user under the synthesized tenant_id and establishes
+  the session under that scope. The `DBUserResolver` (slice 192) now
+  consults `super_admins` via a bounded `WHERE user_id = ANY($1)` query and
+  populates the `atlas:super_admin` JWT claim accordingly — the
+  pre-slice-198 hardcoded `false` is removed. Integration tests cover
+  bootstrap-on-empty, fall-through-on-established-install, and the
+  concurrent-first-installer race (N=5 goroutines via channel barrier).
+
+- **slice 144** — Rename-tenant flow (per-tenant admin or super_admin).
+  Ships `PATCH /v1/tenants/{id}` to mutate a tenant's `name` field; the
+  new value appears immediately in the slice-192 `<TenantSwitcher>`
+  dropdown for everyone scoped to that tenant. Adds the `tenants` table
+  to the schema for the first time — slice 192 referenced it (via the
+  `GET /v1/me/tenants` name-enrichment SELECT) but no migration created
+  it; slice 144 backfills under FORCE RLS using the slice-002 four-policy
+  pattern + a case-insensitive UNIQUE expression index on `LOWER(name)`
+  to block trivial impersonation. Authority gate is dual-leg:
+  `cred.IsAdmin` (slice-034 credential path) OR `claims.SuperAdmin` /
+  `claims.Roles[CURRENT][admin]` (slice-187 JWT path) — either grants
+  rename authority on the caller's CURRENT tenant only. Cross-tenant
+  rename is denied by RLS regardless of role. Server-side validation:
+  trims input, NFC-normalizes, caps at 64 UTF-8 bytes, rejects control
+  characters + null bytes; duplicate names raise 409. Single-transaction
+  write: `UPDATE tenants` + `INSERT me_audit_log (action='tenant_rename')`
+  commit together; the audit row surfaces in the slice-124 unified
+  aggregator as `kind=me action=tenant_rename`. Frontend adds a Tenant
+  section to `/settings` (admin-role-gated) with a name input + Save
+  button that wires to the new `/api/tenants/[id]` BFF route. Out of
+  scope (per slice doc): slug rename (affects URLs), tenant branding /
+  logo / metadata fields, tenant rename history UI (audit-log captures
+  the trail), Playwright e2e on the rename flow (deferred — would need
+  `fixtures/e2e/settings.sql` extension; 0.5d AFK budget honored), and
+  Unicode confusables detection (accepted-risk per the migration header
+  D5 — full guard requires libicu or a heavy Go library).
+
+- **slice 192** — Multi-tenant switch via OAuth token-exchange +
+  frontend tenant switcher. **Closes the v2 vCISO operator persona**
+  (originally specified as slice 141, PARKED 2026-05-20). vCISOs
+  hosting atlas for multiple client tenants can now switch between
+  client contexts from a persistent header dropdown without
+  re-authenticating — each switch is one RFC 8693 token-exchange
+  call against `/oauth/token`. Ships: `GET /v1/me/tenants` backend
+  handler (reads verified JWT claim only, PK-bounded SELECT —
+  P0-192-2); `<TenantSwitcher>` React component mounted in TopBar
+  (HIDDEN when `tenants.length <= 1` per canvas §11 #13);
+  `switchTenant()` client + BFF route at
+  `/api/auth/switch-tenant` (pure proxy to slice 188's
+  token-exchange grant); `/oauth/select-tenant` login picker page
+  for operators with ≥2 tenants; membership-removed UX banner with
+  60s re-fetch cadence; expanded `DBUserResolver` that enumerates
+  the OIDC subject's full tenant set via cross-tenant `users`
+  lookup. Honest "eventual eviction" semantics documented at
+  `docs-site/docs/tenant-membership.md` — operators can call
+  `/oauth/revoke` (slice 190) for immediate eviction. **Closes the
+  auth-substrate-v2 spine** (slot 6 of 6); ADR-0003 addendum + slice
+  141 `_STATUS.md` row flipped to `merged-via-spine-completion`.
 - **slice 187** — OAuth Authorization Server scaffolding (JWT signing
   infrastructure + JWKS endpoint + OIDC discovery document). Foundation
   slice for the auth-substrate-v2 spine (OQ #21 Reading D resolution).
@@ -83,6 +202,35 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   token shape, ES256 decision, key rotation strategy, and threat-model
   summary. JUDGMENT slice — decisions D1-D5 recorded at
   `docs/audit-log/187-oauth-as-scaffolding-decisions.md`.
+- **slice 188** — OAuth `/oauth/token` endpoint + RFC 8693 token
+  exchange. Spine slot 2 of 6 in the auth-substrate-v2 spine, building
+  on slice 187's scaffolding. Lights up `POST /oauth/token` with two
+  grant types: RFC 6749 §4.4 `client_credentials` (machine clients
+  acquire JWT access tokens) and RFC 8693 token-exchange (the
+  load-bearing primitive for slice 192's tenant-switcher). Ships
+  `internal/auth/oauthclient` (DB-backed OAuth client registry +
+  argon2id-hashed secrets), two new migrations
+  (`oauth_clients` non-tenant-scoped + `oauth_token_exchanges`
+  append-only via two-policy RLS matching slice 030's
+  `decisions_audit` precedent), the `internal/api/oauth.TokenEndpoint`
+  handler (form-body Content-Type validation; per-client token-bucket
+  rate limiter keyed on `client_id` — NEVER source IP per P0-188-9;
+  default 60/min/client, configurable via
+  `ATLAS_OAUTH_TOKEN_RATE_PER_MIN`), and the
+  `atlas-cli oauth issue-client <name>` operator helper. Constitutional
+  safety invariants enforced: token-exchange NEVER elevates
+  `atlas:super_admin` (copies from verified subject_token; P0-188-4);
+  signature verification ALWAYS runs before the allowlist check
+  (P0-188-5); audit log is append-only (P0-188-8). The minted-JWT
+  shape matches slice 187's locked claim contract: `sub =
+  oauth_client:<id>` for client_credentials machine tokens;
+  `current_tenant_id` swapped for token-exchange while
+  `available_tenants` + `roles` + `super_admin` are preserved.
+  Discovery doc updated to advertise both grant types when the
+  TokenEndpoint is wired. JUDGMENT slice — decisions D1-D4 recorded at
+  `docs/audit-log/188-oauth-token-endpoint-decisions.md`. ADR-0003
+  carries the slice 188 addendum covering the three load-bearing
+  invariants.
 
 ### Fixed
 

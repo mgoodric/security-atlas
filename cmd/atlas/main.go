@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -30,8 +31,12 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
+	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
+	"github.com/mgoodric/security-atlas/internal/auth/oauthcode"
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
+	"github.com/mgoodric/security-atlas/internal/auth/revocation"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
+	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	metricscatalog "github.com/mgoodric/security-atlas/internal/catalog/metrics"
@@ -289,13 +294,155 @@ func main() {
 	// external issuer URL, and attach to the server. JWKS + discovery
 	// are bearer/authz-exempt per RFC 8414 §3; see
 	// docs/adr/0003-oauth-authorization-server.md.
+	//
+	// Slice 188 extends this block: when the DB pool is wired AND the
+	// issuer URL is set, the OAuth handler also gets a TokenEndpoint
+	// that lights up `POST /oauth/token` with client_credentials +
+	// token-exchange grants. The TokenEndpoint pulls oauth_clients
+	// rows for authentication and writes oauth_token_exchanges audit
+	// rows on every successful exchange.
 	if issuer := os.Getenv("ATLAS_ISSUER_URL"); issuer != "" {
 		ks, err := fsstore.Open(fsstore.ResolvePath(""))
 		if err != nil {
 			logger.Error("atlas: open OAuth keystore", "err", err)
 			os.Exit(1)
 		}
-		srv.AttachOAuthHandler(oauthapi.New(ks, oauthapi.Config{Issuer: issuer}))
+		oauthHandler := oauthapi.New(ks, oauthapi.Config{Issuer: issuer})
+
+		// Slice 188: wire the token endpoint when the DB pool exists.
+		// The unit / in-memory cmd/atlas paths (no DATABASE_URL) leave
+		// the token endpoint absent; `/oauth/token` returns the slice
+		// 187 501-stub response in that mode.
+		if pool != nil {
+			signer := tokensign.New(ks)
+			clients := oauthclient.New(pool)
+			ratePerMin := oauthapi.DefaultTokenRatePerMin
+			if env := os.Getenv("ATLAS_OAUTH_TOKEN_RATE_PER_MIN"); env != "" {
+				if v, err := strconv.Atoi(env); err == nil && v > 0 {
+					ratePerMin = v
+				}
+			}
+			ep := oauthapi.NewTokenEndpoint(signer, clients, oauthapi.TokenEndpointConfig{
+				Issuer:        issuer,
+				AuditPool:     pool,
+				RatePerMinute: ratePerMin,
+			})
+			oauthHandler.AttachTokenEndpoint(ep)
+			logger.Info("atlas: OAuth token endpoint wired",
+				"rate_per_min", ratePerMin)
+
+			// Slice 189: wire the authorize endpoint + auth-code store.
+			// The authorize handler resolves the user's identity from
+			// the slice-034 sessions store + user_roles via the DB
+			// resolver. The token endpoint dispatches
+			// `grant_type=authorization_code` to the same store for
+			// one-shot redemption.
+			codeStore := oauthcode.New(pool)
+			ep.AttachAuthCodeStore(codeStore)
+			// Slice 192: pass the BYPASSRLS authPool to the resolver
+			// so it can enumerate the OIDC subject's tenant
+			// memberships across the `users` table (the cross-tenant
+			// lookup that powers the tenant-switcher's
+			// available_tenants[] claim). When DATABASE_URL is unset
+			// the resolver falls back to the slice-189 single-tenant
+			// snapshot.
+			//
+			// The authPool wired here is constructed locally because
+			// the apikey-path authPool (declared at line ~521) is
+			// scoped inside a sibling `if pool != nil` block that
+			// runs AFTER this one. Both initialisations open the
+			// same migrate-role connection (DATABASE_URL ->
+			// BYPASSRLS) — duplicating the pool is acceptable
+			// because pgxpool gives each its own connection slot;
+			// future refactor can hoist them into a single
+			// initialisation higher in this function.
+			var resolverAuthPool *pgxpool.Pool
+			if migURL := os.Getenv("DATABASE_URL"); migURL != "" {
+				apCtx, apCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				ap, err := atlasotel.NewTracedPool(apCtx, migURL)
+				apCancel()
+				if err == nil {
+					resolverAuthPool = ap
+					defer ap.Close()
+				}
+			}
+			authorizeEP := oauthapi.NewAuthorizeEndpoint(oauthapi.AuthorizeEndpointConfig{
+				Codes:    codeStore,
+				Clients:  clients,
+				Sessions: sessions.NewStore(pool, 0),
+				Users:    oauthapi.NewDBUserResolverWithAuthPool(pool, resolverAuthPool),
+				Issuer:   issuer,
+			})
+			oauthHandler.AttachAuthorizeEndpoint(authorizeEP)
+			logger.Info("atlas: OAuth authorize endpoint wired",
+				"pkce_methods", "S256")
+
+			// Slice 189 AC-40: start the auth-code sweeper goroutine.
+			// DELETEs expired codes every 5 minutes (1-hour grace beyond
+			// the 60s TTL avoids races with in-flight redemptions).
+			sweepCtx, sweepCancel := context.WithCancel(context.Background())
+			go runAuthCodeSweeper(sweepCtx, codeStore, logger)
+			// The sweeper goroutine never returns under normal
+			// operation; sweepCancel is invoked at process shutdown
+			// (handled by the parent process lifecycle).
+			_ = sweepCancel
+
+			// Slice 190: wire the /oauth/revoke (RFC 7009) +
+			// /oauth/introspect (RFC 7662) endpoints, the JWT
+			// validation middleware on /v1/*, and the revocation-
+			// list sweeper goroutine.
+			revokedStore := revocation.New(pool)
+			revokeEP := oauthapi.NewRevocationEndpoint(signer, revokedStore, clients, oauthapi.RevocationEndpointConfig{
+				Issuer: issuer,
+			})
+			introspectEP := oauthapi.NewIntrospectionEndpoint(signer, revokedStore, clients, oauthapi.IntrospectionEndpointConfig{
+				Issuer: issuer,
+			})
+			oauthHandler.AttachRevocationEndpoint(revokeEP)
+			oauthHandler.AttachIntrospectionEndpoint(introspectEP)
+			logger.Info("atlas: OAuth revocation + introspection endpoints wired")
+
+			// Slice 190: attach the JWT validator to the HTTP server
+			// so it prepends jwtmw to the /v1/* chain.
+			srv.AttachJWTValidator(signer, revokedStore, issuer, issuer)
+			logger.Info("atlas: JWT validation middleware wired", "issuer", issuer)
+
+			// Slice 191: wire the RFC 8628 device-authorization endpoint
+			// + the device-code grant + the internal approve/deny
+			// handlers. Together these light up the `atlas login`
+			// CLI flow.
+			deviceCodes := oauthapi.NewDeviceCodeStore(pool)
+			deviceAuthEP := oauthapi.NewDeviceAuthorizationEndpoint(clients, deviceCodes, oauthapi.DeviceAuthorizationConfig{
+				Issuer: issuer,
+			})
+			deviceApprovalEP := oauthapi.NewDeviceApprovalEndpoint(deviceCodes, oauthapi.DeviceApprovalConfig{})
+			ep.AttachDeviceCodeStore(deviceCodes)
+			oauthHandler.AttachDeviceAuthorizationEndpoint(deviceAuthEP)
+			oauthHandler.AttachDeviceApprovalEndpoint(deviceApprovalEP)
+			logger.Info("atlas: OAuth device-authorization endpoints wired",
+				"interval_seconds", oauthapi.DevicePollInterval)
+
+			// Slice 191: the migration URL the 410 responder surfaces
+			// in its body. Defaults to the docs-site path relative to
+			// the issuer when ATLAS_OAUTH_DEPRECATION_URL is unset; an
+			// override lets self-host operators point at their own
+			// migration runbook.
+			migrationURL := os.Getenv("ATLAS_OAUTH_DEPRECATION_URL")
+			if migrationURL == "" {
+				migrationURL = issuer + "/docs/migration/oauth"
+			}
+			srv.AttachDeprecationMigrationURL(migrationURL)
+			logger.Info("atlas: legacy bearer deprecation responder wired",
+				"migration_url", migrationURL)
+
+			// Slice 190: revocation-list sweeper goroutine. DELETEs
+			// rows where expires_at < now() every 5 minutes (decision
+			// D4 — matches the auth-code sweeper interval).
+			revSweepCtx, revSweepCancel := context.WithCancel(context.Background())
+			go runRevokedTokenSweeper(revSweepCtx, revokedStore, logger)
+			_ = revSweepCancel
+		}
+		srv.AttachOAuthHandler(oauthHandler)
 		// Surface the active signing key id (not the key bytes — never
 		// the bytes) so operators can correlate JWKS responses with the
 		// running process at startup.
@@ -407,6 +554,14 @@ func main() {
 		srv.AttachAPIKeyStore(apikeySvc)
 		fmt.Fprintf(os.Stderr, "atlas: api_keys store wired (BEARER_HASH_KEY ok)\n")
 
+		// Slice 192: wire the BYPASSRLS authPool into the Server so
+		// GET /v1/me/tenants can run its bounded `SELECT id, name
+		// FROM tenants WHERE id = ANY($1)` query against the
+		// caller's verified JWT available_tenants[] claim.
+		// authPool MAY be nil (DATABASE_URL unset); the handler
+		// falls back to returning tenant IDs without name enrichment.
+		srv.AttachAuthPool(authPool)
+
 		// Slice 073: platform_status reader/writer. Read pool is the
 		// RLS-bound app pool (public_read RLS policy is USING (true));
 		// write pool is the BYPASSRLS migrate pool (atlas_app has no
@@ -430,7 +585,15 @@ func main() {
 		// secureCookies follows ATLAS_SECURE_COOKIES (default false for
 		// the local-HTTP self-host default; operators set it true behind
 		// TLS).
-		userStore := users.NewStore(pool)
+		// Slice 198: wire the BYPASSRLS authPool into the users.Store
+		// so the OIDC callback handler's bootstrap branch can write
+		// across (tenants, users, user_roles, super_admins, me_audit_log)
+		// when count(*) FROM tenants == 0. When authPool is nil
+		// (DATABASE_URL unset), the bootstrap branch returns
+		// ErrBootstrapUnavailable and the handler falls through to the
+		// existing UpsertOIDC path (which itself preserves the
+		// pre-slice-198 behaviour of erroring on "tenant_id required").
+		userStore := users.NewStoreWithAuthPool(pool, authPool)
 		sessionStore := sessions.NewStore(pool, 0)
 		oidcAuth := oidc.New(localModeIdpResolver{})
 		secureCookies := os.Getenv("ATLAS_SECURE_COOKIES") == "true"
@@ -885,4 +1048,80 @@ type localModeIdpResolver struct{}
 
 func (localModeIdpResolver) ResolveIdp(_ context.Context, _ uuid.UUID, _ string) (oidc.IdpConfig, error) {
 	return oidc.IdpConfig{}, oidc.ErrUnknownIdp
+}
+
+// runAuthCodeSweeper is the slice-189 sweeper goroutine. Every 5
+// minutes it DELETEs auth-code rows whose created_at is older than
+// 1 hour. The 1-hour grace beyond the 60-second TTL prevents races
+// with in-flight redemptions. Logged at INFO with the count deleted.
+//
+// The goroutine runs until ctx is cancelled (process shutdown).
+func runAuthCodeSweeper(ctx context.Context, store *oauthcode.Store, logger *slog.Logger) {
+	const (
+		interval = 5 * time.Minute
+		grace    = 1 * time.Hour
+	)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	// Run one sweep immediately on startup so the first cleanup
+	// doesn't wait the full interval.
+	doSweep(ctx, store, grace, logger)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			doSweep(ctx, store, grace, logger)
+		}
+	}
+}
+
+func doSweep(ctx context.Context, store *oauthcode.Store, grace time.Duration, logger *slog.Logger) {
+	cutoff := time.Now().UTC().Add(-grace)
+	sweepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	n, err := store.SweepExpired(sweepCtx, cutoff)
+	if err != nil {
+		logger.Warn("atlas: oauth_auth_codes sweep failed", "err", err)
+		return
+	}
+	if n > 0 {
+		logger.Info("atlas: oauth_auth_codes swept", "rows_deleted", n)
+	}
+}
+
+// runRevokedTokenSweeper is the slice-190 revocation-list sweeper.
+// Every 5 minutes it DELETEs oauth_revoked_tokens rows whose
+// expires_at < now() — those tokens have already failed the JWT
+// validator's exp check, so the revocation row is dead weight. The
+// goroutine runs until ctx is cancelled (process shutdown). Decision
+// D4 in docs/audit-log/190-jwt-middleware-r2-decisions.md.
+func runRevokedTokenSweeper(ctx context.Context, store *revocation.Store, logger *slog.Logger) {
+	const interval = 5 * time.Minute
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	// Run once immediately so the first cleanup doesn't wait the
+	// full interval.
+	doRevokedSweep(ctx, store, logger)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			doRevokedSweep(ctx, store, logger)
+		}
+	}
+}
+
+func doRevokedSweep(ctx context.Context, store *revocation.Store, logger *slog.Logger) {
+	sweepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	n, err := store.Sweep(sweepCtx)
+	if err != nil {
+		logger.Warn("atlas: oauth_revoked_tokens sweep failed", "err", err)
+		return
+	}
+	if n > 0 {
+		logger.Info("atlas: oauth_revoked_tokens swept", "rows_deleted", n)
+	}
 }

@@ -59,17 +59,123 @@ type Config struct {
 // Handler bundles the keystore + the discovery config and exposes the
 // HTTP entrypoints via Mount. The discovery JSON is pre-marshaled at
 // construction time so the GET hot path is a single Write call.
+//
+// Slice 188 added an optional token endpoint: when AttachTokenEndpoint
+// is called with a non-nil TokenEndpoint, the `/oauth/token` route
+// dispatches to client-credentials + token-exchange handlers instead
+// of returning a 501 stub, and the discovery document advertises the
+// supported grant types.
+//
+// Slice 189 added an optional authorize endpoint: when
+// AttachAuthorizeEndpoint is called with a non-nil AuthorizeEndpoint,
+// the `/oauth/authorize` route serves the real handler (vs the 501
+// stub) and the discovery document gains `authorization_code` in
+// grant_types_supported.
 type Handler struct {
-	store        keystore.KeyStore
-	discoveryDoc []byte
+	store          keystore.KeyStore
+	cfg            Config
+	tokenEP        *TokenEndpoint
+	authorizeEP    *AuthorizeEndpoint
+	revokeEP       *RevocationEndpoint
+	introspectEP   *IntrospectionEndpoint
+	deviceAuthEP   *DeviceAuthorizationEndpoint
+	deviceApproval *DeviceApprovalEndpoint
+	discoveryDoc   []byte
 }
 
 // New constructs a Handler. The store provides verification keys for
 // JWKS; the cfg.Issuer drives every absolute URL in the discovery doc.
 // The discovery JSON is pre-marshaled once here — issuer is fixed at
 // process startup, so building the map per request is pure waste.
+//
+// To enable the real `/oauth/token` handler (slice 188), call
+// AttachTokenEndpoint AFTER New but BEFORE Mount. Mount snapshots the
+// then-current grant-types set into the discovery document.
 func New(store keystore.KeyStore, cfg Config) *Handler {
-	doc, err := json.Marshal(discoveryDocument(cfg.Issuer))
+	h := &Handler{store: store, cfg: cfg}
+	h.rebuildDiscovery()
+	return h
+}
+
+// AttachTokenEndpoint wires the slice-188 grant handlers and
+// regenerates the discovery document with the supported grant types
+// list. Optional — when nil, the `/oauth/token` route stays a 501
+// stub and discovery advertises an empty grant_types_supported.
+func (h *Handler) AttachTokenEndpoint(ep *TokenEndpoint) {
+	h.tokenEP = ep
+	h.rebuildDiscovery()
+}
+
+// AttachAuthorizeEndpoint wires the slice-189 authorize handler and
+// regenerates the discovery document so `authorization_code` joins
+// grant_types_supported. Optional — when nil, the `/oauth/authorize`
+// route stays a 501 stub.
+func (h *Handler) AttachAuthorizeEndpoint(ep *AuthorizeEndpoint) {
+	h.authorizeEP = ep
+	h.rebuildDiscovery()
+}
+
+// AttachRevocationEndpoint wires the slice-190 `/oauth/revoke` handler
+// per RFC 7009. When attached, the discovery document is regenerated
+// to advertise the revocation_endpoint_auth_methods_supported list.
+// Optional — when nil, the `/oauth/revoke` route stays a 501 stub.
+func (h *Handler) AttachRevocationEndpoint(ep *RevocationEndpoint) {
+	h.revokeEP = ep
+	h.rebuildDiscovery()
+}
+
+// AttachIntrospectionEndpoint wires the slice-190 `/oauth/introspect`
+// handler per RFC 7662. When attached, the discovery document is
+// regenerated to advertise the introspection_endpoint_auth_methods_supported
+// list. Optional — when nil, the `/oauth/introspect` route stays a
+// 501 stub.
+func (h *Handler) AttachIntrospectionEndpoint(ep *IntrospectionEndpoint) {
+	h.introspectEP = ep
+	h.rebuildDiscovery()
+}
+
+// AttachDeviceAuthorizationEndpoint wires the slice-191 RFC 8628
+// device-authorization handler. When attached, the discovery
+// document advertises `device_authorization_endpoint` and adds the
+// device-code grant URN to `grant_types_supported`.
+func (h *Handler) AttachDeviceAuthorizationEndpoint(ep *DeviceAuthorizationEndpoint) {
+	h.deviceAuthEP = ep
+	h.rebuildDiscovery()
+}
+
+// AttachDeviceApprovalEndpoint wires the slice-191 internal approve
+// + deny handlers. These endpoints are NOT in RFC 8628 — they are
+// the atlas-internal hooks the device approval UI posts to. No
+// discovery surface change because the endpoints are not part of
+// the public OAuth contract.
+func (h *Handler) AttachDeviceApprovalEndpoint(ep *DeviceApprovalEndpoint) {
+	h.deviceApproval = ep
+}
+
+// rebuildDiscovery snapshots the current grant-type state into the
+// pre-marshaled discovery JSON. Called from New, AttachTokenEndpoint,
+// AttachAuthorizeEndpoint, AttachRevocationEndpoint, and
+// AttachIntrospectionEndpoint.
+func (h *Handler) rebuildDiscovery() {
+	grantTypes := []string{}
+	if h.tokenEP != nil {
+		grantTypes = append(grantTypes, GrantTypeClientCredentials, GrantTypeTokenExchange)
+		// Slice 189: the authorization_code grant lights up when BOTH
+		// the token endpoint is wired AND the authorize endpoint has
+		// been attached. Advertising the grant without the matching
+		// authorize route would be dishonest to clients.
+		if h.authorizeEP != nil {
+			grantTypes = append(grantTypes, GrantTypeAuthorizationCode)
+		}
+		// Slice 191: the device-code grant lights up when BOTH the
+		// token endpoint is wired AND the device-authorization
+		// endpoint is attached — same honest-advertising discipline.
+		if h.deviceAuthEP != nil {
+			grantTypes = append(grantTypes, GrantTypeDeviceCode)
+		}
+	}
+	doc, err := json.Marshal(discoveryDocument(h.cfg.Issuer, grantTypes,
+		h.revokeEP != nil, h.introspectEP != nil, h.deviceAuthEP != nil))
 	if err != nil {
 		// json.Marshal of a fixed-shape map[string]any with string +
 		// []string + bool values cannot fail in practice; if it does,
@@ -77,20 +183,48 @@ func New(store keystore.KeyStore, cfg Config) *Handler {
 		// right behavior.
 		panic("oauth: marshal discovery document: " + err.Error())
 	}
-	return &Handler{store: store, discoveryDoc: doc}
+	h.discoveryDoc = doc
 }
 
-// Mount registers the slice-187 OAuth endpoints on the supplied chi
-// router. Callers MUST pass the root router — not a Mount("/") submount
-// — so the two `/.well-known/*` paths sit at the absolute root per
+// Mount registers the OAuth endpoints on the supplied chi router.
+// Callers MUST pass the root router — not a Mount("/") submount —
+// so the two `/.well-known/*` paths sit at the absolute root per
 // the standards.
 func (h *Handler) Mount(r chi.Router) {
 	r.Get(PathJWKS, h.serveJWKS)
 	r.Get(PathDiscovery, h.serveDiscovery)
-	r.Post(PathToken, stubHandler("188"))
-	r.Get(PathAuthorize, stubHandler("189"))
-	r.Post(PathRevoke, stubHandler("190"))
-	r.Post(PathIntrospect, stubHandler("190"))
+	if h.tokenEP != nil {
+		r.Post(PathToken, h.tokenEP.ServeHTTP)
+	} else {
+		r.Post(PathToken, stubHandler("188"))
+	}
+	if h.authorizeEP != nil {
+		r.Get(PathAuthorize, h.authorizeEP.ServeHTTP)
+	} else {
+		r.Get(PathAuthorize, stubHandler("189"))
+	}
+	if h.revokeEP != nil {
+		r.Post(PathRevoke, h.revokeEP.ServeHTTP)
+	} else {
+		r.Post(PathRevoke, stubHandler("190"))
+	}
+	if h.introspectEP != nil {
+		r.Post(PathIntrospect, h.introspectEP.ServeHTTP)
+	} else {
+		r.Post(PathIntrospect, stubHandler("190"))
+	}
+	if h.deviceAuthEP != nil {
+		r.Post(PathDeviceAuthorization, h.deviceAuthEP.ServeHTTP)
+	} else {
+		r.Post(PathDeviceAuthorization, stubHandler("191"))
+	}
+	if h.deviceApproval != nil {
+		r.Post(PathDeviceApprove, h.deviceApproval.ServeApprove)
+		r.Post(PathDeviceDeny, h.deviceApproval.ServeDeny)
+	} else {
+		r.Post(PathDeviceApprove, stubHandler("191"))
+		r.Post(PathDeviceDeny, stubHandler("191"))
+	}
 }
 
 // serveJWKS returns the verification-key set as a JSON Web Key Set
@@ -127,17 +261,26 @@ func (h *Handler) serveDiscovery(w http.ResponseWriter, _ *http.Request) {
 }
 
 // discoveryDocument is split out so tests can call it directly and
-// other slices in the spine can extend it (188 will append
-// `client_credentials` to grant_types_supported, etc.).
-func discoveryDocument(issuer string) map[string]any {
-	return map[string]any{
+// other slices in the spine can extend it (188 appended
+// `client_credentials` + token-exchange to grant_types_supported when
+// the token endpoint is wired).
+//
+// Slice 188 also tightened token_endpoint_auth_methods_supported to
+// `client_secret_post` only — the slice-188 handler accepts secrets
+// in the form body but does NOT implement the HTTP Basic
+// authentication scheme (`client_secret_basic`). Advertising what we
+// don't accept would be dishonest to clients. RFC 6749 §2.3.1
+// recommends accepting BOTH, but does not REQUIRE it; future-slice
+// work can re-add basic auth if operator demand surfaces.
+func discoveryDocument(issuer string, grantTypesSupported []string, revocationActive, introspectionActive, deviceAuthActive bool) map[string]any {
+	doc := map[string]any{
 		"issuer":                                issuer,
 		"jwks_uri":                              issuer + PathJWKS,
 		"token_endpoint":                        issuer + PathToken,
 		"authorization_endpoint":                issuer + PathAuthorize,
 		"revocation_endpoint":                   issuer + PathRevoke,
 		"introspection_endpoint":                issuer + PathIntrospect,
-		"grant_types_supported":                 []string{},
+		"grant_types_supported":                 grantTypesSupported,
 		"id_token_signing_alg_values_supported": []string{tokensign.SignatureAlgorithmString},
 		"subject_types_supported":               []string{"public"},
 		"scopes_supported":                      []string{"openid"},
@@ -151,8 +294,30 @@ func discoveryDocument(issuer string) map[string]any {
 		},
 		"response_types_supported":              []string{"code"},
 		"code_challenge_methods_supported":      []string{"S256"},
-		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post"},
+		"token_endpoint_auth_methods_supported": []string{"client_secret_post"},
 	}
+	// Slice 190: only advertise the revocation + introspection auth
+	// method lists when the corresponding endpoints are wired. RFC
+	// 8414 §2 allows omitting both fields when those endpoints are
+	// not implemented; stubbed-only deployments stay quiet.
+	if revocationActive {
+		doc["revocation_endpoint_auth_methods_supported"] = []string{
+			"client_secret_basic", "client_secret_post",
+		}
+	}
+	if introspectionActive {
+		doc["introspection_endpoint_auth_methods_supported"] = []string{
+			"client_secret_basic", "client_secret_post",
+		}
+	}
+	// Slice 191: advertise the device-authorization endpoint when
+	// it's wired. RFC 8628 §4 mandates the
+	// `device_authorization_endpoint` discovery field for AS that
+	// implement the grant.
+	if deviceAuthActive {
+		doc["device_authorization_endpoint"] = issuer + PathDeviceAuthorization
+	}
+	return doc
 }
 
 // stubHandler returns a `slice_pending` 501 response pointing at the

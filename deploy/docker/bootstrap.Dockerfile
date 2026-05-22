@@ -49,6 +49,18 @@ COPY migrations/                /repo/migrations/
 COPY controls/                  /repo/controls/
 RUN chmod +x /bootstrap/bootstrap.sh
 
+# Slice 196: pre-create /var/lib/atlas-bootstrap owned by the postgres
+# user so the docker-compose named volume `atlas-bootstrap-data`
+# mounted at this path inherits the postgres ownership. Without this,
+# the volume is root-owned and bootstrap.sh's
+# `oauth-bootstrap-credentials.json` write at phase 6a fails with
+# "permission denied". The runtime-mounted volume is the only place
+# the client_secret ever lives (P0-196-2: never baked into image
+# layers).
+RUN mkdir -p /var/lib/atlas-bootstrap \
+    && chown postgres:postgres /var/lib/atlas-bootstrap \
+    && chmod 0700 /var/lib/atlas-bootstrap
+
 # Run as the postgres image's unprivileged `postgres` user, not root.
 USER postgres
 

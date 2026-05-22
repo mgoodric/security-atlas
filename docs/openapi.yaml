@@ -56,6 +56,7 @@ tags:
   - name: admin-policies
   - name: admin-samples
   - name: admin-sso
+  - name: admin-super-admins
   - name: admin-users
   - name: admin-vendors
   - name: artifacts
@@ -81,6 +82,7 @@ tags:
   - name: schemas
   - name: scopes
   - name: system
+  - name: tenants
   - name: ucf
   - name: vendors
   - name: walkthroughs
@@ -435,6 +437,53 @@ paths:
       operationId: post-v1-admin-sso-preflight
       security:
         - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/super-admins:
+    get:
+      summary: GET /v1/admin/super-admins
+      tags: [admin-super-admins]
+      operationId: get-v1-admin-super-admins
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/admin/super-admins
+      tags: [admin-super-admins]
+      operationId: post-v1-admin-super-admins
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/super-admins/{user_id}:
+    delete:
+      summary: DELETE /v1/admin/super-admins/{user_id}
+      tags: [admin-super-admins]
+      operationId: delete-v1-admin-super-admins-user_id
+      security:
+        - adminBearer: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         default:
           description: Default response envelope.
@@ -2229,6 +2278,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/me/tenants:
+    get:
+      summary: GET /v1/me/tenants
+      tags: [me]
+      operationId: get-v1-me-tenants
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/metrics:
     get:
       summary: GET /v1/metrics
@@ -3180,6 +3243,39 @@ paths:
       operationId: get-v1-scopes-dimensions
       security:
         - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/tenants/{id}:
+    patch:
+      summary: PATCH /v1/tenants/{id} — rename a tenant (per-tenant admin or super_admin)
+      tags: [tenants]
+      operationId: patch-v1-tenants-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/test/issue-jwt:
+    post:
+      summary: Mint a test JWT (env-gated by ATLAS_TEST_MODE; absent in production)
+      tags: [system]
+      operationId: post-v1-test-issue-jwt
+      x-internal: true
       responses:
         default:
           description: Default response envelope.

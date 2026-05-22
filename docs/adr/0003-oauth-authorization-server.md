@@ -131,6 +131,69 @@ The slice-190 R2 middleware that gates `/v1/*` MUST honor the same exemption lis
 
 **Reading D — internal OAuth 2.0 Authorization Server with JWT access tokens carrying tenant-in-claim (chosen).** See above.
 
+## Slice 188 addendum — `/oauth/token` endpoint + token-exchange invariants
+
+Slice 188 (2026-05-21) lit up `POST /oauth/token` with two grants — `client_credentials` (RFC 6749 §4.4) and token-exchange (RFC 8693). The slice locks four invariants on top of the slice-187 scaffolding:
+
+**1. Token-exchange super_admin non-elevation (load-bearing safety).** The token-exchange handler MUST copy `atlas:super_admin` from the verified subject_token; it MUST NOT compute it, infer it from form parameters, or accept it from the request body. The exchange path is a tenant-swap verb, NOT a privilege-grant verb. `super_admin=true` is granted exclusively at OIDC login time (slice 142). P0-188-4 enforces this; AC-15 covers it with an integration test (`TestTokenEndpoint_TokenExchange_NeverElevatesSuperAdmin`).
+
+**2. Signature-before-allowlist.** The token-exchange handler MUST verify the subject_token's JWS signature against the local keystore BEFORE reading any claim (including `atlas:available_tenants`) from the token. An unverified subject_token can claim arbitrary allowlists; only a signature-verified token is trusted as the basis for the tenant gate. P0-188-5 enforces this; the unit test `TestTokenEndpoint_TokenExchange_RejectsBadSignature` demonstrates the negative case (a foreign-signed token cannot influence the allowlist gate).
+
+**3. Per-client rate limit (DoS mitigation).** The token endpoint runs a token-bucket limiter keyed on `client_id`. Default 60/min/client; configurable via `ATLAS_OAUTH_TOKEN_RATE_PER_MIN`. Returns 429 + `Retry-After`. The limit MUST be per-client, NOT per-IP — IP-based limits are bypassable behind NAT. P0-188-9 enforces this.
+
+**4. Audit-log append-only invariant.** Every successful token-exchange writes one row to `oauth_token_exchanges` (append-only via two-policy RLS scoped to the target tenant — matches slice 030's `decisions_audit` precedent). The write is best-effort post-sign — the JWT response does not block on the audit-write commit (D3, slice 188 decisions log). The audit row is forensically airtight (jti + iss + sub + exchanged_at + ip_address); the absence of an UPDATE/DELETE policy under FORCE RLS makes mutation impossible from atlas_app.
+
+**Discovery doc updates.** `grant_types_supported` advertises `["client_credentials", "urn:ietf:params:oauth:grant-type:token-exchange"]` exactly when a TokenEndpoint is wired. `token_endpoint_auth_methods_supported` is tightened to `["client_secret_post"]` — slice 188 does NOT implement HTTP Basic auth; advertising what we don't accept would mislead clients (a follow-on slice can re-add Basic when operator demand surfaces).
+
+## Slice 189 addendum — `/oauth/authorize` + PKCE + redirect-URI registry
+
+Slice 189 (2026-05-21) lit up `GET /oauth/authorize` (RFC 6749 §4.1 Authorization Code grant) hardened with PKCE S256 (RFC 7636) and extended `/oauth/token` with the `authorization_code` grant. Four invariants land on top of the slice-187/188 scaffolding:
+
+**1. PKCE S256 is mandatory for the browser flow.** The `code_challenge_method` parameter is restricted to `S256` at three layers: the application handler (`authorize.go` rejects `plain` with 400), the DB CHECK constraint (`oauth_auth_codes_method_s256_only`), and the discovery document (`code_challenge_methods_supported = ["S256"]`). `plain` is forbidden because the Next.js frontend cannot safely hold a `client_secret`, and PKCE is the load-bearing primitive for public-client safety per OAuth 2.1 §4.5. P0-189-1 enforces this; the unit test `TestComputePKCEChallengeS256` exercises the RFC 7636 Appendix B vector; the integration test `TestIntegrationAuthorizeFlow_PlainPKCERejected` covers the negative path.
+
+**2. Redirect-URI registration is the open-redirect gate.** The `oauth_client_redirect_uris` table (UNIQUE on `(client_id, redirect_uri)`) is the source of truth — the authorize handler validates the requested `redirect_uri` against this registry BEFORE issuing any code OR generating any browser redirect. Unregistered URIs return 400 with no `Location` header set, so an attacker cannot use the authorize endpoint as an open redirector. P0-189-2 enforces this; the integration test `TestIntegrationAuthorizeFlow_UnregisteredRedirectURIRejected` explicitly verifies the absence of a leak. Operators register URIs via `atlas-cli oauth add-redirect-uri <client_id> <redirect_uri>` (rejects non-https non-localhost URIs at the CLI layer).
+
+**3. Authorization codes are one-shot.** The `oauth_auth_codes` table has a nullable `consumed_at` column; the redemption path uses a `SELECT … FOR UPDATE` + `UPDATE … WHERE consumed_at IS NULL RETURNING …` pattern inside one transaction. A second redemption attempt returns 0 rows and is collapsed to `invalid_grant`. Codes expire 60 seconds after issuance; the sweeper goroutine DELETEs rows older than 1 hour (grace beyond the TTL avoids races with in-flight redemptions). P0-189-3 enforces this; the integration test `TestIntegrationAuthorizeCodeRedemption_CodeReuse` exercises the path.
+
+**4. Frontend verifier never persists beyond the tab session.** The Next.js `web/lib/auth/oauth-client.ts` module stores the PKCE `code_verifier` in `sessionStorage` (NOT `localStorage` — P0-189-8). The verifier is cleared after a successful redemption. The JWT-bearing `atlas_jwt` cookie minted by the callback route is HttpOnly + Secure (production) + SameSite=Lax + Path=/ (P0-189-9). The vitest unit test verifies the localStorage-bypass + sessionStorage-write discipline.
+
+**Cookie strategy (D1 slice 189):** the OAuth flow mints a NEW `atlas_jwt` cookie carrying the JWT directly. The slice-034 `atlas_session` opaque session-id cookie continues to exist alongside (slice 190 retires it). This is the cleanest migration path — `atlas_session` reads (slice 108/110 `/v1/me/sessions*`) keep working unchanged while slice 190's JWT validation middleware reads from `atlas_jwt`.
+
+**Discovery doc updates.** When BOTH a `TokenEndpoint` AND an `AuthorizeEndpoint` are wired, `grant_types_supported` adds `"authorization_code"` to the slice-188 list. `response_types_supported` is unchanged (`["code"]` — slice 187 set it). `code_challenge_methods_supported` is unchanged (`["S256"]` — slice 187 set it).
+
+## Slice 192 addendum — spine completion: multi-tenant switch + frontend tenant switcher
+
+Slice 192 (2026-05-21) closes the auth-substrate-v2 spine. With slice 192 merged, OQ #21 Reading D is fully implemented end-to-end:
+
+- 187 ✅ keystore + JWT signing + JWKS + discovery
+- 188 ✅ `/oauth/token` + RFC 8693 token-exchange
+- 189 ✅ `/oauth/authorize` + PKCE + frontend OAuth client
+- 190 ✅ JWT validation middleware + revoke + introspect (cutover)
+- 191 ✅ SDK migration + RFC 8628 device-code + slice 034 partial retirement
+- **192 ✅ multi-tenant switch + frontend tenant switcher**
+
+**Slice 192 ships:**
+
+- **`GET /v1/me/tenants` handler** (`internal/api/me/tenants.go`) — reads the caller's verified JWT claim `atlas:available_tenants[]` and enriches with tenant names via a PK-bounded `SELECT id, name FROM tenants WHERE id = ANY(...)` on the BYPASSRLS pool. No full table scan; the bounded set is the JWT claim's tenant list (P0-192-2).
+- **Frontend tenant-switcher dropdown** (`web/components/auth/tenant-switcher.tsx`) — mounted in the persistent header `TopBar`. Hidden when `tenants.length <= 1` (canvas §11 #13 commitment, P0-192-1).
+- **`switchTenant()` client function** (`web/lib/auth/switch-tenant.ts`) — calls a BFF route which in turn POSTs to `/oauth/token` with `grant_type=urn:ietf:params:oauth:grant-type:token-exchange` (slice 188's primitive). The BFF rotates the `atlas_jwt` cookie on success; the frontend calls `router.refresh()` so server components re-render.
+- **Login picker page** (`web/app/oauth/select-tenant/page.tsx`) — destination for operators with ≥2 tenants; defensive single-tenant redirect to `/dashboard`.
+- **Membership-removed UX banner** — surfaces when the periodic re-fetch (60s, D1) reveals the current tenant has been removed from the operator's available set. Default action: switch to the first available alternative (P0-192-7).
+- **DBUserResolver expansion** (`internal/api/oauth/user_resolver.go`) — the OAuth authorize flow's user-identity snapshot now enumerates ALL tenants the OIDC subject belongs to via a cross-tenant `users` lookup on the BYPASSRLS pool. The JWT minted at code-redemption carries an honest `atlas:available_tenants[]`.
+
+**Eventual eviction invariant.** Slice 192 documents the OAuth standard contract: when an admin removes a user from a tenant, the user's existing JWTs continue to validate until expiry. To force immediate eviction, the admin calls `/oauth/revoke` (slice 190). The operator-facing doc at `docs-site/docs/tenant-membership.md` explains the contract; P0-192-8 commits to documenting it rather than apologising for it.
+
+**Closure of slice 141 (P0-192-11).** Slice 141 (the original "multi-tenant login + switcher" spec, PARKED 2026-05-20 when OQ #21 Reading D resolved the substrate ambiguity at the canvas level) is closed atomically with this slice's merge. Its `_STATUS.md` row flips from `not-ready` to a new status `merged-via-spine-completion` — the historical fact is that slice 141's intent shipped, but via slices 187-192 rather than via the original schema rewrite spec.
+
+**Spine completion summary.** A vCISO hosting atlas for N client tenants can:
+
+1. Sign in once via OIDC.
+2. Receive a JWT carrying `atlas:available_tenants[]` with all N tenant UUIDs.
+3. Use the persistent header dropdown to switch between client tenants without re-authenticating — each switch is one RFC 8693 token-exchange call against `/oauth/token` (slice 188).
+4. See the membership-removed banner when an admin removes them from a tenant.
+
+The binary vCISO success criterion from slice 141 is fulfilled.
+
 ## References
 
 - [`Plans/canvas/11-open-questions.md`](../../Plans/canvas/11-open-questions.md) #21 — resolution block
@@ -138,6 +201,8 @@ The slice-190 R2 middleware that gates `/v1/*` MUST honor the same exemption lis
 - [ADR-0002 — Bearer-token storage](./0002-bearer-token-storage.md) — the predecessor decision the AS layer composes with, not replaces (`api_keys.token_hash` retains its HMAC-keyed shape during the deprecation window)
 - [`docs/issues/187-oauth-as-scaffolding-jwt-signing.md`](../issues/187-oauth-as-scaffolding-jwt-signing.md) — foundation slice
 - [`docs/audit-log/187-oauth-as-scaffolding-decisions.md`](../audit-log/187-oauth-as-scaffolding-decisions.md) — D1-D5 decisions log
+- [`docs/issues/188-oauth-token-endpoint-token-exchange.md`](../issues/188-oauth-token-endpoint-token-exchange.md) — slice 188 spec
+- [`docs/audit-log/188-oauth-token-endpoint-decisions.md`](../audit-log/188-oauth-token-endpoint-decisions.md) — slice 188 D1-D4 decisions log
 - RFC 9068 — https://datatracker.ietf.org/doc/html/rfc9068
 - RFC 8693 — https://datatracker.ietf.org/doc/html/rfc8693
 

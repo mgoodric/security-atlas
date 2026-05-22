@@ -39,6 +39,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	decisionsapi "github.com/mgoodric/security-atlas/internal/api/decisions"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/decision"
 )
 
@@ -114,10 +115,8 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	_, bearer, err := srv.IssueBootstrapOwnerCredential(tenant, []string{"control_owner"})
-	if err != nil {
-		t.Fatalf("IssueBootstrapOwnerCredential: %v", err)
-	}
+	// Slice 197: JWT bearer via slice 190 path (owner roles).
+	bearer := srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"control_owner"}))
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests returned nil — DB pool not attached")

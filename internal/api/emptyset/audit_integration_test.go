@@ -41,6 +41,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 )
 
 // openAppPool returns a connection pool for the application role, which
@@ -87,10 +88,8 @@ func TestAllListEndpoints_EmptyTenant_NeverReturn5xx(t *testing.T) {
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
 	tenant := uuid.NewString()
-	_, bearer, err := srv.IssueBootstrapOwnerCredential(tenant, []string{"owner", "admin", "approver"})
-	if err != nil {
-		t.Fatalf("IssueBootstrapOwnerCredential: %v", err)
-	}
+	// Slice 197: JWT bearer via slice 190 path (owner roles).
+	bearer := srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"owner", "admin", "approver"}))
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(ts.Close)
 

@@ -9,7 +9,11 @@
 --   - evidence records across >=2 freshness classes (freshness panel)
 --   - at least one exception expiring within 30 days (upcoming panel)
 --
--- All inserts are ON CONFLICT DO NOTHING for idempotency across re-runs.
+-- Most inserts are ON CONFLICT DO NOTHING for idempotency across re-runs.
+-- The exceptions row is `ON CONFLICT (id) DO UPDATE` per slice 193: the
+-- `status` column is read by `/v1/upcoming` (`status='active'` filter); a
+-- prior run's stale value must be overwritten to guarantee the seed
+-- state on every re-run.
 
 \set ON_ERROR_STOP on
 
@@ -133,10 +137,27 @@ ON CONFLICT DO NOTHING;
 -- ============================================================
 -- Exception expiring within 30 days (upcoming panel)
 -- ============================================================
+-- Slice 193 — status MUST be 'active' (not 'approved'). The
+-- /v1/upcoming rollup (`ListUpcomingItems` in
+-- internal/db/queries/dashboard.sql) filters `e.status = 'active'`;
+-- so do the slice-040 `/v1/exceptions/expiring` query and every
+-- integration test seed. The pre-slice-193 fixture seeded 'approved'
+-- — that never showed because slice 082's assertions were commented
+-- out. Slice 111 un-skipped, AC-5 broke; slice 193 fixes it.
+-- ON CONFLICT (id) DO UPDATE follows the slice-168 settings.sql
+-- precedent: DO NOTHING would leave a stale row from a prior local
+-- run untouched, defeating the re-seed. Update both status and
+-- expires_at so re-runs always start from a known-good "active +
+-- expires in 14d" state. activated_by/activated_at are set so the
+-- exception's lifecycle narrative is consistent (requested →
+-- approved → active) and the `exceptions_sod` CHECK constraint
+-- (activator MUST differ from requester) is satisfied — we reuse
+-- demo-approver as the activator (a distinct identity from
+-- demo-operator the requester).
 INSERT INTO exceptions (
     id, tenant_id, control_id, scope_cell_predicate, justification,
     compensating_controls, requested_by, requested_at, approved_by,
-    approved_at, expires_at, status
+    approved_at, activated_by, activated_at, expires_at, status
 )
 VALUES (
     'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0001',
@@ -149,9 +170,15 @@ VALUES (
     now() - INTERVAL '60 days',
     'demo-approver@example.invalid',
     now() - INTERVAL '59 days',
+    'demo-approver@example.invalid',
+    now() - INTERVAL '58 days',
     now() + INTERVAL '14 days',
-    'approved'
+    'active'
 )
-ON CONFLICT DO NOTHING;
+ON CONFLICT (id) DO UPDATE
+SET status = EXCLUDED.status,
+    expires_at = EXCLUDED.expires_at,
+    activated_by = EXCLUDED.activated_by,
+    activated_at = EXCLUDED.activated_at;
 
 COMMIT;

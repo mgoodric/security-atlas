@@ -22,6 +22,7 @@ type RouteSpec struct {
 
 // RouteSpecs is the canonical route list. See package doc.
 var RouteSpecs = []RouteSpec{
+	{Method: "DELETE", Path: "/v1/admin/super-admins/{user_id}", Tag: "admin-super-admins", Tier: "adminBearer", Internal: false, Summary: "DELETE /v1/admin/super-admins/{user_id}"},
 	{Method: "DELETE", Path: "/v1/decisions/{id}/links/{kind}/{targetID}", Tag: "decisions", Tier: "bearer", Internal: false, Summary: "DELETE /v1/decisions/{id}/links/{kind}/{targetID}"},
 	{Method: "DELETE", Path: "/v1/me/sessions", Tag: "me", Tier: "bearer", Internal: false, Summary: "DELETE /v1/me/sessions"},
 	{Method: "DELETE", Path: "/v1/me/sessions/{id}", Tag: "me", Tier: "bearer", Internal: false, Summary: "DELETE /v1/me/sessions/{id}"},
@@ -45,6 +46,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/admin/policies/export", Tag: "admin-policies", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/policies/export"},
 	{Method: "GET", Path: "/v1/admin/samples/export", Tag: "admin-samples", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/samples/export"},
 	{Method: "GET", Path: "/v1/admin/sso", Tag: "admin-sso", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/sso"},
+	{Method: "GET", Path: "/v1/admin/super-admins", Tag: "admin-super-admins", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/super-admins"},
 	{Method: "GET", Path: "/v1/admin/users", Tag: "admin-users", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/users"},
 	{Method: "GET", Path: "/v1/admin/users/{id}", Tag: "admin-users", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/users/{id}"},
 	{Method: "GET", Path: "/v1/admin/vendors/export", Tag: "admin-vendors", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/vendors/export"},
@@ -107,6 +109,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/me/notifications", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/notifications"},
 	{Method: "GET", Path: "/v1/me/preferences", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/preferences"},
 	{Method: "GET", Path: "/v1/me/sessions", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/sessions"},
+	{Method: "GET", Path: "/v1/me/tenants", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/tenants"},
 	{Method: "GET", Path: "/v1/metrics", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/metrics"},
 	{Method: "GET", Path: "/v1/metrics/cascade", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/metrics/cascade"},
 	{Method: "GET", Path: "/v1/metrics/{id}", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/metrics/{id}"},
@@ -165,6 +168,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "PATCH", Path: "/v1/policies/{id}/approve", Tag: "policies", Tier: "bearer", Internal: false, Summary: "PATCH /v1/policies/{id}/approve"},
 	{Method: "PATCH", Path: "/v1/policies/{id}/submit", Tag: "policies", Tier: "bearer", Internal: false, Summary: "PATCH /v1/policies/{id}/submit"},
 	{Method: "PATCH", Path: "/v1/questionnaires/{id}/answers/{qid}", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "PATCH /v1/questionnaires/{id}/answers/{qid}"},
+	{Method: "PATCH", Path: "/v1/tenants/{id}", Tag: "tenants", Tier: "bearer", Internal: false, Summary: "PATCH /v1/tenants/{id} — rename a tenant (per-tenant admin or super_admin)"},
 	{Method: "PATCH", Path: "/v1/vendors/{id}", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "PATCH /v1/vendors/{id}"},
 	{Method: "POST", Path: "/auth/local/login", Tag: "auth", Tier: "none", Internal: false, Summary: "POST /auth/local/login"},
 	{Method: "POST", Path: "/auth/logout", Tag: "auth", Tier: "none", Internal: false, Summary: "POST /auth/logout"},
@@ -173,6 +177,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/admin/credentials/{id}/rotate", Tag: "admin-credentials", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/credentials/{id}/rotate"},
 	{Method: "POST", Path: "/v1/admin/install/reset-bootstrap", Tag: "admin-install", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/install/reset-bootstrap"},
 	{Method: "POST", Path: "/v1/admin/sso/preflight", Tag: "admin-sso", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/sso/preflight"},
+	{Method: "POST", Path: "/v1/admin/super-admins", Tag: "admin-super-admins", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/super-admins"},
 	{Method: "POST", Path: "/v1/aggregation-rules", Tag: "risks", Tier: "bearer", Internal: false, Summary: "POST /v1/aggregation-rules"},
 	{Method: "POST", Path: "/v1/artifacts:upload", Tag: "artifacts", Tier: "bearer", Internal: false, Summary: "POST /v1/artifacts:upload"},
 	{Method: "POST", Path: "/v1/audit-notes", Tag: "audit-notes", Tier: "bearer", Internal: false, Summary: "POST /v1/audit-notes"},
@@ -214,6 +219,10 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/samples/{id}/annotations", Tag: "audit-samples", Tier: "bearer", Internal: false, Summary: "POST /v1/samples/{id}/annotations"},
 	{Method: "POST", Path: "/v1/schemas", Tag: "schemas", Tier: "bearer", Internal: false, Summary: "POST /v1/schemas"},
 	{Method: "POST", Path: "/v1/scopes/cells", Tag: "scopes", Tier: "bearer", Internal: false, Summary: "POST /v1/scopes/cells"},
+	// Slice 201: test-only JWT mint, env-gated by ATLAS_TEST_MODE=1. Mounted ONLY
+	// when the env var is set at boot time; absent in production builds. Marked
+	// Internal:true so it does NOT appear in the public Redoc surface.
+	{Method: "POST", Path: "/v1/test/issue-jwt", Tag: "system", Tier: "none", Internal: true, Summary: "Mint a test JWT (env-gated by ATLAS_TEST_MODE; absent in production)"},
 	{Method: "POST", Path: "/v1/vendors", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "POST /v1/vendors"},
 	{Method: "POST", Path: "/v1/walkthroughs", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "POST /v1/walkthroughs"},
 	{Method: "POST", Path: "/v1/walkthroughs/{id}/attachments", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "POST /v1/walkthroughs/{id}/attachments"},
