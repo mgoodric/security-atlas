@@ -426,16 +426,22 @@ capture against controls. Every walkthrough doc's header restates this.
 
 ## Test infrastructure
 
-The `Frontend · Playwright e2e` CI job is currently **quarantined**
-(slice 079 — `continue-on-error: true` on the job, since 2026-05-15)
-because the five un-shimmed specs (`admin-bootstrap`, `audit-workspace`,
-`control-detail`, `dashboard`, `risk-hierarchy`) reference fixtures that
-exist on disk but are not applied to the platform at job startup. Runs
-fail predictably; the job is non-required, so the red annotations are
-noise — not your bug. The two route-mocked specs (`first-time-login`,
-`version-footer`) are unaffected. The fix lives in slice 082
-(`Playwright e2e seed-data harness`, status `not-ready`); when it lands,
-the quarantine line comes out and the job again gates the PR.
+The `Frontend · Playwright e2e` CI job is a **required status check** on
+`main` (slice 116, 2026-05-22) — a red Playwright run blocks merge.
+The historical arc:
+
+- Slice 069 introduced the job as informational (`continue-on-error: true`).
+- Slice 079 quarantined it (the 5 un-shimmed specs lacked seed-data preconditions).
+- Slice 082 landed the seed-data harness and removed `continue-on-error`.
+- Slice 116 promoted it to a required-check after ≥5 clean PR runs across
+  slices 142/143/198/201/202.
+
+The slice-061 docs-only fastpath is preserved (a same-name stub-twin job
+posts pass when `changes.outputs.code != 'true'`), so docs-only PRs still
+resolve the check in seconds. If you add a new spec, read
+`web/e2e/README.md` for the seed-harness contract — a flaky required-check
+is worse than no required-check, so run `npm run test:e2e` locally before
+pushing.
 
 ## Empty-set robustness
 
