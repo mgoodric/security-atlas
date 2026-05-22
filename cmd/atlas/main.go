@@ -585,7 +585,15 @@ func main() {
 		// secureCookies follows ATLAS_SECURE_COOKIES (default false for
 		// the local-HTTP self-host default; operators set it true behind
 		// TLS).
-		userStore := users.NewStore(pool)
+		// Slice 198: wire the BYPASSRLS authPool into the users.Store
+		// so the OIDC callback handler's bootstrap branch can write
+		// across (tenants, users, user_roles, super_admins, me_audit_log)
+		// when count(*) FROM tenants == 0. When authPool is nil
+		// (DATABASE_URL unset), the bootstrap branch returns
+		// ErrBootstrapUnavailable and the handler falls through to the
+		// existing UpsertOIDC path (which itself preserves the
+		// pre-slice-198 behaviour of erroring on "tenant_id required").
+		userStore := users.NewStoreWithAuthPool(pool, authPool)
 		sessionStore := sessions.NewStore(pool, 0)
 		oidcAuth := oidc.New(localModeIdpResolver{})
 		secureCookies := os.Getenv("ATLAS_SECURE_COOKIES") == "true"

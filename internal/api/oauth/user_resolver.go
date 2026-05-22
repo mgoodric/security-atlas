@@ -90,8 +90,10 @@ type userMembership struct {
 //     belongs to via the cross-tenant `users` query.
 //   - roles = a map keyed on tenant_id; populated from per-tenant
 //     user_roles queries under the RLS-bound pool.
-//   - super_admin = false (no super_admins table at v2; spillover
-//     slice 198 ships the OIDC-first-install bootstrap path).
+//   - super_admin = true iff a row in `super_admins` matches ANY of
+//     the user's tenant-scoped user_id values (slice 198 lookup).
+//     Pre-slice-198 the field was hardcoded false; slice 198 added
+//     the storage primitive + the bootstrap branch that writes to it.
 func (r *DBUserResolver) ResolveForOAuth(ctx context.Context, userID, tenantID uuid.UUID) (UserIdentity, error) {
 	id := UserIdentity{
 		UserID:           userID,
@@ -141,7 +143,48 @@ func (r *DBUserResolver) ResolveForOAuth(ctx context.Context, userID, tenantID u
 		}
 	}
 
+	// Step 4 — slice 198: super_admin lookup. The super_admins table
+	// holds one row per platform-global admin identity. We check
+	// membership across the tenant-scoped user_id values (the
+	// bootstrap branch grants on the user_id of the first-install
+	// tenant; a single OIDC subject across multiple tenants has
+	// different user_id values, but at most one of them is super_admin
+	// — the bootstrap-tenant one). The lookup uses the BYPASSRLS
+	// authPool because super_admins is not under RLS. When authPool
+	// is nil (test harness) the claim stays false.
+	if r.authPool != nil {
+		isSuperAdmin, sErr := r.lookupSuperAdmin(ctx, memberships)
+		if sErr != nil {
+			return UserIdentity{}, fmt.Errorf("oauth: lookup super_admin: %w", sErr)
+		}
+		id.SuperAdmin = isSuperAdmin
+	}
+
 	return id, nil
+}
+
+// lookupSuperAdmin consults the slice 198 super_admins table for any
+// of the user's tenant-scoped user_id values. Returns true on the
+// first match. The lookup is a bounded set membership test against
+// the membership rows already enumerated by step 2; no general SELECT
+// across super_admins.
+func (r *DBUserResolver) lookupSuperAdmin(ctx context.Context, memberships []userMembership) (bool, error) {
+	if len(memberships) == 0 {
+		return false, nil
+	}
+	ids := make([]uuid.UUID, 0, len(memberships))
+	for _, m := range memberships {
+		ids = append(ids, m.userID)
+	}
+	var count int
+	err := r.authPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM super_admins WHERE user_id = ANY($1)`,
+		ids,
+	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("query super_admins: %w", err)
+	}
+	return count > 0, nil
 }
 
 // readSessionIdentity reads (idp_issuer, idp_subject) of the user row

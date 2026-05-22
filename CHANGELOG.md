@@ -63,6 +63,30 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 198** — OIDC first-install bootstrap (closes slice 192 AC-11/AC-12).
+  Ships the OIDC-first-install path that creates the Default Tenant +
+  super_admin grant atomically when the `tenants` table is empty. Adds the
+  `super_admins` table (platform-global, NOT tenant-scoped, no RLS) — slice
+  192's user_resolver explicitly deferred this storage primitive to slice
+  198. Extends `me_audit_log.action` CHECK to admit
+  `'bootstrap_first_install'` (slice 144 precedent for `'tenant_rename'`).
+  New `users.Store.BootstrapFirstInstallOrUpsert` method runs the
+  `count(*) FROM tenants == 0` gate; on empty, writes five rows in a single
+  BYPASSRLS transaction (tenants + users + user_roles + super_admins +
+  me_audit_log). Race-handling reuses slice 144's
+  `idx_tenants_bootstrap_singleton` partial UNIQUE index: concurrent
+  first-installers race; the loser trips SQLSTATE 23505, retries the count
+  check, and falls through to `Bootstrapped: false`. The OIDC callback
+  handler invokes the bootstrap branch AFTER `HandleCallback` succeeds but
+  BEFORE the existing `UpsertOIDC` call; on `Bootstrapped: true`, the
+  handler reloads the user under the synthesized tenant_id and establishes
+  the session under that scope. The `DBUserResolver` (slice 192) now
+  consults `super_admins` via a bounded `WHERE user_id = ANY($1)` query and
+  populates the `atlas:super_admin` JWT claim accordingly — the
+  pre-slice-198 hardcoded `false` is removed. Integration tests cover
+  bootstrap-on-empty, fall-through-on-established-install, and the
+  concurrent-first-installer race (N=5 goroutines via channel barrier).
+
 - **slice 144** — Rename-tenant flow (per-tenant admin or super_admin).
   Ships `PATCH /v1/tenants/{id}` to mutate a tenant's `name` field; the
   new value appears immediately in the slice-192 `<TenantSwitcher>`
