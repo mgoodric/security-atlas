@@ -1,8 +1,38 @@
 name: container-publish
 
+# Two publish channels (slice 207):
+#
+#   1. Stable channel — triggered by `release: [published]` (i.e. the
+#      release-please workflow cuts a `v*.*.*` tag, GoReleaser publishes
+#      the GitHub Release, and that event fires this workflow). Builds
+#      multi-arch images tagged `vX.Y.Z`, `X.Y`, `X`, and `latest`.
+#      Stable images are subsequently cosign-signed via
+#      `release.yml`'s signing job (the cosign step lives in the release
+#      workflow because keyless OIDC bindings to a workflow identity
+#      are stronger when the signing step IS the release).
+#
+#   2. Edge channel — triggered by `push: branches: [main]` (slice 207).
+#      Every merge to `main` after branch-protection's required-checks
+#      gate (slice 116) builds the same multi-arch images and tags them
+#      `:edge` AND `:main-<sha7>`. Edge images are NOT cosign-signed —
+#      the keyless-OIDC supply-chain guarantee is bound to release-cut
+#      tag identity by design (release.yml's top-of-file comment block
+#      records the rationale). Edge images carry the same provenance
+#      attestation + SBOM as stable; the only delta is the absence of
+#      the cosign signature.
+#
+# The two channels share this one workflow (slice 207 D1 — see
+# `docs/audit-log/207-edge-deploy-channel-decisions.md`). The
+# docker/metadata-action tag rules below conditionalize on event type
+# so a release event produces `vX.Y.Z` tags only and a main push
+# produces `:edge` + `:main-<sha7>` only — the two are not interleaved.
+
 on:
   release:
     types: [published]
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       tag:
@@ -17,7 +47,12 @@ permissions:
   attestations: write
 
 concurrency:
-  group: container-publish-${{ github.ref }}
+  # Group by event-type AND ref. A release event and a push event for
+  # the same SHA may legitimately race during a release-please merge
+  # (the merge fires `push: main` and then `release-please` cuts a tag
+  # which fires `release: published` — both produce images, both are
+  # safe to run in parallel because they tag different namespaces).
+  group: container-publish-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -68,17 +103,32 @@ jobs:
         uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6
         with:
           images: ${{ matrix.image.target }}
+          # Slice 207 — tag selection is event-type-conditionalized so
+          # release events produce ONLY versioned tags and main pushes
+          # produce ONLY edge tags. The `enable=` predicates use the
+          # docker/metadata-action expression engine's event-context
+          # variables: `is_default_branch` is true when github.ref
+          # matches the repo's default branch (main) AND the event is
+          # a push; the semver/`ref,event=tag` types fire only on
+          # release/tag events.
+          #
+          # On release: `vX.Y.Z` + `X.Y` + `X` + `latest`.
+          # On push-to-main: `edge` + `main-<sha7>`.
+          # On workflow_dispatch: respects the input override.
           tags: |
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+            type=raw,value=edge,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=sha,prefix=main-,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           labels: |
             org.opencontainers.image.title=${{ matrix.image.name }}
             org.opencontainers.image.source=https://github.com/mgoodric/security-atlas
             org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.description=security-atlas ${{ matrix.image.name }} — open-source GRC platform
+            org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Compute BUILD_TIME (RFC3339 UTC)
         id: buildtime

@@ -1,0 +1,328 @@
+# security-atlas — EDGE deploy channel (slice 207).
+#
+# The edge channel runs IN PARALLEL with the stable channel
+# (`docker-compose.yml`). It pulls pre-built images from GHCR tagged
+# `:edge` (built on every push to `main` by
+# `.github/workflows/container-publish.yml`) and lets Watchtower auto-
+# update them within ~5 min of each merge to main.
+#
+# DESIGN
+#
+#   stable channel                                edge channel (THIS FILE)
+#   ----------------------------------------------------------------
+#   docker-compose.yml                            docker-compose.edge.yml
+#   build: from source                            image: ghcr.io/.../:edge
+#   cosign-signed images                          NOT signed (P0-A2)
+#   release-please cadence (~2-7d)                every push to main
+#   atlas.home.gmoney.sh                          atlas-edge.home.gmoney.sh
+#   project: security-atlas                       project: security-atlas-edge
+#   pg volume: pg-data                            pg volume: pg-data-edge
+#   minio volume: minio-data                      minio volume: minio-data-edge
+#   nats volume: nats-data                        nats volume: nats-data-edge
+#   atlas-data volume                             atlas-data-edge volume
+#   default ports (5432/4222/9000/9001/8080/      offset ports
+#     50051/3000)                                   (5532/4322/9100/9101/8180/
+#                                                    50151/3100)
+#
+# ISOLATION INVARIANTS (P0-A4)
+#
+#   The stable + edge stacks share NOTHING at runtime:
+#     - separate compose project names — `docker compose -p` keys live
+#       in different namespaces; `docker compose down` on one does not
+#       affect the other.
+#     - separate Docker networks (the implicit `default` network is
+#       per-compose-project; the two `default` networks are isolated).
+#     - separate named volumes — see the volumes: block at file bottom.
+#     - separate host port mappings — both stacks can run on the same
+#       host without port conflicts.
+#     - separate Postgres data directory — a schema-breaking migration
+#       on edge CANNOT corrupt the stable DB (the two clusters never
+#       share a connection).
+#
+# COSIGN SIGNING (P0-A2)
+#
+#   Edge images are NOT cosign-signed by design (slice 207 D5 +
+#   AC-3). The cosign keyless OIDC binding is anchored to release-cut
+#   tag identity in `release.yml`. Operators who need a signed image
+#   pull from the stable channel.
+#
+# WATCHTOWER (AC-6)
+#
+#   Only services with the label
+#     com.centurylinklabs.watchtower.enable=true
+#   are auto-updated. THIS COMPOSE FILE SETS THAT LABEL ONLY ON THE
+#   `atlas-edge` AND `web-edge` SERVICES — postgres/nats/minio are
+#   pinned to specific image tags and the operator updates those
+#   manually during a maintenance window. Watchtower itself runs as a
+#   separate container (slice 207 AC-6); see the operator runbook at
+#   `docs/operations/edge-deploy.md` for the recommended deployment.
+#
+# RUN
+#
+#   1. cp deploy/docker/.env.example deploy/docker/.env.edge
+#   2. edit .env.edge — generate distinct passwords + the
+#      same env vars as bundled, plus EDGE_* port overrides if needed.
+#   3. docker compose \
+#        -f deploy/docker/docker-compose.edge.yml \
+#        --env-file deploy/docker/.env.edge \
+#        -p security-atlas-edge \
+#        up -d
+#
+# WIPE + RECREATE (safe on edge — see docs/operations/edge-deploy.md)
+#
+#   docker compose -p security-atlas-edge \
+#     -f deploy/docker/docker-compose.edge.yml down -v
+#   docker compose -p security-atlas-edge \
+#     -f deploy/docker/docker-compose.edge.yml up -d
+
+name: security-atlas-edge
+
+services:
+  # --------------------------------------------------------------------
+  # postgres-edge — primary store for the EDGE instance. Distinct volume
+  # from the stable channel (P0-A4). Mirrors the bundled stack's
+  # postgres service shape; see docker-compose.yml lines 42-103 for the
+  # full rationale on POSTGRES_HOST_AUTH_METHOD, the role-bootstrap
+  # initdb script, and the trust-on-docker-network auth posture.
+  # --------------------------------------------------------------------
+  postgres-edge:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:-security_atlas}
+      POSTGRES_HOST_AUTH_METHOD: ${POSTGRES_HOST_AUTH_METHOD-trust}
+    ports:
+      - "${EDGE_POSTGRES_PORT:-5532}:5432"
+    volumes:
+      - pg-data-edge:/var/lib/postgresql/data
+      # Same self-bootstrapping role-init script as the bundled stack —
+      # `01-roles.sql` is fully IF-NOT-EXISTS-guarded so re-running it
+      # later as atlas_migrate is a clean no-op.
+      - ${PG_INITDB_ROLES:-../../migrations/bootstrap/01-roles.sql}:/docker-entrypoint-initdb.d/01-roles.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "security_atlas"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------
+  # nats-edge — JetStream evidence-ingest buffer for the EDGE instance.
+  # Pinned image tag (not Watchtower-managed) — NATS is a stable
+  # dependency; auto-updating it adds risk without speeding any
+  # iteration loop. Distinct volume keeps the streams isolated.
+  # --------------------------------------------------------------------
+  nats-edge:
+    image: nats:2.10-alpine
+    command:
+      - "-js"
+      - "-sd"
+      - "/data"
+      - "--http_port"
+      - "8222"
+    ports:
+      - "${EDGE_NATS_PORT:-4322}:4222"
+      - "${EDGE_NATS_MONITOR_PORT:-8322}:8222"
+    volumes:
+      - nats-data-edge:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------
+  # minio-edge — S3-compatible artifact store for the EDGE instance.
+  # --------------------------------------------------------------------
+  minio-edge:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+    ports:
+      - "${EDGE_MINIO_PORT:-9100}:9000"
+      - "${EDGE_MINIO_CONSOLE_PORT:-9101}:9001"
+    volumes:
+      - minio-data-edge:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------
+  # minio-mc-edge — one-shot bucket creation for the EDGE artifact store.
+  # The bucket name is identical (`atlas-artifacts`) because it is
+  # namespaced INSIDE the edge MinIO server's separate volume — no
+  # name collision is possible across the two channels.
+  # --------------------------------------------------------------------
+  minio-mc-edge:
+    image: minio/mc:latest
+    depends_on:
+      minio-edge:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio-edge:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+      mc mb --ignore-existing local/${ARTIFACTS_BUCKET:-atlas-artifacts} &&
+      echo 'edge bucket ${ARTIFACTS_BUCKET:-atlas-artifacts} ready'
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+    restart: "no"
+
+  # --------------------------------------------------------------------
+  # atlas-bootstrap-edge — one-shot first-boot for the EDGE instance.
+  # Pulls the published bootstrap image from GHCR (`:edge` tag); runs
+  # migrations + seed + SCF import + control-bundle upload against the
+  # EDGE Postgres + EDGE atlas, then exits 0.
+  #
+  # The bundled stack BUILDS this image from source (`build:` block).
+  # The edge stack PULLS it (`image:` block) because edge is a deployed
+  # channel, not a developer-loop. Watchtower also auto-pulls fresh
+  # `:edge` tags between runs, so re-running this one-shot picks up
+  # whatever bootstrap-image build was published on the latest main.
+  # --------------------------------------------------------------------
+  atlas-bootstrap-edge:
+    image: ghcr.io/mgoodric/security-atlas-bootstrap:edge
+    depends_on:
+      postgres-edge:
+        condition: service_healthy
+      minio-mc-edge:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: ${DATABASE_URL_MIGRATE_EDGE:?}
+      ATLAS_APP_PASSWORD: ${ATLAS_APP_PASSWORD:?}
+      ATLAS_HTTP_URL: http://atlas-edge:8080
+      ATLAS_BOOTSTRAP_TENANT: ${ATLAS_BOOTSTRAP_TENANT:-00000000-0000-4000-8000-000000000001}
+      ATLAS_DATA_DIR: /var/lib/atlas-bootstrap
+      ATLAS_DEFAULT_USER_EMAIL: ${ATLAS_DEFAULT_USER_EMAIL:-admin@example.com}
+      ATLAS_DEFAULT_USER_PASSWORD: ${ATLAS_DEFAULT_USER_PASSWORD:?}
+      REPO_ROOT: /repo
+    volumes:
+      # The published bootstrap image embeds its `:edge` view of the repo
+      # tree (Dockerfile COPY); the bind-mount of the host repo is
+      # therefore NOT required for the edge deploy. Operators who want
+      # to bind-mount a host checkout for one-off SCF re-imports can
+      # uncomment the bind below — it must be optional because operators
+      # may not have the host repo on the Unraid filesystem.
+      # - ../..:/repo:ro
+      - atlas-bootstrap-data-edge:/var/lib/atlas-bootstrap
+    restart: "no"
+
+  # --------------------------------------------------------------------
+  # atlas-edge — the platform server, EDGE channel. Watchtower-managed.
+  # --------------------------------------------------------------------
+  atlas-edge:
+    image: ghcr.io/mgoodric/security-atlas:edge
+    labels:
+      # Watchtower opt-IN. When the Watchtower container (deployed
+      # separately — see runbook) sees this label it polls GHCR for
+      # newer pushes of `:edge` and pulls them. Stable channel
+      # (`atlas` service in docker-compose.yml) does NOT have this
+      # label and therefore stays pinned to whatever tag it was
+      # started with.
+      com.centurylinklabs.watchtower.enable: "true"
+    depends_on:
+      postgres-edge:
+        condition: service_healthy
+      nats-edge:
+        condition: service_healthy
+      minio-edge:
+        condition: service_healthy
+      atlas-bootstrap-edge:
+        condition: service_started
+    environment:
+      DATABASE_URL_APP: ${DATABASE_URL_APP_EDGE:?}
+      DATABASE_URL: ${DATABASE_URL_MIGRATE_EDGE:?}
+      ATLAS_HTTP_ADDR: ":8080"
+      ATLAS_GRPC_ADDR: ":50051"
+      ATLAS_ISSUER_URL: http://atlas-edge:8080
+      ATLAS_KEYSTORE_PATH: /var/lib/atlas/keys
+      ATLAS_DATA_DIR: /var/lib/atlas
+      ATLAS_OAUTH_TOKEN_RATE_PER_MIN: ${ATLAS_OAUTH_TOKEN_RATE_PER_MIN:-600}
+      NATS_URL: nats://nats-edge:4222
+      BEARER_HASH_KEY: ${BEARER_HASH_KEY:?}
+      ATLAS_BOOTSTRAP_TENANT: ${ATLAS_BOOTSTRAP_TENANT:-00000000-0000-4000-8000-000000000001}
+      ATLAS_BOOTSTRAP_TOKEN: ${ATLAS_BOOTSTRAP_TOKEN:?}
+      # P0-201-2 invariant carries across: edge MUST NOT set
+      # ATLAS_TEST_MODE=1. The default empty value below explicitly
+      # documents the safe posture — operators MUST NOT override this
+      # to "1" on a public-reachable atlas-edge. Edge is treated as
+      # production from the security-boundary perspective even though
+      # it is a less-stable code-path channel.
+      ATLAS_TEST_MODE: ""
+      # The edge instance default-assumes TLS termination at the
+      # reverse proxy (Nginx Proxy Manager on Unraid). If you front
+      # atlas-edge over plain HTTP for any reason, override this to
+      # "false" — see docs/runbooks/bff-cookie-forwarding.md for the
+      # tradeoffs.
+      ATLAS_SECURE_COOKIES: ${ATLAS_SECURE_COOKIES:-true}
+      ARTIFACTS_BUCKET: ${ARTIFACTS_BUCKET:-atlas-artifacts}
+      ARTIFACTS_S3_ENDPOINT: http://minio-edge:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      # Mark the OTel `deployment.environment` resource attribute as
+      # `edge` so the maintainer's observability backend can split
+      # edge-vs-stable telemetry trivially (a single tag filter). The
+      # operator-runbook's example Grafana dashboard JSON in
+      # `deploy/observability/` uses this attribute.
+      ATLAS_DEPLOYMENT_ENVIRONMENT: ${ATLAS_DEPLOYMENT_ENVIRONMENT:-edge}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-atlas-edge}
+      OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-}
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-}
+      ATLAS_METRICS_FALLBACK_ENABLE: ${ATLAS_METRICS_FALLBACK_ENABLE:-false}
+    ports:
+      - "${EDGE_ATLAS_HTTP_PORT:-8180}:8080"
+      - "${EDGE_ATLAS_GRPC_PORT:-50151}:50051"
+    volumes:
+      # Distinct keystore path from the stable instance (D3). The
+      # in-container path is the same (/var/lib/atlas) because the
+      # binary's defaults haven't changed; isolation is enforced by
+      # the volume-name binding to a different host-side dataset.
+      - atlas-data-edge:/var/lib/atlas
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/atlas", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 120s
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------
+  # web-edge — Next.js frontend, EDGE channel. Watchtower-managed.
+  # --------------------------------------------------------------------
+  web-edge:
+    image: ghcr.io/mgoodric/security-atlas-web:edge
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    depends_on:
+      atlas-edge:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      ATLAS_HTTP_URL: http://atlas-edge:8080
+      # Same NEXT_PUBLIC_API_BASE_URL semantics as bundled. When
+      # atlas-edge.home.gmoney.sh fronts both web + atlas behind one
+      # reverse proxy, leave this empty for same-origin relative URLs.
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}
+    ports:
+      - "${EDGE_WEB_PORT:-3100}:3000"
+    restart: unless-stopped
+
+volumes:
+  pg-data-edge:
+  minio-data-edge:
+  nats-data-edge:
+  atlas-data-edge:
+  atlas-bootstrap-data-edge:
