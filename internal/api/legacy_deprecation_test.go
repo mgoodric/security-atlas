@@ -13,11 +13,11 @@ import (
 // "atlas_<bytes>" form. This avoids tripping GitGuardian's prefix-based
 // secret scanner while still exercising the production code path.
 //
-// The 410 responder fires on `atlas_` prefix EXCEPT for the
-// `atlas_test_` integration-test prefix (slice 191 partial-cutover
-// compromise — see internal/api/httpserver.go legacyBearerDeprecation
-// for the carve-out). To exercise the 410 path, we MUST use a value
-// that starts "atlas_" but NOT "atlas_test_".
+// Slice 197: the responder fires on ANY `atlas_`-prefixed bearer; the
+// slice 191 `atlas_test_` carve-out was removed when integration test
+// fixtures graduated to JWT bearers (see Server.IssueTestJWT +
+// internal/api/testjwt/). Both the `atlas_prod_` and `atlas_test_`
+// shapes 410 today.
 func legacyTokenForTest(suffix string) string {
 	return "atl" + "as_prod_" + suffix
 }
@@ -98,22 +98,32 @@ func TestLegacyBearerDeprecation_PassesNoAuth(t *testing.T) {
 	}
 }
 
-// TestLegacyBearerDeprecation_PassesAtlasTestPrefix is the partial-
-// cutover carve-out: `atlas_test_` integration-test bearers MUST
-// fall through to the legacy bearer middleware so the existing
-// integration test suite continues to pass. Slice 197 spillover
-// removes this carve-out when test fixtures migrate to JWT.
-func TestLegacyBearerDeprecation_PassesAtlasTestPrefix(t *testing.T) {
-	mw := legacyBearerDeprecation("https://atlas/docs/migration/oauth")
-	called := false
+// TestLegacyBearerDeprecation_410OnAtlasTestPrefix is the slice 197
+// inversion of slice 191's partial-cutover carve-out: with the legacy
+// bearer middleware mount removed and test fixtures migrated to JWT,
+// the `atlas_test_` prefix is no longer special. It now 410s exactly
+// like the production `atlas_` prefix.
+//
+// Any test that needs to authenticate against `srv.HTTPHandlerForTests()`
+// must mint a JWT via `Server.IssueTestJWT` instead.
+func TestLegacyBearerDeprecation_410OnAtlasTestPrefix(t *testing.T) {
+	mw := legacyBearerDeprecation("https://atlas.example.com/docs/migration/oauth")
 	handler := mw(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-		called = true
+		t.Fatal("downstream handler should not run — atlas_test_ prefix must 410 after slice 197")
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/v1/anything", nil)
 	req.Header.Set("Authorization", "Bearer "+"atl"+"as_test_"+"integration_fixture")
-	handler.ServeHTTP(httptest.NewRecorder(), req)
-	if !called {
-		t.Fatal("atlas_test_ prefix should fall through to legacy middleware")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusGone {
+		t.Fatalf("status = %d, want 410 (atlas_test_ carve-out removed in slice 197)", rr.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body parse: %v", err)
+	}
+	if body["error"] != "api_key_deprecated" {
+		t.Errorf("error = %q, want api_key_deprecated", body["error"])
 	}
 }
 

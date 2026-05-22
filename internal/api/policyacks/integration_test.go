@@ -34,6 +34,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/policy"
 )
@@ -389,17 +390,13 @@ func setup(t *testing.T) setupResult {
 	})
 	apiServer.AttachDB(app)
 
-	_, adminBearer, err := apiServer.IssueBootstrapAdminCredential(tenant)
-	if err != nil {
-		t.Fatalf("IssueBootstrapAdminCredential: %v", err)
-	}
-	// The bootstrap admin cred has UserID = its own credential id (a
-	// "key_…" string). We mirror that into a users row + an api_keys
-	// row so the rate query has a denominator entry. In production,
-	// slice 034's OIDC path provisions users on first sign-in.
+	// Slice 197: JWT bearer via slice 190 path. Subject = the seeded
+	// users row id, matching the policy_acknowledgments FK target.
 	adminUser := seedUser(t, admin, tenant, "admin@test")
-	// IsAdmin=true so this user counts in any required-role denominator.
 	seedAPIKeyForUser(t, admin, tenant, adminUser, true, true, nil)
+	adminClaims := testjwt.AdminFor(uuid.MustParse(tenant))
+	adminClaims.Subject = adminUser.String()
+	adminBearer := apiServer.IssueTestJWT(t, adminClaims)
 
 	h := apiServer.HTTPHandlerForTests()
 	if h == nil {
@@ -426,44 +423,25 @@ func setup(t *testing.T) setupResult {
 	}
 }
 
-// makeUserAndBearer issues a bootstrap-owner credential carrying the
-// supplied roles, then seeds a users row + an api_keys row so the
-// rate denominator can count them.
+// makeUserAndBearer seeds a users row + an api_keys row, then mints a
+// JWT whose Subject equals the seeded user id so the
+// policy_acknowledgments FK target matches.
+//
+// Slice 197: the legacy `RebindBearerUserIDForTests` rebind hook is
+// gone — the JWT's `sub` claim is the source of UserID on the
+// synthesized credstore.Credential (jwtmw line 202). Setting Subject
+// at mint time is the JWT analog of the legacy rebind.
 func (s *setupResult) makeUserAndBearer(t *testing.T, email string, roles []string, isAdmin bool) (uuid.UUID, string) {
 	t.Helper()
-	var cred string
-	var err error
-	if isAdmin {
-		_, cred, err = s.apiServer.IssueBootstrapAdminCredential(s.tenant)
-	} else {
-		_, cred, err = s.apiServer.IssueBootstrapOwnerCredential(s.tenant, roles)
-	}
-	if err != nil {
-		t.Fatalf("issue cred: %v", err)
-	}
 	user := seedUser(t, s.admin, s.tenant, email)
 	seedAPIKeyForUser(t, s.admin, s.tenant, user, isAdmin, false, roles)
-	// The bootstrap cred's UserID is its own id (key_…); the handler
-	// uses that field to write policy_acknowledgments.user_id. To make
-	// the FK pass we need cred.UserID to equal a real users row id.
-	// Override by re-issuing the cred against the users row id.
-	// (The bootstrap helpers don't expose a UserID override yet; we
-	// patch the credential's UserID directly via the api server.)
-	s.bindBearerToUser(t, cred, user)
-	return user, cred
-}
-
-// bindBearerToUser rewrites the in-memory credstore record's UserID to
-// the supplied users row id. Required because the bootstrap helpers
-// default UserID to the credential id, but the policy_acknowledgments
-// FK targets users(id). The override is an in-memory rewrite that
-// would not be needed once slice 034's OIDC path provisions creds with
-// real user ids; until then this is the integration-test bridge.
-func (s *setupResult) bindBearerToUser(t *testing.T, bearer string, userID uuid.UUID) {
-	t.Helper()
-	if err := s.apiServer.RebindBearerUserIDForTests(bearer, userID.String()); err != nil {
-		t.Fatalf("RebindBearerUserIDForTests: %v", err)
+	tenantUUID := uuid.MustParse(s.tenant)
+	var claims = testjwt.OwnerFor(tenantUUID, roles)
+	if isAdmin {
+		claims = testjwt.AdminFor(tenantUUID)
 	}
+	claims.Subject = user.String()
+	return user, s.apiServer.IssueTestJWT(t, claims)
 }
 
 // ----- helpers for evidence verification (AC-2) -----
@@ -708,21 +686,17 @@ func TestPendingForUser_StaleAck_AC5(t *testing.T) {
 // ack row.
 func (s *setupResult) makeUserAndBearerWithUser(t *testing.T, email string, roles []string, isAdmin bool, existingUser uuid.UUID) (uuid.UUID, string) {
 	t.Helper()
-	var cred string
-	var err error
-	if isAdmin {
-		_, cred, err = s.apiServer.IssueBootstrapAdminCredential(s.tenant)
-	} else {
-		_, cred, err = s.apiServer.IssueBootstrapOwnerCredential(s.tenant, roles)
-	}
-	if err != nil {
-		t.Fatalf("issue cred: %v", err)
-	}
 	// We do NOT seed a new users row; we reuse existingUser. We DO seed
 	// an api_keys row for that user so the rate denominator query
 	// counts them.
 	seedAPIKeyForUser(t, s.admin, s.tenant, existingUser, isAdmin, false, roles)
-	s.bindBearerToUser(t, cred, existingUser)
+	tenantUUID := uuid.MustParse(s.tenant)
+	var claims = testjwt.OwnerFor(tenantUUID, roles)
+	if isAdmin {
+		claims = testjwt.AdminFor(tenantUUID)
+	}
+	claims.Subject = existingUser.String()
+	cred := s.apiServer.IssueTestJWT(t, claims)
 	_ = email
 	return existingUser, cred
 }

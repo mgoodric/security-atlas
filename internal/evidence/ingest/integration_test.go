@@ -30,6 +30,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -358,10 +359,8 @@ func TestRateLimit_AC5(t *testing.T) {
 		EvidencePushRate: 1, // 1 token/sec, burst=2
 	})
 	srv.AttachDB(pool)
-	_, bearer, err := srv.IssueBootstrapCredential(tenantA)
-	if err != nil {
-		t.Fatalf("Issue: %v", err)
-	}
+	// Slice 197: JWT bearer via slice 190 path.
+	bearer := srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenantA)))
 	handler := srv.HTTPHandlerForTests()
 	ts := httptest.NewServer(handler)
 	defer ts.Close()

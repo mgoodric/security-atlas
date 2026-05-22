@@ -52,6 +52,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
 
@@ -288,12 +289,13 @@ func setup(t *testing.T) setupResult {
 	})
 	apiServer.AttachDB(app)
 
-	_, adminBearer, err := apiServer.IssueBootstrapAdminCredential(tenant)
-	if err != nil {
-		t.Fatalf("IssueBootstrapAdminCredential: %v", err)
-	}
+	// Slice 197: JWT bearer via slice 190 path; Subject = admin user
+	// id so policy_acknowledgments FK targets resolve.
 	adminUser := seedUser(t, admin, tenant, "admin@slice107.test")
 	seedAPIKeyForUser(t, admin, tenant, adminUser, true, nil)
+	adminClaims := testjwt.AdminFor(uuid.MustParse(tenant))
+	adminClaims.Subject = adminUser.String()
+	adminBearer := apiServer.IssueTestJWT(t, adminClaims)
 
 	h := apiServer.HTTPHandlerForTests()
 	if h == nil {
@@ -521,10 +523,7 @@ func TestListPolicies_IncludeAckRate_RLS_TenantIsolation(t *testing.T) {
 	// for tenant B; the joined list should be EMPTY (or at least not
 	// contain policyA).
 	tenantB := freshTenant(t, s.admin)
-	_, bearerB, err := s.apiServer.IssueBootstrapAdminCredential(tenantB)
-	if err != nil {
-		t.Fatalf("IssueBootstrapAdminCredential(B): %v", err)
-	}
+	bearerB := s.apiServer.IssueTestJWT(t, testjwt.AdminFor(uuid.MustParse(tenantB)))
 	rawB := s.do(t, http.MethodGet, "/v1/policies?include=ack_rate", nil, bearerB, http.StatusOK)
 	if strings.Contains(string(rawB), policyA) {
 		t.Fatalf("RLS BYPASS: tenant B's joined list contains tenant A's policy %s; body=%s", policyA, rawB)
@@ -702,14 +701,11 @@ func TestListPolicies_IncludeAckRate_WireShape_PinsNullVsNumber(t *testing.T) {
 // (policy_acknowledgments.user_id -> users.id) is satisfied.
 func (s *setupResult) issueRoledUserBearer(t *testing.T, email string, roles []string) (uuid.UUID, string) {
 	t.Helper()
-	_, bearer, err := s.apiServer.IssueBootstrapOwnerCredential(s.tenant, roles)
-	if err != nil {
-		t.Fatalf("IssueBootstrapOwnerCredential: %v", err)
-	}
 	userID := seedUser(t, s.admin, s.tenant, email)
 	seedAPIKeyForUser(t, s.admin, s.tenant, userID, false, roles)
-	if err := s.apiServer.RebindBearerUserIDForTests(bearer, userID.String()); err != nil {
-		t.Fatalf("RebindBearerUserIDForTests: %v", err)
-	}
-	return userID, bearer
+	// Slice 197: JWT bearer with Subject = users row id (replaces
+	// the legacy RebindBearerUserIDForTests hook).
+	claims := testjwt.OwnerFor(uuid.MustParse(s.tenant), roles)
+	claims.Subject = userID.String()
+	return userID, s.apiServer.IssueTestJWT(t, claims)
 }

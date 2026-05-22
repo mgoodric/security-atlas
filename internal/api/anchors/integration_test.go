@@ -13,11 +13,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/scfimport"
 	"github.com/mgoodric/security-atlas/internal/api/soc2import"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 )
 
 const tenantA = "11111111-1111-1111-1111-111111111111"
@@ -92,10 +94,11 @@ func setupHTTPServer(t *testing.T) (*httptest.Server, string) {
 	appPool := openPoolDSN(t, appDSN(t))
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(appPool)
-	_, bearer, err := srv.IssueBootstrapCredential(tenantA)
-	if err != nil {
-		t.Fatalf("IssueBootstrapCredential: %v", err)
-	}
+	// Slice 197: mint a JWT via the slice 190 path; the legacy
+	// `IssueBootstrapCredential` opaque-bearer middleware is retired.
+	// ViewerFor mirrors the legacy default (no admin/approver/owner
+	// elevation) — sufficient for the read-only anchor list endpoints.
+	bearer := srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenantA)))
 	handler := srv.HTTPHandlerForTests()
 	if handler == nil {
 		t.Fatal("HTTPHandlerForTests returned nil; AttachDB did not take effect")

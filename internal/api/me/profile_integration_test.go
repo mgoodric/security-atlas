@@ -33,6 +33,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 )
 
 // ----- harness -----
@@ -132,19 +133,17 @@ func testServerForUser(t *testing.T, app *pgxpool.Pool, tenantID, userID string,
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	var bearer string
-	var err error
+	// Slice 197: JWT bearer via slice 190 path. The jwtmw bridge
+	// reads claims.Subject into the synthesized credstore.Credential's
+	// UserID, so setting Subject on the claim is the JWT analog of
+	// the legacy RebindBearerUserIDForTests hook.
+	tenantUUID := uuid.MustParse(tenantID)
+	var claims = testjwt.ViewerFor(tenantUUID)
 	if admin {
-		_, bearer, err = srv.IssueBootstrapAdminCredential(tenantID)
-	} else {
-		_, bearer, err = srv.IssueBootstrapCredential(tenantID)
+		claims = testjwt.AdminFor(tenantUUID)
 	}
-	if err != nil {
-		t.Fatalf("IssueBootstrap*Credential: %v", err)
-	}
-	if err := srv.RebindBearerUserIDForTests(bearer, userID); err != nil {
-		t.Fatalf("RebindBearerUserIDForTests: %v", err)
-	}
+	claims.Subject = userID
+	bearer := srv.IssueTestJWT(t, claims)
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests returned nil — DB pool not attached")

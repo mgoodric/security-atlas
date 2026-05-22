@@ -28,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -481,14 +482,9 @@ func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string, str
 	app := openPool(t, appDSN(t))
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(app)
-	_, bearer, err := srv.IssueBootstrapCredential(tenant)
-	if err != nil {
-		t.Fatalf("IssueBootstrapCredential: %v", err)
-	}
-	_, approver, err := srv.IssueBootstrapApproverCredential(tenant)
-	if err != nil {
-		t.Fatalf("IssueBootstrapApproverCredential: %v", err)
-	}
+	// Slice 197: JWT bearers via slice 190 path.
+	bearer := srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenant)))
+	approver := srv.IssueTestJWT(t, testjwt.ApproverFor(uuid.MustParse(tenant)))
 	handler := srv.HTTPHandlerForTests()
 	if handler == nil {
 		t.Fatal("HTTPHandlerForTests nil; AttachDB ineffective")
