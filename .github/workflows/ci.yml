@@ -929,18 +929,26 @@ jobs:
       NATS_URL: nats://localhost:4222
       ATLAS_HTTP_URL: http://localhost:8080
       PLATFORM_BASE_URL: http://localhost:3000
-      # Slice 069 — neutral test token (P0-A9 / slice 082 P0-A3). The
-      # Playwright fixture injects this value as the session cookie;
-      # the slice-082 seed harness inserts an `api_keys` row whose
-      # `token_hash` matches HMAC-SHA256(this, BEARER_HASH_KEY) so the
-      # platform's bearer middleware accepts it. Token literal MUST NOT
-      # be vendor-prefixed (ghp_, sk_, eyJ, AKIA) per GitGuardian.
-      TEST_BEARER: test-bearer-e2e
+      # Slice 201 — Playwright global-setup obtains a JWT at runtime
+      # via POST /v1/test/issue-jwt (env-gated below by ATLAS_TEST_MODE)
+      # and writes it into process.env.TEST_BEARER for downstream specs.
+      # The TEST_BEARER env var here is intentionally OMITTED — the
+      # global-setup module is the sole writer (its absence at job-level
+      # forces the runtime mint path). Slice 069's static literal
+      # (which was a slice 034 opaque bearer) is retired with slice 197.
+      ATLAS_TEST_MODE: "1"
+      # Slice 187 / 190 — ATLAS_ISSUER_URL drives the OAuth keystore
+      # wiring + JWT validator on /v1/*. Without this the atlas server
+      # boots WITHOUT a tokensign.Signer, the /v1/test/issue-jwt
+      # endpoint returns 404 (no signer wired), and global-setup fails.
+      ATLAS_ISSUER_URL: http://localhost:8080
       # Slice 082 — deterministic test value (>=32 bytes per
-      # internal/auth/bearer/bearer.go HashKeyMinBytes). The atlas
-      # server boots with this key; the harness HMACs the test bearer
-      # with the same key so the lookup succeeds. NOT a real secret —
-      # only used by the disposable CI Postgres instance.
+      # internal/auth/bearer/bearer.go HashKeyMinBytes). Historically
+      # the atlas server boots with this key; retained because the
+      # bearer.Hasher refuses to construct without it. The HMAC path
+      # itself is now dead post-slice-197 but the boot-time check
+      # remains. NOT a real secret — only used by the disposable CI
+      # Postgres instance.
       BEARER_HASH_KEY: test-bearer-hash-key-32-bytes-ok!!
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -1017,7 +1025,16 @@ jobs:
         working-directory: web
         run: npx playwright install --with-deps chromium
       - name: Start atlas server
+        # Slice 201: ATLAS_KEYSTORE_PATH + ATLAS_DATA_DIR point at /tmp (the
+        # CI runner cannot write to the default /var/lib/security-atlas/).
+        # Without these, fsstore.Open fails with EACCES, the OAuth keystore
+        # never wires, s.jwtSigner stays nil, and the /v1/test/issue-jwt
+        # endpoint returns 404 — breaking the Playwright global-setup.
+        env:
+          ATLAS_KEYSTORE_PATH: /tmp/atlas-ci/keys
+          ATLAS_DATA_DIR: /tmp/atlas-ci
         run: |
+          mkdir -p /tmp/atlas-ci/keys
           atlas serve > /tmp/atlas.log 2>&1 &
           echo "ATLAS_PID=$!" >> "$GITHUB_ENV"
           for i in $(seq 1 30); do
@@ -1198,7 +1215,16 @@ jobs:
         working-directory: web
         run: npx playwright install --with-deps chromium
       - name: Start atlas server
+        # Slice 201: ATLAS_KEYSTORE_PATH + ATLAS_DATA_DIR point at /tmp (the
+        # CI runner cannot write to the default /var/lib/security-atlas/).
+        # Without these, fsstore.Open fails with EACCES, the OAuth keystore
+        # never wires, s.jwtSigner stays nil, and the /v1/test/issue-jwt
+        # endpoint returns 404 — breaking the Playwright global-setup.
+        env:
+          ATLAS_KEYSTORE_PATH: /tmp/atlas-ci/keys
+          ATLAS_DATA_DIR: /tmp/atlas-ci
         run: |
+          mkdir -p /tmp/atlas-ci/keys
           atlas serve > /tmp/atlas.log 2>&1 &
           echo "ATLAS_PID=$!" >> "$GITHUB_ENV"
           for i in $(seq 1 30); do

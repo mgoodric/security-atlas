@@ -194,7 +194,7 @@ func (s *Server) httpHandler() http.Handler {
 		}), "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state",
 			"/v1/calendar.ics", "/.well-known/", "/oauth/token",
 			"/oauth/authorize", "/oauth/revoke", "/oauth/introspect",
-			"/oauth/device_authorization"))
+			"/oauth/device_authorization", "/v1/test/issue-jwt"))
 		// Slice 197: fail-closed credential requirement. The slice 190
 		// JWT middleware passes through requests with NO JWT shape so
 		// the legacy bearer middleware could pick them up; with the
@@ -206,10 +206,16 @@ func (s *Server) httpHandler() http.Handler {
 		//
 		// P0-191-1 invariant restored at the platform level: there is
 		// no auth-bypass window for requests with no token.
+		//
+		// Slice 201: `/v1/test/issue-jwt` joins the exempt set ONLY when
+		// `ATLAS_TEST_MODE=1` (checked at mount time below). The route
+		// MUST be bearer-exempt because its purpose is to issue the
+		// first JWT — a circular dependency would prevent the Playwright
+		// global-setup from ever obtaining a token.
 		root.Use(requireCredential("/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state",
 			"/v1/calendar.ics", "/.well-known/", "/oauth/token",
 			"/oauth/authorize", "/oauth/revoke", "/oauth/introspect",
-			"/oauth/device_authorization"))
+			"/oauth/device_authorization", "/v1/test/issue-jwt"))
 	}
 	// Slice 033: lift the authenticated credential's tenant id onto the
 	// request context so every downstream handler — and every database
@@ -229,7 +235,11 @@ func (s *Server) httpHandler() http.Handler {
 		// same reason as /health — a metadata probe shouldn't reach OPA.
 		// Slice 073: /v1/install-state is added too — public metadata, same
 		// reasoning as the bearer-exempt above.
-		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/"))
+		// Slice 201: `/v1/test/issue-jwt` joins the authz-exempt set
+		// (mounted only when ATLAS_TEST_MODE=1) — same rationale as the
+		// bearer-exempt above: the endpoint mints the first JWT, so it
+		// cannot be gated by OPA on a credential it has not yet produced.
+		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/", "/v1/test/issue-jwt"))
 	}
 	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
 	// tenancy / authz so the cache lives inside the same request-context
@@ -289,6 +299,15 @@ func (s *Server) httpHandler() http.Handler {
 	// above gates the path because /v1/install/* is NOT in the exempt list.
 	root.Get("/v1/install-state", s.handleInstallState)
 	root.Post("/v1/install/mark-first-signin", s.handleMarkFirstSignin)
+	// Slice 201: POST /v1/test/issue-jwt — env-gated test-only JWT
+	// issuance for the Playwright e2e harness. Mounted ONLY when
+	// `ATLAS_TEST_MODE=1` at boot time. The handler ALSO re-checks the
+	// env var per request (P0-201-2 defense in depth). Production
+	// binaries leave the env var unset and the route is absent.
+	// See `internal/api/testissuejwt.go` for the full design rationale.
+	if testModeEnabled() {
+		root.Post("/v1/test/issue-jwt", s.handleIssueTestJWT)
+	}
 	// Slice 187: OAuth Authorization Server scaffolding. The handler
 	// owns six routes — JWKS, OIDC discovery, and four 501-stubs for
 	// /oauth/token (188), /oauth/authorize (189), /oauth/revoke (190),

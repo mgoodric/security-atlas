@@ -3222,6 +3222,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/test/issue-jwt:
+    post:
+      summary: Mint a test JWT (env-gated by ATLAS_TEST_MODE; absent in production)
+      tags: [system]
+      operationId: post-v1-test-issue-jwt
+      x-internal: true
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/themes:
     get:
       summary: GET /v1/themes

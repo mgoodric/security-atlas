@@ -16,6 +16,14 @@ const isCI = !!process.env.CI;
 
 export default defineConfig({
   testDir: "./e2e",
+  // Slice 201: global-setup mints a JWT via the env-gated atlas
+  // endpoint `POST /v1/test/issue-jwt` and writes it into
+  // `process.env.TEST_BEARER`. Replaces the static
+  // `TEST_BEARER = "test-bearer-e2e"` literal that slice 197 broke by
+  // retiring the slice 034 bearer middleware. The atlas server MUST be
+  // started with ATLAS_TEST_MODE=1 (and ATLAS_ISSUER_URL set so the
+  // OAuth keystore is wired) before this runs.
+  globalSetup: require.resolve("./e2e/global-setup"),
   // The specs are sequential against a single shared backend; parallelism
   // across files (workers) is fine, but inside-file tests run serially so
   // a sign-in in one test does not race with another's network mocks.
