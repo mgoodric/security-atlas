@@ -14,10 +14,10 @@
 //     buffering. A risk-register export of any plausible size should
 //     never materialise in the BFF's memory.
 //
-//   - Bearer auth: the same `sa_session_token` cookie the slice 100
-//     `/api/risks` BFF uses. The atlas_session cookie is NOT
-//     forwarded (slice 110 P0-A2) — the export endpoint authenticates
-//     on the bearer alone.
+//   - Bearer auth: the same `SESSION_COOKIE` (post-slice-206:
+//     `atlas_jwt`) the slice 100 `/api/risks` BFF uses. The
+//     atlas_session cookie is NOT forwarded (slice 110 P0-A2) — the
+//     export endpoint authenticates on the bearer alone.
 //
 //   - Header passthrough: Content-Type, Content-Disposition,
 //     X-Content-Type-Options all flow through verbatim. The backend

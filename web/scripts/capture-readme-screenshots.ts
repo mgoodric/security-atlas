@@ -109,8 +109,9 @@ const NEXT_PORT = 3300; // avoid colliding with the dev convention :3000
 const DEMO_BEARER = "demo-bearer-readme-capture";
 // Must match `SESSION_COOKIE` in web/lib/auth.ts. Hard-coded here
 // (rather than imported) because esbuild bundles this script in
-// isolation from the Next module-resolution context.
-const SESSION_COOKIE = "sa_session_token";
+// isolation from the Next module-resolution context. Slice 206
+// migrated the value from `sa_session_token` to `atlas_jwt`.
+const SESSION_COOKIE = "atlas_jwt";
 
 const CAPTURE_TARGETS = [
   { name: "hero-dashboard", path: "/dashboard" },

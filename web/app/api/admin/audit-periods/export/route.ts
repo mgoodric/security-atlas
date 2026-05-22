@@ -8,9 +8,9 @@
 //   - Streaming forward: `upstream.body` (a ReadableStream) is piped
 //     directly into NextResponse with NO buffering. Even a 50K-row
 //     XLSX must not materialise in BFF memory.
-//   - Bearer auth: same `sa_session_token` cookie the slice-110 admin
-//     BFFs use. The `atlas_session` cookie is NEVER forwarded
-//     (slice 110 P0-A2 narrow-scope rule).
+//   - Bearer auth: same `SESSION_COOKIE` (post-slice-206: `atlas_jwt`)
+//     the slice-110 admin BFFs use. The `atlas_session` cookie is
+//     NEVER forwarded (slice 110 P0-A2 narrow-scope rule).
 //   - Header passthrough: Content-Type + Content-Disposition +
 //     X-Content-Type-Options. The backend is the authority on the
 //     filename.
