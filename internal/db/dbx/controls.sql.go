@@ -482,6 +482,128 @@ func (q *Queries) ListControlVersionsByBundle(ctx context.Context, arg ListContr
 	return items, nil
 }
 
+const listControlsHistoryForExport = `-- name: ListControlsHistoryForExport :many
+SELECT id, bundle_id, version, scf_id, scf_anchor_id, title,
+       control_family, implementation_type, owner_role, lifecycle_state,
+       applicability_expr, freshness_class, bundle_manifest_hash,
+       created_at, updated_at, superseded_by
+FROM controls
+WHERE tenant_id = $1
+ORDER BY bundle_id ASC, version DESC
+LIMIT $2
+`
+
+type ListControlsHistoryForExportParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Limit    int32       `json:"limit"`
+}
+
+type ListControlsHistoryForExportRow struct {
+	ID                 pgtype.UUID               `json:"id"`
+	BundleID           string                    `json:"bundle_id"`
+	Version            int32                     `json:"version"`
+	ScfID              *string                   `json:"scf_id"`
+	ScfAnchorID        pgtype.UUID               `json:"scf_anchor_id"`
+	Title              string                    `json:"title"`
+	ControlFamily      string                    `json:"control_family"`
+	ImplementationType ControlImplementationType `json:"implementation_type"`
+	OwnerRole          string                    `json:"owner_role"`
+	LifecycleState     ControlLifecycleState     `json:"lifecycle_state"`
+	ApplicabilityExpr  string                    `json:"applicability_expr"`
+	FreshnessClass     *string                   `json:"freshness_class"`
+	BundleManifestHash string                    `json:"bundle_manifest_hash"`
+	CreatedAt          pgtype.Timestamptz        `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz        `json:"updated_at"`
+	SupersededBy       pgtype.UUID               `json:"superseded_by"`
+}
+
+// Slice 175 — control bundle history export projection (lineage incl. superseded).
+//
+// Returns EVERY control version for the caller's tenant — active rows
+// AND superseded rows — with the slice 137 column projection PLUS two
+// new columns (`superseded_by`, `superseded_at`). Capped at $2 rows.
+// The caller passes (row_cap + 1) so the handler can detect the
+// row-cap-exceeded path with no extra round trip.
+//
+// Why a SEPARATE query (slice 175 D2):
+//
+//   - Slice 137 D2 explicitly rejected including `superseded_by` /
+//     `superseded_at` in the active-only export because those columns
+//     would always be NULL. Extending the slice 137 query would
+//     re-introduce that "always-NULL noise" against the active-only
+//     stream — wrong shape for both consumers. Two queries keep both
+//     projections clean.
+//   - Active-only export consumers (compliance gap analysis, auditor
+//     handoff index sheets) MUST keep seeing the slice 137 shape
+//     unchanged. Reshaping that query for both consumers would force a
+//     downstream-tool migration that buys nothing.
+//
+// Column projection rationale (slice 175 acceptance criterion AC-2 —
+// 17 columns; the slice 137 15 columns IN THE SAME ORDER plus two new
+// columns appended):
+//
+//	identity:     id, bundle_id, version, title, control_family
+//	topology:     scf_id, scf_anchor_id (foreign-key join columns)
+//	posture:      implementation_type, owner_role, lifecycle_state
+//	tenant data:  applicability_expr
+//	integrity:    freshness_class, bundle_manifest_hash
+//	audit:        created_at, updated_at
+//	supersession: superseded_by, superseded_at  (slice 175 NEW)
+//
+// `superseded_at` is NOT a stored column on controls; the slice 175
+// handler synthesises it from `updated_at` ONLY for rows whose
+// `superseded_by IS NOT NULL`. Rationale: the supersession transaction
+// (MarkControlSuperseded) sets `superseded_by` and bumps `updated_at =
+// now()` in the same UPDATE, so for superseded rows `updated_at` is
+// the timestamp of the supersession event. Adding a dedicated stored
+// column would be a separate schema slice; the handler-level synthesis
+// gets us the AC-2 column at zero schema cost. The SQL projection
+// returns `superseded_by` and `updated_at` separately; the handler
+// emits an empty `superseded_at` cell when `superseded_by IS NULL`.
+//
+// Ordering (slice 175 narrative §1): `bundle_id ASC, version DESC` so
+// consumers see the most-recent-first lineage per bundle.
+//
+// RLS posture: identical to slice 137. The WHERE tenant_id = $1 clause
+// is belt-and-suspenders alongside the GUC-driven RLS policy; the
+// tenancy.ApplyTenant call upstream pins the GUC.
+func (q *Queries) ListControlsHistoryForExport(ctx context.Context, arg ListControlsHistoryForExportParams) ([]ListControlsHistoryForExportRow, error) {
+	rows, err := q.db.Query(ctx, listControlsHistoryForExport, arg.TenantID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListControlsHistoryForExportRow
+	for rows.Next() {
+		var i ListControlsHistoryForExportRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BundleID,
+			&i.Version,
+			&i.ScfID,
+			&i.ScfAnchorID,
+			&i.Title,
+			&i.ControlFamily,
+			&i.ImplementationType,
+			&i.OwnerRole,
+			&i.LifecycleState,
+			&i.ApplicabilityExpr,
+			&i.FreshnessClass,
+			&i.BundleManifestHash,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SupersededBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markControlSuperseded = `-- name: MarkControlSuperseded :exec
 UPDATE controls
 SET superseded_by = $3, updated_at = now()

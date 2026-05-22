@@ -1111,6 +1111,57 @@ type Querier interface {
 	// NO `WHERE tenant_id = ?` clause: invariant 6 — RLS does the tenant
 	// filtering. Adding such a clause would be a constitutional violation.
 	ListControlsForAnchors(ctx context.Context, dollar_1 []pgtype.UUID) ([]ListControlsForAnchorsRow, error)
+	// Slice 175 — control bundle history export projection (lineage incl. superseded).
+	//
+	// Returns EVERY control version for the caller's tenant — active rows
+	// AND superseded rows — with the slice 137 column projection PLUS two
+	// new columns (`superseded_by`, `superseded_at`). Capped at $2 rows.
+	// The caller passes (row_cap + 1) so the handler can detect the
+	// row-cap-exceeded path with no extra round trip.
+	//
+	// Why a SEPARATE query (slice 175 D2):
+	//
+	//   - Slice 137 D2 explicitly rejected including `superseded_by` /
+	//     `superseded_at` in the active-only export because those columns
+	//     would always be NULL. Extending the slice 137 query would
+	//     re-introduce that "always-NULL noise" against the active-only
+	//     stream — wrong shape for both consumers. Two queries keep both
+	//     projections clean.
+	//   - Active-only export consumers (compliance gap analysis, auditor
+	//     handoff index sheets) MUST keep seeing the slice 137 shape
+	//     unchanged. Reshaping that query for both consumers would force a
+	//     downstream-tool migration that buys nothing.
+	//
+	// Column projection rationale (slice 175 acceptance criterion AC-2 —
+	// 17 columns; the slice 137 15 columns IN THE SAME ORDER plus two new
+	// columns appended):
+	//
+	//   identity:     id, bundle_id, version, title, control_family
+	//   topology:     scf_id, scf_anchor_id (foreign-key join columns)
+	//   posture:      implementation_type, owner_role, lifecycle_state
+	//   tenant data:  applicability_expr
+	//   integrity:    freshness_class, bundle_manifest_hash
+	//   audit:        created_at, updated_at
+	//   supersession: superseded_by, superseded_at  (slice 175 NEW)
+	//
+	// `superseded_at` is NOT a stored column on controls; the slice 175
+	// handler synthesises it from `updated_at` ONLY for rows whose
+	// `superseded_by IS NOT NULL`. Rationale: the supersession transaction
+	// (MarkControlSuperseded) sets `superseded_by` and bumps `updated_at =
+	// now()` in the same UPDATE, so for superseded rows `updated_at` is
+	// the timestamp of the supersession event. Adding a dedicated stored
+	// column would be a separate schema slice; the handler-level synthesis
+	// gets us the AC-2 column at zero schema cost. The SQL projection
+	// returns `superseded_by` and `updated_at` separately; the handler
+	// emits an empty `superseded_at` cell when `superseded_by IS NULL`.
+	//
+	// Ordering (slice 175 narrative §1): `bundle_id ASC, version DESC` so
+	// consumers see the most-recent-first lineage per bundle.
+	//
+	// RLS posture: identical to slice 137. The WHERE tenant_id = $1 clause
+	// is belt-and-suspenders alongside the GUC-driven RLS policy; the
+	// tenancy.ApplyTenant call upstream pins the GUC.
+	ListControlsHistoryForExport(ctx context.Context, arg ListControlsHistoryForExportParams) ([]ListControlsHistoryForExportRow, error)
 	// Slice 016 — evidence freshness read-model + control drift snapshot queries.
 	//
 	// `evidence_freshness` is a materialized current-state read model (one row per

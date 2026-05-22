@@ -65,6 +65,11 @@ import {
   CONTROLS_EXPORT_FORMAT_LABELS,
   buildControlsExportURL,
 } from "@/lib/api/controls-export";
+import {
+  CONTROLS_HISTORY_EXPORT_FORMATS,
+  CONTROLS_HISTORY_EXPORT_FORMAT_LABELS,
+  buildControlsHistoryExportURL,
+} from "@/lib/api/controls-history-export";
 
 import {
   ALL,
@@ -293,7 +298,14 @@ function ControlsPageInner() {
   // platform `GET /v1/controls/export` endpoint. Each link is an
   // `<a download>` so the browser honours the backend's
   // Content-Disposition filename; no client-side JS download flow.
-  // Replaces the previous disabled `Export CSV` placeholder.
+  //
+  // Slice 175: History export buttons (CSV / JSON / XLSX) wire to a
+  // sibling BFF proxy at `/api/controls/history/export?format=...`,
+  // which forwards to `GET /v1/controls/history/export`. Same link
+  // shape — distinguished by the "Export History …" label and the
+  // `controls-history-export-*` data-testid. The history export
+  // returns 17 columns (slice 137's 15 + superseded_by + superseded_at)
+  // covering every version of every bundle, active + superseded.
   const actions = (
     <>
       {CONTROLS_EXPORT_FORMATS.map((format) => (
@@ -306,6 +318,18 @@ function ControlsPageInner() {
           data-testid={`controls-export-${format}`}
         >
           Export {CONTROLS_EXPORT_FORMAT_LABELS[format]}
+        </a>
+      ))}
+      {CONTROLS_HISTORY_EXPORT_FORMATS.map((format) => (
+        <a
+          key={`history-${format}`}
+          href={buildControlsHistoryExportURL(format)}
+          download
+          rel="noopener"
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+          data-testid={`controls-history-export-${format}`}
+        >
+          Export History {CONTROLS_HISTORY_EXPORT_FORMAT_LABELS[format]}
         </a>
       ))}
       <Button size="sm" disabled>

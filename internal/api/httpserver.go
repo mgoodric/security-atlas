@@ -497,6 +497,16 @@ func (s *Server) httpHandler() http.Handler {
 	// multi-product orgs are large.
 	controlsExportH := controlsapi.NewExportHandler(s.dbPool)
 	root.Get("/v1/controls/export", controlsExportH.ExportControls)
+	// Slice 175: controls history export (lineage incl. superseded
+	// versions). Sibling endpoint to /v1/controls/export — same shape,
+	// 17-column projection (slice 137's 15 + superseded_by +
+	// superseded_at), distinct meta-audit action
+	// (`controls_history_export`). Literal-segment route under
+	// /v1/controls/history/... declared alongside /v1/controls/export
+	// — chi matches static segments before the {id} wildcard so no
+	// shadowing risk with /v1/controls/{id}/history (slice 064).
+	controlsHistoryExportH := controlsapi.NewHistoryExportHandler(s.dbPool)
+	root.Get("/v1/controls/history/export", controlsHistoryExportH.ExportControlsHistory)
 	// Slice 011: manual control attestation endpoint. Wired only when
 	// the slice-013 ingest service is wired in (this slice writes
 	// evidence records via that service). When the artifact store is

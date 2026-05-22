@@ -1275,6 +1275,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls/history/export:
+    get:
+      summary: GET /v1/controls/history/export
+      tags: [controls]
+      operationId: get-v1-controls-history-export
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/applicability:
     get:
       summary: GET /v1/controls/{id}/applicability
