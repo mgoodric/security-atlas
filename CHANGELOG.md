@@ -707,6 +707,23 @@ goreleaser-action-v7-migration-decisions.md`. P0-A2 honored: cosign
 
 ### Fixed
 
+- **slice 131** — test-harness fix: two slice-029 integration tests
+  (`TestSlice029_AppendOnlyAtDBLayer` +
+  `TestSlice029_DeleteRejectedAtDBLayer`) called bare
+  `SET LOCAL app.tenant_id = $1`, which fails with
+  `SQLSTATE 42601: syntax error at or near "$1"` because PostgreSQL's
+  `SET` does not accept bind parameters. Both call-sites are now
+  rewritten to the canonical `tenancy.ApplyTenant(ctx, tx)` pattern
+  (mirroring `internal/exception/integration_test.go`
+  `TestAuditLog_IsAppendOnly`): a transaction is begun on the app
+  pool, `tenancy.ApplyTenant` issues `SELECT set_config(...)` against
+  the correct GUC name (`app.current_tenant`), and the UPDATE/DELETE
+  attempt runs inside the same Tx so RLS sees the tenant. P0-A1:
+  production `internal/audit/notes/notes.go` is untouched. P0-A2: the
+  `audit_notes` RLS policies are unchanged — the tests still assert
+  the same append-only / delete-rejected property. No user-facing
+  change.
+
 - **slice 186** — UI honesty fix (F-178-6 closure): the sidebar `/admin`
   nav entry is now role-gated to admin-only callers. The entry was
   previously rendered to every signed-in user; non-admin callers

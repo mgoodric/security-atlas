@@ -30,6 +30,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/audit/notes"
 	"github.com/mgoodric/security-atlas/internal/audit/notifications"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ===== AC-1: scope coverage =====
@@ -549,15 +550,20 @@ func TestSlice029_AppendOnlyAtDBLayer(t *testing.T) {
 	}
 
 	// Set tenant GUC on the app connection then attempt UPDATE.
-	conn, err := app.Acquire(ctx)
+	// Use the canonical tenancy.ApplyTenant(ctx, tx) pattern -- SET LOCAL
+	// must run inside a transaction or the `is_local` flag is silently
+	// inert (see internal/tenancy/apply.go), and bare SET LOCAL does not
+	// accept bind parameters (SQLSTATE 42601). The same idiom is used by
+	// internal/exception/integration_test.go TestAuditLog_IsAppendOnly.
+	tx, err := app.Begin(ctx)
 	if err != nil {
-		t.Fatalf("Acquire: %v", err)
+		t.Fatalf("Begin: %v", err)
 	}
-	defer conn.Release()
-	if _, err := conn.Exec(ctx, "SET LOCAL app.tenant_id = $1", tenant); err != nil {
-		t.Fatalf("set tenant guc: %v", err)
+	defer tx.Rollback(ctx)
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		t.Fatalf("apply tenant: %v", err)
 	}
-	res, err := conn.Exec(ctx, `UPDATE audit_notes SET body = 'Tampered' WHERE id = $1`, root.Note.ID)
+	res, err := tx.Exec(ctx, `UPDATE audit_notes SET body = 'Tampered' WHERE id = $1`, root.Note.ID)
 	if err == nil {
 		// If the error is nil, the only acceptable outcome is zero
 		// rows affected (RLS silently filtered out the row). Both
@@ -608,15 +614,17 @@ func TestSlice029_DeleteRejectedAtDBLayer(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	conn, err := app.Acquire(ctx)
+	// Canonical tenancy.ApplyTenant(ctx, tx) pattern (see the
+	// TestSlice029_AppendOnlyAtDBLayer note above).
+	tx, err := app.Begin(ctx)
 	if err != nil {
-		t.Fatalf("Acquire: %v", err)
+		t.Fatalf("Begin: %v", err)
 	}
-	defer conn.Release()
-	if _, err := conn.Exec(ctx, "SET LOCAL app.tenant_id = $1", tenant); err != nil {
-		t.Fatalf("set tenant guc: %v", err)
+	defer tx.Rollback(ctx)
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		t.Fatalf("apply tenant: %v", err)
 	}
-	res, err := conn.Exec(ctx, `DELETE FROM audit_notes WHERE id = $1`, root.Note.ID)
+	res, err := tx.Exec(ctx, `DELETE FROM audit_notes WHERE id = $1`, root.Note.ID)
 	if err == nil {
 		if rows := res.RowsAffected(); rows != 0 {
 			t.Fatalf("expected DELETE rejected by RLS; got %d rows affected", rows)
