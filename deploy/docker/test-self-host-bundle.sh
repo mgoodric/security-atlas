@@ -166,12 +166,27 @@ if [ "${MODE}" = "external" ]; then
     # (written above), so this `up` and every later compose invocation
     # consistently get scram-sha-256 — no inline VAR= prefix needed.
     "${COMPOSE[@]}" up -d postgres
-    # Wait for postgres to accept connections.
+    # Wait for postgres to accept connections AND for POSTGRES_DB to exist.
+    #
+    # Slice 200 — race-condition fix. `pg_isready -U postgres` (with no -d)
+    # connects against the user-named DB and returns ready as soon as the
+    # postgres docker-entrypoint's TEMP server is up. That temp server is
+    # the one that the entrypoint itself uses to run `CREATE DATABASE
+    # "$POSTGRES_DB"` and the /docker-entrypoint-initdb.d/*.sql scripts —
+    # so on a fresh data dir there is a window where `pg_isready` returns 0
+    # but the `security_atlas` database has NOT yet been created. The next
+    # step (`psql -d security_atlas ...`) then fails with
+    #   FATAL: database "security_atlas" does not exist
+    # The fix is to point the readiness check at the target database so it
+    # only succeeds once `docker_setup_db` has finished creating it. The
+    # bundled-mode harness path does not poll this directly — it relies on
+    # the compose healthcheck during `up -d --build` — so this fix is
+    # external-mode-only.
     for i in $(seq 1 30); do
-        if "${COMPOSE[@]}" exec -T postgres pg_isready -U postgres >/dev/null 2>&1; then
+        if "${COMPOSE[@]}" exec -T postgres pg_isready -U postgres -d security_atlas >/dev/null 2>&1; then
             break
         fi
-        [ "$i" -eq 30 ] && fail "postgres did not become ready"
+        [ "$i" -eq 30 ] && fail "postgres did not become ready (security_atlas DB never created)"
         sleep 2
     done
     log "pre-creating a NON-SUPERUSER atlas_migrate with a password"
