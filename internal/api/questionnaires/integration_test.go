@@ -42,6 +42,7 @@ import (
 	"github.com/xuri/excelize/v2"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 )
 
 // ----- harness -----
@@ -106,10 +107,8 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
 
-	_, bearer, err := srv.IssueBootstrapOwnerCredential(tenant, []string{"owner"})
-	if err != nil {
-		t.Fatalf("IssueBootstrapOwnerCredential: %v", err)
-	}
+	// Slice 197: JWT bearer via slice 190 path (owner roles).
+	bearer := srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"owner"}))
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests returned nil — DB pool not attached")

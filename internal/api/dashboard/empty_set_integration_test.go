@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 )
 
 func empAppDSN(t *testing.T) string {
@@ -81,10 +82,8 @@ func TestDashboard_EmptyTenant_AllPanelsReturn200(t *testing.T) {
 
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	_, bearer, err := srv.IssueBootstrapOwnerCredential(tenant, []string{"owner"})
-	if err != nil {
-		t.Fatalf("IssueBootstrapOwnerCredential: %v", err)
-	}
+	// Slice 197: JWT bearer via slice 190 path (owner roles).
+	bearer := srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"owner"}))
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(ts.Close)
 

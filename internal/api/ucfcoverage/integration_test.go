@@ -19,6 +19,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/scfimport"
 	"github.com/mgoodric/security-atlas/internal/api/soc2import"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 )
 
 const (
@@ -160,10 +161,9 @@ func setupHTTPServer(t *testing.T, tenantID string) (*httptest.Server, string) {
 	appPool := openPool(t, appDSN(t))
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(appPool)
-	_, bearer, err := srv.IssueBootstrapCredential(tenantID)
-	if err != nil {
-		t.Fatalf("IssueBootstrapCredential: %v", err)
-	}
+	// Slice 197: JWT bearer via slice 190 path. ViewerFor mirrors
+	// the legacy IssueBootstrapCredential default (no elevation).
+	bearer := srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenantID)))
 	handler := srv.HTTPHandlerForTests()
 	if handler == nil {
 		t.Fatal("HTTPHandlerForTests returned nil; AttachDB did not take effect")

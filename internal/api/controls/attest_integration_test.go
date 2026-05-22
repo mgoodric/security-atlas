@@ -36,6 +36,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
@@ -300,18 +301,11 @@ func setupHTTP(t *testing.T) setupResult {
 	})
 	srv.AttachDB(app)
 
-	_, adminBear, err := srv.IssueBootstrapAdminCredential(tenant)
-	if err != nil {
-		t.Fatalf("IssueBootstrapAdminCredential: %v", err)
-	}
-	_, ownerBear, err := srv.IssueBootstrapOwnerCredential(tenant, []string{ownerRole})
-	if err != nil {
-		t.Fatalf("IssueBootstrapOwnerCredential: %v", err)
-	}
-	_, plainBear, err := srv.IssueBootstrapCredential(tenant)
-	if err != nil {
-		t.Fatalf("IssueBootstrapCredential: %v", err)
-	}
+	// Slice 197: JWT bearers via slice 190 path.
+	tenantUUID := uuid.MustParse(tenant)
+	adminBear := srv.IssueTestJWT(t, testjwt.AdminFor(tenantUUID))
+	ownerBear := srv.IssueTestJWT(t, testjwt.OwnerFor(tenantUUID, []string{ownerRole}))
+	plainBear := srv.IssueTestJWT(t, testjwt.ViewerFor(tenantUUID))
 
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
@@ -519,8 +513,12 @@ func TestAttest_HappyPath_NoArtifact(t *testing.T) {
 	if got, _ := src["actor_type"].(string); got != "human" {
 		t.Fatalf("actor_type: got %q want human", got)
 	}
-	if got, _ := src["actor_id"].(string); got == "" || !strings.HasPrefix(got, "key_") {
-		t.Fatalf("actor_id must equal owner credential UserID; got %q", got)
+	// Slice 197: actor_id is the JWT subject (claims.Subject) routed
+	// through jwtmw's credstore.Credential synthesis. The legacy
+	// `key_` prefix from the credstore-issued bearer is gone; we now
+	// assert only that an actor_id is present and non-empty.
+	if got, _ := src["actor_id"].(string); got == "" {
+		t.Fatalf("actor_id must be set on source_attribution; got empty")
 	}
 
 	// AC-6: audit-log row exists, decision=accepted.
@@ -536,8 +534,11 @@ func TestAttest_HappyPath_NoArtifact(t *testing.T) {
 	if decision != "accepted" {
 		t.Fatalf("audit decision: got %q want accepted", decision)
 	}
-	if !strings.HasPrefix(credID, "key_") {
-		t.Fatalf("audit credential_id: got %q", credID)
+	// Slice 197: credential_id is the jwtmw-synthesized id (`jwt:<jti>`)
+	// rather than the legacy credstore `key_<hex>` shape. We assert it
+	// is non-empty.
+	if credID == "" {
+		t.Fatalf("audit credential_id: empty")
 	}
 	if auditKind == nil || *auditKind != "manual.attestation.v1" {
 		t.Fatalf("audit evidence_kind: %v", auditKind)
@@ -707,10 +708,7 @@ func TestAttest_CrossTenant_NotFound(t *testing.T) {
 		IngestService:  ingest,
 	})
 	srvB.AttachDB(openPool(t, appDSN(t)))
-	_, bearerB, err := srvB.IssueBootstrapOwnerCredential(tenantB, []string{ownerRole})
-	if err != nil {
-		t.Fatalf("bearer B: %v", err)
-	}
+	bearerB := srvB.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenantB), []string{ownerRole}))
 	h := srvB.HTTPHandlerForTests()
 	tsB := httptest.NewServer(h)
 	defer tsB.Close()

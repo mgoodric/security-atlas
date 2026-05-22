@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 )
 
 // AC-5: latency budget. The benchmark seeds a representative-of-an-SCF-
@@ -386,10 +387,8 @@ func setupHTTPServerForBench(b *testing.B, appDSNStr string) (*httptest.Server, 
 	appPool := openPool_b(b, appDSNStr)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(appPool)
-	_, bearer, err := srv.IssueBootstrapCredential(tenantA)
-	if err != nil {
-		b.Fatalf("IssueBootstrapCredential: %v", err)
-	}
+	// Slice 197: JWT bearer via slice 190 path.
+	bearer := srv.IssueTestJWT(b, testjwt.ViewerFor(uuid.MustParse(tenantA)))
 	handler := srv.HTTPHandlerForTests()
 	if handler == nil {
 		b.Fatal("HTTPHandlerForTests returned nil")

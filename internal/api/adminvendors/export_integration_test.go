@@ -33,6 +33,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 )
 
 // ===== Harness =====
@@ -89,10 +90,8 @@ func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string) {
 	app := openPool(t, appDSN(t))
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(app)
-	_, bearer, err := srv.IssueBootstrapAdminCredential(tenant)
-	if err != nil {
-		t.Fatalf("IssueBootstrapAdminCredential: %v", err)
-	}
+	// Slice 197: JWT bearer via slice 190 path (admin claims).
+	bearer := srv.IssueTestJWT(t, testjwt.AdminFor(uuid.MustParse(tenant)))
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests nil")

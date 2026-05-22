@@ -39,6 +39,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 )
 
 // ----- harness -----
@@ -181,16 +182,30 @@ func seedEvaluation(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uui
 type testEnv struct {
 	server *httptest.Server
 	bearer string
-	tenant string
+	// calendarToken is a credstore-issued opaque bearer used by
+	// `GET /v1/calendar.ics?token=...`. The calendar.ics handler
+	// authenticates via `h.creds.Authenticate` (slice 091); slice
+	// 197 left that path on credstore intentionally because calendar
+	// clients (Google / Apple / Outlook) cannot exchange JWTs. The
+	// scope-mismatch integration test asserts a wrong-scope credstore
+	// token returns 403.
+	calendarToken string
+	tenant        string
 }
 
 func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	_, bearer, err := srv.IssueBootstrapOwnerCredential(tenant, []string{"control_owner"})
+	// Slice 197: JWT bearer via slice 190 path (owner roles) for the
+	// Authorization-header gated routes (/v1/calendar, /v1/calendar/subscription).
+	bearer := srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"control_owner"}))
+	// Slice 091 path: a separate credstore opaque bearer drives the
+	// `?token=` URL parameter on /v1/calendar.ics. The owner credential
+	// has no calendar scope — the scope-mismatch test relies on that.
+	_, calendarToken, err := srv.IssueBootstrapOwnerCredential(tenant, []string{"control_owner"})
 	if err != nil {
-		t.Fatalf("IssueBootstrapOwnerCredential: %v", err)
+		t.Fatalf("IssueBootstrapOwnerCredential (calendar token): %v", err)
 	}
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
@@ -198,7 +213,7 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	}
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
-	return testEnv{server: ts, bearer: bearer, tenant: tenant}
+	return testEnv{server: ts, bearer: bearer, calendarToken: calendarToken, tenant: tenant}
 }
 
 func get(t *testing.T, env testEnv, path string) (*http.Response, []byte) {
@@ -508,8 +523,10 @@ func TestCalendarICS_RejectsNonCalendarScopeToken(t *testing.T) {
 	tenant := freshTenant(t, admin)
 
 	env := testServer(t, app, tenant)
-	// env.bearer is an owner credential — NOT scoped for calendar.
-	resp, err := http.Get(env.server.URL + "/v1/calendar.ics?token=" + env.bearer)
+	// env.calendarToken is an owner credstore bearer — NOT scoped for
+	// calendar. (Slice 197: the JWT-bearer env.bearer cannot be used
+	// here because /v1/calendar.ics authenticates via credstore lookup.)
+	resp, err := http.Get(env.server.URL + "/v1/calendar.ics?token=" + env.calendarToken)
 	if err != nil {
 		t.Fatalf("ICS GET: %v", err)
 	}
