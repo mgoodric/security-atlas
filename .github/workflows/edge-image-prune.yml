@@ -1,0 +1,82 @@
+name: edge-image-prune
+
+# Slice 207 — weekly GHCR cleanup for the edge channel.
+#
+# The container-publish workflow tags every push to `main` as
+# `:edge` + `:main-<sha7>` (slice 207). Without pruning, the
+# `:main-<sha7>` tags accumulate indefinitely. This workflow invokes
+# `scripts/edge-image-cleanup.sh` on a Monday-morning cron schedule
+# to prune tags that fall outside the D2 hybrid retention policy:
+#
+#   KEEP if (created_at within last EDGE_RETENTION_DAYS days)
+#     OR (rank < EDGE_RETENTION_KEEP_LAST among recency-sorted tags)
+#   DELETE otherwise.
+#
+# The `:edge` floating tag and all `vX.Y.Z` / `X.Y` / `X` / `latest`
+# release tags are NEVER deleted — the script's jq filter only
+# considers versions whose tag list is composed ENTIRELY of
+# `main-<sha7>` entries.
+#
+# WORKFLOW_DISPATCH allows the maintainer to run an ad-hoc prune (e.g.
+# after a burst of main commits has filled the registry budget). The
+# workflow_dispatch path also accepts a `dry_run` input so the
+# maintainer can preview the deletion list before it executes.
+
+on:
+  schedule:
+    # Mondays 09:00 UTC. Weekly cadence keeps the cron load low; the
+    # D2 retention policy doesn't need finer granularity because both
+    # the days-floor and the keep-last-K-floor are slow-moving knobs.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "If true, print the deletion list without making DELETE calls"
+        required: false
+        type: boolean
+        default: false
+      retention_days:
+        description: "Override EDGE_RETENTION_DAYS (default: 30)"
+        required: false
+        type: string
+        default: ""
+      keep_last:
+        description: "Override EDGE_RETENTION_KEEP_LAST (default: 50)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  # The GHCR REST DELETE endpoint requires the `packages: write`
+  # permission on the workflow token. `contents: read` is needed for
+  # the checkout (the script lives in-repo).
+  contents: read
+  packages: write
+
+concurrency:
+  # Serialize prune runs. A scheduled run and a manual run starting in
+  # the same minute would otherwise race on the same DELETE calls.
+  group: edge-image-prune
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: Prune `:main-<sha7>` tags older than retention policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Run edge-image-cleanup.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EDGE_DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+          EDGE_RETENTION_DAYS: ${{ inputs.retention_days }}
+          EDGE_RETENTION_KEEP_LAST: ${{ inputs.keep_last }}
+        run: bash scripts/edge-image-cleanup.sh --verbose
