@@ -735,6 +735,82 @@ export async function patchFeatureFlag(
   return (await res.json()) as FeatureFlagPatchResponse;
 }
 
+// ===== Slice 142 — super_admin management surface =====
+//
+// Wire shape mirrors `internal/api/adminsuperadmins/handler.go`:
+//   GET    /v1/admin/super-admins              -> list of super_admin rows
+//   POST   /v1/admin/super-admins              -> grant a super_admin
+//   DELETE /v1/admin/super-admins/{user_id}    -> demote a super_admin (204)
+//
+// The handler is super_admin-gated; non-super_admin callers receive
+// 403 from the upstream which the BFF passes through.
+
+export type SuperAdminRow = {
+  user_id: string;
+  granted_at: string;
+  granted_via: "bootstrap_first_install" | "manual_grant";
+  display_name?: string | null;
+  email?: string | null;
+};
+
+export type SuperAdminListResponse = { items: SuperAdminRow[] };
+
+export async function listSuperAdmins(
+  bearer: string,
+): Promise<SuperAdminRow[]> {
+  const res = await apiFetch(`/v1/admin/super-admins`, bearer);
+  const body = (await res.json()) as SuperAdminListResponse;
+  return body.items ?? [];
+}
+
+export async function grantSuperAdmin(
+  bearer: string,
+  userID: string,
+): Promise<SuperAdminRow> {
+  const res = await fetch(`${apiBaseURL()}/v1/admin/super-admins`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ user_id: userID }),
+  });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) msg = body.error;
+    } catch {
+      // fall through with the status-line message
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as SuperAdminRow;
+}
+
+export async function demoteSuperAdmin(
+  bearer: string,
+  userID: string,
+): Promise<void> {
+  const res = await fetch(
+    `${apiBaseURL()}/v1/admin/super-admins/${encodeURIComponent(userID)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${bearer}` },
+    },
+  );
+  if (!res.ok && res.status !== 204) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) msg = body.error;
+    } catch {
+      // fall through with the status-line message
+    }
+    throw new APIError(res.status, msg);
+  }
+}
+
 // ===== Slice 063 — Admin SSO config (binds to slice 062 backend) =====
 //
 // Wire shape mirrors `internal/api/adminsso/handler.go`:

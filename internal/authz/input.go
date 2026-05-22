@@ -7,6 +7,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 )
 
 // Input is the canonical decision input passed to OPA. The schema is
@@ -83,6 +84,13 @@ func BuildInput(r *http.Request, attrs map[string]interface{}) Input {
 		"is_machine_actor": cred.UserID == "" ||
 			strings.HasPrefix(cred.UserID, "key_") ||
 			strings.HasPrefix(cred.UserID, "oauth_client:"),
+		// is_super_admin: slice 142. Surfaces the platform-global
+		// super_admin bit from the verified JWT's `atlas:super_admin`
+		// claim. The policies/authz/super_admin.rego rule keys on this
+		// attribute. Falls back to false when no JWT is on the context
+		// (legacy bearer path; super_admin is JWT-only at v1).
+		"is_super_admin": jwtmw.FromContext(r.Context()) != nil &&
+			jwtmw.FromContext(r.Context()).SuperAdmin,
 	}
 	for k, v := range attrs {
 		userAttrs[k] = v

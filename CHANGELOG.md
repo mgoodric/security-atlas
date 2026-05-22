@@ -63,6 +63,53 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 142** — super_admin role full schema + management surface
+  (slice 198 follow-on). Promotes slice 198's `super_admins` stub
+  (`user_id, granted_at, granted_via`) to a management-grade schema:
+  extends `granted_via` CHECK to admit `'manual_grant'` (the runtime
+  provenance value); grants INSERT + DELETE on `super_admins` to
+  `atlas_app` (the table is NOT under RLS — slice 198 D3 — but the
+  per-handler transaction sets the tenant GUC for the parallel
+  `me_audit_log` write). Adds the platform-global
+  `super_admin_audit_log` table (no tenant_id, no RLS — super_admin
+  is platform-global by definition); SELECT + INSERT only via the
+  slice-036 append-only pattern (no UPDATE/DELETE grants). Extends
+  `me_audit_log.action` CHECK with `'super_admin_grant'` +
+  `'super_admin_revoke'` so the slice-124 unified aggregator surfaces
+  every grant/demote event to admins/auditors of the actor's session
+  tenant via the existing `kind='me'` UNION branch (the
+  super_admin_audit_log row is the platform-global forensic anchor;
+  the me_audit_log row is the tenant-scoped surface). Adds new OPA
+  policy `policies/authz/super_admin.rego` exposing `is_super_admin`
+  (sourced from the verified JWT's `atlas:super_admin` claim via
+  `input.user.attrs.is_super_admin`); the policy is NARROW —
+  resource.type="admin" + resource.id="super-admins" — and does NOT
+  silently elevate super_admin authority across other resources.
+  Three new endpoints: `GET /v1/admin/super-admins` lists every
+  super_admin (LEFT JOIN users for display_name + email under session
+  tenant RLS); `POST /v1/admin/super-admins` grants super_admin
+  (idempotent ON CONFLICT DO NOTHING); `DELETE
+  /v1/admin/super-admins/{user_id}` demotes super_admin. LOAD-BEARING
+  last-super_admin safety rail (P0-SA-1): the DELETE handler
+  acquires a `pg_advisory_xact_lock(0x142142142142)` before
+  `count(*) FROM super_admins` — concurrent demotes block on the
+  same advisory lock so they cannot each read a stale count==2 and
+  proceed; the loser sees count==1 post-DELETE and returns 409
+  Conflict ("Cannot demote the last super_admin"). Advisory lock
+  chosen over `SELECT FOR UPDATE` because atlas_app lacks the
+  Postgres UPDATE privilege required for row-level locking on
+  super_admins (the table is functionally append+delete only). New
+  frontend management page at `web/app/admin/super-admins/page.tsx`
+  binds to the new BFF routes; surfaces grant form + per-row demote
+  with confirmation dialog + inline 409 error rendering. AC-by-AC
+  PASS: 12/12. Integration test asserts both single-demote 409 +
+  concurrent-demote serialisation under race. OPA matrix asserts
+  super_admin allows the management surface but does NOT grant
+  blanket write across other resources. Out of scope (per slice
+  doc): super_admin granting tenant membership into arbitrary
+  tenants (P0-SA-3); email notifications on grant/demote;
+  time-bounded grants (P0-SA-4).
+
 - **slice 198** — OIDC first-install bootstrap (closes slice 192 AC-11/AC-12).
   Ships the OIDC-first-install path that creates the Default Tenant +
   super_admin grant atomically when the `tenants` table is empty. Adds the

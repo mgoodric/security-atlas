@@ -17,6 +17,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/adminauditperiods"
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
 	"github.com/mgoodric/security-atlas/internal/api/adminsso"
+	"github.com/mgoodric/security-atlas/internal/api/adminsuperadmins"
 	"github.com/mgoodric/security-atlas/internal/api/adminusers"
 	"github.com/mgoodric/security-atlas/internal/api/adminvendors"
 	aggregationrulesapi "github.com/mgoodric/security-atlas/internal/api/aggregationrules"
@@ -875,6 +876,14 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/admin/users", usersH.List)
 	root.Get("/v1/admin/users/{id}", usersH.Get)
 	root.Patch("/v1/admin/users/{id}/roles", usersH.PatchRoles)
+
+	// Slice 142: super_admin management surface. super_admin-gated
+	// (the handler reads jwtmw.FromContext().SuperAdmin); the OPA
+	// policy in policies/authz/super_admin.rego is the second leg.
+	superAdminsH := adminsuperadmins.New(s.dbPool)
+	root.Get("/v1/admin/super-admins", superAdminsH.List)
+	root.Post("/v1/admin/super-admins", superAdminsH.Grant)
+	root.Delete("/v1/admin/super-admins/{user_id}", superAdminsH.Demote)
 	auditLogH := adminauditlog.New(s.dbPool)
 	root.Get("/v1/admin/audit-log", auditLogH.List)
 	// Slice 124: unified audit-log aggregation read across all nine
