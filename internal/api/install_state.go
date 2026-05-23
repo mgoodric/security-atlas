@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/mgoodric/security-atlas/internal/platform"
 )
 
@@ -20,6 +22,11 @@ import (
 type PlatformStatus interface {
 	IsFirstInstall(ctx context.Context) (bool, error)
 	MarkFirstSignin(ctx context.Context, at time.Time) (bool, error)
+	// BootstrapTenantID returns the canonical bootstrap-tenant id during
+	// fresh-install state. Returns uuid.Nil with a nil error when no
+	// bootstrap tenant can be resolved — the handler treats that as
+	// "no tenant_id to include" and degrades gracefully (slice 210).
+	BootstrapTenantID(ctx context.Context) (uuid.UUID, error)
 }
 
 // AttachPlatformStatus wires the slice-073 Status reader/writer onto the
@@ -49,8 +56,15 @@ func (s *Server) AttachLogger(l *slog.Logger) {
 }
 
 // installStateResponse is the public response shape for GET /v1/install-state.
+//
+// Slice 210: TenantID is included only on fresh-install responses, and only
+// when a bootstrap tenant can be resolved (see PlatformStatus.BootstrapTenantID).
+// `omitempty` keeps the response shape unchanged for post-first-install
+// installs (which never carry a tenant_id) and for the graceful-degradation
+// path where the tenant lookup failed.
 type installStateResponse struct {
-	FirstInstall bool `json:"first_install"`
+	FirstInstall bool   `json:"first_install"`
+	TenantID     string `json:"tenant_id,omitempty"`
 }
 
 // handleInstallState answers GET /v1/install-state with
@@ -82,7 +96,22 @@ func (s *Server) handleInstallState(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"error":"install state unavailable"}`))
 		return
 	}
-	_ = json.NewEncoder(w).Encode(installStateResponse{FirstInstall: first})
+	resp := installStateResponse{FirstInstall: first}
+	// Slice 210 — when in fresh-install state, resolve the bootstrap
+	// tenant id so slice 209's login form can auto-populate its hidden
+	// `tenant_id` field. Failure is non-fatal: a backend hiccup must not
+	// break the login render. The endpoint stays HTTP 200 with the field
+	// omitted (P0-A3: post-first-install responses are unchanged).
+	if first {
+		tid, terr := s.platformStatus.BootstrapTenantID(r.Context())
+		if terr != nil {
+			s.installLogger().Warn("install-state bootstrap-tenant lookup failed",
+				slog.String("error", terr.Error()))
+		} else if tid != uuid.Nil {
+			resp.TenantID = tid.String()
+		}
+	}
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // markFirstSigninResponse is the response shape for the elevated POST

@@ -35,6 +35,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -97,6 +98,58 @@ func (s *Status) IsFirstInstall(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("platform: read platform_status: %w", err)
 	}
 	return firstSigninAt == nil, nil
+}
+
+// BootstrapTenantID returns the canonical bootstrap-tenant id for the
+// fresh-install login UX (slice 210, closing the slice 209 BE/FE
+// contract gap). Returns `uuid.Nil` with a nil error when no bootstrap
+// tenant can be resolved — callers treat that as "no tenant_id to
+// surface" and degrade gracefully.
+//
+// Resolution order:
+//
+//  1. PRIMARY: `SELECT id FROM tenants WHERE is_bootstrap_tenant = TRUE
+//     LIMIT 1`. Going forward, the `deploy/docker/bootstrap/seed.sql` step
+//     populates this row on every fresh install.
+//
+//  2. FALLBACK: `SELECT tenant_id FROM users ORDER BY created_at ASC
+//     LIMIT 1`. Used ONLY when the primary query returns no rows — i.e.
+//     installs that pre-date the slice 210 seed.sql change (the existing
+//     atlas-edge instance). The bootstrap user is by construction the
+//     oldest user, so its tenant_id is the canonical bootstrap tenant
+//     by definition. This is a corrupted-install / pre-slice-210
+//     graceful-degradation path; not a permanent contract.
+//
+// Any DB failure other than `pgx.ErrNoRows` is propagated to the caller
+// so the slice-210 install-state handler can log + omit the field.
+func (s *Status) BootstrapTenantID(ctx context.Context) (uuid.UUID, error) {
+	if s.readPool == nil {
+		return uuid.Nil, errors.New("platform: read pool not configured")
+	}
+	var tid uuid.UUID
+	err := s.readPool.QueryRow(ctx,
+		`SELECT id FROM tenants WHERE is_bootstrap_tenant = TRUE LIMIT 1`).Scan(&tid)
+	if err == nil {
+		return tid, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, fmt.Errorf("platform: bootstrap tenant primary lookup: %w", err)
+	}
+	// FALLBACK path. The primary `tenants` lookup found nothing — assume
+	// a pre-slice-210 installed instance where seed.sql never populated
+	// the tenants row. Use the oldest user's tenant_id as the canonical
+	// bootstrap tenant.
+	err = s.readPool.QueryRow(ctx,
+		`SELECT tenant_id FROM users ORDER BY created_at ASC LIMIT 1`).Scan(&tid)
+	if err == nil {
+		return tid, nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No tenants AND no users — a genuinely empty install. Caller
+		// treats `uuid.Nil` as "no tenant_id".
+		return uuid.Nil, nil
+	}
+	return uuid.Nil, fmt.Errorf("platform: bootstrap tenant fallback lookup: %w", err)
 }
 
 // MarkFirstSignin flips first_signin_at to `at` if it is currently NULL.
