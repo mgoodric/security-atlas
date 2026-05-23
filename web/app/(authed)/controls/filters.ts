@@ -21,6 +21,14 @@ export type ControlFilters = {
   family: string;
   result: string;
   freshness: string;
+  /**
+   * Slice 224 — scope cell filter. `ALL` means no scope narrowing; a
+   * UUID value narrows controls to those whose `applicability_expr`
+   * intersects with the given scope cell (server-side intersection;
+   * the BFF forwards this id to the upstream as `?scope=<id>`). The
+   * client never receives `applicability_expr` (P0-224-2).
+   */
+  scope: string;
 };
 
 export const DEFAULT_FILTERS: ControlFilters = {
@@ -28,6 +36,7 @@ export const DEFAULT_FILTERS: ControlFilters = {
   family: ALL,
   result: ALL,
   freshness: ALL,
+  scope: ALL,
 };
 
 /**
@@ -38,7 +47,8 @@ export function isDefault(filters: ControlFilters): boolean {
     filters.framework === ALL &&
     filters.family === ALL &&
     filters.result === ALL &&
-    filters.freshness === ALL
+    filters.freshness === ALL &&
+    filters.scope === ALL
   );
 }
 

@@ -219,3 +219,38 @@ func TestAnchorStateCellWire_HasPinnedFieldShape(t *testing.T) {
 		t.Errorf("evaluated_at should be UTC RFC3339Nano: %q", cell.EvaluatedAt)
 	}
 }
+
+// Slice 224 — scopeCell helper parses the optional ?scope=<uuid> query
+// param. Absent param → invalid pgtype.UUID (no-filter sentinel); valid
+// param → Valid=true; malformed → 400 with "scope must be a UUID".
+func TestScopeCellHelper(t *testing.T) {
+	h := &Handler{}
+	cases := []struct {
+		name      string
+		url       string
+		wantValid bool
+		wantOK    bool
+		wantCode  int
+	}{
+		{"omitted is no-filter sentinel", "/v1/anchors", false, true, 200},
+		{"empty value is no-filter sentinel", "/v1/anchors?scope=", false, true, 200},
+		{"valid uuid sets Valid=true", "/v1/anchors?scope=00000000-0000-0000-0000-000000000001", true, true, 200},
+		{"malformed uuid returns 400", "/v1/anchors?scope=not-a-uuid", false, false, 400},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", c.url, nil)
+			rw := httptest.NewRecorder()
+			got, ok := h.scopeCell(rw, req)
+			if ok != c.wantOK {
+				t.Errorf("ok = %v; want %v", ok, c.wantOK)
+			}
+			if got.Valid != c.wantValid {
+				t.Errorf("uuid.Valid = %v; want %v", got.Valid, c.wantValid)
+			}
+			if c.wantCode == 400 && rw.Code != 400 {
+				t.Errorf("response code = %d; want 400", rw.Code)
+			}
+		})
+	}
+}

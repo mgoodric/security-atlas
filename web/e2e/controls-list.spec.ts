@@ -69,4 +69,43 @@ test.describe("/controls list view", () => {
     //    await scfIdLink.click();
     //    await expect(page).toHaveURL(/\/controls\/[^/]+$/);
   });
+
+  // Slice 224 — Scope filter pill (5th pill, server-side intersection).
+  // Pre-conditions the seed harness (slice 082) must establish before
+  // these assertions are turned on:
+  //   - At least two scope cells in the tenant (the bootstrap seed
+  //     ships one default cell; the seed harness adds a second so the
+  //     select option assertion exercises a non-degenerate dropdown).
+  //   - At least one control_evaluations row recorded against each
+  //     cell so the worst_per_anchor rollup narrows visibly when the
+  //     pill is set.
+  test("slice 224 AC-1: Scope pill renders as 5th filter pill", async () => {
+    //    await page.goto("/controls");
+    //    await expect(page.getByTestId("list-filter-pill-framework")).toBeVisible();
+    //    await expect(page.getByTestId("list-filter-pill-family")).toBeVisible();
+    //    await expect(page.getByTestId("list-filter-pill-result")).toBeVisible();
+    //    await expect(page.getByTestId("list-filter-pill-freshness")).toBeVisible();
+    //    await expect(page.getByTestId("list-filter-pill-scope")).toBeVisible();
+  });
+
+  test("slice 224 AC-3: selecting a scope cell sets ?scope=<id> on the URL", async () => {
+    //    await page.goto("/controls");
+    //    const scopePill = page.getByLabel("Scope");
+    //    // Pick the second option (first non-ALL cell).
+    //    await scopePill.selectOption({ index: 1 });
+    //    await page.waitForLoadState("networkidle");
+    //    const url = new URL(page.url());
+    //    expect(url.searchParams.get("scope")).toMatch(
+    //      /^[0-9a-f-]{36}$/,
+    //    );
+  });
+
+  test("slice 224 AC-3: clearing the scope cell removes ?scope from the URL", async () => {
+    //    await page.goto("/controls?scope=00000000-0000-0000-0000-000000000001");
+    //    const scopePill = page.getByLabel("Scope");
+    //    await scopePill.selectOption({ index: 0 }); // "All cells"
+    //    await page.waitForLoadState("networkidle");
+    //    const url = new URL(page.url());
+    //    expect(url.searchParams.get("scope")).toBeNull();
+  });
 });

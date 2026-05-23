@@ -499,6 +499,7 @@ worst_per_anchor AS (
     JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
     WHERE c.superseded_by IS NULL
       AND c.scf_anchor_id IS NOT NULL
+      AND ($4::uuid IS NULL OR le.scope_cell_id = $4::uuid)
     GROUP BY c.scf_anchor_id
 )
 SELECT
@@ -533,6 +534,7 @@ type ListSCFAnchorsForVersionWithStateParams struct {
 	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
 	Limit              int32       `json:"limit"`
 	Offset             int32       `json:"offset"`
+	ScopeCellID        pgtype.UUID `json:"scope_cell_id"`
 }
 
 type ListSCFAnchorsForVersionWithStateRow struct {
@@ -558,7 +560,7 @@ type ListSCFAnchorsForVersionWithStateRow struct {
 // a NULL sentinel) so the planner can inline the simpler predicate
 // and so the parameter types stay tight for sqlc codegen.
 func (q *Queries) ListSCFAnchorsForVersionWithState(ctx context.Context, arg ListSCFAnchorsForVersionWithStateParams) ([]ListSCFAnchorsForVersionWithStateRow, error) {
-	rows, err := q.db.Query(ctx, listSCFAnchorsForVersionWithState, arg.FrameworkVersionID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listSCFAnchorsForVersionWithState, arg.FrameworkVersionID, arg.Limit, arg.Offset, arg.ScopeCellID)
 	if err != nil {
 		return nil, err
 	}
@@ -683,6 +685,7 @@ worst_per_anchor AS (
     JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
     WHERE c.superseded_by IS NULL
       AND c.scf_anchor_id IS NOT NULL
+      AND ($3::uuid IS NULL OR le.scope_cell_id = $3::uuid)
     GROUP BY c.scf_anchor_id
 )
 SELECT
@@ -716,8 +719,9 @@ LIMIT $1 OFFSET $2
 `
 
 type ListSCFAnchorsLatestWithStateParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit       int32       `json:"limit"`
+	Offset      int32       `json:"offset"`
+	ScopeCellID pgtype.UUID `json:"scope_cell_id"`
 }
 
 type ListSCFAnchorsLatestWithStateRow struct {
@@ -769,7 +773,7 @@ type ListSCFAnchorsLatestWithStateRow struct {
 // (hand-maintained to keep the rest of the dbx tree HEAD-blessed per the
 // regen-on-rebase note in MEMORY.md). Keep the two in sync.
 func (q *Queries) ListSCFAnchorsLatestWithState(ctx context.Context, arg ListSCFAnchorsLatestWithStateParams) ([]ListSCFAnchorsLatestWithStateRow, error) {
-	rows, err := q.db.Query(ctx, listSCFAnchorsLatestWithState, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listSCFAnchorsLatestWithState, arg.Limit, arg.Offset, arg.ScopeCellID)
 	if err != nil {
 		return nil, err
 	}

@@ -33,6 +33,18 @@ vi.mock("next/server", () => {
   return { NextResponse };
 });
 
+// Slice 224 — the GET handler now reads `req.nextUrl.searchParams`
+// to pluck the optional ?scope=<cell_id> query param and forward it
+// upstream. The tests construct a small fake whose only contract is
+// the `nextUrl.searchParams.get()` call path used by the handler.
+type FakeNextRequest = {
+  nextUrl: { searchParams: URLSearchParams };
+};
+function makeReq(url = "/api/controls"): FakeNextRequest {
+  const u = new URL(url, "http://test.local");
+  return { nextUrl: { searchParams: u.searchParams } };
+}
+
 const mockCookieGet = vi.fn();
 
 vi.mock("next/headers", () => ({
@@ -59,7 +71,7 @@ describe("GET /api/controls", () => {
 
   test("401 when bearer cookie missing", async () => {
     mockCookieGet.mockReturnValue(undefined);
-    const res = await GET();
+    const res = await GET(makeReq() as never);
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error?: string };
     expect(body.error).toBe("unauthenticated");
@@ -88,7 +100,7 @@ describe("GET /api/controls", () => {
       ),
     );
 
-    const res = await GET();
+    const res = await GET(makeReq() as never);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       anchors: { state: unknown | null }[];
@@ -130,7 +142,7 @@ describe("GET /api/controls", () => {
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     );
-    const res = await GET();
+    const res = await GET(makeReq() as never);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       anchors: { state: { result: string } | null }[];
@@ -144,7 +156,61 @@ describe("GET /api/controls", () => {
       new Response("server error", { status: 502 }),
     );
 
-    const res = await GET();
+    const res = await GET(makeReq() as never);
     expect(res.status).toBe(502);
+  });
+
+  // Slice 224 — the BFF forwards an optional ?scope=<cell_id> query
+  // param to the upstream as `?scope=<cell_id>`. Verifies the
+  // server-side intersection plumbing — the BFF never narrows
+  // anchors itself; it forwards the predicate verbatim (P0-224-2).
+  test("slice 224: forwards ?scope= upstream when set", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-224" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ anchors: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const cellID = "00000000-0000-0000-0000-000000000aaa";
+    const res = await GET(makeReq(`/api/controls?scope=${cellID}`) as never);
+    expect(res.status).toBe(200);
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
+    expect(calledURL).toContain("/v1/anchors?");
+    expect(calledURL).toContain("include=state");
+    expect(calledURL).toContain(`scope=${cellID}`);
+  });
+
+  test("slice 224: omits scope when query param is absent", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-224" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ anchors: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const res = await GET(makeReq("/api/controls") as never);
+    expect(res.status).toBe(200);
+    const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
+    expect(calledURL).not.toContain("scope=");
+  });
+
+  test("slice 224: empty scope value treated as no-filter", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-224" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ anchors: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const res = await GET(makeReq("/api/controls?scope=") as never);
+    expect(res.status).toBe(200);
+    const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
+    expect(calledURL).not.toContain("scope=");
   });
 });

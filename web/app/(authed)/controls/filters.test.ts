@@ -43,6 +43,8 @@ describe("DEFAULT_FILTERS / isDefault / clearFilters", () => {
     expect(DEFAULT_FILTERS.family).toBe(ALL);
     expect(DEFAULT_FILTERS.result).toBe(ALL);
     expect(DEFAULT_FILTERS.freshness).toBe(ALL);
+    // Slice 224 — scope is the 5th filter; defaults to ALL like the others.
+    expect(DEFAULT_FILTERS.scope).toBe(ALL);
   });
 
   test("isDefault is true for the default set", () => {
@@ -52,6 +54,14 @@ describe("DEFAULT_FILTERS / isDefault / clearFilters", () => {
   test("isDefault is false when any filter is narrowed", () => {
     expect(isDefault({ ...DEFAULT_FILTERS, family: "AAA" })).toBe(false);
     expect(isDefault({ ...DEFAULT_FILTERS, result: "pass" })).toBe(false);
+    // Slice 224 — narrowing scope flips isDefault to false the same
+    // way the other four pills do.
+    expect(
+      isDefault({
+        ...DEFAULT_FILTERS,
+        scope: "00000000-0000-0000-0000-000000000001",
+      }),
+    ).toBe(false);
   });
 
   test("clearFilters returns a fresh ALL set (no shared reference)", () => {
