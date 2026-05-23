@@ -11,6 +11,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -18,11 +19,22 @@ import (
 
 	"github.com/google/uuid"
 
+	oauthapi "github.com/mgoodric/security-atlas/internal/api/oauth"
+	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
+	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
+
+// localUserResolver is the subset of oauthapi.UserResolver the local-credential
+// JWT-minting path needs. Declared as an interface here so the auth package
+// can take a nil-safe dependency without forcing the OAuth wiring to exist —
+// AC-1's nil-fallback covers no-OAuth deploys (e.g. unit-test harnesses).
+type localUserResolver interface {
+	ResolveForOAuth(ctx context.Context, userID, tenantID uuid.UUID) (oauthapi.UserIdentity, error)
+}
 
 // Handler bundles the auth routes' dependencies.
 type Handler struct {
@@ -30,12 +42,47 @@ type Handler struct {
 	users         *users.Store
 	sessions      *sessions.Store
 	secureCookies bool
+
+	// Slice 209 — local-credential AS. When both are non-nil, LocalLogin
+	// mints an atlas_jwt and includes it in the response body. When either
+	// is nil (no-OAuth deploy / unit-test harness), LocalLogin falls back
+	// to the pre-slice-209 behavior (atlas_session cookie only).
+	jwtSigner    *tokensign.Signer
+	userResolver localUserResolver
+	jwtIssuer    string
+	jwtAudience  string
 }
 
 // New constructs a Handler. secureCookies=false is for local-dev HTTP
 // fixtures only; production MUST set it true.
-func New(o *oidc.Authenticator, u *users.Store, s *sessions.Store, secureCookies bool) *Handler {
-	return &Handler{oidc: o, users: u, sessions: s, secureCookies: secureCookies}
+//
+// Slice 209: jwtSigner + userResolver are optional dependencies that
+// upgrade /auth/local/login into an in-app authorization server. When
+// both are non-nil, successful local-credential login returns a JWT in
+// the response body; the web app's signInLocal action sets the atlas_jwt
+// cookie from that field. When either is nil, LocalLogin behaves as it
+// did pre-209 (session-cookie only, no token field) so unit-test harnesses
+// that don't wire OAuth keep working.
+func New(
+	o *oidc.Authenticator,
+	u *users.Store,
+	s *sessions.Store,
+	secureCookies bool,
+	jwtSigner *tokensign.Signer,
+	userResolver localUserResolver,
+	jwtIssuer string,
+	jwtAudience string,
+) *Handler {
+	return &Handler{
+		oidc:          o,
+		users:         u,
+		sessions:      s,
+		secureCookies: secureCookies,
+		jwtSigner:     jwtSigner,
+		userResolver:  userResolver,
+		jwtIssuer:     jwtIssuer,
+		jwtAudience:   jwtAudience,
+	}
 }
 
 // LocalLoginRequest is the JSON body for POST /auth/local/login.
@@ -83,12 +130,51 @@ func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sessions.SetCookie(w, sess.ID, sess.ExpiresAt, h.secureCookies)
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+
+	resp := map[string]any{
 		"user_id":   usr.ID,
 		"tenant_id": usr.TenantID,
 		"display":   usr.DisplayName,
-	})
+	}
+
+	// Slice 209 — mint an atlas_jwt when the AS is wired. The token uses the
+	// same claim shape as the OAuth code-redemption path (buildAtlasClaimsForUser
+	// in internal/api/oauth/pkce.go) so the jwtmw middleware accepts both.
+	if h.jwtSigner != nil && h.userResolver != nil {
+		identity, resolveErr := h.userResolver.ResolveForOAuth(ctx, usr.ID, usr.TenantID)
+		if resolveErr != nil {
+			// Resolver failure is a server-side problem, not a credential one.
+			// Don't leak the cause; return 500 so the web layer surfaces a
+			// non-credential error to the operator.
+			writeAuthError(w, http.StatusInternalServerError, "resolve user authorization failed")
+			return
+		}
+		now := time.Now().UTC()
+		claims := jwt.AtlasClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    h.jwtIssuer,
+				Subject:   "user:" + usr.ID.String(),
+				Audience:  []string{h.jwtAudience},
+				ExpiresAt: now.Add(time.Hour).Unix(),
+				IssuedAt:  now.Unix(),
+				NotBefore: now.Unix(),
+				ID:        uuid.NewString(),
+			},
+			CurrentTenantID:  identity.CurrentTenantID,
+			AvailableTenants: identity.AvailableTenants,
+			Roles:            identity.Roles,
+			SuperAdmin:       identity.SuperAdmin,
+		}
+		token, signErr := h.jwtSigner.Sign(ctx, claims)
+		if signErr != nil {
+			writeAuthError(w, http.StatusInternalServerError, "sign failed")
+			return
+		}
+		resp["token"] = token
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // OIDCLogin handles GET /auth/oidc/login?tenant_id=...&idp=...
