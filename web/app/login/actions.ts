@@ -87,3 +87,98 @@ export async function signOut(): Promise<void> {
   jar.delete(SESSION_COOKIE);
   redirect("/login");
 }
+
+// signInLocal — slice 209. Submits (tenant_id, email, password) to
+// /auth/local/login. On success, reads the platform-minted atlas_jwt from
+// the response body and stores it in the SESSION_COOKIE — the same cookie
+// the OAuth callback finalize endpoint writes (slice 189). On 401, redirects
+// to /login with a generic "invalid credentials" message (no oracle —
+// LocalLogin itself returns the same shape regardless of whether the email
+// row existed or the password mismatched).
+//
+// Tenant resolution: a hidden `tenant_id` field is populated by the
+// LoginPage server component from /v1/install-state (slice 141 will expand
+// this to a tenant picker when multiple memberships are detected; in slice
+// 209 we keep single-tenant scope only).
+export async function signInLocal(formData: FormData): Promise<void> {
+  const tenantID = String(formData.get("tenant_id") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+  const target = safeRedirectTarget(
+    String(formData.get("from") ?? "/dashboard"),
+  );
+
+  if (!tenantID || !email || !password) {
+    redirect(
+      `/login?error=${encodeURIComponent("email and password are required")}` +
+        `&from=${encodeURIComponent(target)}`,
+    );
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseURL()}/auth/local/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tenant_id: tenantID,
+        email,
+        password,
+      }),
+    });
+  } catch {
+    // Network error reaching the backend — surface as a non-credential
+    // error so the operator knows it's infrastructure, not credentials.
+    redirect(
+      `/login?error=${encodeURIComponent("sign-in service unavailable")}` +
+        `&from=${encodeURIComponent(target)}`,
+    );
+  }
+
+  if (response.status === 401) {
+    // No oracle — same message regardless of email-exists vs. wrong-password.
+    redirect(
+      `/login?error=${encodeURIComponent("invalid credentials")}` +
+        `&from=${encodeURIComponent(target)}`,
+    );
+  }
+  if (!response.ok) {
+    redirect(
+      `/login?error=${encodeURIComponent("sign-in failed")}` +
+        `&from=${encodeURIComponent(target)}`,
+    );
+  }
+
+  type LocalLoginResponse = {
+    user_id: string;
+    tenant_id: string;
+    display: string;
+    token?: string;
+  };
+  const body: LocalLoginResponse = await response.json();
+  if (!body.token) {
+    // Backend didn't include a token — local-AS is not wired (atlas
+    // started without ATLAS_ISSUER_URL or without a DB pool). Surface as
+    // a misconfiguration so the operator can fix the deploy.
+    redirect(
+      `/login?error=${encodeURIComponent(
+        "local-credential AS not configured (ATLAS_ISSUER_URL must be set)",
+      )}&from=${encodeURIComponent(target)}`,
+    );
+  }
+
+  const jar = await cookies();
+  const reqHeaders = await headers();
+  jar.set(SESSION_COOKIE, body.token, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: shouldUseSecureCookie(reqHeaders),
+    path: "/",
+    // 1 hour — matches AccessTokenLifetime (oauthapi.AccessTokenLifetime)
+    // and the JWT exp the backend minted. Cookie expiry tracks token
+    // expiry; the platform's JWT validator is the source of truth either way.
+    maxAge: 60 * 60,
+  });
+
+  redirect(target);
+}
