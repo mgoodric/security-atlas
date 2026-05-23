@@ -144,6 +144,25 @@ The `/v1` API path that the browser hits will land at `web-edge`
 which proxies it through the BFF to `atlas-edge` on the internal
 Docker network — same shape as stable.
 
+**Note (slice 208):** the browser-side `/v1/*`, `/health`, and
+`/metrics` paths are now forwarded to the atlas backend by Next.js
+rewrites declared in `web/next.config.ts`, using the existing
+`ATLAS_HTTP_URL` env var. **No reverse-proxy path-routing config is
+required** for these three prefixes. If you previously added
+`Location /v1/`, `Location /health`, or `Location /metrics` blocks
+to NPM (or equivalent in Caddy/Traefik/nginx) pointing at the atlas
+backend port, you can either:
+
+- **Keep them.** One fewer in-app proxy hop on the data path;
+  marginal latency benefit. Harmless if both routing layers point
+  at the same atlas backend.
+- **Remove them.** Simpler reverse-proxy config; the Next.js
+  rewrite handles forwarding. This is the recommended config for
+  new deployments.
+
+Either path works. The Next.js rewrite is the in-repo default; the
+NPM path-routing is the operator escape hatch.
+
 ### 5. Watchtower
 
 The edge stack does NOT bundle Watchtower itself; the operator runs
