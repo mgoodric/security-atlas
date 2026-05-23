@@ -13,6 +13,12 @@
 --   3. a default single-cell scope — the solo-operator's whole-org cell.
 --   4. a default local user        — email + argon2id password hash, for
 --                                    slice 209 local sign-in.
+--   5. a user_roles grant          — slice 211. role='admin' in the
+--                                    bootstrap tenant so the JWT minted on
+--                                    sign-in actually authorizes against
+--                                    /v1/* admin gates.
+--   6. a super_admins grant        — slice 211. platform-global, mirrors
+--                                    the slice-198 OIDC first-install path.
 --
 -- Idempotent: every INSERT uses ON CONFLICT DO NOTHING so re-running the
 -- bootstrap (e.g. `docker compose up` after a restart) is a safe no-op.
@@ -111,6 +117,55 @@ VALUES (
     'argon2id',
     '{}'::jsonb
 )
+ON CONFLICT (user_id) DO NOTHING;
+
+-- ===== 5. Default user role grant (slice 211) =====
+--
+-- Grants the bootstrap user role='admin' in the bootstrap tenant.
+-- Without this, the slice-209 email/password sign-in succeeds but the
+-- JWT carries empty `atlas:roles`, so every admin/auditor-gated
+-- endpoint returns 403 — dashboards render "Could not load this panel
+-- · 403 Forbidden" on every authz-gated card.
+--
+-- Mirrors the slice-198 OIDC first-install path
+-- (internal/auth/users/users.go:351). The role enum is locked at the
+-- five canvas §9.5 values; 'admin' is the canonical bootstrap role.
+-- `granted_by='system:bootstrap_seed'` distinguishes this provenance
+-- from the OIDC path's `'system:bootstrap_first_install'` so the
+-- audit trail tags which bootstrap shape the operator used.
+--
+-- Sub-SELECT instead of hardcoded UUID: if a future slice changes the
+-- seed user's id, the grant follows. user_roles.user_id is TEXT (not
+-- UUID) per the slice 018 schema; the cast is required.
+INSERT INTO user_roles (tenant_id, user_id, role, granted_by)
+SELECT
+    :'default_tenant_id',
+    u.id::text,
+    'admin',
+    'system:bootstrap_seed'
+FROM users u
+WHERE u.tenant_id = :'default_tenant_id'
+  AND u.email = :'default_user_email'
+ON CONFLICT (tenant_id, user_id, role) DO NOTHING;
+
+-- ===== 6. Default user super_admin grant (slice 211) =====
+--
+-- Platform-global super_admin. Mirrors the slice-198 OIDC
+-- BootstrapFirstInstallOrUpsert path (users.go:360). Single permitted
+-- `granted_via` value per the slice-198 CHECK constraint:
+-- 'bootstrap_first_install'. Re-used here because this IS
+-- semantically a first-install grant — extending the CHECK to add a
+-- 'bootstrap_seed' value would require a separate migration.
+--
+-- super_admins has no tenant_id column (P0-198-5: super_admin is
+-- platform-global, not tenant-scoped). user_id is UUID (no cast).
+INSERT INTO super_admins (user_id, granted_via)
+SELECT
+    u.id,
+    'bootstrap_first_install'
+FROM users u
+WHERE u.tenant_id = :'default_tenant_id'
+  AND u.email = :'default_user_email'
 ON CONFLICT (user_id) DO NOTHING;
 
 COMMIT;
