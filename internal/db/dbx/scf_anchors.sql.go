@@ -536,7 +536,7 @@ type ListSCFAnchorsForVersionWithStateParams struct {
 	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
 	Limit              int32       `json:"limit"`
 	Offset             int32       `json:"offset"`
-	Column4            pgtype.UUID `json:"column_4"`
+	ScopeCellID        pgtype.UUID `json:"scope_cell_id"`
 }
 
 type ListSCFAnchorsForVersionWithStateRow struct {
@@ -570,7 +570,7 @@ func (q *Queries) ListSCFAnchorsForVersionWithState(ctx context.Context, arg Lis
 		arg.FrameworkVersionID,
 		arg.Limit,
 		arg.Offset,
-		arg.Column4,
+		arg.ScopeCellID,
 	)
 	if err != nil {
 		return nil, err
@@ -696,9 +696,9 @@ worst_per_anchor AS (
     JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
     WHERE c.superseded_by IS NULL
       AND c.scf_anchor_id IS NOT NULL
-      -- Slice 224: optional scope cell filter. When $3 is the NULL UUID
-      -- sentinel, this predicate is a no-op (every evaluation participates).
-      -- When $3 is a valid uuid, the rollup narrows to that cell.
+      -- Slice 224: optional scope cell filter via sqlc.narg('scope_cell_id').
+      -- When the param is the NULL UUID sentinel, this predicate is a no-op
+      -- (every evaluation participates). When valid uuid, narrows to that cell.
       AND ($3::uuid IS NULL OR le.scope_cell_id = $3::uuid)
     GROUP BY c.scf_anchor_id
 )
@@ -733,9 +733,9 @@ LIMIT $1 OFFSET $2
 `
 
 type ListSCFAnchorsLatestWithStateParams struct {
-	Limit   int32       `json:"limit"`
-	Offset  int32       `json:"offset"`
-	Column3 pgtype.UUID `json:"column_3"`
+	Limit       int32       `json:"limit"`
+	Offset      int32       `json:"offset"`
+	ScopeCellID pgtype.UUID `json:"scope_cell_id"`
 }
 
 type ListSCFAnchorsLatestWithStateRow struct {
@@ -796,7 +796,7 @@ type ListSCFAnchorsLatestWithStateRow struct {
 // (hand-maintained to keep the rest of the dbx tree HEAD-blessed per the
 // regen-on-rebase note in MEMORY.md). Keep the two in sync.
 func (q *Queries) ListSCFAnchorsLatestWithState(ctx context.Context, arg ListSCFAnchorsLatestWithStateParams) ([]ListSCFAnchorsLatestWithStateRow, error) {
-	rows, err := q.db.Query(ctx, listSCFAnchorsLatestWithState, arg.Limit, arg.Offset, arg.Column3)
+	rows, err := q.db.Query(ctx, listSCFAnchorsLatestWithState, arg.Limit, arg.Offset, arg.ScopeCellID)
 	if err != nil {
 		return nil, err
 	}

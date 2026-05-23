@@ -198,10 +198,10 @@ worst_per_anchor AS (
     JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
     WHERE c.superseded_by IS NULL
       AND c.scf_anchor_id IS NOT NULL
-      -- Slice 224: optional scope cell filter. When $3 is the NULL UUID
-      -- sentinel, this predicate is a no-op (every evaluation participates).
-      -- When $3 is a valid uuid, the rollup narrows to that cell.
-      AND ($3::uuid IS NULL OR le.scope_cell_id = $3::uuid)
+      -- Slice 224: optional scope cell filter via sqlc.narg('scope_cell_id').
+      -- When the param is the NULL UUID sentinel, this predicate is a no-op
+      -- (every evaluation participates). When valid uuid, narrows to that cell.
+      AND (sqlc.narg('scope_cell_id')::uuid IS NULL OR le.scope_cell_id = sqlc.narg('scope_cell_id')::uuid)
     GROUP BY c.scf_anchor_id
 )
 SELECT
@@ -291,7 +291,7 @@ worst_per_anchor AS (
       AND c.scf_anchor_id IS NOT NULL
       -- Slice 224: optional scope cell filter; see comment on the
       -- latest-with-state variant above.
-      AND ($4::uuid IS NULL OR le.scope_cell_id = $4::uuid)
+      AND (sqlc.narg('scope_cell_id')::uuid IS NULL OR le.scope_cell_id = sqlc.narg('scope_cell_id')::uuid)
     GROUP BY c.scf_anchor_id
 )
 SELECT
