@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/catalog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -512,9 +513,20 @@ type anchorStateCellWire struct {
 
 // anchorWithStateWire is the JSON shape returned by ?include=state.
 // `State` is nil when no tenant control satisfies the anchor.
+//
+// Slice 226: the `frameworks` field carries the set of framework
+// DISPLAY ABBREVIATIONS (e.g. `["SOC2","ISO","CSF"]`) the anchor
+// satisfies via fw_to_scf_edges. The wire ships display codes (not
+// slugs) so the frontend renders verbatim — the abbreviation authority
+// is `internal/catalog.FrameworkDisplayCode` and the frontend never
+// knows about the slug→display map (P0-226-2). The field is omitted on
+// the bare anchor list (no `?include=state`); it MAY be an empty array
+// when an anchor has no satisfaction edges yet (e.g. SCF anchor in a
+// family no framework has crosswalked).
 type anchorWithStateWire struct {
 	anchorWire
-	State *anchorStateCellWire `json:"state"`
+	State      *anchorStateCellWire `json:"state"`
+	Frameworks []string             `json:"frameworks"`
 }
 
 // stateRowMeta is the subset of fields the wire-encoding step needs from
@@ -624,7 +636,8 @@ func latestRowsToStateWire(rows []dbx.ListSCFAnchorsLatestWithStateRow) []anchor
 				Name:        r.Title,
 				Description: r.Description,
 			},
-			State: anchorStateWireFrom(latestStateRow{r: r}),
+			State:      anchorStateWireFrom(latestStateRow{r: r}),
+			Frameworks: frameworksWire(r.FrameworkSlugs),
 		}
 	}
 	return out
@@ -641,10 +654,24 @@ func forVersionRowsToStateWire(rows []dbx.ListSCFAnchorsForVersionWithStateRow) 
 				Name:        r.Title,
 				Description: r.Description,
 			},
-			State: anchorStateWireFrom(forVersionStateRow{r: r}),
+			State:      anchorStateWireFrom(forVersionStateRow{r: r}),
+			Frameworks: frameworksWire(r.FrameworkSlugs),
 		}
 	}
 	return out
+}
+
+// frameworksWire converts the DB-returned slug slice to the per-row
+// display-abbreviation slice the wire ships. Returns a non-nil empty
+// slice (not nil) when the input is nil/empty so the JSON wire renders
+// `[]` rather than `null` — the frontend treats both as "no
+// frameworks", but the consistent `[]` shape simplifies type narrowing
+// (the field is always an array on the wire).
+func frameworksWire(slugs []string) []string {
+	if len(slugs) == 0 {
+		return []string{}
+	}
+	return catalog.SortedFrameworkDisplayCodes(slugs)
 }
 
 type anchorRow interface {

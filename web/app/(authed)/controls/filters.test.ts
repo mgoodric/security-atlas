@@ -14,16 +14,24 @@ import {
   applyFilters,
   clearFilters,
   DEFAULT_FILTERS,
+  formatFrameworksCell,
+  FRAMEWORKS_EMPTY_PLACEHOLDER,
+  FRAMEWORKS_JOIN_SEPARATOR,
   isDefault,
   setFilter,
   uniqueFamilies,
   type AnchorRow,
 } from "./filters";
 
+// Slice 226 — `frameworks` is required on AnchorRow. Default to the
+// empty array so the existing filter assertions remain agnostic to
+// the new column (the filter logic ignores the field; the column is
+// renderer-only).
 function row(
   family: string,
   state: AnchorRow["state"],
   scfSuffix: string,
+  frameworks: string[] = [],
 ): AnchorRow {
   return {
     anchor: {
@@ -34,6 +42,7 @@ function row(
       description: "",
     },
     state,
+    frameworks,
   };
 }
 
@@ -185,5 +194,54 @@ describe("applyFilters", () => {
       family: "DOES-NOT-EXIST",
     });
     expect(out).toEqual([]);
+  });
+});
+
+// Slice 226 — AC-5 / AC-6 / AC-7 column-render-helper coverage.
+describe("formatFrameworksCell", () => {
+  test("AC-5: single framework renders verbatim (no separator)", () => {
+    expect(formatFrameworksCell(["SOC2"])).toBe("SOC2");
+  });
+
+  test("AC-5 + AC-7: multi-framework joins with middle-dot separator", () => {
+    // Matches `Plans/mockups/controls.html` line 217 example
+    // (`SOC2 · ISO · CSF` on IAC-06).
+    expect(formatFrameworksCell(["SOC2", "ISO", "CSF"])).toBe(
+      "SOC2 · ISO · CSF",
+    );
+  });
+
+  test("AC-5: four-framework row renders the full strip", () => {
+    // Mockup CRY-04 example (`SOC2 · ISO · CSF · GDPR`).
+    expect(formatFrameworksCell(["SOC2", "ISO", "CSF", "GDPR"])).toBe(
+      "SOC2 · ISO · CSF · GDPR",
+    );
+  });
+
+  test("AC-6: empty array renders the em-dash placeholder", () => {
+    expect(formatFrameworksCell([])).toBe(FRAMEWORKS_EMPTY_PLACEHOLDER);
+    expect(FRAMEWORKS_EMPTY_PLACEHOLDER).toBe("—");
+  });
+
+  test("does NOT sort the input — caller controls order", () => {
+    // The backend ships sorted display abbreviations; the renderer
+    // trusts that and ships them verbatim. If a caller passes
+    // unsorted input, the cell renders unsorted — the contract is
+    // "render what you got".
+    expect(formatFrameworksCell(["GDPR", "SOC2", "CSF"])).toBe(
+      "GDPR · SOC2 · CSF",
+    );
+  });
+
+  test("does NOT map or transform abbreviations (P0-226-2)", () => {
+    // Slug-shaped input passes through unchanged — proves the helper
+    // is renderer-only, no map.
+    expect(formatFrameworksCell(["soc2", "iso27001"])).toBe("soc2 · iso27001");
+  });
+
+  test("separator constant is the canonical middle-dot pattern", () => {
+    // Pin the separator so a future refactor doesn't quietly flip
+    // to ", " or " | " and break visual parity with the mockup.
+    expect(FRAMEWORKS_JOIN_SEPARATOR).toBe(" · ");
   });
 });

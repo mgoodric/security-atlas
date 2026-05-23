@@ -119,14 +119,41 @@ export function clearFilters(): ControlFilters {
 }
 
 /**
- * One row of the controls table: an anchor (always present) plus an
- * optional state cell that the BFF MAY join when the backend extension
- * lands (spillover 104). Today the BFF never sets `state`; the page
- * renders dashes in the state columns.
+ * Slice 226 — render-helper for the Frameworks column. Pure data-in /
+ * data-out so the cell renderer in `page.tsx` can stay JSX-only and so
+ * the formatting contract is vitest-pinned.
+ *
+ * Contract (matches `Plans/mockups/controls.html` line 217):
+ *   - Non-empty input → join with " · " (middle-dot, U+00B7,
+ *     surrounded by single spaces).
+ *   - Empty input → the em-dash placeholder, mirroring the `—`
+ *     fallback the State / Freshness / Last-observed cells use.
+ *
+ * The function does NOT sort or transform the input — the backend
+ * (`internal/catalog.SortedFrameworkDisplayCodes`) already ships
+ * sorted display abbreviations. P0-226-2: no slug → display mapping
+ * in the frontend.
+ */
+export const FRAMEWORKS_EMPTY_PLACEHOLDER = "—";
+export const FRAMEWORKS_JOIN_SEPARATOR = " · ";
+export function formatFrameworksCell(frameworks: string[]): string {
+  if (frameworks.length === 0) return FRAMEWORKS_EMPTY_PLACEHOLDER;
+  return frameworks.join(FRAMEWORKS_JOIN_SEPARATOR);
+}
+
+/**
+ * One row of the controls table: an anchor (always present), an
+ * optional state cell (slice 104), and the slice-226 per-anchor
+ * framework set (display abbreviations — `SOC2`, `ISO`, `CSF`, etc.).
+ *
+ * Slice 226: `frameworks` is always a string array on the wire —
+ * empty array when the anchor has no satisfaction edges; the page
+ * renders `—` in that branch (AC-6).
  */
 export type AnchorRow = {
   anchor: Anchor;
   state: AnchorRowState | null;
+  frameworks: string[];
 };
 
 export type AnchorRowState = {

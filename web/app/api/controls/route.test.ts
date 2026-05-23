@@ -213,4 +213,55 @@ describe("GET /api/controls", () => {
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
     expect(calledURL).not.toContain("scope=");
   });
+
+  // Slice 226 — the BFF passes the new `frameworks` array on every
+  // anchor through verbatim. Upstream ships display abbreviations
+  // (per `internal/catalog/framework_codes.go`); the BFF does NOT
+  // transform them (P0-226-2 — frontend renders only).
+  test("slice 226: forwards frameworks array verbatim", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-226" });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          anchors: [
+            {
+              id: "00000000-0000-0000-0000-000000000226",
+              scf_id: "IAC-06",
+              family: "IAC",
+              name: "MFA enforcement",
+              description: "",
+              state: {
+                result: "pass",
+                freshness_status: "fresh",
+                last_observed_at: "2026-05-15T09:30:00Z",
+                evaluated_at: "2026-05-16T10:00:00Z",
+              },
+              // Mockup row IAC-06 example.
+              frameworks: ["CSF", "ISO", "SOC2"],
+            },
+            {
+              id: "00000000-0000-0000-0000-000000000227",
+              scf_id: "PLACEHOLDER-99",
+              family: "ZZZ",
+              name: "anchor with no satisfaction edges yet",
+              description: "",
+              state: null,
+              // AC-6 empty-set branch.
+              frameworks: [],
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const res = await GET(makeReq() as never);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      anchors: { frameworks: string[] }[];
+    };
+    expect(body.anchors).toHaveLength(2);
+    expect(body.anchors[0].frameworks).toEqual(["CSF", "ISO", "SOC2"]);
+    expect(body.anchors[1].frameworks).toEqual([]);
+  });
 });

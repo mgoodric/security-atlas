@@ -339,3 +339,93 @@ func TestListAnchors_IncludeStateColumnSetMatchesDesignDoc(t *testing.T) {
 		t.Fatalf("expected last_observed_at in payload; body=%s", body)
 	}
 }
+
+// Slice 226 AC-1 + AC-3 + AC-5 — `?include=state` returns a `frameworks`
+// array on every anchor. The setupHTTPServer harness loads the SCF
+// catalog + the SOC 2 v2017 crosswalk, so the IAC-06 anchor (which the
+// crosswalk explicitly maps) MUST carry at least `SOC2`. Anchors with
+// no satisfaction edges yet carry an empty array (NOT nil / NOT a
+// missing key — the wire shape is always `frameworks: string[]`).
+//
+// The single-query guarantee is implicit in the response time + the
+// unit-test-pinned wire layer; we cannot count queries through the
+// public HTTP API. The CTE shape in the SQL is the structural guard.
+func TestListAnchors_IncludeStateCarriesFrameworksColumn(t *testing.T) {
+	ts, bearer := setupHTTPServer(t)
+	admin := openPoolDSN(t, adminDSN(t))
+	defer admin.Close()
+	cleanupTenantState(t, admin, tenantA)
+
+	resp, body := get(t, ts, "/v1/anchors?include=state", bearer)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", resp.StatusCode, body)
+	}
+	var got struct {
+		Anchors []struct {
+			SCFID      string   `json:"scf_id"`
+			Frameworks []string `json:"frameworks"`
+		} `json:"anchors"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\nbody=%s", err, body)
+	}
+	if len(got.Anchors) == 0 {
+		t.Fatal("expected anchors")
+	}
+
+	// Every anchor must carry the field — wire shape is `string[]`,
+	// never missing / null. This guards the frontend type narrowing.
+	var iac06Frameworks []string
+	var iac06Hit bool
+	for _, a := range got.Anchors {
+		if a.Frameworks == nil {
+			t.Errorf("anchor %s missing frameworks field (nil); want at least empty array", a.SCFID)
+		}
+		if a.SCFID == "IAC-06" {
+			iac06Hit = true
+			iac06Frameworks = a.Frameworks
+		}
+	}
+	if !iac06Hit {
+		t.Fatal("IAC-06 not present in response — fixture drift?")
+	}
+
+	// IAC-06 (Multi-Factor Authentication) is explicitly mapped to SOC 2
+	// in the v2017 crosswalk loaded by setupHTTPServer. Display value is
+	// `SOC2` per the framework_codes authority.
+	wantContains := "SOC2"
+	found := false
+	for _, f := range iac06Frameworks {
+		if f == wantContains {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("IAC-06 frameworks = %v; want to contain %q", iac06Frameworks, wantContains)
+	}
+}
+
+// Slice 226 AC-3 — wire payload carries display abbreviations (not
+// slugs). Specifically, the response MUST contain `SOC2` (display)
+// and MUST NOT contain a bare `soc2` (slug) inside the
+// `"frameworks":[…]` array. Guards P0-226-2 — the abbreviation
+// authority lives backend-side.
+func TestListAnchors_IncludeStateFrameworksAreDisplayAbbreviations(t *testing.T) {
+	ts, bearer := setupHTTPServer(t)
+	admin := openPoolDSN(t, adminDSN(t))
+	defer admin.Close()
+	cleanupTenantState(t, admin, tenantA)
+
+	_, body := get(t, ts, "/v1/anchors?include=state", bearer)
+	// Cheap substring assertion is enough — the unit tests pin the per-
+	// row sorted-display-codes shape; the integration test just
+	// confirms the wire ships display, not slug.
+	if !strings.Contains(string(body), `"SOC2"`) {
+		t.Errorf("expected display abbreviation \"SOC2\" in payload; body=%s", body)
+	}
+	if strings.Contains(string(body), `"frameworks":["soc2"`) ||
+		strings.Contains(string(body), `"frameworks":["soc2",`) {
+		t.Errorf("payload leaks raw slug `soc2` in frameworks array; want display abbreviation; body=%s", body)
+	}
+}
