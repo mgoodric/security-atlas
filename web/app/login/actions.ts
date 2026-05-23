@@ -157,8 +157,9 @@ export async function signInLocal(formData: FormData): Promise<void> {
       "signInLocal: backend response missing token; ATLAS_ISSUER_URL likely unset",
     );
     redirect(
-      `/login?error=${encodeURIComponent("sign-in is not configured on this server")}` +
-        `&from=${encodeURIComponent(target)}`,
+      `/login?error=${encodeURIComponent(
+        "sign-in is not configured on this server",
+      )}` + `&from=${encodeURIComponent(target)}`,
     );
   }
 

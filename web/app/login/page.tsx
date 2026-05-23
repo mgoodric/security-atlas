@@ -153,7 +153,9 @@ export default async function LoginPage({
         <Card>
           <CardHeader>
             <CardTitle>
-              {bootstrapTenantID ? "Developer sign-in" : "Sign in to security-atlas"}
+              {bootstrapTenantID
+                ? "Developer sign-in"
+                : "Sign in to security-atlas"}
             </CardTitle>
             <CardDescription>
               Paste a bearer token issued by{" "}
