@@ -61,11 +61,15 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-// DefaultCookieName matches slice 189's `atlas_session` cookie. The
-// frontend OAuth completion flow stores the freshly minted JWT in
-// this cookie; the middleware reads it back on every subsequent
-// request.
-const DefaultCookieName = "atlas_session"
+// DefaultCookieName is the cookie the middleware reads as an alternative
+// to the Authorization header. Post-slice-198 the OIDC callback writes
+// the freshly minted JWT to `atlas_jwt` (`ATLAS_JWT_COOKIE` constant in
+// web/app/oauth/callback/route.ts:44). This constant was previously
+// `atlas_session` (slice 189 legacy cookie name); slice 208 closes the
+// drift so direct browser → atlas requests (e.g. via the slice-208
+// Next.js rewrites for /v1/*) authenticate correctly from the same
+// cookie the OAuth callback set.
+const DefaultCookieName = "atlas_jwt"
 
 // realm is the WWW-Authenticate `realm=` value advertised on 401
 // responses per RFC 6750 §3.

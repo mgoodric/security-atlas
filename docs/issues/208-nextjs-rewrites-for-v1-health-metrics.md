@@ -1,111 +1,81 @@
-# 208 — Next.js rewrites for /v1/, /health, /metrics (deployment-portable backend routing)
+# 208 — Next.js rewrites for `/v1/*`, `/health`, `/metrics`
 
-**Cluster:** Frontend / Deploy
-**Estimate:** 0.25d
-**Type:** AFK
+**Cluster:** Frontend (deploy / routing)
+**Estimate:** ~0.5d
+**Type:** JUDGMENT
 **Status:** `ready`
-**Parent:** maintainer-surfaced 2026-05-22 during atlas-edge provisioning. Discovered that **production atlas.home.gmoney.sh has never had functional `/v1/*` routing** — NPM forwards everything to web (Next.js) and Next.js has no route at `/v1/*`. Slice 206 fixed the redirect-loop symptom; this slice fixes the underlying routing gap.
+**Parent:** spillover surfaced 2026-05-22 during live atlas-edge provisioning. NPM path-based routing works as an operator workaround but requires every deployment topology to re-add three NPM `Location` blocks. Slice 206 exempted `/v1/*` + `/metrics` in `web/proxy.ts` so the Next.js redirect-to-login gate fires after the path check — but Next.js itself still has no route at `/v1/*`, so the dashboard's browser-side data fetches return 404 from the Next.js catch-all. The fix is in-repo and portable.
 
 ## Narrative
 
-The atlas deployment runs two services: `atlas` (Go backend, internal port 8080) and `web` (Next.js BFF + UI, internal port 3000). Browsers + curl callers need to reach BOTH:
+The architectural shape post-slice-206:
 
-- `/login`, `/dashboard`, `/admin/*`, `/api/*` (BFF routes), `/oauth/*` → web Next.js
-- `/v1/*`, `/health`, `/metrics` → atlas Go backend
+1. The browser loads `https://atlas-edge.home.gmoney.sh/dashboard` (Next.js page).
+2. The dashboard's client-side `fetch('/v1/me')` hits the SAME ORIGIN — the Next.js host.
+3. Next.js routes `/v1/me` through `web/proxy.ts`. Slice 206 added `pathname.startsWith("/v1/")` to the exempt set, so the redirect-to-login does NOT fire.
+4. After the proxy returns `next()`, Next.js looks for a route handler at `app/v1/me/route.ts`. There is none. So the server returns 404 (the catch-all).
 
-In every existing deployment (stable + the brand-new edge), the reverse proxy (NPM, Cloudflare, K8s Ingress, whatever) forwards EVERYTHING to web. No path-based split. Net result: when the browser-side dashboard JS fetches `/v1/me`, it hits Next.js's catch-all and returns 404 (or pre-slice-206, the `proxy.ts` middleware caught it first and 307'd to `/login`). **The dashboard's data layer has never worked end-to-end in deployment.**
+The dashboard panel renders "Could not load this panel" because the BFF JSON parse throws on the 404 HTML.
 
-The maintainer's atlas-edge provisioning surfaced this. NPM was configured with path-based routing (`/v1/` → atlas:8180, `/metrics` → atlas:8180, default → web:3180) as a workaround, and the dashboard then loaded correctly. But that workaround requires every deployment topology (Cloudflare Tunnel, K8s Ingress, Caddy, raw `docker compose up`) to replicate the same path-routing config — and the docker-compose.bundled.yml + docker-compose.edge.yml templates expose no such config.
+**Path-based NPM workaround (operator-provisioned):** add three `Location` blocks to the reverse proxy: `/v1/` + `/health` + `/metrics` → atlas Go backend. Maintainer verified this live on atlas-edge 2026-05-22; it works. But it requires every operator to replicate the config in their reverse proxy of choice (NPM, Caddy, Traefik, nginx, Kubernetes Ingress, etc.).
 
-**This slice ships the in-repo fix**: Next.js rewrites in `web/next.config.ts`. Browser fetches `/v1/me` → Next.js dev/prod server proxies internally to `${ATLAS_HTTP_URL}/v1/me`. `ATLAS_HTTP_URL` is already an env var (the compose templates set it to `http://atlas:8080`), so this generalizes existing knowledge without introducing new config.
+**Next.js rewrites (this slice):** `web/next.config.ts` declares an `async rewrites()` that forwards the three path prefixes to `${ATLAS_HTTP_URL}/...`. The env var is already wired by `deploy/docker/docker-compose.yml` + `docker-compose.edge.yml` + read by `web/lib/api.ts:apiBaseURL()` for server-side BFF calls. Generalizing the same env to browser-side requests through rewrites means:
 
-After this lands + Watchtower pulls the new `:edge` image, atlas-edge.home.gmoney.sh's dashboard becomes fully functional WITHOUT the NPM path-routing workaround. The next v1.16.0 release will fix the same thing on stable.
-
-**Scope discipline (what is OUT):**
-
-- **NPM/reverse-proxy migration** — operators who already configured path-routing can keep it (it's harmless redundant overhead, ~1 fewer hop). Document the option to simplify the reverse-proxy config but don't require migration.
-- **`/api/*` rewrites** — those are BFF routes, served by Next.js. NOT proxied to atlas.
-- **`/oauth/*` rewrites** — same, Next.js-served.
-- **HTTPS / certificate management** — operator's reverse proxy handles TLS.
-- **WebSocket support** — atlas doesn't currently expose any; if added later, that's a follow-on.
+- One in-repo line of config makes every deployment topology Just Work.
+- No operator-side proxy config required.
+- The reverse proxy in front of the deployment becomes a pure TLS terminator + hostname router; path-routing is the application's job.
 
 ## Threat model
 
-| STRIDE                | Threat                                                                                                                                                                                                     | Mitigation                                                                                                                                                                                                                                                    |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **S** Spoofing        | Rewrite could be exploited to access atlas on behalf of unauthenticated callers if Next.js fails to forward credentials correctly.                                                                         | Next.js rewrites preserve request headers including cookies + Authorization by default (next.js framework guarantee). AC-4: integration test verifies an authenticated browser request that includes `atlas_jwt` cookie reaches atlas with the cookie intact. |
-| **T** Tampering       | Operator could set `ATLAS_HTTP_URL` to a malicious upstream.                                                                                                                                               | AC-5: rewrite target is read from env at server-startup; not request-time. Misconfiguration affects ALL backend calls (BFF routes already do this, so the new attack surface is zero).                                                                        |
-| **R** Repudiation     | None — audit-log writes happen on atlas; this is request routing only.                                                                                                                                     | n/a                                                                                                                                                                                                                                                           |
-| **I** Info disclosure | None — rewrites preserve the existing auth boundary; atlas already enforces 401 on unauthenticated `/v1/*` calls (just confirmed live: `curl -sI http://atlas-edge.home.gmoney.sh/v1/anchors` → 401 JSON). | AC-6 regression check: unauthenticated `/v1/me` via the rewritten path returns 401 JSON, not 200.                                                                                                                                                             |
-| **D** DoS             | Rewriting adds one in-process hop per request. Negligible (~1ms LAN).                                                                                                                                      | n/a                                                                                                                                                                                                                                                           |
-| **E** EoP             | None.                                                                                                                                                                                                      | n/a                                                                                                                                                                                                                                                           |
+| STRIDE                | Threat                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **S** Spoofing        | A rewrite that forwards to an attacker-controlled origin would let the dashboard's data layer leak cookies/tokens. The rewrite destination is hard-coded to `${ATLAS_HTTP_URL}` — an operator-controlled env var, not a request-derived value. Open-redirect class threats do not apply (the destination is not derived from query/path params).                                                                                                                   | P0-A4: no new env var. `ATLAS_HTTP_URL` already governs the BFF→backend hop; reusing it preserves the existing operator threat model.                                                                                                                                                                                                                                                                                                                                                                 |
+| **T** Tampering       | A rewrite preserves cookies + headers verbatim — the browser still sees the same origin, so the `atlas_jwt` cookie attaches to the rewritten request. Tampering would require the operator to set `ATLAS_HTTP_URL` to a hostile origin — explicit, observable, and out of scope.                                                                                                                                                                                   | n/a — the rewrite destination is operator-controlled at deploy time.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **R** Repudiation     | The atlas Go backend's audit log still captures every `/v1/*` hit with the verified JWT subject + tenant. The rewrite is invisible to the audit layer.                                                                                                                                                                                                                                                                                                             | n/a                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| **I** Info disclosure | `/health` is intentionally public (slice-052 contract); `/metrics` is the slice-121 OTel surface (deliberate operator-visibility). Rewriting these does not expose new data — they were already public on the atlas backend port.                                                                                                                                                                                                                                  | The rewrite preserves whatever the backend serves at `/health` and `/metrics`. If the atlas backend ever locks `/metrics` behind auth (operator-network-only is the current shape), the rewrite continues to forward without modification — the auth decision stays on the backend.                                                                                                                                                                                                                   |
+| **D** DoS             | An unauthenticated requester can hammer `/v1/anchors` through the Next.js host and reach atlas. Without rewrites, the request 404s at Next.js (cheaper) — but then the dashboard doesn't work. The tradeoff is intentional: the atlas backend already has its own rate limiting + RLS gate; pushing requests through is the contract.                                                                                                                              | n/a — atlas-side rate limit (slice-XXX) is the authority.                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| **E** EoP             | The critical bug class: if a rewrite ever bypasses atlas auth, that's an auth-substrate escape. **It doesn't.** The rewrite preserves cookies + headers, and atlas's slice-190 `jwtmw` middleware gates every `/v1/*` request. AC-5 explicitly verifies: an unauthenticated `fetch('/v1/anchors')` through the rewrite returns 401 from atlas (not 404 from Next.js, not 200 from a bypass). P0-A1 forbids rewriting `/api/*` (BFF) or `/oauth/*` (OIDC callback). | P0-A1 + P0-A2 + P0-A3: rewrites NEVER cover `/api/*` (BFF routes stay server-side) NOR `/oauth/*` (OIDC callback stays server-side). The three rewrite rules are exact-path-prefix and well-known: `/v1/:path*`, `/health` (equality), `/metrics` (equality). The atlas backend remains the auth authority for everything under `/v1/*`. AC-4 + AC-5 exercise both the positive (authed `/v1/me` reaches atlas, returns 200) and the negative (unauth `/v1/anchors` reaches atlas, returns 401 JSON). |
 
 ## Acceptance criteria
 
-- [ ] **AC-1**: `web/next.config.ts` adds an `async rewrites()` returning three rules: `/v1/:path*` → `${ATLAS_HTTP_URL}/v1/:path*`, `/health` → `${ATLAS_HTTP_URL}/health`, `/metrics` → `${ATLAS_HTTP_URL}/metrics`.
-- [ ] **AC-2**: `ATLAS_HTTP_URL` is read from env at startup. Local-dev fallback to `http://localhost:8080` when unset (matches the existing `web/lib/api/bff.ts` BFF pattern; engineer confirms the existing fallback's exact host:port via D1).
-- [ ] **AC-3**: vitest regression in `web/lib/next-config.test.ts` (or analog) confirming the rewrites config shape. Specifically: with `ATLAS_HTTP_URL=http://atlas:8080` set, `rewrites()` returns the three expected rules.
-- [ ] **AC-4**: Playwright e2e: after authenticated login, `GET /v1/me` from the browser context returns the user JSON (200, not 404 from Next.js's catch-all and not 401 because the session cookie should be present). Extends `web/e2e/auth-flow.spec.ts` or analog.
-- [ ] **AC-5**: Backend regression check (Playwright or integration test): unauthenticated `GET /v1/anchors` via the rewritten path returns 401 JSON. Verifies the rewrite doesn't accidentally bypass atlas's auth boundary.
-- [ ] **AC-6**: Health check: `GET /health` via the rewritten path returns `{"status":"ok","db":"ok"}` (or whatever atlas's /health currently emits) when atlas is reachable.
-- [ ] **AC-7**: Updates `docs/operations/edge-deploy.md` to remove the manual NPM path-routing recommendation. Add a one-line note: "If you previously added path-routing in your reverse proxy for /v1/, /health, /metrics, you can remove it — Next.js now handles this internally."
-- [ ] **AC-8**: CHANGELOG entry under "Changed" describing the deployment behavior change. Operator note: existing path-routing configs continue to work (harmless redundant overhead).
+- [ ] AC-1: `web/next.config.ts` declares `async rewrites()` returning exactly three rules:
+  - `{ source: "/v1/:path*",  destination: "${ATLAS_HTTP_URL}/v1/:path*" }`
+  - `{ source: "/health",     destination: "${ATLAS_HTTP_URL}/health" }`
+  - `{ source: "/metrics",    destination: "${ATLAS_HTTP_URL}/metrics" }`
+- [ ] AC-2: `ATLAS_HTTP_URL` env read at config load. D1 fallback to `http://localhost:8080` if unset. A warning is logged via `console.warn` at config load when the fallback is in play, so devs running `next dev` outside docker-compose see the heads-up.
+- [ ] AC-3: vitest regression `web/next-config.test.ts` covers the rewrite shape: with `ATLAS_HTTP_URL=http://atlas:8080` set, `rewrites()` returns the expected 3-rule array; with the env unset, `rewrites()` falls back to `http://localhost:8080` AND `console.warn` is called once.
+- [ ] AC-4: Playwright e2e (new spec `web/e2e/nextjs-rewrites.spec.ts`) — authenticated browser context `request.get("/v1/me")` returns 200 + JSON containing the demo user (proves the rewrite forwards cookies + atlas auth verifies them).
+- [ ] AC-5: Same spec — unauthenticated `request.get("/v1/anchors", { maxRedirects: 0 })` returns 401 JSON from atlas (NOT 404 from Next.js, NOT 307 to /login). Verifies the rewrite does not bypass atlas's slice-190 `jwtmw` middleware.
+- [ ] AC-6: Same spec — `request.get("/health")` returns 200 JSON shaped `{status, ...}` (whatever atlas's /health endpoint emits). Verifies the literal-path rewrite works.
+- [ ] AC-7: `docs/operations/edge-deploy.md` updated — the existing reverse-proxy section's path-routing recommendation gets a one-paragraph note explaining that operators with existing NPM/Caddy/etc. path-routing can either keep it (one fewer hop, marginal benefit) or remove it (simpler config); both work.
+- [ ] AC-8: CHANGELOG entry under "Changed" — operator-facing behavior change note.
 
-## Constitutional invariants honored
+## P0 hard rules
 
-- **No new auth surface**: rewrites preserve existing cookies + Authorization headers; atlas's JWT validation remains authoritative.
-- **No backend code change**: atlas Go server unchanged.
-- **AI-assist boundary**: n/a (deploy/wiring change).
+- **P0-A1:** NO rewrite for `/api/*` (Next.js BFF routes — server-side credential handling stays Next.js-managed).
+- **P0-A2:** NO rewrite for `/oauth/*` (Next.js OIDC callback — server-side cookie writing stays Next.js-managed).
+- **P0-A3:** NO bypass of atlas auth. The rewrites preserve cookies + headers; atlas's slice-190 `jwtmw` middleware continues to gate every `/v1/*` request. AC-5 verifies this end-to-end.
+- **P0-A4:** NO new env var. Reuse `ATLAS_HTTP_URL` — already wired by docker-compose and read by `web/lib/api.ts:apiBaseURL()` for the server-side BFF→backend hop.
+- **P0-A5:** NO modification of reverse-proxy / NPM config in the repo. `deploy/` stays untouched apart from the optional docs note (AC-7).
+- **P0-A6:** No vendor-prefixed test fixture tokens (`ghp_*`, `sk_*`, `AKIA*`, etc.). The Playwright spec uses the slice-201 global-setup-minted JWT via the existing `authedPage` fixture.
 
-## Canvas references
+## Judgment decisions
 
-- None — operational wiring.
+Three decisions belong in the decisions log (`docs/audit-log/208-nextjs-rewrites-decisions.md`):
 
-## Dependencies
+- **D1** — local-dev fallback for `ATLAS_HTTP_URL`. Recommendation: `http://localhost:8080` matches `cmd/atlas/main.go`'s default. Log a `console.warn` when the fallback fires so devs running `next dev` outside docker-compose see the heads-up.
+- **D2** — honest CI-delta scan (per slice 202 D2; NOT the slice 143 D8 / slice 205 D7 false-positive class).
+- **D3** — operator migration note for existing reverse-proxy path-routing setups.
 
-- **#206** (BFF cookie migration) — merged. The `proxy.ts` middleware exempts `/v1/*` already (slice 206 AC-3); without that exemption, the new rewrites would never get a chance to fire.
-- **#072** (version string in UI) — merged. Provides the VersionFooter that lets operators verify which commit is running.
+## Out of scope (deferred)
 
-## Anti-criteria (P0 — block merge)
+- Migrating the BFF route handlers to share the same `ATLAS_HTTP_URL` resolution surface as the rewrites (already done implicitly — `apiBaseURL()` reads the same env).
+- Rewrite rules for `/proto` or `/grpc` (atlas's gRPC surface is on a separate port, never traversed by Next.js).
+- Per-tenant rewrite destinations (single-tenant atlas backend is the v1 invariant).
 
-- **P0-A1**: DOES NOT rewrite `/api/*` to atlas. Those are Next.js BFF routes; keep them server-side at web.
-- **P0-A2**: DOES NOT rewrite `/oauth/*` or any auth-callback paths. Those are Next.js-served per slice 198.
-- **P0-A3**: DOES NOT bypass atlas's authentication. The rewritten request must include the same cookies/headers as a direct request would.
-- **P0-A4**: DOES NOT change `ATLAS_HTTP_URL` semantics. Same env var, same value, same expected shape (`http://host:port`, no trailing slash).
-- **P0-A5**: DOES NOT modify the operator's reverse-proxy config. The change is in-repo only; deployments don't need to re-configure NPM/Cloudflare/etc.
-- **P0-A6**: DOES NOT use vendor-prefixed test fixture tokens.
+## See also
 
-## Skill mix
-
-- `web/next.config.ts` editor
-- vitest spec author (config-shape test)
-- Playwright spec author (browser-context fetch through the rewrite)
-
-## Notes for the implementing agent
-
-This is a **one-file fix** with regression tests. Keep the diff minimal.
-
-**D1 — local-dev fallback.** `ATLAS_HTTP_URL` is unset in `web/` local dev (you run `npm run dev` separately from `cd .. && go run cmd/atlas/main.go`). Pick a fallback:
-
-- `http://localhost:8080` (atlas default port from `cmd/atlas/main.go`)
-- Read from `.env.development.local` if it exists
-- Or fail loudly if unset
-
-Recommended: fallback to `http://localhost:8080` matching atlas's default + log a warning on startup if unset.
-
-**D2 — CI-delta scan (per slice 202 D2 honest-scan precedent; NOT slice 143 D8 / slice 205 D7 false-positive class).** Specifically verify:
-
-- `npm run build` works (next.config rewrites must serialize correctly)
-- `npm run lint` clean (typecheck the rewrite return shape)
-- `npm run test` clean (the new vitest spec)
-- `npm run test:e2e` — the new Playwright spec exercises the rewrite end-to-end
-
-**D3 — operator migration note.** Operators with existing NPM/reverse-proxy path-routing can keep it (one fewer hop, marginal perf benefit) OR remove it (simpler config). CHANGELOG + docs/operations/edge-deploy.md should make this explicit so operators don't panic.
-
-**Live verification post-merge:**
-
-- Watchtower on Unraid (atlas-edge.home.gmoney.sh) auto-pulls `:edge` ~5 min after PR #N merges
-- Maintainer browses to atlas-edge.home.gmoney.sh/dashboard → dashboard loads with real data (slice 206 + slice 208 = full end-to-end fix)
-- Next v1.16.0 stable release applies the same fix to atlas.home.gmoney.sh
-
-Provenance: filed 2026-05-22 immediately after live-verifying that NPM path-routing on atlas-edge resolves the /v1/\* gap. Choosing the Next.js-rewrite approach over a per-deployment reverse-proxy fix because it ships portable across ALL deployment topologies (docker-compose / K8s / Cloudflare Tunnel / Caddy / etc.) with zero operator config.
+- [`web/proxy.ts`](../../web/proxy.ts) — slice 206's exemption set (the rewrites depend on the redirect-to-login NOT firing on `/v1/*`).
+- [`web/lib/api.ts`](../../web/lib/api.ts) — the existing `ATLAS_HTTP_URL` consumer for server-side BFF calls.
+- [`docs/operations/edge-deploy.md`](../operations/edge-deploy.md) — operator runbook updated by AC-7.
+- [Next.js rewrites docs](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites) — the API the implementation uses.

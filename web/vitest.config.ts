@@ -59,6 +59,10 @@ export default defineConfig({
       // so no escape is needed.
       "app/audit-log/**/*.test.ts",
       "proxy.test.ts",
+      // Slice 208: next-config.test.ts lives at the web root because
+      // next.config.ts must sit at the workspace root (Next.js
+      // convention). Same colocation precedent as proxy.test.ts above.
+      "next-config.test.ts",
       // Slice 132: the README-screenshot capture pipeline's safety
       // gate (assertCaptureSafe + isLoopbackOrPrivate) is the
       // load-bearing information-disclosure mitigation per the slice
