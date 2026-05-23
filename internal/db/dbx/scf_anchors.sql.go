@@ -499,6 +499,8 @@ worst_per_anchor AS (
     JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
     WHERE c.superseded_by IS NULL
       AND c.scf_anchor_id IS NOT NULL
+      -- Slice 224: optional scope cell filter; see comment on the
+      -- latest-with-state variant above.
       AND ($4::uuid IS NULL OR le.scope_cell_id = $4::uuid)
     GROUP BY c.scf_anchor_id
 )
@@ -534,7 +536,7 @@ type ListSCFAnchorsForVersionWithStateParams struct {
 	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
 	Limit              int32       `json:"limit"`
 	Offset             int32       `json:"offset"`
-	ScopeCellID        pgtype.UUID `json:"scope_cell_id"`
+	Column4            pgtype.UUID `json:"column_4"`
 }
 
 type ListSCFAnchorsForVersionWithStateRow struct {
@@ -559,8 +561,17 @@ type ListSCFAnchorsForVersionWithStateRow struct {
 // the current SCF version. Kept as two queries (rather than one with
 // a NULL sentinel) so the planner can inline the simpler predicate
 // and so the parameter types stay tight for sqlc codegen.
+//
+// Slice 224: extended to accept an optional `scope_cell_id` filter
+// on the same NULL-UUID sentinel pattern as the latest-with-state
+// variant above.
 func (q *Queries) ListSCFAnchorsForVersionWithState(ctx context.Context, arg ListSCFAnchorsForVersionWithStateParams) ([]ListSCFAnchorsForVersionWithStateRow, error) {
-	rows, err := q.db.Query(ctx, listSCFAnchorsForVersionWithState, arg.FrameworkVersionID, arg.Limit, arg.Offset, arg.ScopeCellID)
+	rows, err := q.db.Query(ctx, listSCFAnchorsForVersionWithState,
+		arg.FrameworkVersionID,
+		arg.Limit,
+		arg.Offset,
+		arg.Column4,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -685,6 +696,9 @@ worst_per_anchor AS (
     JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
     WHERE c.superseded_by IS NULL
       AND c.scf_anchor_id IS NOT NULL
+      -- Slice 224: optional scope cell filter. When $3 is the NULL UUID
+      -- sentinel, this predicate is a no-op (every evaluation participates).
+      -- When $3 is a valid uuid, the rollup narrows to that cell.
       AND ($3::uuid IS NULL OR le.scope_cell_id = $3::uuid)
     GROUP BY c.scf_anchor_id
 )
@@ -719,9 +733,9 @@ LIMIT $1 OFFSET $2
 `
 
 type ListSCFAnchorsLatestWithStateParams struct {
-	Limit       int32       `json:"limit"`
-	Offset      int32       `json:"offset"`
-	ScopeCellID pgtype.UUID `json:"scope_cell_id"`
+	Limit   int32       `json:"limit"`
+	Offset  int32       `json:"offset"`
+	Column3 pgtype.UUID `json:"column_3"`
 }
 
 type ListSCFAnchorsLatestWithStateRow struct {
@@ -743,6 +757,15 @@ type ListSCFAnchorsLatestWithStateRow struct {
 // Slice 104: paginated anchor list for the latest current SCF
 // framework_version, LEFT JOINed to the worst-state-wins per-anchor
 // rollup over the tenant's `control_evaluations` ledger.
+//
+// Slice 224: extended to accept an optional `scope_cell_id` filter.
+// When the parameter is the NULL UUID sentinel (`pgtype.UUID{Valid:false}`),
+// the per-cell predicate inside `worst_per_anchor` is a no-op and every
+// evaluation row participates in the rollup. When the parameter is a
+// valid UUID, the rollup narrows to only the evaluations recorded against
+// that scope cell — i.e. "what's the per-anchor state in just THIS cell?".
+// Out-of-tenant cell ids return zero rows naturally via the existing
+// tenant RLS on `control_evaluations` (no 404 leak).
 //
 // Shape:
 //  1. `latest_eval` CTE picks the latest control_evaluations row per
@@ -773,7 +796,7 @@ type ListSCFAnchorsLatestWithStateRow struct {
 // (hand-maintained to keep the rest of the dbx tree HEAD-blessed per the
 // regen-on-rebase note in MEMORY.md). Keep the two in sync.
 func (q *Queries) ListSCFAnchorsLatestWithState(ctx context.Context, arg ListSCFAnchorsLatestWithStateParams) ([]ListSCFAnchorsLatestWithStateRow, error) {
-	rows, err := q.db.Query(ctx, listSCFAnchorsLatestWithState, arg.Limit, arg.Offset, arg.ScopeCellID)
+	rows, err := q.db.Query(ctx, listSCFAnchorsLatestWithState, arg.Limit, arg.Offset, arg.Column3)
 	if err != nil {
 		return nil, err
 	}

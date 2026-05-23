@@ -1627,12 +1627,25 @@ type Querier interface {
 	// the current SCF version. Kept as two queries (rather than one with
 	// a NULL sentinel) so the planner can inline the simpler predicate
 	// and so the parameter types stay tight for sqlc codegen.
+	//
+	// Slice 224: extended to accept an optional `scope_cell_id` filter
+	// on the same NULL-UUID sentinel pattern as the latest-with-state
+	// variant above.
 	ListSCFAnchorsForVersionWithState(ctx context.Context, arg ListSCFAnchorsForVersionWithStateParams) ([]ListSCFAnchorsForVersionWithStateRow, error)
 	// Paginated anchor list for the latest current SCF framework_version.
 	ListSCFAnchorsLatest(ctx context.Context, arg ListSCFAnchorsLatestParams) ([]ScfAnchor, error)
 	// Slice 104: paginated anchor list for the latest current SCF
 	// framework_version, LEFT JOINed to the worst-state-wins per-anchor
 	// rollup over the tenant's `control_evaluations` ledger.
+	//
+	// Slice 224: extended to accept an optional `scope_cell_id` filter.
+	// When the parameter is the NULL UUID sentinel (`pgtype.UUID{Valid:false}`),
+	// the per-cell predicate inside `worst_per_anchor` is a no-op and every
+	// evaluation row participates in the rollup. When the parameter is a
+	// valid UUID, the rollup narrows to only the evaluations recorded against
+	// that scope cell — i.e. "what's the per-anchor state in just THIS cell?".
+	// Out-of-tenant cell ids return zero rows naturally via the existing
+	// tenant RLS on `control_evaluations` (no 404 leak).
 	//
 	// Shape:
 	//   1. `latest_eval` CTE picks the latest control_evaluations row per
