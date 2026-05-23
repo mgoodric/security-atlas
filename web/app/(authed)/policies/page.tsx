@@ -79,6 +79,7 @@ import {
   uniqueOwners,
   type PolicyFilters,
 } from "./filters";
+import { statusCountsLabel } from "./header-counts";
 
 const FILTER_KEYS: (keyof PolicyFilters)[] = ["status", "owner_role"];
 
@@ -190,6 +191,24 @@ function PoliciesPageInner() {
       <span className="font-mono">{rows.length}</span> policies
     </span>
   );
+
+  // Slice 239 — derive the header status-count tally from the FULL rows
+  // list (NOT `visible`), per AC-1. The tally is the one-glance "this
+  // is the right tenant" check the operator runs BEFORE they touch a
+  // filter; making it filter-sensitive would shadow the "Showing X of
+  // Y" meta-text in the filter row that already plays that role
+  // (P0-239-2). Empty-string sentinel from `statusCountsLabel` cleanly
+  // suppresses rendering for the zero-row case (AC-3).
+  const headerCounts = useMemo(() => statusCountsLabel(rows), [rows]);
+  const titleAdornment = headerCounts ? (
+    <span
+      data-testid="policies-status-counts"
+      aria-label="policy status counts"
+      className="text-sm text-muted-foreground"
+    >
+      {headerCounts}
+    </span>
+  ) : null;
 
   const columns: ListColumn<Policy>[] = [
     {
@@ -419,6 +438,7 @@ function PoliciesPageInner() {
   return (
     <ListPage
       title="Policy library"
+      titleAdornment={titleAdornment}
       subtitle="Versioned policies · acknowledgment tracked against the current version"
       actions={actions}
       filterRow={
