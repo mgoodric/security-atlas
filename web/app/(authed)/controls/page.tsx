@@ -57,8 +57,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   fetchControlsList,
+  fetchScopeCells,
   type AnchorWithState,
   type ControlsListResponse,
+  type ScopeCellsListResponse,
 } from "@/lib/api";
 import {
   CONTROLS_EXPORT_FORMATS,
@@ -88,7 +90,18 @@ const FILTER_KEYS: (keyof ControlFilters)[] = [
   "family",
   "result",
   "freshness",
+  // Slice 224 — scope cell filter. URL key `scope`, value is a cell uuid
+  // or `ALL`. The BFF / upstream applies the actual intersection
+  // (P0-224-2 — applicability_expr never reaches the browser).
+  "scope",
 ];
+
+// Slice 224 — cap the Scope pill at 50 entries per AC-5. Tenants with
+// more cells get a banner indicating the cap; the dropdown still works
+// for the first 50 cells (newest-first ordering from /v1/scopes/cells).
+// A typeahead replacement for tenants exceeding the cap is deferred to
+// a follow-on slice (per AC-5 + decision log D3).
+const SCOPE_CELL_CAP = 50;
 
 const RESULT_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All states" },
@@ -151,9 +164,23 @@ function ControlsPageInner() {
     router.replace(`/controls?${sp.toString()}`);
   };
 
+  // Slice 224 — refetch the controls list when the scope filter changes.
+  // The narrowing is server-side; the queryKey carries the scope so
+  // TanStack invalidates correctly. `ALL` is treated as no-filter
+  // (fetchControlsList drops the query param entirely).
+  const scopeArg = filters.scope === ALL ? undefined : filters.scope;
   const anchorsQ = useQuery<ControlsListResponse>({
-    queryKey: ["controls", "list"],
-    queryFn: fetchControlsList,
+    queryKey: ["controls", "list", scopeArg ?? "all"],
+    queryFn: () => fetchControlsList(scopeArg),
+  });
+
+  // Slice 224 — the dropdown options for the Scope filter pill come
+  // from the tenant's own scope cells (RLS-scoped to the caller's
+  // tenant in /v1/scopes/cells, per slice 017). Failure to load this
+  // list is non-fatal — the pill renders with just "All cells".
+  const scopeCellsQ = useQuery<ScopeCellsListResponse>({
+    queryKey: ["scope-cells"],
+    queryFn: fetchScopeCells,
   });
 
   // Convert the anchor wire payload into the join-ready row shape used
@@ -187,6 +214,30 @@ function ControlsPageInner() {
     ];
   }, [rows]);
 
+  // Slice 224 — render the Scope pill options from the tenant's cells.
+  // Cap at 50 entries; surface a banner above the table when the
+  // tenant has more cells than the cap (AC-5). The cell label falls
+  // back to a deterministic key=value summary if the cell has no
+  // explicit `label` text on the wire.
+  const allScopeCells = scopeCellsQ.data?.cells ?? [];
+  const cellsCapped = allScopeCells.length > SCOPE_CELL_CAP;
+  const cappedScopeCells = cellsCapped
+    ? allScopeCells.slice(0, SCOPE_CELL_CAP)
+    : allScopeCells;
+  const scopeOptions: { value: string; label: string }[] = useMemo(() => {
+    const opts: { value: string; label: string }[] = [
+      { value: ALL, label: "All cells" },
+    ];
+    for (const c of cappedScopeCells) {
+      const fallback = Object.entries(c.dimensions)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => `${k}=${v}`)
+        .join(" / ");
+      opts.push({ value: c.id, label: c.label || fallback || c.id });
+    }
+    return opts;
+  }, [cappedScopeCells]);
+
   const pills: FilterPill[] = [
     {
       id: "framework",
@@ -211,6 +262,15 @@ function ControlsPageInner() {
       label: "Freshness",
       value: filters.freshness,
       options: FRESHNESS_OPTIONS,
+    },
+    // Slice 224 — fifth pill, scope cell filter. Options enumerate
+    // the tenant's own cells (RLS-scoped). Selecting a cell sets
+    // ?scope=<id> and the BFF / upstream applies the intersection.
+    {
+      id: "scope",
+      label: "Scope",
+      value: filters.scope,
+      options: scopeOptions,
     },
   ];
 
@@ -413,6 +473,16 @@ function ControlsPageInner() {
         />
       }
     >
+      {cellsCapped ? (
+        <Alert data-testid="controls-scope-cells-capped" className="mb-3">
+          <AlertTitle>Scope filter capped at {SCOPE_CELL_CAP} cells</AlertTitle>
+          <AlertDescription>
+            Your tenant has {allScopeCells.length} scope cells; only the first{" "}
+            {SCOPE_CELL_CAP} are listed in the Scope filter. A typeahead
+            replacement for larger tenants is on the follow-on backlog.
+          </AlertDescription>
+        </Alert>
+      ) : null}
       <ListTable<AnchorRow>
         columns={columns}
         rows={visible}

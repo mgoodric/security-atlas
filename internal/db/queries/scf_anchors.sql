@@ -117,6 +117,15 @@ WHERE f.slug = 'scf' AND fv.status = 'current' AND a.scf_id = $1 AND f.tenant_id
 -- framework_version, LEFT JOINed to the worst-state-wins per-anchor
 -- rollup over the tenant's `control_evaluations` ledger.
 --
+-- Slice 224: extended to accept an optional `scope_cell_id` filter.
+-- When the parameter is the NULL UUID sentinel (`pgtype.UUID{Valid:false}`),
+-- the per-cell predicate inside `worst_per_anchor` is a no-op and every
+-- evaluation row participates in the rollup. When the parameter is a
+-- valid UUID, the rollup narrows to only the evaluations recorded against
+-- that scope cell — i.e. "what's the per-anchor state in just THIS cell?".
+-- Out-of-tenant cell ids return zero rows naturally via the existing
+-- tenant RLS on `control_evaluations` (no 404 leak).
+--
 -- Shape:
 --   1. `latest_eval` CTE picks the latest control_evaluations row per
 --      (tenant, control_id, scope_cell_id) via DISTINCT ON — the same
@@ -189,6 +198,10 @@ worst_per_anchor AS (
     JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
     WHERE c.superseded_by IS NULL
       AND c.scf_anchor_id IS NOT NULL
+      -- Slice 224: optional scope cell filter via sqlc.narg('scope_cell_id').
+      -- When the param is the NULL UUID sentinel, this predicate is a no-op
+      -- (every evaluation participates). When valid uuid, narrows to that cell.
+      AND (sqlc.narg('scope_cell_id')::uuid IS NULL OR le.scope_cell_id = sqlc.narg('scope_cell_id')::uuid)
     GROUP BY c.scf_anchor_id
 )
 SELECT
@@ -227,6 +240,10 @@ LIMIT $1 OFFSET $2;
 -- the current SCF version. Kept as two queries (rather than one with
 -- a NULL sentinel) so the planner can inline the simpler predicate
 -- and so the parameter types stay tight for sqlc codegen.
+--
+-- Slice 224: extended to accept an optional `scope_cell_id` filter
+-- on the same NULL-UUID sentinel pattern as the latest-with-state
+-- variant above.
 WITH latest_eval AS (
     SELECT DISTINCT ON (ce.tenant_id, ce.control_id, ce.scope_cell_id)
         ce.tenant_id,
@@ -272,6 +289,9 @@ worst_per_anchor AS (
     JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
     WHERE c.superseded_by IS NULL
       AND c.scf_anchor_id IS NOT NULL
+      -- Slice 224: optional scope cell filter; see comment on the
+      -- latest-with-state variant above.
+      AND (sqlc.narg('scope_cell_id')::uuid IS NULL OR le.scope_cell_id = sqlc.narg('scope_cell_id')::uuid)
     GROUP BY c.scf_anchor_id
 )
 SELECT

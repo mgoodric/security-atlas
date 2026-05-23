@@ -113,10 +113,18 @@ export type AnchorWithState = Anchor & {
   state: AnchorState | null;
 };
 
+// Slice 224 — accepts an optional `scopeCellID` that, when set, is
+// forwarded to the upstream as `?scope=<cell_id>` so the worst_per_anchor
+// rollup narrows to evaluations recorded against that scope cell.
+// Server-side filtering only (P0-224-2): the applicability_expr never
+// reaches the browser.
 export async function listAnchorsWithState(
   bearer: string,
+  scopeCellID?: string,
 ): Promise<AnchorWithState[]> {
-  const res = await apiFetch("/v1/anchors?include=state", bearer);
+  const qs = new URLSearchParams({ include: "state" });
+  if (scopeCellID) qs.set("scope", scopeCellID);
+  const res = await apiFetch(`/v1/anchors?${qs.toString()}`, bearer);
   const body = (await res.json()) as { anchors: AnchorWithState[] };
   return body.anchors;
 }
@@ -149,8 +157,18 @@ export type ControlsListResponse = {
   anchors: AnchorWithState[];
 };
 
-export async function fetchControlsList(): Promise<ControlsListResponse> {
-  const res = await fetch(`/api/controls`);
+// Slice 224 — accepts an optional `scopeCellID` that the page forwards
+// to the BFF as `?scope=<cell_id>`. Empty / undefined value omits the
+// query param entirely so the BFF takes its no-filter branch.
+export async function fetchControlsList(
+  scopeCellID?: string,
+): Promise<ControlsListResponse> {
+  const qs = new URLSearchParams();
+  if (scopeCellID) qs.set("scope", scopeCellID);
+  const url = qs.toString()
+    ? `/api/controls?${qs.toString()}`
+    : `/api/controls`;
+  const res = await fetch(url);
   if (!res.ok) {
     let msg = `${res.status} ${res.statusText}`;
     try {
@@ -162,6 +180,52 @@ export async function fetchControlsList(): Promise<ControlsListResponse> {
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as ControlsListResponse;
+}
+
+// ----- Slice 224: tenant scope cells (for the /controls Scope filter pill) -----
+//
+// `ScopeCell` mirrors `cellWire` in internal/api/scopes/handlers.go.
+// The /controls page consumes this via the BFF route at
+// `/api/scope-cells` to populate the Scope filter pill's dropdown
+// options. Filtering by scope cell is a server-side concern
+// (P0-224-2 — applicability_expr never reaches the browser); these
+// types only carry the cell id + display label.
+
+export type ScopeCell = {
+  id: string;
+  label: string;
+  dimensions: Record<string, string>;
+};
+
+export type ScopeCellsListResponse = {
+  cells: ScopeCell[];
+};
+
+// Server-side fn: hit the platform directly with the bearer. Used by the
+// /api/scope-cells BFF route handler that runs server-side. Mirrors the
+// listAnchorsWithState shape (no client-direct call from the browser —
+// we never expose the platform's bearer to the page).
+export async function listScopeCells(bearer: string): Promise<ScopeCell[]> {
+  const res = await apiFetch("/v1/scopes/cells", bearer);
+  const body = (await res.json()) as { cells: ScopeCell[] };
+  return body.cells ?? [];
+}
+
+// Browser-side fn: the page calls this via TanStack Query. Hits the
+// BFF, which injects the bearer cookie.
+export async function fetchScopeCells(): Promise<ScopeCellsListResponse> {
+  const res = await fetch("/api/scope-cells");
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // body not JSON — keep the status line
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as ScopeCellsListResponse;
 }
 
 // ----- Slice 151: tenant control list (for risk-create form picker) -----

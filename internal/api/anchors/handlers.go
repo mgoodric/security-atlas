@@ -101,6 +101,18 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	withState := includesState(r)
 
+	// Slice 224: optional `?scope=<cell_id>` filter. When set, the
+	// with-state queries narrow the worst_per_anchor rollup to
+	// evaluations recorded against the given scope cell only. A bad
+	// UUID returns 400; an unset value is the no-filter sentinel
+	// (pgtype.UUID{Valid:false}). Out-of-tenant cell ids return zero
+	// rows naturally via the existing tenant RLS on
+	// control_evaluations — no 404 leak.
+	scopeCell, ok := h.scopeCell(w, r)
+	if !ok {
+		return
+	}
+
 	if fvID := r.URL.Query().Get("framework_version_id"); fvID != "" {
 		uid, err := uuid.Parse(fvID)
 		if err != nil {
@@ -115,6 +127,7 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 					FrameworkVersionID: pgtype.UUID{Bytes: uid, Valid: true},
 					Limit:              limit,
 					Offset:             offset,
+					ScopeCellID:        scopeCell,
 				})
 				return inner
 			})
@@ -143,8 +156,9 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 		err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
 			var inner error
 			rows, inner = q.ListSCFAnchorsLatestWithState(ctx, dbx.ListSCFAnchorsLatestWithStateParams{
-				Limit:  limit,
-				Offset: offset,
+				Limit:       limit,
+				Offset:      offset,
+				ScopeCellID: scopeCell,
 			})
 			return inner
 		})
@@ -195,6 +209,25 @@ func (h *Handler) inTenantTx(ctx context.Context, fn func(context.Context, *dbx.
 		return fmt.Errorf("anchors: commit tx: %w", err)
 	}
 	return nil
+}
+
+// scopeCell parses the optional `?scope=<uuid>` query parameter. Returns
+// the parsed UUID wrapped in a pgtype.UUID (Valid=true) when set, or an
+// invalid pgtype.UUID (Valid=false) when the query param is absent —
+// the SQL queries treat the invalid sentinel as "no filter". On a
+// malformed UUID it writes a 400 and returns ok=false so the caller
+// short-circuits the handler. Slice 224.
+func (h *Handler) scopeCell(w http.ResponseWriter, r *http.Request) (pgtype.UUID, bool) {
+	v := r.URL.Query().Get("scope")
+	if v == "" {
+		return pgtype.UUID{Valid: false}, true
+	}
+	uid, err := uuid.Parse(v)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "scope must be a UUID")
+		return pgtype.UUID{}, false
+	}
+	return pgtype.UUID{Bytes: uid, Valid: true}, true
 }
 
 // includesState returns true when the request asked for the joined state

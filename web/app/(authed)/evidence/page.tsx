@@ -138,7 +138,7 @@ function EvidencePageInner() {
   // reuses the slice 098 endpoint so we don't duplicate the wire.
   const anchorsQ = useQuery<ControlsListResponse>({
     queryKey: ["controls", "list"],
-    queryFn: fetchControlsList,
+    queryFn: () => fetchControlsList(),
   });
   const anchors = useMemo(() => anchorsQ.data?.anchors ?? [], [anchorsQ.data]);
   const controlOptions = useMemo(() => buildControlOptions(anchors), [anchors]);
