@@ -106,28 +106,57 @@ func (s *Status) IsFirstInstall(ctx context.Context) (bool, error) {
 // tenant can be resolved — callers treat that as "no tenant_id to
 // surface" and degrade gracefully.
 //
-// Resolution order:
+// POOL SELECTION (fix-forward 2026-05-23): this method MUST run
+// against the writePool (the BYPASSRLS migrate pool), not the
+// readPool. Both `tenants` and `users` are tenant-scoped tables under
+// FORCE ROW LEVEL SECURITY (migrations 20260511000012 +
+// 20260521010000); the read policy on each filters by
+// `current_tenant_matches(tenant_id)`. The `/v1/install-state`
+// surface is INTENTIONALLY unauthenticated (slice 073 contract), so
+// no `app.current_tenant` GUC is set on the request, and
+// `current_tenant_matches(...)` evaluates to NULL → row hidden. The
+// migrate pool's BYPASSRLS attribute is the only way to resolve the
+// bootstrap tenant id without first authenticating the caller —
+// which would be circular (the caller is on the login page and needs
+// the tenant id to sign in).
+//
+// When the write pool is nil (unit-test servers that exercise only
+// the read path), this method returns `(uuid.Nil, nil)` — the
+// install-state handler treats that as "no tenant_id to surface" and
+// omits the field gracefully. This mirrors the existing
+// MarkFirstSignin / ResetBootstrap shape where a missing write pool
+// is a soft failure.
+//
+// Resolution order (writePool):
 //
 //  1. PRIMARY: `SELECT id FROM tenants WHERE is_bootstrap_tenant = TRUE
-//     LIMIT 1`. Going forward, the `deploy/docker/bootstrap/seed.sql` step
-//     populates this row on every fresh install.
+//     LIMIT 1`. Going forward, the `deploy/docker/bootstrap/seed.sql`
+//     step populates this row on every fresh install.
 //
 //  2. FALLBACK: `SELECT tenant_id FROM users ORDER BY created_at ASC
-//     LIMIT 1`. Used ONLY when the primary query returns no rows — i.e.
-//     installs that pre-date the slice 210 seed.sql change (the existing
-//     atlas-edge instance). The bootstrap user is by construction the
-//     oldest user, so its tenant_id is the canonical bootstrap tenant
-//     by definition. This is a corrupted-install / pre-slice-210
-//     graceful-degradation path; not a permanent contract.
+//     LIMIT 1`. Used ONLY when the primary query returns no rows —
+//     i.e. installs that pre-date the slice 210 seed.sql change (the
+//     existing atlas-edge instance). The bootstrap user is by
+//     construction the oldest user, so its tenant_id is the canonical
+//     bootstrap tenant by definition. This is a graceful-degradation
+//     path for already-deployed installs; not a permanent contract.
 //
-// Any DB failure other than `pgx.ErrNoRows` is propagated to the caller
-// so the slice-210 install-state handler can log + omit the field.
+// Any DB failure other than `pgx.ErrNoRows` is propagated to the
+// caller so the slice-210 install-state handler can log + omit the
+// field.
 func (s *Status) BootstrapTenantID(ctx context.Context) (uuid.UUID, error) {
-	if s.readPool == nil {
-		return uuid.Nil, errors.New("platform: read pool not configured")
+	if s.writePool == nil {
+		// No BYPASSRLS pool available — graceful degradation. Reading
+		// via readPool would return zero rows (RLS hides them without
+		// a tenant GUC), which would be observationally identical to
+		// "no bootstrap tenant" but for the wrong reason. Returning
+		// `(uuid.Nil, nil)` makes the handler omit the field, the FE
+		// falls back to the legacy bearer-paste card. This is the
+		// same shape unit-test servers (no write pool wired) see.
+		return uuid.Nil, nil
 	}
 	var tid uuid.UUID
-	err := s.readPool.QueryRow(ctx,
+	err := s.writePool.QueryRow(ctx,
 		`SELECT id FROM tenants WHERE is_bootstrap_tenant = TRUE LIMIT 1`).Scan(&tid)
 	if err == nil {
 		return tid, nil
@@ -139,7 +168,7 @@ func (s *Status) BootstrapTenantID(ctx context.Context) (uuid.UUID, error) {
 	// a pre-slice-210 installed instance where seed.sql never populated
 	// the tenants row. Use the oldest user's tenant_id as the canonical
 	// bootstrap tenant.
-	err = s.readPool.QueryRow(ctx,
+	err = s.writePool.QueryRow(ctx,
 		`SELECT tenant_id FROM users ORDER BY created_at ASC LIMIT 1`).Scan(&tid)
 	if err == nil {
 		return tid, nil
