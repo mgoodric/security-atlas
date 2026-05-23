@@ -258,10 +258,53 @@ func resetBootstrapFixtures(t *testing.T, admin *pgxpool.Pool) {
 	}
 }
 
+// TestStatus_BootstrapTenantID_RequiresWritePool guards the
+// fix-forward 2026-05-23 invariant: the method MUST use the writePool
+// (BYPASSRLS migrate pool), not the readPool. Without a writePool,
+// the method falls through to (uuid.Nil, nil) — graceful degradation
+// — because the atlas_app readPool cannot see `tenants` or `users`
+// rows without a tenant GUC set, and the unauth install-state
+// surface has none.
+//
+// Concretely: seed a tenants row, then construct a Status with
+// writePool=nil but readPool=app. Assert (uuid.Nil, nil) is returned
+// — anything else (an error OR a returned UUID) means the method
+// regressed back to readPool-based RLS-vulnerable behavior.
+func TestStatus_BootstrapTenantID_RequiresWritePool(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	resetBootstrapFixtures(t, admin)
+	t.Cleanup(func() { resetBootstrapFixtures(t, admin) })
+
+	// Seed a tenants row that atlas_app cannot see due to RLS.
+	want := uuid.MustParse("f0000000-0000-4000-8000-000000000001")
+	_, err := admin.Exec(context.Background(),
+		`INSERT INTO tenants (id, name, is_bootstrap_tenant) VALUES ($1, 'Default Tenant', TRUE)`,
+		want)
+	if err != nil {
+		t.Fatalf("seed tenants row: %v", err)
+	}
+
+	// Construct Status with writePool=nil. The method must NOT try to
+	// read via readPool (where RLS hides the row), and must return
+	// (uuid.Nil, nil) for graceful degradation.
+	s := platform.NewStatus(app, nil)
+	got, err := s.BootstrapTenantID(context.Background())
+	if err != nil {
+		t.Fatalf("BootstrapTenantID with nil writePool: err = %v; want nil (graceful degradation)", err)
+	}
+	if got != uuid.Nil {
+		t.Fatalf("BootstrapTenantID with nil writePool: got = %s; want uuid.Nil (would expose RLS-vulnerable readPool)", got)
+	}
+}
+
 // TestStatus_BootstrapTenantID_PrimaryQueryHitsTenantsRow exercises
 // the slice-210 primary lookup: when a `tenants` row exists with
 // `is_bootstrap_tenant=true`, BootstrapTenantID returns its id without
 // touching the users-fallback path.
+//
+// Verifies the writePool path (the only correct path — atlas_app
+// readPool would see zero rows due to RLS without a tenant GUC).
 func TestStatus_BootstrapTenantID_PrimaryQueryHitsTenantsRow(t *testing.T) {
 	admin := openPool(t, adminDSN(t))
 	app := openPool(t, appDSN(t))
