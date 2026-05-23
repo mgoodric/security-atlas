@@ -189,7 +189,7 @@ export default function SettingsPage() {
               className="text-primary underline-offset-4 hover:underline"
               data-testid="settings-admin-cross-link"
             >
-              Tenant administration ({"->"}/admin)
+              Tenant administration → /admin
             </a>
           ) : (
             <span className="text-muted-foreground">
