@@ -45,7 +45,18 @@
 #      fixed-token credential — see cmd/atlas/main.go — never a DB-backed
 #      api_keys row. `decision_audit_log` is the table that actually
 #      records phase 6 running.)
-#   6. A fresh re-run of `docker compose run --rm atlas-bootstrap` exits 0
+#   6. (Slice 212) POST /auth/local/login with the bootstrap user's
+#      email + password returns HTTP 200 and a non-empty `token` field —
+#      proves slice 209's local-credential AS is wired end-to-end
+#      (handler reachable + password verifies + JWT signer produces a
+#      token; catches the slice-209 D5 nil-signer fallback).
+#   7. (Slice 212) The JWT minted in assertion 6 carries
+#      `atlas:super_admin == true` AND
+#      `atlas:roles[<bootstrap_tenant_uuid>]` containing `"admin"` —
+#      proves slice 211's seed.sql role grants flowed into the JWT
+#      claims at sign-in time. Without this, every admin-gated endpoint
+#      would return 403 even though sign-in itself succeeded.
+#   8. A fresh re-run of `docker compose run --rm atlas-bootstrap` exits 0
 #      and does not duplicate seed rows (slice 065 bug #3 idempotency,
 #      AC-7).
 #
@@ -409,7 +420,86 @@ AUDITROWS="$(db_count 'SELECT count(*) FROM decision_audit_log')"
 log "decision_audit_log table has ${AUDITROWS} row(s)"
 
 # ---------------------------------------------------------------------
-# Assertion 6 (AC-7): a fresh re-run of atlas-bootstrap against the now-
+# Assertion 6 (slice 212): the bootstrap user can sign in via the slice-
+# 209 local-credential AS. Catches slice 209 D5's nil-signer fallback
+# (200 with no `token` field) and any future regression in
+# /auth/local/login wiring.
+#
+# Body materialized via heredoc to a tmpfile + `curl --data @<file>` so
+# the password never lands in a process arg list (defensive even though
+# the bootstrap password is a CI-only deterministic value).
+# ---------------------------------------------------------------------
+LOGIN_BODY="$(mktemp)"
+cat > "${LOGIN_BODY}" <<JSON
+{"tenant_id":"00000000-0000-4000-8000-000000000001","email":"admin@example.com","password":"test-default-user-password"}
+JSON
+
+LOGIN_RESP="$(mktemp)"
+LOGIN_CODE="$(curl -sS -o "${LOGIN_RESP}" -w "%{http_code}" \
+    -X POST \
+    -H "Content-Type: application/json" \
+    --data "@${LOGIN_BODY}" \
+    "http://127.0.0.1:${ATLAS_HOSTPORT}/auth/local/login")"
+rm -f "${LOGIN_BODY}"
+
+[ "${LOGIN_CODE}" = "200" ] \
+    || fail "sign-in: HTTP ${LOGIN_CODE} (want 200); body: $(head -c 400 "${LOGIN_RESP}")"
+
+TOKEN="$(python3 -c '
+import json, sys
+with open(sys.argv[1]) as f:
+    body = json.load(f)
+tok = body.get("token", "")
+if not tok:
+    sys.stderr.write("token field missing or empty in /auth/local/login response\n")
+    sys.exit(1)
+print(tok)
+' "${LOGIN_RESP}")" \
+    || fail "sign-in: response has no non-empty 'token' field (slice 209 D5 nil-signer fallback?); body: $(head -c 400 "${LOGIN_RESP}")"
+log "sign-in: HTTP 200, token minted ($(printf %s "${TOKEN}" | wc -c | tr -d ' ') chars)"
+
+# ---------------------------------------------------------------------
+# Assertion 7 (slice 212): the JWT minted in assertion 6 carries the
+# slice-211 admin role grant + super_admin claim. Decodes the JWT's
+# middle segment (base64url-encoded JSON payload) and inspects the
+# `atlas:super_admin` + `atlas:roles[<bootstrap_tenant>]` claims.
+#
+# Without this assertion, a regression that removed the slice-211 seed
+# grants would pass sign-in (assertion 6 stays green) but every
+# admin/auditor-gated /v1/* endpoint would 403 in prod — exactly the
+# bug class slices 209/210/211 collectively dug us out of.
+# ---------------------------------------------------------------------
+python3 - <<PY || fail "JWT claim verification failed (see stderr above)"
+import base64, json, sys
+token = """${TOKEN}"""
+parts = token.split(".")
+if len(parts) != 3:
+    sys.stderr.write(f"JWT shape: {len(parts)} dot-separated parts, want 3\n")
+    sys.exit(1)
+b = parts[1]
+b += "=" * (4 - len(b) % 4)
+claims = json.loads(base64.urlsafe_b64decode(b))
+ok = True
+if claims.get("atlas:super_admin") is not True:
+    sys.stderr.write(f"atlas:super_admin = {claims.get('atlas:super_admin')!r}; want True\n")
+    ok = False
+TENANT = "00000000-0000-4000-8000-000000000001"
+roles_map = claims.get("atlas:roles") or {}
+tenant_roles = roles_map.get(TENANT) or []
+if "admin" not in tenant_roles:
+    sys.stderr.write(f"atlas:roles[{TENANT}] = {tenant_roles!r}; want it to contain 'admin'\n")
+    ok = False
+if not ok:
+    sys.stderr.write(f"full claims: {json.dumps(claims, indent=2)}\n")
+    sys.exit(1)
+print("  atlas:super_admin = True")
+print(f"  atlas:roles[{TENANT}] contains 'admin'")
+PY
+log "JWT carries super_admin=true + admin role in bootstrap tenant"
+rm -f "${LOGIN_RESP}"
+
+# ---------------------------------------------------------------------
+# Assertion 8 (AC-7): a fresh re-run of atlas-bootstrap against the now-
 # populated DB exits 0 and does not duplicate seed rows.
 # ---------------------------------------------------------------------
 log "re-running atlas-bootstrap (idempotency check)"
