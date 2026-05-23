@@ -109,8 +109,15 @@ export type AnchorState = {
   evaluated_at: string;
 };
 
+// Slice 226 — `?include=state` now also carries `frameworks: string[]`
+// (display abbreviations like `SOC2 · ISO · CSF`). The wire ships
+// display values, not slugs; the abbreviation authority lives in the
+// backend (`internal/catalog/framework_codes.go`), and the frontend is
+// a pure renderer (P0-226-2). Empty array means the anchor has no
+// satisfaction edges yet; the page renders `—` in that case (AC-6).
 export type AnchorWithState = Anchor & {
   state: AnchorState | null;
+  frameworks: string[];
 };
 
 // Slice 224 — accepts an optional `scopeCellID` that, when set, is

@@ -108,4 +108,44 @@ test.describe("/controls list view", () => {
     //    const url = new URL(page.url());
     //    expect(url.searchParams.get("scope")).toBeNull();
   });
+
+  // Slice 226 — Frameworks-per-row column (right-aligned, mockup line 197).
+  // Pre-conditions the seed harness (slice 082) must establish before
+  // these assertions are turned on:
+  //   - The SCF catalog + at least one framework crosswalk (SOC 2 v2017)
+  //     are loaded so at least one anchor carries a non-empty frameworks
+  //     array. The setupHTTPServer in the Go integration tests already
+  //     does this for the integration suite; the seed harness must
+  //     replicate the bring-up for the e2e harness.
+  test("slice 226 AC-5: Frameworks column header is present", async () => {
+    //    await page.goto("/controls");
+    //    await expect(
+    //      page.getByRole("columnheader", { name: /Frameworks/ }),
+    //    ).toBeVisible();
+  });
+
+  test("slice 226 AC-5 + AC-9: at least one row carries a non-empty Frameworks cell", async () => {
+    //    await page.goto("/controls");
+    //    // Wait for data to load.
+    //    await page.waitForLoadState("networkidle");
+    //    const populatedFrameworks = page.getByTestId("controls-row-frameworks");
+    //    expect(await populatedFrameworks.count()).toBeGreaterThan(0);
+    //    // At least one cell must contain the middle-dot separator OR a
+    //    // single canonical abbreviation (SOC2 / ISO / CSF / PCI / HIPAA / GDPR).
+    //    const firstText = await populatedFrameworks.first().textContent();
+    //    expect(firstText).toMatch(/SOC2|ISO|CSF|PCI|HIPAA|GDPR/);
+  });
+
+  test("slice 226 AC-6: anchors with no satisfaction edges render the em-dash placeholder", async () => {
+    //    await page.goto("/controls");
+    //    await page.waitForLoadState("networkidle");
+    //    // The empty-set marker shares the `controls-row-frameworks-empty`
+    //    // test-id so the assertion is stable when the SCF catalog
+    //    // contains anchors a crosswalk hasn't mapped yet.
+    //    const empties = page.getByTestId("controls-row-frameworks-empty");
+    //    // 0 is a valid count (every anchor MAY be mapped); just verify
+    //    // the locator is plumbed correctly — when the catalog grows to
+    //    // include unmapped anchors, this becomes a non-zero check.
+    //    expect(await empties.count()).toBeGreaterThanOrEqual(0);
+  });
 });

@@ -133,6 +133,9 @@ func TestLatestRowsToStateWire_RendersSQLAggregatedResultVerbatim(t *testing.T) 
 			StateResult:          ptrEvidenceResult("fail"),
 			StateFreshnessStatus: ptrString("fresh"),
 			StateEvaluatedAt:     pgtype.Timestamptz{Time: evalAt, Valid: true},
+			// Slice 226: anchor satisfies SOC 2 + ISO + NIST CSF — the
+			// canonical mockup-row example.
+			FrameworkSlugs: []string{"soc2", "iso27001", "nist_csf"},
 		},
 		{
 			ID: pgtype.UUID{Bytes: [16]byte{0x22}, Valid: true}, ScfID: "AAA-02",
@@ -140,12 +143,16 @@ func TestLatestRowsToStateWire_RendersSQLAggregatedResultVerbatim(t *testing.T) 
 			StateResult:          ptrEvidenceResult("pass"),
 			StateFreshnessStatus: ptrString("fresh"),
 			StateEvaluatedAt:     pgtype.Timestamptz{Time: evalAt, Valid: true},
+			// Slice 226: anchor satisfies just SOC 2.
+			FrameworkSlugs: []string{"soc2"},
 		},
 		{
 			// Anchor with NO tenant control instantiated.
 			ID: pgtype.UUID{Bytes: [16]byte{0x33}, Valid: true}, ScfID: "AAA-03",
 			Family: "AAA", Title: "no-control anchor",
 			// All state_* columns are zero-value / .Valid = false
+			// Slice 226: anchor with no satisfaction edges yet.
+			FrameworkSlugs: nil,
 		},
 	}
 	wire := latestRowsToStateWire(rows)
@@ -163,6 +170,78 @@ func TestLatestRowsToStateWire_RendersSQLAggregatedResultVerbatim(t *testing.T) 
 	}
 	if wire[0].SCFID != "AAA-01" || wire[1].SCFID != "AAA-02" || wire[2].SCFID != "AAA-03" {
 		t.Errorf("scf_id ordering not preserved: %+v", []string{wire[0].SCFID, wire[1].SCFID, wire[2].SCFID})
+	}
+
+	// Slice 226 AC-4 + AC-7 — frameworks render as display abbreviations
+	// (SOC2, ISO, CSF) in sorted order. Row[0] gets the full strip;
+	// row[1] gets a single chip; row[2] gets the empty array.
+	wantRow0 := []string{"CSF", "ISO", "SOC2"}
+	if !sliceEq(wire[0].Frameworks, wantRow0) {
+		t.Errorf("row[0] frameworks = %v; want %v", wire[0].Frameworks, wantRow0)
+	}
+	wantRow1 := []string{"SOC2"}
+	if !sliceEq(wire[1].Frameworks, wantRow1) {
+		t.Errorf("row[1] frameworks = %v; want %v", wire[1].Frameworks, wantRow1)
+	}
+	// Slice 226 AC-6 — anchor with no satisfaction edges renders an
+	// empty array on the wire (NOT nil; the JSON wire shape is `[]`
+	// so the frontend type narrowing stays simple).
+	if wire[2].Frameworks == nil {
+		t.Errorf("row[2] frameworks = nil; want empty slice for stable wire shape")
+	}
+	if len(wire[2].Frameworks) != 0 {
+		t.Errorf("row[2] frameworks len = %d; want 0", len(wire[2].Frameworks))
+	}
+}
+
+// sliceEq is a tiny equality helper local to this test file so the
+// frameworks assertions stay readable without dragging in reflect for
+// one comparison.
+func sliceEq(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// Slice 226 — wire shape pin for the new `frameworks` column. The
+// frontend AnchorWithState type narrows on the field being a string
+// array; this test guards against silent regressions to nil / null /
+// other shapes.
+func TestFrameworksWire_NilAndEmptyInputBothRenderEmpty(t *testing.T) {
+	if got := frameworksWire(nil); got == nil || len(got) != 0 {
+		t.Errorf("frameworksWire(nil) = %v; want non-nil empty slice", got)
+	}
+	if got := frameworksWire([]string{}); got == nil || len(got) != 0 {
+		t.Errorf("frameworksWire([]) = %v; want non-nil empty slice", got)
+	}
+}
+
+func TestFrameworksWire_SortsAndMapsCanonicalSlugs(t *testing.T) {
+	// Backend authority over display abbreviations: the wire layer
+	// converts slugs to mockup-style codes (SOC2 / ISO / CSF / PCI /
+	// HIPAA / GDPR) and sorts the result for deterministic output.
+	in := []string{"gdpr", "soc2", "nist_csf"}
+	got := frameworksWire(in)
+	want := []string{"CSF", "GDPR", "SOC2"}
+	if !sliceEq(got, want) {
+		t.Errorf("frameworksWire(%v) = %v; want %v", in, got, want)
+	}
+}
+
+func TestFrameworksWire_UnknownSlugFallsBackToUpperCase(t *testing.T) {
+	// Catalog-drift transparency — a newly imported framework not yet
+	// in the canonical map still appears in the column, just upper-
+	// cased verbatim (e.g. `ccm` → `CCM`).
+	got := frameworksWire([]string{"ccm", "soc2"})
+	want := []string{"CCM", "SOC2"}
+	if !sliceEq(got, want) {
+		t.Errorf("frameworksWire(catalog-drift) = %v; want %v", got, want)
 	}
 }
 

@@ -1631,6 +1631,11 @@ type Querier interface {
 	// Slice 224: extended to accept an optional `scope_cell_id` filter
 	// on the same NULL-UUID sentinel pattern as the latest-with-state
 	// variant above.
+	//
+	// Slice 226: extended again to attach a per-anchor `framework_slugs`
+	// array — see ListSCFAnchorsLatestWithState comment for the shape +
+	// constitutional rationale. Identical CTE; the only difference vs the
+	// latest variant is the outer WHERE clause.
 	ListSCFAnchorsForVersionWithState(ctx context.Context, arg ListSCFAnchorsForVersionWithStateParams) ([]ListSCFAnchorsForVersionWithStateRow, error)
 	// Paginated anchor list for the latest current SCF framework_version.
 	ListSCFAnchorsLatest(ctx context.Context, arg ListSCFAnchorsLatestParams) ([]ScfAnchor, error)
@@ -1647,6 +1652,16 @@ type Querier interface {
 	// Out-of-tenant cell ids return zero rows naturally via the existing
 	// tenant RLS on `control_evaluations` (no 404 leak).
 	//
+	// Slice 226: extended again to attach a per-anchor `framework_slugs`
+	// array — the set of framework slugs (excluding `scf` itself) whose
+	// requirements the anchor satisfies via fw_to_scf_edges. A separate
+	// `anchor_frameworks` CTE aggregates the slugs with array_agg(DISTINCT),
+	// joined LEFT to scf_anchors so anchors with zero edges return an empty
+	// array (renders as `—` in the UI per AC-6). Constitutional invariant 1
+	// (one control, N framework satisfactions) is the spine — the column
+	// exists precisely to surface this invariant to users browsing the
+	// catalog. No per-row fan-out: one CTE, one GROUP BY, one LEFT JOIN.
+	//
 	// Shape:
 	//   1. `latest_eval` CTE picks the latest control_evaluations row per
 	//      (tenant, control_id, scope_cell_id) via DISTINCT ON — the same
@@ -1657,19 +1672,29 @@ type Querier interface {
 	//      tenant-instantiated control that satisfies one anchor:
 	//        result rank: fail (4) > inconclusive (3) > pass (2) > na (1)
 	//        freshness  : expired (4) > stale (3) > no_evidence (2) > fresh (1)
-	//   3. Outer SELECT joins scf_anchors LEFT JOIN worst_per_anchor — an
-	//      anchor with no tenant control returns NULLs for every state
-	//      column (the handler renders `state: null`).
+	//   3. `anchor_frameworks` aggregates the global crosswalk: for each
+	//      anchor, the DISTINCT set of framework slugs reached via
+	//      fw_to_scf_edges → framework_requirements → framework_versions
+	//      → frameworks. Excludes the SCF spine itself (the column is
+	//      "what frameworks DOES this anchor satisfy?", not "is it an SCF
+	//      anchor?" — the answer to that is always yes). Excludes
+	//      `no_relationship` edges (those are explicit non-mappings, not
+	//      satisfaction).
+	//   4. Outer SELECT joins scf_anchors LEFT JOIN worst_per_anchor +
+	//      LEFT JOIN anchor_frameworks — an anchor with no tenant control
+	//      returns NULLs for state; an anchor with no satisfaction edges
+	//      returns NULL for framework_slugs (the handler COALESCEs to []).
 	//
 	// Constitutional invariants:
+	//   #1 One control, N framework satisfactions: the new framework_slugs
+	//      column SURFACES this invariant on the controls list.
 	//   #6 RLS: `controls` and `control_evaluations` are tenant-scoped under
 	//      FORCE ROW LEVEL SECURITY. The tenant GUC set by `tenancymw`
-	//      filters those rows; the global `scf_anchors` rows
-	//      (`tenant_id IS NULL`) are visible to every tenant by design.
+	//      filters those rows; the global `scf_anchors` rows + the
+	//      catalog-global `fw_to_scf_edges` (`tenant_id IS NULL`) are
+	//      visible to every tenant by design.
 	//   #2 Engine is sole writer of control_evaluations: this is a pure read
 	//      over the engine's output table, never a parallel computation.
-	//   #1 One control, N framework satisfactions: state is rolled up per
-	//      ANCHOR (the catalog spine node), not per framework.
 	//
 	// NOTE: the matching Go method lives in internal/db/dbx/scf_anchors.sql.go
 	// (hand-maintained to keep the rest of the dbx tree HEAD-blessed per the

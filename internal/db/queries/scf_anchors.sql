@@ -126,6 +126,16 @@ WHERE f.slug = 'scf' AND fv.status = 'current' AND a.scf_id = $1 AND f.tenant_id
 -- Out-of-tenant cell ids return zero rows naturally via the existing
 -- tenant RLS on `control_evaluations` (no 404 leak).
 --
+-- Slice 226: extended again to attach a per-anchor `framework_slugs`
+-- array — the set of framework slugs (excluding `scf` itself) whose
+-- requirements the anchor satisfies via fw_to_scf_edges. A separate
+-- `anchor_frameworks` CTE aggregates the slugs with array_agg(DISTINCT),
+-- joined LEFT to scf_anchors so anchors with zero edges return an empty
+-- array (renders as `—` in the UI per AC-6). Constitutional invariant 1
+-- (one control, N framework satisfactions) is the spine — the column
+-- exists precisely to surface this invariant to users browsing the
+-- catalog. No per-row fan-out: one CTE, one GROUP BY, one LEFT JOIN.
+--
 -- Shape:
 --   1. `latest_eval` CTE picks the latest control_evaluations row per
 --      (tenant, control_id, scope_cell_id) via DISTINCT ON — the same
@@ -136,19 +146,29 @@ WHERE f.slug = 'scf' AND fv.status = 'current' AND a.scf_id = $1 AND f.tenant_id
 --      tenant-instantiated control that satisfies one anchor:
 --        result rank: fail (4) > inconclusive (3) > pass (2) > na (1)
 --        freshness  : expired (4) > stale (3) > no_evidence (2) > fresh (1)
---   3. Outer SELECT joins scf_anchors LEFT JOIN worst_per_anchor — an
---      anchor with no tenant control returns NULLs for every state
---      column (the handler renders `state: null`).
+--   3. `anchor_frameworks` aggregates the global crosswalk: for each
+--      anchor, the DISTINCT set of framework slugs reached via
+--      fw_to_scf_edges → framework_requirements → framework_versions
+--      → frameworks. Excludes the SCF spine itself (the column is
+--      "what frameworks DOES this anchor satisfy?", not "is it an SCF
+--      anchor?" — the answer to that is always yes). Excludes
+--      `no_relationship` edges (those are explicit non-mappings, not
+--      satisfaction).
+--   4. Outer SELECT joins scf_anchors LEFT JOIN worst_per_anchor +
+--      LEFT JOIN anchor_frameworks — an anchor with no tenant control
+--      returns NULLs for state; an anchor with no satisfaction edges
+--      returns NULL for framework_slugs (the handler COALESCEs to []).
 --
 -- Constitutional invariants:
+--   #1 One control, N framework satisfactions: the new framework_slugs
+--      column SURFACES this invariant on the controls list.
 --   #6 RLS: `controls` and `control_evaluations` are tenant-scoped under
 --      FORCE ROW LEVEL SECURITY. The tenant GUC set by `tenancymw`
---      filters those rows; the global `scf_anchors` rows
---      (`tenant_id IS NULL`) are visible to every tenant by design.
+--      filters those rows; the global `scf_anchors` rows + the
+--      catalog-global `fw_to_scf_edges` (`tenant_id IS NULL`) are
+--      visible to every tenant by design.
 --   #2 Engine is sole writer of control_evaluations: this is a pure read
 --      over the engine's output table, never a parallel computation.
---   #1 One control, N framework satisfactions: state is rolled up per
---      ANCHOR (the catalog spine node), not per framework.
 --
 -- NOTE: the matching Go method lives in internal/db/dbx/scf_anchors.sql.go
 -- (hand-maintained to keep the rest of the dbx tree HEAD-blessed per the
@@ -203,6 +223,21 @@ worst_per_anchor AS (
       -- (every evaluation participates). When valid uuid, narrows to that cell.
       AND (sqlc.narg('scope_cell_id')::uuid IS NULL OR le.scope_cell_id = sqlc.narg('scope_cell_id')::uuid)
     GROUP BY c.scf_anchor_id
+),
+anchor_frameworks AS (
+    -- Slice 226: per-anchor framework set. One GROUP BY over the
+    -- catalog-global crosswalk; no per-row fan-out.
+    SELECT
+        e.scf_anchor_id AS anchor_id,
+        array_agg(DISTINCT af.slug) AS framework_slugs
+    FROM fw_to_scf_edges e
+    JOIN framework_requirements ar ON ar.id = e.framework_requirement_id
+    JOIN framework_versions afv    ON afv.id = ar.framework_version_id
+    JOIN frameworks af             ON af.id = afv.framework_id
+    WHERE e.relationship_type <> 'no_relationship'
+      AND af.tenant_id IS NULL
+      AND af.slug <> 'scf'
+    GROUP BY e.scf_anchor_id
 )
 SELECT
     a.id, a.framework_version_id, a.scf_id, a.family, a.title,
@@ -224,11 +259,18 @@ SELECT
     wpa.result                        AS state_result,
     wpa.freshness_status              AS state_freshness_status,
     wpa.last_observed_at::timestamptz AS state_last_observed_at,
-    wpa.evaluated_at::timestamptz     AS state_evaluated_at
+    wpa.evaluated_at::timestamptz     AS state_evaluated_at,
+    -- Slice 226: per-anchor framework set. COALESCE in the handler
+    -- (sqlc emits []string with NULL → nil; the wire layer coalesces
+    -- nil → empty array). The LEFT JOIN ensures every anchor row
+    -- carries the column; anchors with no satisfaction edges return
+    -- NULL → empty slice → wire `[]`.
+    af.framework_slugs::text[]        AS framework_slugs
 FROM scf_anchors a
 JOIN framework_versions fv ON fv.id = a.framework_version_id
 JOIN frameworks f ON f.id = fv.framework_id
 LEFT JOIN worst_per_anchor wpa ON wpa.anchor_id = a.id
+LEFT JOIN anchor_frameworks af ON af.anchor_id = a.id
 WHERE f.slug = 'scf' AND fv.status = 'current' AND f.tenant_id IS NULL
 ORDER BY a.scf_id
 LIMIT $1 OFFSET $2;
@@ -244,6 +286,11 @@ LIMIT $1 OFFSET $2;
 -- Slice 224: extended to accept an optional `scope_cell_id` filter
 -- on the same NULL-UUID sentinel pattern as the latest-with-state
 -- variant above.
+--
+-- Slice 226: extended again to attach a per-anchor `framework_slugs`
+-- array — see ListSCFAnchorsLatestWithState comment for the shape +
+-- constitutional rationale. Identical CTE; the only difference vs the
+-- latest variant is the outer WHERE clause.
 WITH latest_eval AS (
     SELECT DISTINCT ON (ce.tenant_id, ce.control_id, ce.scope_cell_id)
         ce.tenant_id,
@@ -293,6 +340,23 @@ worst_per_anchor AS (
       -- latest-with-state variant above.
       AND (sqlc.narg('scope_cell_id')::uuid IS NULL OR le.scope_cell_id = sqlc.narg('scope_cell_id')::uuid)
     GROUP BY c.scf_anchor_id
+),
+anchor_frameworks AS (
+    -- Slice 226: per-anchor framework set — same shape as the latest
+    -- variant. The CTE is intentionally duplicated rather than lifted
+    -- to a shared view so sqlc's per-query type inference stays simple
+    -- and the two queries remain independently optimizable.
+    SELECT
+        e.scf_anchor_id AS anchor_id,
+        array_agg(DISTINCT af.slug) AS framework_slugs
+    FROM fw_to_scf_edges e
+    JOIN framework_requirements ar ON ar.id = e.framework_requirement_id
+    JOIN framework_versions afv    ON afv.id = ar.framework_version_id
+    JOIN frameworks af             ON af.id = afv.framework_id
+    WHERE e.relationship_type <> 'no_relationship'
+      AND af.tenant_id IS NULL
+      AND af.slug <> 'scf'
+    GROUP BY e.scf_anchor_id
 )
 SELECT
     a.id, a.framework_version_id, a.scf_id, a.family, a.title,
@@ -314,9 +378,13 @@ SELECT
     wpa.result                        AS state_result,
     wpa.freshness_status              AS state_freshness_status,
     wpa.last_observed_at::timestamptz AS state_last_observed_at,
-    wpa.evaluated_at::timestamptz     AS state_evaluated_at
+    wpa.evaluated_at::timestamptz     AS state_evaluated_at,
+    -- Slice 226: per-anchor framework set; see the latest-variant
+    -- comment for the constitutional rationale.
+    af.framework_slugs::text[]        AS framework_slugs
 FROM scf_anchors a
 LEFT JOIN worst_per_anchor wpa ON wpa.anchor_id = a.id
+LEFT JOIN anchor_frameworks af ON af.anchor_id = a.id
 WHERE a.framework_version_id = $1
 ORDER BY a.scf_id
 LIMIT $2 OFFSET $3;

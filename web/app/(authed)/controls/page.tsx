@@ -78,6 +78,7 @@ import {
   applyFilters,
   clearFilters,
   DEFAULT_FILTERS,
+  FRAMEWORKS_JOIN_SEPARATOR,
   isDefault,
   setFilter,
   uniqueFamilies,
@@ -186,12 +187,13 @@ function ControlsPageInner() {
   // Convert the anchor wire payload into the join-ready row shape used
   // by the filter logic + table renderer. Slice 104 attaches a real
   // state cell per anchor (or `null` when the tenant has no control
-  // instantiated for the anchor). The shape was split in slice 098 for
-  // exactly this hand-off — no page-level rework needed.
+  // instantiated for the anchor). Slice 226 additionally threads the
+  // per-anchor frameworks set (display abbreviations) through the row;
+  // empty array when the anchor has no satisfaction edges.
   const rows: AnchorRow[] = useMemo(() => {
     const anchors: AnchorWithState[] = anchorsQ.data?.anchors ?? [];
     return anchors.map<AnchorRow>((a) => {
-      const { state, ...anchor } = a;
+      const { state, frameworks, ...anchor } = a;
       return {
         anchor,
         state: state
@@ -201,6 +203,11 @@ function ControlsPageInner() {
               last_observed_at: state.last_observed_at,
             }
           : null,
+        // Slice 226: defensive default so older fixtures (e.g.
+        // hand-rolled mocks in route.test.ts cases that predate the
+        // backend extension) round-trip cleanly. The live BFF always
+        // ships an array.
+        frameworks: frameworks ?? [],
       };
     });
   }, [anchorsQ.data]);
@@ -349,6 +356,33 @@ function ControlsPageInner() {
           </span>
         ) : (
           <span className="text-muted-foreground">—</span>
+        ),
+    },
+    // Slice 226 — Frameworks-per-row column. Right-aligned per the
+    // mockup (`Plans/mockups/controls.html` line 197). Renders the
+    // display abbreviations joined by `·`; empty set renders `—`
+    // (AC-6). The abbreviation authority lives in the backend
+    // (`internal/catalog/framework_codes.go`); the frontend is a pure
+    // renderer (P0-226-2 — no slug→display map here).
+    {
+      id: "frameworks",
+      header: "Frameworks",
+      align: "right",
+      cell: (row) =>
+        row.frameworks.length > 0 ? (
+          <span
+            className="text-xs text-muted-foreground"
+            data-testid="controls-row-frameworks"
+          >
+            {row.frameworks.join(FRAMEWORKS_JOIN_SEPARATOR)}
+          </span>
+        ) : (
+          <span
+            className="text-muted-foreground"
+            data-testid="controls-row-frameworks-empty"
+          >
+            —
+          </span>
         ),
     },
   ];
