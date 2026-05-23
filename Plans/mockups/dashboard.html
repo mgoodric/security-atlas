@@ -36,10 +36,7 @@
       <span class="text-slate-900 font-medium">Program</span>
     </nav>
     <div class="ml-auto flex items-center gap-3">
-      <div class="flex items-center gap-2 px-2.5 py-1 bg-amber-50 border border-amber-200 rounded-full">
-        <span class="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse"></span>
-        <span class="text-xs font-medium text-amber-800">SOC 2 Type II · Q2 2026 in progress</span>
-      </div>
+      <!-- Slice 231 (MOCKUP-STALE): the persistent "SOC 2 Type II · Q2 2026 in progress" topbar status pill was removed. Audit-period state surfaces inside the /audits workspace (slice 042's audit-period card), not in global chrome — duplicating it created a state-sync problem with multi-concurrent audit-periods (slice 030 design). Re-add behind a backing data path if the topbar truly needs the affordance. -->
       <div class="relative">
         <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
         <input type="text" placeholder="Search controls, evidence, risks…" class="pl-8 pr-3 py-1.5 w-64 text-sm bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-brand-500 focus:bg-white"/>

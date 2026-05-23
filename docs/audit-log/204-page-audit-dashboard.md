@@ -77,6 +77,7 @@
 **Category:** (iv) mockup-stale. Recommendation: remove the pill from the mockup (slice 183 precedent for mockup-vs-production divergence resolution).
 **Severity guess:** low — mockup hygiene; no live-build defect.
 **Spillover:** [#231](../issues/231-ui-honesty-dashboard-mockup-stale-audit-cycle-status-pill.md), filed `ready`.
+**Resolution:** Slice 231 removed the amber pill `<div>` block at `Plans/mockups/dashboard.html` lines 38–42 and replaced it with an in-place HTML comment recording the MOCKUP-STALE deletion and the rationale (audit-period state belongs in the `/audits` workspace, not global chrome). Mockup-only edit; no production code changed. Decisions log: [`docs/audit-log/231-decisions.md`](231-decisions.md).
 
 ### F-204D-5 — Activity-feed panel lacks "View full activity ledger →" footer link
 
