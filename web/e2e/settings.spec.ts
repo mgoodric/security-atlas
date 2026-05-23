@@ -21,6 +21,13 @@
 //              activated. AC-12 binds the contract: select Dark,
 //              assert the page's <body> computed background color
 //              matches the dark-mode token (oklch(0.145 0 0)).
+// Slice 248 -- spec gains AC-13 (page <title> is route-specific). The
+//              sibling server-component layout at
+//              `web/app/(authed)/settings/layout.tsx` declares the
+//              metadata; this AC binds the visible-to-operator
+//              contract that the browser tab reads "Settings ·
+//              security-atlas" instead of inheriting the root
+//              `<title>security-atlas</title>`.
 //
 // Run locally:
 //   cd web
@@ -39,6 +46,9 @@
 //   AC-9 API tokens section renders empty-state or row table (slice 154)
 //   AC-10 Roles tail badge renders when slice-130 roles array is non-empty (slice 154)
 //   AC-11 Rotate-twice-in-a-row chains predecessors + fresh secret per rotate (slice 163)
+//   AC-13 Page <title> is route-specific via per-route layout metadata (slice 248)
+//   (AC-12 lives in the AppearanceSection block alongside AC-2; the slice
+//   203 author elected to keep the numbering inline rather than renumber.)
 
 import { expect, test } from "./fixtures";
 
@@ -476,5 +486,22 @@ test.describe("/settings user-facing page", () => {
     await page.goto("/settings");
     await page.getByTestId("settings-theme-option-light").click();
     await expect(page.locator("html")).not.toHaveClass(/(^|\s)dark(\s|$)/);
+  });
+
+  test("AC-13: page <title> is route-specific (slice 248)", async ({
+    authedPage: page,
+  }) => {
+    // Slice 248 -- the /settings page ships its own `<title>` via the
+    // sibling server-component layout at web/app/(authed)/settings/layout.tsx
+    // (page.tsx is a client component and cannot export metadata).
+    // Without the layout, the page inherits the root
+    // `<title>security-atlas</title>` from web/app/layout.tsx and is
+    // indistinguishable from sibling routes in the browser tab.
+    //
+    // The assertion is intentionally exact-string -- the slice's
+    // AC-1 binds the literal "Settings · security-atlas" (middle dot,
+    // U+00B7) so any mojibake regression also trips this spec.
+    await page.goto("/settings");
+    await expect(page).toHaveTitle("Settings · security-atlas");
   });
 });
