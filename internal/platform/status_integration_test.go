@@ -241,20 +241,17 @@ func TestResetBootstrap_ForceClearsBoth(t *testing.T) {
 // slice-210 BootstrapTenantID tests touch. Run as both setup and
 // cleanup so each subtest sees a known-empty state. Uses the migrate
 // pool because RLS would hide most rows from atlas_app.
+//
+// TRUNCATE CASCADE handles all FK dependencies in one shot (notably
+// `local_credentials.user_id REFERENCES users ON DELETE CASCADE`,
+// `super_admins.user_id` if present, etc.) without having to
+// enumerate every table that may or may not exist in the current
+// migration set.
 func resetBootstrapFixtures(t *testing.T, admin *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
-	// users → user_roles + cascades. Wipe in dependency order.
-	for _, stmt := range []string{
-		`DELETE FROM user_tenants`,
-		`DELETE FROM user_roles`,
-		`DELETE FROM local_credentials`,
-		`DELETE FROM users`,
-		`DELETE FROM tenants`,
-	} {
-		if _, err := admin.Exec(ctx, stmt); err != nil {
-			t.Fatalf("reset (%s): %v", stmt, err)
-		}
+	if _, err := admin.Exec(ctx, `TRUNCATE TABLE tenants, users RESTART IDENTITY CASCADE`); err != nil {
+		t.Fatalf("reset tenants + users (TRUNCATE CASCADE): %v", err)
 	}
 }
 
