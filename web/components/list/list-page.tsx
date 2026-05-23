@@ -20,6 +20,18 @@ import type { ReactNode } from "react";
 export type ListPageProps = {
   title: string;
   subtitle?: ReactNode;
+  /**
+   * Optional inline adornment rendered to the right of the H1, on the
+   * same baseline. Used by /audits for the status tally
+   * (`1 in_progress · 4 frozen · 1 closed`) per slice 215. The
+   * adornment is a sibling of the H1 inside a `flex items-baseline`
+   * row, matching `Plans/mockups/audits.html` lines 109-112.
+   *
+   * Callers SHOULD wrap the adornment in a `<span>` with semantic
+   * styling (e.g. small muted text) and an `aria-label` describing
+   * what the inline value is — see slice 215 AC-3.
+   */
+  titleAdornment?: ReactNode;
   /** Right-side action buttons (e.g. "Export CSV", "New X"). */
   actions?: ReactNode;
   /** The horizontal filter pill row — usually a `<FilterPills>`. */
@@ -31,6 +43,7 @@ export type ListPageProps = {
 export function ListPage({
   title,
   subtitle,
+  titleAdornment,
   actions,
   filterRow,
   children,
@@ -39,7 +52,10 @@ export function ListPage({
     <div data-testid="list-page" className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+          <div className="flex items-baseline gap-3 flex-wrap">
+            <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+            {titleAdornment}
+          </div>
           {subtitle ? (
             <p className="text-sm text-muted-foreground mt-0.5">{subtitle}</p>
           ) : null}

@@ -177,3 +177,69 @@ export function frozenMetaLabel(period: AuditPeriod): string {
   if (!by) return at;
   return `${at} · ${by}`;
 }
+
+/**
+ * Slice 215 — status-tally formatter for the /audits page header.
+ *
+ * Derives an inline "1 in_progress · 4 frozen · 1 closed" string from
+ * the same periods list the table renders. Pure data → string; no
+ * React, no DOM.
+ *
+ * Rendering rules (mirror the slice 215 ACs):
+ *   - AC-1 / P0-215-1: statuses with count 0 are OMITTED. The string
+ *     "0 closed · 0 open" is noise we explicitly reject.
+ *   - AC-1 ordering: canonical statuses render in the slice-prescribed
+ *     order — `in_progress · frozen · closed · open`. Any status that
+ *     appears in the data but is NOT one of those four (e.g. `planned`
+ *     once the backend lifts the CHECK constraint, or an unknown new
+ *     value) is appended after the canonical four in alphabetical
+ *     order, so the rendering is deterministic.
+ *   - P0-215-2: only statuses with at least one matching period render.
+ *     We never invent statuses from a hard-coded enum — the data is the
+ *     source of truth.
+ *   - AC-2: empty input → empty string. The caller can use the empty
+ *     string as a render-or-skip flag (e.g. `tally ? <span>{tally}</span>
+ *     : null`).
+ *
+ * Separator is " · " (U+00B7 MIDDLE DOT with single spaces) to match
+ * the mockup at `Plans/mockups/audits.html` line 111 verbatim.
+ */
+export const TALLY_STATUS_ORDER: readonly string[] = [
+  "in_progress",
+  "frozen",
+  "closed",
+  "open",
+];
+
+export function statusTallyLabel(periods: AuditPeriod[]): string {
+  if (periods.length === 0) return "";
+
+  // Count per status — only statuses present in the data appear in the
+  // map, so the rendering never invents statuses (P0-215-2).
+  const counts = new Map<string, number>();
+  for (const p of periods) {
+    counts.set(p.status, (counts.get(p.status) ?? 0) + 1);
+  }
+
+  // Canonical ordering first, then any non-canonical statuses
+  // alphabetically. Both lists drop count-0 entries (P0-215-1) — the
+  // map only contains statuses we saw, so this is automatic for the
+  // canonical pass, but we still guard explicitly for clarity.
+  const canonical: string[] = [];
+  for (const status of TALLY_STATUS_ORDER) {
+    const n = counts.get(status);
+    if (n && n > 0) {
+      canonical.push(`${n} ${status}`);
+      counts.delete(status);
+    }
+  }
+
+  // Remaining (non-canonical) statuses — sort alphabetically for
+  // deterministic output. count-0 entries can't appear here because we
+  // only insert into the map when we see a period.
+  const remaining = [...counts.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([status, n]) => `${n} ${status}`);
+
+  return [...canonical, ...remaining].join(" · ");
+}

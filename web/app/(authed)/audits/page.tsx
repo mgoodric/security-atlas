@@ -87,6 +87,7 @@ import {
   periodRangeLabel,
   statusDotClass,
   statusPillClass,
+  statusTallyLabel,
 } from "./format";
 
 const FILTER_KEYS: (keyof AuditFilters)[] = ["framework", "status", "year"];
@@ -187,6 +188,24 @@ function AuditsPageInner() {
     () => applyFilters(periods, filters),
     [periods, filters],
   );
+
+  // Slice 215 — derive the status tally from the same TanStack Query
+  // cache the table reads (P0-215-3: no new endpoint, no second
+  // network call). Tally counts the FULL period set, not the
+  // filter-narrowed `visible` set, so the operator's "this is the
+  // right tenant" check is stable as they fiddle with filters.
+  // Empty-string sentinel from the formatter (AC-2) cleanly skips
+  // rendering below.
+  const tally = useMemo(() => statusTallyLabel(periods), [periods]);
+  const titleAdornment = tally ? (
+    <span
+      data-testid="audits-status-tally"
+      aria-label="audit period status tally"
+      className="text-sm text-muted-foreground"
+    >
+      {tally}
+    </span>
+  ) : null;
 
   const yearOptions: { value: string; label: string }[] = useMemo(() => {
     const years = uniqueYears(periods);
@@ -481,6 +500,7 @@ function AuditsPageInner() {
   return (
     <ListPage
       title="Audit periods"
+      titleAdornment={titleAdornment}
       subtitle="Period-level index — open a period for the per-control walk-through"
       actions={actions}
       filterRow={
