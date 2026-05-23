@@ -9,6 +9,7 @@ import type { AuditPeriod } from "@/lib/api";
 
 import {
   IN_PROGRESS_URGENT_DAYS,
+  TALLY_STATUS_ORDER,
   daysUntilEnd,
   daysUntilEndLabel,
   frozenMetaLabel,
@@ -18,6 +19,7 @@ import {
   periodRangeLabel,
   statusDotClass,
   statusPillClass,
+  statusTallyLabel,
 } from "./format";
 
 function period(overrides: Partial<AuditPeriod> = {}): AuditPeriod {
@@ -262,5 +264,135 @@ describe("frozenMetaLabel", () => {
       frozen_by: "test-actor",
     });
     expect(frozenMetaLabel(p)).toBe("test-actor");
+  });
+});
+
+describe("statusTallyLabel (slice 215 AC-4)", () => {
+  test("AC-2: empty periods list → empty string", () => {
+    expect(statusTallyLabel([])).toBe("");
+  });
+
+  test("AC-1: all four canonical statuses render in prescribed order", () => {
+    // One of each canonical status. Insertion order intentionally
+    // scrambled so the assertion verifies ordering by TALLY_STATUS_ORDER
+    // (in_progress · frozen · closed · open), not by data arrival.
+    const periods = [
+      period({ id: "1", status: "closed" }),
+      period({ id: "2", status: "open" }),
+      period({ id: "3", status: "in_progress" }),
+      period({ id: "4", status: "frozen" }),
+    ];
+    expect(statusTallyLabel(periods)).toBe(
+      "1 in_progress · 1 frozen · 1 closed · 1 open",
+    );
+  });
+
+  test("AC-4 single-status case: only that status renders ('6 frozen')", () => {
+    const periods = Array.from({ length: 6 }, (_, i) =>
+      period({ id: `${i}`, status: "frozen" }),
+    );
+    expect(statusTallyLabel(periods)).toBe("6 frozen");
+  });
+
+  test("AC-1 mockup case: '1 in progress · 4 frozen · 1 closed'", () => {
+    // Spec mockup text uses spaces in 'in progress'; the platform's
+    // enum is `in_progress` (underscore) and that's what we render
+    // verbatim per AI-assist tone discipline + invariant 10.
+    const periods = [
+      period({ id: "1", status: "in_progress" }),
+      ...Array.from({ length: 4 }, (_, i) =>
+        period({ id: `f${i}`, status: "frozen" }),
+      ),
+      period({ id: "9", status: "closed" }),
+    ];
+    expect(statusTallyLabel(periods)).toBe(
+      "1 in_progress · 4 frozen · 1 closed",
+    );
+  });
+
+  test("P0-215-1: statuses with count 0 are OMITTED", () => {
+    // Only frozen periods present — 'closed', 'open', 'in_progress'
+    // must NOT appear in the rendered string.
+    const periods = Array.from({ length: 3 }, (_, i) =>
+      period({ id: `${i}`, status: "frozen" }),
+    );
+    const tally = statusTallyLabel(periods);
+    expect(tally).toBe("3 frozen");
+    expect(tally).not.toContain("0 ");
+    expect(tally).not.toContain("closed");
+    expect(tally).not.toContain("open");
+    expect(tally).not.toContain("in_progress");
+  });
+
+  test("P0-215-2: only statuses present in periods[].status render — never invent", () => {
+    // 'planned' is in the platform's forward-looking enum but no
+    // period carries it here; it must NOT appear in the rendered
+    // string. Same for 'open' / 'in_progress'.
+    const periods = [
+      period({ id: "1", status: "frozen" }),
+      period({ id: "2", status: "closed" }),
+    ];
+    const tally = statusTallyLabel(periods);
+    expect(tally).not.toContain("planned");
+    expect(tally).not.toContain("open");
+    expect(tally).not.toContain("in_progress");
+  });
+
+  test("non-canonical statuses (e.g. 'planned') appear after canonical four, alphabetically", () => {
+    // Once the backend lifts the CHECK constraint and 'planned' shows
+    // up, it should render — just appended after the canonical four
+    // in alphabetical order for deterministic output.
+    const periods = [
+      period({ id: "1", status: "frozen" }),
+      period({ id: "2", status: "planned" }),
+      period({ id: "3", status: "in_progress" }),
+      period({ id: "4", status: "experimental" }),
+    ];
+    expect(statusTallyLabel(periods)).toBe(
+      "1 in_progress · 1 frozen · 1 experimental · 1 planned",
+    );
+  });
+
+  test("uses ' · ' (U+00B7 MIDDLE DOT) as separator — matches mockup verbatim", () => {
+    const periods = [
+      period({ id: "1", status: "frozen" }),
+      period({ id: "2", status: "closed" }),
+    ];
+    const tally = statusTallyLabel(periods);
+    // Exact mockup separator: space + middle-dot + space.
+    expect(tally).toContain(" · ");
+    // And NOT the comma/bullet alternatives some designers reach for.
+    expect(tally).not.toContain(", ");
+    expect(tally).not.toContain(" • ");
+  });
+
+  test("TALLY_STATUS_ORDER constant matches the slice 215 AC-1 order", () => {
+    expect(TALLY_STATUS_ORDER).toEqual([
+      "in_progress",
+      "frozen",
+      "closed",
+      "open",
+    ]);
+  });
+
+  test("handles many periods of mixed statuses (sanity)", () => {
+    // 100 frozen + 50 open + 5 closed + 2 in_progress.
+    const periods = [
+      ...Array.from({ length: 100 }, (_, i) =>
+        period({ id: `f${i}`, status: "frozen" }),
+      ),
+      ...Array.from({ length: 50 }, (_, i) =>
+        period({ id: `o${i}`, status: "open" }),
+      ),
+      ...Array.from({ length: 5 }, (_, i) =>
+        period({ id: `c${i}`, status: "closed" }),
+      ),
+      ...Array.from({ length: 2 }, (_, i) =>
+        period({ id: `i${i}`, status: "in_progress" }),
+      ),
+    ];
+    expect(statusTallyLabel(periods)).toBe(
+      "2 in_progress · 100 frozen · 5 closed · 50 open",
+    );
   });
 });

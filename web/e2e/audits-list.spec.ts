@@ -127,6 +127,41 @@ test.describe("/audits list view", () => {
     //    await expect(page.getByRole("heading", { name: /Audit periods/ })).toHaveCount(0);
   });
 
+  test("slice 215 / AC-5: status tally appears in the header with mixed-state fixture", async () => {
+    // Seed harness (slice 082) pre-conditions assume the tenant has at
+    // least three distinct statuses — see the `audit_periods` rows of
+    // the seed fixture. With those rows the tally must render and the
+    // text must read as a `· `-separated count list.
+    //    await page.goto("/audits");
+    //    const tally = page.getByTestId("audits-status-tally");
+    //    await expect(tally).toBeVisible();
+    //    // The tally is aria-labeled for screen readers (AC-3).
+    //    await expect(tally).toHaveAttribute(
+    //      "aria-label",
+    //      "audit period status tally",
+    //    );
+    //    // Format: each segment is "<N> <status>", segments joined by " · ".
+    //    const text = (await tally.textContent())?.trim() ?? "";
+    //    expect(text).toMatch(
+    //      /^\d+ [a-z_]+( · \d+ [a-z_]+)*$/,
+    //    );
+    //    // Zero-count statuses (P0-215-1) must NOT appear.
+    //    expect(text).not.toMatch(/\b0 /);
+  });
+
+  test("slice 215 / AC-2: tally hides when no periods exist (empty tenant)", async () => {
+    // Empty-tenant fixture (seed harness must support a "no audit
+    // periods" credential). With zero periods, the H1 renders solo and
+    // the tally is absent — consistent with the existing empty-state
+    // pattern.
+    //    await page.goto("/audits");
+    //    await expect(page.getByTestId("audits-status-tally")).toHaveCount(0);
+    //    // The H1 itself still renders.
+    //    await expect(
+    //      page.getByRole("heading", { name: /Audit periods/ }),
+    //    ).toBeVisible();
+  });
+
   test("P0-A2: frozen periods are NOT editable from the list (no inline mutation)", async () => {
     //    await page.goto("/audits");
     //    // No edit buttons, no input fields, no delete affordances in
