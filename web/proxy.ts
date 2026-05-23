@@ -109,6 +109,7 @@ export function proxy(request: NextRequest) {
     pathname.startsWith("/login") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/v1/") ||
+    pathname === "/health" ||
     pathname === "/metrics" ||
     pathname === "/api/version" ||
     pathname === "/api/install-state" ||
