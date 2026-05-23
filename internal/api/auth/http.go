@@ -18,11 +18,28 @@ import (
 
 	"github.com/google/uuid"
 
+	oauthapi "github.com/mgoodric/security-atlas/internal/api/oauth"
+	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
+	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
+
+// LocalASConfig wires the in-app authorization server for /auth/local/login.
+// When passed (non-nil) to New, a successful credential verification mints
+// an atlas_jwt and includes it in the response body. When nil, LocalLogin
+// falls back to pre-slice-209 behavior (atlas_session cookie only) — the
+// shape unit-test harnesses that don't wire OAuth depend on.
+type LocalASConfig struct {
+	Signer   *tokensign.Signer
+	Resolver oauthapi.UserResolver
+	// Issuer is also used as the audience claim, matching the
+	// AttachJWTValidator(signer, revoked, issuer, issuer) convention
+	// in cmd/atlas/main.go (audience-equals-issuer for atlas-issued tokens).
+	Issuer string
+}
 
 // Handler bundles the auth routes' dependencies.
 type Handler struct {
@@ -30,12 +47,31 @@ type Handler struct {
 	users         *users.Store
 	sessions      *sessions.Store
 	secureCookies bool
+
+	localAS *LocalASConfig
 }
 
 // New constructs a Handler. secureCookies=false is for local-dev HTTP
 // fixtures only; production MUST set it true.
-func New(o *oidc.Authenticator, u *users.Store, s *sessions.Store, secureCookies bool) *Handler {
-	return &Handler{oidc: o, users: u, sessions: s, secureCookies: secureCookies}
+//
+// Slice 209: localAS upgrades /auth/local/login into an in-app authorization
+// server when non-nil. The web app's signInLocal action sets the atlas_jwt
+// cookie from the response body's token field. Pass nil from unit-test
+// harnesses or no-OAuth deploys.
+func New(
+	o *oidc.Authenticator,
+	u *users.Store,
+	s *sessions.Store,
+	secureCookies bool,
+	localAS *LocalASConfig,
+) *Handler {
+	return &Handler{
+		oidc:          o,
+		users:         u,
+		sessions:      s,
+		secureCookies: secureCookies,
+		localAS:       localAS,
+	}
 }
 
 // LocalLoginRequest is the JSON body for POST /auth/local/login.
@@ -83,12 +119,48 @@ func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sessions.SetCookie(w, sess.ID, sess.ExpiresAt, h.secureCookies)
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+
+	resp := map[string]any{
 		"user_id":   usr.ID,
 		"tenant_id": usr.TenantID,
 		"display":   usr.DisplayName,
-	})
+	}
+
+	// Mint an atlas_jwt when the AS is wired. The token uses the same claim
+	// shape as the OAuth code-redemption path (buildAtlasClaimsForUser in
+	// internal/api/oauth/pkce.go) so jwtmw accepts both uniformly.
+	if h.localAS != nil && h.localAS.Signer != nil && h.localAS.Resolver != nil {
+		identity, resolveErr := h.localAS.Resolver.ResolveForOAuth(ctx, usr.ID, usr.TenantID)
+		if resolveErr != nil {
+			writeAuthError(w, http.StatusInternalServerError, "resolve user authorization failed")
+			return
+		}
+		now := time.Now().UTC()
+		claims := jwt.AtlasClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    h.localAS.Issuer,
+				Subject:   "user:" + usr.ID.String(),
+				Audience:  []string{h.localAS.Issuer},
+				ExpiresAt: now.Add(time.Hour).Unix(),
+				IssuedAt:  now.Unix(),
+				NotBefore: now.Unix(),
+				ID:        uuid.NewString(),
+			},
+			CurrentTenantID:  identity.CurrentTenantID,
+			AvailableTenants: identity.AvailableTenants,
+			Roles:            identity.Roles,
+			SuperAdmin:       identity.SuperAdmin,
+		}
+		token, signErr := h.localAS.Signer.Sign(ctx, claims)
+		if signErr != nil {
+			writeAuthError(w, http.StatusInternalServerError, "sign failed")
+			return
+		}
+		resp["token"] = token
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // OIDCLogin handles GET /auth/oidc/login?tenant_id=...&idp=...

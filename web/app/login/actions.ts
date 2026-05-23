@@ -87,3 +87,94 @@ export async function signOut(): Promise<void> {
   jar.delete(SESSION_COOKIE);
   redirect("/login");
 }
+
+// signInLocal — slice 209. POSTs (tenant_id, email, password) to
+// /auth/local/login and stores the response token in SESSION_COOKIE —
+// the same cookie the OAuth callback finalize endpoint writes (slice 189).
+// 401 redirects with "invalid credentials" (no oracle — same message
+// regardless of email-exists vs password-mismatched).
+export async function signInLocal(formData: FormData): Promise<void> {
+  const tenantID = String(formData.get("tenant_id") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+  const target = safeRedirectTarget(
+    String(formData.get("from") ?? "/dashboard"),
+  );
+
+  if (!tenantID || !email || !password) {
+    redirect(
+      `/login?error=${encodeURIComponent("email and password are required")}` +
+        `&from=${encodeURIComponent(target)}`,
+    );
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseURL()}/auth/local/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tenant_id: tenantID,
+        email,
+        password,
+      }),
+    });
+  } catch {
+    // Network error reaching the backend — surface as a non-credential
+    // error so the operator knows it's infrastructure, not credentials.
+    redirect(
+      `/login?error=${encodeURIComponent("sign-in service unavailable")}` +
+        `&from=${encodeURIComponent(target)}`,
+    );
+  }
+
+  if (response.status === 401) {
+    // No oracle — same message regardless of email-exists vs. wrong-password.
+    redirect(
+      `/login?error=${encodeURIComponent("invalid credentials")}` +
+        `&from=${encodeURIComponent(target)}`,
+    );
+  }
+  if (!response.ok) {
+    redirect(
+      `/login?error=${encodeURIComponent("sign-in failed")}` +
+        `&from=${encodeURIComponent(target)}`,
+    );
+  }
+
+  type LocalLoginResponse = {
+    user_id: string;
+    tenant_id: string;
+    display: string;
+    token?: string;
+  };
+  const body: LocalLoginResponse = await response.json();
+  if (!body.token) {
+    // Backend didn't include a token — atlas was started without the
+    // OAuth signer wired. Log the specific cause server-side; surface a
+    // generic message to the operator.
+    console.warn(
+      "signInLocal: backend response missing token; ATLAS_ISSUER_URL likely unset",
+    );
+    redirect(
+      `/login?error=${encodeURIComponent(
+        "sign-in is not configured on this server",
+      )}` + `&from=${encodeURIComponent(target)}`,
+    );
+  }
+
+  const jar = await cookies();
+  const reqHeaders = await headers();
+  jar.set(SESSION_COOKIE, body.token, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: shouldUseSecureCookie(reqHeaders),
+    path: "/",
+    // 1 hour — matches AccessTokenLifetime (oauthapi.AccessTokenLifetime)
+    // and the JWT exp the backend minted. Cookie expiry tracks token
+    // expiry; the platform's JWT validator is the source of truth either way.
+    maxAge: 60 * 60,
+  });
+
+  redirect(target);
+}

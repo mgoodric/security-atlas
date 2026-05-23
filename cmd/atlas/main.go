@@ -287,6 +287,16 @@ func main() {
 		srv.AttachMetricsHandler(otelResult.PrometheusHandler)
 	}
 
+	// Slice 209 — local-credential AS plumbing. These are populated inside
+	// the OAuth block below (when the signer + DB-backed user resolver are
+	// constructed) and consumed by the auth-handler attach further down.
+	// Nil when ATLAS_ISSUER_URL is unset OR pool is nil; authapi.New takes
+	// the nil-fallback in that case (LocalLogin returns no token field —
+	// pre-slice-209 behavior preserved for OAuth-disabled deploys).
+	var localAuthSigner *tokensign.Signer
+	var localAuthResolver oauthapi.UserResolver
+	var localAuthIssuer string
+
 	// Slice 187: OAuth Authorization Server scaffolding. Open the
 	// filesystem-backed keystore (which generates a fresh ES256 keypair
 	// on first boot, or rehydrates the existing keypair on subsequent
@@ -366,16 +376,24 @@ func main() {
 					defer ap.Close()
 				}
 			}
+			localAuthResolver = oauthapi.NewDBUserResolverWithAuthPool(pool, resolverAuthPool)
 			authorizeEP := oauthapi.NewAuthorizeEndpoint(oauthapi.AuthorizeEndpointConfig{
 				Codes:    codeStore,
 				Clients:  clients,
 				Sessions: sessions.NewStore(pool, 0),
-				Users:    oauthapi.NewDBUserResolverWithAuthPool(pool, resolverAuthPool),
+				Users:    localAuthResolver,
 				Issuer:   issuer,
 			})
 			oauthHandler.AttachAuthorizeEndpoint(authorizeEP)
 			logger.Info("atlas: OAuth authorize endpoint wired",
 				"pkce_methods", "S256")
+
+			// Slice 209 — capture the signer + resolver + issuer so the
+			// auth handler attached further below can mint atlas_jwt on
+			// successful /auth/local/login. Mirrors the OAuth
+			// code-redemption path's claim shape exactly.
+			localAuthSigner = signer
+			localAuthIssuer = issuer
 
 			// Slice 189 AC-40: start the auth-code sweeper goroutine.
 			// DELETEs expired codes every 5 minutes (1-hour grace beyond
@@ -597,8 +615,20 @@ func main() {
 		sessionStore := sessions.NewStore(pool, 0)
 		oidcAuth := oidc.New(localModeIdpResolver{})
 		secureCookies := os.Getenv("ATLAS_SECURE_COOKIES") == "true"
-		srv.AttachAuthHandler(authapi.New(oidcAuth, userStore, sessionStore, secureCookies))
-		fmt.Fprintf(os.Stderr, "atlas: auth handler wired (/auth/local/login mounted, secure_cookies=%t)\n", secureCookies)
+		// Slice 209: bundle the local-AS deps when OAuth wiring exists.
+		// nil when ATLAS_ISSUER_URL is unset OR pool is nil; LocalLogin
+		// falls back to the pre-slice-209 behavior in that case.
+		var localAS *authapi.LocalASConfig
+		if localAuthSigner != nil && localAuthResolver != nil {
+			localAS = &authapi.LocalASConfig{
+				Signer:   localAuthSigner,
+				Resolver: localAuthResolver,
+				Issuer:   localAuthIssuer,
+			}
+		}
+		srv.AttachAuthHandler(authapi.New(oidcAuth, userStore, sessionStore, secureCookies, localAS))
+		fmt.Fprintf(os.Stderr, "atlas: auth handler wired (/auth/local/login mounted, secure_cookies=%t, local_as_enabled=%t)\n",
+			secureCookies, localAS != nil)
 
 		// Slice 035: construct the OPA engine + decision audit writer
 		// once at startup. The engine loads the embedded rego bundle;
