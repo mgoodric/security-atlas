@@ -27,6 +27,13 @@
     - HECVAT bundled templates
     - Vendor portal
     - Cross-tenant sharing
+
+  Mockup edit history:
+    - 2026-05-23 (slice 264): Stage B (post-import column-mapping review UI)
+      was removed per slice 155 D3 — slice 155 deferred the manual column-mapping
+      step. The header-row heuristic auto-detects today; re-add Stage B if
+      operator feedback shows heuristic miss rate is high.
+      See: docs/audit-log/264-decisions.md
 -->
 
 <!-- TOP BAR (matches dashboard / control mockups) -->
@@ -59,7 +66,7 @@
 </header>
 
 <!-- ==================== STAGE A: EMPTY STATE / EXCEL UPLOAD ==================== -->
-<!-- Shown when the operator has no questionnaire selected. After upload, transitions to Stage B. -->
+<!-- Shown when the operator has no questionnaire selected. After upload, parsed rows persist via header-row heuristic and the operator lands directly on Stage C. -->
 <div class="bg-white border-b border-slate-200">
   <div class="max-w-7xl mx-auto px-8 py-6">
     <div class="flex items-start justify-between gap-6">
@@ -110,69 +117,15 @@
   </div>
 </div>
 
-<!-- ==================== STAGE B: POST-IMPORT REVIEW / COLUMN MAPPING ==================== -->
-<!-- Shown after upload. Operator confirms column mapping before parsed rows persist. -->
-<div class="max-w-7xl mx-auto px-6 pt-5" id="parse-review">
-  <div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
-    <div class="px-6 py-4 border-b border-slate-200 bg-amber-50/40">
-      <div class="flex items-center justify-between">
-        <div>
-          <div class="text-sm font-semibold text-slate-900">Review parsed rows · acme-caiq-v4-1.xlsx</div>
-          <div class="text-xs text-slate-500 mt-0.5">283 rows detected · 6 columns matched · 2 columns unmapped</div>
-        </div>
-        <div class="flex items-center gap-2">
-          <button class="px-3 py-1.5 text-xs bg-white border border-slate-200 text-slate-700 rounded-md hover:bg-slate-50">Cancel</button>
-          <button class="px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-md hover:bg-emerald-700 font-medium">Confirm &amp; import</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="px-6 py-4">
-      <div class="text-[11px] uppercase tracking-wider font-medium text-slate-500 mb-2">Detected column mapping</div>
-      <table class="w-full text-xs">
-        <thead>
-          <tr class="border-b border-slate-200 text-left text-slate-500">
-            <th class="py-1.5 pr-3 font-medium">Source column</th>
-            <th class="py-1.5 pr-3 font-medium">Mapped to field</th>
-            <th class="py-1.5 font-medium">Sample value</th>
-          </tr>
-        </thead>
-        <tbody class="font-mono text-[11px] text-slate-700">
-          <tr class="border-b border-slate-100">
-            <td class="py-1.5 pr-3">Question ID</td>
-            <td class="py-1.5 pr-3"><span class="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded">code</span></td>
-            <td class="py-1.5">IAM-02</td>
-          </tr>
-          <tr class="border-b border-slate-100">
-            <td class="py-1.5 pr-3">Question</td>
-            <td class="py-1.5 pr-3"><span class="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded">text</span></td>
-            <td class="py-1.5">Are users required to use MFA…</td>
-          </tr>
-          <tr class="border-b border-slate-100">
-            <td class="py-1.5 pr-3">Domain</td>
-            <td class="py-1.5 pr-3"><span class="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded">domain</span></td>
-            <td class="py-1.5">IAM</td>
-          </tr>
-          <tr class="border-b border-slate-100">
-            <td class="py-1.5 pr-3">Answer Type</td>
-            <td class="py-1.5 pr-3"><span class="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded">answer_type</span></td>
-            <td class="py-1.5">yes/no/n.a.</td>
-          </tr>
-          <tr class="border-b border-slate-100">
-            <td class="py-1.5 pr-3">Notes (internal)</td>
-            <td class="py-1.5 pr-3"><span class="px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded">— unmapped —</span></td>
-            <td class="py-1.5 text-slate-400">(ignored)</td>
-          </tr>
-          <tr>
-            <td class="py-1.5 pr-3">Internal Owner</td>
-            <td class="py-1.5 pr-3"><span class="px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded">— unmapped —</span></td>
-            <td class="py-1.5 text-slate-400">(ignored)</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-</div>
+<!--
+  ==================== STAGE B: REMOVED (slice 264, 2026-05-23) ====================
+  The post-import column-mapping review UI was removed per slice 264.
+  Rationale: slice 155 D3 deferred the manual column-mapping step; the platform
+  auto-detects via a header-row heuristic at import time and persists rows
+  directly. Re-introduce Stage B only if operator feedback from the shipped
+  questionnaire page (slice 263) shows the heuristic miss rate is high.
+  See: docs/audit-log/264-decisions.md
+-->
 
 <!-- ==================== STAGE C: MAIN TWO-PANE (post-import) ==================== -->
 <main class="max-w-7xl mx-auto px-6 py-6">
