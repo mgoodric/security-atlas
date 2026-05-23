@@ -1,13 +1,21 @@
 // Slice 043 — pack cover header (per Plans/mockups/board-pack.html).
 //
 // The cover renders the report id, draft/published badge, title, period
-// range subtitle, and a four-cell metadata strip (period, generated_at,
-// author, approver). The mockup shows "DRAFT · 64% complete" — we
-// render the approval-progress fraction honestly from the live pack
-// (count of approved sections / total fixed sections).
+// range subtitle, and a three-cell metadata strip (period, generated_at,
+// approver). The mockup shows "DRAFT · 64% complete" — we render the
+// approval-progress fraction honestly from the live pack (count of
+// approved sections / total fixed sections).
+//
+// Slice 219 — the Author cell was dropped: the backend board-pack record
+// has no author field, so the previous `value="—"` placeholder was a
+// UI-honesty gap (em-dash reads as "missing data" when the field is
+// not modeled). The mockup at Plans/mockups/board-pack.html line 69 still
+// shows a 4-cell strip including Author; we intentionally diverge.
+// Honesty > parity.
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { PACK_HEADER_META_LABELS } from "./pack-header-meta";
 
 type PackHeaderProps = {
   periodEnd: string;
@@ -56,12 +64,15 @@ export function PackHeader({
         Period ending {periodEnd}. Posture, top risks, control coverage trend,
         and program asks for the upcoming board meeting.
       </p>
-      <dl className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <MetaCell label="Period end" value={periodEnd} mono />
-        <MetaCell label="Generated" value={formatTimestamp(generatedAt)} mono />
-        <MetaCell label="Author" value="—" />
+      <dl className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-3">
+        <MetaCell label={PACK_HEADER_META_LABELS[0]} value={periodEnd} mono />
         <MetaCell
-          label="Approver"
+          label={PACK_HEADER_META_LABELS[1]}
+          value={formatTimestamp(generatedAt)}
+          mono
+        />
+        <MetaCell
+          label={PACK_HEADER_META_LABELS[2]}
           value={
             publishedBy && publishedBy.length > 0 ? publishedBy : "pending"
           }
