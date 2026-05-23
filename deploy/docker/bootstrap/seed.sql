@@ -4,15 +4,15 @@
 -- have been applied, via the atlas-bootstrap one-shot container. It seeds
 -- the minimum a fresh deployment needs to be usable:
 --
---   1. a default tenant            — referenced by id; there is no `tenants`
---                                    table in v1 (tenant_id is a bare UUID
---                                    column), so a tenant "exists" purely by
---                                    being referenced.
+--   1. a default tenant row        — slice 144 introduced the `tenants`
+--                                    table; slice 210 populates it here so
+--                                    `is_bootstrap_tenant=true` resolves
+--                                    cleanly for the slice-209 login UX.
 --   2. a builtin scope dimension   — `environment`, the canonical first
 --                                    dimension. is_builtin = TRUE.
 --   3. a default single-cell scope — the solo-operator's whole-org cell.
 --   4. a default local user        — email + argon2id password hash, for
---                                    AC-3 local sign-in.
+--                                    slice 209 local sign-in.
 --
 -- Idempotent: every INSERT uses ON CONFLICT DO NOTHING so re-running the
 -- bootstrap (e.g. `docker compose up` after a restart) is a safe no-op.
@@ -31,6 +31,25 @@
 \set ON_ERROR_STOP on
 
 BEGIN;
+
+-- ===== 0. Default tenant row (slice 210) =====
+--
+-- Populates the slice-144 `tenants` row so the slice-210
+-- `BootstrapTenantID` primary query resolves on every fresh install
+-- going forward. The fallback path in `internal/platform/status.go`
+-- (oldest-user's tenant_id) remains for pre-slice-210 installs that
+-- did not run this seed step. `is_bootstrap_tenant=true` is the
+-- slice-198 column the OIDC first-install path also writes; the
+-- `idx_tenants_bootstrap_singleton` partial index serializes concurrent
+-- writers (irrelevant here — bootstrap.sh runs once before atlas comes
+-- up). `ON CONFLICT (id) DO NOTHING` keeps re-bootstraps no-op.
+INSERT INTO tenants (id, name, is_bootstrap_tenant)
+VALUES (
+    :'default_tenant_id',
+    'Default Tenant',
+    TRUE
+)
+ON CONFLICT (id) DO NOTHING;
 
 -- ===== 1 + 2. Builtin scope dimension for the default tenant =====
 --

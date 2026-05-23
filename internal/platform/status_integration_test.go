@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/platform"
@@ -233,5 +234,108 @@ func TestResetBootstrap_ForceClearsBoth(t *testing.T) {
 	}
 	if !got {
 		t.Fatalf("IsFirstInstall = false; want true after --force reset")
+	}
+}
+
+// resetBootstrapFixtures clears `tenants` and `users` rows that the
+// slice-210 BootstrapTenantID tests touch. Run as both setup and
+// cleanup so each subtest sees a known-empty state. Uses the migrate
+// pool because RLS would hide most rows from atlas_app.
+func resetBootstrapFixtures(t *testing.T, admin *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+	// users → user_roles + cascades. Wipe in dependency order.
+	for _, stmt := range []string{
+		`DELETE FROM user_tenants`,
+		`DELETE FROM user_roles`,
+		`DELETE FROM local_credentials`,
+		`DELETE FROM users`,
+		`DELETE FROM tenants`,
+	} {
+		if _, err := admin.Exec(ctx, stmt); err != nil {
+			t.Fatalf("reset (%s): %v", stmt, err)
+		}
+	}
+}
+
+// TestStatus_BootstrapTenantID_PrimaryQueryHitsTenantsRow exercises
+// the slice-210 primary lookup: when a `tenants` row exists with
+// `is_bootstrap_tenant=true`, BootstrapTenantID returns its id without
+// touching the users-fallback path.
+func TestStatus_BootstrapTenantID_PrimaryQueryHitsTenantsRow(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	resetBootstrapFixtures(t, admin)
+	t.Cleanup(func() { resetBootstrapFixtures(t, admin) })
+
+	want := uuid.MustParse("d0000000-0000-4000-8000-000000000001")
+	_, err := admin.Exec(context.Background(),
+		`INSERT INTO tenants (id, name, is_bootstrap_tenant) VALUES ($1, 'Default Tenant', TRUE)`,
+		want)
+	if err != nil {
+		t.Fatalf("seed tenants row: %v", err)
+	}
+
+	s := platform.NewStatus(app, admin)
+	got, err := s.BootstrapTenantID(context.Background())
+	if err != nil {
+		t.Fatalf("BootstrapTenantID: %v", err)
+	}
+	if got != want {
+		t.Fatalf("BootstrapTenantID = %s; want %s", got, want)
+	}
+}
+
+// TestStatus_BootstrapTenantID_FallbackToUsers exercises the
+// slice-210 fallback: with no `tenants` row, the method falls back to
+// the oldest user's tenant_id. This is the path the live atlas-edge
+// instance (pre-slice-210 seed.sql) walks until its next re-bootstrap.
+func TestStatus_BootstrapTenantID_FallbackToUsers(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	resetBootstrapFixtures(t, admin)
+	t.Cleanup(func() { resetBootstrapFixtures(t, admin) })
+
+	want := uuid.MustParse("e0000000-0000-4000-8000-000000000001")
+	// Insert a users row with NO matching tenants row (the pre-slice-210
+	// state). The oldest user is by created_at; we rely on the column
+	// default of now() — only one user exists, so it's trivially oldest.
+	_, err := admin.Exec(context.Background(),
+		`INSERT INTO users (id, tenant_id, email, display_name, status)
+		 VALUES ($1, $2, $3, $4, 'active')`,
+		uuid.MustParse("e0000000-0000-4000-8000-000000000099"),
+		want,
+		"bootstrap@example.com",
+		"Bootstrap")
+	if err != nil {
+		t.Fatalf("seed users row: %v", err)
+	}
+
+	s := platform.NewStatus(app, admin)
+	got, err := s.BootstrapTenantID(context.Background())
+	if err != nil {
+		t.Fatalf("BootstrapTenantID (fallback): %v", err)
+	}
+	if got != want {
+		t.Fatalf("BootstrapTenantID = %s; want %s (fallback to oldest user's tenant)", got, want)
+	}
+}
+
+// TestStatus_BootstrapTenantID_NoBootstrapAtAll exercises the empty
+// state: no tenants, no users. Returns (uuid.Nil, nil) so the
+// install-state handler omits the field gracefully.
+func TestStatus_BootstrapTenantID_NoBootstrapAtAll(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	resetBootstrapFixtures(t, admin)
+	t.Cleanup(func() { resetBootstrapFixtures(t, admin) })
+
+	s := platform.NewStatus(app, admin)
+	got, err := s.BootstrapTenantID(context.Background())
+	if err != nil {
+		t.Fatalf("BootstrapTenantID (empty install): %v", err)
+	}
+	if got != uuid.Nil {
+		t.Fatalf("BootstrapTenantID = %s; want uuid.Nil", got)
 	}
 }
