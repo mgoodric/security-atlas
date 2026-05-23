@@ -20,16 +20,25 @@ type SearchParams = Promise<{ from?: string; error?: string }>;
 // Server-side install-state fetch — single-tenant deploys auto-populate
 // the hidden tenant_id field from the bootstrap tenant. Multi-tenant
 // picker UX is slice 141; here we keep first-install scope only.
+//
+// Known limitation: this is a server-component fetch, so Playwright's
+// page.route() (which only sees browser-originated requests) can't mock
+// it. The slice-073 BFF-relay pattern (web/app/api/install-state/route.ts +
+// FirstInstallCard) exists for the test-mockable surface; this card's
+// Playwright e2e (AC-14) will need a similar client-island promotion when
+// the test commit lands.
 async function fetchBootstrapTenantID(): Promise<string | null> {
   try {
     const response = await fetch(`${apiBaseURL()}/v1/install-state`, {
-      cache: "no-store",
+      // 5s SSR revalidation absorbs the redundant browser-side fetch
+      // FirstInstallCard does on the same page render.
+      next: { revalidate: 5 },
+      // Bound the wait so a wedged backend doesn't stall /login forever.
+      signal: AbortSignal.timeout(3000),
     });
     if (!response.ok) return null;
     const body: { first_install?: boolean; tenant_id?: string } =
       await response.json();
-    // Only auto-populate during first-install. Once a real user has signed
-    // in, slice 141's tenant picker takes over.
     if (body.first_install && body.tenant_id) return body.tenant_id;
     return null;
   } catch {

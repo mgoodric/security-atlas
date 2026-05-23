@@ -615,16 +615,20 @@ func main() {
 		sessionStore := sessions.NewStore(pool, 0)
 		oidcAuth := oidc.New(localModeIdpResolver{})
 		secureCookies := os.Getenv("ATLAS_SECURE_COOKIES") == "true"
-		// Slice 209: pass the local-AS deps captured from the OAuth block
-		// above. When OAuth is disabled (issuer unset or pool nil), all
-		// three are zero values and LocalLogin falls back to the
-		// pre-slice-209 behavior (session cookie only, no token field).
-		srv.AttachAuthHandler(authapi.New(
-			oidcAuth, userStore, sessionStore, secureCookies,
-			localAuthSigner, localAuthResolver, localAuthIssuer, localAuthIssuer,
-		))
+		// Slice 209: bundle the local-AS deps when OAuth wiring exists.
+		// nil when ATLAS_ISSUER_URL is unset OR pool is nil; LocalLogin
+		// falls back to the pre-slice-209 behavior in that case.
+		var localAS *authapi.LocalASConfig
+		if localAuthSigner != nil && localAuthResolver != nil {
+			localAS = &authapi.LocalASConfig{
+				Signer:   localAuthSigner,
+				Resolver: localAuthResolver,
+				Issuer:   localAuthIssuer,
+			}
+		}
+		srv.AttachAuthHandler(authapi.New(oidcAuth, userStore, sessionStore, secureCookies, localAS))
 		fmt.Fprintf(os.Stderr, "atlas: auth handler wired (/auth/local/login mounted, secure_cookies=%t, local_as_enabled=%t)\n",
-			secureCookies, localAuthSigner != nil && localAuthResolver != nil)
+			secureCookies, localAS != nil)
 
 		// Slice 035: construct the OPA engine + decision audit writer
 		// once at startup. The engine loads the embedded rego bundle;

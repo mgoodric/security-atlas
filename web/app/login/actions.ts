@@ -88,18 +88,11 @@ export async function signOut(): Promise<void> {
   redirect("/login");
 }
 
-// signInLocal — slice 209. Submits (tenant_id, email, password) to
-// /auth/local/login. On success, reads the platform-minted atlas_jwt from
-// the response body and stores it in the SESSION_COOKIE — the same cookie
-// the OAuth callback finalize endpoint writes (slice 189). On 401, redirects
-// to /login with a generic "invalid credentials" message (no oracle —
-// LocalLogin itself returns the same shape regardless of whether the email
-// row existed or the password mismatched).
-//
-// Tenant resolution: a hidden `tenant_id` field is populated by the
-// LoginPage server component from /v1/install-state (slice 141 will expand
-// this to a tenant picker when multiple memberships are detected; in slice
-// 209 we keep single-tenant scope only).
+// signInLocal — slice 209. POSTs (tenant_id, email, password) to
+// /auth/local/login and stores the response token in SESSION_COOKIE —
+// the same cookie the OAuth callback finalize endpoint writes (slice 189).
+// 401 redirects with "invalid credentials" (no oracle — same message
+// regardless of email-exists vs password-mismatched).
 export async function signInLocal(formData: FormData): Promise<void> {
   const tenantID = String(formData.get("tenant_id") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
@@ -157,13 +150,15 @@ export async function signInLocal(formData: FormData): Promise<void> {
   };
   const body: LocalLoginResponse = await response.json();
   if (!body.token) {
-    // Backend didn't include a token — local-AS is not wired (atlas
-    // started without ATLAS_ISSUER_URL or without a DB pool). Surface as
-    // a misconfiguration so the operator can fix the deploy.
+    // Backend didn't include a token — atlas was started without the
+    // OAuth signer wired. Log the specific cause server-side; surface a
+    // generic message to the operator.
+    console.warn(
+      "signInLocal: backend response missing token; ATLAS_ISSUER_URL likely unset",
+    );
     redirect(
-      `/login?error=${encodeURIComponent(
-        "local-credential AS not configured (ATLAS_ISSUER_URL must be set)",
-      )}&from=${encodeURIComponent(target)}`,
+      `/login?error=${encodeURIComponent("sign-in is not configured on this server")}` +
+        `&from=${encodeURIComponent(target)}`,
     );
   }
 
