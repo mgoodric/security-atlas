@@ -130,3 +130,31 @@ func (s *Store) UpcomingItems(ctx context.Context, categoryFilter string, cursor
 	})
 	return rows, err
 }
+
+// ActivityFeedFirstPage is the cross-package convenience wrapper for
+// the dashboard's activity feed's first page. Slice 269 (dashboard
+// export) is the first caller — the export composes the same view
+// the user sees in the live dashboard, which is "the first page,
+// newest-first". The handler at `/v1/activity` consumes the keyset
+// cursor; cross-package callers (slice 269) cannot construct a
+// keyset because the type is package-private (the wire shape is
+// intentionally opaque), so this wrapper bridges the gap without
+// leaking the type.
+//
+// `limit` is the page size (the caller's responsibility to bound).
+func (s *Store) ActivityFeedFirstPage(ctx context.Context, limit int32) ([]dbx.ListEvidenceActivityRow, error) {
+	return s.ActivityFeed(ctx, firstPageActivity(), limit)
+}
+
+// UpcomingItemsFirstPage is the cross-package convenience wrapper for
+// the upcoming rollup's first page. Same rationale as
+// [Store.ActivityFeedFirstPage] — slice 269's dashboard export
+// composes the same view the user sees in the live dashboard.
+//
+// `categoryFilter` defaults to "" (all categories) for the dashboard-
+// export call site; the wrapper still surfaces the filter argument
+// so a future caller (e.g., a category-narrowed export) can
+// specialise the call without a second wrapper.
+func (s *Store) UpcomingItemsFirstPage(ctx context.Context, categoryFilter string, limit int32) ([]dbx.ListUpcomingItemsRow, error) {
+	return s.UpcomingItems(ctx, categoryFilter, firstPageUpcoming(), limit)
+}

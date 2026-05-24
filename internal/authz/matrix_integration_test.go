@@ -153,6 +153,16 @@ var matrix = []matrixCase{
 	{authz.RoleViewer, "write", "risks", false, "viewer: NOT allowed to write risks"},
 	{authz.RoleViewer, "write", "controls", false, "viewer: NOT allowed to write controls"},
 	{authz.RoleViewer, "approve", "policies", false, "viewer: NOT allowed to approve"},
+
+	// slice 269 — dashboard snapshot export. Admit set: admin +
+	// grc_engineer (IsApprover) + auditor. Viewer + control_owner
+	// are deliberately denied — the bulk-handoff variant is a
+	// narrower admit than the in-app dashboard read (slice 269 D3).
+	{authz.RoleAdmin, "read", "dashboard", true, "slice 269: admin admitted to dashboard export"},
+	{authz.RoleGRCEngineer, "read", "dashboard", true, "slice 269: grc_engineer admitted to dashboard export"},
+	{authz.RoleAuditor, "read", "dashboard", true, "slice 269: auditor admitted to dashboard export"},
+	{authz.RoleControlOwner, "read", "dashboard", false, "slice 269: control_owner NOT admitted to bulk dashboard export"},
+	{authz.RoleViewer, "read", "dashboard", false, "slice 269: viewer NOT admitted to bulk dashboard export"},
 }
 
 // TestAuthzMatrix_AllRolesAllEndpoints is the AC-5 headline test. It

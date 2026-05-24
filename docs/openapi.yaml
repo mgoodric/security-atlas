@@ -1519,6 +1519,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/dashboard/export:
+    get:
+      summary: GET /v1/dashboard/export — snapshot of the six dashboard panels in json/csv/xlsx
+      tags: [dashboard]
+      operationId: get-v1-dashboard-export
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/decisions:
     get:
       summary: GET /v1/decisions
