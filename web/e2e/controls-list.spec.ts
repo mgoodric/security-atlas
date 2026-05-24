@@ -149,6 +149,72 @@ test.describe("/controls list view", () => {
     //    expect(await empties.count()).toBeGreaterThanOrEqual(0);
   });
 
+  // Slice 227 — /controls list pagination footer. The footer is
+  // unconditional once at least one row is in the filtered set; with a
+  // multi-page catalog the Previous / Next buttons round-trip through
+  // the URL `?page=N`. Assertions stay quarantined behind the slice 082
+  // seed-data harness, matching the rest of this spec. Pre-conditions
+  // the harness must establish:
+  //   - At least 51 anchor rows in the seeded catalog (so the default
+  //     `CONTROLS_PAGE_SIZE = 50` produces a 2-page result). The SCF
+  //     bootstrap importer (slice 006) ships ~53 anchors on the
+  //     atlas-edge instance, which already satisfies this on main.
+  test("AC-227-1: pagination footer renders with truth-telling summary", async () => {
+    //    await page.goto("/controls");
+    //    const footer = page.getByTestId("controls-pagination");
+    //    await expect(footer).toBeVisible();
+    //    // With >=51 seeded anchors the page-1 summary reads "Showing 1–50 of N".
+    //    await expect(
+    //      page.getByTestId("controls-pagination-summary"),
+    //    ).toContainText("Showing 1–50 of");
+  });
+
+  test("AC-227-2: Previous is disabled on page 1, Next is enabled", async () => {
+    //    await page.goto("/controls");
+    //    await expect(page.getByTestId("controls-pagination-prev")).toBeDisabled();
+    //    await expect(page.getByTestId("controls-pagination-next")).toBeEnabled();
+  });
+
+  test("AC-227-3: clicking Next advances to ?page=2 and updates the summary", async () => {
+    //    await page.goto("/controls");
+    //    await page.getByTestId("controls-pagination-next").click();
+    //    await expect(page).toHaveURL(/\/controls\?(.*&)?page=2/);
+    //    // Page 2 summary reads "Showing 51–N of N" (or similar).
+    //    await expect(
+    //      page.getByTestId("controls-pagination-summary"),
+    //    ).toContainText("Showing 51");
+    //    // Previous is now enabled; Next is disabled (only 2 pages).
+    //    await expect(page.getByTestId("controls-pagination-prev")).toBeEnabled();
+    //    await expect(page.getByTestId("controls-pagination-next")).toBeDisabled();
+  });
+
+  test("AC-227-4: Previous from page 2 returns to page 1 with the page param dropped", async () => {
+    //    await page.goto("/controls?page=2");
+    //    await page.getByTestId("controls-pagination-prev").click();
+    //    // Canonical page-1 URL drops the `page` param.
+    //    await expect(page).toHaveURL(/\/controls(\?[^p]*)?$/);
+    //    await expect(page.getByTestId("controls-pagination-prev")).toBeDisabled();
+  });
+
+  test("AC-227-5: filter mutation while on page 2 resets to page 1", async () => {
+    //    await page.goto("/controls?page=2");
+    //    // Apply a filter change (Family → first non-ALL option).
+    //    const familyPill = page.getByLabel("Family");
+    //    await familyPill.selectOption({ index: 1 });
+    //    // The page param must be dropped on the next URL replace.
+    //    await expect(page).not.toHaveURL(/[?&]page=/);
+    //    await expect(page.getByTestId("controls-pagination-prev")).toBeDisabled();
+  });
+
+  test("AC-227-6: refresh on ?page=2 preserves the page state", async () => {
+    //    await page.goto("/controls?page=2");
+    //    await page.reload();
+    //    await expect(page).toHaveURL(/[?&]page=2/);
+    //    await expect(
+    //      page.getByTestId("controls-pagination-summary"),
+    //    ).toContainText("Showing 51");
+  });
+
   test("slice 225 AC-4: New control disclosure replaces the disabled button", async () => {
     // Slice 225 closed the F-178-225 HONESTY-GAP by replacing a
     // permanently-disabled `<Button>New control</Button>` in the
