@@ -66,7 +66,7 @@ import {
   type ListColumn,
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { fetchRisksList, type Risk, type RisksListResponse } from "@/lib/api";
 import {
   RISK_EXPORT_FORMATS,
@@ -344,9 +344,19 @@ function RisksPageInner() {
           Export {RISK_EXPORT_FORMAT_LABELS[format]}
         </a>
       ))}
-      <Button size="sm" disabled>
+      {/* Slice 247 — honesty fix. Previously rendered as
+          `<Button size="sm" disabled>` with no tooltip / banner / route,
+          even though `/risks/new` exists (slice 105) and the empty-state
+          CTA already routes there. Same shadcn Button shape via
+          `buttonVariants({ size: "sm" })`, wrapped in a Next `<Link>` to
+          `/risks/new`. Matches the /vendors page header pattern. */}
+      <Link
+        href="/risks/new"
+        data-testid="risks-new-link"
+        className={buttonVariants({ size: "sm" })}
+      >
         New risk
-      </Button>
+      </Link>
     </>
   );
 

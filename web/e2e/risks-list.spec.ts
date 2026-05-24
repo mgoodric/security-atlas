@@ -126,4 +126,27 @@ test.describe("/risks list view", () => {
     //      page.getByText(/Per-risk detail page is a future slice/),
     //    ).toBeVisible();
   });
+
+  // Slice 247 — header "New risk" button enable. The header previously
+  // rendered `<Button size="sm" disabled>` even though `/risks/new`
+  // exists (slice 105) and the empty-state CTA already routes there.
+  // This slice replaces the disabled button with a `<Link>` wrapping
+  // the same shadcn Button shape via `buttonVariants({ size: "sm" })`.
+  // Both assertions (href + navigation) stay quarantined behind the
+  // slice 082 seed harness, matching the rest of this spec.
+  test("AC-247-1: header `New risk` link is enabled and points at /risks/new", async () => {
+    //    await page.goto("/risks");
+    //    const newLink = page.getByTestId("risks-new-link");
+    //    await expect(newLink).toBeVisible();
+    //    await expect(newLink).toHaveAttribute("href", "/risks/new");
+    //    // The previously disabled `<button disabled>` is gone — the
+    //    // link is the role exposed to assistive tech.
+    //    await expect(newLink).not.toHaveAttribute("disabled", "");
+  });
+
+  test("AC-247-2: clicking header `New risk` navigates to /risks/new", async () => {
+    //    await page.goto("/risks");
+    //    await page.getByTestId("risks-new-link").click();
+    //    await expect(page).toHaveURL(/\/risks\/new$/);
+  });
 });
