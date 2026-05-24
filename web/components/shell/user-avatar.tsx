@@ -86,10 +86,7 @@ export async function UserAvatar() {
       >
         {initials}
       </div>
-      <span
-        data-testid="user-avatar-name"
-        className="text-sm text-foreground"
-      >
+      <span data-testid="user-avatar-name" className="text-sm text-foreground">
         {name}
       </span>
     </div>
