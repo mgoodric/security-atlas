@@ -36,6 +36,7 @@ import (
 	controlstateapi "github.com/mgoodric/security-atlas/internal/api/controlstate"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	dashboardapi "github.com/mgoodric/security-atlas/internal/api/dashboard"
+	dashboardexportapi "github.com/mgoodric/security-atlas/internal/api/dashboardexport"
 	decisionsapi "github.com/mgoodric/security-atlas/internal/api/decisions"
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
 	exceptionsapi "github.com/mgoodric/security-atlas/internal/api/exceptions"
@@ -780,10 +781,37 @@ func (s *Server) httpHandler() http.Handler {
 	// is a pure read surface over existing tables + the slice-062
 	// admin_audit_log_v view -- this slice adds no migration and no write
 	// path (constitutional invariant #2).
-	dashboardH := dashboardapi.New(dashboardapi.NewStore(s.dbPool))
+	dashboardStoreForExport := dashboardapi.NewStore(s.dbPool)
+	dashboardH := dashboardapi.New(dashboardStoreForExport)
 	root.Get("/v1/frameworks/posture", dashboardH.FrameworkPosture)
 	root.Get("/v1/activity", dashboardH.Activity)
 	root.Get("/v1/upcoming", dashboardH.Upcoming)
+	// Slice 269: dashboard snapshot export (`GET /v1/dashboard/export
+	// ?format=json|csv|xlsx`). Composes the six per-panel reads
+	// (framework posture + risks + freshness + drift + upcoming +
+	// activity) into a single artifact in three formats — single
+	// JSON document, ZIP of one CSV per panel, or XLSX workbook with
+	// one sheet per panel. Reuses the already-wired
+	// dashboardStoreForExport (shared with the per-panel reads
+	// above), the risks store, and the freshness + drift stores
+	// declared above. The handler runs the slice 035 OPA admit
+	// (`dashboard_export` action — added by the slice 269 OPA admit
+	// extension) PLUS a handler-level `hasDashboardExportAccess`
+	// predicate; admin + approver only (slice 269 D3). Every
+	// terminal outcome writes one `me_audit_log` row with
+	// action='dashboard_export' (migration
+	// 20260524000000_dashboard_export_meta_audit.sql extends the
+	// CHECK to permit the value). Routes appended per the
+	// parallel-batch convention. Unblocks slice 230's frontend
+	// `Export` CTA wiring.
+	dashboardExportSource := dashboardexportapi.NewLivePanelSource(
+		dashboardStoreForExport,
+		risksStore,
+		freshnessStore,
+		driftStore,
+	)
+	dashboardExportH := dashboardexportapi.NewHandler(s.dbPool, dashboardExportSource)
+	root.Get("/v1/dashboard/export", dashboardExportH.ExportDashboard)
 	// Slice 268: unified cross-domain search (`/v1/search`). Aggregates
 	// lexical ILIKE matches across controls, risks, and evidence into a
 	// single typed-union response. Per-type OPA admit (D3) is invoked

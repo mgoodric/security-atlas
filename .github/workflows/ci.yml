@@ -319,6 +319,7 @@ jobs:
             ./internal/api/controlstate/... \
             ./internal/decision/... \
             ./internal/api/dashboard/... \
+            ./internal/api/dashboardexport/... \
             ./internal/api/risks/... \
             ./internal/authz/... \
             ./internal/control/... \

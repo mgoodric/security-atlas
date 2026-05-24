@@ -117,6 +117,7 @@
     "internal/api/connectorregistry/",
     "internal/api/controlstate/",
     "internal/api/dashboard/",
+    "internal/api/dashboardexport/",
     "internal/api/decisions/",
     "internal/api/evidence/",
     "internal/api/exceptions/",

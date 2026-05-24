@@ -183,6 +183,25 @@ auditor_readable_resources := {
     # defaults.rego.catalog_resources["frameworks"] (slice 035).
     "activity",
     "upcoming",
+    # Slice 269: dashboard snapshot export
+    # (`GET /v1/dashboard/export?format=json|csv|xlsx`). The
+    # `BuildInput` path-to-resource resolver derives resource.type
+    # = "dashboard" from the leading /v1/dashboard/ segment, so the
+    # admit key here is "dashboard" (NOT "dashboard-export").
+    #
+    # The auditor admit set for the in-app dashboard reads
+    # (activity + upcoming above + frameworks via defaults.rego)
+    # already includes everything the export composes; the
+    # bulk-handoff variant is the same data with a different
+    # encoder. Admitting the auditor here mirrors the slice 135
+    # P0-A9 "export admit MUST match the underlying read admit"
+    # parity rule. RLS keeps each per-panel read tenant-scoped;
+    # the slice 269 cross-tenant isolation integration test is
+    # the merge-blocking evidence. The handler-level
+    # `hasDashboardExportAccess` predicate is the defense-in-
+    # depth twin (admin + approver only); the OPA rule here is
+    # the upstream production gate.
+    "dashboard",
 }
 
 # Slice 148: auditor can mint their own ICS subscription URL via
