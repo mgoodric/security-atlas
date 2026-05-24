@@ -55,6 +55,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { CoverageTable } from "@/components/control/coverage-table";
 import { FreshnessClock } from "@/components/control/freshness-clock";
+import { ControlHeaderActions } from "@/components/control/header-actions";
 import { UcfMiniViz } from "@/components/control/ucf-mini-viz";
 import {
   fetchControlCoverage,
@@ -269,65 +270,82 @@ export default function ControlDetailPage() {
       </div>
 
       {/* ============ CONTROL HEADER ============ */}
-      <header className="space-y-2" data-testid="control-header">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono text-xs text-muted-foreground">
-            {control.bundle_id}
-            {control.version ? ` · v${control.version}` : ""}
-          </span>
-          {anchor ? (
-            <Link
-              href={`/catalog/scf/${encodeURIComponent(anchor.id)}`}
-              className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-primary hover:bg-primary/20"
-              data-testid="scf-anchor-pill"
-            >
-              {anchor.scf_id}
-            </Link>
-          ) : (
-            <span
-              className="font-mono text-[11px] text-muted-foreground"
-              data-testid="scf-anchor-pill"
-            >
-              unanchored
+      {/* Slice 255 — header now splits into a left "title + meta" well
+          and a right "action buttons + last-evaluated" well. The flex
+          row collapses to a stacked column at mobile widths so the
+          action well drops below the title rather than wrapping
+          mid-button-row. */}
+      <header
+        className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between"
+        data-testid="control-header"
+      >
+        <div className="min-w-0 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-xs text-muted-foreground">
+              {control.bundle_id}
+              {control.version ? ` · v${control.version}` : ""}
             </span>
-          )}
-          <Badge
-            variant="secondary"
-            data-testid="lifecycle-badge"
-            className="capitalize"
+            {anchor ? (
+              <Link
+                href={`/catalog/scf/${encodeURIComponent(anchor.id)}`}
+                className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-primary hover:bg-primary/20"
+                data-testid="scf-anchor-pill"
+              >
+                {anchor.scf_id}
+              </Link>
+            ) : (
+              <span
+                className="font-mono text-[11px] text-muted-foreground"
+                data-testid="scf-anchor-pill"
+              >
+                unanchored
+              </span>
+            )}
+            <Badge
+              variant="secondary"
+              data-testid="lifecycle-badge"
+              className="capitalize"
+            >
+              {control.lifecycle_state}
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              {control.control_family}
+            </span>
+          </div>
+
+          <h1
+            className="text-2xl font-semibold tracking-tight"
+            data-testid="control-title"
           >
-            {control.lifecycle_state}
-          </Badge>
-          <span className="text-xs text-muted-foreground">
-            {control.control_family}
-          </span>
+            {control.title}
+          </h1>
+
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+            <span className="text-muted-foreground">
+              Owner role{" "}
+              <span className="text-foreground">{control.owner_role}</span>
+            </span>
+            <span className="text-muted-foreground">
+              Implementation{" "}
+              <span className="text-foreground">
+                {control.implementation_type}
+              </span>
+            </span>
+            <span className="text-muted-foreground">
+              Freshness class{" "}
+              <span className="font-mono text-foreground">
+                {control.freshness_class ?? "—"}
+              </span>
+            </span>
+          </div>
         </div>
 
-        <h1
-          className="text-2xl font-semibold tracking-tight"
-          data-testid="control-title"
-        >
-          {control.title}
-        </h1>
-
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
-          <span className="text-muted-foreground">
-            Owner role{" "}
-            <span className="text-foreground">{control.owner_role}</span>
-          </span>
-          <span className="text-muted-foreground">
-            Implementation{" "}
-            <span className="text-foreground">
-              {control.implementation_type}
-            </span>
-          </span>
-          <span className="text-muted-foreground">
-            Freshness class{" "}
-            <span className="font-mono text-foreground">
-              {control.freshness_class ?? "—"}
-            </span>
-          </span>
-        </div>
+        {/* Slice 255 — header actions well: Run query + Edit YAML +
+            Request exception, with "last evaluated <relative-time>"
+            sub-line. See web/components/control/header-actions.tsx for
+            the JUDGMENT decisions on disabled-vs-link semantics per
+            button. */}
+        <ControlHeaderActions controlID={id} state={state} />
       </header>
 
       {/* ============ KPI STRIP ============ */}
