@@ -997,6 +997,82 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   Production compose unchanged. Both `bundled` and `external`
   matrix modes use the staged shape.
 
+## [1.16.0](https://github.com/mgoodric/security-atlas/compare/v1.15.0...v1.16.0) (2026-05-24)
+
+
+### Features
+
+* **api:** slice 268 — unified /v1/search endpoint ([#593](https://github.com/mgoodric/security-atlas/issues/593)) ([d9d8e69](https://github.com/mgoodric/security-atlas/commit/d9d8e69b5338c880f8d71d71b256088d1cc6e810))
+* **api:** slice 269 — dashboard snapshot export endpoint ([#599](https://github.com/mgoodric/security-atlas/issues/599)) ([418caab](https://github.com/mgoodric/security-atlas/commit/418caabf42c29f6bc77d75ca7956bc61e3f3c5ad))
+* **auth:** slice 209 — in-app local-credential AS (email/password → JWT) ([#512](https://github.com/mgoodric/security-atlas/issues/512)) ([d35dae9](https://github.com/mgoodric/security-atlas/commit/d35dae974c893eeab9fdb29f5877802f7e862106))
+* **auth:** slice 210 — /v1/install-state returns bootstrap tenant_id ([#513](https://github.com/mgoodric/security-atlas/issues/513)) ([482489b](https://github.com/mgoodric/security-atlas/commit/482489b998f4a81333036d0ce7a50a9f49445d12))
+* **auth:** slice 211 — seed grants user_roles + super_admins to bootstrap user ([#515](https://github.com/mgoodric/security-atlas/issues/515)) ([a1d689b](https://github.com/mgoodric/security-atlas/commit/a1d689b0c167f9c6dc6f9238242eaa598450c13d))
+* **board:** slice 273 — vendor-burndown board-pack section ([#616](https://github.com/mgoodric/security-atlas/issues/616)) ([418763b](https://github.com/mgoodric/security-atlas/commit/418763b86cbe29415b7631e10b980aeeba33d3fe))
+* **frontend:** Frameworks-per-row column on /controls list ([#226](https://github.com/mgoodric/security-atlas/issues/226)) ([#553](https://github.com/mgoodric/security-atlas/issues/553)) ([de74002](https://github.com/mgoodric/security-atlas/commit/de74002dcd5fef48474aa772dbdf97702f1a385d))
+* **frontend:** slice 213 — audits header chrome (subset) ([#583](https://github.com/mgoodric/security-atlas/issues/583)) ([1b7074b](https://github.com/mgoodric/security-atlas/commit/1b7074b1af2d247f2d5d7e8c74a560793312c358))
+* **frontend:** slice 214 — sidebar item counts ([#587](https://github.com/mgoodric/security-atlas/issues/587)) ([1001f4d](https://github.com/mgoodric/security-atlas/commit/1001f4de740169403e5810e96d70abd31d6428d6))
+* **frontend:** slice 215 — audits page title status tally ([#542](https://github.com/mgoodric/security-atlas/issues/542)) ([e61d315](https://github.com/mgoodric/security-atlas/commit/e61d315445e34c82ad5de6669f98df20ad106a56))
+* **frontend:** slice 217 — audits OSCAL export button affordance tooltip ([#217](https://github.com/mgoodric/security-atlas/issues/217)) ([#557](https://github.com/mgoodric/security-atlas/issues/557)) ([381784b](https://github.com/mgoodric/security-atlas/commit/381784bf728d8293e251a9ce5153f4fe2b469c96))
+* **frontend:** slice 218 — board-pack detail breadcrumb ([#582](https://github.com/mgoodric/security-atlas/issues/582)) ([ceef32f](https://github.com/mgoodric/security-atlas/commit/ceef32f209ce9caa60aa4e3094b6f52378956122))
+* **frontend:** slice 219 — board-pack Author cell honesty ([#552](https://github.com/mgoodric/security-atlas/issues/552)) ([f57c8c1](https://github.com/mgoodric/security-atlas/commit/f57c8c1be5a3649b0f923b66cd7dca1be0059cbd))
+* **frontend:** slice 222 — board-pack posture coverage-definition caption ([#547](https://github.com/mgoodric/security-atlas/issues/547)) ([88f3766](https://github.com/mgoodric/security-atlas/commit/88f37669dcaf0bde6cfcb92cd656dfac0d42b5df))
+* **frontend:** slice 223 — controls top bar chrome (subset) ([#603](https://github.com/mgoodric/security-atlas/issues/603)) ([cf7c0be](https://github.com/mgoodric/security-atlas/commit/cf7c0be0dc40f9759507947d2f204d242500b8ef))
+* **frontend:** slice 224 — Scope filter pill on /controls list ([#224](https://github.com/mgoodric/security-atlas/issues/224)) ([#543](https://github.com/mgoodric/security-atlas/issues/543)) ([e2df15d](https://github.com/mgoodric/security-atlas/commit/e2df15d06f9d6881667c173ad7e960759d95e1c6))
+* **frontend:** slice 225 — controls New button affordance ([#561](https://github.com/mgoodric/security-atlas/issues/561)) ([ef3c4a2](https://github.com/mgoodric/security-atlas/commit/ef3c4a28385536924973a7b31e880dd012ffe2f8))
+* **frontend:** slice 227 — /controls list pagination footer ([#576](https://github.com/mgoodric/security-atlas/issues/576)) ([5842272](https://github.com/mgoodric/security-atlas/commit/58422721f63bc93264f3a50763b19317bcd9b818))
+* **frontend:** slice 229 — dashboard header tenant + snapshot subtitle ([#592](https://github.com/mgoodric/security-atlas/issues/592)) ([6c8fa4e](https://github.com/mgoodric/security-atlas/commit/6c8fa4eb13b3febe72e5c9e35d1011dddd33aade))
+* **frontend:** slice 233 — evidence Push CTA affordance ([#558](https://github.com/mgoodric/security-atlas/issues/558)) ([ebf7502](https://github.com/mgoodric/security-atlas/commit/ebf7502a78b8a02ae2c02774061f07f12c271887))
+* **frontend:** slice 234 — /evidence filter row Source + Scope + Since pills ([#568](https://github.com/mgoodric/security-atlas/issues/568)) ([1bea0cd](https://github.com/mgoodric/security-atlas/commit/1bea0cd47a100e606ab0159169ca56767a569497))
+* **frontend:** slice 235 — evidence header chrome (subset) ([#606](https://github.com/mgoodric/security-atlas/issues/606)) ([0351f05](https://github.com/mgoodric/security-atlas/commit/0351f05c8b0e56df15ea4bd97fdeb2634eb46561))
+* **frontend:** slice 236 — /evidence record-count meta ledger-total context ([#562](https://github.com/mgoodric/security-atlas/issues/562)) ([ef1291a](https://github.com/mgoodric/security-atlas/commit/ef1291a4a3a95244e9ad604defd477646b2f6c26))
+* **frontend:** slice 237 — /evidence pagination footer ([#578](https://github.com/mgoodric/security-atlas/issues/578)) ([7576852](https://github.com/mgoodric/security-atlas/commit/7576852d85de42c5dbcbac2e6e469986308ca3a1))
+* **frontend:** slice 238 — /policies Linked-control + Ack-status filter pills ([#566](https://github.com/mgoodric/security-atlas/issues/566)) ([d4d9081](https://github.com/mgoodric/security-atlas/commit/d4d9081060e3c31662d0bbcc2ed8e7f69f9d5d3a))
+* **frontend:** slice 239 — policies list header inline status counts ([#548](https://github.com/mgoodric/security-atlas/issues/548)) ([628a5ff](https://github.com/mgoodric/security-atlas/commit/628a5ffe1891cc5a28faf5cf49bd26caf01c11b9))
+* **frontend:** slice 240 — /policies pagination + 365-day disclosure ([#577](https://github.com/mgoodric/security-atlas/issues/577)) ([cdc8dfa](https://github.com/mgoodric/security-atlas/commit/cdc8dfaff456f6146d3c7e58ed1b776ed9f10b87))
+* **frontend:** slice 241 — /policies header CTAs honest disclosure ([#572](https://github.com/mgoodric/security-atlas/issues/572)) ([0dd23ed](https://github.com/mgoodric/security-atlas/commit/0dd23ed007eedeb2365a678e14045cea07f7ead6))
+* **frontend:** slice 242 — policies empty-state CTA correct destination ([#242](https://github.com/mgoodric/security-atlas/issues/242)) ([#563](https://github.com/mgoodric/security-atlas/issues/563)) ([f676ee3](https://github.com/mgoodric/security-atlas/commit/f676ee36850d58f59810ea77aee9cd458036c327))
+* **frontend:** slice 243 — /risks header chrome regression-protection spec ([#610](https://github.com/mgoodric/security-atlas/issues/610)) ([a4950b7](https://github.com/mgoodric/security-atlas/commit/a4950b76143c27035bc9074e3a3e2afce7d476f4))
+* **frontend:** slice 244 — /risks list Category + Methodology + Org unit filter pills ([#567](https://github.com/mgoodric/security-atlas/issues/567)) ([4c8435c](https://github.com/mgoodric/security-atlas/commit/4c8435ce3791bf163c985236c33e0060a66af714))
+* **frontend:** slice 246 — /risks list pagination footer ([#571](https://github.com/mgoodric/security-atlas/issues/571)) ([399e0e1](https://github.com/mgoodric/security-atlas/commit/399e0e12ea5e6986718b8934430c73a583b9e9be))
+* **frontend:** slice 247 — enable risks New button (route exists) ([#556](https://github.com/mgoodric/security-atlas/issues/556)) ([bf665f0](https://github.com/mgoodric/security-atlas/commit/bf665f02850397eccb2a18b48e0af19121fec28e))
+* **frontend:** slice 248 — settings page &lt;title&gt; metadata ([#551](https://github.com/mgoodric/security-atlas/issues/551)) ([79eef15](https://github.com/mgoodric/security-atlas/commit/79eef15c03bc25fae3588992360fe1d7effef4c0))
+* **frontend:** slice 251 — settings Notifications honest disclosure for credential bearers ([#251](https://github.com/mgoodric/security-atlas/issues/251)) ([#573](https://github.com/mgoodric/security-atlas/issues/573)) ([c5dfc87](https://github.com/mgoodric/security-atlas/commit/c5dfc87ab567bd83d71b1dac9eb9f85be3af2fe1))
+* **frontend:** slice 252 — settings admin cross-link Unicode arrow ([#546](https://github.com/mgoodric/security-atlas/issues/546)) ([0800df7](https://github.com/mgoodric/security-atlas/commit/0800df713acb2802a81aa2d0a7138912101fe04f))
+* **frontend:** slice 254 — control-detail tab strip ([#615](https://github.com/mgoodric/security-atlas/issues/615)) ([3b273d0](https://github.com/mgoodric/security-atlas/commit/3b273d0b0e33bf87cd3b46feb90f48f3c9bdb86c))
+* **frontend:** slice 255 — control-detail header buttons + last-evaluated ([#612](https://github.com/mgoodric/security-atlas/issues/612)) ([bb34d8a](https://github.com/mgoodric/security-atlas/commit/bb34d8a62de965fb2e91350e8b9d3889ebb70060))
+* **frontend:** slice 256 — control-detail Coverage column ([#607](https://github.com/mgoodric/security-atlas/issues/607)) ([da03fd2](https://github.com/mgoodric/security-atlas/commit/da03fd2440b2da410e44ca89b78bb4ac72b4dd32))
+* **frontend:** slice 257 — control-detail header chrome regression-protection spec ([#611](https://github.com/mgoodric/security-atlas/issues/611)) ([66a426a](https://github.com/mgoodric/security-atlas/commit/66a426a69f7038e0abf139a29fd007f0a2b8d190))
+* **infra:** slice 207 — edge deploy channel for atlas-edge.home.gmoney.sh ([#506](https://github.com/mgoodric/security-atlas/issues/506)) ([bf0aa19](https://github.com/mgoodric/security-atlas/commit/bf0aa197e58aff79e85db6c531adb5f75c592b2b))
+* **mockup:** slice 216 — drop "Sample size" column from audits mockup ([#533](https://github.com/mgoodric/security-atlas/issues/533)) ([7770adf](https://github.com/mgoodric/security-atlas/commit/7770adf3ff593d12596082ebb110345eaa9df948))
+* **mockup:** slice 220 — board-pack coverage-trend updated to v1 scalar-only ([#532](https://github.com/mgoodric/security-atlas/issues/532)) ([ffee1c9](https://github.com/mgoodric/security-atlas/commit/ffee1c9f327f38e3c9a8f5b221de524374145c71))
+* **mockup:** slice 231 — drop dashboard topbar audit-cycle status pill ([#537](https://github.com/mgoodric/security-atlas/issues/537)) ([a5bbf03](https://github.com/mgoodric/security-atlas/commit/a5bbf03a89f650c2703c5ff9127ca90d96bd2b8e)), closes [#231](https://github.com/mgoodric/security-atlas/issues/231)
+* **mockup:** slice 245 — risks mockup drops stale "above appetite" subtitle tally ([#534](https://github.com/mgoodric/security-atlas/issues/534)) ([472a17f](https://github.com/mgoodric/security-atlas/commit/472a17f1c39e3532886f9e4962062bed361f2477))
+* **mockup:** slice 258 — drop stale "design only" badges from mockup index ([#539](https://github.com/mgoodric/security-atlas/issues/539)) ([03b9e34](https://github.com/mgoodric/security-atlas/commit/03b9e34eb8eeeb4ff6241ac11671226fe9305ce2))
+* **mockup:** slice 264 — drop unshipped Excel column-mapping section from questionnaire mockup ([#538](https://github.com/mgoodric/security-atlas/issues/538)) ([9a51b40](https://github.com/mgoodric/security-atlas/commit/9a51b405f0856c5e04ae1d82c59c7b6fc65d169e))
+* slice 270 — non-admin /activity ledger surface ([#598](https://github.com/mgoodric/security-atlas/issues/598)) ([1ee7242](https://github.com/mgoodric/security-atlas/commit/1ee7242bda23f496649f100538cd1661f7aca3b0))
+* **web:** slice 208 — Next.js rewrites for /v1/, /health, /metrics ([#510](https://github.com/mgoodric/security-atlas/issues/510)) ([3967ff9](https://github.com/mgoodric/security-atlas/commit/3967ff95a254d8c2ed44dff80fbf191d2c7d7790))
+
+
+### Bug Fixes
+
+* **auth:** slice 210 — BootstrapTenantID must use BYPASSRLS pool ([#514](https://github.com/mgoodric/security-atlas/issues/514)) ([eac2553](https://github.com/mgoodric/security-atlas/commit/eac25533f259a2fb51a39669ac8d3fd63b68cb91))
+* **e2e:** slice 274 — settings AC-9 token-row root-cause fix ([#597](https://github.com/mgoodric/security-atlas/issues/597)) ([235c41d](https://github.com/mgoodric/security-atlas/commit/235c41d6271c6215dcfb5dfbd2b157f598279276))
+* **e2e:** slice 275 — control-detail-tabs.spec.ts auto-wait fix ([#620](https://github.com/mgoodric/security-atlas/issues/620)) ([dcfe052](https://github.com/mgoodric/security-atlas/commit/dcfe0523baacc341c219d0ea745d8a2fcb6c0927))
+* **frontend:** slice 249 — settings admin variants no longer flicker ([#581](https://github.com/mgoodric/security-atlas/issues/581)) ([98872a4](https://github.com/mgoodric/security-atlas/commit/98872a4da74108f60c97b3d9821fdc72dc9f10e5))
+* **frontend:** slice 250 — settings Profile honesty for credential bearers ([#588](https://github.com/mgoodric/security-atlas/issues/588)) ([0a4762d](https://github.com/mgoodric/security-atlas/commit/0a4762d98bede97c2948da8d3f34f59c73755319))
+* **frontend:** slice 253 — control-detail empty-states honest about live data ([#602](https://github.com/mgoodric/security-atlas/issues/602)) ([2591cbb](https://github.com/mgoodric/security-atlas/commit/2591cbbb77859fa8e419fae17d62821102c6859f))
+
+
+### Documentation
+
+* **audit-log:** slice 204 — UI parity audit fleet aggregate + decisions ([#528](https://github.com/mgoodric/security-atlas/issues/528)) ([ced0a8d](https://github.com/mgoodric/security-atlas/commit/ced0a8dfbe63b2f0a1b4bdddf6e312c4d9a4a026))
+* **issues:** add slice 275 — slice 254 control-detail-tabs e2e fix ([#617](https://github.com/mgoodric/security-atlas/issues/617)) ([197d753](https://github.com/mgoodric/security-atlas/commit/197d7539832aa1f30136a24f1eee463b6a38bdf5))
+* **issues:** add slices 268-270 — precursor endpoints for slice 204 spillovers 228/230/232 ([#530](https://github.com/mgoodric/security-atlas/issues/530)) ([23fd2eb](https://github.com/mgoodric/security-atlas/commit/23fd2ebc0cfbeb5b3f1e1cb25cfb1f2154a13adb))
+* **issues:** slice 274 — settings AC-9 token-row flake investigation ([#594](https://github.com/mgoodric/security-atlas/issues/594)) ([60d2bd2](https://github.com/mgoodric/security-atlas/commit/60d2bd243ec5b809adc8eb77f650ab94c4bfd99d))
+* **issues:** slice 276 — control-detail-tabs e2e deep fix ([#621](https://github.com/mgoodric/security-atlas/issues/621)) ([e004b9f](https://github.com/mgoodric/security-atlas/commit/e004b9f83ccea0d7774f89db9b4436c2b60880f2))
+* **mockup:** slice 221 — board-pack vendor-burndown → open-findings (D1=A) ([#586](https://github.com/mgoodric/security-atlas/issues/586)) ([4634060](https://github.com/mgoodric/security-atlas/commit/4634060ca978084990a6d93912adc009c0f32e7e))
+* **mockup:** slice 259 — index tiles for post-093 surfaces ([#591](https://github.com/mgoodric/security-atlas/issues/591)) ([575d1bf](https://github.com/mgoodric/security-atlas/commit/575d1bf6966404d278e860754fb2d0890bb7e071))
+
 ## [1.15.0](https://github.com/mgoodric/security-atlas/compare/v1.14.0...v1.15.0) (2026-05-22)
 
 
