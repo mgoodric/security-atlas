@@ -109,9 +109,9 @@ which P0-A3 explicitly forbids.
   other seven reflect day-to-day operator work and are tenant-public.
 - **The `me` kind** is the per-actor self-audit table.
   `me_audit_log.user_id` IS the actor; `me_audit_log.action` enumerates
-  ~22 distinct values today (profile.update, *_export queries, plus
+  ~22 distinct values today (profile.update, _*export queries, plus
   admin-only actions like super_admin_grant, tenant_create,
-  bootstrap_first_install, tenant_rename, demo_seed_*). For a non-admin
+  bootstrap_first_install, tenant_rename, demo_seed*_). For a non-admin
   caller, the right cut is "show only rows where `user_id = caller`."
   The admin-only actions are filtered out automatically because a
   non-admin never took them.

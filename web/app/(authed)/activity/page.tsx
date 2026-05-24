@@ -22,8 +22,8 @@ export default function ActivityPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Activity</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
           Tenant activity ledger: state changes, evidence ingestion, audit
-          milestones, and your own audit trail. Filter by time window, actor,
-          or event kind; expand a row to see its raw payload. Read-only.
+          milestones, and your own audit trail. Filter by time window, actor, or
+          event kind; expand a row to see its raw payload. Read-only.
         </p>
       </div>
       <ActivityPageClient />
