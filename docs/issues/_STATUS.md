@@ -137,10 +137,10 @@ Two slice 204 spillover slices, different pages — conflict-safe.
 - **#274** (settings.spec.ts AC-9 token-row flake fix) merged at `235c41d6` via PR #597 — root cause: slice 249's SSR HydrationBoundary widened a pre-existing snapshot/fetch race. Surgical fix: `.count()` snapshot → auto-waiting `await expect(rows.first()).toBeVisible()` (mirrors AC-11 pattern). UNBLOCKS all frontend slices going forward. 4 hypothesis disproof table documented in decisions log.
 
 | Row | Transition                                              | Evidence                                                       |
-| --- | ------------------------------------------------------- | -------------------------------------------------------------- | -------------------------------------- | --- | ---------- | --- | ------------------------------------------------------- |
+| --- | ------------------------------------------------------- | -------------------------------------------------------------- | -------------------------------------- | ------ | ---------- | ---------- | --------------------------------------------------------------------------------- |
 | 269 | `in-progress` → `merged`                                | PR #599 at `418caabf` (dashboard export endpoint + migration)  |
 | 270 | `in-progress` → `merged`                                | PR #598 at `1ee7242b` (D1=FUSED A/B activity ledger)           |
-| 273 | Board-pack vendor-burndown section (spillover from 221) | `merged` | backend/273-board-pack-vendor-burndown | gh#616 | 2026-05-24 | 2026-05-24 | spillover from 221 · FORCE-merged (blocked by 254 e2e on main; backend-only diff) |
+| 273 | Board-pack vendor-burndown section (spillover from 221) | `merged`                                                       | backend/273-board-pack-vendor-burndown | gh#616 | 2026-05-24 | 2026-05-24 | spillover from 221 · FORCE-merged (blocked by 254 e2e on main; backend-only diff) |
 | 274 | `in-progress` → `merged`                                | PR #597 at `235c41d6` (AC-9 root-cause fix; unblocks frontend) |
 
 ### Fix-forward / process notes
