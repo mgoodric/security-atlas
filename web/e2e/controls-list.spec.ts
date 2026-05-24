@@ -148,4 +148,40 @@ test.describe("/controls list view", () => {
     //    // include unmapped anchors, this becomes a non-zero check.
     //    expect(await empties.count()).toBeGreaterThanOrEqual(0);
   });
+
+  test("slice 225 AC-4: New control disclosure replaces the disabled button", async () => {
+    // Slice 225 closed the F-178-225 HONESTY-GAP by replacing a
+    // permanently-disabled `<Button>New control</Button>` in the
+    // toolbar with a non-button `<span>` that discloses the future-
+    // state (the create-control flow lands in a future slice; SCF
+    // importer + atlas CLI are the current instantiation paths).
+    // AC-4 has two halves:
+    //
+    //   1. The disclosure is present, visible, and its text contains
+    //      "create-control" (load-bearing substring pinned by the
+    //      vitest sibling spec at
+    //      `web/app/(authed)/controls/new-control-future.test.ts`).
+    //   2. No disabled `<button>` with the literal text "New control"
+    //      exists anywhere on the page.
+    //
+    // Quarantined behind the slice 082 seed harness like the rest of
+    // this file. Bodies left commented so the contract is reviewable;
+    // when the harness lands the assertions turn on.
+    //    await page.goto("/controls");
+    //    const disclosure = page.getByTestId(
+    //      "controls-new-control-disabled-reason",
+    //    );
+    //    await expect(disclosure).toBeVisible();
+    //    const text = (await disclosure.textContent())?.toLowerCase() ?? "";
+    //    expect(text).toContain("create-control");
+    //    // `title` attribute carries the same copy as the visible text
+    //    // so screen readers and pointer-hover both surface the same
+    //    // disclosure. (aria-label likewise — both are set.)
+    //    const titleAttr = await disclosure.getAttribute("title");
+    //    expect(titleAttr).toMatch(/create-control/i);
+    //    // No disabled <button> with the original label survives.
+    //    await expect(
+    //      page.locator("button[disabled]", { hasText: "New control" }),
+    //    ).toHaveCount(0);
+  });
 });
