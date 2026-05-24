@@ -293,10 +293,24 @@ test.describe("/settings user-facing page", () => {
     // seed fixture inserts a token row. The slice 164 fixture seeds
     // a predecessor + successor pair (plus the harness's own admin
     // bearer row) so the table branch is exercised.
+    //
+    // Slice 274: replaced the `.count() > 0` snapshot with the
+    // auto-waiting `rows.first().toBeVisible()` assertion. Slice 249
+    // (SSR-prefetch of `is_admin` via the layout's HydrationBoundary)
+    // made `settings-section-tokens` visible on the FIRST byte of the
+    // SSR HTML instead of waiting for the client-side meQuery to
+    // resolve. The pre-slice-249 implicit delay between the section
+    // becoming visible and the `useQuery(["settings-creds"])` list
+    // completing was load-bearing for this test's `.count()` snapshot;
+    // post-slice-249 the snapshot consistently fires while the list
+    // is still in `isLoading`, returning 0. Pattern matches AC-11
+    // (line 328 below: `await expect(rows.first()).toBeVisible()`).
+    // Root cause + 4-hypothesis empirical disproof in
+    // docs/audit-log/274-settings-ac9-token-row-flake-decisions.md.
     await page.goto("/settings");
     await expect(page.getByTestId("settings-section-tokens")).toBeVisible();
-    const rowCount = await page.getByTestId("settings-token-row").count();
-    expect(rowCount).toBeGreaterThan(0);
+    const rows = page.getByTestId("settings-token-row");
+    await expect(rows.first()).toBeVisible();
     await expect(
       page.getByRole("columnheader", { name: /Last 4/ }),
     ).toBeVisible();

@@ -113,6 +113,39 @@ A spec's preconditions (the test user, tenant rows, seeded controls/evidence/pol
 
 4. Add the spec to CI by doing nothing — `npx playwright test` runs the whole `e2e/` directory.
 
+## Timing-sensitive assertions
+
+**Use auto-waiting assertions for any data that arrives asynchronously.** Playwright divides its locator API into two camps:
+
+- **Auto-waiting**: `await expect(locator).toBeVisible()`, `await expect(locator).toHaveCount(N)`, `await expect(locator).toHaveText(...)`. These poll until the assertion passes or the timeout fires (5s default).
+- **Snapshot**: `await locator.count()`, `await locator.innerText()`, `await locator.getAttribute(...)`. These read the DOM at the instant they fire and return immediately.
+
+A snapshot read of state that arrives via `useQuery` / `fetch` / any async path is a race against the data-fetch. It works whenever the fetch happens to win; it fails whenever the page becomes visible before the fetch completes.
+
+The shape of the bug: a parent `useQuery` resolves and renders the section's outer testid; the test's `await expect(section).toBeVisible()` passes; the next line snapshots a child locator that depends on a SECOND `useQuery` still in `isLoading`. Snapshot returns 0. Assertion fails.
+
+**Bad** (slice 274 root cause):
+
+```ts
+await expect(page.getByTestId("settings-section-tokens")).toBeVisible();
+const rowCount = await page.getByTestId("settings-token-row").count();
+expect(rowCount).toBeGreaterThan(0);
+```
+
+**Good** (slice 274 fix):
+
+```ts
+await expect(page.getByTestId("settings-section-tokens")).toBeVisible();
+const rows = page.getByTestId("settings-token-row");
+await expect(rows.first()).toBeVisible();
+```
+
+The auto-waiting `expect(rows.first()).toBeVisible()` polls until either a row appears (test passes) or the timeout fires (test fails for a real reason). The race is closed at the assertion shape, not by adding sleeps or retries.
+
+This is especially load-bearing for pages whose outer shell is SSR-prefetched (e.g. `/settings` post-slice-249 via `HydrationBoundary`) because the outer testid becomes visible on the first byte of HTML, leaving the inner data-fetch with zero head-start.
+
+See `docs/audit-log/274-settings-ac9-token-row-flake-decisions.md` for the full diagnosis.
+
 ## How to debug a failure via the trace viewer
 
 When CI fails, the Playwright job uploads `web/playwright-report/` and `web/test-results/` as a workflow artifact named `playwright-report`. Download it, then:
