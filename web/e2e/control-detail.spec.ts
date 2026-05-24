@@ -203,6 +203,90 @@ test.describe("control detail view", () => {
     //    ).toBeVisible();
   });
 
+  test("slice 255: header action buttons + last-evaluated timestamp", async () => {
+    // Slice 255 — the control header's top-right well carries three
+    // action buttons (Run query · Edit YAML · Request exception) and a
+    // "last evaluated <relative-time>" sub-line below them.
+    //
+    // AC-2 + AC-3 + AC-4 expectations:
+    //   - Three buttons render in mockup order.
+    //   - Run query + Edit YAML are <button disabled> with title/
+    //     aria-label tooltips naming the canvas section (slice 183/184
+    //     placeholder pattern — visible copy + tooltip + aria-label
+    //     read the same line). They are NOT `<a href="#">` (slice 178
+    //     anti-pattern).
+    //   - Request exception is a real link to /exceptions?control_id=<id>,
+    //     which is a merged URL-driven filter on the existing
+    //     /exceptions list page.
+    //
+    // AC-6 expectations:
+    //   - The three buttons are keyboard-reachable in DOM order. The
+    //     disabled <button> elements are still focusable for screen
+    //     readers via shadcn's Button (which is built on base-ui
+    //     Button — disabled buttons remain in the tab order with
+    //     aria-disabled so the affordance is announced).
+    //
+    // AC-1 expectations:
+    //   - The "last evaluated" sub-line renders with a relative-time
+    //     value sourced from state.last_observed_at. Assertions are
+    //     commented pending the slice-082 seed harness — same
+    //     convention as the surrounding tests.
+    //
+    //    await page.goto(`/controls/${KNOWN_CONTROL_ID}`);
+    //    await expect(page.getByTestId("control-header-actions")).toBeVisible();
+    //
+    //    // AC-2: three buttons in mockup order.
+    //    const runQuery = page.getByTestId("control-action-run-query");
+    //    const editYaml = page.getByTestId("control-action-edit-yaml");
+    //    const requestException = page.getByTestId(
+    //      "control-action-request-exception",
+    //    );
+    //    await expect(runQuery).toBeVisible();
+    //    await expect(editYaml).toBeVisible();
+    //    await expect(requestException).toBeVisible();
+    //
+    //    // AC-3 + AC-4: Run query + Edit YAML carry an explanatory
+    //    // tooltip and are non-interactive. They are NOT links.
+    //    await expect(runQuery).toBeDisabled();
+    //    await expect(editYaml).toBeDisabled();
+    //    await expect(runQuery).toHaveAttribute(
+    //      "aria-label",
+    //      /Rule-DSL execution lands in a follow-up slice/,
+    //    );
+    //    await expect(editYaml).toHaveAttribute(
+    //      "aria-label",
+    //      /Control-text editor lands in a follow-up slice/,
+    //    );
+    //
+    //    // P0-255-3: no `<a href="#">` anywhere in the action well.
+    //    const headHashLinks = page
+    //      .getByTestId("control-header-actions")
+    //      .locator('a[href="#"]');
+    //    await expect(headHashLinks).toHaveCount(0);
+    //
+    //    // D2: Request exception links to a real route.
+    //    await expect(requestException).toHaveAttribute(
+    //      "href",
+    //      new RegExp(`^/exceptions\\?control_id=`),
+    //    );
+    //
+    //    // AC-1: last-evaluated sub-line renders with a value.
+    //    await expect(page.getByTestId("control-last-evaluated")).toBeVisible();
+    //    await expect(
+    //      page.getByTestId("control-last-evaluated-value"),
+    //    ).toBeVisible();
+    //
+    //    // AC-6: the three buttons are keyboard-reachable in DOM order.
+    //    // We focus the first one explicitly, then Tab twice; each Tab
+    //    // should land on the next button in mockup order.
+    //    await runQuery.focus();
+    //    await expect(runQuery).toBeFocused();
+    //    await page.keyboard.press("Tab");
+    //    await expect(editYaml).toBeFocused();
+    //    await page.keyboard.press("Tab");
+    //    await expect(requestException).toBeFocused();
+  });
+
   test("AC-7: out-of-scope framework rows render dashed/greyed", async () => {
     // The pre-condition control is out of scope for >=1 framework. That
     // row carries data-out-of-scope="true" and the dashed/greyed
