@@ -82,6 +82,11 @@ import {
   scopeLabel,
   sourceSummary,
 } from "./format";
+import {
+  PUSH_CTA_HREF,
+  PUSH_CTA_LABEL,
+  PUSH_CTA_SUBTITLE_PREFIX,
+} from "./push-cta";
 
 // URL parameter names mirror the upstream + BFF FORWARD_PARAMS so the
 // browser URL is a faithful echo of the request that the BFF will
@@ -330,9 +335,44 @@ function EvidencePageInner() {
           </a>
         ))}
       </div>
-      <Button size="sm" disabled>
-        Push evidence
-      </Button>
+      {/* Slice 233 — primary CTA points at the canonical CLI push doc
+          rather than rendering as a permanently-disabled `<Button>`.
+          The in-app Push dialog (Option B in the slice 233 spec) is a
+          deferred follow-on; until it ships, "Push evidence →" is the
+          truthful affordance for the operator who wants to push their
+          first record. Opens in a new tab so the operator does not
+          lose their filtered ledger view. */}
+      <a
+        href={PUSH_CTA_HREF}
+        target="_blank"
+        rel="noreferrer"
+        className={buttonVariants({ size: "sm" })}
+        data-testid="evidence-push-cta"
+      >
+        {PUSH_CTA_LABEL}
+      </a>
+    </>
+  );
+
+  // Slice 233 — subtitle gains a second sentence directing operators
+  // to the canonical CLI push doc. The trailing "Push evidence →" is
+  // anchored to the same destination as the page-level CTA so both
+  // surfaces point at the same place; the inline link uses the same
+  // `data-testid="evidence-push-cta-inline"` shape so a Playwright
+  // selector can disambiguate it from the action-bar CTA.
+  const subtitleNode = (
+    <>
+      Append-only · ingestion separated from evaluation · point-in-time replay
+      always possible. {PUSH_CTA_SUBTITLE_PREFIX}
+      <a
+        href={PUSH_CTA_HREF}
+        target="_blank"
+        rel="noreferrer"
+        className="underline hover:text-foreground"
+        data-testid="evidence-push-cta-inline"
+      >
+        {PUSH_CTA_LABEL}
+      </a>
     </>
   );
 
@@ -387,7 +427,7 @@ function EvidencePageInner() {
     return (
       <ListPage
         title="Evidence ledger"
-        subtitle="Append-only · ingestion separated from evaluation · point-in-time replay always possible"
+        subtitle={subtitleNode}
         actions={actions}
         filterRow={
           <FilterPills pills={pills} onChange={() => {}} meta={meta} />
@@ -402,7 +442,7 @@ function EvidencePageInner() {
     return (
       <ListPage
         title="Evidence ledger"
-        subtitle="Append-only · ingestion separated from evaluation · point-in-time replay always possible"
+        subtitle={subtitleNode}
         actions={actions}
       >
         <Alert variant="destructive" data-testid="evidence-load-error">
@@ -420,7 +460,7 @@ function EvidencePageInner() {
     return (
       <ListPage
         title="Evidence ledger"
-        subtitle="Append-only · ingestion separated from evaluation · point-in-time replay always possible"
+        subtitle={subtitleNode}
         actions={actions}
         filterRow={
           <FilterPills
@@ -439,7 +479,7 @@ function EvidencePageInner() {
     return (
       <ListPage
         title="Evidence ledger"
-        subtitle="Append-only · ingestion separated from evaluation · point-in-time replay always possible"
+        subtitle={subtitleNode}
         actions={actions}
         filterRow={
           <FilterPills
@@ -463,7 +503,7 @@ function EvidencePageInner() {
     <>
       <ListPage
         title="Evidence ledger"
-        subtitle="Append-only · ingestion separated from evaluation · point-in-time replay always possible"
+        subtitle={subtitleNode}
         actions={actions}
         filterRow={
           <FilterPills
