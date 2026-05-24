@@ -21,6 +21,16 @@ Pre-commit clean. Decisions log committed.
 | --- | --------------------------- | -------------------------------------------------------------------------------------- |
 | 251 | `in-progress` → `in-review` | branch `frontend/251-settings-notifications-cred-bearer` · PR pending · 868/868 vitest |
 
+## Drift detected — 2026-05-24 (continuous-loop batch · 275 → in-progress · LOAD-BEARING)
+
+Solo dispatch — slice 275 fixes the slice 254 control-detail-tabs.spec.ts e2e race that's blocking ALL frontend-touching PRs on main. Highest-priority unblocker.
+
+- **#275** (slice 254 control-detail-tabs.spec.ts e2e fix) — branch `quality/275-slice-254-tabs-e2e-fix` — 3 hypotheses documented in slice spec (Suspense boundary timing, route.fulfill registration timing, coverageQ.isLoading race)
+
+| Row | Transition                | Evidence                                    |
+| --- | ------------------------- | ------------------------------------------- |
+| 275 | (new row) → `in-progress` | branch `quality/275-slice-254-tabs-e2e-fix` |
+
 ## Drift detected — 2026-05-24 (reconcile · batch 254-273 → merged · slice 275 spillover)
 
 - **#254** (control-detail tab strip) FORCE-MERGED at `3b273d0b` via PR #615 — seven-tab strip with `?tab=<key>` URL routing; 15 vitest cases pass on `tabs.ts` helpers; sibling slices on /controls/[id] (253/255/256/257) continue to pass. Force-merged because the NEW `control-detail-tabs.spec.ts` e2e cases race the page's `coverageQ.isLoading` early return — page code is sound, only the new specs fail.
@@ -136,12 +146,13 @@ Two slice 204 spillover slices, different pages — conflict-safe.
 - **#270** (non-admin `/activity` ledger surface) merged at `1ee7242b` via PR #598 — D1=FUSED A/B: new `/v1/activity/unified` endpoint reusing slice 124's aggregator via two new SQL parameters (`caller_is_privileged`, `caller_user_id`) gating one extra row-visibility WHERE predicate. Admin endpoint unchanged. Sidebar entry unconditional (D4). Four integration tests + OPA matrix test.
 - **#274** (settings.spec.ts AC-9 token-row flake fix) merged at `235c41d6` via PR #597 — root cause: slice 249's SSR HydrationBoundary widened a pre-existing snapshot/fetch race. Surgical fix: `.count()` snapshot → auto-waiting `await expect(rows.first()).toBeVisible()` (mirrors AC-11 pattern). UNBLOCKS all frontend slices going forward. 4 hypothesis disproof table documented in decisions log.
 
-| Row | Transition                                              | Evidence                                                       |
-| --- | ------------------------------------------------------- | -------------------------------------------------------------- | -------------------------------------- | ------ | ---------- | ---------- | --------------------------------------------------------------------------------- |
-| 269 | `in-progress` → `merged`                                | PR #599 at `418caabf` (dashboard export endpoint + migration)  |
-| 270 | `in-progress` → `merged`                                | PR #598 at `1ee7242b` (D1=FUSED A/B activity ledger)           |
-| 273 | Board-pack vendor-burndown section (spillover from 221) | `merged`                                                       | backend/273-board-pack-vendor-burndown | gh#616 | 2026-05-24 | 2026-05-24 | spillover from 221 · FORCE-merged (blocked by 254 e2e on main; backend-only diff) |
-| 274 | `in-progress` → `merged`                                | PR #597 at `235c41d6` (AC-9 root-cause fix; unblocks frontend) |
+| Row | Transition                                                   | Evidence                                                       |
+| --- | ------------------------------------------------------------ | -------------------------------------------------------------- | -------------------------------------- | ------ | ---------- | ---------- | ----------------------------------------------------------------------------------------- |
+| 269 | `in-progress` → `merged`                                     | PR #599 at `418caabf` (dashboard export endpoint + migration)  |
+| 270 | `in-progress` → `merged`                                     | PR #598 at `1ee7242b` (D1=FUSED A/B activity ledger)           |
+| 273 | Board-pack vendor-burndown section (spillover from 221)      | `merged`                                                       | backend/273-board-pack-vendor-burndown | gh#616 | 2026-05-24 | 2026-05-24 | spillover from 221 · FORCE-merged (blocked by 254 e2e on main; backend-only diff)         |
+| 274 | `in-progress` → `merged`                                     | PR #597 at `235c41d6` (AC-9 root-cause fix; unblocks frontend) |
+| 275 | Slice 254 control-detail-tabs.spec.ts e2e fix (LOAD-BEARING) | `in-progress`                                                  | quality/275-slice-254-tabs-e2e-fix     | —      | 2026-05-24 | —          | spillover from slice 254 · Quality · AFK · 0.25-0.5d · unblocks ALL frontend-touching PRs |
 
 ### Fix-forward / process notes
 
