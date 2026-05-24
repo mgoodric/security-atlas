@@ -90,15 +90,34 @@ test.describe("/policies list view", () => {
     //    await expect(page.getByTestId("list-table-wrap")).toBeVisible();
   });
 
-  test("AC-5: true zero-state CTA reads 'Scaffold five foundational policies'", async () => {
+  test("AC-5 (slice 242 update): true zero-state replaces the lying scaffold CTA with a label-honest body disclosure", async () => {
+    //    // Slice 242 closed the slice 101 P0-A4 honesty-gap. The
+    //    // empty-state previously rendered a primary CTA "Scaffold
+    //    // five foundational policies" whose onClick pointed at
+    //    // /admin/credentials (an unrelated admin surface — slice 100
+    //    // "land somewhere usable" placeholder pattern). Slice 242
+    //    // retired that lying CTA: the `cta` prop is dropped in the
+    //    // zero-state branch and the disclosure is folded into the
+    //    // empty-state body, which names the operator's concrete next
+    //    // action (drafting policies via POST /v1/policies on the
+    //    // platform API).
+    //    //
     //    // This spec needs the seed harness to seed an empty tenant
     //    // (e.g. via a fresh-tenant fixture). When that lands:
     //    await page.goto("/policies");
     //    await expect(page.getByTestId("list-empty-state")).toBeVisible();
     //    await expect(page.getByText("No policies published yet")).toBeVisible();
-    //    await expect(page.getByTestId("list-empty-state-cta")).toContainText(
-    //      "Scaffold five foundational policies",
-    //    );
+    //    // The lying CTA must be gone (slice 242 P0-242-4: "does NOT
+    //    // redirect the CTA to yet another unrelated admin page").
+    //    await expect(
+    //      page.getByTestId("list-empty-state-cta"),
+    //    ).toHaveCount(0);
+    //    // The disclosure body wrapper is visible and carries the
+    //    // load-bearing capability phrase + the platform-API signpost.
+    //    const disclosure = page.getByTestId("policies-scaffold-future");
+    //    await expect(disclosure).toBeVisible();
+    //    await expect(disclosure).toContainText(/policy scaffold/i);
+    //    await expect(disclosure).toContainText("POST /v1/policies");
   });
 
   test("AC-5: filter-induced empty surfaces 'Clear filters' instead of scaffold CTA", async () => {

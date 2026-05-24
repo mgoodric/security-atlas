@@ -35,8 +35,17 @@
 //   - P0-A3: NO invented columns — every column derives from
 //     `policyWire` (title, version, status, owner_role, published_at,
 //     updated_at) + the joined PolicyAckRate cell when available.
-//   - P0-A4: NO policy-create UI bundled — the empty-state CTA links
-//     to /admin/credentials as a placeholder (slice 100 precedent).
+//   - P0-A4: NO policy-create UI bundled. Slice 242 closes the
+//     forward-looking-UI claim by replacing the lying CTA
+//     ("Scaffold five foundational policies" → /admin/credentials)
+//     with a label-honest body disclosure naming the platform API
+//     endpoint (`POST /v1/policies`) as the operator's concrete
+//     next action. Slice 100's "link the lie at /admin/credentials"
+//     precedent is explicitly retired for this empty-state — the
+//     anti-criterion P0-242-4 forbids moving the lie to another
+//     unrelated admin page; the only honest fix is to ship the
+//     destination or update the copy. See slice 242 D1 in
+//     `docs/audit-log/242-decisions.md` for the path-(b) rationale.
 //   - P0-A5: neutral test-* tokens only.
 
 import { useQuery } from "@tanstack/react-query";
@@ -80,6 +89,10 @@ import {
   type PolicyFilters,
 } from "./filters";
 import { statusCountsLabel } from "./header-counts";
+import {
+  POLICIES_SCAFFOLD_FUTURE_BODY,
+  POLICIES_SCAFFOLD_FUTURE_TESTID,
+} from "./scaffold-future";
 
 const FILTER_KEYS: (keyof PolicyFilters)[] = ["status", "owner_role"];
 
@@ -383,13 +396,40 @@ function PoliciesPageInner() {
     );
   }
 
-  // Empty-state branch: AC-5 / design doc §2 — true zero-state CTA
-  // "Scaffold five foundational policies". Slice 100 P0-A2 precedent:
-  // the CTA links to /admin/credentials as a placeholder until a
-  // dedicated scaffold wizard slice lands. When the user has filtered
-  // down to zero, we show the slice-098-style "Clear filters" affordance
-  // instead of the scaffold CTA.
+  // Empty-state branch — two cases:
+  //
+  //   * zeroState (no rows in the tenant at all): slice 242 closed
+  //     the slice 101 P0-A4 honesty-gap. The empty-state previously
+  //     rendered a primary CTA "Scaffold five foundational policies"
+  //     whose `onClick` pointed at `/admin/credentials` — an
+  //     unrelated admin surface (slice 100's "land somewhere usable"
+  //     placeholder pattern). Slice 242 retired the lying CTA: the
+  //     `cta` prop is dropped and the disclosure is folded into the
+  //     `body` text, which names the operator's concrete next action
+  //     (drafting policies via `POST /v1/policies` on the platform
+  //     API). The disclosure copy is the single source of truth in
+  //     `./scaffold-future.ts` so vitest can pin its invariants
+  //     (sentence-shape, future-tense framing, capability-named) and
+  //     Playwright can assert on the load-bearing substring. The
+  //     `data-testid` on the body wrapper composes with the slice 178
+  //     honesty harness — `captureComingSoonButtons` looks for
+  //     `button[disabled]` matching coming-soon copy; a body
+  //     paragraph is invisible to that heuristic, which is the
+  //     correct behavior because the disclosure IS the affordance.
+  //
+  //   * filter-narrowed (rows exist but none match the active
+  //     filters): the slice 098 "Clear filters" affordance is the
+  //     working action and remains untouched by slice 242 — the
+  //     destination genuinely exists (it's the same page with
+  //     filters cleared), so the CTA is honest.
   const zeroState = rows.length === 0;
+  const emptyStateBody = zeroState ? (
+    <span data-testid={POLICIES_SCAFFOLD_FUTURE_TESTID}>
+      {POLICIES_SCAFFOLD_FUTURE_BODY}
+    </span>
+  ) : (
+    "Try widening the status or owner-role filters."
+  );
   const emptyState = (
     <EmptyState
       icon={
@@ -413,21 +453,10 @@ function PoliciesPageInner() {
           ? "No policies published yet"
           : "No policies match these filters"
       }
-      body={
-        zeroState
-          ? "Start with the five SOC 2 foundational policies — the wizard scaffolds them with your org name pre-filled."
-          : "Try widening the status or owner-role filters."
-      }
+      body={emptyStateBody}
       cta={
         zeroState
-          ? {
-              label: "Scaffold five foundational policies",
-              // Placeholder destination per slice 101 P0-A4: no
-              // scaffold wizard exists on main; the CTA lands on the
-              // admin credentials surface so the user reaches a usable
-              // page rather than a 404. Slice 100 precedent.
-              onClick: () => router.push("/admin/credentials"),
-            }
+          ? undefined
           : isDefault(filters)
             ? undefined
             : { label: "Clear filters", onClick: clearAll }
