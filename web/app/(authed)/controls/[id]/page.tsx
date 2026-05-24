@@ -1,28 +1,35 @@
 "use client";
 
 // Slice 041 — control detail view (`/controls/[id]`).
+// Slice 253 — re-pointed the four endpoint-pending placeholders.
 //
 // Built per `Plans/mockups/control.html`. Renders, in mockup order:
 //   - control header: CTRL id, SCF anchor pill, lifecycle badge, family,
 //     title, owner/implementation/freshness-class meta
-//   - KPI strip: effectiveness 30d, frameworks satisfied, evidence records
-//     (placeholder — see evidence-stream note), effective-scope cells
+//   - KPI strip: effectiveness 30d, frameworks satisfied, evidence
+//     records 30d (slice 253 — bound to GET /v1/evidence?control_id=…),
+//     effective-scope cells
 //   - coverage-by-framework table (slice 008)
 //   - UCF mini-viz SVG (slice 008)
-//   - evidence stream (empty-state placeholder — see below)
+//   - evidence stream (slice 253 — bound to GET /v1/evidence; renders
+//     the latest five records or a truly-empty honest state)
 //   - right rail: freshness clock (slice 012), effective-scope panel
-//     (slice 018, one call per framework_version_id), linked policies,
-//     linked risks, audit log
+//     (slice 018, one call per framework_version_id), linked policies
+//     (slice 253 — GET /v1/controls/{id}/policies), linked risks
+//     (slice 253 — GET /v1/controls/{id}/risks), audit log (slice 253
+//     — GET /v1/controls/{id}/history)
 //
-// Backend gap surfaced: there is no `GET /v1/evidence?control_id=...`
-// list endpoint on main (only `POST /v1/evidence:push`). The
-// evidence-stream section ships as an empty-state naming the missing
-// endpoint, per the slice-060 precedent (slice 060 shipped SSO/users/
-// audit-log surfaces as endpoint-naming placeholders rather than
-// blocking). The linked-policies / linked-risks / audit-log rail
-// sections likewise have no per-control read endpoint on main; they
-// render the mockup layout as labelled empty-states. No fabricated data
-// anywhere (anti-criterion P0-3).
+// Slice 253 backstory: slice 041 shipped five "endpoint not on main yet"
+// placeholders for the evidence-list KPI, the evidence-stream card, and
+// the three right-rail Policies / Risks / Audit-log cards. Each named a
+// specific upstream that DID land later (slice 106 for the evidence
+// list; slice 064 for per-control history / policies / risks). The
+// placeholders were not re-walked when the backends shipped, so the
+// page denied real platform capability. Slice 253 binds all four to
+// their live upstreams; empty states still render when the response is
+// genuinely empty (fresh-install tenant, no linked policies, etc.) —
+// the empty-state copy now reflects "no data" honestly, not "endpoint
+// pending". No fabricated rows anywhere (anti-criterion P0-253-2).
 //
 // Data sync: server values live ONLY in TanStack Query cache and are read
 // during render — there is NO useEffect that seeds state from a server
@@ -53,12 +60,26 @@ import {
   fetchControlCoverage,
   fetchControlEffectiveScope,
   fetchControlEffectiveness,
+  fetchControlHistory,
+  fetchControlPolicies,
+  fetchControlRisks,
   fetchControlState,
+  fetchEvidenceList,
   type ControlCoverage,
   type EffectiveScopeResponse,
 } from "@/lib/api";
+import { formatResidualScore } from "@/app/(authed)/risks/filters";
 
 import { classifyControlDetailError } from "../error-classifier";
+
+// Slice 253 — page size for the evidence stream card. Five rows mirrors
+// the mockup (`Plans/mockups/control.html` lines 389-440). The KPI sub-
+// text reads "in last 30 days" (the upstream default window) — when the
+// stream's count maxes at the limit AND a next_cursor is present we
+// surface a "<limit>+ in last 30 days" hint rather than fabricating a
+// total the backend never returned. The dedicated /evidence list page
+// is the destination for full paginated browsing.
+const EVIDENCE_STREAM_LIMIT = 5;
 
 export default function ControlDetailPage() {
   const router = useRouter();
@@ -79,6 +100,37 @@ export default function ControlDetailPage() {
   const effectivenessQ = useQuery({
     queryKey: ["control", id, "effectiveness"],
     queryFn: () => fetchControlEffectiveness(id),
+    enabled: Boolean(id),
+  });
+
+  // Slice 253 — bind the four formerly-"endpoint pending" surfaces to
+  // their real upstreams. Errors are tolerated independently: a 404 on,
+  // say, `/policies` should NOT mask the rest of the page; the per-card
+  // empty-state still renders honestly. Only `coverageQ`'s error drives
+  // the page-level branch (the page makes no sense without a control to
+  // anchor to).
+  const evidenceQ = useQuery({
+    queryKey: ["control", id, "evidence", EVIDENCE_STREAM_LIMIT],
+    queryFn: () =>
+      fetchEvidenceList({ controlID: id, limit: EVIDENCE_STREAM_LIMIT }),
+    enabled: Boolean(id),
+  });
+
+  const policiesQ = useQuery({
+    queryKey: ["control", id, "policies"],
+    queryFn: () => fetchControlPolicies(id),
+    enabled: Boolean(id),
+  });
+
+  const risksQ = useQuery({
+    queryKey: ["control", id, "risks"],
+    queryFn: () => fetchControlRisks(id),
+    enabled: Boolean(id),
+  });
+
+  const historyQ = useQuery({
+    queryKey: ["control", id, "history"],
+    queryFn: () => fetchControlHistory(id),
     enabled: Boolean(id),
   });
 
@@ -301,8 +353,22 @@ export default function ControlDetailPage() {
         />
         <KpiCard
           label="Evidence records · 30d"
-          value="—"
-          sub="evidence-list endpoint pending"
+          value={
+            evidenceQ.isLoading
+              ? "…"
+              : evidenceQ.data
+                ? evidenceQ.data.next_cursor
+                  ? `${evidenceQ.data.count}+`
+                  : String(evidenceQ.data.count)
+                : "—"
+          }
+          sub={
+            evidenceQ.isLoading
+              ? "loading…"
+              : evidenceQ.error
+                ? "error"
+                : "in last 30 days"
+          }
         />
         <KpiCard
           label="In-scope frameworks"
@@ -356,7 +422,7 @@ export default function ControlDetailPage() {
             </CardContent>
           </Card>
 
-          {/* EVIDENCE STREAM — placeholder (no list endpoint on main) */}
+          {/* EVIDENCE STREAM — slice 253: bound to GET /v1/evidence?control_id=… */}
           <Card data-testid="evidence-stream-section">
             <CardHeader className="border-b">
               <CardTitle>Evidence stream · recent</CardTitle>
@@ -365,21 +431,53 @@ export default function ControlDetailPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Alert data-testid="evidence-stream-placeholder">
-                <AlertTitle>Evidence stream not yet wired</AlertTitle>
-                <AlertDescription>
-                  The evidence stream binds to a{" "}
-                  <span className="font-mono">
-                    GET /v1/evidence?control_id=…
-                  </span>{" "}
-                  list endpoint that does not exist on main yet — only{" "}
-                  <span className="font-mono">POST /v1/evidence:push</span> is
-                  shipped. This section activates when the evidence-list read
-                  endpoint lands (tracked as a follow-up backend slice). No
-                  evidence records are shown until then — the view never
-                  fabricates ledger entries.
-                </AlertDescription>
-              </Alert>
+              {evidenceQ.isLoading ? (
+                <Skeleton className="h-24 w-full" />
+              ) : evidenceQ.error ? (
+                <Alert
+                  variant="destructive"
+                  data-testid="evidence-stream-error"
+                >
+                  <AlertTitle>Could not load evidence stream</AlertTitle>
+                  <AlertDescription>
+                    {(evidenceQ.error as Error).message}
+                  </AlertDescription>
+                </Alert>
+              ) : evidenceQ.data && evidenceQ.data.evidence.length > 0 ? (
+                <div
+                  className="divide-y divide-border"
+                  data-testid="evidence-stream-list"
+                >
+                  {evidenceQ.data.evidence.map((rec) => (
+                    <EvidenceStreamRow
+                      key={rec.evidence_id}
+                      evidenceID={rec.evidence_id}
+                      observedAt={rec.observed_at}
+                      kind={rec.evidence_kind}
+                      source={rec.source}
+                      result={rec.result}
+                    />
+                  ))}
+                  {evidenceQ.data.next_cursor ? (
+                    <div className="pt-3 text-center text-xs text-muted-foreground">
+                      <Link
+                        href={`/evidence?control_id=${encodeURIComponent(id)}`}
+                        className="hover:underline"
+                        data-testid="evidence-stream-view-all"
+                      >
+                        View all records in last 30 days →
+                      </Link>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <p
+                  className="text-sm text-muted-foreground"
+                  data-testid="evidence-stream-empty"
+                >
+                  No evidence records for this control in the last 30 days.
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -454,45 +552,162 @@ export default function ControlDetailPage() {
             </CardContent>
           </Card>
 
-          {/* LINKED POLICIES */}
+          {/* LINKED POLICIES — slice 253: GET /v1/controls/{id}/policies */}
           <Card data-testid="policies-section">
             <CardHeader>
               <CardTitle>Policies</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">
-                Linked policies bind to a per-control policy-link read endpoint
-                that is not on main yet. This section activates when that
-                endpoint ships.
-              </p>
+              {policiesQ.isLoading ? (
+                <Skeleton className="h-16 w-full" />
+              ) : policiesQ.error ? (
+                <p
+                  className="text-sm text-destructive"
+                  data-testid="policies-error"
+                >
+                  Could not load linked policies:{" "}
+                  {(policiesQ.error as Error).message}
+                </p>
+              ) : policiesQ.data && policiesQ.data.policies.length > 0 ? (
+                <ul
+                  className="divide-y divide-border text-sm"
+                  data-testid="policies-list"
+                >
+                  {policiesQ.data.policies.map((p) => (
+                    <li
+                      key={p.policy_id}
+                      className="flex items-center justify-between py-2"
+                      data-testid="policy-row"
+                    >
+                      <div className="min-w-0">
+                        <Link
+                          href={`/policies/${encodeURIComponent(p.policy_id)}`}
+                          className="text-foreground hover:underline"
+                        >
+                          {p.title}
+                        </Link>
+                        <div className="font-mono text-[11px] text-muted-foreground">
+                          {p.version}
+                        </div>
+                      </div>
+                      <Badge variant="secondary" className="capitalize">
+                        {p.status}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p
+                  className="text-sm text-muted-foreground"
+                  data-testid="policies-empty"
+                >
+                  No policies are linked to this control.
+                </p>
+              )}
             </CardContent>
           </Card>
 
-          {/* LINKED RISKS */}
+          {/* LINKED RISKS — slice 253: GET /v1/controls/{id}/risks */}
           <Card data-testid="risks-section">
             <CardHeader>
               <CardTitle>Risks treated</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">
-                Linked risks bind to a per-control risk-link read endpoint that
-                is not on main yet. This section activates when that endpoint
-                ships.
-              </p>
+              {risksQ.isLoading ? (
+                <Skeleton className="h-16 w-full" />
+              ) : risksQ.error ? (
+                <p
+                  className="text-sm text-destructive"
+                  data-testid="risks-error"
+                >
+                  Could not load linked risks: {(risksQ.error as Error).message}
+                </p>
+              ) : risksQ.data && risksQ.data.risks.length > 0 ? (
+                <ul
+                  className="divide-y divide-border text-sm"
+                  data-testid="risks-list"
+                >
+                  {risksQ.data.risks.map((r) => (
+                    <li key={r.risk_id} className="py-2" data-testid="risk-row">
+                      <div className="flex items-center justify-between">
+                        <Link
+                          href={`/risks/${encodeURIComponent(r.risk_id)}`}
+                          className="min-w-0 text-foreground hover:underline"
+                        >
+                          {r.title}
+                        </Link>
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {formatResidualScore(r.residual_score)} residual
+                        </span>
+                      </div>
+                      {typeof r.link_weight === "number" ? (
+                        <div className="font-mono text-[11px] text-muted-foreground">
+                          link weight {r.link_weight.toFixed(2)}
+                        </div>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p
+                  className="text-sm text-muted-foreground"
+                  data-testid="risks-empty"
+                >
+                  No risks are linked to this control.
+                </p>
+              )}
             </CardContent>
           </Card>
 
-          {/* AUDIT LOG */}
+          {/* AUDIT LOG — slice 253: GET /v1/controls/{id}/history */}
           <Card data-testid="audit-log-section">
             <CardHeader>
               <CardTitle>Audit log</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">
-                The per-control audit log binds to a control-history read
-                endpoint that is not on main yet. This section activates when
-                that endpoint ships.
-              </p>
+              {historyQ.isLoading ? (
+                <Skeleton className="h-16 w-full" />
+              ) : historyQ.error ? (
+                <p
+                  className="text-sm text-destructive"
+                  data-testid="audit-log-error"
+                >
+                  Could not load audit log: {(historyQ.error as Error).message}
+                </p>
+              ) : historyQ.data && historyQ.data.history.length > 0 ? (
+                <ul
+                  className="space-y-1.5 text-xs"
+                  data-testid="audit-log-list"
+                >
+                  {historyQ.data.history.map((h, i) => (
+                    <li
+                      key={`${h.evaluated_at}-${i}`}
+                      className="text-muted-foreground"
+                      data-testid="audit-log-entry"
+                    >
+                      <span className="font-mono text-muted-foreground">
+                        {formatHistoryDate(h.evaluated_at)}
+                      </span>{" "}
+                      ·{" "}
+                      <span className="text-foreground">
+                        evaluated{" "}
+                        <span className="font-mono">{h.computed_state}</span>
+                      </span>{" "}
+                      <span className="text-muted-foreground">
+                        ({h.evidence_count} evidence ·{" "}
+                        <span className="font-mono">{h.freshness_status}</span>)
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p
+                  className="text-sm text-muted-foreground"
+                  data-testid="audit-log-empty"
+                >
+                  No evaluation history yet for this control.
+                </p>
+              )}
             </CardContent>
           </Card>
         </aside>
@@ -539,4 +754,87 @@ function KpiCard({
       </CardContent>
     </Card>
   );
+}
+
+// Slice 253 — one row of the evidence-stream card. Mirrors the mockup
+// (`Plans/mockups/control.html` lines 389-440): a result dot, the
+// observed_at timestamp, a summary line (the evidence_kind + the
+// connector/actor tag), and a pass/fail/na/inconclusive badge. The
+// `source` JSONB is rendered as a brief tag — `{actor_type}/{actor_id}`
+// when present — rather than fabricated narrative copy.
+function EvidenceStreamRow({
+  evidenceID,
+  observedAt,
+  kind,
+  source,
+  result,
+}: {
+  evidenceID: string;
+  observedAt: string;
+  kind: string | null;
+  source: Record<string, unknown> | null;
+  result: "pass" | "fail" | "na" | "inconclusive";
+}) {
+  const dotClass =
+    result === "pass"
+      ? "bg-emerald-500"
+      : result === "fail"
+        ? "bg-rose-500"
+        : "bg-muted-foreground";
+  const resultClass =
+    result === "pass"
+      ? "text-emerald-700"
+      : result === "fail"
+        ? "text-rose-600"
+        : "text-muted-foreground";
+  return (
+    <div
+      className="grid grid-cols-12 items-center gap-3 py-2.5"
+      data-testid="evidence-stream-row"
+    >
+      <div className="col-span-1">
+        <span className={`inline-block h-2 w-2 rounded-full ${dotClass}`} />
+      </div>
+      <div className="col-span-3 font-mono text-[11px] text-muted-foreground">
+        {observedAt}
+      </div>
+      <div className="col-span-6 min-w-0">
+        <div className="truncate text-sm text-foreground">
+          {kind ?? evidenceID}
+        </div>
+        <div className="truncate font-mono text-[11px] text-muted-foreground">
+          {formatEvidenceSource(source)}
+        </div>
+      </div>
+      <div className={`col-span-2 text-right font-mono text-xs ${resultClass}`}>
+        {result}
+      </div>
+    </div>
+  );
+}
+
+// formatEvidenceSource renders the slice-013 provenance JSONB as a
+// short "actor_type/actor_id" tag. Shape varies by connector; when the
+// JSONB has no recognisable shape we fall back to "—" rather than
+// stringifying arbitrary nested objects into the row.
+function formatEvidenceSource(source: Record<string, unknown> | null): string {
+  if (!source || typeof source !== "object") return "—";
+  const actorType = source.actor_type;
+  const actorID = source.actor_id;
+  if (typeof actorType === "string" && typeof actorID === "string") {
+    return `${actorType}/${actorID}`;
+  }
+  if (typeof actorID === "string") return actorID;
+  if (typeof actorType === "string") return actorType;
+  return "—";
+}
+
+// formatHistoryDate renders the RFC3339 evaluated_at as the YYYY-MM-DD
+// prefix used in the mockup's audit-log entries (lines 552-557). Falls
+// back to the raw string when parsing fails so a backend-shape change
+// surfaces as a visible date, not a silent error.
+function formatHistoryDate(iso: string): string {
+  if (!iso) return "—";
+  const t = iso.indexOf("T");
+  return t > 0 ? iso.slice(0, t) : iso;
 }

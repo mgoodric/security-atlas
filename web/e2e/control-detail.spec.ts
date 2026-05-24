@@ -89,15 +89,53 @@ test.describe("control detail view", () => {
     // component has no code path that draws one (see ucf-mini-viz.tsx).
   });
 
-  test("AC-4: evidence stream — placeholder until the list endpoint ships", async () => {
-    // There is no GET /v1/evidence?control_id=... endpoint on main; the
-    // section ships as an empty-state naming the gap (slice-060
-    // precedent). When the endpoint lands this test asserts the
-    // paginated last-30-days stream instead.
+  test("AC-4: evidence stream — bound to /v1/evidence?control_id=… (slice 253)", async () => {
+    // Slice 253 — the section is no longer a "list endpoint pending"
+    // placeholder. It renders either the latest few records or, when
+    // the response is genuinely empty, an honest empty-state. The
+    // critical regression guard is that the empty-state copy is the
+    // truly-empty form ("No evidence records … in the last 30 days"),
+    // NOT the pre-slice-253 endpoint-pending form ("not yet wired" /
+    // "does not exist on main"). The endpoint-pending text was a
+    // category-(iv) mockup-stale lie surfaced by slice 204 / #253.
     //    await page.goto(`/controls/${KNOWN_CONTROL_ID}`);
-    //    await expect(page.getByTestId("evidence-stream-placeholder")).toBeVisible();
-    //    await expect(page.getByTestId("evidence-stream-placeholder")).toContainText(
-    //      "GET /v1/evidence",
+    //    await expect(page.getByTestId("evidence-stream-section")).toBeVisible();
+    //    await expect(page.getByTestId("evidence-stream-placeholder")).toHaveCount(0);
+    //    const list = page.getByTestId("evidence-stream-list");
+    //    const empty = page.getByTestId("evidence-stream-empty");
+    //    await expect(list.or(empty)).toBeVisible();
+    //    // Whichever surface renders, the endpoint-pending copy is gone.
+    //    await expect(page.getByTestId("evidence-stream-section")).not.toContainText(
+    //      "not yet wired",
+    //    );
+    //    await expect(page.getByTestId("evidence-stream-section")).not.toContainText(
+    //      "not on main yet",
+    //    );
+    //    // The empty-state — if it renders — uses the truly-empty copy.
+    //    if (await empty.isVisible()) {
+    //      await expect(empty).toContainText("No evidence records");
+    //      await expect(empty).toContainText("in the last 30 days");
+    //    }
+  });
+
+  test("AC-4-b: right-rail Policies / Risks / Audit-log render real backings (slice 253)", async () => {
+    // Slice 253 — the right-rail cards were previously three
+    // "endpoint not on main yet" placeholders. They now bind to live
+    // upstreams (`/v1/controls/{id}/policies`, `/risks`, `/history`).
+    // Empty states are honest: "No policies are linked…", "No risks
+    // are linked…", "No evaluation history yet…". The regression
+    // guard asserts the endpoint-pending wording is gone, regardless
+    // of whether the seeded fixture has linked rows.
+    //    await page.goto(`/controls/${KNOWN_CONTROL_ID}`);
+    //    for (const id of ["policies-section", "risks-section", "audit-log-section"]) {
+    //      await expect(page.getByTestId(id)).toBeVisible();
+    //      await expect(page.getByTestId(id)).not.toContainText("not on main yet");
+    //      await expect(page.getByTestId(id)).not.toContainText("endpoint pending");
+    //    }
+    //    // And the KPI "Evidence records · 30d" sub-text no longer
+    //    // names the endpoint-pending status.
+    //    await expect(page.getByTestId("kpi-strip")).not.toContainText(
+    //      "evidence-list endpoint pending",
     //    );
   });
 
