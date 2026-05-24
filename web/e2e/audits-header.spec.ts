@@ -101,4 +101,81 @@ test.describe("topbar header chrome (slice 213)", () => {
     // assertion is "at least one", not "exactly one".
     expect(audits.length).toBeGreaterThan(0);
   });
+
+  // ----- Slice 214 — sidebar item counts (Controls + Risks badges) -----
+  //
+  // The badges live in the shared sidebar (`web/components/shell/
+  // sidebar.tsx`), which renders on every authed page. We piggyback on
+  // the audits-header fixture (which already provides an authed
+  // session + the demo tenant) to assert the badge presence on /audits.
+  //
+  // The walkthroughs base seed inserts a control but does NOT seed an
+  // scf_anchor row that the slice-104 anchors-with-state join requires
+  // to surface that control via /v1/anchors. Rather than expand the
+  // seed surface (which would ripple across many adjacent specs), the
+  // two integration assertions below MOCK `/api/controls` via
+  // `page.route` to inject a deterministic anchor payload. The
+  // mock-vs-live-data split is honest: the pure render branches
+  // (zero / loading / error / non-zero) are pinned by the vitest
+  // sibling `sidebar-counts.test.ts`; this spec pins the badge mounts
+  // in the shared shell and consumes the existing BFF.
+  //
+  // Risks badge: similar story — the audits-header fixture seeds zero
+  // risks. The silent-absence rule (P0-214-2) keeps the badge hidden;
+  // the vitest test pins the zero branch.
+
+  test("AC-1 (slice 214): Controls count badge appears on /audits via shared sidebar (mocked BFF payload)", async ({
+    authedPage: page,
+  }) => {
+    await page.route("**/api/controls**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          anchors: [
+            {
+              scf_id: "CRY-05",
+              title: "Encryption at rest",
+              control_id: "00000000-0000-0000-0000-000000000001",
+            },
+            {
+              scf_id: "IAC-06",
+              title: "MFA",
+              control_id: "00000000-0000-0000-0000-000000000002",
+            },
+          ],
+        }),
+      });
+    });
+    await page.goto("/audits");
+    const badge = page.getByTestId("sidebar-controls-count");
+    await expect(badge).toBeVisible();
+    const text = await badge.innerText();
+    expect(Number(text)).toBe(2);
+  });
+
+  test("P0-214-1 (slice 214): Controls badge consumes the existing /api/controls BFF (no new endpoint)", async ({
+    authedPage: page,
+  }) => {
+    const controlsRequests: string[] = [];
+    page.on("request", (r) => {
+      const url = r.url();
+      if (url.includes("/api/controls")) controlsRequests.push(url);
+    });
+    // Mock with a non-zero anchor list so the badge renders and the
+    // visibility assertion below proves the wiring (route -> render),
+    // not just that the request was issued.
+    await page.route("**/api/controls**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          anchors: [{ scf_id: "CRY-05", title: "T", control_id: "x" }],
+        }),
+      });
+    });
+    await page.goto("/audits");
+    await expect(page.getByTestId("sidebar-controls-count")).toBeVisible();
+    expect(controlsRequests.length).toBeGreaterThan(0);
+  });
 });

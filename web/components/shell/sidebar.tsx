@@ -1,6 +1,12 @@
+import type { ReactNode } from "react";
+
 import Link from "next/link";
 import { cookies, headers } from "next/headers";
 
+import {
+  ControlsCountBadge,
+  RisksCountBadge,
+} from "@/components/shell/sidebar-counts";
 import { shouldShowAdminEntry } from "@/lib/admin-nav";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -33,13 +39,33 @@ import { cn } from "@/lib/utils";
 // response collapses to "hide the Admin entry" — never "show by default."
 // The current user may briefly see the entry absent during the initial
 // fetch; rendering ghost admin chrome would be worse than a brief gap.
-const NAV_BASE = [
+//
+// Slice 214 — NAV item rows now carry an optional `slot` ReactNode
+// rendered right-of-label (the existing flex row gives the slot's
+// `ml-auto` a natural right-align). Mounted on the Controls + Risks
+// rows only:
+//
+//   - `<ControlsCountBadge />` — mono muted aggregate count.
+//   - `<RisksCountBadge />`    — mono rose count of severity-high
+//     rows; hidden when zero (P0-214-2 silent absence).
+//
+// Both badges are client components driven by TanStack Query against
+// the existing per-page BFFs. Slot composition stays a server-component
+// concern; the slice 186 admin gate is unchanged because we only added
+// to the NAV item shape, not the predicate.
+type NavItem = {
+  href: string;
+  label: string;
+  slot?: ReactNode;
+};
+
+const NAV_BASE: NavItem[] = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/calendar", label: "Calendar" },
   { href: "/dashboards/metrics", label: "Metrics" },
-  { href: "/controls", label: "Controls" },
+  { href: "/controls", label: "Controls", slot: <ControlsCountBadge /> },
   { href: "/evidence", label: "Evidence" },
-  { href: "/risks", label: "Risks" },
+  { href: "/risks", label: "Risks", slot: <RisksCountBadge /> },
   { href: "/audits", label: "Audits" },
   { href: "/policies", label: "Policies" },
   { href: "/vendors", label: "Vendors" },
@@ -48,7 +74,7 @@ const NAV_BASE = [
   { href: "/settings", label: "Settings" },
 ];
 
-const ADMIN_NAV_ITEM = { href: "/admin", label: "Admin" };
+const ADMIN_NAV_ITEM: NavItem = { href: "/admin", label: "Admin" };
 
 async function fetchAdminMe(): Promise<{
   is_admin?: unknown;
@@ -94,13 +120,20 @@ export async function Sidebar({ active }: { active?: string }) {
               key={item.href}
               href={item.href}
               className={cn(
-                "rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                "flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors",
                 isActive
                   ? "bg-foreground/10 text-foreground"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
               )}
             >
-              {item.label}
+              <span>{item.label}</span>
+              {/*
+                Slice 214 — optional right-aligned count badge slot.
+                The badge component carries `ml-auto` so it floats
+                right inside this flex row; rows without a slot just
+                render the label.
+              */}
+              {item.slot}
             </Link>
           );
         })}
