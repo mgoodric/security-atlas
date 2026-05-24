@@ -31,8 +31,10 @@
       </div>
       <h1 class="text-4xl font-semibold tracking-tight text-slate-900 mb-3">UI mockups</h1>
       <p class="text-slate-600 max-w-2xl">
-        Ten screens covering the v1 high-leverage workflows for a solo security leader running their entire program
-        from one tool — four iteration-1 deep workflows plus six v1 fill-in pages added in slice 093. Click into any
+        Ten iteration-1 mockup screens covering v1 high-leverage workflows — four deep workflows plus six v1
+        fill-in pages added in slice 093. Six additional v1 surfaces (Calendar, Metrics, Vendors, Board Packs list,
+        Catalog · SCF, Admin) ship live in the Next.js app without iteration-1 mockups; see the
+        <a href="#unmocked" class="text-brand-600 hover:text-brand-700">unmocked section</a> below. Click into any
         screen, then iterate via the canvas docs and the source files in
         <code class="mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Plans/mockups/</code>.
       </p>
@@ -242,6 +244,65 @@
           </div>
         </a>
 
+      </div>
+    </div>
+
+    <!-- ============ PAGES WITHOUT ITERATION-1 MOCKUPS (post-093 nav additions) ============ -->
+    <div id="unmocked" class="mt-12">
+      <div class="flex items-baseline justify-between mb-4">
+        <h2 class="text-lg font-semibold tracking-tight">Pages without iteration-1 mockups</h2>
+        <span class="text-xs text-slate-500 mono">implementation shipped (post-093 nav additions)</span>
+      </div>
+      <p class="text-sm text-slate-600 mb-5 max-w-3xl">
+        Six additional top-nav surfaces shipped after slice 093 without iteration-1 HTML mockups. All routes are live
+        in the Next.js app under <span class="mono text-xs">web/app/(authed)/</span>. If a future contributor wants to
+        iterate one of these screens via the iteration-1 mockup loop, they can graduate the surface to a full tile at
+        that time. See
+        <a href="../canvas/12-ui-fill-in-design-decisions.md" class="text-brand-600 hover:text-brand-700">canvas §12</a>
+        for the v2 canonical top-nav order.
+      </p>
+      <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 border-b border-slate-200">
+            <tr class="text-left text-xs text-slate-500 uppercase tracking-wide">
+              <th class="px-5 py-3 font-medium">Top-nav item</th>
+              <th class="px-5 py-3 font-medium">Live route</th>
+              <th class="px-5 py-3 font-medium">Description</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <tr>
+              <td class="px-5 py-3 font-medium text-slate-900">Calendar</td>
+              <td class="px-5 py-3 mono text-xs text-slate-500">/calendar</td>
+              <td class="px-5 py-3 text-slate-600">Cross-business compliance calendar (slice 094). Sits immediately after Dashboard per canvas §12.1.</td>
+            </tr>
+            <tr>
+              <td class="px-5 py-3 font-medium text-slate-900">Metrics</td>
+              <td class="px-5 py-3 mono text-xs text-slate-500">/dashboards/metrics</td>
+              <td class="px-5 py-3 text-slate-600">Board cascade metrics dashboard (slice 097). Clusters with Dashboard + Calendar as the at-a-glance group.</td>
+            </tr>
+            <tr>
+              <td class="px-5 py-3 font-medium text-slate-900">Vendors</td>
+              <td class="px-5 py-3 mono text-xs text-slate-500">/vendors</td>
+              <td class="px-5 py-3 text-slate-600">Third-party vendor inventory and review cadence. Adjacent program work, less frequently touched than the core five.</td>
+            </tr>
+            <tr>
+              <td class="px-5 py-3 font-medium text-slate-900">Board Packs (list view)</td>
+              <td class="px-5 py-3 mono text-xs text-slate-500">/board-packs</td>
+              <td class="px-5 py-3 text-slate-600">Quarterly board-pack index. Distinct from the existing <a href="board-pack.html" class="text-brand-600 hover:text-brand-700">board-pack.html</a> per-pack preview, which is the deep-workflow mockup.</td>
+            </tr>
+            <tr>
+              <td class="px-5 py-3 font-medium text-slate-900">Catalog · SCF</td>
+              <td class="px-5 py-3 mono text-xs text-slate-500">/catalog/scf</td>
+              <td class="px-5 py-3 text-slate-600">Reference content: ~1,400 SCF anchors. Reference top-level (not per-tenant data), sits after Vendors + Board Packs.</td>
+            </tr>
+            <tr>
+              <td class="px-5 py-3 font-medium text-slate-900">Admin</td>
+              <td class="px-5 py-3 mono text-xs text-slate-500">/admin</td>
+              <td class="px-5 py-3 text-slate-600">Tenant-wide configuration. Distinct from <a href="settings.html" class="text-brand-600 hover:text-brand-700">/settings</a> (personal preferences); admin role only.</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
