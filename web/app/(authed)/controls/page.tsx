@@ -54,7 +54,7 @@ import {
   type ListColumn,
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import {
   fetchControlsList,
   fetchScopeCells,
@@ -85,6 +85,10 @@ import {
   type AnchorRow,
   type ControlFilters,
 } from "./filters";
+import {
+  NEW_CONTROL_FUTURE_REASON,
+  NEW_CONTROL_FUTURE_TESTID,
+} from "./new-control-future";
 
 const FILTER_KEYS: (keyof ControlFilters)[] = [
   "framework",
@@ -426,9 +430,28 @@ function ControlsPageInner() {
           Export History {CONTROLS_HISTORY_EXPORT_FORMAT_LABELS[format]}
         </a>
       ))}
-      <Button size="sm" disabled>
-        New control
-      </Button>
+      {/* Slice 225 — replaces the formerly-disabled "New control"
+          `<Button>`, which was a permanently-disabled action with no
+          signposting (UI-honesty gap per slice 178's heuristic). The
+          create-control flow is a non-trivial mutation surface (SCF
+          anchor pick + applicability_expr + framework satisfactions +
+          optional policy attach) deferred to a future slice; the
+          route `/controls/new` does not exist on `main`. Replaced
+          with a non-button `<span>` carrying `title` + `aria-label` +
+          a stable test-id, mirroring the slice 217 audits pattern
+          (see `../audits/oscal-export-future.ts`). Visible copy +
+          tooltip + aria-label all read the same line; the disclosure
+          IS the affordance. When the create-control flow ships, this
+          surface flips back to a routing `<Link>` per slice 247's
+          enable-pattern and `new-control-future.ts` deletes. */}
+      <span
+        title={NEW_CONTROL_FUTURE_REASON}
+        aria-label={NEW_CONTROL_FUTURE_REASON}
+        data-testid={NEW_CONTROL_FUTURE_TESTID}
+        className="inline-flex items-center px-2.5 text-[0.8rem] text-muted-foreground italic cursor-help"
+      >
+        {NEW_CONTROL_FUTURE_REASON}
+      </span>
     </>
   );
 
