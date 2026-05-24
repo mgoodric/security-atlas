@@ -58,7 +58,9 @@ import {
   FilterPills,
   ListLoadingSkeleton,
   ListPage,
+  ListPagination,
   ListTable,
+  paginateRows,
   type FilterPill,
   type ListColumn,
 } from "@/components/list";
@@ -78,6 +80,10 @@ import {
   ackRateTextColor,
   formatAckRate,
 } from "./ack-rate";
+import {
+  POLICY_ACK_WINDOW_CAPTION,
+  POLICY_ACK_WINDOW_TESTID,
+} from "./ack-window";
 import {
   ACK_STATUS_GE_95,
   ACK_STATUS_LT_50,
@@ -108,6 +114,29 @@ const FILTER_KEYS: (keyof PolicyFilters)[] = [
   "owner_role",
   "ack_status",
 ];
+
+// Slice 240 — page-size default per AC-3.
+//
+// Per anti-criterion P0-246-4 (inherited from the slice 246
+// pagination-primitive convention) this constant lives at module
+// scope so it is greppable; component code references
+// `POLICIES_PAGE_SIZE` rather than inlining `25`. A future slice that
+// promotes pagination to server-side LIMIT/OFFSET will swap the
+// constant for an API-derived value without touching the JSX.
+//
+// Choice of 25 (not 50): the policy library is the smallest of the
+// four list views — a healthy SOC 2 program runs ~15-30 policies
+// total, so 25 keeps the typical install on a single page while
+// keeping the truth-telling "Showing N of N" footer visible (D1 in
+// the decisions log).
+const POLICIES_PAGE_SIZE = 25;
+
+// Slice 240 — URL query-string key for the 1-indexed page index. The
+// `page` key is sibling to the filter keys above; the filter-change
+// handlers below explicitly DROP it on every filter mutation (AC-4 —
+// page index resets to 1 when a filter changes, matching the slice
+// 246 / risks precedent).
+const PAGE_PARAM = "page";
 
 const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All statuses" },
@@ -166,6 +195,20 @@ function PoliciesPageInner() {
     return out;
   }, [search]);
 
+  // Slice 240 — current page index. URL is the source of truth so the
+  // page is bookmarkable and survives refresh (AC-4). Invalid /
+  // missing / negative values fall back to 1; the rendering math in
+  // `paginationBounds` further clamps an out-of-range page to the
+  // last available page so a stale bookmark survives a register that
+  // shrunk between visits. Mirrors slice 246's risks-page wiring D2.
+  const currentPage: number = useMemo(() => {
+    const raw = search.get(PAGE_PARAM);
+    if (!raw) return 1;
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < 1) return 1;
+    return parsed;
+  }, [search]);
+
   const updateFilter = (key: keyof PolicyFilters, value: string) => {
     const next = setFilter(filters, key, value);
     const sp = new URLSearchParams(search.toString());
@@ -174,6 +217,11 @@ function PoliciesPageInner() {
     } else {
       sp.set(key, next[key]);
     }
+    // Slice 240 — filter changes reset the page index to 1. The URL
+    // key is dropped (page=1 is the default and need not be
+    // serialised) so the URL stays clean when no pagination is in
+    // play. Matches slice 246 D2 + AC-5 precedent.
+    sp.delete(PAGE_PARAM);
     router.replace(`/policies?${sp.toString()}`);
   };
 
@@ -182,6 +230,23 @@ function PoliciesPageInner() {
     const sp = new URLSearchParams(search.toString());
     for (const k of FILTER_KEYS) {
       if (cleared[k] === ALL) sp.delete(k);
+    }
+    // Slice 240 — clearing filters also resets pagination.
+    sp.delete(PAGE_PARAM);
+    router.replace(`/policies?${sp.toString()}`);
+  };
+
+  // Slice 240 — page-change handler. Writes the new 1-indexed page to
+  // the URL; page=1 is omitted so the canonical URL of the first
+  // page matches the no-pagination URL exactly. Mirrors slice 246
+  // D2's `goToPage` shape verbatim — the project-wide pattern for
+  // URL-bound list pagination.
+  const goToPage = (page: number) => {
+    const sp = new URLSearchParams(search.toString());
+    if (page <= 1) {
+      sp.delete(PAGE_PARAM);
+    } else {
+      sp.set(PAGE_PARAM, String(page));
     }
     router.replace(`/policies?${sp.toString()}`);
   };
@@ -197,6 +262,17 @@ function PoliciesPageInner() {
   );
 
   const visible = useMemo(() => applyFilters(rows, filters), [rows, filters]);
+
+  // Slice 240 — client-side page slice over the filtered set. Per
+  // P0-240-1 the v1 wire `GET /v1/policies` ships the full list; the
+  // table consumes the per-page slice rather than the full `visible`
+  // array. The pagination footer below the table emits page-change
+  // events through `goToPage` which round-trip through the URL.
+  const pagedRows = useMemo(
+    () => paginateRows(visible, currentPage, POLICIES_PAGE_SIZE),
+    [visible, currentPage],
+  );
+
   const ownerOptions: { value: string; label: string }[] = useMemo(() => {
     const owners = uniqueOwners(rows);
     return [
@@ -545,13 +621,61 @@ function PoliciesPageInner() {
     >
       <ListTable<Policy>
         columns={columns}
-        rows={visible}
+        rows={pagedRows}
         rowKey={(row) => row.id}
         onRowClick={(row) =>
           router.push(`/policies/${encodeURIComponent(row.id)}`)
         }
         emptyFallback={emptyState}
       />
+      {/* Slice 240 — pagination footer + 365-day acknowledgment
+          window disclosure. Rendered ONLY when there is at least
+          one row in the filtered set; an empty result delegates
+          entirely to the `<ListTable>` `emptyFallback` (the
+          `<EmptyState>` zero-state CTA) — D3 in the decisions log.
+
+          Composition note (D2 in the decisions log):
+            The slice doc's AC-2 reads the disclosure as a TAIL on
+            the pagination summary line — verbatim "Showing M–N of
+            TOTAL · 365-day acknowledgment window". The slice 246
+            `<ListPagination>` primitive owns the "Showing M–N of
+            TOTAL" line in its `bg-muted/30` footer bar and is
+            page-domain-neutral on purpose (no policies-specific
+            strings inside `web/components/list/`). Anti-criterion
+            "NO modifying ListPagination primitive" forecloses
+            adding a `tailCaption` prop to inline the disclosure
+            inside the summary span. The honest composition: render
+            the disclosure as a small caption row IMMEDIATELY
+            ABOVE the `<ListPagination>` chrome, inside the same
+            border-top/bg-muted footer visual block, so the operator
+            reads both in a single glance. The mockup's exact
+            inline shape is approximated faithfully — the disclosure
+            sits on its own line but in the same footer area with
+            the same muted-text styling.
+
+            On a single-page populated result the pagination
+            footer still renders so the user gets the truth-telling
+            "Showing N of N" summary AND the disclosure caption;
+            Previous and Next are both disabled by the primitive. */}
+      {visible.length > 0 ? (
+        <>
+          <div
+            data-testid="policies-list-footer-disclosure"
+            className="border-t px-5 py-1.5 flex items-center justify-end text-xs text-muted-foreground bg-muted/30"
+          >
+            <span data-testid={POLICY_ACK_WINDOW_TESTID}>
+              {POLICY_ACK_WINDOW_CAPTION}
+            </span>
+          </div>
+          <ListPagination
+            currentPage={currentPage}
+            pageSize={POLICIES_PAGE_SIZE}
+            totalCount={visible.length}
+            onPageChange={goToPage}
+            testIdPrefix="policies-pagination"
+          />
+        </>
+      ) : null}
     </ListPage>
   );
 }
