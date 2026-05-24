@@ -264,4 +264,137 @@ test.describe("dashboard view", () => {
     await page.goto("/dashboard");
     await expect(page).toHaveURL(/\/login/);
   });
+
+  // ----- Slice 229 — dashboard header tenant + snapshot subtitle -----
+  //
+  // The slice adds a tenant-name chip next to the H1 and a subtitle
+  // bound to the freshness pct (with skeleton on loading, "Snapshot
+  // unavailable" on error, "No evidence ingested yet" on empty). The
+  // pure-helper branches (compute / format) are pinned by the vitest
+  // sibling `dashboard-header-subtitle.test.ts`; the e2e here pins the
+  // integrated render under mocked BFF payloads (the audits-header
+  // spec's canonical pattern for chrome that depends on /api/me/tenants
+  // — fixture seeding tenant rows is out of scope for this slice).
+
+  test("AC-1 (slice 229): tenant-name chip renders next to the H1 from /api/me/tenants", async ({
+    authedPage: page,
+  }) => {
+    await page.route("**/api/me/tenants", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          tenants: [
+            {
+              id: "11111111-1111-1111-1111-111111111111",
+              name: "Sentinel Labs",
+              current: true,
+            },
+          ],
+        }),
+      });
+    });
+    await page.goto("/dashboard");
+    const chip = page.getByTestId("dashboard-header-tenant-context");
+    await expect(chip).toBeVisible();
+    await expect(chip).toHaveText("Sentinel Labs");
+  });
+
+  test("AC-2 (slice 229): subtitle renders 'evidence freshness {pct}% within window' from the freshness endpoint", async ({
+    authedPage: page,
+  }) => {
+    // Mock the BFF to a deterministic 87% (100 - 13/100 stale) so the
+    // visible copy is predictable regardless of seed-fixture drift.
+    await page.route("**/api/dashboard/freshness", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          bucket: "class",
+          buckets: [
+            {
+              freshness_class: "monthly",
+              total: 100,
+              fresh: 87,
+              stale: 13,
+            },
+          ],
+          total: 100,
+          total_stale: 13,
+        }),
+      });
+    });
+    await page.goto("/dashboard");
+    const subtitle = page.getByTestId("dashboard-header-subtitle");
+    await expect(subtitle).toBeVisible();
+    await expect(subtitle).toHaveText("evidence freshness 87% within window");
+  });
+
+  test("AC-4 (slice 229): subtitle renders 'Snapshot unavailable' when the freshness endpoint errors", async ({
+    authedPage: page,
+  }) => {
+    await page.route("**/api/dashboard/freshness", (r) => r.abort());
+    await page.goto("/dashboard");
+    const errSubtitle = page.getByTestId("dashboard-header-subtitle-error");
+    await expect(errSubtitle).toBeVisible();
+    await expect(errSubtitle).toHaveText("Snapshot unavailable");
+  });
+
+  test("AC-5 (slice 229): subtitle renders 'No evidence ingested yet' when total === 0", async ({
+    authedPage: page,
+  }) => {
+    await page.route("**/api/dashboard/freshness", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          bucket: "class",
+          buckets: [],
+          total: 0,
+          total_stale: 0,
+        }),
+      });
+    });
+    await page.goto("/dashboard");
+    const subtitle = page.getByTestId("dashboard-header-subtitle");
+    await expect(subtitle).toBeVisible();
+    await expect(subtitle).toHaveText("No evidence ingested yet");
+  });
+
+  test("P0-229-2 (slice 229): the subtitle does NOT show '100% fresh of 0' when total === 0", async ({
+    authedPage: page,
+  }) => {
+    // Anti-criterion: when total === 0 we MUST NOT show "100%" or
+    // "100% fresh" anywhere in the subtitle region.
+    await page.route("**/api/dashboard/freshness", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          bucket: "class",
+          buckets: [],
+          total: 0,
+          total_stale: 0,
+        }),
+      });
+    });
+    await page.goto("/dashboard");
+    const subtitle = page.getByTestId("dashboard-header-subtitle");
+    await expect(subtitle).toBeVisible();
+    await expect(subtitle).not.toContainText("100%");
+    await expect(subtitle).not.toContainText("100% fresh");
+  });
+
+  test("P0-229-1 (slice 229): the subtitle does NOT render the prior generic marketing copy", async ({
+    authedPage: page,
+  }) => {
+    // Anti-criterion enforcement: slice 229 removes the generic
+    // "The home screen for the security program — live posture, drift,
+    // risk, and what is coming up." copy.
+    await page.goto("/dashboard");
+    const dashboard = page.getByTestId("program-dashboard");
+    await expect(dashboard).not.toContainText(
+      "The home screen for the security program",
+    );
+  });
 });

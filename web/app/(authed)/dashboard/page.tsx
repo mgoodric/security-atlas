@@ -29,6 +29,10 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 import { ActivityFeedPanel } from "@/components/dashboard/activity-feed-panel";
+import {
+  DashboardHeaderSubtitle,
+  TenantContext,
+} from "@/components/dashboard/dashboard-header-subtitle";
 import { EvidenceFreshnessPanel } from "@/components/dashboard/evidence-freshness-panel";
 import { FrameworkPosturePanel } from "@/components/dashboard/framework-posture-panel";
 import { RecentDriftPanel } from "@/components/dashboard/recent-drift-panel";
@@ -92,13 +96,26 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6" data-testid="program-dashboard">
       {/* ============ HEADER ============ */}
+      {/*
+        Slice 229 — the H1 row carries the active tenant name (AC-1)
+        and the subtitle binds to the freshness pct / empty / error
+        state (AC-2, AC-3, AC-4, AC-5). The prior generic marketing
+        copy ("The home screen for the security program …") was
+        decoration that did not communicate which tenant the operator
+        was viewing nor the aggregate freshness posture; the mockup
+        (`Plans/mockups/dashboard.html` lines 117-120) encodes the
+        right design intent (operator orientation in one line).
+        Snapshot timestamp is OMITTED until the FreshnessReport wire
+        shape exposes a `received_at` — see slice header comment in
+        `dashboard-header-subtitle.tsx` for the JUDGMENT note.
+      */}
       <header className="flex items-baseline justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Program</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            The home screen for the security program — live posture, drift,
-            risk, and what is coming up.
-          </p>
+          <div className="flex items-baseline gap-3">
+            <h1 className="text-2xl font-semibold tracking-tight">Program</h1>
+            <TenantContext />
+          </div>
+          <DashboardHeaderSubtitle />
         </div>
       </header>
 
