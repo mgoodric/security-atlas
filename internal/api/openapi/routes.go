@@ -35,6 +35,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/health", Tag: "system", Tier: "none", Internal: true, Summary: "GET /health"},
 	{Method: "GET", Path: "/metrics", Tag: "system", Tier: "none", Internal: true, Summary: "GET /metrics"},
 	{Method: "GET", Path: "/v1/activity", Tag: "dashboard", Tier: "bearer", Internal: false, Summary: "GET /v1/activity"},
+	{Method: "GET", Path: "/v1/activity/unified", Tag: "activity", Tier: "bearer", Internal: false, Summary: "GET /v1/activity/unified"},
 	{Method: "GET", Path: "/v1/admin/audit-log", Tag: "admin-audit-log", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/audit-log"},
 	{Method: "GET", Path: "/v1/admin/audit-log/export", Tag: "admin-audit-log", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/audit-log/export"},
 	{Method: "GET", Path: "/v1/admin/audit-log/unified", Tag: "admin-audit-log", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/audit-log/unified"},
