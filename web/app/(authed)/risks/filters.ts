@@ -8,14 +8,17 @@
 // Constitutional commitment: this module knows nothing about React,
 // useSearchParams, or the BFF. It is data-in, data-out.
 //
-// Filter set per AC-3: treatment + severity band + owner. The mockup
-// shows category/methodology/org_unit pills too, but the AC narrows the
-// shipped pill set to three. Adding the rest is a future extension; the
-// data is on `riskWire` already so the cost is purely UI.
+// Slice 100 shipped 3 pills (treatment + severity band + owner). Slice
+// 244 extended this to 6 pills by adding category + methodology +
+// org_unit — the three mockup pills slice 100 deferred (see the
+// "future extension" note that lived here before this slice). The data
+// for all three was already on `riskWire` (slice 019 carried category +
+// methodology; slice 067 carried org_unit_id), so the cost was purely
+// UI plumbing.
 //
-// Constitutional anti-criterion P0-A3 honored: only fields that exist
-// on `riskWire` (slice 019 + slice 067 additions) are referenced — no
-// invented columns.
+// Constitutional anti-criterion P0-A3 (slice 100) honored: only fields
+// that exist on `riskWire` (slice 019 + slice 067 additions) are
+// referenced — no invented columns.
 
 import type { Risk } from "@/lib/api";
 
@@ -54,12 +57,21 @@ export type RiskFilters = {
   treatment: string;
   severity: string;
   owner: string;
+  // Slice 244 additions.
+  category: string;
+  methodology: string;
+  org_unit: string;
 };
 
 export const DEFAULT_FILTERS: RiskFilters = {
   treatment: ALL,
   severity: ALL,
   owner: ALL,
+  // Slice 244 additions — all default to ALL so the pill row starts
+  // unfiltered and only narrows when the user picks a specific value.
+  category: ALL,
+  methodology: ALL,
+  org_unit: ALL,
 };
 
 /**
@@ -69,18 +81,32 @@ export function isDefault(filters: RiskFilters): boolean {
   return (
     filters.treatment === ALL &&
     filters.severity === ALL &&
-    filters.owner === ALL
+    filters.owner === ALL &&
+    filters.category === ALL &&
+    filters.methodology === ALL &&
+    filters.org_unit === ALL
   );
 }
 
 /**
- * Narrow a risk list against the active filter set. The treatment + owner
- * filters compare the exact string from `riskWire`; the severity filter
- * buckets the numeric `severity` scalar into the four bands above.
+ * Narrow a risk list against the active filter set. The treatment +
+ * owner + category + methodology + org_unit filters compare the exact
+ * string from `riskWire`; the severity filter buckets the numeric
+ * `severity` scalar into the four bands above.
  *
  * Unassigned-owner rows match `owner = "unassigned"` (the sentinel the
  * mockup uses) — the wire shape carries an empty string for an unset
  * treatment_owner, so the filter normalizes both shapes.
+ *
+ * Slice 244 — three new branches:
+ *   - category: exact match against the wire enum (`risk_category`).
+ *   - methodology: exact match against the wire enum
+ *     (`risk_methodology`).
+ *   - org_unit: exact match against the row's `org_unit_id` (UUID).
+ *     Rows with no `org_unit_id` never match a specific filter value —
+ *     a row with `org_unit_id = undefined` only passes when the filter
+ *     is `ALL` (i.e., disabled). This is the same shape as how the
+ *     other identity-bearing pills (owner) treat unset values.
  */
 export function applyFilters(rows: Risk[], filters: RiskFilters): Risk[] {
   return rows.filter((row) => {
@@ -93,6 +119,18 @@ export function applyFilters(rows: Risk[], filters: RiskFilters): Risk[] {
     if (filters.owner !== ALL) {
       const ownerNorm = row.treatment_owner.trim() || "unassigned";
       if (ownerNorm !== filters.owner) return false;
+    }
+    if (filters.category !== ALL && row.category !== filters.category) {
+      return false;
+    }
+    if (
+      filters.methodology !== ALL &&
+      row.methodology !== filters.methodology
+    ) {
+      return false;
+    }
+    if (filters.org_unit !== ALL && row.org_unit_id !== filters.org_unit) {
+      return false;
     }
     return true;
   });
