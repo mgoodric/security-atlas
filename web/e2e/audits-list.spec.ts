@@ -162,6 +162,38 @@ test.describe("/audits list view", () => {
     //    ).toBeVisible();
   });
 
+  test("slice 217 / AC-A4: OSCAL export disclosure replaces the disabled button", async () => {
+    // Slice 217 closed the F-178-217 HONESTY-GAP by replacing a
+    // permanently-disabled `<Button>Export OSCAL bundle</Button>` in
+    // the toolbar with a non-button `<span>` that discloses the
+    // future-state (the capability ships with the per-period detail
+    // view). AC-A4 has two halves:
+    //
+    //   1. The disclosure is present, visible, and its text contains
+    //      "per-period" (load-bearing substring pinned by the vitest
+    //      sibling spec).
+    //   2. No disabled `<button>` with the literal text "Export OSCAL
+    //      bundle" exists anywhere on the page.
+    //
+    // Quarantined behind the slice 082 seed harness like the rest of
+    // this file. Bodies left commented so the contract is reviewable;
+    // when the harness lands the assertions turn on.
+    //    await page.goto("/audits");
+    //    const disclosure = page.getByTestId("audits-oscal-export-future");
+    //    await expect(disclosure).toBeVisible();
+    //    const text = (await disclosure.textContent())?.toLowerCase() ?? "";
+    //    expect(text).toContain("per-period");
+    //    // `title` attribute carries the same copy as the visible text
+    //    // so screen readers and pointer-hover both surface the same
+    //    // disclosure. (aria-label likewise — both are set.)
+    //    const titleAttr = await disclosure.getAttribute("title");
+    //    expect(titleAttr).toMatch(/per-period/i);
+    //    // No disabled <button> with the original label survives.
+    //    await expect(
+    //      page.locator("button[disabled]", { hasText: "Export OSCAL bundle" }),
+    //    ).toHaveCount(0);
+  });
+
   test("P0-A2: frozen periods are NOT editable from the list (no inline mutation)", async () => {
     //    await page.goto("/audits");
     //    // No edit buttons, no input fields, no delete affordances in

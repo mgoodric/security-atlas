@@ -113,7 +113,12 @@
         <p class="text-sm text-slate-500 mt-0.5">Period-level index · for a per-control walk-through, open a period and pick the control</p>
       </div>
       <div class="flex items-center gap-2">
-        <button class="px-3 py-1.5 text-sm text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50">Export OSCAL bundle</button>
+        <!-- Slice 217 — formerly a `<button>` for "Export OSCAL bundle".
+             Per slice 217 AC-A3 the mockup is updated to match the live
+             page: a non-button `<span>` discloses the future-state
+             ("OSCAL bundle export ships with the per-period detail view")
+             rather than a permanently-disabled action. -->
+        <span class="inline-flex items-center px-2.5 text-sm text-slate-500 italic" title="OSCAL bundle export ships with the per-period detail view — open a period to export.">OSCAL bundle export ships with the per-period detail view — open a period to export.</span>
         <button class="px-3 py-1.5 text-sm text-white bg-brand-600 rounded-md hover:bg-brand-700 flex items-center gap-1.5">
           <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd"/></svg>
           New audit period

@@ -78,6 +78,10 @@ import {
   type AuditFilters,
 } from "./filters";
 import {
+  OSCAL_EXPORT_FUTURE_REASON,
+  OSCAL_EXPORT_FUTURE_TESTID,
+} from "./oscal-export-future";
+import {
   daysUntilEnd,
   daysUntilEndLabel,
   frozenMetaLabel,
@@ -372,9 +376,27 @@ function AuditsPageInner() {
 
   const actions = (
     <>
-      <Button variant="outline" size="sm" disabled>
-        Export OSCAL bundle
-      </Button>
+      {/* Slice 217 — formerly a `<Button disabled>Export OSCAL bundle`,
+          which was a permanently-disabled action with no signposting
+          (slice 178 honesty audit F-178-217). Replaced with a non-
+          button `<span>` carrying `title` + `aria-label` + a stable
+          test-id, mirroring the slice 183 calendar pattern (see
+          `web/components/calendar/agenda-view.tsx` lines 173-179).
+          Visible copy + tooltip + aria-label all read the same line;
+          the disclosure IS the affordance. The capability itself
+          (per-period OSCAL SSP/AP/AR/POA&M export) is the per-period
+          detail view's responsibility — see slice 030 for the
+          underlying export and slice 184's decisions log for the
+          per-period framing. When that detail page ships, this
+          surface either points to it or is removed entirely. */}
+      <span
+        title={OSCAL_EXPORT_FUTURE_REASON}
+        aria-label={OSCAL_EXPORT_FUTURE_REASON}
+        data-testid={OSCAL_EXPORT_FUTURE_TESTID}
+        className="inline-flex items-center px-2.5 text-[0.8rem] text-muted-foreground italic cursor-help"
+      >
+        {OSCAL_EXPORT_FUTURE_REASON}
+      </span>
       {/* Slice 139 — audit-periods data export (CSV / JSON / XLSX).
           Distinct from the slice 030 OSCAL bundle (which is the
           cosigned audit-binding artifact). This export is the
