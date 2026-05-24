@@ -13,6 +13,12 @@
 // This component is intentionally generic: NO controls-specific imports,
 // types, or strings. The consuming page passes the icon (React node),
 // title, body, and CTA props.
+//
+// Slice 242: `body` widened from `string` to `string | ReactNode` so the
+// `/policies` empty-state can wrap its honesty-disclosure body text in a
+// `<span data-testid="policies-scaffold-future">…</span>` for the slice
+// 178 harness + Playwright (AC-7). String bodies still render
+// unchanged — only the type widened.
 
 import type { ReactNode } from "react";
 
@@ -23,8 +29,13 @@ export type EmptyStateProps = {
   icon?: ReactNode;
   /** Single short sentence describing what the user is seeing. */
   title: string;
-  /** Single short sentence describing what the user can do about it. */
-  body?: string;
+  /**
+   * Single short sentence describing what the user can do about it.
+   * Accepts either a plain string (the common case) or a ReactNode for
+   * pages that need to attach a `data-testid` / honesty-disclosure
+   * wrapper to the body content (slice 242 / `/policies`).
+   */
+  body?: ReactNode;
   /** Optional primary CTA. Click handler does whatever the page needs. */
   cta?: {
     label: string;
