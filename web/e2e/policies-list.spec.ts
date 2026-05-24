@@ -121,6 +121,75 @@ test.describe("/policies list view", () => {
     //    expect(missing).toBe(0);
   });
 
+  test("slice 241 / AC-4: header acknowledgment-report disclosure replaces the disabled button", async () => {
+    // Slice 241 closed the F-178-241 HONESTY-GAP by replacing a
+    // permanently-disabled `<Button variant="outline" size="sm"
+    // disabled>Acknowledgment report</Button>` in the header
+    // toolbar with a non-button `<span>` that discloses the
+    // future-state (the in-app report ships with a future slice;
+    // per-policy ack rates surface in the Acknowledgment column
+    // on this page today). AC-4 has two halves:
+    //
+    //   1. The disclosure is present, visible, and its text
+    //      contains "acknowledgment report" (load-bearing
+    //      substring pinned by the vitest sibling spec).
+    //   2. No disabled `<button>` with the literal text
+    //      "Acknowledgment report" exists anywhere on the page.
+    //
+    // Quarantined behind the slice 082 seed harness like the rest
+    // of this file. Bodies left commented so the contract is
+    // reviewable; when the harness lands the assertions turn on.
+    //    await page.goto("/policies");
+    //    const disclosure = page.getByTestId("policies-ack-report-future");
+    //    await expect(disclosure).toBeVisible();
+    //    const text = (await disclosure.textContent())?.toLowerCase() ?? "";
+    //    expect(text).toContain("acknowledgment report");
+    //    // `title` attribute carries the same copy as the visible
+    //    // text so screen readers and pointer-hover both surface
+    //    // the same disclosure. (aria-label likewise — both are
+    //    // set.)
+    //    const titleAttr = await disclosure.getAttribute("title");
+    //    expect(titleAttr).toMatch(/acknowledgment report/i);
+    //    // No disabled <button> with the original label survives.
+    //    await expect(
+    //      page.locator("button[disabled]", { hasText: "Acknowledgment report" }),
+    //    ).toHaveCount(0);
+  });
+
+  test("slice 241 / AC-4: header new-policy disclosure replaces the disabled button", async () => {
+    // Slice 241 closed the F-178-241 HONESTY-GAP by replacing a
+    // permanently-disabled `<Button size="sm" disabled>New
+    // policy</Button>` in the header toolbar with a non-button
+    // `<span>` that discloses the future-state (the in-app form
+    // ships with a future slice; policies can be drafted via the
+    // platform API today). AC-4 has two halves:
+    //
+    //   1. The disclosure is present, visible, and its text
+    //      contains "policy-create form" (load-bearing substring
+    //      pinned by the vitest sibling spec).
+    //   2. No disabled `<button>` with the literal text "New
+    //      policy" exists anywhere on the page.
+    //
+    // Quarantined behind the slice 082 seed harness like the rest
+    // of this file.
+    //    await page.goto("/policies");
+    //    const disclosure = page.getByTestId("policies-new-policy-future");
+    //    await expect(disclosure).toBeVisible();
+    //    const text = (await disclosure.textContent())?.toLowerCase() ?? "";
+    //    expect(text).toContain("policy-create form");
+    //    // `title` attribute carries the same copy as the visible
+    //    // text.
+    //    const titleAttr = await disclosure.getAttribute("title");
+    //    expect(titleAttr).toMatch(/policy-create form/i);
+    //    // The platform API endpoint is named so the disclosure
+    //    // is a signpost, not a dead end.
+    //    expect(text).toContain("post /v1/policies");
+    //    // No disabled <button> with the original label survives.
+    //    await expect(
+    //      page.locator("button[disabled]", { hasText: /^New policy$/ }),
+    //    ).toHaveCount(0);
+  });
+
   test("AC-5 (slice 242 update): true zero-state replaces the lying scaffold CTA with a label-honest body disclosure", async () => {
     //    // Slice 242 closed the slice 101 P0-A4 honesty-gap. The
     //    // empty-state previously rendered a primary CTA "Scaffold
