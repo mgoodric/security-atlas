@@ -146,6 +146,58 @@ This is especially load-bearing for pages whose outer shell is SSR-prefetched (e
 
 See `docs/audit-log/274-settings-ac9-token-row-flake-decisions.md` for the full diagnosis.
 
+### Gating the FIRST visibility assertion on a network round-trip
+
+Slice 274's fix covers the SECOND assertion onward — once a parent testid is visible, downstream snapshots should auto-wait. Slice 275 extends the pattern to the FIRST visibility assertion when the page has a load-bearing useQuery in its mount path.
+
+**The shape of the bug** (slice 275 — `control-detail-tabs.spec.ts`): the page renders a `<Skeleton data-testid="control-detail-loading" />` branch while `coverageQ.isLoading`. The tablist (`data-testid="control-tabs"`) renders only AFTER `coverageQ` settles. Under CI load (2 parallel workers, shared docker stack), the mount sequence (Suspense fallback → mount → useSearchParams resolved → useQuery fires → fetch → React commit) can exceed Playwright's default 5s `toBeVisible` timeout. The default `await expect(tablist).toBeVisible()` polls for 5s and times out before the skeleton transitions.
+
+**The fix**: gate the first visibility assertion on the network round-trip that drives the relevant query, and lift the timeout to 30s as a CI-load backstop.
+
+**Bad** (slice 275 root cause):
+
+```ts
+test("AC-1", async ({ authedPage: page }) => {
+  await page.goto(`/controls/${seeded.controlId}`);
+  await expect(page.getByTestId("control-tabs")).toBeVisible();
+  // ... 5s timeout; mount sequence under CI load exceeds it; fails.
+});
+```
+
+**Good** (slice 275 fix):
+
+```ts
+async function gotoControlDetail(page: Page, opts: { tab?: string } = {}) {
+  const url = opts.tab
+    ? `/controls/${seeded.controlId}?tab=${opts.tab}`
+    : `/controls/${seeded.controlId}`;
+  const coverageResp = page.waitForResponse(
+    (r) =>
+      r.url().includes(`/api/controls/${seeded.controlId}/coverage`) &&
+      r.status() === 200,
+    { timeout: 30_000 },
+  );
+  await page.goto(url);
+  await coverageResp;
+}
+
+test("AC-1", async ({ authedPage: page }) => {
+  await gotoControlDetail(page);
+  await expect(page.getByTestId("control-tabs")).toBeVisible({
+    timeout: 30_000,
+  });
+  // ... waitForResponse closes the race; the 30s timeout is a backstop.
+});
+```
+
+Two notes on the pattern:
+
+1. The `waitForResponse` Promise MUST be set up BEFORE the `page.goto` (a Playwright invariant). The helper above does this; do the same when inlining the pattern in a test body.
+
+2. Use `waitForResponse` (not `waitForRequest`) so the helper resolves only AFTER the response is delivered — which is the actual gate `useQuery` is waiting on.
+
+See `docs/audit-log/275-slice-254-tabs-e2e-fix-decisions.md` for the full diagnosis.
+
 ## How to debug a failure via the trace viewer
 
 When CI fails, the Playwright job uploads `web/playwright-report/` and `web/test-results/` as a workflow artifact named `playwright-report`. Download it, then:
