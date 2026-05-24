@@ -133,8 +133,16 @@ test.describe("topbar header chrome (slice 213)", () => {
         contentType: "application/json",
         body: JSON.stringify({
           anchors: [
-            { scf_id: "CRY-05", title: "Encryption at rest", control_id: "00000000-0000-0000-0000-000000000001" },
-            { scf_id: "IAC-06", title: "MFA", control_id: "00000000-0000-0000-0000-000000000002" },
+            {
+              scf_id: "CRY-05",
+              title: "Encryption at rest",
+              control_id: "00000000-0000-0000-0000-000000000001",
+            },
+            {
+              scf_id: "IAC-06",
+              title: "MFA",
+              control_id: "00000000-0000-0000-0000-000000000002",
+            },
           ],
         }),
       });
