@@ -15,6 +15,22 @@
 -- contract; the only wire-shape change is one additional column on every
 -- returned row.
 --
+-- Slice 270 (2026-05-23): two new optional parameters
+-- (`caller_is_privileged BOOLEAN` + `caller_user_id TEXT`) gate one extra
+-- WHERE predicate that restricts non-privileged callers (viewer /
+-- control_owner — slice 270 D1) to:
+--   - tenant-public kinds (decision, evidence, exception, sample,
+--     audit_period, aggregation_rule, walkthrough) — excludes feature_flag
+--     (admin-only program-configuration events);
+--   - PLUS me-rows whose `actor_id = caller_user_id` (the caller's own
+--     self-audit trail).
+-- When `caller_is_privileged = true` (slice 124 admin endpoint, plus the
+-- slice 270 endpoint for privileged callers) the predicate short-circuits
+-- and the result set is identical to the slice-180 shape.
+-- The predicate is conjunctive with the user-controlled `actor_filter` and
+-- `kind_filter_csv` parameters — a non-privileged caller passing
+-- `?actor=<other-user-uuid>` cannot widen visibility (slice 270 P0-A5).
+--
 -- RLS-aware: the query runs under `tenancy.ApplyTenant` as `atlas_app`. Every
 -- branch's source-table tenant_read policy fires; rows from other tenants are
 -- silently filtered out at the source-table policy layer. The aggregator never
@@ -244,6 +260,21 @@ WHERE unified.occurred_at >= sqlc.arg('from_ts')::timestamptz
   AND (sqlc.arg('actor_filter')::text = '' OR unified.actor_id = sqlc.arg('actor_filter')::text)
   AND (sqlc.arg('kind_filter_csv')::text = ''
        OR unified.kind = ANY(string_to_array(sqlc.arg('kind_filter_csv')::text, ',')))
+  -- Slice 270 — non-privileged row-visibility filter. When
+  -- `caller_is_privileged = true` (slice 124 admin endpoint + slice 270
+  -- endpoint for admin/auditor/grc_engineer callers) the predicate
+  -- short-circuits and visibility is unchanged. When false (viewer /
+  -- control_owner reaching the slice 270 endpoint), feature_flag rows
+  -- are hidden unconditionally and me-rows are restricted to the
+  -- caller's own. The predicate is conjunctive with the user-controlled
+  -- actor / kind filters (slice 270 P0-A5).
+  AND (
+      sqlc.arg('caller_is_privileged')::boolean = true
+      OR (
+          unified.kind <> 'feature_flag'
+          AND (unified.kind <> 'me' OR unified.actor_id = sqlc.arg('caller_user_id')::text)
+      )
+  )
   -- Cursor: occurred_at strictly less, OR same occurred_at and a strictly-greater
   -- (kind, row_id) tuple. row_id is the underlying audit-log row's UUID PK and
   -- is GUARANTEED unique per row across the UNION (because each base table's PK

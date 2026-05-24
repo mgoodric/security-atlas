@@ -59,10 +59,17 @@ type NavItem = {
   slot?: ReactNode;
 };
 
+// Slice 270 (D4): the `/activity` entry sits alongside the
+// dashboard / calendar / metrics cross-business "at-a-glance" cluster
+// because that is the cluster it semantically belongs to (program-pulse
+// surfaces). The link renders for every authed user — the page itself
+// is non-admin-gated (slice 270 D1; the OPA admit covers all five
+// tenant-member roles) so no role probe is needed.
 const NAV_BASE: NavItem[] = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/calendar", label: "Calendar" },
   { href: "/dashboards/metrics", label: "Metrics" },
+  { href: "/activity", label: "Activity" },
   { href: "/controls", label: "Controls", slot: <ControlsCountBadge /> },
   { href: "/evidence", label: "Evidence" },
   { href: "/risks", label: "Risks", slot: <RisksCountBadge /> },

@@ -178,6 +178,24 @@ type QueryParams struct {
 	// slice-124 handler passes 1001 for a 1000-row page so it can detect
 	// "more available" without an extra round-trip.
 	Limit int
+
+	// CallerIsPrivileged (slice 270) is the Go-side trust signal that
+	// controls the row-visibility WHERE predicate. When true, the
+	// predicate short-circuits and visibility is unchanged from slice
+	// 124. When false, feature_flag rows are hidden and me-rows are
+	// restricted to those whose actor_id equals CallerUserID — the
+	// non-privileged shape consumed by the slice 270 `/v1/activity/unified`
+	// endpoint.
+	//
+	// MUST be derived from the caller's credential + user_roles probe,
+	// NEVER from a URL-controllable filter (slice 270 P0-A5).
+	CallerIsPrivileged bool
+
+	// CallerUserID (slice 270) is the caller's user_id (the UUID
+	// `me_audit_log.user_id::text` value). Used only when
+	// CallerIsPrivileged is false; ignored otherwise. Empty string is
+	// acceptable when privileged.
+	CallerUserID string
 }
 
 // Query executes the unified UNION ALL against the nine audit-log tables.
@@ -208,11 +226,13 @@ func Query(ctx context.Context, q *dbx.Queries, params QueryParams) ([]Entry, *C
 	}
 
 	arg := dbx.ListUnifiedAuditLogParams{
-		FromTs:        pgtype.Timestamptz{Time: params.From, Valid: true},
-		ToTs:          pgtype.Timestamptz{Time: params.To, Valid: true},
-		ActorFilter:   params.ActorFilter,
-		KindFilterCsv: joinKinds(params.KindFilter),
-		LimitN:        int32(params.Limit),
+		FromTs:             pgtype.Timestamptz{Time: params.From, Valid: true},
+		ToTs:               pgtype.Timestamptz{Time: params.To, Valid: true},
+		ActorFilter:        params.ActorFilter,
+		KindFilterCsv:      joinKinds(params.KindFilter),
+		CallerIsPrivileged: params.CallerIsPrivileged,
+		CallerUserID:       params.CallerUserID,
+		LimitN:             int32(params.Limit),
 	}
 	if params.Cursor != nil {
 		arg.CursorTs = pgtype.Timestamptz{Time: params.Cursor.OccurredAt, Valid: true}

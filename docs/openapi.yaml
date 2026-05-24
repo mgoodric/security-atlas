@@ -46,6 +46,7 @@ servers:
     description: Self-hosted deployment (replace with your atlas host)
 
 tags:
+  - name: activity
   - name: admin-audit-log
   - name: admin-audit-periods
   - name: admin-credentials
@@ -169,6 +170,20 @@ paths:
       summary: GET /v1/activity
       tags: [dashboard]
       operationId: get-v1-activity
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/activity/unified:
+    get:
+      summary: GET /v1/activity/unified
+      tags: [activity]
+      operationId: get-v1-activity-unified
       security:
         - bearer: []
       responses:
