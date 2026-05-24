@@ -12,9 +12,13 @@ import (
 
 // SectionKeys is the FIXED enumerated set (decision D6). Every key has a
 // title; the set is the single source of truth for "what sections exist".
+// Slice 273 expanded the set from 7 to 8 by adding `vendor_burndown` (the
+// spillover from slice 221 D1=A). The position is slot §05, immediately
+// after `open_findings` and before `operational_metrics` — see
+// docs/audit-log/273-decisions.md D1.
 func TestSectionKeys_AllHaveTitlesAndAreKnown(t *testing.T) {
-	if len(SectionKeys) != 7 {
-		t.Fatalf("SectionKeys has %d entries, want 7 (the fixed mockup section set)", len(SectionKeys))
+	if len(SectionKeys) != 8 {
+		t.Fatalf("SectionKeys has %d entries, want 8 (slice 273 added vendor_burndown)", len(SectionKeys))
 	}
 	for _, key := range SectionKeys {
 		if _, ok := sectionTitles[key]; !ok {
@@ -27,6 +31,30 @@ func TestSectionKeys_AllHaveTitlesAndAreKnown(t *testing.T) {
 	if isKnownSection("not_a_real_section") {
 		t.Error("isKnownSection accepted an unknown key")
 	}
+	// Slice 273: vendor_burndown sits in slot §05 — right after open_findings
+	// and right before operational_metrics. The position is load-bearing for
+	// the canonical-order tests in pack_narrative_test + pack_pdf.
+	wantPos := map[string]int{
+		SectionOpenFindings:   3,
+		SectionVendorBurndown: 4,
+		SectionOperational:    5,
+	}
+	for key, want := range wantPos {
+		if got := indexOfSection(key); got != want {
+			t.Errorf("section %q at index %d, want %d", key, got, want)
+		}
+	}
+}
+
+// indexOfSection returns the position of `key` in the canonical SectionKeys,
+// or -1 when absent. Used by canonical-order assertions.
+func indexOfSection(key string) int {
+	for i, k := range SectionKeys {
+		if k == key {
+			return i
+		}
+	}
+	return -1
 }
 
 // costPerCoveragePoint = spend / max(delta, 1) (decision D5). A non-positive
@@ -199,6 +227,102 @@ func TestApplySectionEdit_ApprovedFlag(t *testing.T) {
 	// Other sections stay unapproved.
 	if out.Sections[SectionTopRisks].Approved {
 		t.Error("approving posture also approved top_risks")
+	}
+}
+
+// vendorOnTimeFraction (slice 273) = on-time / total, with [0.0, 1.0]
+// bounds and a zero-total fallback to 0.0 (no divide-by-zero).
+func TestVendorOnTimeFraction(t *testing.T) {
+	cases := []struct {
+		name   string
+		total  int64
+		onTime int64
+		want   float64
+	}{
+		{"all on time", 10, 10, 1.0},
+		{"half on time", 10, 5, 0.5},
+		{"none on time", 10, 0, 0.0},
+		{"zero total yields zero (no divide by zero)", 0, 0, 0.0},
+		{"zero total with stale onTime sentinel yields zero", 0, 7, 0.0},
+		{"negative onTime clamps to zero", 10, -3, 0.0},
+		{"onTime greater than total clamps to total (defensive)", 5, 9, 1.0},
+	}
+	for _, c := range cases {
+		got := vendorOnTimeFraction(c.total, c.onTime)
+		if got != c.want {
+			t.Errorf("%s: vendorOnTimeFraction(%d, %d) = %v, want %v",
+				c.name, c.total, c.onTime, got, c.want)
+		}
+	}
+}
+
+// vendorOnTimePct (slice 273) is the half-up integer percentage of the
+// fraction. Round to nearest; 0% floor for zero total.
+func TestVendorOnTimePct(t *testing.T) {
+	cases := []struct {
+		name   string
+		total  int64
+		onTime int64
+		want   int
+	}{
+		{"100% on time", 8, 8, 100},
+		{"0% on time", 8, 0, 0},
+		{"half rounds to 50%", 10, 5, 50},
+		{"66.67% rounds half-up to 67%", 3, 2, 67},
+		{"33.33% rounds to 33%", 3, 1, 33},
+		{"zero total yields zero pct", 0, 0, 0},
+	}
+	for _, c := range cases {
+		got := vendorOnTimePct(c.total, c.onTime)
+		if got != c.want {
+			t.Errorf("%s: vendorOnTimePct(%d, %d) = %v, want %v",
+				c.name, c.total, c.onTime, got, c.want)
+		}
+	}
+}
+
+// Slice 273: the new vendor_burndown section participates in the publish
+// gate. A pack with every section approved EXCEPT vendor_burndown fails the
+// gate and names the vendor_burndown section as the first unapproved.
+func TestAllSectionsApproved_VendorBurndownParticipatesInPublishGate(t *testing.T) {
+	p := Pack{Sections: make(map[string]Section, len(SectionKeys))}
+	for _, key := range SectionKeys {
+		p.Sections[key] = Section{Key: key, Title: sectionTitles[key], Approved: true}
+	}
+	// Un-approve the new section.
+	sec := p.Sections[SectionVendorBurndown]
+	sec.Approved = false
+	p.Sections[SectionVendorBurndown] = sec
+
+	title, ok := allSectionsApproved(p)
+	if ok {
+		t.Fatal("allSectionsApproved returned true with vendor_burndown unapproved")
+	}
+	if title != sectionTitles[SectionVendorBurndown] {
+		t.Errorf("first unapproved = %q, want %q", title, sectionTitles[SectionVendorBurndown])
+	}
+}
+
+// Slice 273: P0-273-2 — a pack generated before slice 273 (no vendor_burndown
+// section in its serialized content) fails the publish gate. The publish
+// path correctly treats the missing canonical section as unapproved — old
+// drafts must be re-generated to pick up the new section.
+func TestAllSectionsApproved_PreSlice273DraftMissingVendorBurndown(t *testing.T) {
+	// A "legacy" pack with the OLD seven sections, all approved.
+	p := Pack{Sections: make(map[string]Section, 7)}
+	for _, key := range []string{
+		SectionPosture, SectionTopRisks, SectionCoverageTrend, SectionOpenFindings,
+		SectionOperational, SectionInvestment, SectionAsks,
+	} {
+		p.Sections[key] = Section{Key: key, Title: sectionTitles[key], Approved: true}
+	}
+	title, ok := allSectionsApproved(p)
+	if ok {
+		t.Fatal("publish gate accepted a legacy 7-section pack with no vendor_burndown")
+	}
+	if title != sectionTitles[SectionVendorBurndown] {
+		t.Errorf("first unapproved = %q, want %q (the missing canonical section)",
+			title, sectionTitles[SectionVendorBurndown])
 	}
 }
 

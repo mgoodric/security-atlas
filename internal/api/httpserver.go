@@ -447,7 +447,12 @@ func (s *Server) httpHandler() http.Handler {
 	// is registered before /v1/vendors/{id} so chi's router matches the
 	// literal segment first (chi resolves routes in declaration order
 	// inside the same method).
-	vendorsH := vendors.New(vendor.NewStore(s.dbPool))
+	//
+	// Slice 273: the same vendor.Store also backs the board-pack
+	// vendor_burndown section adapter wired below. Single store = single
+	// resource; the adapter reuses vendor.Store.Burndown.
+	vendorStore := vendor.NewStore(s.dbPool)
+	vendorsH := vendors.New(vendorStore)
 	root.Post("/v1/vendors", vendorsH.CreateVendor)
 	root.Get("/v1/vendors", vendorsH.ListVendors)
 	root.Get("/v1/vendors/burndown", vendorsH.Burndown)
@@ -874,7 +879,17 @@ func (s *Server) httpHandler() http.Handler {
 	// Routes appended per the parallel-batch convention; the literal-suffix
 	// and deeper /sections/... routes are declared before the bare /{id}.
 	boardPackStore := board.NewPackStore(s.dbPool)
-	boardPackGen := board.NewPackGenerator(boardPackStore, freshnessStore, driftStore)
+	// Slice 273: the board-pack `vendor_burndown` section reads through
+	// the existing slice-122 high-criticality vendor burndown surface
+	// (vendor.Store.Burndown) via a tiny in-process adapter. The adapter
+	// lives at this wiring layer so internal/board stays free of an
+	// internal/vendor import (board.VendorBurndownReader is the contract).
+	// Pinned to criticality=high per slice 273 D2 — the board concern is
+	// overdue reviews on the vendors that matter.
+	boardPackGen := board.NewPackGenerator(
+		boardPackStore, freshnessStore, driftStore,
+		vendorBurndownAdapter{store: vendorStore},
+	)
 	boardPackH := boardapi.NewPack(boardPackGen, boardPackStore)
 	boardPackH.RegisterRoutes(root)
 	// Slice 155: questionnaire tracer-bullet — Excel import + manual
@@ -1449,4 +1464,37 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ok","db":"` + db + `"}`))
+}
+
+// vendorBurndownAdapter wires the slice-273 board.VendorBurndownReader
+// contract onto the existing slice-122 vendor.Store.Burndown surface. It
+// lives at the wiring layer (httpserver.go) — NOT in internal/board — so
+// the board package stays free of an internal/vendor import. The adapter
+// pins the criticality filter to `high` per slice 273 D2: the board
+// concern is overdue reviews on the vendors that matter, not the entire
+// vendor portfolio.
+type vendorBurndownAdapter struct {
+	store *vendor.Store
+}
+
+// ReadHighCriticalityBurndown reads the high-criticality vendor burndown
+// at `asOf` through vendor.Store.Burndown (slice 122). It propagates the
+// caller's ctx — which carries the tenant GUC — so RLS gates the read
+// (constitutional invariant 6). Returns (0, 0, 0) when no high-criticality
+// vendors are registered for the tenant; that case is the honest read.
+func (a vendorBurndownAdapter) ReadHighCriticalityBurndown(ctx context.Context, asOf time.Time) (board.VendorBurndownReadout, error) {
+	high := vendor.CriticalityHigh
+	bd, err := a.store.Burndown(ctx, asOf, &high)
+	if err != nil {
+		return board.VendorBurndownReadout{}, err
+	}
+	// The Total band is the slice-122 aggregate; with criticality=high
+	// pinned it equals the single Bands[0] row when present. Read the
+	// aggregate so the contract stays correct even if vendor.Store ever
+	// returns multiple bands under the same criticality filter.
+	return board.VendorBurndownReadout{
+		Total:   bd.Total.Total,
+		OnTime:  bd.Total.Total - bd.Total.Overdue,
+		PastDue: bd.Total.Overdue,
+	}, nil
 }
