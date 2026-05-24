@@ -15,6 +15,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { periodLabel } from "./pack-breadcrumb-segments";
 import { PACK_HEADER_META_LABELS } from "./pack-header-meta";
 
 type PackHeaderProps = {
@@ -112,24 +113,9 @@ function MetaCell({
   );
 }
 
-// periodLabel derives a "Q1 2026"-style label from YYYY-MM-DD when the
-// date is a calendar-quarter end (Mar 31 / Jun 30 / Sep 30 / Dec 31).
-// Otherwise it falls back to the raw date — no fabrication.
-function periodLabel(periodEnd: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(periodEnd);
-  if (!match) return periodEnd;
-  const [, year, month, day] = match;
-  const quarter = quarterFromMonthDay(month, day);
-  return quarter ? `${quarter} ${year}` : periodEnd;
-}
-
-function quarterFromMonthDay(month: string, day: string): string | null {
-  if (month === "03" && day === "31") return "Q1";
-  if (month === "06" && day === "30") return "Q2";
-  if (month === "09" && day === "30") return "Q3";
-  if (month === "12" && day === "31") return "Q4";
-  return null;
-}
+// periodLabel was moved to `./pack-breadcrumb-segments.ts` in slice 218
+// so the breadcrumb (in the sticky export bar) and the cover header
+// share one canonical implementation. Imported above.
 
 function formatTimestamp(ts: string): string {
   if (!ts) return "—";
