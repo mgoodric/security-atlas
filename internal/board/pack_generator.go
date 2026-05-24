@@ -32,25 +32,70 @@ import (
 	"time"
 )
 
+// VendorBurndownReader is the narrow view of the slice-122 high-criticality
+// vendor burndown surface the PackGenerator reads from (slice 273). An
+// interface (not the concrete vendor.Store) keeps the board package free of
+// an internal/vendor import cycle and the generator unit-testable without
+// a live DB. The integration wires a tiny adapter over vendor.Store.Burndown
+// pinned to criticality=high (slice 273 D2) at httpserver.go.
+//
+// The contract:
+//
+//   - ReadHighCriticalityBurndown returns the (total, on-time, past-due)
+//     triple of high-criticality vendor reviews as of `asOf`. on-time + past
+//     due == total in the contract; the generator does not assume a
+//     particular sum but renders both totals honestly.
+//   - tenant context is carried on `ctx` (the adapter propagates it through
+//     the vendor.Store's tenancy GUC).
+type VendorBurndownReader interface {
+	ReadHighCriticalityBurndown(ctx context.Context, asOf time.Time) (VendorBurndownReadout, error)
+}
+
+// VendorBurndownReadout is the value the VendorBurndownReader returns —
+// three scalars from the slice-122 surface, used to populate the new
+// `vendor_burndown` board-pack section (slice 273).
+//
+// "on-time" means a high-criticality vendor whose last review was within
+// the configured cadence as of `AsOf`. "Past due" means a vendor whose next
+// review is overdue. `Total = OnTime + PastDue` in the slice-122 SQL; the
+// generator does not enforce that — if the upstream surface ever introduces
+// a "no last review" bucket it surfaces honestly as a delta from the sum.
+type VendorBurndownReadout struct {
+	Total   int64
+	OnTime  int64
+	PastDue int64
+}
+
 // PackGenerator assembles and persists draft quarterly board packs. It is
 // wired with the freshness + drift read-model stores (reused from slice
 // 031), the board pack Store (frameworks/risks/findings reads, pack append),
-// and a wall-clock source (overridable in tests for determinism).
+// the slice-273 vendor-burndown reader, and a wall-clock source (overridable
+// in tests for determinism).
 type PackGenerator struct {
 	store     *PackStore
 	freshness freshnessLister
 	drift     driftReporter
+	vendors   VendorBurndownReader
 	now       func() time.Time
 }
 
 // NewPackGenerator wires a PackGenerator. The freshness + drift arguments are
 // the slice-016 read-model stores (the same ones slice 031 uses); the pack
-// Store handles the frameworks/risks/findings reads and the append.
-func NewPackGenerator(store *PackStore, freshnessStore freshnessLister, driftStore driftReporter) *PackGenerator {
+// Store handles the frameworks/risks/findings reads and the append. The
+// vendors argument is the slice-273 high-criticality vendor-burndown reader
+// (the adapter over vendor.Store.Burndown lives at the httpserver wiring
+// layer so the board package stays free of an internal/vendor import).
+//
+// `vendors` may be nil — when nil the generator seeds the vendor_burndown
+// section with zero scalars, which is the honest read for a deployment with
+// the vendor module disabled or untouched. The integration wires a real
+// reader.
+func NewPackGenerator(store *PackStore, freshnessStore freshnessLister, driftStore driftReporter, vendors VendorBurndownReader) *PackGenerator {
 	return &PackGenerator{
 		store:     store,
 		freshness: freshnessStore,
 		drift:     driftStore,
+		vendors:   vendors,
 		now:       func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -141,6 +186,20 @@ func (g *PackGenerator) assemble(ctx context.Context, periodEnd, generatedAt tim
 		return Pack{}, err
 	}
 
+	// --- vendor burndown (slice 273): high-criticality vendor reviews
+	//     on-time / past-due as of period_end. Pinned to criticality=high
+	//     per slice 273 D2. When the generator is wired without a vendor
+	//     reader (g.vendors == nil) the section is seeded with zero
+	//     scalars — the honest read for a deployment without the vendor
+	//     module attached. ---
+	var vendorBD VendorBurndownReadout
+	if g.vendors != nil {
+		vendorBD, err = g.vendors.ReadHighCriticalityBurndown(ctx, periodEnd)
+		if err != nil {
+			return Pack{}, fmt.Errorf("board: vendor burndown read: %w", err)
+		}
+	}
+
 	pack := Pack{
 		PeriodEnd:   periodEnd.Format("2006-01-02"),
 		GeneratedAt: generatedAt.Format(time.RFC3339),
@@ -167,6 +226,19 @@ func (g *PackGenerator) assemble(ctx context.Context, periodEnd, generatedAt tim
 	pack.Sections[SectionOpenFindings] = newSection(SectionOpenFindings, SectionData{
 		Findings:      findings,
 		FindingsCount: len(findings),
+	})
+
+	// Slice 273: vendor_burndown — GENERATED from the slice-122 surface.
+	// The on-time percentage is rounded to the nearest integer for the
+	// narrative; the fraction is kept as a float for downstream consumers
+	// (chart axis, exports). `Total == 0` keeps the percentage at 0 — the
+	// honest read for "no high-criticality vendors registered yet".
+	pack.Sections[SectionVendorBurndown] = newSection(SectionVendorBurndown, SectionData{
+		VendorBurndownTotal:          vendorBD.Total,
+		VendorBurndownOnTime:         vendorBD.OnTime,
+		VendorBurndownPastDue:        vendorBD.PastDue,
+		VendorBurndownOnTimePct:      vendorOnTimePct(vendorBD.Total, vendorBD.OnTime),
+		VendorBurndownOnTimeFraction: vendorOnTimeFraction(vendorBD.Total, vendorBD.OnTime),
 	})
 
 	// Operator-entered sections (decision D3) — seeded EMPTY with a
@@ -224,4 +296,29 @@ func costPerCoveragePoint(spendUSD, coverageDelta int) float64 {
 		denom = 1
 	}
 	return float64(spendUSD) / float64(denom)
+}
+
+// vendorOnTimeFraction computes on-time / total (slice 273). Zero total
+// yields zero — the honest read for "no high-criticality vendors registered".
+// A non-zero total bounds the fraction in [0.0, 1.0].
+func vendorOnTimeFraction(total, onTime int64) float64 {
+	if total <= 0 {
+		return 0
+	}
+	if onTime < 0 {
+		onTime = 0
+	}
+	if onTime > total {
+		onTime = total
+	}
+	return float64(onTime) / float64(total)
+}
+
+// vendorOnTimePct converts vendorOnTimeFraction to a 0-100 integer percentage,
+// half-up rounded — the narrative-friendly form (slice 273).
+func vendorOnTimePct(total, onTime int64) int {
+	if total <= 0 {
+		return 0
+	}
+	return int((vendorOnTimeFraction(total, onTime) * 100.0) + 0.5)
 }

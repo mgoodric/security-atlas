@@ -205,6 +205,27 @@ func writeSectionData(w *strings.Builder, key string, d SectionData) {
 		}
 		w.WriteString(`</tbody></table>`)
 
+	case SectionVendorBurndown:
+		// Slice 273: render the three scalars + on-time percent as a
+		// stat grid matching the slice-031 framework-posture card density.
+		// No table — the section is intentionally a small card.
+		if d.VendorBurndownTotal == 0 {
+			w.WriteString(`<div class="muted">No high-criticality vendors registered.</div>`)
+			return
+		}
+		w.WriteString(`<div class="grid">`)
+		fmt.Fprintf(w,
+			`<div class="card"><div class="label">High-criticality vendors</div><div class="pct">%d</div></div>`,
+			d.VendorBurndownTotal)
+		fmt.Fprintf(w,
+			`<div class="card"><div class="label">Reviewed on time</div><div class="pct">%d</div>`+
+				`<div class="muted">%d%% of total</div></div>`,
+			d.VendorBurndownOnTime, d.VendorBurndownOnTimePct)
+		fmt.Fprintf(w,
+			`<div class="card"><div class="label">Past due</div><div class="pct">%d</div></div>`,
+			d.VendorBurndownPastDue)
+		w.WriteString(`</div>`)
+
 	case SectionOperational:
 		w.WriteString(`<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`)
 		writeOptIntRow(w, "Phishing pass rate (%)", d.PhishingPassRatePct)

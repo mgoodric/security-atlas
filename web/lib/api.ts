@@ -1920,11 +1920,21 @@ export type BoardPack = {
 // The fixed, ordered section keys (decision D6) — the single source of
 // truth in the UI for "what sections exist and in what order". Mirrors
 // internal/board/pack.go SectionKeys.
+//
+// Slice 273 added `vendor_burndown` in slot §05 (between `open_findings`
+// and `operational_metrics`). The mirror is the *only* FE change in this
+// slice — no dedicated <VendorBurndown /> component ships here; the page
+// renders the section's chrome (title, approve button, templated
+// narrative) via the default fallback in SectionStructured, and the
+// publish-gate math stays correct (totalSections === BOARD_PACK_SECTION_KEYS.length).
+// A dedicated component lands in a follow-on FE slice. See
+// docs/audit-log/273-decisions.md D6.
 export const BOARD_PACK_SECTION_KEYS: string[] = [
   "posture",
   "top_risks",
   "coverage_trend",
   "open_findings",
+  "vendor_burndown",
   "operational_metrics",
   "investment",
   "asks",

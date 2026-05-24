@@ -95,11 +95,13 @@ func generateDraftPack(t *testing.T, env testEnv, periodEnd string) string {
 }
 
 // approveAllSections walks the fixed section keys and approves each one.
+// Slice 273 added `vendor_burndown` as the 8th canonical section between
+// `open_findings` and `operational_metrics`.
 func approveAllSections(t *testing.T, env testEnv, packID string) {
 	t.Helper()
 	for _, key := range []string{
 		"posture", "top_risks", "coverage_trend", "open_findings",
-		"operational_metrics", "investment", "asks",
+		"vendor_burndown", "operational_metrics", "investment", "asks",
 	} {
 		resp, body := doJSON(t, env, http.MethodPost,
 			"/v1/board-packs/"+packID+"/sections/"+key+"/approve", map[string]any{})
@@ -136,7 +138,7 @@ func TestPackGenerate_DraftWithAllSections(t *testing.T) {
 	sections, _ := content["sections"].(map[string]any)
 	for _, key := range []string{
 		"posture", "top_risks", "coverage_trend", "open_findings",
-		"operational_metrics", "investment", "asks",
+		"vendor_burndown", "operational_metrics", "investment", "asks",
 	} {
 		if _, ok := sections[key]; !ok {
 			t.Errorf("generated pack missing fixed section %q", key)
@@ -307,10 +309,11 @@ func TestPackPublish_GatedOnEverySectionApproved(t *testing.T) {
 		t.Fatalf("publish with no sections approved = %d, want 409 (body: %v)", resp.StatusCode, body)
 	}
 
-	// Approve all but one -> still 409.
+	// Approve all but one -> still 409. Slice 273 added vendor_burndown to
+	// the canonical eight-section set; approve all eight EXCEPT asks here.
 	for _, key := range []string{
 		"posture", "top_risks", "coverage_trend", "open_findings",
-		"operational_metrics", "investment",
+		"vendor_burndown", "operational_metrics", "investment",
 	} {
 		resp, _ := doJSON(t, env, http.MethodPost,
 			"/v1/board-packs/"+packID+"/sections/"+key+"/approve", map[string]any{})
@@ -510,6 +513,217 @@ func TestPackRLS_CrossTenantIsolation(t *testing.T) {
 		if pm["id"] == packA {
 			t.Error("tenant B's pack list leaked tenant A's pack")
 		}
+	}
+}
+
+// ===== slice 273: vendor_burndown section =====
+
+// seedHighCritVendor inserts one high-criticality vendor with a configurable
+// last_review_date + review_cadence so the burndown SQL classifies it as
+// on-time or past-due relative to a chosen asOf. `lastReview == nil` seeds
+// a "never reviewed" vendor (always overdue).
+func seedHighCritVendor(t *testing.T, admin *pgxpool.Pool, tenant, name string, lastReview *time.Time, cadence string) {
+	t.Helper()
+	var lastReviewVal any
+	if lastReview != nil {
+		lastReviewVal = *lastReview
+	}
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO vendors (
+			id, tenant_id, name, criticality, review_cadence, last_review_date
+		)
+		VALUES ($1, $2, $3, 'high', $4, $5)
+	`, uuid.New(), tenant, name, cadence, lastReviewVal); err != nil {
+		t.Fatalf("seed high-criticality vendor %q: %v", name, err)
+	}
+}
+
+// freshPackVendorTenant extends freshPackTenant with a vendors-table cleanup
+// — slice 273 seeds vendors, so they need to be torn down too.
+func freshPackVendorTenant(t *testing.T, admin *pgxpool.Pool) string {
+	t.Helper()
+	tenant := freshPackTenant(t, admin)
+	t.Cleanup(func() {
+		ctx := context.Background()
+		if _, err := admin.Exec(ctx,
+			`DELETE FROM vendors WHERE tenant_id = $1`, tenant); err != nil {
+			t.Logf("vendor cleanup: %v", err)
+		}
+	})
+	return tenant
+}
+
+// Slice 273 AC-3 + AC-4: the generated pack's vendor_burndown section
+// carries the three scalars from the slice-122 high-criticality burndown
+// surface, and its templated narrative names the same numbers. Three
+// scenarios in one test:
+//
+//   - no high-criticality vendors        -> Total = 0, narrative "no vendors registered"
+//   - all on time (zero past-due)        -> OnTime == Total, narrative "All N ... 100% on-time"
+//   - partial overdue                    -> mixed counts, narrative names the gap
+func TestPackVendorBurndown_PopulatedFromHighCriticalitySurface(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+
+	t.Run("no_vendors_registered", func(t *testing.T) {
+		tenant := freshPackVendorTenant(t, admin)
+		env := testServer(t, app, tenant)
+
+		packID := generateDraftPack(t, env, "2026-03-31")
+		resp, body := doJSON(t, env, http.MethodGet, "/v1/board-packs/"+packID, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET pack = %d, want 200", resp.StatusCode)
+		}
+		content, _ := body["content"].(map[string]any)
+		sections, _ := content["sections"].(map[string]any)
+		vb, ok := sections["vendor_burndown"].(map[string]any)
+		if !ok {
+			t.Fatalf("pack missing vendor_burndown section; sections=%v", sections)
+		}
+		data, _ := vb["data"].(map[string]any)
+		// Total absent or zero (omitempty drops zero from the JSON).
+		if v, present := data["vendor_burndown_total"]; present && v.(float64) != 0 {
+			t.Errorf("vendor_burndown_total = %v, want 0 (no vendors seeded)", v)
+		}
+		// Narrative names the empty state.
+		nm, _ := body["narrative_md"].(string)
+		if !contains(nm, "No high-criticality vendors") {
+			t.Errorf("narrative does not name the empty vendor state; got:\n%s", nm)
+		}
+	})
+
+	t.Run("all_on_time_zero_past_due", func(t *testing.T) {
+		tenant := freshPackVendorTenant(t, admin)
+		env := testServer(t, app, tenant)
+		// Three high-criticality vendors reviewed 10 days ago, annual cadence
+		// -> all within window relative to 2026-03-31 -> 100% on-time.
+		periodEnd := time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC)
+		recent := periodEnd.AddDate(0, 0, -10)
+		seedHighCritVendor(t, admin, tenant, "Acme", &recent, "annual")
+		seedHighCritVendor(t, admin, tenant, "Globex", &recent, "annual")
+		seedHighCritVendor(t, admin, tenant, "Initech", &recent, "annual")
+
+		packID := generateDraftPack(t, env, "2026-03-31")
+		resp, body := doJSON(t, env, http.MethodGet, "/v1/board-packs/"+packID, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET pack = %d, want 200", resp.StatusCode)
+		}
+		content, _ := body["content"].(map[string]any)
+		sections, _ := content["sections"].(map[string]any)
+		vb, _ := sections["vendor_burndown"].(map[string]any)
+		data, _ := vb["data"].(map[string]any)
+		if total, _ := data["vendor_burndown_total"].(float64); total != 3 {
+			t.Errorf("vendor_burndown_total = %v, want 3", data["vendor_burndown_total"])
+		}
+		if onTime, _ := data["vendor_burndown_on_time"].(float64); onTime != 3 {
+			t.Errorf("vendor_burndown_on_time = %v, want 3", data["vendor_burndown_on_time"])
+		}
+		// past_due omitempty -> absent when zero, which is correct.
+		if pastDue, present := data["vendor_burndown_past_due"]; present && pastDue.(float64) != 0 {
+			t.Errorf("vendor_burndown_past_due = %v, want 0 (or absent)", pastDue)
+		}
+		if pct, _ := data["vendor_burndown_on_time_pct"].(float64); pct != 100 {
+			t.Errorf("vendor_burndown_on_time_pct = %v, want 100", data["vendor_burndown_on_time_pct"])
+		}
+		nm, _ := body["narrative_md"].(string)
+		if !contains(nm, "All 3 high-criticality vendors") || !contains(nm, "100% on-time") {
+			t.Errorf("narrative missing 'all-on-time' shape; got:\n%s", nm)
+		}
+	})
+
+	t.Run("partial_overdue", func(t *testing.T) {
+		tenant := freshPackVendorTenant(t, admin)
+		env := testServer(t, app, tenant)
+		// Mix: 2 on-time (recent annual), 2 past-due (reviewed >400 days ago
+		// against annual cadence, OR never reviewed).
+		periodEnd := time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC)
+		recent := periodEnd.AddDate(0, 0, -10)
+		ancient := periodEnd.AddDate(-2, 0, 0) // ~730 days ago
+		seedHighCritVendor(t, admin, tenant, "Acme", &recent, "annual")
+		seedHighCritVendor(t, admin, tenant, "Globex", &recent, "annual")
+		seedHighCritVendor(t, admin, tenant, "OldVendor", &ancient, "annual")
+		seedHighCritVendor(t, admin, tenant, "NeverReviewed", nil, "annual")
+
+		packID := generateDraftPack(t, env, "2026-03-31")
+		resp, body := doJSON(t, env, http.MethodGet, "/v1/board-packs/"+packID, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET pack = %d, want 200", resp.StatusCode)
+		}
+		content, _ := body["content"].(map[string]any)
+		sections, _ := content["sections"].(map[string]any)
+		vb, _ := sections["vendor_burndown"].(map[string]any)
+		data, _ := vb["data"].(map[string]any)
+		if total, _ := data["vendor_burndown_total"].(float64); total != 4 {
+			t.Errorf("vendor_burndown_total = %v, want 4", data["vendor_burndown_total"])
+		}
+		if onTime, _ := data["vendor_burndown_on_time"].(float64); onTime != 2 {
+			t.Errorf("vendor_burndown_on_time = %v, want 2 (Acme + Globex)", data["vendor_burndown_on_time"])
+		}
+		if pastDue, _ := data["vendor_burndown_past_due"].(float64); pastDue != 2 {
+			t.Errorf("vendor_burndown_past_due = %v, want 2 (OldVendor + NeverReviewed)", data["vendor_burndown_past_due"])
+		}
+		if pct, _ := data["vendor_burndown_on_time_pct"].(float64); pct != 50 {
+			t.Errorf("vendor_burndown_on_time_pct = %v, want 50", data["vendor_burndown_on_time_pct"])
+		}
+		nm, _ := body["narrative_md"].(string)
+		if !contains(nm, "2 of 4 high-criticality vendors") || !contains(nm, "2 vendors are past due") {
+			t.Errorf("narrative does not name the partial-overdue shape; got:\n%s", nm)
+		}
+	})
+}
+
+// Slice 273 RLS: cross-tenant isolation — tenant A's high-criticality vendors
+// never leak into tenant B's board-pack vendor_burndown section. The
+// vendor.Store.Burndown surface is tenant-RLS-scoped (slice 122); the new
+// adapter inherits that scoping through the tenant GUC on ctx.
+func TestPackVendorBurndown_RLSCrossTenantIsolation(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenantA := freshPackVendorTenant(t, admin)
+	tenantB := freshPackVendorTenant(t, admin)
+	envA := testServer(t, app, tenantA)
+	envB := testServer(t, app, tenantB)
+
+	// Tenant A: 5 high-criticality vendors, all on-time.
+	periodEnd := time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC)
+	recent := periodEnd.AddDate(0, 0, -10)
+	for i := 0; i < 5; i++ {
+		seedHighCritVendor(t, admin, tenantA, "TenantA-Vendor-"+string(rune('A'+i)), &recent, "annual")
+	}
+	// Tenant B: zero high-criticality vendors.
+
+	packA := generateDraftPack(t, envA, "2026-03-31")
+	packB := generateDraftPack(t, envB, "2026-03-31")
+
+	// Tenant A's pack: total = 5.
+	_, bodyA := doJSON(t, envA, http.MethodGet, "/v1/board-packs/"+packA, nil)
+	contentA, _ := bodyA["content"].(map[string]any)
+	sectionsA, _ := contentA["sections"].(map[string]any)
+	vbA, _ := sectionsA["vendor_burndown"].(map[string]any)
+	dataA, _ := vbA["data"].(map[string]any)
+	if total, _ := dataA["vendor_burndown_total"].(float64); total != 5 {
+		t.Errorf("tenant A vendor_burndown_total = %v, want 5", dataA["vendor_burndown_total"])
+	}
+
+	// Tenant B's pack: total = 0 (RLS made tenant A's rows invisible). The
+	// omitempty JSON tag drops zero scalars; presence + zero or absence
+	// both satisfy "no leak".
+	_, bodyB := doJSON(t, envB, http.MethodGet, "/v1/board-packs/"+packB, nil)
+	contentB, _ := bodyB["content"].(map[string]any)
+	sectionsB, _ := contentB["sections"].(map[string]any)
+	vbB, _ := sectionsB["vendor_burndown"].(map[string]any)
+	dataB, _ := vbB["data"].(map[string]any)
+	if total, present := dataB["vendor_burndown_total"]; present && total.(float64) != 0 {
+		t.Errorf("tenant B vendor_burndown_total = %v, want 0 — RLS leak from tenant A", total)
+	}
+	// Narrative reflects the empty state, not tenant A's numbers.
+	nmB, _ := bodyB["narrative_md"].(string)
+	if !contains(nmB, "No high-criticality vendors") {
+		t.Errorf("tenant B narrative does not name the empty state — possible RLS leak; got:\n%s", nmB)
+	}
+	// Tenant A's vendor names must never appear in tenant B's pack output.
+	if contains(nmB, "TenantA-Vendor") {
+		t.Error("tenant B narrative contains tenant A's vendor name — RLS leak")
 	}
 }
 

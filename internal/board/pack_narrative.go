@@ -37,6 +37,14 @@ var packSectionFuncs = template.FuncMap{
 		}
 		return plural
 	},
+	// pluralize64 mirrors pluralize for int64 counts (slice 273 — the
+	// vendor-burndown totals are int64 from the slice-122 surface).
+	"pluralize64": func(n int64, singular, plural string) string {
+		if n == 1 {
+			return singular
+		}
+		return plural
+	},
 }
 
 // sectionTemplates holds the per-section narrative template, keyed by
@@ -84,6 +92,24 @@ var sectionSources = map[string]string{
 	SectionOpenFindings: `{{ if .Data.Findings }}{{ .Data.FindingsCount }} open {{ pluralize .Data.FindingsCount "finding" "findings" }} ` +
 		`as of {{ .PeriodEnd }} — each is a control whose latest evaluation is failing as of the quarter-end horizon.` +
 		`{{ else }}No open findings — every evaluated control is passing as of {{ .PeriodEnd }}.{{ end }}`,
+
+	// Slice 273: vendor_burndown narrative. Generated from the slice-122
+	// high-criticality vendor burndown surface. Three scalars + a derived
+	// on-time percentage; the templated text varies by total (none /
+	// all-on-time / partial-overdue) so the narrative is informative even
+	// at the trivial extremes. NO operator-entered fallback — this is a
+	// GENERATED section per slice 273 D1.
+	SectionVendorBurndown: `{{ if eq .Data.VendorBurndownTotal 0 }}` +
+		`No high-criticality vendors are registered in the vendor module as of {{ .PeriodEnd }} — the burndown is empty. ` +
+		`Register high-criticality vendors to populate this section.` +
+		`{{ else if eq .Data.VendorBurndownPastDue 0 }}` +
+		`All {{ .Data.VendorBurndownTotal }} high-criticality {{ pluralize64 .Data.VendorBurndownTotal "vendor" "vendors" }} ` +
+		`are current on review cadence as of {{ .PeriodEnd }} (100% on-time).` +
+		`{{ else }}` +
+		`{{ .Data.VendorBurndownOnTime }} of {{ .Data.VendorBurndownTotal }} high-criticality vendors ` +
+		`({{ .Data.VendorBurndownOnTimePct }}%) are current on review cadence as of {{ .PeriodEnd }}; ` +
+		`{{ .Data.VendorBurndownPastDue }} {{ pluralize64 .Data.VendorBurndownPastDue "vendor is" "vendors are" }} past due.` +
+		`{{ end }}`,
 
 	SectionOperational: `Operational metrics are operator-entered for v1 — phishing pass rate, P1 patch median, ` +
 		`incident count, and vendor reviews on time have no automated connector yet (the training connector and ` +

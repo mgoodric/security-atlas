@@ -138,6 +138,123 @@ func TestRenderPackNarrative_WholeDocument(t *testing.T) {
 	}
 }
 
+// Slice 273: the vendor_burndown narrative renders three distinct shapes
+// depending on the data — empty (no high-criticality vendors registered),
+// all-on-time (zero past-due), and partial-overdue. Each shape is a
+// pure, deterministic function of the three scalars; NO LLM.
+func TestRenderSectionNarrative_VendorBurndownShapes(t *testing.T) {
+	cases := []struct {
+		name        string
+		data        SectionData
+		mustContain []string
+	}{
+		{
+			name: "empty — no vendors registered",
+			data: SectionData{VendorBurndownTotal: 0},
+			mustContain: []string{
+				"No high-criticality vendors are registered",
+				"2026-03-31",
+			},
+		},
+		{
+			name: "all on time — zero past due",
+			data: SectionData{
+				VendorBurndownTotal:     5,
+				VendorBurndownOnTime:    5,
+				VendorBurndownPastDue:   0,
+				VendorBurndownOnTimePct: 100,
+			},
+			mustContain: []string{
+				"All 5 high-criticality vendors",
+				"100% on-time",
+			},
+		},
+		{
+			name: "partial overdue — narrative names the gap",
+			data: SectionData{
+				VendorBurndownTotal:     10,
+				VendorBurndownOnTime:    7,
+				VendorBurndownPastDue:   3,
+				VendorBurndownOnTimePct: 70,
+			},
+			mustContain: []string{
+				"7 of 10 high-criticality vendors",
+				"(70%)",
+				"3 vendors are past due",
+			},
+		},
+		{
+			name: "exactly one past due — pluralization renders 'is past due'",
+			data: SectionData{
+				VendorBurndownTotal:     4,
+				VendorBurndownOnTime:    3,
+				VendorBurndownPastDue:   1,
+				VendorBurndownOnTimePct: 75,
+			},
+			mustContain: []string{
+				"3 of 4 high-criticality vendors",
+				"1 vendor is past due",
+			},
+		},
+		{
+			name: "exactly one vendor on time — pluralization renders 'vendor is'",
+			data: SectionData{
+				VendorBurndownTotal:     1,
+				VendorBurndownOnTime:    1,
+				VendorBurndownPastDue:   0,
+				VendorBurndownOnTimePct: 100,
+			},
+			mustContain: []string{
+				"All 1 high-criticality vendor",
+				"100% on-time",
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sec := newSection(SectionVendorBurndown, c.data)
+			text, err := renderSectionNarrative(sec, "2026-03-31")
+			if err != nil {
+				t.Fatalf("renderSectionNarrative: %v", err)
+			}
+			for _, want := range c.mustContain {
+				if !strings.Contains(text, want) {
+					t.Errorf("narrative missing %q\n got: %q", want, text)
+				}
+			}
+			// Determinism — the second render must equal the first.
+			again, _ := renderSectionNarrative(sec, "2026-03-31")
+			if again != text {
+				t.Errorf("vendor_burndown narrative is not deterministic")
+			}
+		})
+	}
+}
+
+// Slice 273: vendor_burndown is a GENERATED section, not operator-entered —
+// its narrative must NOT include the "operator-entered" placeholder shape.
+// This is the structural guard against accidentally drifting the new
+// section into the operational_metrics / investment / asks placeholder
+// shape over time.
+func TestRenderSectionNarrative_VendorBurndownIsGenerated(t *testing.T) {
+	sec := newSection(SectionVendorBurndown, SectionData{
+		VendorBurndownTotal:     2,
+		VendorBurndownOnTime:    2,
+		VendorBurndownPastDue:   0,
+		VendorBurndownOnTimePct: 100,
+	})
+	text, err := renderSectionNarrative(sec, "2026-03-31")
+	if err != nil {
+		t.Fatalf("renderSectionNarrative: %v", err)
+	}
+	if strings.Contains(text, "operator-entered") {
+		t.Errorf("vendor_burndown narrative includes 'operator-entered' — must be GENERATED: %q", text)
+	}
+	if strings.Contains(text, "authored by the security leader") {
+		t.Errorf("vendor_burndown narrative looks like the asks placeholder: %q", text)
+	}
+}
+
 // RenderPackNarrative prefers a section's operator override over the
 // templated text (AC-2).
 func TestRenderPackNarrative_UsesOverride(t *testing.T) {

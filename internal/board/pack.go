@@ -75,19 +75,29 @@ const (
 
 // Section keys — the FIXED, ENUMERATED set of sections every quarterly pack
 // carries (decision D6). `publish` iterates exactly this set and rejects the
-// publish if any section's `approved` flag is false. Mirrors the seven
-// sections of Plans/mockups/board-pack.html.
+// publish if any section's `approved` flag is false. Mirrors the eight
+// sections of the canonical board-pack shape.
+//
+// Slice 273 (spillover from slice 221 D1=A) expanded the set from 7 to 8 by
+// adding `vendor_burndown` — a GENERATED section sourced from the existing
+// slice-122 high-criticality-vendor burndown surface. Position: slot §05,
+// after `open_findings` and before the operator-entered `operational_metrics`
+// (the slice's D1). Rationale: vendor burndown is a "what's wrong right
+// now" panel (sibling to `open_findings`), and GENERATED sections precede
+// operator-entered ones in canonical order. See
+// docs/audit-log/273-decisions.md D1.
 //
 // The order of SectionKeys is the canonical render order — pack_narrative.go
 // and pack_pdf.go both walk it.
 const (
-	SectionPosture       = "posture"
-	SectionTopRisks      = "top_risks"
-	SectionCoverageTrend = "coverage_trend"
-	SectionOpenFindings  = "open_findings"
-	SectionOperational   = "operational_metrics"
-	SectionInvestment    = "investment"
-	SectionAsks          = "asks"
+	SectionPosture        = "posture"
+	SectionTopRisks       = "top_risks"
+	SectionCoverageTrend  = "coverage_trend"
+	SectionOpenFindings   = "open_findings"
+	SectionVendorBurndown = "vendor_burndown"
+	SectionOperational    = "operational_metrics"
+	SectionInvestment     = "investment"
+	SectionAsks           = "asks"
 )
 
 // SectionKeys is the canonical, ordered list of the fixed section keys. It is
@@ -99,6 +109,7 @@ var SectionKeys = []string{
 	SectionTopRisks,
 	SectionCoverageTrend,
 	SectionOpenFindings,
+	SectionVendorBurndown,
 	SectionOperational,
 	SectionInvestment,
 	SectionAsks,
@@ -107,13 +118,14 @@ var SectionKeys = []string{
 // sectionTitles maps a section key to its board-facing title. Used by the
 // narrative + PDF renderers and the publish-gate error messages.
 var sectionTitles = map[string]string{
-	SectionPosture:       "Program posture",
-	SectionTopRisks:      "Top risks · aging",
-	SectionCoverageTrend: "Control coverage trend",
-	SectionOpenFindings:  "Open findings",
-	SectionOperational:   "Operational metrics",
-	SectionInvestment:    "Investment vs coverage",
-	SectionAsks:          "Asks of the board",
+	SectionPosture:        "Program posture",
+	SectionTopRisks:       "Top risks · aging",
+	SectionCoverageTrend:  "Control coverage trend",
+	SectionOpenFindings:   "Open findings",
+	SectionVendorBurndown: "Vendor risk burndown",
+	SectionOperational:    "Operational metrics",
+	SectionInvestment:     "Investment vs coverage",
+	SectionAsks:           "Asks of the board",
 }
 
 // isKnownSection reports whether key is one of the fixed SectionKeys.
@@ -193,6 +205,19 @@ type SectionData struct {
 	// (decision D4 — a failing evaluation IS a finding for v1).
 	Findings      []Finding `json:"findings,omitempty"`
 	FindingsCount int       `json:"findings_count,omitempty"`
+
+	// vendor_burndown (slice 273): GENERATED from the slice-122 high-
+	// criticality vendor burndown surface (vendor.Store.Burndown). Three
+	// scalars + a derived on-time fraction; pinned to `criticality=high`
+	// per slice 273 D2 — the board concern is overdue reviews on the
+	// vendors that matter. AsOf == period_end. The operator-entered
+	// "Vendor reviews on time: N/M" tile in operational_metrics remains
+	// independent (manual roster vs vendor-module tracked) — slice 273 D5.
+	VendorBurndownTotal          int64   `json:"vendor_burndown_total,omitempty"`
+	VendorBurndownOnTime         int64   `json:"vendor_burndown_on_time,omitempty"`
+	VendorBurndownPastDue        int64   `json:"vendor_burndown_past_due,omitempty"`
+	VendorBurndownOnTimePct      int     `json:"vendor_burndown_on_time_pct,omitempty"`
+	VendorBurndownOnTimeFraction float64 `json:"vendor_burndown_on_time_fraction,omitempty"`
 
 	// operational_metrics: OPERATOR-ENTERED (decision D3). No v1 data source
 	// exists; these are seeded zero and the operator fills them in. A
