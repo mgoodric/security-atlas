@@ -22,15 +22,75 @@
 // preamble). The mocked payloads carry deterministic counts so the
 // tab-chip assertions are stable.
 //
-// Run locally:
-//   cd web
-//   npx playwright install chromium     # once per machine
-//   npx playwright test e2e/control-detail-tabs.spec.ts
+// Slice 275 — auto-wait fix for the tablist-visible assertion.
+//
+// The first build of this spec used the Playwright default 5s
+// `toBeVisible` timeout on `page.getByTestId("control-tabs")`. Under
+// CI load (2 parallel workers against a shared docker stack), the
+// page-mount sequence (Suspense fallback → ControlDetailPageInner
+// mount → useSearchParams resolved → coverageQ useQuery fires →
+// fetch awaits mock fulfillment → React re-renders past
+// `coverageQ.isLoading`) routinely exceeded that 5s budget. The page
+// stays in its `coverageQ.isLoading` skeleton branch (testid
+// `control-detail-loading`); the assertion times out.
+//
+// The mocks ARE registered before `page.goto` — every `await
+// page.route(...)` in beforeEach resolves before the test body runs,
+// so the spec's filed "route registration timing" hypothesis (#2) is
+// NOT the root cause. The actual cause is the assertion shape's
+// default 5s polling budget being too short for the mount sequence
+// under CI load (hypothesis #1 in the slice spec — Suspense
+// fallback + coverageQ fetch overhead).
+//
+// The fix follows slice 274 D-274-3's "auto-waiting beats default
+// timeouts" pattern, ratcheted up for the page-mount case:
+//
+//   1. After every `page.goto(/controls/{id})`, await a
+//      `page.waitForResponse("**/coverage")` so the assertion that
+//      follows is deterministically gated on the network round-trip
+//      that drives `coverageQ.isLoading` → settled.
+//   2. The first tablist assertion in each test uses an explicit
+//      30s timeout as a CI-load backstop. The `waitForResponse`
+//      above closes the race; the timeout is the floor in case
+//      something downstream (React commit, sticky-position layout)
+//      slips on slow runners.
+//
+// The fix is e2e-only — no production code is touched (slice 275
+// P0-275-2). The `gotoControlDetail(page, opts)` helper encapsulates
+// the navigation + wait pattern so all five originally-racy tests
+// (AC-1, AC-2, AC-8 x2, AC-9) share one implementation.
 
 import { expect, test } from "./fixtures";
+import type { Page } from "@playwright/test";
 
 import { seeded } from "./fixtures";
 import { seedFromFixture } from "./seed";
+
+// Slice 275 — Navigate to /controls/{id} and gate the next
+// assertion on the coverage endpoint resolving. The page is
+// dominated by `coverageQ.isLoading` until the GET /api/controls/
+// {id}/coverage round-trip completes — the tablist renders only
+// AFTER that query settles (see web/app/(authed)/controls/[id]/
+// page.tsx line 226 `if (coverageQ.isLoading) return <Skeleton/>`).
+// Waiting for the response BEFORE the tablist visibility assertion
+// closes the race deterministically. The optional `tab` arg lets
+// the AC-8 deep-link / AC-8 garbage-tab tests share the helper.
+async function gotoControlDetail(
+  page: Page,
+  opts: { tab?: string } = {},
+): Promise<void> {
+  const url = opts.tab
+    ? `/controls/${seeded.controlId}?tab=${encodeURIComponent(opts.tab)}`
+    : `/controls/${seeded.controlId}`;
+  const coverageResp = page.waitForResponse(
+    (r) =>
+      r.url().includes(`/api/controls/${seeded.controlId}/coverage`) &&
+      r.status() === 200,
+    { timeout: 30_000 },
+  );
+  await page.goto(url);
+  await coverageResp;
+}
 
 test.describe("control detail tab strip (slice 254)", () => {
   test.beforeAll(() => {
@@ -259,9 +319,11 @@ test.describe("control detail tab strip (slice 254)", () => {
   test("AC-1: renders the seven tabs in mockup order with the right labels", async ({
     authedPage: page,
   }) => {
-    await page.goto(`/controls/${seeded.controlId}`);
+    // Slice 275 — wait for the coverage response BEFORE asserting the
+    // tablist so the assertion isn't racing the mount sequence.
+    await gotoControlDetail(page);
     const tablist = page.getByTestId("control-tabs");
-    await expect(tablist).toBeVisible();
+    await expect(tablist).toBeVisible({ timeout: 30_000 });
 
     // The tab strip is the seven labels in mockup order. We assert
     // both the label text and the testid suffix so a regression that
@@ -291,10 +353,15 @@ test.describe("control detail tab strip (slice 254)", () => {
   test("AC-2: count chips render the mocked-payload counts", async ({
     authedPage: page,
   }) => {
-    await page.goto(`/controls/${seeded.controlId}`);
-    // Wait for the Overview panel to mount as a proxy for "all
-    // initial queries resolved" — the chips read from those payloads.
-    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible();
+    // Slice 275 — coverage-response gate (see gotoControlDetail) +
+    // 30s timeout on the first auto-waiting assertion so the Overview
+    // panel has space to mount on slow CI runners. The chips render
+    // off subsequent useQuery payloads; each chip's per-assertion
+    // toHaveText below auto-waits on its own polling cycle.
+    await gotoControlDetail(page);
+    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible({
+      timeout: 30_000,
+    });
 
     // 3 evidence records · 2 mapped requirements · 12 effective-scope
     // cells (one framework_version in the mock) · 2 policies · 1
@@ -309,10 +376,13 @@ test.describe("control detail tab strip (slice 254)", () => {
   test("AC-8: clicking a tab updates `?tab=<key>` and renders that tab's panel", async ({
     authedPage: page,
   }) => {
-    await page.goto(`/controls/${seeded.controlId}`);
+    // Slice 275 — coverage-response gate (see gotoControlDetail).
+    await gotoControlDetail(page);
     // Initial URL has no `tab` param (Overview is the default — D2).
     await expect(page).toHaveURL(new RegExp(`/controls/${seeded.controlId}$`));
-    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible();
+    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible({
+      timeout: 30_000,
+    });
 
     // Click Evidence — URL updates, Evidence panel renders.
     await page.getByTestId("control-tab-evidence").click();
@@ -333,20 +403,32 @@ test.describe("control detail tab strip (slice 254)", () => {
   test("AC-8: refresh on a tab-deep-linked URL lands on that tab", async ({
     authedPage: page,
   }) => {
-    // Deep-link directly to the Policies tab.
-    await page.goto(`/controls/${seeded.controlId}?tab=policies`);
+    // Slice 275 — deep-link directly to the Policies tab; the helper
+    // both navigates and gates on the coverage round-trip.
+    await gotoControlDetail(page, { tab: "policies" });
     // The Policies panel renders without first showing Overview — the
     // URL is the source of truth.
-    await expect(page.getByTestId("policies-tab-panel")).toBeVisible();
+    await expect(page.getByTestId("policies-tab-panel")).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(page.getByTestId("control-tab-panel-overview")).toHaveCount(0);
     await expect(page.getByTestId("control-tab-policies")).toHaveAttribute(
       "aria-selected",
       "true",
     );
 
-    // Refresh — still on Policies.
+    // Refresh — re-gate on coverage since the in-flight query restarts.
+    const reloadCoverage = page.waitForResponse(
+      (r) =>
+        r.url().includes(`/api/controls/${seeded.controlId}/coverage`) &&
+        r.status() === 200,
+      { timeout: 30_000 },
+    );
     await page.reload();
-    await expect(page.getByTestId("policies-tab-panel")).toBeVisible();
+    await reloadCoverage;
+    await expect(page.getByTestId("policies-tab-panel")).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(page.getByTestId("control-tab-policies")).toHaveAttribute(
       "aria-selected",
       "true",
@@ -356,9 +438,12 @@ test.describe("control detail tab strip (slice 254)", () => {
   test("AC-8: unrecognised `?tab=<garbage>` falls through to Overview", async ({
     authedPage: page,
   }) => {
-    await page.goto(`/controls/${seeded.controlId}?tab=foo`);
+    // Slice 275 — coverage-response gate via the helper.
+    await gotoControlDetail(page, { tab: "foo" });
     // Default tab is Overview when the param is unrecognised.
-    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible();
+    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(page.getByTestId("control-tab-overview")).toHaveAttribute(
       "aria-selected",
       "true",
@@ -368,10 +453,13 @@ test.describe("control detail tab strip (slice 254)", () => {
   test("AC-9: keyboard Tab navigation walks through the seven tab buttons in DOM order", async ({
     authedPage: page,
   }) => {
-    await page.goto(`/controls/${seeded.controlId}`);
+    // Slice 275 — coverage-response gate via the helper.
+    await gotoControlDetail(page);
     // Wait until the Overview panel is mounted so we know the strip
     // is rendered and the focus order is stable.
-    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible();
+    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible({
+      timeout: 30_000,
+    });
 
     // Focus the first tab explicitly. From there, six Tab presses
     // walk through the remaining six tab buttons in mockup order.
@@ -395,12 +483,15 @@ test.describe("control detail tab strip (slice 254)", () => {
   test("AC-3 + AC-7: Overview panel preserves the pre-tab layout (P0-254-3)", async ({
     authedPage: page,
   }) => {
-    await page.goto(`/controls/${seeded.controlId}`);
+    // Slice 275 — coverage-response gate via the helper.
+    await gotoControlDetail(page);
     // The Overview panel still hosts: KPI strip, Coverage table,
     // UCF graph, Evidence stream card, Freshness, Effective scope
     // summary, Policies, Risks, Audit log. Slice 254 anti-criterion
     // P0-254-3 — the Overview tab's data layout is preserved verbatim.
-    await expect(page.getByTestId("kpi-strip")).toBeVisible();
+    await expect(page.getByTestId("kpi-strip")).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(page.getByTestId("coverage-section")).toBeVisible();
     await expect(page.getByTestId("ucf-viz-section")).toBeVisible();
     await expect(page.getByTestId("evidence-stream-section")).toBeVisible();
