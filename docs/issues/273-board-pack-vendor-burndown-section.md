@@ -94,7 +94,7 @@ read joins the existing tenant-scoped flow.
 - `docs/audit-log/032-quarterly-board-pack-decisions.md` D6 — the
   canonical SectionKeys decision being expanded
 - `docs/audit-log/221-board-pack-section-divergence-decisions.md` D1
-  + D5 — the spawning context
+  - D5 — the spawning context
 
 ## Dependencies
 

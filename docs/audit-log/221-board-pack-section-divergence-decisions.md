@@ -297,11 +297,11 @@ templates + PDF + frontend component, all built on the existing
 
 - **AC-1.** `Plans/mockups/board-pack.html` removes §06 "Vendor risk
   burndown" entirely. Verified by `grep -n "Vendor risk burndown"
-  Plans/mockups/board-pack.html` (zero matches post-edit). ✓
+Plans/mockups/board-pack.html` (zero matches post-edit). ✓
 - **AC-2.** A new "Open findings" section is inserted between §03
   coverage trend and the operational metrics section, mirroring
   `BOARD_PACK_SECTION_KEYS` order. Verified by `grep -n "§ 0\|SECTION"
-  Plans/mockups/board-pack.html` showing §01-§07 contiguous with
+Plans/mockups/board-pack.html` showing §01-§07 contiguous with
   Open findings at §04. ✓
 - **AC-3.** Section heading numbers renumbered §01-§07 contiguous.
   Verified by the same grep — §05 is Operational metrics (was §04),
@@ -314,6 +314,6 @@ templates + PDF + frontend component, all built on the existing
   - `pre-commit run --all-files` — clean (mockup is HTML; no
     formatter or linter touches it on the touched paths).
   - Web frontend checks (`npm run lint && npm run test && npx tsc
-    --noEmit && npm run build`) — not applicable (no `web/` source
+--noEmit && npm run build`) — not applicable (no `web/` source
     touched in this slice).
   - CHANGELOG bullet — landed under `## Unreleased / ### Changed`.
