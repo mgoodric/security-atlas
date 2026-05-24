@@ -55,23 +55,33 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  fetchAuditPeriods,
   fetchControlsList,
   fetchEvidenceList,
+  fetchScopeCells,
+  type AuditPeriodsListResponse,
   type ControlsListResponse,
   type EvidenceListResponse,
   type EvidenceRecord,
+  type ScopeCellsListResponse,
 } from "@/lib/api";
 
 import {
   ALL,
   NONE,
+  SCOPE_CELL_CAP,
+  SOURCE_DELIM,
   buildControlOptions,
   buildKindOptions,
   buildResultOptions,
+  buildScopeCellOptions,
+  buildSinceOptions,
+  buildSourceOptions,
   clearFilters,
   DEFAULT_FILTERS,
   isDefault,
   setFilter,
+  sinceCutoff,
   toFetchOptions,
   type EvidenceFilters,
 } from "./filters";
@@ -93,12 +103,21 @@ import {
 // URL parameter names mirror the upstream + BFF FORWARD_PARAMS so the
 // browser URL is a faithful echo of the request that the BFF will
 // dispatch upstream. Bookmarkable + shareable.
+//
+// Slice 234 — `scope_cell_id` is a real upstream param (slice 234
+// backend extension). The Since pill stores its preset *key* under
+// `since_preset` so a "Last 7 days" selection survives a reload
+// without re-resolving to a sliding RFC3339 cutoff each time the page
+// renders; the resolved `since` query param is computed at submit time
+// from the key.
 const URL_KEYS: Record<keyof EvidenceFilters, string> = {
   controlId: "control_id",
   kind: "kind",
   result: "result",
   sourceActorType: "source_actor_type",
   sourceActorId: "source_actor_id",
+  scopeCellId: "scope_cell_id",
+  since: "since_preset",
 };
 
 function EvidencePageInner() {
@@ -119,6 +138,11 @@ function EvidencePageInner() {
     if (sat) out.sourceActorType = sat;
     const sai = search.get(URL_KEYS.sourceActorId);
     if (sai) out.sourceActorId = sai;
+    // Slice 234.
+    const sc = search.get(URL_KEYS.scopeCellId);
+    if (sc) out.scopeCellId = sc;
+    const sp = search.get(URL_KEYS.since);
+    if (sp) out.since = sp;
     return out;
   }, [search]);
 
@@ -133,6 +157,37 @@ function EvidencePageInner() {
       sp.set(urlKey, next[key]);
     }
     router.replace(`/evidence?${sp.toString()}`);
+  };
+
+  // Slice 234 — the Source pill's value is the composite `type|id`
+  // tuple (or `ALL`). On change we update BOTH URL params atomically
+  // so the round-trip stays consistent. A composite key keeps the pill
+  // honest: the operator selects one observed tuple, the page binds
+  // exactly that tuple, no cross-product surprises.
+  const updateSourceFilter = (value: string) => {
+    const sp = new URLSearchParams(search.toString());
+    if (value === ALL) {
+      sp.delete(URL_KEYS.sourceActorType);
+      sp.delete(URL_KEYS.sourceActorId);
+    } else {
+      const [t, id] = value.split(SOURCE_DELIM);
+      if (t) sp.set(URL_KEYS.sourceActorType, t);
+      else sp.delete(URL_KEYS.sourceActorType);
+      if (id) sp.set(URL_KEYS.sourceActorId, id);
+      else sp.delete(URL_KEYS.sourceActorId);
+    }
+    router.replace(`/evidence?${sp.toString()}`);
+  };
+
+  // Dispatcher: every pill's onChange routes through here so the Source
+  // pill's composite handling stays local to the page (filters.ts is
+  // wire-shape-agnostic).
+  const onPillChange = (id: string, value: string) => {
+    if (id === "source") {
+      updateSourceFilter(value);
+      return;
+    }
+    updateFilter(id as keyof EvidenceFilters, value);
   };
 
   const clearAll = () => {
@@ -151,10 +206,85 @@ function EvidencePageInner() {
   const controlOptions = useMemo(() => buildControlOptions(anchors), [anchors]);
   const resultOptions = useMemo(() => buildResultOptions(), []);
 
+  // Slice 234 — scope cells drive the Scope pill option list. Failure
+  // to load is non-fatal: the pill still renders with just "All cells".
+  // Reuses the slice 224 BFF + query key so the catalog is shared with
+  // /controls (TanStack caches it under the same key).
+  const scopeCellsQ = useQuery<ScopeCellsListResponse>({
+    queryKey: ["scope-cells"],
+    queryFn: fetchScopeCells,
+  });
+  const scopeCells = useMemo(
+    () => scopeCellsQ.data?.cells ?? [],
+    [scopeCellsQ.data],
+  );
+  const scopeOptions = useMemo(
+    () => buildScopeCellOptions(scopeCells),
+    [scopeCells],
+  );
+  const scopeCellsCapped = scopeCells.length > SCOPE_CELL_CAP;
+
+  // Slice 234 — `nowAtMount` is captured once per mount so the
+  // "active audit period" and the Since cutoff computations stay pure
+  // for this render lifecycle (React purity rule:
+  // `react-hooks/purity` rejects `Date.now()` inside a useMemo). A
+  // sliding window still re-resolves on next mount; for an open page,
+  // the window is effectively pinned to the moment the operator
+  // opened it — the desirable shape for an audit-period operator
+  // workflow (the window does not silently shift while the operator
+  // is reading the table).
+  const [nowAtMount] = useState<Date>(() => new Date());
+
+  // Slice 234 — audit periods drive the "Audit period (current)" Since
+  // option. We pick the active period as `status === 'open'` whose
+  // [period_start, period_end] contains today's date. Failure to load
+  // is non-fatal: the option still renders with the generic label and
+  // resolves to undefined cutoff (the upstream default 30-day window
+  // takes over).
+  const auditPeriodsQ = useQuery<AuditPeriodsListResponse>({
+    queryKey: ["audit-periods", "list"],
+    queryFn: fetchAuditPeriods,
+  });
+  const activeAuditPeriod = useMemo(() => {
+    const periods = auditPeriodsQ.data?.audit_periods ?? [];
+    const nowMs = nowAtMount.getTime();
+    return (
+      periods.find((p) => {
+        if (p.status !== "open") return false;
+        const start = Date.parse(p.period_start);
+        const end = Date.parse(p.period_end);
+        return (
+          Number.isFinite(start) &&
+          Number.isFinite(end) &&
+          start <= nowMs &&
+          nowMs <= end
+        );
+      }) ?? null
+    );
+  }, [auditPeriodsQ.data, nowAtMount]);
+  const sinceOptions = useMemo(
+    () => buildSinceOptions(activeAuditPeriod?.name),
+    [activeAuditPeriod],
+  );
+
+  // Slice 234 — resolve the Since preset key to an RFC3339 cutoff.
+  // Pinned to `nowAtMount` for the same purity reason as above.
+  const resolvedSince = useMemo(() => {
+    if (filters.since === ALL) return undefined;
+    return sinceCutoff(
+      filters.since,
+      nowAtMount,
+      activeAuditPeriod?.period_start,
+    );
+  }, [filters.since, activeAuditPeriod, nowAtMount]);
+
   // Evidence ledger query — slice 106 always runs (no more gating on a
   // control_id presence). The filter translator drops sentinel values
   // so the URL query string only carries narrowing predicates.
-  const fetchOpts = useMemo(() => toFetchOptions(filters), [filters]);
+  const fetchOpts = useMemo(
+    () => toFetchOptions(filters, resolvedSince),
+    [filters, resolvedSince],
+  );
   const evidenceQ = useQuery<EvidenceListResponse>({
     queryKey: ["evidence", "list", fetchOpts],
     queryFn: () => fetchEvidenceList(fetchOpts),
@@ -171,6 +301,36 @@ function EvidencePageInner() {
     () => buildKindOptions(records.map((r) => r.evidence_kind ?? "")),
     [records],
   );
+  // Slice 234 — Source pill options derived from the observed
+  // (actor_type, actor_id) tuples on the current page of evidence
+  // rows. Same provenance shape as the table cell renderer; no
+  // invented values (P0 — "Options come from observed values only").
+  const sourceOptions = useMemo(
+    () =>
+      buildSourceOptions(
+        records.map((r) => ({
+          actor_type:
+            typeof r.source?.actor_type === "string"
+              ? r.source.actor_type
+              : undefined,
+          actor_id:
+            typeof r.source?.actor_id === "string"
+              ? r.source.actor_id
+              : undefined,
+        })),
+      ),
+    [records],
+  );
+  // Slice 234 — the Source pill's current value is the composite
+  // `type|id` (or ALL when neither is narrowing). When the URL carries
+  // only one of the two params, we still surface the pill as "narrowed"
+  // so the operator sees the state is non-default — but the dropdown
+  // value falls back to ALL because no observed tuple matches a half-
+  // narrowed state.
+  const sourcePillValue =
+    filters.sourceActorType !== ALL && filters.sourceActorId !== ALL
+      ? `${filters.sourceActorType}${SOURCE_DELIM}${filters.sourceActorId}`
+      : ALL;
 
   // Row drawer state — clicking a row opens an inline Dialog showing
   // the full record JSON pretty-printed (slice 099 AC-7, decision D3).
@@ -224,6 +384,29 @@ function EvidencePageInner() {
       label: "Result",
       value: filters.result,
       options: resultOptions,
+    },
+    // Slice 234 — three new pills bring the row to the six-pill mockup
+    // parity (Plans/mockups/evidence.html lines 125-184). Source binds
+    // both source_actor_* params atomically (composite key handled by
+    // updateSourceFilter); Scope binds scope_cell_id; Since maps a
+    // preset key to an RFC3339 cutoff client-side.
+    {
+      id: "source",
+      label: "Source",
+      value: sourcePillValue,
+      options: sourceOptions,
+    },
+    {
+      id: "scopeCellId",
+      label: "Scope",
+      value: filters.scopeCellId,
+      options: scopeOptions,
+    },
+    {
+      id: "since",
+      label: "Since",
+      value: filters.since,
+      options: sinceOptions,
     },
   ];
 
@@ -502,11 +685,7 @@ function EvidencePageInner() {
         subtitle={subtitleNode}
         actions={actions}
         filterRow={
-          <FilterPills
-            pills={pills}
-            onChange={(id, v) => updateFilter(id as keyof EvidenceFilters, v)}
-            meta={meta}
-          />
+          <FilterPills pills={pills} onChange={onPillChange} meta={meta} />
         }
       >
         <ListLoadingSkeleton />
@@ -521,11 +700,7 @@ function EvidencePageInner() {
         subtitle={subtitleNode}
         actions={actions}
         filterRow={
-          <FilterPills
-            pills={pills}
-            onChange={(id, v) => updateFilter(id as keyof EvidenceFilters, v)}
-            meta={meta}
-          />
+          <FilterPills pills={pills} onChange={onPillChange} meta={meta} />
         }
       >
         <Alert variant="destructive" data-testid="evidence-load-error">
@@ -545,13 +720,25 @@ function EvidencePageInner() {
         subtitle={subtitleNode}
         actions={actions}
         filterRow={
-          <FilterPills
-            pills={pills}
-            onChange={(id, v) => updateFilter(id as keyof EvidenceFilters, v)}
-            meta={meta}
-          />
+          <FilterPills pills={pills} onChange={onPillChange} meta={meta} />
         }
       >
+        {/* Slice 234 — Scope filter cell-cap banner (mirrors the slice
+            224 banner above the controls table). The banner fires when
+            the tenant has more cells than `SCOPE_CELL_CAP`; the
+            dropdown still works for the first 50 cells. */}
+        {scopeCellsCapped ? (
+          <Alert data-testid="evidence-scope-cells-capped" className="mb-3">
+            <AlertTitle>
+              Scope filter capped at {SCOPE_CELL_CAP} cells
+            </AlertTitle>
+            <AlertDescription>
+              Your tenant has {scopeCells.length} scope cells; only the first{" "}
+              {SCOPE_CELL_CAP} are listed in the Scope filter. A typeahead
+              replacement is tracked as a follow-on.
+            </AlertDescription>
+          </Alert>
+        ) : null}
         <ListTable<EvidenceRecord>
           columns={columns}
           rows={records}

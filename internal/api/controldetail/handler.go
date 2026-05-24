@@ -85,6 +85,8 @@ type historyWire struct {
 //     source_attribution->>'actor_type'.
 //   - source_actor_id   (optional, slice 106) JSONB predicate on
 //     source_attribution->>'actor_id'.
+//   - scope_cell_id     (optional, slice 234) narrows to one scope cell.
+//     400 if present but non-UUID. Ignored on the per-control path.
 //   - since/until       (optional) RFC3339 observed_at window. Default is
 //     the last 30 days.
 //   - cursor            (optional) opaque keyset cursor.
@@ -128,6 +130,21 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 	if !isValidResult(resultFilter) {
 		writeError(w, http.StatusBadRequest, "result must be one of: pass, fail, na, inconclusive")
 		return
+	}
+
+	// Slice 234 — optional scope_cell_id filter. uuid.Nil is the no-filter
+	// sentinel; a bad UUID returns 400 before the SQL round-trip. The
+	// per-control path (?control_id=…) ignores this param: that branch
+	// already resolves a single control's evidence and never benefits
+	// from a scope-cell narrowing.
+	var scopeCellID uuid.UUID
+	if raw := q.Get("scope_cell_id"); raw != "" {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "scope_cell_id must be a uuid")
+			return
+		}
+		scopeCellID = parsed
 	}
 
 	now := time.Now().UTC()
@@ -177,6 +194,7 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 			result:          resultFilter,
 			sourceActorType: q.Get("source_actor_type"),
 			sourceActorID:   q.Get("source_actor_id"),
+			scopeCellID:     scopeCellID,
 			cursor:          cursor,
 			pageRows:        pageRows,
 		})
@@ -457,6 +475,17 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 
 // pgUUID wraps a uuid.UUID as a pgtype.UUID for sqlc param structs.
 func pgUUID(u uuid.UUID) pgtype.UUID {
+	return pgtype.UUID{Bytes: u, Valid: true}
+}
+
+// optUUID wraps a uuid.UUID as a pgtype.UUID, treating uuid.Nil as the
+// no-filter sentinel (Valid=false). Used by the slice-234 scope_cell_id
+// filter on the tenant-wide evidence ledger query — same shape as the
+// slice-224 scope filter on the anchors rollup query.
+func optUUID(u uuid.UUID) pgtype.UUID {
+	if u == uuid.Nil {
+		return pgtype.UUID{Valid: false}
+	}
 	return pgtype.UUID{Bytes: u, Valid: true}
 }
 

@@ -219,12 +219,14 @@ WHERE tenant_id = $1
        OR source_attribution->>'actor_type' = $6::text)
   AND ($7::text IS NULL
        OR source_attribution->>'actor_id' = $7::text)
+  AND ($8::uuid IS NULL
+       OR scope_id = $8::uuid)
   AND (
-        observed_at < $8
-        OR (observed_at = $8 AND id < $9)
+        observed_at < $9
+        OR (observed_at = $9 AND id < $10)
       )
 ORDER BY observed_at DESC, id DESC
-LIMIT $10
+LIMIT $11
 `
 
 type ListEvidencePagedParams struct {
@@ -235,6 +237,7 @@ type ListEvidencePagedParams struct {
 	ResultFilter    *string            `json:"result_filter"`
 	SourceActorType *string            `json:"source_actor_type"`
 	SourceActorID   *string            `json:"source_actor_id"`
+	ScopeCellID     pgtype.UUID        `json:"scope_cell_id"`
 	CursorTs        pgtype.Timestamptz `json:"cursor_ts"`
 	CursorID        pgtype.UUID        `json:"cursor_id"`
 	RowLimit        int32              `json:"row_limit"`
@@ -258,7 +261,7 @@ type ListEvidencePagedRow struct {
 // caller-tenant's whole evidence stream (RLS still scopes it on top of the
 // explicit tenant_id predicate, defense-in-depth per canvas invariant #6).
 //
-// All four filter args are optional. The
+// All five filter args are optional. The
 //
 //	(sqlc.narg('x')::T IS NULL OR col = sqlc.narg('x')::T)
 //
@@ -267,6 +270,12 @@ type ListEvidencePagedRow struct {
 // letting sqlc emit nullable Go parameters. The source-actor filters drill
 // into the JSONB source_attribution column (slice 013 enforces the
 // {actor_type, actor_id, session_id} shape there).
+//
+// Slice 234: a fifth optional filter `scope_cell_id` narrows to one
+// scope cell. Pattern mirrors slice 224's `scope_cell_id` filter on the
+// anchors rollup query (`scf_anchors.sql`). Out-of-tenant cell ids return
+// zero rows naturally because the row's `scope_id` is itself tenant-
+// scoped — no 404 leak.
 //
 // Keyset pagination mirrors ListEvidenceForControlPaged exactly: same
 // decomposed (observed_at, id) predicate, same +1 probe-row idiom.
@@ -281,6 +290,7 @@ func (q *Queries) ListEvidencePaged(ctx context.Context, arg ListEvidencePagedPa
 		arg.ResultFilter,
 		arg.SourceActorType,
 		arg.SourceActorID,
+		arg.ScopeCellID,
 		arg.CursorTs,
 		arg.CursorID,
 		arg.RowLimit,
