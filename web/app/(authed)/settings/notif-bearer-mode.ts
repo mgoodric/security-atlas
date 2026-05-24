@@ -24,20 +24,22 @@
 // and avoids false positives when a future OIDC provider returns an
 // empty email but a real subject (rare but documented).
 //
-// **Slice 250 composition note.** Slice 250 (settings Profile section
-// credential-bearer identity-leak) ships a sibling detection helper
-// for the Profile section's hero block. When 250 lands, this helper
-// should be de-duplicated against 250's -- both should converge on a
-// single shared `isCredentialBearer(profile)` predicate at
-// `web/app/(authed)/settings/credential-bearer.ts`. Slice 251 was
-// authored before 250 merged; this in-file vendor is intentional and
-// flagged for follow-up.
+// **Slice 250 de-dup landed.** Slice 250 (settings Profile section
+// credential-bearer identity-leak) lifted the synthetic-profile detector
+// to a shared module `./credential-bearer.ts`. This file's
+// `isSyntheticCredentialProfile` is now a thin re-export of
+// `isCredentialBearer(profile)` so the helper's public API stays
+// byte-stable and existing callers do not change. The Notifications-
+// section-specific `notificationsRenderMode` orchestration logic stays
+// here -- it is the mode-resolution layer, not the detection layer.
 //
 // Pure function; vitest-covered in `notif-bearer-mode.test.ts`.
 // No JSX, no fetch, no React import; safe to import from both the
 // page and the test.
 
 import type { MeProfile } from "@/lib/api";
+
+import { isCredentialBearer } from "./credential-bearer";
 
 /**
  * The Notifications section's render mode for the current bearer.
@@ -129,24 +131,17 @@ export function notificationsRenderMode(
 
 /**
  * Whether the profile shape matches the synthetic-credential branch
- * (`internal/api/me/profile.go:269-282`). The marker is
- * `idp_subject === ""` -- a real user always carries a non-empty OIDC
- * subject after sign-in. The corroborating empty `email` is checked
- * defensively but is NOT required (some IdPs do not sync email; the
- * absence of `idp_subject` is the load-bearing signal).
+ * (`internal/api/me/profile.go:269-282`).
+ *
+ * Slice 250 lifted the body to `./credential-bearer.ts#isCredentialBearer`.
+ * This export is preserved as a thin wrapper so the existing slice-251
+ * public API stays byte-stable for any external caller; new callers
+ * should prefer `isCredentialBearer` directly.
  */
 export function isSyntheticCredentialProfile(
   profile: Pick<MeProfile, "idp_subject" | "email" | "display_name">,
 ): boolean {
-  const idpSubject = (profile.idp_subject ?? "").trim();
-  if (idpSubject !== "") return false;
-  // Defensive corroboration: the synthetic profile path always sets
-  // email = "". A profile that has no idp_subject but DOES carry an
-  // email is unexpected -- treat as a real user (fail-open to the
-  // existing Notifications rendering) rather than misclassifying.
-  const email = (profile.email ?? "").trim();
-  if (email !== "") return false;
-  return true;
+  return isCredentialBearer(profile);
 }
 
 /**
