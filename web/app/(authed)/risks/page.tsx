@@ -61,7 +61,9 @@ import {
   FilterPills,
   ListLoadingSkeleton,
   ListPage,
+  ListPagination,
   ListTable,
+  paginateRows,
   type FilterPill,
   type ListColumn,
 } from "@/components/list";
@@ -108,6 +110,22 @@ const FILTER_KEYS: (keyof RiskFilters)[] = [
   "severity",
   "owner",
 ];
+
+// Slice 246 — page-size default per AC-3.
+//
+// Per anti-criterion P0-246-4 this constant lives at module scope so it
+// is greppable; component code references `RISKS_PAGE_SIZE` rather than
+// inlining `50`. A future slice that promotes pagination to server-side
+// LIMIT/OFFSET will swap the constant for an API-derived value without
+// touching the JSX.
+const RISKS_PAGE_SIZE = 50;
+
+// Slice 246 — URL query-string key for the 1-indexed page index. The
+// `page` key is sibling to the filter keys above; the filter-change
+// handlers below explicitly DROP it on every filter mutation (AC-5 —
+// page index resets to 1 when a filter changes, preserving the user's
+// mental model).
+const PAGE_PARAM = "page";
 
 const TREATMENT_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All treatments" },
@@ -174,6 +192,20 @@ function RisksPageInner() {
     return out;
   }, [search]);
 
+  // Slice 246 — current page index. URL is the source of truth so the
+  // page is bookmarkable and survives refresh. Invalid / missing /
+  // negative values fall back to 1; the rendering math in
+  // `paginationBounds` further clamps an out-of-range page to the
+  // last available page so a stale bookmark survives a register that
+  // shrunk between visits.
+  const currentPage: number = useMemo(() => {
+    const raw = search.get(PAGE_PARAM);
+    if (!raw) return 1;
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < 1) return 1;
+    return parsed;
+  }, [search]);
+
   const updateFilter = (key: keyof RiskFilters, value: string) => {
     const next = setFilter(filters, key, value);
     const sp = new URLSearchParams(search.toString());
@@ -182,6 +214,10 @@ function RisksPageInner() {
     } else {
       sp.set(key, next[key]);
     }
+    // AC-5: filter changes reset the page index to 1. The URL key is
+    // dropped (page=1 is the default and need not be serialised) so
+    // the URL stays clean when no pagination is in play.
+    sp.delete(PAGE_PARAM);
     router.replace(`/risks?${sp.toString()}`);
   };
 
@@ -190,6 +226,21 @@ function RisksPageInner() {
     const sp = new URLSearchParams(search.toString());
     for (const k of FILTER_KEYS) {
       if (cleared[k] === ALL) sp.delete(k);
+    }
+    // AC-2 / AC-5: clearing filters also resets pagination.
+    sp.delete(PAGE_PARAM);
+    router.replace(`/risks?${sp.toString()}`);
+  };
+
+  // Slice 246 — page-change handler. Writes the new 1-indexed page to
+  // the URL; page=1 is omitted so the canonical URL of the first page
+  // matches the no-pagination URL exactly.
+  const goToPage = (page: number) => {
+    const sp = new URLSearchParams(search.toString());
+    if (page <= 1) {
+      sp.delete(PAGE_PARAM);
+    } else {
+      sp.set(PAGE_PARAM, String(page));
     }
     router.replace(`/risks?${sp.toString()}`);
   };
@@ -214,6 +265,16 @@ function RisksPageInner() {
   const rows: Risk[] = useMemo(() => risksQ.data?.risks ?? [], [risksQ.data]);
 
   const visible = useMemo(() => applyFilters(rows, filters), [rows, filters]);
+
+  // Slice 246 — client-side page slice over the filtered set. Per
+  // P0-246-1 the v1 wire `GET /v1/risks` ships the full list; the
+  // table consumes the per-page slice rather than the full `visible`
+  // array. The pagination footer below the table emits page-change
+  // events through `goToPage` which round-trip through the URL.
+  const pagedRows = useMemo(
+    () => paginateRows(visible, currentPage, RISKS_PAGE_SIZE),
+    [visible, currentPage],
+  );
 
   const ownerOptions: { value: string; label: string }[] = useMemo(() => {
     const owners = uniqueOwners(rows);
@@ -584,10 +645,27 @@ function RisksPageInner() {
       </Alert>
       <ListTable<Risk>
         columns={columns}
-        rows={visible}
+        rows={pagedRows}
         rowKey={(row) => row.id}
         emptyFallback={emptyState}
       />
+      {/* Slice 246 — pagination footer. Rendered ONLY when there is at
+          least one row in the filtered set; an empty result delegates
+          to the `emptyFallback` above and a stand-alone pagination
+          chrome would be honesty-confusing (Previous / Next clicks
+          would no-op). On a single-page result the footer still
+          renders so the user gets the truth-telling "Showing N of N"
+          summary; both Previous and Next are disabled and clearly
+          read as such. */}
+      {visible.length > 0 ? (
+        <ListPagination
+          currentPage={currentPage}
+          pageSize={RISKS_PAGE_SIZE}
+          totalCount={visible.length}
+          onPageChange={goToPage}
+          testIdPrefix="risks-pagination"
+        />
+      ) : null}
     </ListPage>
   );
 }

@@ -188,6 +188,70 @@ test.describe("/risks list view", () => {
     //    ).toBeAttached();
   });
 
+  // Slice 246 — /risks list pagination footer (AC-7). The footer is
+  // unconditional once at least one row is in the filtered set; with a
+  // multi-page register the Previous / Next buttons round-trip through
+  // the URL `?page=N`. Assertions stay quarantined behind the slice 082
+  // seed-data harness, matching the rest of this spec. Pre-conditions
+  // the harness must establish:
+  //   - At least 51 risk rows in the seeded tenant (so the default
+  //     `RISKS_PAGE_SIZE = 50` produces a 2-page result).
+  test("AC-246-1: pagination footer renders with truth-telling summary", async () => {
+    //    await page.goto("/risks");
+    //    const footer = page.getByTestId("risks-pagination");
+    //    await expect(footer).toBeVisible();
+    //    // With >=51 seeded rows the page-1 summary reads "Showing 1–50 of N".
+    //    await expect(page.getByTestId("risks-pagination-summary")).toContainText(
+    //      "Showing 1–50 of",
+    //    );
+  });
+
+  test("AC-246-2: Previous is disabled on page 1, Next is enabled", async () => {
+    //    await page.goto("/risks");
+    //    await expect(page.getByTestId("risks-pagination-prev")).toBeDisabled();
+    //    await expect(page.getByTestId("risks-pagination-next")).toBeEnabled();
+  });
+
+  test("AC-246-3: clicking Next advances to ?page=2 and updates the summary", async () => {
+    //    await page.goto("/risks");
+    //    await page.getByTestId("risks-pagination-next").click();
+    //    await expect(page).toHaveURL(/\/risks\?(.*&)?page=2/);
+    //    // Page 2 summary reads "Showing 51–N of N" (or similar).
+    //    await expect(page.getByTestId("risks-pagination-summary")).toContainText(
+    //      "Showing 51",
+    //    );
+    //    // Previous is now enabled; Next is disabled (only 2 pages).
+    //    await expect(page.getByTestId("risks-pagination-prev")).toBeEnabled();
+    //    await expect(page.getByTestId("risks-pagination-next")).toBeDisabled();
+  });
+
+  test("AC-246-4: Previous from page 2 returns to page 1 with the page param dropped", async () => {
+    //    await page.goto("/risks?page=2");
+    //    await page.getByTestId("risks-pagination-prev").click();
+    //    // Canonical page-1 URL drops the `page` param.
+    //    await expect(page).toHaveURL(/\/risks(\?[^p]*)?$/);
+    //    await expect(page.getByTestId("risks-pagination-prev")).toBeDisabled();
+  });
+
+  test("AC-246-5: filter mutation while on page 2 resets to page 1", async () => {
+    //    await page.goto("/risks?page=2");
+    //    // Apply a filter change (Treatment → mitigate).
+    //    const treatmentPill = page.getByLabel("Treatment");
+    //    await treatmentPill.selectOption({ value: "mitigate" });
+    //    // The page param must be dropped on the next URL replace.
+    //    await expect(page).not.toHaveURL(/[?&]page=/);
+    //    await expect(page.getByTestId("risks-pagination-prev")).toBeDisabled();
+  });
+
+  test("AC-246-6: refresh on ?page=2 preserves the page state", async () => {
+    //    await page.goto("/risks?page=2");
+    //    await page.reload();
+    //    await expect(page).toHaveURL(/[?&]page=2/);
+    //    await expect(page.getByTestId("risks-pagination-summary")).toContainText(
+    //      "Showing 51",
+    //    );
+  });
+
   test("AC-244-4: URL query round-trips all six filter keys", async () => {
     //    // Pick valid wire enum values for category + methodology so a
     //    // populated tenant lands on a real row set. The org_unit value

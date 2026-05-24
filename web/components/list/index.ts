@@ -22,6 +22,12 @@ export {
   type FilterPillsProps,
 } from "./filter-pills";
 export { ListPage, type ListPageProps } from "./list-page";
+export {
+  ListPagination,
+  paginateRows,
+  paginationBounds,
+  type ListPaginationProps,
+} from "./pagination";
 export { ListTable, type ListColumn, type ListTableProps } from "./list-table";
 export {
   ListLoadingSkeleton,
