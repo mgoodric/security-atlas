@@ -37,10 +37,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
+  CursorPagination,
   FilterPills,
   ListLoadingSkeleton,
   ListPage,
   ListTable,
+  popCursor,
+  pushCursor,
   type FilterPill,
   type ListColumn,
 } from "@/components/list";
@@ -120,6 +123,14 @@ const URL_KEYS: Record<keyof EvidenceFilters, string> = {
   since: "since_preset",
 };
 
+// Slice 237 — the cursor URL param is owned by the page (not by the
+// filter module) because cursors are pagination state, not filter state.
+// The current cursor lives in the URL so a deep-link is shareable
+// (anti-criterion P0-237-2 only forbids persisting the STACK; the
+// current cursor IS shareable per the spec narrative). The stack is
+// in-memory only.
+const CURSOR_PARAM = "cursor";
+
 function EvidencePageInner() {
   const router = useRouter();
   const search = useSearchParams();
@@ -146,6 +157,15 @@ function EvidencePageInner() {
     return out;
   }, [search]);
 
+  // Slice 237 — pagination state. The current cursor (the keyset token
+  // identifying the start of the currently-rendered page) lives in the
+  // URL for shareable deep-links. The cursor STACK (the history of
+  // cursors the operator paged THROUGH on the way here) lives in React
+  // state only — never persisted, never URL-encoded — per
+  // anti-criterion P0-237-2.
+  const urlCursor = search.get(CURSOR_PARAM) ?? "";
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
+
   const updateFilter = (key: keyof EvidenceFilters, value: string) => {
     const next = setFilter(filters, key, value);
     const sp = new URLSearchParams(search.toString());
@@ -156,6 +176,12 @@ function EvidencePageInner() {
     } else {
       sp.set(urlKey, next[key]);
     }
+    // Slice 237 — any filter mutation resets pagination: the current
+    // cursor is keyset-bound to the OLD filter window, so keeping it
+    // would yield a non-deterministic page slice. Clear both surfaces:
+    // the URL cursor AND the in-memory stack.
+    sp.delete(CURSOR_PARAM);
+    setCursorStack([]);
     router.replace(`/evidence?${sp.toString()}`);
   };
 
@@ -176,6 +202,9 @@ function EvidencePageInner() {
       if (id) sp.set(URL_KEYS.sourceActorId, id);
       else sp.delete(URL_KEYS.sourceActorId);
     }
+    // Slice 237 — same reset semantics as `updateFilter` above.
+    sp.delete(CURSOR_PARAM);
+    setCursorStack([]);
     router.replace(`/evidence?${sp.toString()}`);
   };
 
@@ -193,7 +222,38 @@ function EvidencePageInner() {
   const clearAll = () => {
     const cleared = clearFilters();
     void cleared;
+    // Slice 237 — clearing filters also clears the pagination cursor
+    // (the URL is rewritten to `/evidence` with no query string) and
+    // the in-memory stack.
+    setCursorStack([]);
     router.replace(`/evidence`);
+  };
+
+  // Slice 237 — pagination mutators. Both routes through `router.replace`
+  // so the browser's back/forward stack does not fill up with cursor
+  // transitions (the operator can still navigate away from the page and
+  // come back via the app shell).
+  const goNext = (nextCur: string) => {
+    if (!nextCur) return;
+    setCursorStack((s) => pushCursor(s, urlCursor));
+    const sp = new URLSearchParams(search.toString());
+    sp.set(CURSOR_PARAM, nextCur);
+    router.replace(`/evidence?${sp.toString()}`);
+  };
+  const goPrevious = () => {
+    const { popped, rest } = popCursor(cursorStack);
+    setCursorStack(rest);
+    const sp = new URLSearchParams(search.toString());
+    // `popped === ""` means we paged back to the first (no-cursor) page.
+    // `popped === undefined` means the stack was empty: the operator
+    // landed here via a deep-link with a URL cursor; clicking Previous
+    // returns to the unparameterized first page (spec AC-5).
+    if (popped === undefined || popped === "") {
+      sp.delete(CURSOR_PARAM);
+    } else {
+      sp.set(CURSOR_PARAM, popped);
+    }
+    router.replace(`/evidence?${sp.toString()}`);
   };
 
   // Anchor catalog — drives the Control pill option list. The fetch
@@ -281,10 +341,20 @@ function EvidencePageInner() {
   // Evidence ledger query — slice 106 always runs (no more gating on a
   // control_id presence). The filter translator drops sentinel values
   // so the URL query string only carries narrowing predicates.
-  const fetchOpts = useMemo(
-    () => toFetchOptions(filters, resolvedSince),
-    [filters, resolvedSince],
-  );
+  //
+  // Slice 237 — when the URL carries a `?cursor=…` value, the page
+  // forwards it as the `cursor` fetch option so the upstream returns
+  // the keyset-paginated page that starts AT that cursor. An empty URL
+  // cursor (the default state) omits the field entirely so the
+  // TanStack cache treats first-page-via-undefined and first-page-via-
+  // empty-string as the same entry.
+  const fetchOpts = useMemo(() => {
+    const base = toFetchOptions(filters, resolvedSince);
+    if (urlCursor) {
+      return { ...base, cursor: urlCursor };
+    }
+    return base;
+  }, [filters, resolvedSince, urlCursor]);
   const evidenceQ = useQuery<EvidenceListResponse>({
     queryKey: ["evidence", "list", fetchOpts],
     queryFn: () => fetchEvidenceList(fetchOpts),
@@ -297,6 +367,15 @@ function EvidencePageInner() {
   // upstream handler. `undefined` while the query is in flight; the
   // meta + subtitle branches treat that as "skip the of-M suffix".
   const ledgerTotal: number | undefined = evidenceQ.data?.total;
+  // Slice 237 — the upstream's keyset cursor for the NEXT page. Empty
+  // string ("" or undefined) means "no more pages" — drives the Next
+  // button's disabled state. Previous is enabled when EITHER the
+  // in-memory stack has entries OR the URL carries a cursor (deep-link
+  // case — clicking Previous returns to the unparameterized first page
+  // per spec AC-5).
+  const upstreamNextCursor: string = evidenceQ.data?.next_cursor ?? "";
+  const hasNextPage = upstreamNextCursor !== "";
+  const hasPreviousPage = cursorStack.length > 0 || urlCursor !== "";
   const kindOptions = useMemo(
     () => buildKindOptions(records.map((r) => r.evidence_kind ?? "")),
     [records],
@@ -746,6 +825,21 @@ function EvidencePageInner() {
           onRowClick={openDrawer}
           emptyFallback={noRecordsEmptyState}
         />
+        {/* Slice 237 — cursor-paginated footer. Matches the mockup at
+            Plans/mockups/evidence.html lines 266-272. Renders only when
+            the current page has rows (slice 246 D3 convention: empty
+            sets surface the EmptyState above instead). The Previous
+            stack lives in `cursorStack` (in-memory, page-scoped). */}
+        {records.length > 0 ? (
+          <CursorPagination
+            recordCount={records.length}
+            hasNext={hasNextPage}
+            hasPrevious={hasPreviousPage}
+            onNext={() => goNext(upstreamNextCursor)}
+            onPrevious={goPrevious}
+            testIdPrefix="evidence-pagination"
+          />
+        ) : null}
       </ListPage>
 
       {/* Row-detail drawer — opens on row click, shows the full record
