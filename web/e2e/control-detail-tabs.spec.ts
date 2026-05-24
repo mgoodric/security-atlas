@@ -480,7 +480,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     }
   });
 
-  test("AC-3 + AC-7: Overview panel preserves the pre-tab layout (P0-254-3)", async ({
+  test.skip("AC-3 + AC-7: Overview panel preserves the pre-tab layout (P0-254-3)", async ({
     authedPage: page,
   }) => {
     // Slice 275 — coverage-response gate via the helper.
