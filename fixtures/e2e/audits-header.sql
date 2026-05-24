@@ -33,8 +33,19 @@ SET LOCAL app.current_tenant = '00000000-0000-0000-0000-00000000d3a0';
 -- Slice 164/108: the users row /v1/me resolves to. Mirrors the
 -- settings fixture insert so this spec can drive the avatar assertion
 -- without depending on the settings spec's seed running first.
+--
+-- IMPORTANT: this row shares its id with the settings.sql fixture
+-- insert (both use 44444444-...0001). ON CONFLICT DO NOTHING means
+-- whichever runs first wins; the loser's values are masked. To avoid
+-- silently breaking the settings spec's AC-8 (time_zone round-trip),
+-- this insert ALSO carries time_zone='America/New_York' — the same
+-- value settings.sql expects. The display_name divergence ('Sam
+-- Operator' vs settings.sql's 'Settings E2E Operator') is benign
+-- because settings.spec.ts does NOT pin display_name; only the
+-- audits-header avatar AC-4 does.
 INSERT INTO users (
-    id, tenant_id, email, display_name, status, idp_issuer, idp_subject
+    id, tenant_id, email, display_name, status, idp_issuer, idp_subject,
+    time_zone
 )
 VALUES (
     '44444444-4444-4444-4444-444444440001',
@@ -43,7 +54,8 @@ VALUES (
     'Sam Operator',
     'active',
     'urn:atlas:test',
-    'demo-operator-subject'
+    'demo-operator-subject',
+    'America/New_York'
 )
 ON CONFLICT DO NOTHING;
 
