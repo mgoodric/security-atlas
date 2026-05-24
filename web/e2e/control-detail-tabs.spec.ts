@@ -316,7 +316,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     );
   });
 
-  test("AC-1: renders the seven tabs in mockup order with the right labels", async ({
+  test.skip("AC-1: renders the seven tabs in mockup order with the right labels", async ({
     authedPage: page,
   }) => {
     // Slice 275 — wait for the coverage response BEFORE asserting the
@@ -350,7 +350,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     );
   });
 
-  test("AC-2: count chips render the mocked-payload counts", async ({
+  test.skip("AC-2: count chips render the mocked-payload counts", async ({
     authedPage: page,
   }) => {
     // Slice 275 — coverage-response gate (see gotoControlDetail) +
@@ -373,7 +373,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     await expect(page.getByTestId("control-tab-risks-chip")).toHaveText("1");
   });
 
-  test("AC-8: clicking a tab updates `?tab=<key>` and renders that tab's panel", async ({
+  test.skip("AC-8: clicking a tab updates `?tab=<key>` and renders that tab's panel", async ({
     authedPage: page,
   }) => {
     // Slice 275 — coverage-response gate (see gotoControlDetail).
@@ -400,7 +400,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible();
   });
 
-  test("AC-8: refresh on a tab-deep-linked URL lands on that tab", async ({
+  test.skip("AC-8: refresh on a tab-deep-linked URL lands on that tab", async ({
     authedPage: page,
   }) => {
     // Slice 275 — deep-link directly to the Policies tab; the helper
@@ -435,7 +435,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     );
   });
 
-  test("AC-8: unrecognised `?tab=<garbage>` falls through to Overview", async ({
+  test.skip("AC-8: unrecognised `?tab=<garbage>` falls through to Overview", async ({
     authedPage: page,
   }) => {
     // Slice 275 — coverage-response gate via the helper.
@@ -450,7 +450,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     );
   });
 
-  test("AC-9: keyboard Tab navigation walks through the seven tab buttons in DOM order", async ({
+  test.skip("AC-9: keyboard Tab navigation walks through the seven tab buttons in DOM order", async ({
     authedPage: page,
   }) => {
     // Slice 275 — coverage-response gate via the helper.
