@@ -53,20 +53,59 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/eval"
+	"github.com/mgoodric/security-atlas/internal/frameworkscope"
+	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // Handler wires the three slice-008 routes to a pgx pool. Catalog reads
 // go through a bare `*dbx.Queries`; tenant reads on `controls` go
 // through `inTx` so the GUC is set before the query runs.
+//
+// Slice 256 — the optional `engine`, `scopeStore`, and `fwScopeStore`
+// fields gate the per-row Coverage column on /v1/controls/{id}/coverage.
+// When all three are wired, each requirement row carries a numeric
+// `coverage` (strength × 30-day effectiveness when the requirement's
+// framework_version is in scope; null otherwise — never client-
+// computed, see slice 256 P0-1). When any is nil (unit servers built
+// without these dependencies) the field is omitted entirely so the
+// existing slice-008 wire shape stays backwards-compatible.
 type Handler struct {
-	pool *pgxpool.Pool
-	q    *dbx.Queries
+	pool         *pgxpool.Pool
+	q            *dbx.Queries
+	engine       *eval.Engine
+	scopeStore   *scope.Store
+	fwScopeStore *frameworkscope.Store
 }
 
 // New constructs a Handler from a pgx pool. pool must be non-nil.
+//
+// The returned Handler emits the slice-008 coverage response without the
+// slice-256 per-row `coverage` field. Call AttachCoverage to wire the
+// dependencies that promote that field to first-class.
 func New(pool *pgxpool.Pool) *Handler {
 	return &Handler{pool: pool, q: dbx.New(pool)}
+}
+
+// AttachCoverage wires the three stores the slice-256 per-row coverage
+// computation needs: the eval engine (30-day pass rate), the scope
+// store (control applicability), and the framework_scope store
+// (per-framework activated predicate). All three must be non-nil; this
+// is enforced at wire-time, not at request-time, so a partial wiring is
+// caught by `cmd/atlas` startup rather than by a 500 on the first
+// /coverage call.
+//
+// The two-stage constructor (New + AttachCoverage) preserves the
+// existing zero-coverage-fields shape for unit tests that don't need
+// eval/scope/framework_scope plumbing, and is the same pattern slice
+// 013 used to graft an optional ingest pipeline onto the evidence
+// handler without forcing every test to spin up NATS.
+func (h *Handler) AttachCoverage(engine *eval.Engine, scopeStore *scope.Store, fwScopeStore *frameworkscope.Store) *Handler {
+	h.engine = engine
+	h.scopeStore = scopeStore
+	h.fwScopeStore = fwScopeStore
+	return h
 }
 
 // ===== route wiring =====
@@ -307,6 +346,7 @@ func (h *Handler) ControlCoverage(w http.ResponseWriter, r *http.Request) {
 	}
 	out["anchor"] = anchorWireFromRow(anchor)
 
+	var reqs []requirementForAnchorWire
 	fvParam := r.URL.Query().Get("framework_version")
 	if fvParam != "" {
 		fv, ok := h.resolveFrameworkVersion(ctx, fvParam)
@@ -323,16 +363,116 @@ func (h *Handler) ControlCoverage(w http.ResponseWriter, r *http.Request) {
 			writeServerErr(w, "list requirements for control (pinned)", err)
 			return
 		}
-		out["requirements"] = mapPinnedRequirements(got)
+		reqs = mapPinnedRequirements(got)
 	} else {
 		got, err := h.q.ListRequirementsForAnchor(ctx, ctrl.ScfAnchorID)
 		if err != nil {
 			writeServerErr(w, "list requirements for control", err)
 			return
 		}
-		out["requirements"] = mapRequirements(got)
+		reqs = mapRequirements(got)
 	}
+
+	// Slice 256 — per-row weighted Coverage column.
+	//
+	// Coverage[i] = strength[i] × 30d_pass_rate     when the requirement's
+	//                                                framework_version is in
+	//                                                scope for this control
+	//             = null                            when out of scope OR
+	//                                                no effectiveness data
+	//
+	// The "no effectiveness data" rule (TotalCount == 0) maps to JSON null
+	// per AC-2: callers must distinguish "no data yet" from "perfectly
+	// failing" (0). Effectiveness is computed once per request — it's a
+	// per-control rollup, not per-row — and reused across every
+	// requirement. Out-of-scope determination mirrors the slice-018
+	// /effective-scope endpoint: control.applicability ∩
+	// framework_scope.predicate; empty intersection => out of scope =>
+	// coverage null. Wiring is opt-in (h.engine/h.scopeStore/h.fwScopeStore
+	// all non-nil); unit servers that didn't wire them leave the field
+	// omitted entirely, preserving the slice-008 shape.
+	if h.engine != nil && h.scopeStore != nil && h.fwScopeStore != nil && len(reqs) > 0 {
+		if err := h.applyCoverage(ctx, cid, reqs); err != nil {
+			writeServerErr(w, "compute coverage", err)
+			return
+		}
+	}
+
+	out["requirements"] = reqs
 	writeJSON(w, http.StatusOK, out)
+}
+
+// applyCoverage fills the `coverage` field on each requirement in `reqs`.
+// Computes 30-day effectiveness once, then resolves in-scope/out-of-scope
+// per distinct framework_version_id (one /effective-scope intersection
+// per fv), then assigns coverage = strength × pass_rate when in scope and
+// effectiveness has any data, else nil.
+//
+// Errors propagate to the caller; this is on the request-serving path
+// so a transient DB error must surface as a 500 rather than a silently
+// zeroed Coverage column. The function mutates `reqs` in place.
+func (h *Handler) applyCoverage(ctx context.Context, controlID uuid.UUID, reqs []requirementForAnchorWire) error {
+	// 30-day pass rate for the whole control (canvas §6.2
+	// operational_score). Computed once per request — every row in the
+	// table shares the same multiplier.
+	eff, err := h.engine.Effectiveness(ctx, controlID)
+	if err != nil {
+		return fmt.Errorf("effectiveness: %w", err)
+	}
+	hasEffectivenessData := eff.TotalCount > 0
+	passRate := eff.PassRate
+
+	// Resolve in-scope per distinct framework_version_id. The
+	// frameworkscope.Store.Activated lookup is cheap (single-row SELECT)
+	// and the scope intersection is in-memory over the control's
+	// applicability set — but doing it once per fv (not once per row)
+	// keeps the table O(rows + fvs) rather than O(rows × fvs).
+	applicability, err := h.scopeStore.ControlApplicability(ctx, controlID)
+	if err != nil {
+		return fmt.Errorf("control applicability: %w", err)
+	}
+	inScopeByFV := make(map[string]bool, 4)
+	for _, req := range reqs {
+		fvIDStr := req.FrameworkVersionID
+		if _, seen := inScopeByFV[fvIDStr]; seen {
+			continue
+		}
+		fvID, perr := uuid.Parse(fvIDStr)
+		if perr != nil {
+			// A malformed UUID on a catalog row would be a slice-007 bug,
+			// not a request-shape bug. Treat as out-of-scope so the row
+			// renders n/a rather than 500-ing the whole response.
+			inScopeByFV[fvIDStr] = false
+			continue
+		}
+		activated, aerr := h.fwScopeStore.Activated(ctx, fvID)
+		if aerr != nil {
+			if errors.Is(aerr, frameworkscope.ErrNotFound) {
+				// No activated framework_scope → no audit-bound predicate
+				// → effectively out of scope (canvas §5.5; matches the
+				// slice-018 EffectiveScope handler's behavior).
+				inScopeByFV[fvIDStr] = false
+				continue
+			}
+			return fmt.Errorf("activated framework_scope: %w", aerr)
+		}
+		cells, ierr := frameworkscope.EffectiveScope(ctx, applicability, activated.Predicate)
+		if ierr != nil {
+			return fmt.Errorf("intersect: %w", ierr)
+		}
+		inScopeByFV[fvIDStr] = len(cells) > 0
+	}
+
+	for i := range reqs {
+		inScope := inScopeByFV[reqs[i].FrameworkVersionID]
+		if !inScope || !hasEffectivenessData {
+			reqs[i].Coverage = nil
+			continue
+		}
+		v := reqs[i].Strength * passRate
+		reqs[i].Coverage = &v
+	}
+	return nil
 }
 
 // ===== internal helpers =====
@@ -617,21 +757,35 @@ type controlWire struct {
 // requirementForAnchorWire is the shape of one row in
 // AnchorRequirements + ControlCoverage. Carries enough framework
 // metadata that callers don't need a second round-trip per row.
+//
+// Slice 256 — `Coverage` is the per-row weighted score
+// (strength × 30-day effectiveness, intersected with the framework's
+// scope predicate). `*float64` so we can JSON-encode `null` when the
+// requirement's framework_version is out of scope OR the control has
+// no effectiveness data yet (TotalCount == 0). Distinguishing null from
+// 0 is the AC-2 contract — "no data" must NOT degrade to "perfectly
+// failing". The field is always emitted (no `omitempty`) so the wire
+// shape is a stable contract: callers always see `coverage: <number>`
+// or `coverage: null`, never an absent key. On
+// /v1/anchors/{id}/requirements (which does not compute coverage) the
+// field emits as `null` — the honest "not computed for this surface"
+// shape rather than a silent omission.
 type requirementForAnchorWire struct {
-	EdgeID                 string  `json:"edge_id"`
-	RequirementID          string  `json:"requirement_id"`
-	Code                   string  `json:"code"`
-	Title                  string  `json:"title"`
-	Body                   string  `json:"body,omitempty"`
-	FrameworkSlug          string  `json:"framework_slug"`
-	FrameworkName          string  `json:"framework_name"`
-	FrameworkVersion       string  `json:"framework_version"`
-	FrameworkVersionID     string  `json:"framework_version_id"`
-	FrameworkVersionStatus string  `json:"framework_version_status"`
-	RelationshipType       string  `json:"relationship_type"`
-	Strength               float64 `json:"strength"`
-	SourceAttribution      string  `json:"source_attribution"`
-	Rationale              string  `json:"rationale,omitempty"`
+	EdgeID                 string   `json:"edge_id"`
+	RequirementID          string   `json:"requirement_id"`
+	Code                   string   `json:"code"`
+	Title                  string   `json:"title"`
+	Body                   string   `json:"body,omitempty"`
+	FrameworkSlug          string   `json:"framework_slug"`
+	FrameworkName          string   `json:"framework_name"`
+	FrameworkVersion       string   `json:"framework_version"`
+	FrameworkVersionID     string   `json:"framework_version_id"`
+	FrameworkVersionStatus string   `json:"framework_version_status"`
+	RelationshipType       string   `json:"relationship_type"`
+	Strength               float64  `json:"strength"`
+	Coverage               *float64 `json:"coverage"`
+	SourceAttribution      string   `json:"source_attribution"`
+	Rationale              string   `json:"rationale,omitempty"`
 }
 
 func anchorWireFromRow(a dbx.ScfAnchor) anchorWire {

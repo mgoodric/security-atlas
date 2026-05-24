@@ -1067,6 +1067,14 @@ export type ControlAnchorWire = {
 
 // requirementForAnchorWire mirrors the same handler's per-requirement row.
 // `relationship_type` is the STRM edge label — open string by design.
+//
+// Slice 256 — `coverage` is the per-row weighted score
+// (strength × 30-day effectiveness, intersected with the framework's
+// scope predicate). Always present on /v1/controls/{id}/coverage as a
+// number-or-null (never undefined): null when the row's
+// framework_version is out of scope OR when the control has no
+// effectiveness data yet. The frontend MUST NOT compute coverage
+// client-side as a fallback (slice 256 anti-criterion P0-256-1).
 export type CoverageRequirement = {
   edge_id: string;
   requirement_id: string;
@@ -1080,6 +1088,7 @@ export type CoverageRequirement = {
   framework_version_status: string;
   relationship_type: string;
   strength: number;
+  coverage: number | null;
   source_attribution: string;
   rationale?: string;
 };

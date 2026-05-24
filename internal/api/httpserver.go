@@ -334,7 +334,17 @@ func (s *Server) httpHandler() http.Handler {
 	// anchors.Routes()); the response shape is a superset of the
 	// in-memory one so slice-007's TestRequirementsForAnchor still
 	// passes.
-	ucfH := ucfcoverage.New(s.dbPool)
+	// Slice 256 — wire the eval engine, scope store, and frameworkscope
+	// store so /v1/controls/{id}/coverage can carry the per-row weighted
+	// `coverage` field (strength × 30-day effectiveness, intersected
+	// with the framework's scope predicate). Unit tests that don't need
+	// these dependencies leave the field omitted by skipping
+	// AttachCoverage — the slice-008 shape stays backwards-compatible.
+	ucfH := ucfcoverage.New(s.dbPool).AttachCoverage(
+		eval.NewEngine(eval.NewStore(s.dbPool), scope.NewStore(s.dbPool)),
+		scope.NewStore(s.dbPool),
+		frameworkscope.NewStore(s.dbPool),
+	)
 	ucfH.RegisterRoutes(root)
 	if dbSvc, ok := s.registry.(*schemaregistry.Service); ok && dbSvc != nil {
 		// chi forbids two Mounts on the same path. Attach each schema

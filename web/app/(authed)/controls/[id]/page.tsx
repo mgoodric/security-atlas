@@ -394,7 +394,8 @@ export default function ControlDetailPage() {
                 <span className="font-mono">
                   {anchor ? anchor.scf_id : "no anchor"}
                 </span>{" "}
-                · STRM relationship type and mapping strength per requirement
+                · weighted by STRM strength × 30-day effectiveness, intersected
+                with FrameworkScope
               </CardDescription>
             </CardHeader>
             <CardContent>
