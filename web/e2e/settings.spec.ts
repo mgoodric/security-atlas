@@ -28,6 +28,17 @@
 //              contract that the browser tab reads "Settings ·
 //              security-atlas" instead of inheriting the root
 //              `<title>security-atlas</title>`.
+// Slice 249 -- spec gains AC-14 (no admin-variant flicker on SSR).
+//              The page's `useQuery(getSessionMe)` had not resolved
+//              at SSR time, so the initial HTML shipped the NON-admin
+//              variant (literal text "Admin role required") for every
+//              first paint -- even when the cookie was an admin JWT.
+//              Slice 249 promotes layout.tsx to a server-component
+//              prefetch that seeds the page's useQuery initialData
+//              via HydrationBoundary. AC-14 reads the SSR HTML
+//              directly (via page.request.get -- no client JS) and
+//              asserts the admin cross-link is in the markup and the
+//              non-admin sentinel strings are absent.
 //
 // Run locally:
 //   cd web
@@ -503,5 +514,50 @@ test.describe("/settings user-facing page", () => {
     // U+00B7) so any mojibake regression also trips this spec.
     await page.goto("/settings");
     await expect(page).toHaveTitle("Settings · security-atlas");
+  });
+
+  test("AC-14 (slice 249): first SSR paint ships admin variant, no flicker", async ({
+    authedPage: page,
+  }) => {
+    // Slice 249 -- the visible regression this AC guards against:
+    // before the fix, an admin user fetching /settings would receive
+    // SSR HTML containing the NON-admin variant (literal text
+    // "Admin role required", `data-testid="settings-section-tokens-
+    // non-admin"`, muted "Tenant administration (admin role
+    // required)" span). On hydration the client-side useQuery would
+    // resolve and the page would swap variants -- a 50-200ms flicker
+    // for the primary-user persona who IS the admin.
+    //
+    // The fix: layout.tsx prefetches the session-me query server-
+    // side and hands the result to the page via HydrationBoundary,
+    // so the first byte of HTML already carries the admin variant.
+    //
+    // To assert this honestly we must read the RAW SSR HTML before
+    // any client JS executes. `page.request.get()` does this -- it
+    // fires an HTTP GET with the test browser's cookies and returns
+    // the response body verbatim. `page.goto()` would let client JS
+    // run and the hydration step would mask the regression we're
+    // guarding against.
+    //
+    // The seed bearer is is_admin=true (slice 082 harness) so the
+    // SSR response MUST contain the admin variant.
+    const resp = await page.request.get("/settings");
+    expect(resp.status()).toBe(200);
+    const html = await resp.text();
+
+    // Positive assertion: the admin cross-link is in the markup.
+    expect(html).toContain('data-testid="settings-admin-cross-link"');
+
+    // Negative assertions (the flicker sentinels):
+    //   - the non-admin tokens-section testid must NOT appear
+    //   - the literal "Admin role required" must NOT appear
+    //     (it lives ONLY in the non-admin tokens-section variant)
+    //   - the muted non-admin tenant-administration span must NOT
+    //     appear (page.tsx line 200-202)
+    expect(html).not.toContain(
+      'data-testid="settings-section-tokens-non-admin"',
+    );
+    expect(html).not.toContain("Admin role required");
+    expect(html).not.toContain("Tenant administration (admin role required)");
   });
 });
