@@ -18,9 +18,9 @@ slices since the spec was authored:
   chrome elements the spec named: `<InProgressAuditPill />` + `<UserAvatar />`.
   Both render on `/controls` today via the shared shell.
 - **Slice 213 D1** filed two spillover slices — **#271** (breadcrumb)
-  + **#272** (global ⌘K search) — for the remaining two elements. #271
-  is `ready`; #272 was blocked on backend slice **#268** (unified
-  `/v1/search` endpoint).
+  - **#272** (global ⌘K search) — for the remaining two elements. #271
+    is `ready`; #272 was blocked on backend slice **#268** (unified
+    `/v1/search` endpoint).
 - **Slice 268** merged 2026-05-24 (commit `d9d8e69b`) — the search
   backend is live on `main`.
 
@@ -43,12 +43,12 @@ mark spillover slices **#271** + **#272** as **superseded** by 223
 
 **Rationale (why ship both vs defer one):**
 
-| Element              | Current state                              | Ship in 223? | Reason                                                                                                                                                                                                                                       |
-| -------------------- | ------------------------------------------ | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| In-progress pill     | already shipped (slice 213)                | n/a          | already in shared shell; no-op for 223                                                                                                                                                                                                       |
-| User avatar          | already shipped (slice 213)                | n/a          | already in shared shell; no-op for 223                                                                                                                                                                                                       |
-| Breadcrumb           | not shipped; spillover 271 ready           | YES          | Narrow scope (~150 LOC including the pure helper + test). Backing data is `/api/me/tenants` (slice 192) — no new endpoint, no new wire shape. Pure helper `derivePageName` is unit-coverable; integrated render is e2e-coverable.            |
-| Global ⌘K search     | not shipped; spillover 272 unblocked by 268 | YES          | Backend slice 268 just merged with the exact `GET /v1/search?q=...` shape the spec assumed (AC-2). The BFF + UI is one self-contained piece (~250 LOC). Spillover 272 would have re-implemented the same surface as a separate PR — same code, more rebases. |
+| Element          | Current state                               | Ship in 223? | Reason                                                                                                                                                                                                                                                       |
+| ---------------- | ------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| In-progress pill | already shipped (slice 213)                 | n/a          | already in shared shell; no-op for 223                                                                                                                                                                                                                       |
+| User avatar      | already shipped (slice 213)                 | n/a          | already in shared shell; no-op for 223                                                                                                                                                                                                                       |
+| Breadcrumb       | not shipped; spillover 271 ready            | YES          | Narrow scope (~150 LOC including the pure helper + test). Backing data is `/api/me/tenants` (slice 192) — no new endpoint, no new wire shape. Pure helper `derivePageName` is unit-coverable; integrated render is e2e-coverable.                            |
+| Global ⌘K search | not shipped; spillover 272 unblocked by 268 | YES          | Backend slice 268 just merged with the exact `GET /v1/search?q=...` shape the spec assumed (AC-2). The BFF + UI is one self-contained piece (~250 LOC). Spillover 272 would have re-implemented the same surface as a separate PR — same code, more rebases. |
 
 **Architectural reason to consolidate:** all four chrome elements
 touch the same shared shell (`web/components/shell/topbar.tsx`).
@@ -139,11 +139,11 @@ right-aligned and the popover's right edge anchors to the input.
 **Decision:** the popover row routes follow the established
 per-primitive conventions:
 
-| Type     | Route                                | Why                                                                                                          |
-| -------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| controls | `/controls/${id}`                    | The slice-041 detail page exists                                                                             |
-| risks    | `/risks/hierarchy?focus=${id}`       | No per-risk detail page on main; slice 100 set the convention of deep-linking into the hierarchy view        |
-| evidence | `/evidence`                          | No per-evidence detail page on main; the list page is the honest destination (slice 098 P0-A1: no fabrication) |
+| Type     | Route                          | Why                                                                                                            |
+| -------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| controls | `/controls/${id}`              | The slice-041 detail page exists                                                                               |
+| risks    | `/risks/hierarchy?focus=${id}` | No per-risk detail page on main; slice 100 set the convention of deep-linking into the hierarchy view          |
+| evidence | `/evidence`                    | No per-evidence detail page on main; the list page is the honest destination (slice 098 P0-A1: no fabrication) |
 
 **Rationale:** AC-3 says "Each result links to the entity's detail
 page." When the detail page doesn't yet exist, the slice-100 risks

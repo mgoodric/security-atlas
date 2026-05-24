@@ -46,9 +46,7 @@ describe("pickCurrentTenantName", () => {
 
   test("trims surrounding whitespace from the returned name", () => {
     expect(
-      pickCurrentTenantName([
-        { id: "t1", name: "  Acme  ", current: true },
-      ]),
+      pickCurrentTenantName([{ id: "t1", name: "  Acme  ", current: true }]),
     ).toBe("Acme");
   });
 });

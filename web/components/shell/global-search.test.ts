@@ -20,11 +20,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import {
-  groupByType,
-  hrefForHit,
-  isShortcutTrigger,
-} from "./global-search";
+import { groupByType, hrefForHit, isShortcutTrigger } from "./global-search";
 
 interface Hit {
   id: string;
@@ -95,9 +91,7 @@ describe("hrefForHit", () => {
   });
 
   test("evidence hit routes to the list page (no detail page yet)", () => {
-    expect(hrefForHit(mkHit({ id: "e1", type: "evidence" }))).toBe(
-      "/evidence",
-    );
+    expect(hrefForHit(mkHit({ id: "e1", type: "evidence" }))).toBe("/evidence");
   });
 
   test("encodes special characters in the id (controls)", () => {

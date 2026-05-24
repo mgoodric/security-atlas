@@ -138,7 +138,9 @@ test.describe("topbar header chrome (slice 223)", () => {
     const popover = page.getByTestId("global-search-popover");
     await expect(popover).toBeVisible();
     // Three groups in canonical order.
-    await expect(page.getByTestId("global-search-group-controls")).toBeVisible();
+    await expect(
+      page.getByTestId("global-search-group-controls"),
+    ).toBeVisible();
     await expect(page.getByTestId("global-search-group-risks")).toBeVisible();
     await expect(
       page.getByTestId("global-search-group-evidence"),

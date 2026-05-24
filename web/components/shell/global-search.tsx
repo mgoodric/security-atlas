@@ -192,7 +192,9 @@ export function GlobalSearch() {
     const fetchTimer = setTimeout(async () => {
       try {
         const resp = await fetch(
-          `/api/search?q=${encodeURIComponent(trimmed)}&limit=${PER_TYPE_LIMIT * 3}`,
+          `/api/search?q=${encodeURIComponent(trimmed)}&limit=${
+            PER_TYPE_LIMIT * 3
+          }`,
           {
             cache: "no-store",
             credentials: "include",
@@ -284,11 +286,7 @@ export function GlobalSearch() {
   const showPopover = open && query.trim().length >= 2;
 
   return (
-    <div
-      ref={containerRef}
-      data-testid="global-search"
-      className="relative"
-    >
+    <div ref={containerRef} data-testid="global-search" className="relative">
       <div className="relative">
         <SearchIcon />
         <input
