@@ -5,14 +5,19 @@
 // /v1/... endpoints — a plain <a href> cannot attach the Authorization
 // header). The approve-and-publish button is a scroll-to-publish-card
 // affordance; the actual publish happens in PublishFooter.
+//
+// Slice 218 — the slice-043 `← All packs` link at the left edge was
+// REPLACED with the new `<PackBreadcrumb>` chrome. The breadcrumb's
+// first segment (`Board packs` → `/board-packs`) is semantically the
+// same as the old link; keeping both would be the redundancy AC-2
+// warns against. See pack-breadcrumb.tsx + docs/audit-log/218-decisions.md.
 
 "use client";
-
-import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { boardPackMarkdownURL, boardPackPdfURL } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { PackBreadcrumb } from "./pack-breadcrumb";
 
 // Tailwind utility set matching the shadcn Button "outline" + "sm" variant —
 // we render export links as anchors (not <Button asChild>) because the
@@ -22,11 +27,19 @@ const linkButtonClasses =
 
 type ExportBarProps = {
   packID: string;
+  /** YYYY-MM-DD; rendered through periodLabel() in the breadcrumb's
+   * trailing segment. */
+  periodEnd: string;
   status: string;
   canApprove: boolean;
 };
 
-export function ExportBar({ packID, status, canApprove }: ExportBarProps) {
+export function ExportBar({
+  packID,
+  periodEnd,
+  status,
+  canApprove,
+}: ExportBarProps) {
   const isPublished = status === "published";
   return (
     <div
@@ -35,12 +48,7 @@ export function ExportBar({ packID, status, canApprove }: ExportBarProps) {
       )}
       data-testid="export-bar"
     >
-      <Link
-        href="/board-packs"
-        className="text-sm text-slate-500 underline hover:text-slate-700"
-      >
-        ← All packs
-      </Link>
+      <PackBreadcrumb periodEnd={periodEnd} />
       <div className="ml-auto flex items-center gap-2">
         <a
           href={boardPackPdfURL(packID)}

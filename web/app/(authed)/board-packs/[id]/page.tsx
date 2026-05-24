@@ -116,7 +116,12 @@ export default function BoardPackDetailPage({
 
   return (
     <div className="bg-slate-50 print:bg-white" data-testid="board-pack-view">
-      <ExportBar packID={id} status={pack.status} canApprove={canApprove} />
+      <ExportBar
+        packID={id}
+        periodEnd={pack.period_end}
+        status={pack.status}
+        canApprove={canApprove}
+      />
       <main className="mx-auto max-w-5xl px-4 py-10 md:px-8">
         <PackHeader
           periodEnd={pack.period_end}

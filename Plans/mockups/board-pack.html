@@ -24,10 +24,15 @@
       </svg>
       <span class="text-sm font-semibold tracking-tight">security-atlas</span>
     </a>
+    <!-- Slice 218 — the mockup's original 3-segment chain
+         (Sentinel Labs > Board reports > Q1 2026) shipped a fake
+         tenant name and a dead-anchor "Board reports" parent route
+         that does not exist on main. The live UI renders an honest
+         2-segment chain (Board packs > Q1 2026) — see
+         web/components/board-pack/pack-breadcrumb.tsx. The mockup is
+         updated to match per slice 217 D2 / AC-A3 precedent. -->
     <nav class="flex items-center gap-1 text-xs text-slate-500">
-      <a href="dashboard.html" class="hover:text-slate-700">Sentinel Labs</a>
-      <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg>
-      <span>Board reports</span>
+      <a href="board-packs.html" class="hover:text-slate-700">Board packs</a>
       <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg>
       <span class="text-slate-900 font-medium">Q1 2026</span>
     </nav>
