@@ -131,9 +131,15 @@ type evidencePage struct {
 
 // evidenceListPage is the resolved parameter set for the tenant-wide
 // ledger query (slice 106). Carries the same window + cursor + pageRows
-// as evidencePage, plus the four optional filters. Empty-string filter
+// as evidencePage, plus the optional filters. Empty-string filter
 // values mean "no filter on this column" and are translated to nil via
 // optString at the store boundary.
+//
+// Slice 234 — `scopeCellID` is the optional `?scope_cell_id=<uuid>`
+// filter (the /evidence page's new Scope pill binds to this). The zero
+// value (`uuid.Nil`) is the no-filter sentinel; the store wraps it as
+// `pgtype.UUID{Valid: false}` and the SQL query treats the invalid
+// sentinel as "no filter on this column".
 type evidenceListPage struct {
 	since           time.Time
 	until           time.Time
@@ -141,6 +147,7 @@ type evidenceListPage struct {
 	result          string
 	sourceActorType string
 	sourceActorID   string
+	scopeCellID     uuid.UUID
 	cursor          keyset
 	pageRows        int32
 }

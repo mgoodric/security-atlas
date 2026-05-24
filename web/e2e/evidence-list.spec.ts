@@ -112,6 +112,63 @@ test.describe("/evidence list view", () => {
     //    // No left filter sidebar exists. The pill row sits above the table.
   });
 
+  // Slice 234 — three new filter pills bring the row to six-pill
+  // mockup parity (Plans/mockups/evidence.html lines 125-184):
+  // Source (composite actor_type|actor_id), Scope (scope_cell_id), and
+  // Since (preset window mapped client-side to an RFC3339 cutoff).
+  // Each pill renders, selecting a non-sentinel option narrows the
+  // result count, and clearing returns to the unfiltered ledger.
+  test("slice 234 — Source / Scope / Since pills render in the filter row", async () => {
+    //    await page.goto("/evidence");
+    //    const filterRow = page.getByTestId("list-filter-pills");
+    //    await expect(filterRow.getByLabel("Source")).toBeVisible();
+    //    await expect(filterRow.getByLabel("Scope")).toBeVisible();
+    //    await expect(filterRow.getByLabel("Since")).toBeVisible();
+  });
+
+  test("slice 234 — Since pill 'Last 7 days' narrows the result set", async () => {
+    //    await page.goto("/evidence");
+    //    // Baseline: count the rows in the default window (last 30 days).
+    //    const before = await page.getByTestId("list-table-row").count();
+    //    await page.getByLabel("Since").selectOption("7d");
+    //    await page.waitForLoadState("networkidle");
+    //    const after = await page.getByTestId("list-table-row").count();
+    //    expect(after).toBeLessThanOrEqual(before);
+    //    // URL carries the preset key, not the resolved RFC3339 cutoff
+    //    // (a sliding window must not stale on bookmark reload).
+    //    expect(page.url()).toContain("since_preset=7d");
+  });
+
+  test("slice 234 — Scope pill narrows the ledger to one cell", async () => {
+    //    await page.goto("/evidence");
+    //    // Pick the first non-sentinel cell.
+    //    await page.getByLabel("Scope").selectOption({ index: 1 });
+    //    await page.waitForLoadState("networkidle");
+    //    expect(page.url()).toContain("scope_cell_id=");
+  });
+
+  test("slice 234 — Source pill sets BOTH source_actor_type + source_actor_id atomically", async () => {
+    //    await page.goto("/evidence");
+    //    // Pick the first non-sentinel observed (type, id) tuple.
+    //    await page.getByLabel("Source").selectOption({ index: 1 });
+    //    await page.waitForLoadState("networkidle");
+    //    expect(page.url()).toContain("source_actor_type=");
+    //    expect(page.url()).toContain("source_actor_id=");
+  });
+
+  test("slice 234 — clearing filters drops all three new params", async () => {
+    //    await page.goto(
+    //      "/evidence?since_preset=7d&scope_cell_id=22222222-2222-2222-2222-222222222222&source_actor_type=connector&source_actor_id=aws-connector",
+    //    );
+    //    await expect(page.getByTestId("list-empty-state")).toBeVisible();
+    //    await page.getByTestId("evidence-empty-clear").click();
+    //    await page.waitForLoadState("networkidle");
+    //    expect(page.url()).not.toContain("since_preset=");
+    //    expect(page.url()).not.toContain("scope_cell_id=");
+    //    expect(page.url()).not.toContain("source_actor_type=");
+    //    expect(page.url()).not.toContain("source_actor_id=");
+  });
+
   // Slice 233 — UI honesty: "Push evidence" CTA is no longer
   // permanently-disabled. It is a primary-styled `<a>` pointing at the
   // canonical CLI push doc (the evidence-primitive doc's "Pushing

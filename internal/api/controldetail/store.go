@@ -97,10 +97,11 @@ func (s *Store) EvidenceForControl(ctx context.Context, controlID uuid.UUID, p e
 
 // EvidencePaged reads one page of the tenant-wide evidence ledger, bounded
 // by the [since, until] observed_at window, the keyset cursor, and the
-// optional filter set (kind, result, source_actor_type, source_actor_id).
-// Used when GET /v1/evidence is called WITHOUT a control_id. Tenant
-// isolation continues to ride on RLS plus the explicit tenant_id predicate
-// (canvas invariant #6). Slice 106.
+// optional filter set (kind, result, source_actor_type, source_actor_id,
+// scope_cell_id). Used when GET /v1/evidence is called WITHOUT a
+// control_id. Tenant isolation continues to ride on RLS plus the
+// explicit tenant_id predicate (canvas invariant #6). Slice 106; slice
+// 234 added the scope_cell_id filter.
 func (s *Store) EvidencePaged(ctx context.Context, p evidenceListPage) ([]dbx.ListEvidencePagedRow, error) {
 	var rows []dbx.ListEvidencePagedRow
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
@@ -113,6 +114,7 @@ func (s *Store) EvidencePaged(ctx context.Context, p evidenceListPage) ([]dbx.Li
 			ResultFilter:    optString(p.result),
 			SourceActorType: optString(p.sourceActorType),
 			SourceActorID:   optString(p.sourceActorID),
+			ScopeCellID:     optUUID(p.scopeCellID),
 			CursorTs:        pgTimestamptz(p.cursor.ts),
 			CursorID:        pgUUID(p.cursor.id),
 			RowLimit:        p.pageRows + 1, // +1 probe row to detect a next page

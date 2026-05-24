@@ -1,7 +1,7 @@
-// Slice 099 + 106 — BFF proxy for `/evidence` list view.
+// Slice 099 + 106 + 234 — BFF proxy for `/evidence` list view.
 //
 // Reads the bearer cookie server-side and calls
-// `GET /v1/evidence[?control_id=&kind=&result=&source_actor_type=&source_actor_id=&since=&cursor=&limit=]`
+// `GET /v1/evidence[?control_id=&kind=&result=&source_actor_type=&source_actor_id=&scope_cell_id=&since=&until=&cursor=&limit=]`
 // upstream. The bearer never reaches the browser. Mirrors the slice 098
 // controls + slice 102 audits BFF pattern so the BFF shape stays
 // predictable across the list-view slices (098/099/100/101/102).
@@ -18,6 +18,12 @@
 //     The BFF therefore drops the required-control_id 400 guard.
 //   * FORWARD_PARAMS gains `kind`, `result`, `source_actor_type`,
 //     `source_actor_id` — the four new optional filter keys.
+//
+// Slice 234 changes:
+//   * FORWARD_PARAMS gains `scope_cell_id` — the new Scope filter pill
+//     binds to it. The upstream applies the SQL predicate against
+//     `evidence_records.scope_id` (still RLS-scoped). The `since` param
+//     was already in the whitelist (the Since pill reuses it).
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
@@ -35,6 +41,8 @@ const FORWARD_PARAMS = [
   "result",
   "source_actor_type",
   "source_actor_id",
+  // Slice 234 — Scope filter pill binds to `scope_cell_id`.
+  "scope_cell_id",
   "since",
   "until",
   "cursor",

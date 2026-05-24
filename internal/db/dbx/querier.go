@@ -1296,13 +1296,19 @@ type Querier interface {
 	// caller-tenant's whole evidence stream (RLS still scopes it on top of the
 	// explicit tenant_id predicate, defense-in-depth per canvas invariant #6).
 	//
-	// All four filter args are optional. The
+	// All five filter args are optional. The
 	//     (sqlc.narg('x')::T IS NULL OR col = sqlc.narg('x')::T)
 	// pattern is the established NULL-skip shape — see
 	// internal/db/queries/vendors.sql:50 — and keeps the query plan stable while
 	// letting sqlc emit nullable Go parameters. The source-actor filters drill
 	// into the JSONB source_attribution column (slice 013 enforces the
 	// {actor_type, actor_id, session_id} shape there).
+	//
+	// Slice 234: a fifth optional filter `scope_cell_id` narrows to one
+	// scope cell. Pattern mirrors slice 224's `scope_cell_id` filter on the
+	// anchors rollup query (`scf_anchors.sql`). Out-of-tenant cell ids return
+	// zero rows naturally because the row's `scope_id` is itself tenant-
+	// scoped — no 404 leak.
 	//
 	// Keyset pagination mirrors ListEvidenceForControlPaged exactly: same
 	// decomposed (observed_at, id) predicate, same +1 probe-row idiom.

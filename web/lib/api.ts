@@ -2252,6 +2252,10 @@ export type EvidenceListResponse = {
 /**
  * Filter options for `fetchEvidenceList`. All fields are optional — an
  * empty object yields the tenant-wide ledger window.
+ *
+ * Slice 234 — `scopeCellID` and `since` join the existing set: the
+ * `/evidence` filter row now ships six pills (Control, Kind, Result,
+ * Source, Scope, Since).
  */
 export type EvidenceListFilters = {
   controlID?: string;
@@ -2259,6 +2263,19 @@ export type EvidenceListFilters = {
   result?: EvidenceResultEnum;
   sourceActorType?: string;
   sourceActorID?: string;
+  /**
+   * Slice 234 — narrow the ledger to one scope cell. Server-side
+   * intersection (the cell UUID's evidence rows). Out-of-tenant cells
+   * return zero rows naturally via RLS.
+   */
+  scopeCellID?: string;
+  /**
+   * Slice 234 — RFC3339 timestamp; the upstream applies
+   * `observed_at >= since`. The Since filter pill maps preset windows
+   * ("Last 24 hours", "Last 7 days", "Last 30 days", "Audit period")
+   * to a concrete RFC3339 cutoff client-side and passes it here.
+   */
+  since?: string;
   cursor?: string;
   limit?: number;
 };
@@ -2279,6 +2296,9 @@ export async function fetchEvidenceList(
   if (filters.sourceActorType)
     qs.set("source_actor_type", filters.sourceActorType);
   if (filters.sourceActorID) qs.set("source_actor_id", filters.sourceActorID);
+  // Slice 234 — new pills.
+  if (filters.scopeCellID) qs.set("scope_cell_id", filters.scopeCellID);
+  if (filters.since) qs.set("since", filters.since);
   if (filters.cursor) qs.set("cursor", filters.cursor);
   if (filters.limit) qs.set("limit", String(filters.limit));
 

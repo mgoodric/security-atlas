@@ -72,6 +72,24 @@ func TestOptString(t *testing.T) {
 	}
 }
 
+// ----- optUUID: the Nil-vs-pgtype.UUID helper (slice 234) -----
+
+func TestOptUUID(t *testing.T) {
+	// uuid.Nil maps to the no-filter sentinel (Valid=false).
+	if got := optUUID(uuid.Nil); got.Valid {
+		t.Fatalf("optUUID(uuid.Nil).Valid = true, want false")
+	}
+	// A real UUID maps to a Valid pgtype.UUID carrying the same bytes.
+	u := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	got := optUUID(u)
+	if !got.Valid {
+		t.Fatalf("optUUID(%v).Valid = false, want true", u)
+	}
+	if got.Bytes != u {
+		t.Fatalf("optUUID(%v).Bytes = %v, want %v", u, got.Bytes, u)
+	}
+}
+
 // ----- handler 400 branches that do NOT require DB access -----
 //
 // The handler dispatches its early validation (control_id parse,
@@ -173,6 +191,19 @@ func TestEvidence_Handler_400_BadUntil(t *testing.T) {
 	handlerOver().Evidence(rec, r)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// Slice 234 — bad scope_cell_id is a clean 400 before the SQL round-trip.
+func TestEvidence_Handler_400_NonUUIDScopeCellID(t *testing.T) {
+	r := fakeTenantContext(t, httptest.NewRequest(http.MethodGet, "/v1/evidence?scope_cell_id=not-a-uuid", nil))
+	rec := httptest.NewRecorder()
+	handlerOver().Evidence(rec, r)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "scope_cell_id") {
+		t.Fatalf("body should mention scope_cell_id, got %s", rec.Body.String())
 	}
 }
 

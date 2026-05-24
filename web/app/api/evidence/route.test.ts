@@ -177,6 +177,34 @@ describe("GET /api/evidence", () => {
     expect(headers?.Authorization).toBe("Bearer test-bearer-099");
   });
 
+  test("slice 234 — forwards scope_cell_id when present", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-099" });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          control_id: "",
+          evidence: [],
+          count: 0,
+          total: 0,
+          next_cursor: "",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await GET(
+      makeRequest(
+        "http://localhost/api/evidence?scope_cell_id=22222222-2222-2222-2222-222222222222",
+      ),
+    );
+
+    const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
+    expect(calledURL).toContain(
+      "scope_cell_id=22222222-2222-2222-2222-222222222222",
+    );
+  });
+
   test("forwards optional since + cursor + limit params when present", async () => {
     mockCookieGet.mockReturnValue({ value: "test-bearer-099" });
 
