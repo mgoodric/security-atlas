@@ -101,4 +101,48 @@ test.describe("topbar header chrome (slice 213)", () => {
     // assertion is "at least one", not "exactly one".
     expect(audits.length).toBeGreaterThan(0);
   });
+
+  // ----- Slice 214 — sidebar item counts (Controls + Risks badges) -----
+  //
+  // The badges live in the shared sidebar (`web/components/shell/
+  // sidebar.tsx`), which renders on every authed page. We piggyback on
+  // the audits-header fixture (which already provides an authed
+  // session + the demo tenant) to assert the badge presence on /audits.
+  //
+  // Controls badge: the base seed `fixtures/walkthroughs/00-seed.sql`
+  // instantiates one control under DEMO_CONTROL_ID; the badge therefore
+  // shows "1" once the count fetch resolves.
+  //
+  // Risks badge: the audits-header fixture seeds zero risks. The badge
+  // is hidden under the silent-absence rule (P0-214-2). Asserting
+  // absence in Playwright is brittle (`.not.toBeVisible()` requires
+  // careful wait semantics); the pure-helper unit test
+  // (`sidebar-counts.test.ts`) pins the zero-count → null branch.
+
+  test("AC-1 (slice 214): Controls count badge appears on /audits via shared sidebar", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/audits");
+    const badge = page.getByTestId("sidebar-controls-count");
+    await expect(badge).toBeVisible();
+    // The base seed inserts one control row; the count fetch must
+    // resolve to a positive integer (we assert the visible text is a
+    // numeric string ≥1 rather than pinning a specific number because
+    // sibling fixtures in the same DB may insert additional controls).
+    const text = await badge.innerText();
+    expect(Number(text)).toBeGreaterThan(0);
+  });
+
+  test("P0-214-1 (slice 214): Controls badge consumes the existing /api/controls BFF (no new endpoint)", async ({
+    authedPage: page,
+  }) => {
+    const controlsRequests: string[] = [];
+    page.on("request", (r) => {
+      const url = r.url();
+      if (url.includes("/api/controls")) controlsRequests.push(url);
+    });
+    await page.goto("/audits");
+    await expect(page.getByTestId("sidebar-controls-count")).toBeVisible();
+    expect(controlsRequests.length).toBeGreaterThan(0);
+  });
 });
