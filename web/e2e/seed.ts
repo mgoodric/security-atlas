@@ -58,6 +58,12 @@ export const DEMO_USER_ID = "44444444-4444-4444-4444-444444440001";
 //
 // Slice 213 added "audits-header" — seeds one in_progress audit period
 // for the topbar in-progress pill assertion.
+//
+// Slice 223 added "controls-top-bar" — seeds a tenants row for the
+// demo tenant UUID so the slice-223 breadcrumb has a non-empty
+// left segment to render. The /v1/me/tenants handler joins the
+// JWT's available_tenants[] claim against the slice-144 tenants
+// table; the d3a0 UUID has no bootstrap row by default in CI.
 export type FixtureName =
   | "dashboard"
   | "control-detail"
@@ -66,7 +72,8 @@ export type FixtureName =
   | "admin-bootstrap"
   | "audit-log"
   | "settings"
-  | "audits-header";
+  | "audits-header"
+  | "controls-top-bar";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

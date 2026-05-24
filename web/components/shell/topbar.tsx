@@ -3,6 +3,8 @@ import Link from "next/link";
 import { signOut } from "@/app/login/actions";
 import { TenantSwitcher } from "@/components/auth/tenant-switcher";
 import { Button } from "@/components/ui/button";
+import { Breadcrumb } from "@/components/shell/breadcrumb";
+import { GlobalSearch } from "@/components/shell/global-search";
 import { InProgressAuditPill } from "@/components/shell/in-progress-audit-pill";
 import { ThemeAwareLogo } from "@/components/shell/theme-aware-logo";
 import { UserAvatar } from "@/components/shell/user-avatar";
@@ -47,11 +49,22 @@ import { UserAvatar } from "@/components/shell/user-avatar";
 //     null on any failure (fail-closed, parallels slice 186 sidebar
 //     pattern).
 //
-// The breadcrumb (`Sentinel Labs › Audits`) and global search are
-// deferred to follow-on slices — they need a cross-page surface
-// (every authed page has a different page-name to fill in) and the
-// global-search modal needs platform indexing work. See decisions
-// log `docs/audit-log/213-audits-header-chrome-decisions.md` D1.
+// Slice 223 — closes the remaining two parity gaps from slice 213's
+// deferred list (and supersedes spillover slices 271 + 272):
+//
+//   - <Breadcrumb /> — client component reading `usePathname()` +
+//     `/api/me/tenants` (slice 192 BFF) to render `<tenant> > <page>`.
+//     Read-only wayfinding; distinct from the interactive
+//     TenantSwitcher. Returns null when either segment is missing
+//     (fail-quiet, parallels slice 213's pill).
+//   - <GlobalSearch /> — client component wrapping a ⌘K-focused
+//     input + popover. Calls the BFF /api/search which forwards to
+//     slice 268's unified `/v1/search` endpoint (merged on main).
+//     Per-type results grouped (Controls / Risks / Evidence) with
+//     keyboard navigation (arrows / Enter / Esc).
+//
+// See decisions log `docs/audit-log/223-controls-top-bar-chrome-
+// decisions.md` D1 (subset shipped + spillovers superseded).
 export async function TopBar() {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b bg-background px-6">
@@ -65,8 +78,21 @@ export async function TopBar() {
           <span className="text-base font-semibold">security-atlas</span>
         </Link>
         <span className="text-xs text-muted-foreground">v0 · self-host</span>
+        {/*
+          Slice 223 — read-only breadcrumb chip `<tenant> > <page>`.
+          Distinct from the TenantSwitcher (which is on the right side
+          + interactive). Renders null when the tenant fetch fails
+          (fail-quiet).
+        */}
+        <Breadcrumb />
       </div>
       <div className="flex items-center gap-3">
+        {/*
+          Slice 223 — global ⌘K search input. Calls slice 268's
+          /v1/search via the BFF /api/search; popover groups results
+          by entity type with keyboard navigation.
+        */}
+        <GlobalSearch />
         {/*
           Slice 213 — in-progress audit pill. Reads /api/audits via
           TanStack Query (60s stale). Returns null when zero periods
