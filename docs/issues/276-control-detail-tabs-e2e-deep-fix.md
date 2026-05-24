@@ -11,11 +11,12 @@
 Slice 275 attempted to fix the racy AC-1/AC-2/AC-8/AC-9 cases in
 `web/e2e/control-detail-tabs.spec.ts` by introducing a
 `gotoControlDetail` helper that gates on `page.waitForResponse('coverage')`
-+ a 30s assertion timeout. **The fix did not resolve the failure**:
-every test still timed out at the 30s budget, with the helper hitting
-its own 30s `waitForResponse` timeout. This means the `page.route`
-mock for `/coverage` is NOT intercepting the request, even though the
-URL pattern looks correct.
+
+- a 30s assertion timeout. **The fix did not resolve the failure**:
+  every test still timed out at the 30s budget, with the helper hitting
+  its own 30s `waitForResponse` timeout. This means the `page.route`
+  mock for `/coverage` is NOT intercepting the request, even though the
+  URL pattern looks correct.
 
 Slice 275 quarantined the failing 6 tests with `.skip()` to unblock
 the continuous-batch loop. This slice owns the real fix.
