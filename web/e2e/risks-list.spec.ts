@@ -149,4 +149,70 @@ test.describe("/risks list view", () => {
     //    await page.getByTestId("risks-new-link").click();
     //    await expect(page).toHaveURL(/\/risks\/new$/);
   });
+
+  // Slice 244 — extended filter pill row (Category + Methodology +
+  // Org unit added to the slice-100 Treatment + Severity + Owner set).
+  // Default labels per page.tsx: "All categories" / "All methodologies"
+  // / "All units". Assertions stay quarantined behind the slice 082
+  // seed-data harness, matching the rest of this spec.
+  test("AC-244-1: Category pill is visible with the default `All categories` label", async () => {
+    //    await page.goto("/risks");
+    //    const pill = page.getByTestId("list-filter-pill-category");
+    //    await expect(pill).toBeVisible();
+    //    await expect(pill).toContainText("Category");
+    //    await expect(pill.getByRole("combobox")).toHaveValue("all");
+    //    await expect(
+    //      pill.getByRole("option", { name: "All categories" }),
+    //    ).toBeAttached();
+  });
+
+  test("AC-244-2: Methodology pill is visible with the default `All methodologies` label", async () => {
+    //    await page.goto("/risks");
+    //    const pill = page.getByTestId("list-filter-pill-methodology");
+    //    await expect(pill).toBeVisible();
+    //    await expect(pill).toContainText("Methodology");
+    //    await expect(pill.getByRole("combobox")).toHaveValue("all");
+    //    await expect(
+    //      pill.getByRole("option", { name: "All methodologies" }),
+    //    ).toBeAttached();
+  });
+
+  test("AC-244-3: Org unit pill is visible with the default `All units` label", async () => {
+    //    await page.goto("/risks");
+    //    const pill = page.getByTestId("list-filter-pill-org_unit");
+    //    await expect(pill).toBeVisible();
+    //    await expect(pill).toContainText("Org unit");
+    //    await expect(pill.getByRole("combobox")).toHaveValue("all");
+    //    await expect(
+    //      pill.getByRole("option", { name: "All units" }),
+    //    ).toBeAttached();
+  });
+
+  test("AC-244-4: URL query round-trips all six filter keys", async () => {
+    //    // Pick valid wire enum values for category + methodology so a
+    //    // populated tenant lands on a real row set. The org_unit value
+    //    // is a UUID derived from the seeded org-units list.
+    //    const orgUnitId = process.env.TEST_ORG_UNIT_ID!;
+    //    await page.goto(
+    //      `/risks?category=operational&methodology=nist_800_30&org_unit=${orgUnitId}&treatment=mitigate&severity=high&owner=alpha`,
+    //    );
+    //    await expect(page.getByTestId("list-filter-pill-category")).toContainText(
+    //      "operational",
+    //    );
+    //    await expect(
+    //      page.getByTestId("list-filter-pill-methodology"),
+    //    ).toContainText("nist_800_30");
+    //    await expect(
+    //      page.getByTestId("list-filter-pill-org_unit"),
+    //    ).toBeVisible();
+    //    await expect(page.getByTestId("list-filter-pill-treatment")).toContainText(
+    //      "mitigate",
+    //    );
+    //    await expect(page.getByTestId("list-filter-pill-severity")).toContainText(
+    //      "high",
+    //    );
+    //    await expect(page.getByTestId("list-filter-pill-owner")).toContainText(
+    //      "alpha",
+    //    );
+  });
 });

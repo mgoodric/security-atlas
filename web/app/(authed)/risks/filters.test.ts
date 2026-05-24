@@ -48,10 +48,13 @@ function risk(id: string, overrides: Partial<Risk> = {}): Risk {
 }
 
 describe("DEFAULT_FILTERS / isDefault / clearFilters", () => {
-  test("DEFAULT_FILTERS is all-ALL", () => {
+  test("DEFAULT_FILTERS is all-ALL across all six pills (slice 244)", () => {
     expect(DEFAULT_FILTERS.treatment).toBe(ALL);
     expect(DEFAULT_FILTERS.severity).toBe(ALL);
     expect(DEFAULT_FILTERS.owner).toBe(ALL);
+    expect(DEFAULT_FILTERS.category).toBe(ALL);
+    expect(DEFAULT_FILTERS.methodology).toBe(ALL);
+    expect(DEFAULT_FILTERS.org_unit).toBe(ALL);
   });
 
   test("isDefault is true for the default set", () => {
@@ -64,6 +67,17 @@ describe("DEFAULT_FILTERS / isDefault / clearFilters", () => {
     );
     expect(isDefault({ ...DEFAULT_FILTERS, severity: "high" })).toBe(false);
     expect(isDefault({ ...DEFAULT_FILTERS, owner: "alpha" })).toBe(false);
+    // Slice 244 — three new pills each break the default set.
+    expect(isDefault({ ...DEFAULT_FILTERS, category: "operational" })).toBe(
+      false,
+    );
+    expect(isDefault({ ...DEFAULT_FILTERS, methodology: "fair" })).toBe(false);
+    expect(
+      isDefault({
+        ...DEFAULT_FILTERS,
+        org_unit: "00000000-0000-0000-0000-000000000001",
+      }),
+    ).toBe(false);
   });
 
   test("clearFilters returns a fresh ALL set (no shared reference)", () => {
@@ -237,6 +251,130 @@ describe("applyFilters", () => {
       treatment: "avoid",
     });
     expect(out).toEqual([]);
+  });
+});
+
+// Slice 244 — table-driven coverage for the three new filter branches.
+//
+// Each branch gets:
+//   - ALL-passthrough: filter set to ALL leaves the row set untouched.
+//   - positive match: at least one row carries the value, narrows
+//     correctly.
+//   - negative match: no row carries the value, returns empty.
+describe("applyFilters — slice 244 additions", () => {
+  const mixedRows: Risk[] = [
+    risk("11", {
+      category: "operational",
+      methodology: "nist_800_30",
+      org_unit_id: "00000000-0000-0000-0000-0000000000aa",
+    }),
+    risk("12", {
+      category: "regulatory",
+      methodology: "fair",
+      org_unit_id: "00000000-0000-0000-0000-0000000000bb",
+    }),
+    risk("13", {
+      category: "operational",
+      methodology: "qualitative_5x5",
+      org_unit_id: undefined,
+    }),
+  ];
+
+  test("category ALL passes every row through", () => {
+    const out = applyFilters(mixedRows, {
+      ...DEFAULT_FILTERS,
+      category: ALL,
+    });
+    expect(out).toHaveLength(3);
+  });
+
+  test("category filter narrows by exact wire-enum value", () => {
+    const out = applyFilters(mixedRows, {
+      ...DEFAULT_FILTERS,
+      category: "operational",
+    });
+    expect(out).toHaveLength(2);
+    expect(out.every((r) => r.category === "operational")).toBe(true);
+  });
+
+  test("category negative match returns empty", () => {
+    const out = applyFilters(mixedRows, {
+      ...DEFAULT_FILTERS,
+      category: "privacy",
+    });
+    expect(out).toEqual([]);
+  });
+
+  test("methodology ALL passes every row through", () => {
+    const out = applyFilters(mixedRows, {
+      ...DEFAULT_FILTERS,
+      methodology: ALL,
+    });
+    expect(out).toHaveLength(3);
+  });
+
+  test("methodology filter narrows by exact wire-enum value", () => {
+    const out = applyFilters(mixedRows, {
+      ...DEFAULT_FILTERS,
+      methodology: "fair",
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]?.methodology).toBe("fair");
+  });
+
+  test("methodology negative match returns empty", () => {
+    const out = applyFilters(mixedRows, {
+      ...DEFAULT_FILTERS,
+      methodology: "cis_ram",
+    });
+    expect(out).toEqual([]);
+  });
+
+  test("org_unit ALL passes every row through (including unassigned)", () => {
+    const out = applyFilters(mixedRows, {
+      ...DEFAULT_FILTERS,
+      org_unit: ALL,
+    });
+    expect(out).toHaveLength(3);
+  });
+
+  test("org_unit filter narrows by exact UUID match", () => {
+    const out = applyFilters(mixedRows, {
+      ...DEFAULT_FILTERS,
+      org_unit: "00000000-0000-0000-0000-0000000000aa",
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]?.org_unit_id).toBe("00000000-0000-0000-0000-0000000000aa");
+  });
+
+  test("org_unit filter excludes rows with no org_unit_id", () => {
+    // Row 13 has org_unit_id = undefined; narrowing to a specific
+    // UUID must NOT match it (spec D3).
+    const out = applyFilters(mixedRows, {
+      ...DEFAULT_FILTERS,
+      org_unit: "00000000-0000-0000-0000-0000000000bb",
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]?.id).toContain("12");
+  });
+
+  test("org_unit negative match returns empty", () => {
+    const out = applyFilters(mixedRows, {
+      ...DEFAULT_FILTERS,
+      org_unit: "00000000-0000-0000-0000-0000000000ff",
+    });
+    expect(out).toEqual([]);
+  });
+
+  test("composing the three new filters narrows on every predicate", () => {
+    const out = applyFilters(mixedRows, {
+      ...DEFAULT_FILTERS,
+      category: "operational",
+      methodology: "nist_800_30",
+      org_unit: "00000000-0000-0000-0000-0000000000aa",
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]?.id.endsWith("11")).toBe(true);
   });
 });
 

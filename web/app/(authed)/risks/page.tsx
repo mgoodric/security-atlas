@@ -67,7 +67,13 @@ import {
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
-import { fetchRisksList, type Risk, type RisksListResponse } from "@/lib/api";
+import {
+  fetchHierarchyOrgUnits,
+  fetchRisksList,
+  type OrgUnit,
+  type Risk,
+  type RisksListResponse,
+} from "@/lib/api";
 import {
   RISK_EXPORT_FORMATS,
   RISK_EXPORT_FORMAT_LABELS,
@@ -88,7 +94,20 @@ import {
   type RiskFilters,
 } from "./filters";
 
-const FILTER_KEYS: (keyof RiskFilters)[] = ["treatment", "severity", "owner"];
+// Slice 244 — six filter keys. Order mirrors the mockup
+// (Plans/mockups/risks.html lines 126-173) with one local deviation:
+// the slice-100 Severity pill is a net positive over the mockup and is
+// retained per anti-criterion P0-244-1. It sits between Org unit and
+// Owner so it neighbours the related risk-scoring controls without
+// disturbing the mockup-pill visual order.
+const FILTER_KEYS: (keyof RiskFilters)[] = [
+  "category",
+  "treatment",
+  "methodology",
+  "org_unit",
+  "severity",
+  "owner",
+];
 
 const TREATMENT_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All treatments" },
@@ -104,6 +123,39 @@ const SEVERITY_OPTIONS: { value: string; label: string }[] = [
   { value: "medium", label: "medium (8-14)" },
   { value: "low", label: "low (1-7)" },
   { value: "none", label: "none (0)" },
+];
+
+// Slice 244 — wire-enum-backed option lists.
+//
+// Decision D1 (see docs/audit-log/244-decisions.md): the mockup
+// labels for the Category pill (Operational / Compliance /
+// Third-party / Strategic) do not match the wire enum `risk_category`,
+// which is the CIA-Privacy-axis seven-value enum below. The wire is
+// the source of truth — exact-string match (AC-3) against any mockup
+// label would never hit because no risk row carries those strings.
+// The mockup is non-canonical and the discrepancy is captured as a
+// follow-up item in the slice's decision log.
+const CATEGORY_OPTIONS: { value: string; label: string }[] = [
+  { value: ALL, label: "All categories" },
+  { value: "confidentiality", label: "confidentiality" },
+  { value: "integrity", label: "integrity" },
+  { value: "availability", label: "availability" },
+  { value: "privacy", label: "privacy" },
+  { value: "regulatory", label: "regulatory" },
+  { value: "operational", label: "operational" },
+  { value: "financial", label: "financial" },
+];
+
+// Decision D2: the mockup shows `five_by_five` but the wire enum
+// `risk_methodology` carries `qualitative_5x5` for the same concept.
+// All five wire values are exposed.
+const METHODOLOGY_OPTIONS: { value: string; label: string }[] = [
+  { value: ALL, label: "All methodologies" },
+  { value: "nist_800_30", label: "nist_800_30" },
+  { value: "fair", label: "fair" },
+  { value: "cis_ram", label: "cis_ram" },
+  { value: "iso_27005", label: "iso_27005" },
+  { value: "qualitative_5x5", label: "qualitative_5x5" },
 ];
 
 function RisksPageInner() {
@@ -147,6 +199,18 @@ function RisksPageInner() {
     queryFn: fetchRisksList,
   });
 
+  // Slice 244 — Org unit pill options need org-unit *names*, not just
+  // the `org_unit_id` UUIDs the risk rows carry. Reuse the existing
+  // browser-side fetcher (`fetchHierarchyOrgUnits`) so we do NOT
+  // introduce a new BFF route (anti-criterion P0-244-3). Stale time of
+  // 5 minutes — org unit data rarely changes during a session and a
+  // refetch on every nav is wasteful.
+  const orgUnitsQ = useQuery<OrgUnit[]>({
+    queryKey: ["risks", "org-units"],
+    queryFn: fetchHierarchyOrgUnits,
+    staleTime: 5 * 60 * 1000,
+  });
+
   const rows: Risk[] = useMemo(() => risksQ.data?.risks ?? [], [risksQ.data]);
 
   const visible = useMemo(() => applyFilters(rows, filters), [rows, filters]);
@@ -162,12 +226,54 @@ function RisksPageInner() {
     ];
   }, [rows]);
 
+  // Slice 244 — Org unit options derive from the unique `org_unit_id`
+  // set on the loaded rows (same pattern as `ownerOptions`), then join
+  // client-side to OrgUnit names so the pill displays "Platform"
+  // rather than a bare UUID. Rows with no `org_unit_id` are skipped —
+  // the spec does not call for an "unassigned" org-unit bucket, and
+  // the filter is by exact `org_unit_id` against the wire.
+  const orgUnitOptions: { value: string; label: string }[] = useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of rows) {
+      if (r.org_unit_id) ids.add(r.org_unit_id);
+    }
+    const nameById = new Map<string, string>();
+    for (const u of orgUnitsQ.data ?? []) {
+      nameById.set(u.id, u.name);
+    }
+    const sorted = Array.from(ids)
+      .map((id) => ({ id, name: nameById.get(id) ?? id }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return [
+      { value: ALL, label: "All units" },
+      ...sorted.map(({ id, name }) => ({ value: id, label: name })),
+    ];
+  }, [rows, orgUnitsQ.data]);
+
   const pills: FilterPill[] = [
+    {
+      id: "category",
+      label: "Category",
+      value: filters.category,
+      options: CATEGORY_OPTIONS,
+    },
     {
       id: "treatment",
       label: "Treatment",
       value: filters.treatment,
       options: TREATMENT_OPTIONS,
+    },
+    {
+      id: "methodology",
+      label: "Methodology",
+      value: filters.methodology,
+      options: METHODOLOGY_OPTIONS,
+    },
+    {
+      id: "org_unit",
+      label: "Org unit",
+      value: filters.org_unit,
+      options: orgUnitOptions,
     },
     {
       id: "severity",
@@ -424,7 +530,7 @@ function RisksPageInner() {
       }
       body={
         isFilterEmpty
-          ? "Try widening the treatment, severity, or owner filters."
+          ? "Try widening the category, treatment, methodology, org unit, severity, or owner filters."
           : "Start a register with one or two known operational risks — you can refine methodology later."
       }
       cta={
