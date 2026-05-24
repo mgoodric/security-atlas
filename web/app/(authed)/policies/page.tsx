@@ -63,7 +63,7 @@ import {
   type ListColumn,
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {
   fetchPoliciesList,
@@ -92,6 +92,12 @@ import {
   type PolicyFilters,
 } from "./filters";
 import { statusCountsLabel } from "./header-counts";
+import {
+  POLICIES_ACK_REPORT_FUTURE_REASON,
+  POLICIES_ACK_REPORT_FUTURE_TESTID,
+  POLICIES_NEW_POLICY_FUTURE_REASON,
+  POLICIES_NEW_POLICY_FUTURE_TESTID,
+} from "./header-cta-future";
 import {
   POLICIES_SCAFFOLD_FUTURE_BODY,
   POLICIES_SCAFFOLD_FUTURE_TESTID,
@@ -384,12 +390,42 @@ function PoliciesPageInner() {
           </a>
         ))}
       </div>
-      <Button variant="outline" size="sm" disabled>
-        Acknowledgment report
-      </Button>
-      <Button size="sm" disabled>
-        New policy
-      </Button>
+      {/* Slice 241 — formerly two `<Button disabled>` actions
+          ("Acknowledgment report" + "New policy"), both inert with
+          no tooltip / no link / no signposting (slice 178 honesty
+          audit class F-178-241). Replaced with non-button `<span>`
+          affordances carrying `title` + `aria-label` + a stable
+          test-id, mirroring the slice 217 pattern (see
+          `web/app/(authed)/audits/oscal-export-future.ts` +
+          `audits/page.tsx`). Visible copy + tooltip + aria-label
+          all read the same line; the disclosure IS the affordance.
+
+          Slice 247's enable-via-`<Link>` shape was the alternative
+          considered but rejected: it presupposes the destination
+          route exists. `/policies/new` does NOT exist on main
+          today; an acknowledgment-report-generation surface does
+          NOT exist at all. Building either inline blows the 0.5d
+          budget for both buttons combined (P0-241-1 / P0-241-2).
+          When the in-app `/policies/new` form ships, this header
+          flips to a `<Link>` matching the slice 247 / risks pattern;
+          this `<span>` deletes in that same PR. Same applies to
+          the ack-report surface when it lands. */}
+      <span
+        title={POLICIES_ACK_REPORT_FUTURE_REASON}
+        aria-label={POLICIES_ACK_REPORT_FUTURE_REASON}
+        data-testid={POLICIES_ACK_REPORT_FUTURE_TESTID}
+        className="inline-flex items-center px-2.5 text-[0.8rem] text-muted-foreground italic cursor-help"
+      >
+        {POLICIES_ACK_REPORT_FUTURE_REASON}
+      </span>
+      <span
+        title={POLICIES_NEW_POLICY_FUTURE_REASON}
+        aria-label={POLICIES_NEW_POLICY_FUTURE_REASON}
+        data-testid={POLICIES_NEW_POLICY_FUTURE_TESTID}
+        className="inline-flex items-center px-2.5 text-[0.8rem] text-muted-foreground italic cursor-help"
+      >
+        {POLICIES_NEW_POLICY_FUTURE_REASON}
+      </span>
     </>
   );
 
