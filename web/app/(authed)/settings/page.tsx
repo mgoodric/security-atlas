@@ -108,6 +108,11 @@ import {
   tailRoles,
 } from "./profile-derive";
 import { isAnyKind, kindsLabel } from "./allowed-kinds-display";
+import {
+  CREDENTIAL_BEARER_BANNER_BODY,
+  CREDENTIAL_BEARER_BANNER_TITLE,
+  notificationsRenderMode,
+} from "./notif-bearer-mode";
 import { sessionLine } from "./session-line";
 import { DEFAULT_THEME, readTheme, Theme, writeTheme } from "./theme";
 import { initialState, reduce } from "./token-state";
@@ -810,15 +815,45 @@ const NOTIF_EVENTS: { key: NotifEvent; label: string; description: string }[] =
 
 function NotificationsSection() {
   const qc = useQueryClient();
+  // Slice 251: classify the caller's bearer to decide whether to render
+  // the four event rows × two channels (OIDC user; existing behaviour)
+  // or the honest-disclosure banner (credential bearer; new branch).
+  // The profile query reuses the same query key as ProfileSection so
+  // TanStack-Query dedupes -- no extra network round-trip. The prefs
+  // query stays first-class because PATCH still flows through it for
+  // the OIDC case; the credential branch never calls patchMut.
+  const profileQuery = useQuery({
+    queryKey: ["settings-me-profile"],
+    queryFn: getMe,
+  });
   const prefsQuery = useQuery({
     queryKey: ["settings-me-preferences"],
     queryFn: getMyPreferences,
+    // Skip the prefs round-trip for credential bearers -- we already
+    // know the platform returns the documented 404 + the section won't
+    // render the rows. Saves a guaranteed-error fetch on every settings
+    // page load for credential sign-ins.
+    enabled:
+      !profileQuery.isLoading &&
+      !profileQuery.error &&
+      !(
+        profileQuery.data &&
+        (profileQuery.data.idp_subject ?? "").trim() === "" &&
+        (profileQuery.data.email ?? "").trim() === ""
+      ),
   });
   const patchMut = useMutation({
     mutationFn: patchMyPreferences,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["settings-me-preferences"] });
     },
+  });
+  const mode = notificationsRenderMode({
+    profileLoading: profileQuery.isLoading,
+    profileError: !!profileQuery.error,
+    profile: profileQuery.data,
+    preferencesErrorMessage:
+      prefsQuery.error instanceof Error ? prefsQuery.error.message : undefined,
   });
   return (
     <Card id="notifications" data-testid="settings-section-notifications">
@@ -829,13 +864,28 @@ function NotificationsSection() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {prefsQuery.isLoading ? (
+        {mode === "loading" || prefsQuery.isLoading ? (
           <Skeleton className="h-24 w-full" />
-        ) : prefsQuery.error ? (
+        ) : mode === "credential" ? (
+          // Slice 251 D1: banner + skip rendering rows. Composes with
+          // slice 250's credential-bearer detection -- when 250 lands,
+          // de-dup the synthetic-profile check into a shared helper
+          // (see notif-bearer-mode.ts header).
+          <Alert data-testid="settings-notif-credential-banner">
+            <AlertTitle data-testid="settings-notif-credential-banner-title">
+              {CREDENTIAL_BEARER_BANNER_TITLE}
+            </AlertTitle>
+            <AlertDescription data-testid="settings-notif-credential-banner-body">
+              {CREDENTIAL_BEARER_BANNER_BODY}
+            </AlertDescription>
+          </Alert>
+        ) : mode === "error" || prefsQuery.error ? (
           <Alert variant="destructive">
             <AlertTitle>Could not load preferences</AlertTitle>
             <AlertDescription>
-              {(prefsQuery.error as Error).message}
+              {prefsQuery.error
+                ? (prefsQuery.error as Error).message
+                : (profileQuery.error as Error).message}
             </AlertDescription>
           </Alert>
         ) : (
