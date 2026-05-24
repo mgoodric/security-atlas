@@ -1794,6 +1794,22 @@ type Querier interface {
 	// contract; the only wire-shape change is one additional column on every
 	// returned row.
 	//
+	// Slice 270 (2026-05-23): two new optional parameters
+	// (`caller_is_privileged BOOLEAN` + `caller_user_id TEXT`) gate one extra
+	// WHERE predicate that restricts non-privileged callers (viewer /
+	// control_owner — slice 270 D1) to:
+	//   - tenant-public kinds (decision, evidence, exception, sample,
+	//     audit_period, aggregation_rule, walkthrough) — excludes feature_flag
+	//     (admin-only program-configuration events);
+	//   - PLUS me-rows whose `actor_id = caller_user_id` (the caller's own
+	//     self-audit trail).
+	// When `caller_is_privileged = true` (slice 124 admin endpoint, plus the
+	// slice 270 endpoint for privileged callers) the predicate short-circuits
+	// and the result set is identical to the slice-180 shape.
+	// The predicate is conjunctive with the user-controlled `actor_filter` and
+	// `kind_filter_csv` parameters — a non-privileged caller passing
+	// `?actor=<other-user-uuid>` cannot widen visibility (slice 270 P0-A5).
+	//
 	// RLS-aware: the query runs under `tenancy.ApplyTenant` as `atlas_app`. Every
 	// branch's source-table tenant_read policy fires; rows from other tenants are
 	// silently filtered out at the source-table policy layer. The aggregator never

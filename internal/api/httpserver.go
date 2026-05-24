@@ -937,6 +937,18 @@ func (s *Server) httpHandler() http.Handler {
 	// format-encoder swap on the response body (CSV / JSON / XLSX).
 	// Meta-audit row written on EVERY outcome (slice 135 P0-A4).
 	root.Get("/v1/admin/audit-log/export", auditLogH.ExportUnified)
+	// Slice 270: non-admin activity-ledger surface. Same aggregator as
+	// the slice 124 admin endpoint (`internal/audit/unifiedlog.Query`),
+	// shared SQL with one extra row-visibility WHERE predicate gated on
+	// `caller_is_privileged`. The OPA admit-set widens to {admin,
+	// auditor, grc_engineer, viewer, control_owner} via the new
+	// `activity-unified` resource type — non-privileged callers (viewer
+	// / control_owner) see tenant-public kinds plus their own me-rows;
+	// feature_flag rows are hidden + cross-actor me-rows are hidden
+	// (slice 270 D1 + D2). Reuses the slice 124 meta-audit pattern with
+	// `surface="activity"` tagging (slice 270 D7) — no new action value,
+	// no migration.
+	root.Get("/v1/activity/unified", auditLogH.ActivityList)
 	// Slice 139: per-entity data exports for audit_periods + vendors.
 	// Both reuse the slice-135 export library; both go through the
 	// slice-145 per-(tenant, user) concurrency cap; both emit a

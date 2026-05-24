@@ -203,27 +203,44 @@ WHERE unified.occurred_at >= $1::timestamptz
   AND ($3::text = '' OR unified.actor_id = $3::text)
   AND ($4::text = ''
        OR unified.kind = ANY(string_to_array($4::text, ',')))
+  -- Slice 270 — non-privileged row-visibility filter. When
+  -- ` + "`" + `caller_is_privileged = true` + "`" + ` (slice 124 admin endpoint + slice 270
+  -- endpoint for admin/auditor/grc_engineer callers) the predicate
+  -- short-circuits and visibility is unchanged. When false (viewer /
+  -- control_owner reaching the slice 270 endpoint), feature_flag rows
+  -- are hidden unconditionally and me-rows are restricted to the
+  -- caller's own. The predicate is conjunctive with the user-controlled
+  -- actor / kind filters (slice 270 P0-A5).
+  AND (
+      $5::boolean = true
+      OR (
+          unified.kind <> 'feature_flag'
+          AND (unified.kind <> 'me' OR unified.actor_id = $6::text)
+      )
+  )
   -- Cursor: occurred_at strictly less, OR same occurred_at and a strictly-greater
   -- (kind, row_id) tuple. row_id is the underlying audit-log row's UUID PK and
   -- is GUARANTEED unique per row across the UNION (because each base table's PK
   -- is independently unique and the kind discriminator separates branches).
-  AND ($5::timestamptz IS NULL
-       OR unified.occurred_at < $5::timestamptz
-       OR (unified.occurred_at = $5::timestamptz
-           AND (unified.kind, unified.row_id::text) > ($6::text, $7::text)))
+  AND ($7::timestamptz IS NULL
+       OR unified.occurred_at < $7::timestamptz
+       OR (unified.occurred_at = $7::timestamptz
+           AND (unified.kind, unified.row_id::text) > ($8::text, $9::text)))
 ORDER BY unified.occurred_at DESC, unified.kind ASC, unified.row_id ASC
-LIMIT $8::integer
+LIMIT $10::integer
 `
 
 type ListUnifiedAuditLogParams struct {
-	FromTs        pgtype.Timestamptz `json:"from_ts"`
-	ToTs          pgtype.Timestamptz `json:"to_ts"`
-	ActorFilter   string             `json:"actor_filter"`
-	KindFilterCsv string             `json:"kind_filter_csv"`
-	CursorTs      pgtype.Timestamptz `json:"cursor_ts"`
-	CursorKind    string             `json:"cursor_kind"`
-	CursorRowID   string             `json:"cursor_row_id"`
-	LimitN        int32              `json:"limit_n"`
+	FromTs             pgtype.Timestamptz `json:"from_ts"`
+	ToTs               pgtype.Timestamptz `json:"to_ts"`
+	ActorFilter        string             `json:"actor_filter"`
+	KindFilterCsv      string             `json:"kind_filter_csv"`
+	CallerIsPrivileged bool               `json:"caller_is_privileged"`
+	CallerUserID       string             `json:"caller_user_id"`
+	CursorTs           pgtype.Timestamptz `json:"cursor_ts"`
+	CursorKind         string             `json:"cursor_kind"`
+	CursorRowID        string             `json:"cursor_row_id"`
+	LimitN             int32              `json:"limit_n"`
 }
 
 type ListUnifiedAuditLogRow struct {
@@ -258,6 +275,23 @@ type ListUnifiedAuditLogRow struct {
 // nine source tables, the canonical Kind enum, or the cursor pagination
 // contract; the only wire-shape change is one additional column on every
 // returned row.
+//
+// Slice 270 (2026-05-23): two new optional parameters
+// (`caller_is_privileged BOOLEAN` + `caller_user_id TEXT`) gate one extra
+// WHERE predicate that restricts non-privileged callers (viewer /
+// control_owner — slice 270 D1) to:
+//   - tenant-public kinds (decision, evidence, exception, sample,
+//     audit_period, aggregation_rule, walkthrough) — excludes feature_flag
+//     (admin-only program-configuration events);
+//   - PLUS me-rows whose `actor_id = caller_user_id` (the caller's own
+//     self-audit trail).
+//
+// When `caller_is_privileged = true` (slice 124 admin endpoint, plus the
+// slice 270 endpoint for privileged callers) the predicate short-circuits
+// and the result set is identical to the slice-180 shape.
+// The predicate is conjunctive with the user-controlled `actor_filter` and
+// `kind_filter_csv` parameters — a non-privileged caller passing
+// `?actor=<other-user-uuid>` cannot widen visibility (slice 270 P0-A5).
 //
 // RLS-aware: the query runs under `tenancy.ApplyTenant` as `atlas_app`. Every
 // branch's source-table tenant_read policy fires; rows from other tenants are
@@ -305,6 +339,8 @@ func (q *Queries) ListUnifiedAuditLog(ctx context.Context, arg ListUnifiedAuditL
 		arg.ToTs,
 		arg.ActorFilter,
 		arg.KindFilterCsv,
+		arg.CallerIsPrivileged,
+		arg.CallerUserID,
 		arg.CursorTs,
 		arg.CursorKind,
 		arg.CursorRowID,

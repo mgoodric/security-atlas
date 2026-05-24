@@ -105,12 +105,20 @@ type unifiedCursorPayload struct {
 
 // metaAuditParams is the shape persisted to me_audit_log.before so the
 // audit record carries enough context to reconstruct the request.
+//
+// Surface (slice 270) splits the two endpoints that write this shape:
+// `"admin"` for the slice 124 `/v1/admin/audit-log/unified` route,
+// `"activity"` for the slice 270 `/v1/activity/unified` route. The
+// `me_audit_log.action` value is shared (`audit_log_query_unified`)
+// because the underlying SQL is the same; the surface field is the
+// forensic discriminator (slice 270 D7).
 type metaAuditParams struct {
-	From   string   `json:"from"`
-	To     string   `json:"to"`
-	Actor  string   `json:"actor,omitempty"`
-	Kinds  []string `json:"kinds,omitempty"`
-	Cursor string   `json:"cursor,omitempty"`
+	From    string   `json:"from"`
+	To      string   `json:"to"`
+	Actor   string   `json:"actor,omitempty"`
+	Kinds   []string `json:"kinds,omitempty"`
+	Cursor  string   `json:"cursor,omitempty"`
+	Surface string   `json:"surface,omitempty"`
 }
 
 // metaAuditResult is the shape persisted to me_audit_log.after.
@@ -144,6 +152,11 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, perr.Error())
 		return
 	}
+	// Slice 270: the slice 124 admin endpoint is admit-gated to
+	// {admin, auditor, grc_engineer}. Every caller that reaches this
+	// point is privileged; the SQL-layer row-visibility predicate
+	// short-circuits and behavior matches pre-slice-270.
+	params.queryParams.CallerIsPrivileged = true
 
 	// Defense-in-depth role gate: admin OR auditor OR grc_engineer.
 	// IsAdmin is on the credential; the other two require a user_roles
@@ -188,7 +201,11 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 		entries = got
 
 		// Meta-audit: one row per successful query (slice-124 AC-10).
-		paramsBlob, _ := json.Marshal(params.toAuditShape())
+		// Slice 270 D7: surface-tag the row for forensic split between
+		// the admin endpoint and the new `/v1/activity/unified`.
+		auditShape := params.toAuditShape()
+		auditShape.Surface = adminSurfaceTag
+		paramsBlob, _ := json.Marshal(auditShape)
 		resultBlob, _ := json.Marshal(metaAuditResult{
 			Returned:       len(entries),
 			NextCursorEcho: encodeUnifiedCursor(nextCursor),
@@ -342,6 +359,12 @@ func parseUnifiedParams(r *http.Request) (parsedUnifiedParams, error) {
 		From:        from,
 		To:          to,
 		ActorFilter: q.Get("actor"),
+		// Slice 270: row-visibility privilege is set by the handler AFTER
+		// parsing, not here. The slice 124 admin handler sets
+		// CallerIsPrivileged=true unconditionally (every caller that
+		// reaches it has cleared the {admin, auditor, grc_engineer}
+		// OPA admit). The slice 270 activity handler sets it from its
+		// own role probe.
 	}
 	if raw := q.Get("kind"); raw != "" {
 		for _, candidate := range strings.Split(raw, ",") {
