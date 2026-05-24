@@ -79,6 +79,9 @@ import {
   formatAckRate,
 } from "./ack-rate";
 import {
+  ACK_STATUS_GE_95,
+  ACK_STATUS_LT_50,
+  ACK_STATUS_LT_95,
   ALL,
   applyFilters,
   clearFilters,
@@ -94,7 +97,11 @@ import {
   POLICIES_SCAFFOLD_FUTURE_TESTID,
 } from "./scaffold-future";
 
-const FILTER_KEYS: (keyof PolicyFilters)[] = ["status", "owner_role"];
+const FILTER_KEYS: (keyof PolicyFilters)[] = [
+  "status",
+  "owner_role",
+  "ack_status",
+];
 
 const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All statuses" },
@@ -103,6 +110,16 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "under_review", label: "under_review" },
   { value: "approved", label: "approved" },
   { value: "retired", label: "retired" },
+];
+
+// Slice 238 — ack-status band pill. Labels mirror the mockup at
+// `Plans/mockups/policies.html` lines 154-165; values are URL-safe
+// short identifiers so `?ack_status=ge95` is bookmarkable (AC-3).
+const ACK_STATUS_OPTIONS: { value: string; label: string }[] = [
+  { value: ALL, label: "All ack rates" },
+  { value: ACK_STATUS_GE_95, label: "≥ 95% acknowledged" },
+  { value: ACK_STATUS_LT_95, label: "< 95% acknowledged" },
+  { value: ACK_STATUS_LT_50, label: "< 50% acknowledged" },
 ];
 
 function statusPillClass(status: string): string {
@@ -194,6 +211,18 @@ function PoliciesPageInner() {
       label: "Owner role",
       value: filters.owner_role,
       options: ownerOptions,
+    },
+    // Slice 238 — ack-status band pill sits between owner_role and the
+    // right-aligned meta counter (AC-1). The `Linked control` pill from
+    // the mockup is deferred per slice 238 AC-4 — the list endpoint
+    // does not yet surface a `linked_controls` field per row, so the
+    // pill would be unbacked. Follow-on slice files the wire field +
+    // multi-select pill together.
+    {
+      id: "ack_status",
+      label: "Ack status",
+      value: filters.ack_status,
+      options: ACK_STATUS_OPTIONS,
     },
   ];
 
@@ -428,7 +457,7 @@ function PoliciesPageInner() {
       {POLICIES_SCAFFOLD_FUTURE_BODY}
     </span>
   ) : (
-    "Try widening the status or owner-role filters."
+    "Try widening the status, owner-role, or ack-status filters."
   );
   const emptyState = (
     <EmptyState

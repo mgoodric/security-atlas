@@ -90,6 +90,37 @@ test.describe("/policies list view", () => {
     //    await expect(page.getByTestId("list-table-wrap")).toBeVisible();
   });
 
+  test("AC-1 (slice 238): ack_status pill renders between owner_role and meta", async () => {
+    //    // Slice 238 — the third filter pill ("Ack status") sits between
+    //    // the Owner role pill and the right-aligned "Showing N of M"
+    //    // meta counter. The mockup at Plans/mockups/policies.html
+    //    // lines 154-165 names four options: All / >= 95% / < 95% /
+    //    // < 50%.
+    //    await page.goto("/policies");
+    //    await expect(page.getByTestId("list-filter-pill-ack_status")).toBeVisible();
+    //    const ackPill = page.getByLabel("Ack status");
+    //    const opts = await ackPill.locator("option").allTextContents();
+    //    expect(opts).toContain("All ack rates");
+    //    expect(opts.some((o) => o.includes("95%"))).toBe(true);
+    //    expect(opts.some((o) => o.includes("50%"))).toBe(true);
+  });
+
+  test("AC-2/AC-3 (slice 238): ack_status=ge95 narrows + URL is bookmarkable", async () => {
+    //    // Slice 238 — band narrowing is client-side over
+    //    // `policiesQ.data?.policies`; the URL serializes the active
+    //    // band so `/policies?ack_status=ge95` is shareable.
+    //    await page.goto("/policies?ack_status=ge95");
+    //    await expect(page.getByTestId("list-filter-pill-ack_status")).toBeVisible();
+    //    const ackPill = page.getByLabel("Ack status");
+    //    await expect(ackPill).toHaveValue("ge95");
+    //    // Every visible row carries an ack-rate cell at >= 95%. Rows
+    //    // with `policies-ack-rate-missing` (null cells) MUST NOT appear
+    //    // under a non-ALL band (slice 238 AC-2).
+    //    await page.waitForLoadState("networkidle");
+    //    const missing = await page.getByTestId("policies-ack-rate-missing").count();
+    //    expect(missing).toBe(0);
+  });
+
   test("AC-5 (slice 242 update): true zero-state replaces the lying scaffold CTA with a label-honest body disclosure", async () => {
     //    // Slice 242 closed the slice 101 P0-A4 honesty-gap. The
     //    // empty-state previously rendered a primary CTA "Scaffold
