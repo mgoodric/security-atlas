@@ -38,15 +38,18 @@ import {
 } from "@/lib/api";
 
 /**
- * The literal in-progress status the period must carry to qualify for
- * the pill. The audit_periods.status CHECK constraint will eventually
- * include this value (today the v1 constraint allows {'open','frozen'};
- * `in_progress` is the forward-looking value the slice 215 status
- * tally already enumerates — see `web/app/(authed)/audits/format.ts`
- * line 208). When a tenant carries no in_progress periods the pill is
- * absent — which is the v1 steady-state.
+ * The literal status the period must carry to qualify for the pill.
+ * The audit_periods.status CHECK constraint allows {'open','frozen'}
+ * in v1 (see `migrations/sql/20260511000020_audit_periods.sql`); an
+ * `'open'` period is, semantically, an audit-period that has been
+ * opened and has not yet been frozen — which is exactly what the
+ * "in progress" pill is meant to surface to the operator. The pill's
+ * displayed copy ("in progress") is user-facing UX; the wire-value
+ * is the v1 schema's `'open'`. `format.ts` line 208's forward-looking
+ * `'in_progress'` enum entry is a future-compat consideration; today
+ * no DB row carries that value.
  */
-const IN_PROGRESS = "in_progress";
+const ACTIVE = "open";
 
 /**
  * pickMostRecent picks the period with the most recent `period_start`
@@ -57,7 +60,7 @@ const IN_PROGRESS = "in_progress";
 export function pickMostRecentInProgress(
   periods: AuditPeriod[],
 ): AuditPeriod | null {
-  const inProgress = periods.filter((p) => p.status === IN_PROGRESS);
+  const inProgress = periods.filter((p) => p.status === ACTIVE);
   if (inProgress.length === 0) return null;
   let best = inProgress[0];
   for (let i = 1; i < inProgress.length; i++) {

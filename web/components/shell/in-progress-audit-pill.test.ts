@@ -5,14 +5,15 @@
 // is owned by the Playwright e2e (`web/e2e/audits-header.spec.ts`).
 // The pure picker function is unit-testable here.
 //
-// AC-3: "filters to `status === 'in_progress'`, renders the most-
-// recently-started period as an amber pill". This file pins the
-// "most-recently-started" + "filter narrows" + "zero match returns
-// null" branches.
+// AC-3: "filters to in-progress status, renders the most-recently-
+// started period as an amber pill". v1 DB status for the in-progress
+// surface is `'open'` (see the pill source for the rationale). This
+// file pins "most-recently-started" + "filter narrows" + "zero match
+// returns null" branches.
 //
-// AC-5 (the "absent otherwise" half): when zero periods match
-// status='in_progress', the helper returns null and the component
-// returns null — silent-absence (P0-213-2).
+// AC-5 (the "absent otherwise" half): when zero periods are active,
+// the helper returns null and the component returns null — silent-
+// absence (P0-213-2).
 
 import { describe, expect, test } from "vitest";
 
@@ -27,7 +28,7 @@ function makePeriod(overrides: Partial<AuditPeriod> = {}): AuditPeriod {
     framework_version_id: "00000000-0000-0000-0000-000000000000",
     period_start: "2026-01-01",
     period_end: "2026-03-31",
-    status: "in_progress",
+    status: "open",
     created_by: "test@example.invalid",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -40,21 +41,20 @@ describe("pickMostRecentInProgress", () => {
     expect(pickMostRecentInProgress([])).toBeNull();
   });
 
-  test("returns null when no period has status='in_progress'", () => {
+  test("returns null when no period is active (all frozen)", () => {
     const periods = [
-      makePeriod({ id: "a", status: "open" }),
+      makePeriod({ id: "a", status: "frozen" }),
       makePeriod({ id: "b", status: "frozen" }),
-      makePeriod({ id: "c", status: "closed" }),
     ];
     expect(pickMostRecentInProgress(periods)).toBeNull();
   });
 
-  test("returns the sole in_progress period when only one matches", () => {
+  test("returns the sole active period when only one matches", () => {
     const periods = [
-      makePeriod({ id: "a", status: "open" }),
+      makePeriod({ id: "a", status: "frozen" }),
       makePeriod({
         id: "b",
-        status: "in_progress",
+        status: "open",
         name: "Q2 2026",
         period_start: "2026-04-01",
       }),
@@ -69,19 +69,19 @@ describe("pickMostRecentInProgress", () => {
     const periods = [
       makePeriod({
         id: "older",
-        status: "in_progress",
+        status: "open",
         name: "Q1 2026",
         period_start: "2026-01-01",
       }),
       makePeriod({
         id: "newer",
-        status: "in_progress",
+        status: "open",
         name: "Q2 2026",
         period_start: "2026-04-01",
       }),
       makePeriod({
         id: "middle",
-        status: "in_progress",
+        status: "open",
         name: "Q1.5 2026",
         period_start: "2026-02-15",
       }),
@@ -90,14 +90,14 @@ describe("pickMostRecentInProgress", () => {
     expect(pick?.id).toBe("newer");
   });
 
-  test("ignores non-in_progress periods when comparing dates", () => {
-    // A 'frozen' period starting LATER than the in_progress one must
-    // not displace the in_progress winner. The filter happens before
+  test("ignores non-active periods when comparing dates", () => {
+    // A 'frozen' period starting LATER than the active one must
+    // not displace the active winner. The filter happens before
     // the sort.
     const periods = [
       makePeriod({
         id: "in-prog",
-        status: "in_progress",
+        status: "open",
         period_start: "2026-04-01",
       }),
       makePeriod({
@@ -111,7 +111,7 @@ describe("pickMostRecentInProgress", () => {
   });
 
   test("handles a single-element list correctly", () => {
-    const periods = [makePeriod({ id: "solo", status: "in_progress" })];
+    const periods = [makePeriod({ id: "solo", status: "open" })];
     expect(pickMostRecentInProgress(periods)?.id).toBe("solo");
   });
 });
