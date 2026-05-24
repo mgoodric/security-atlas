@@ -75,7 +75,7 @@ Both leading segments are dropped.
   slice-178 honesty heuristic `captureColdLinks`
   (`web/e2e-audit/lib/heuristics.ts`) explicitly flags anchors with
   no real destination as HONESTY-GAPs. Shipping a `<span>Board
-  reports</span>` (non-link, plain text) wouldn't trip that heuristic
+reports</span>` (non-link, plain text) wouldn't trip that heuristic
   but would still mislead the operator into thinking there's a
   navigable parent. The honesty discipline is "every segment links to
   a real route OR is plain text DERIVED FROM PACK DATA" (P0-218-2):
@@ -88,7 +88,7 @@ Both leading segments are dropped.
 **Alternative rejected — render a Tenant-name segment from session.**
 We have a session-me API surface (slice 060's `getSessionMe`). Loading
 the tenant display name and rendering it as the first segment is
-*plausible* but (a) adds a data dependency the export bar doesn't
+_plausible_ but (a) adds a data dependency the export bar doesn't
 have today, (b) the tenant-name segment would link to `/dashboard`
 (the only real parent for "the tenant" route shape on main), which is
 a stretch — the tenant doesn't OWN board packs more than it owns
@@ -126,7 +126,7 @@ chain). An HTML comment in the file explains the divergence.
   iteration-1 design.
 
 **Alternative rejected — leave the mockup unchanged.** Slice 219 did
-this for the Author cell, and that *was* the right call there (the
+this for the Author cell, and that _was_ the right call there (the
 mockup author was a real-looking value that future Option-B work
 could legitimately reinstate). Here, both mockup segments are
 permanently dead — no future option recovers them. Editing the
@@ -154,7 +154,7 @@ truth).
   closes the spec mismatch and gives the breadcrumb a clean import.
 - **Two surfaces, one implementation.** The cover header
   (`pack-header.tsx` line 61) renders `{periodLabel(periodEnd)} Board
-  Pack` as the page H1; the breadcrumb's trailing segment renders the
+Pack` as the page H1; the breadcrumb's trailing segment renders the
   same label. Keeping two copies in two files is the kind of small
   duplication that drifts. One canonical helper in a `.ts` module is
   the slice 222 (posture-coverage-caption.ts) + slice 219
@@ -183,13 +183,14 @@ silent break when somebody adds Q5 (kidding) or fiscal-quarter offset.
 
 **Decision:** Vitest spec at `pack-breadcrumb-segments.test.ts` pins:
 segment count, parent label + href + testid, trailing-segment shape
-+ testid + no-href, no-fabricated-segments regression (no `Sentinel
+
+- testid + no-href, no-fabricated-segments regression (no `Sentinel
 Labs`, no `Board reports`), `periodLabel` quarter parsing + fallback.
-Playwright spec at `board-pack-detail.spec.ts` (NEW file) asserts the
-DOM contract — breadcrumb visibility, aria-label, parent link target,
-trailing segment plain-text + aria-current="page", no `← All packs`
-text, no fake tenant-name text. Playwright spec is quarantined behind
-the slice 082 seed harness like the rest of the e2e directory.
+  Playwright spec at `board-pack-detail.spec.ts` (NEW file) asserts the
+  DOM contract — breadcrumb visibility, aria-label, parent link target,
+  trailing segment plain-text + aria-current="page", no `← All packs`
+  text, no fake tenant-name text. Playwright spec is quarantined behind
+  the slice 082 seed harness like the rest of the e2e directory.
 
 **Why:**
 
@@ -261,8 +262,8 @@ instead of the `linkButtonClasses` shadcn-button-mimic from
   `Board packs` (links to the existing `/board-packs` route) and the
   period label (derived from `pack.period_end`). No fabricated
   segments. Vitest's `does NOT fabricate a tenant-name segment`
-  + the Playwright `no fabricated tenant-name segment` assertions pin
-  the regression guard. ✓
+  - the Playwright `no fabricated tenant-name segment` assertions pin
+    the regression guard. ✓
 - **P0-218-3 (does NOT touch export buttons or publish flow).** The
   right-edge of `ExportBar` (the three buttons block) is byte-unchanged
   apart from the `linkButtonClasses` constant declaration position.
@@ -287,7 +288,7 @@ instead of the `linkButtonClasses` shadcn-button-mimic from
   back to the raw YYYY-MM-DD when `periodEnd` isn't a calendar-quarter
   end. If a future slice adds non-quarterly board packs (e.g.,
   monthly), this fallback reads awkwardly in the breadcrumb (`Board
-  packs > 2026-05-15`). The right fix is a richer label function (e.g.
+packs > 2026-05-15`). The right fix is a richer label function (e.g.
   `May 2026`) — but only when the data shape exists; today the system
   emits quarterly packs only.
 - **R3 — Mockup parity refresh.** When iteration-2 mockups land, the
