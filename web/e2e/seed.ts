@@ -53,8 +53,11 @@ export const DEMO_AUDIT_PERIOD_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0001";
 // `sub` claim so the synthesized credential's UserID matches.
 export const DEMO_USER_ID = "44444444-4444-4444-4444-444444440001";
 
-// The seven fixture names the harness understands. Each maps to one
+// The fixture names the harness understands. Each maps to one
 // per-spec SQL file under fixtures/e2e/.
+//
+// Slice 213 added "audits-header" — seeds one in_progress audit period
+// for the topbar in-progress pill assertion.
 export type FixtureName =
   | "dashboard"
   | "control-detail"
@@ -62,7 +65,8 @@ export type FixtureName =
   | "risk-hierarchy"
   | "admin-bootstrap"
   | "audit-log"
-  | "settings";
+  | "settings"
+  | "audits-header";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 
