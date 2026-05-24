@@ -163,6 +163,46 @@ test.describe("control detail view", () => {
     //    ).toBeGreaterThan(0);
   });
 
+  test("slice 256: coverage column renders both numeric and n/a rows", async () => {
+    // Slice 256 — the coverage table gains a Coverage column bound
+    // to the backend's per-row `coverage` field (strength × 30-day
+    // effectiveness × FrameworkScope predicate). When a control has
+    // at least one in-scope and one out-of-scope mapped requirement,
+    // the table renders both shapes:
+    //   - in-scope row: data-coverage-state="numeric" + a numeric
+    //     value (two decimals)
+    //   - out-of-scope row: data-coverage-state="out-of-scope" + the
+    //     literal text "n/a"
+    // The strength bar's width reflects the COVERAGE percent, not the
+    // raw strength (mockup binding — see Plans/mockups/control.html
+    // lines 192/203/214). Assertions are commented pending the
+    // slice-082 seed harness (same convention as the surrounding
+    // tests). The slice 256 P0-1 contract — no client-side fabrication
+    // — is also asserted here: when coverage is null, the bar fills 0%.
+    //    await page.goto(`/controls/${KNOWN_CONTROL_ID}`);
+    //    await expect(page.getByTestId("coverage-table")).toBeVisible();
+    //    // A numeric coverage row exists.
+    //    const numeric = page.locator(
+    //      '[data-testid="coverage-cell"][data-coverage-state="numeric"]',
+    //    );
+    //    await expect(numeric.first()).toBeVisible();
+    //    await expect(numeric.first()).toHaveText(/^\d\.\d{2}$/);
+    //    // An out-of-scope row exists and renders "n/a".
+    //    const oosCell = page.locator(
+    //      '[data-testid="coverage-cell"][data-coverage-state="out-of-scope"]',
+    //    );
+    //    await expect(oosCell.first()).toBeVisible();
+    //    await expect(oosCell.first()).toHaveText("n/a");
+    //    // The footer text restates the formula honestly.
+    //    await expect(page.getByTestId("coverage-footer")).toContainText(
+    //      "strength × 30-day effectiveness",
+    //    );
+    //    // The chevron affordance is present per row.
+    //    await expect(
+    //      page.getByTestId("coverage-row-chevron").first(),
+    //    ).toBeVisible();
+  });
+
   test("AC-7: out-of-scope framework rows render dashed/greyed", async () => {
     // The pre-condition control is out of scope for >=1 framework. That
     // row carries data-out-of-scope="true" and the dashed/greyed

@@ -668,3 +668,282 @@ func TestNoFrameworkToFrameworkEdgeTable(t *testing.T) {
 		t.Fatalf("constitutional invariant 1 violation: a fw->fw table exists (%d hits)", n)
 	}
 }
+
+// ===== slice 256: per-row Coverage column =====
+//
+// AC-1 (backend): GET /v1/controls/{id}/coverage emits a `coverage`
+// numeric per requirement row when in scope, `null` when out of scope
+// or when the control has zero effectiveness data.
+//
+// AC-2 (backend): three branches covered below:
+//   - in-scope row with evaluations returns numeric coverage
+//   - out-of-scope row returns null (framework_scope predicate
+//     intersects to empty)
+//   - row with zero effectiveness data returns null (TotalCount == 0
+//     must NOT degrade to coverage=0; "no data" is distinct from
+//     "perfectly failing")
+
+// seedActivatedFrameworkScope inserts an activated framework_scope row
+// binding `tenant` to `frameworkVersionID` with a permissive
+// `{"op":"true"}` predicate (matches every cell in the tenant's
+// applicability universe — see frameworkscope.EffectiveScope). Mirrors
+// the demoseed pattern at internal/demoseed/writers.go (slice 205).
+func seedActivatedFrameworkScope(t *testing.T, tenant string, frameworkVersionID uuid.UUID, name string) uuid.UUID {
+	t.Helper()
+	pool := openPool(t, adminDSN(t))
+	defer pool.Close()
+	id := uuid.New()
+	predicate := `{"op":"true"}`
+	// predicate_hash matches the demoseed shape: hex(sha256(predicate)).
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO framework_scopes
+		 (id, tenant_id, framework_version_id, name, state, predicate, predicate_hash,
+		  effective_from)
+		 VALUES ($1, $2, $3, $4, 'activated', $5::jsonb,
+		         encode(digest($5::text, 'sha256'), 'hex'),
+		         now() - INTERVAL '6 months')`,
+		id, tenant, frameworkVersionID, name, predicate,
+	); err != nil {
+		t.Fatalf("seed framework_scope: %v", err)
+	}
+	return id
+}
+
+// seedEvaluation inserts one row into control_evaluations. Mirrors
+// internal/freshnessdrift/integration_test.go::seedEvaluation. Used
+// here to give the slice-012 effectiveness rollup data to chew on so
+// the per-row coverage isn't null for in-scope rows.
+func seedEvaluation(t *testing.T, tenant string, controlID uuid.UUID, result string, evaluatedAt time.Time) {
+	t.Helper()
+	pool := openPool(t, adminDSN(t))
+	defer pool.Close()
+	id := uuid.New()
+	runID := uuid.New()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO control_evaluations (
+			id, tenant_id, control_id, scope_cell_id, eval_run_id,
+			evaluated_at, result, freshness_status,
+			evidence_count_in_window, trigger
+		) VALUES ($1, $2, $3, NULL, $4, $5, $6, 'fresh', 1, 'manual')
+	`, id, tenant, controlID, runID, evaluatedAt, result); err != nil {
+		t.Fatalf("seed evaluation: %v", err)
+	}
+}
+
+// firstFrameworkVersionID returns the framework_version_id of the first
+// SOC 2 row in the catalog. Slice 256's coverage tests need a known fv
+// to activate a framework_scope against.
+func soc2017FrameworkVersionID(t *testing.T) uuid.UUID {
+	t.Helper()
+	pool := openPool(t, adminDSN(t))
+	defer pool.Close()
+	var id uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`SELECT fv.id FROM framework_versions fv
+		   JOIN frameworks f ON f.id = fv.framework_id
+		  WHERE f.slug = 'soc2' AND fv.version = '2017'
+		  LIMIT 1`,
+	).Scan(&id); err != nil {
+		t.Fatalf("lookup soc2:2017 framework_version_id: %v", err)
+	}
+	return id
+}
+
+// wipeTenantState clears the per-tenant working set that slice 256
+// tests rely on: controls, evaluations, framework_scopes. Catalog rows
+// (scf_anchors / framework_versions / etc.) stay intact.
+func wipeTenantState(t *testing.T) {
+	t.Helper()
+	pool := openPool(t, adminDSN(t))
+	defer pool.Close()
+	for _, q := range []string{
+		`DELETE FROM control_evaluations`,
+		`DELETE FROM framework_scopes`,
+		`DELETE FROM controls`,
+	} {
+		if _, err := pool.Exec(context.Background(), q); err != nil {
+			t.Fatalf("wipe (%s): %v", q, err)
+		}
+	}
+}
+
+// AC-1 / AC-2 branch (a) — in-scope row with evaluation data returns a
+// numeric `coverage` that equals strength × 30d pass_rate. We seed two
+// pass evaluations and one fail in the last 30 days (pass_rate = 2/3 ≈
+// 0.6667), activate SOC 2 with a permissive predicate (so every fv row
+// is in scope), then verify the CC6.6 row's coverage is `strength *
+// 0.6667`.
+func TestControlCoverage_Slice256_InScopeRowReturnsNumeric(t *testing.T) {
+	ensureCatalog(t)
+	wipeTenantState(t)
+	cid := seedControl(t, tenantA, "IAC-06", "test-mfa-256-inscope", "MFA Enforcement (256-inscope)")
+	soc2FVID := soc2017FrameworkVersionID(t)
+	seedActivatedFrameworkScope(t, tenantA, soc2FVID, "SOC 2 — Test Activated")
+
+	now := time.Now().UTC()
+	seedEvaluation(t, tenantA, cid, "pass", now.Add(-1*time.Hour))
+	seedEvaluation(t, tenantA, cid, "pass", now.Add(-2*time.Hour))
+	seedEvaluation(t, tenantA, cid, "fail", now.Add(-3*time.Hour))
+
+	ts, bearer := setupHTTPServer(t, tenantA)
+	resp, body := get(t, ts, "/v1/controls/"+cid.String()+"/coverage", bearer)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
+	}
+	var got struct {
+		Requirements []struct {
+			Code             string   `json:"code"`
+			FrameworkSlug    string   `json:"framework_slug"`
+			FrameworkVersion string   `json:"framework_version"`
+			Strength         float64  `json:"strength"`
+			Coverage         *float64 `json:"coverage"`
+		} `json:"requirements"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\nbody=%s", err, body)
+	}
+	if len(got.Requirements) == 0 {
+		t.Fatal("expected at least one requirement row")
+	}
+	sawCC66 := false
+	for _, r := range got.Requirements {
+		if r.Code == "CC6.6" && r.FrameworkSlug == "soc2" && r.FrameworkVersion == "2017" {
+			sawCC66 = true
+			if r.Coverage == nil {
+				t.Fatalf("CC6.6 coverage = null; want strength*pass_rate (strength=%v)", r.Strength)
+			}
+			want := r.Strength * (2.0 / 3.0)
+			if delta := *r.Coverage - want; delta < -1e-9 || delta > 1e-9 {
+				t.Fatalf("CC6.6 coverage = %v; want %v (strength=%v × pass_rate=2/3)", *r.Coverage, want, r.Strength)
+			}
+		}
+	}
+	if !sawCC66 {
+		t.Fatalf("expected CC6.6 in requirements: %+v", got.Requirements)
+	}
+}
+
+// AC-2 branch (b) — out-of-scope row returns `coverage: null`. We seed
+// evaluations (so effectiveness has data), but do NOT activate any
+// framework_scope for SOC 2 — slice 018's `Activated` returns
+// ErrNotFound, the handler treats that as out-of-scope, and every row
+// must report null coverage. Distinguishes "out of scope" from
+// "in-scope but failing".
+func TestControlCoverage_Slice256_OutOfScopeRowReturnsNull(t *testing.T) {
+	ensureCatalog(t)
+	wipeTenantState(t)
+	cid := seedControl(t, tenantA, "IAC-06", "test-mfa-256-oos", "MFA Enforcement (256-oos)")
+
+	// Plenty of effectiveness data so the null can't be confused with
+	// "no data yet".
+	now := time.Now().UTC()
+	seedEvaluation(t, tenantA, cid, "pass", now.Add(-1*time.Hour))
+	seedEvaluation(t, tenantA, cid, "pass", now.Add(-2*time.Hour))
+
+	ts, bearer := setupHTTPServer(t, tenantA)
+	resp, body := get(t, ts, "/v1/controls/"+cid.String()+"/coverage", bearer)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
+	}
+	var got struct {
+		Requirements []struct {
+			Code     string   `json:"code"`
+			Coverage *float64 `json:"coverage"`
+		} `json:"requirements"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\nbody=%s", err, body)
+	}
+	if len(got.Requirements) == 0 {
+		t.Fatal("expected at least one requirement row")
+	}
+	for _, r := range got.Requirements {
+		if r.Coverage != nil {
+			t.Fatalf("requirement %q coverage = %v; want null (no activated framework_scope = out of scope)",
+				r.Code, *r.Coverage)
+		}
+	}
+}
+
+// AC-2 branch (c) — in-scope row with ZERO effectiveness data returns
+// `coverage: null`, NOT 0. This is the anti-criterion P0 contract: a
+// 0 would imply "perfectly failing" (every evaluation returned fail);
+// null is "we don't have enough data to weigh this yet." The DB has an
+// activated framework_scope (so the row is in scope) but no
+// control_evaluations rows in the 30-day window.
+func TestControlCoverage_Slice256_NoEffectivenessDataReturnsNull(t *testing.T) {
+	ensureCatalog(t)
+	wipeTenantState(t)
+	cid := seedControl(t, tenantA, "IAC-06", "test-mfa-256-nodata", "MFA Enforcement (256-nodata)")
+	soc2FVID := soc2017FrameworkVersionID(t)
+	seedActivatedFrameworkScope(t, tenantA, soc2FVID, "SOC 2 — Test Activated (nodata)")
+	// Intentionally seed NO control_evaluations rows.
+
+	ts, bearer := setupHTTPServer(t, tenantA)
+	resp, body := get(t, ts, "/v1/controls/"+cid.String()+"/coverage", bearer)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
+	}
+	var got struct {
+		Requirements []struct {
+			Code             string   `json:"code"`
+			FrameworkSlug    string   `json:"framework_slug"`
+			FrameworkVersion string   `json:"framework_version"`
+			Coverage         *float64 `json:"coverage"`
+		} `json:"requirements"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\nbody=%s", err, body)
+	}
+	if len(got.Requirements) == 0 {
+		t.Fatal("expected at least one requirement row")
+	}
+	// Even SOC 2 — which is in-scope — must report null because the
+	// control has no evaluations to weight against. Anti-criterion: a
+	// zero would be a lie about the operational record.
+	sawSOC2 := false
+	for _, r := range got.Requirements {
+		if r.FrameworkSlug == "soc2" && r.FrameworkVersion == "2017" {
+			sawSOC2 = true
+			if r.Coverage != nil {
+				t.Fatalf("SOC2 row coverage = %v; want null (no effectiveness data must NOT degrade to 0)", *r.Coverage)
+			}
+		}
+	}
+	if !sawSOC2 {
+		t.Fatalf("expected a SOC 2 row in requirements: %+v", got.Requirements)
+	}
+}
+
+// AC-1 wire-shape guard: the `coverage` field is ALWAYS emitted on the
+// /v1/controls/{id}/coverage response — never omitted. JSON nulls
+// must render as the explicit key `"coverage": null` so frontend
+// destructuring is stable (a missing key vs an explicit null is a real
+// shape difference in TS strict mode).
+func TestControlCoverage_Slice256_CoverageKeyAlwaysEmitted(t *testing.T) {
+	ensureCatalog(t)
+	wipeTenantState(t)
+	cid := seedControl(t, tenantA, "IAC-06", "test-mfa-256-keypresent", "MFA Enforcement (256-keypresent)")
+
+	ts, bearer := setupHTTPServer(t, tenantA)
+	resp, body := get(t, ts, "/v1/controls/"+cid.String()+"/coverage", bearer)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
+	}
+	// Peek at raw JSON so we can assert key presence even when value is
+	// null. json.Unmarshal-into-struct hides absent keys vs null.
+	var raw struct {
+		Requirements []map[string]json.RawMessage `json:"requirements"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("unmarshal: %v\nbody=%s", err, body)
+	}
+	if len(raw.Requirements) == 0 {
+		t.Fatal("expected requirements")
+	}
+	for i, r := range raw.Requirements {
+		if _, ok := r["coverage"]; !ok {
+			t.Fatalf("requirements[%d] missing `coverage` key; raw=%s", i, string(body))
+		}
+	}
+}
