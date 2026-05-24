@@ -141,6 +141,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/schemas/{kind}/{semver}", Tag: "schemas", Tier: "bearer", Internal: false, Summary: "GET /v1/schemas/{kind}/{semver}"},
 	{Method: "GET", Path: "/v1/scopes/cells", Tag: "scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/scopes/cells"},
 	{Method: "GET", Path: "/v1/scopes/dimensions", Tag: "scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/scopes/dimensions"},
+	{Method: "GET", Path: "/v1/search", Tag: "search", Tier: "bearer", Internal: false, Summary: "GET /v1/search — unified lexical search across controls, risks, and evidence"},
 	{Method: "GET", Path: "/v1/themes", Tag: "risks", Tier: "bearer", Internal: false, Summary: "GET /v1/themes"},
 	{Method: "GET", Path: "/v1/upcoming", Tag: "dashboard", Tier: "bearer", Internal: false, Summary: "GET /v1/upcoming"},
 	{Method: "GET", Path: "/v1/vendors", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "GET /v1/vendors"},
