@@ -28,6 +28,14 @@ export {
   paginationBounds,
   type ListPaginationProps,
 } from "./pagination";
+// Slice 237 — sibling primitive for cursor-paginated wires (the
+// /evidence ledger is the v1 consumer). See `./cursor-pagination.tsx`.
+export {
+  CursorPagination,
+  popCursor,
+  pushCursor,
+  type CursorPaginationProps,
+} from "./cursor-pagination";
 export { ListTable, type ListColumn, type ListTableProps } from "./list-table";
 export {
   ListLoadingSkeleton,
