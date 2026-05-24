@@ -1135,6 +1135,66 @@ export type EffectiveScopeResponse = {
   out_of_scope_reason?: string;
 };
 
+// ===== Slice 253 — per-control policies / risks / history wire shapes =====
+//
+// Row sources are `policyWire`, `riskWire`, and `historyWire` in
+// `internal/api/controldetail/handler.go` (slice 064). Endpoints have
+// shipped on main since slice 064 + slice 106 (the evidence-list peer),
+// but the control-detail view never re-pointed past slice 041's
+// endpoint-pending placeholders — slice 253 wires the four reads.
+
+// policyWire — one row of GET /v1/controls/{id}/policies.
+export type ControlLinkedPolicy = {
+  policy_id: string;
+  title: string;
+  version: string;
+  status: string;
+};
+
+export type ControlLinkedPoliciesResponse = {
+  control_id: string;
+  policies: ControlLinkedPolicy[];
+  count: number;
+};
+
+// riskWire — one row of GET /v1/controls/{id}/risks. The score fields
+// stay opaque JSON blobs by design (canvas §2.2 — the 5x5 case carries
+// `{likelihood, impact}` numerics; FAIR-shaped scores are valid too).
+// The page extracts a display value via `formatResidualScore` from
+// `app/(authed)/risks/filters.ts`.
+export type ControlLinkedRisk = {
+  risk_id: string;
+  title: string;
+  inherent_score: unknown;
+  residual_score: unknown;
+  link_weight: number | null;
+};
+
+export type ControlLinkedRisksResponse = {
+  control_id: string;
+  risks: ControlLinkedRisk[];
+  count: number;
+};
+
+// historyWire — one row of GET /v1/controls/{id}/history. Newest-first,
+// keyset-paginated; we render the most recent ~8 entries on the
+// right-rail audit-log card (this view does NOT paginate — the dedicated
+// History tab/page is the spillover for deeper trails).
+export type ControlHistoryEntry = {
+  evaluated_at: string;
+  scope_cell: string | null;
+  computed_state: string;
+  freshness_status: string;
+  evidence_count: number;
+};
+
+export type ControlHistoryResponse = {
+  control_id: string;
+  history: ControlHistoryEntry[];
+  count: number;
+  next_cursor: string;
+};
+
 // ----- server-side fns (called by the BFF route handlers) -----
 
 export async function getControlCoverage(
@@ -1181,6 +1241,51 @@ export async function getControlEffectiveScope(
     bearer,
   );
   return (await res.json()) as EffectiveScopeResponse;
+}
+
+// Slice 253 — per-control policies / risks / history (server-side).
+//
+// Each thin wrapper rides the same `apiFetch` helper used by the
+// coverage / state / effectiveness / effective-scope reads above, which
+// throws `APIError` on a non-2xx upstream response. The BFF route
+// handlers in `app/api/controls/[id]/{policies,risks,history}/route.ts`
+// catch the error and propagate the upstream status + message.
+
+export async function getControlPolicies(
+  bearer: string,
+  controlID: string,
+): Promise<ControlLinkedPoliciesResponse> {
+  const res = await apiFetch(
+    `/v1/controls/${encodeURIComponent(controlID)}/policies`,
+    bearer,
+  );
+  return (await res.json()) as ControlLinkedPoliciesResponse;
+}
+
+export async function getControlRisks(
+  bearer: string,
+  controlID: string,
+): Promise<ControlLinkedRisksResponse> {
+  const res = await apiFetch(
+    `/v1/controls/${encodeURIComponent(controlID)}/risks`,
+    bearer,
+  );
+  return (await res.json()) as ControlLinkedRisksResponse;
+}
+
+export async function getControlHistory(
+  bearer: string,
+  controlID: string,
+): Promise<ControlHistoryResponse> {
+  // Right-rail audit-log card renders the latest few entries; the
+  // upstream default page size is 50 and that's plenty for the
+  // most-recent view. Deeper paginated history is the dedicated
+  // History tab/page (slice 254 follow-on).
+  const res = await apiFetch(
+    `/v1/controls/${encodeURIComponent(controlID)}/history`,
+    bearer,
+  );
+  return (await res.json()) as ControlHistoryResponse;
 }
 
 // ----- browser-side fns (hit the BFF under /api/controls/**) -----
@@ -1231,6 +1336,37 @@ export function fetchControlEffectiveScope(
   return bffControlFetch<EffectiveScopeResponse>(
     `/api/controls/${encodeURIComponent(controlID)}/effective-scope` +
       `?framework_version=${encodeURIComponent(frameworkVersionID)}`,
+  );
+}
+
+// Slice 253 — browser-side fetchers for the per-control policies /
+// risks / history reads. Each rides the existing `bffControlFetch`
+// helper so APIError surfaces with the upstream status; the
+// control-detail page's `classifyControlDetailError` already routes
+// 401 / 404 / other in a single discriminator and the new queries
+// reuse it for free.
+
+export function fetchControlPolicies(
+  controlID: string,
+): Promise<ControlLinkedPoliciesResponse> {
+  return bffControlFetch<ControlLinkedPoliciesResponse>(
+    `/api/controls/${encodeURIComponent(controlID)}/policies`,
+  );
+}
+
+export function fetchControlRisks(
+  controlID: string,
+): Promise<ControlLinkedRisksResponse> {
+  return bffControlFetch<ControlLinkedRisksResponse>(
+    `/api/controls/${encodeURIComponent(controlID)}/risks`,
+  );
+}
+
+export function fetchControlHistory(
+  controlID: string,
+): Promise<ControlHistoryResponse> {
+  return bffControlFetch<ControlHistoryResponse>(
+    `/api/controls/${encodeURIComponent(controlID)}/history`,
   );
 }
 
