@@ -119,7 +119,9 @@ export function ControlsCountBadge() {
   return (
     <span
       data-testid="sidebar-controls-count"
-      className={`${BADGE_BASE} text-muted-foreground ${pulseClass(q.isFetching)}`}
+      className={`${BADGE_BASE} text-muted-foreground ${pulseClass(
+        q.isFetching,
+      )}`}
       aria-label={`${count} controls`}
     >
       {count}
@@ -144,7 +146,9 @@ export function RisksCountBadge() {
   return (
     <span
       data-testid="sidebar-risks-count"
-      className={`${BADGE_BASE} text-rose-600 dark:text-rose-400 ${pulseClass(q.isFetching)}`}
+      className={`${BADGE_BASE} text-rose-600 dark:text-rose-400 ${pulseClass(
+        q.isFetching,
+      )}`}
       aria-label={`${count} high-severity risks`}
     >
       {count}

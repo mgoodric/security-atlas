@@ -162,10 +162,10 @@ literal in the `FixtureName` union).
 **Spec coverage added:**
 
 - `AC-1 (slice 214): Controls count badge appears on /audits via
-  shared sidebar` — proves end-to-end wiring + shared-shell
+shared sidebar` — proves end-to-end wiring + shared-shell
   coverage.
 - `P0-214-1 (slice 214): Controls badge consumes the existing
-  /api/controls BFF` — proves the anti-criterion.
+/api/controls BFF` — proves the anti-criterion.
 
 **What this resolves:** spec AC-5 reads "Playwright e2e spec confirms
 the badges appear on `/audits` (proxy for 'shared shell shows
