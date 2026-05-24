@@ -294,23 +294,15 @@ test.describe("control detail tab strip (slice 254)", () => {
     await page.goto(`/controls/${seeded.controlId}`);
     // Wait for the Overview panel to mount as a proxy for "all
     // initial queries resolved" — the chips read from those payloads.
-    await expect(
-      page.getByTestId("control-tab-panel-overview"),
-    ).toBeVisible();
+    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible();
 
     // 3 evidence records · 2 mapped requirements · 12 effective-scope
     // cells (one framework_version in the mock) · 2 policies · 1
     // risk. History has no chip per the mockup.
-    await expect(
-      page.getByTestId("control-tab-evidence-chip"),
-    ).toHaveText("3");
-    await expect(
-      page.getByTestId("control-tab-mappings-chip"),
-    ).toHaveText("2");
+    await expect(page.getByTestId("control-tab-evidence-chip")).toHaveText("3");
+    await expect(page.getByTestId("control-tab-mappings-chip")).toHaveText("2");
     await expect(page.getByTestId("control-tab-scope-chip")).toHaveText("12");
-    await expect(
-      page.getByTestId("control-tab-policies-chip"),
-    ).toHaveText("2");
+    await expect(page.getByTestId("control-tab-policies-chip")).toHaveText("2");
     await expect(page.getByTestId("control-tab-risks-chip")).toHaveText("1");
   });
 
@@ -319,12 +311,8 @@ test.describe("control detail tab strip (slice 254)", () => {
   }) => {
     await page.goto(`/controls/${seeded.controlId}`);
     // Initial URL has no `tab` param (Overview is the default — D2).
-    await expect(page).toHaveURL(
-      new RegExp(`/controls/${seeded.controlId}$`),
-    );
-    await expect(
-      page.getByTestId("control-tab-panel-overview"),
-    ).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/controls/${seeded.controlId}$`));
+    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible();
 
     // Click Evidence — URL updates, Evidence panel renders.
     await page.getByTestId("control-tab-evidence").click();
@@ -338,12 +326,8 @@ test.describe("control detail tab strip (slice 254)", () => {
 
     // Click Overview — param is stripped (canonical URL stays clean).
     await page.getByTestId("control-tab-overview").click();
-    await expect(page).toHaveURL(
-      new RegExp(`/controls/${seeded.controlId}$`),
-    );
-    await expect(
-      page.getByTestId("control-tab-panel-overview"),
-    ).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/controls/${seeded.controlId}$`));
+    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible();
   });
 
   test("AC-8: refresh on a tab-deep-linked URL lands on that tab", async ({
@@ -354,9 +338,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     // The Policies panel renders without first showing Overview — the
     // URL is the source of truth.
     await expect(page.getByTestId("policies-tab-panel")).toBeVisible();
-    await expect(
-      page.getByTestId("control-tab-panel-overview"),
-    ).toHaveCount(0);
+    await expect(page.getByTestId("control-tab-panel-overview")).toHaveCount(0);
     await expect(page.getByTestId("control-tab-policies")).toHaveAttribute(
       "aria-selected",
       "true",
@@ -376,9 +358,7 @@ test.describe("control detail tab strip (slice 254)", () => {
   }) => {
     await page.goto(`/controls/${seeded.controlId}?tab=foo`);
     // Default tab is Overview when the param is unrecognised.
-    await expect(
-      page.getByTestId("control-tab-panel-overview"),
-    ).toBeVisible();
+    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible();
     await expect(page.getByTestId("control-tab-overview")).toHaveAttribute(
       "aria-selected",
       "true",
@@ -391,9 +371,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     await page.goto(`/controls/${seeded.controlId}`);
     // Wait until the Overview panel is mounted so we know the strip
     // is rendered and the focus order is stable.
-    await expect(
-      page.getByTestId("control-tab-panel-overview"),
-    ).toBeVisible();
+    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible();
 
     // Focus the first tab explicitly. From there, six Tab presses
     // walk through the remaining six tab buttons in mockup order.
