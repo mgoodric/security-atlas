@@ -122,6 +122,30 @@ func (s *Store) EvidencePaged(ctx context.Context, p evidenceListPage) ([]dbx.Li
 	return rows, err
 }
 
+// CountEvidenceForTenant reads the tenant-wide ledger row count, ignoring
+// any filter predicates. Slice 236 — the `/evidence` page surfaces this as
+// the M in `Showing N of M records` so the operator can distinguish
+// "filters are narrowing the view" from "the ledger is empty tenant-wide".
+//
+// The count rides on the same RLS-bound pool the list reads use (canvas
+// invariant #6); the underlying sqlc query
+// (`CountEvidenceRecordsByTenant`) re-asserts the tenant_id predicate as
+// defense-in-depth. The append-only invariant means the count is monotonic-
+// non-decreasing tenant-wide; staleness is not a concern for the read.
+//
+// Per slice 236 P0-236-2, the count is the LEDGER total — it does NOT
+// apply the filter predicates the list page applies. Confusing the two is
+// the bug class this slice exists to close.
+func (s *Store) CountEvidenceForTenant(ctx context.Context) (int64, error) {
+	var total int64
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var qerr error
+		total, qerr = q.CountEvidenceRecordsByTenant(ctx, pgUUID(tenantID))
+		return qerr
+	})
+	return total, err
+}
+
 // PoliciesForControl reads every policy whose linked_control_ids array
 // contains controlID. The policy library is small per the canvas v1 scope,
 // so this read is not paginated.

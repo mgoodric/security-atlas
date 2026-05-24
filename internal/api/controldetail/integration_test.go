@@ -791,3 +791,142 @@ func TestEvidence_PerControlBackwardsCompatibleWithResult(t *testing.T) {
 		t.Fatalf("per-control row result = %q, want fail", got)
 	}
 }
+
+// ===== Slice 236 — `total` (tenant-wide ledger count) surfacing =====
+
+// totalFromBody decodes the slice-236 `total` field, which JSON unmarshals
+// to a float64 via the generic map[string]any path. Returns -1 if the
+// field is missing or not numeric so the caller can fail with a clear
+// message rather than a confusing nil-deref.
+func totalFromBody(body map[string]any) int64 {
+	v, ok := body["total"]
+	if !ok {
+		return -1
+	}
+	f, ok := v.(float64)
+	if !ok {
+		return -1
+	}
+	return int64(f)
+}
+
+// ISC-236-1: the tenant-wide /v1/evidence response carries `total`,
+// equal to the tenant-wide row count of evidence_records, independent
+// of the [since, until] window and any filter predicates. Seed three
+// rows spread across the window boundary; query with a 30-day window
+// that excludes one; assert `total` still reports 3.
+func TestEvidence_TenantWideTotalIgnoresFilters(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	a := seedControl(t, admin, tenant)
+	// In-window rows.
+	seedEvidenceWithResult(t, admin, tenant, a, "k.v1", "pass", time.Now().UTC().Add(-1*24*time.Hour))
+	seedEvidenceWithResult(t, admin, tenant, a, "k.v1", "fail", time.Now().UTC().Add(-2*24*time.Hour))
+	// Out-of-window row (older than 30 days).
+	seedEvidenceWithResult(t, admin, tenant, a, "k.v1", "pass", time.Now().UTC().Add(-45*24*time.Hour))
+
+	resp, body := get(t, env, "/v1/evidence?result=pass")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200; body %v", resp.StatusCode, body)
+	}
+	// `evidence` is the filtered window (pass-only, in-window) — one row.
+	rows, _ := body["evidence"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 filter-narrowed row, got %d", len(rows))
+	}
+	// `total` is the tenant-wide ledger total — three rows, ignoring
+	// both the window and the result filter (P0-236-2).
+	if got := totalFromBody(body); got != 3 {
+		t.Fatalf("total = %d, want 3 (filter / window must not apply to total)", got)
+	}
+}
+
+// ISC-236-2: the per-control /v1/evidence?control_id=… path ALSO carries
+// `total`, equal to the tenant-wide ledger count — NOT the count for the
+// specific control. (Confusing the two is the bug class slice 236 closes;
+// the per-control wire shape is consistent with the tenant-wide wire
+// shape so the frontend can render a single meta-line formatter.)
+func TestEvidence_PerControlTotalIsTenantWide(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	a := seedControl(t, admin, tenant)
+	b := seedControl(t, admin, tenant)
+	// Two rows for control A, one row for control B — tenant total = 3.
+	seedEvidenceWithResult(t, admin, tenant, a, "k.v1", "pass", time.Now().UTC().Add(-1*24*time.Hour))
+	seedEvidenceWithResult(t, admin, tenant, a, "k.v1", "fail", time.Now().UTC().Add(-2*24*time.Hour))
+	seedEvidenceWithResult(t, admin, tenant, b, "k.v1", "pass", time.Now().UTC().Add(-3*24*time.Hour))
+
+	resp, body := get(t, env, "/v1/evidence?control_id="+a.String())
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200; body %v", resp.StatusCode, body)
+	}
+	// `evidence` is per-control A — two rows.
+	rows, _ := body["evidence"].([]any)
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 per-control rows, got %d", len(rows))
+	}
+	// `total` is tenant-wide — three rows.
+	if got := totalFromBody(body); got != 3 {
+		t.Fatalf("total = %d, want 3 (per-control wire shape must surface tenant-wide total)", got)
+	}
+}
+
+// ISC-236-3: `total` is RLS-bound. Tenant A seeds three rows; tenant B's
+// bearer must observe `total == 0` because RLS excludes A's rows. This is
+// the critical security gate for slice 236 — the COUNT(*) query rides
+// the same RLS-bound pool as the list read; the regression-pin matches
+// the slice 106 list-RLS regression-pin (ISC-RLS for the tenant-wide
+// optional-control_id path).
+func TestEvidence_TotalRLSIsolation(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+
+	tenantA := freshTenant(t, admin)
+	tenantB := freshTenant(t, admin)
+
+	ctrlA := seedControl(t, admin, tenantA)
+	seedEvidenceWithResult(t, admin, tenantA, ctrlA, "k.v1", "pass", time.Now().UTC().Add(-1*24*time.Hour))
+	seedEvidenceWithResult(t, admin, tenantA, ctrlA, "k.v1", "fail", time.Now().UTC().Add(-2*24*time.Hour))
+	seedEvidenceWithResult(t, admin, tenantA, ctrlA, "k.v1", "inconclusive", time.Now().UTC().Add(-3*24*time.Hour))
+
+	envB := testServer(t, app, tenantB)
+
+	resp, body := get(t, envB, "/v1/evidence")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200; body %v", resp.StatusCode, body)
+	}
+	rows, _ := body["evidence"].([]any)
+	if len(rows) != 0 {
+		t.Fatalf("RLS REGRESSION (list): tenant B saw %d cross-tenant rows", len(rows))
+	}
+	if got := totalFromBody(body); got != 0 {
+		t.Fatalf("RLS REGRESSION (count): tenant B saw total=%d, want 0 — slice 236 COUNT(*) bypassed RLS", got)
+	}
+}
+
+// ISC-236-4: on a fresh tenant the wire surfaces `total == 0` — the
+// empty-ledger sentinel the frontend renders as "No records in ledger
+// yet". Pinning this branch separately from the RLS-isolation test
+// (which also asserts total==0) keeps the assertion legible: this is
+// the "tenant exists, no rows" wire shape rather than the "tenant B
+// has rows but RLS excludes them" wire shape.
+func TestEvidence_TotalZeroOnFreshTenant(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	resp, body := get(t, env, "/v1/evidence")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200; body %v", resp.StatusCode, body)
+	}
+	if got := totalFromBody(body); got != 0 {
+		t.Fatalf("fresh tenant total = %d, want 0", got)
+	}
+}

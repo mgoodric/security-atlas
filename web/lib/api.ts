@@ -2238,6 +2238,14 @@ export type EvidenceListResponse = {
   control_id: string;
   evidence: EvidenceRecord[];
   count: number;
+  /**
+   * Slice 236: tenant-wide ledger row count (ignores filter predicates).
+   * Surfaced so the `/evidence` page can render
+   * `Showing N of M records` and disambiguate "ledger is empty" from
+   * "my filters narrowed to zero". The query runs through the same
+   * RLS-bound pool — tenant isolation is preserved.
+   */
+  total: number;
   next_cursor: string;
 };
 

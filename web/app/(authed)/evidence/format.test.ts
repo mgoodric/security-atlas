@@ -5,8 +5,10 @@ import { describe, expect, test } from "vitest";
 import {
   HASH_PREFIX_LEN,
   hashPrefix,
+  ledgerSubtitleSuffix,
   observedAtLabel,
   prettyJSON,
+  recordCountMeta,
   scopeLabel,
   sourceSummary,
 } from "./format";
@@ -91,5 +93,75 @@ describe("observedAtLabel", () => {
     expect(observedAtLabel("2026-05-16T09:42:00Z")).toBe(
       "2026-05-16T09:42:00Z",
     );
+  });
+});
+
+// ---- Slice 236 — record-count meta + ledger subtitle suffix ----
+//
+// The /evidence page surfaces a tenant-wide ledger total alongside the
+// filtered-window row count so the operator can distinguish "filters
+// narrowed the view" from "the ledger is empty". The three branches
+// the formatter has to cover are the same three operator-confusion
+// modes documented in `docs/issues/236-…`.
+
+describe("recordCountMeta", () => {
+  test("renders empty-ledger sentinel when total is zero", () => {
+    // Bug class the slice closes: a fresh tenant lands on /evidence,
+    // sees "Showing 0 records", and cannot tell whether the ledger is
+    // empty tenant-wide or their filters narrowed to zero.
+    expect(recordCountMeta(0, 0)).toBe("No records in ledger yet");
+  });
+
+  test("renders empty-ledger sentinel even if shown is non-zero (defensive)", () => {
+    // The wire shape can never report shown > 0 when total === 0
+    // (ledger total >= filtered count by construction), but the
+    // formatter guards against the contradictory input by falling
+    // through to the empty-ledger branch.
+    expect(recordCountMeta(3, 0)).toBe("No records in ledger yet");
+  });
+
+  test("renders 'Showing N of M records' when filters narrow the view", () => {
+    expect(recordCountMeta(12, 14712)).toBe("Showing 12 of 14712 records");
+  });
+
+  test("renders 'Showing 0 of M records' when filters narrow to zero on a non-empty ledger", () => {
+    // Distinct from the empty-ledger case: the operator can read this
+    // as "your filters excluded every record — try widening them".
+    expect(recordCountMeta(0, 47)).toBe("Showing 0 of 47 records");
+  });
+
+  test("renders 'Showing N of N records' when the filter matches the entire ledger", () => {
+    // No-filter / wide-window case on a small ledger: N === M.
+    expect(recordCountMeta(5, 5)).toBe("Showing 5 of 5 records");
+  });
+
+  test("clamps negative inputs to zero defensively", () => {
+    // The wire shape never returns negative counts, but a downstream
+    // bug should not surface a misleading "Showing -1 of -2 records".
+    expect(recordCountMeta(-1, -2)).toBe("No records in ledger yet");
+  });
+});
+
+describe("ledgerSubtitleSuffix", () => {
+  test("renders 'append-only · M records' when the ledger has rows", () => {
+    expect(ledgerSubtitleSuffix(14712)).toBe("append-only · 14712 records");
+  });
+
+  test("renders empty string when the ledger is empty", () => {
+    // The empty-ledger signal is carried by the meta row's
+    // "No records in ledger yet"; the subtitle stays clean.
+    expect(ledgerSubtitleSuffix(0)).toBe("");
+  });
+
+  test("clamps negative inputs to zero (renders empty string)", () => {
+    expect(ledgerSubtitleSuffix(-3)).toBe("");
+  });
+
+  test("renders 'append-only · 1 records' for a single-row ledger", () => {
+    // Pluralisation is intentionally NOT done here — "1 records" is
+    // mildly awkward but the slice 236 spec defaults to the mockup
+    // string shape, and pluralisation would diverge from the design
+    // doc. A future slice can add it consistently across the page.
+    expect(ledgerSubtitleSuffix(1)).toBe("append-only · 1 records");
   });
 });
