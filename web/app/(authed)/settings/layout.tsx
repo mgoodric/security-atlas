@@ -135,7 +135,7 @@ export default async function SettingsLayout({
   // value already populated -- the page's first paint reads it as
   // initialData and ships the correct admin/non-admin variant.
   await queryClient.prefetchQuery({
-    queryKey: [...SETTINGS_SESSION_ME_QUERY_KEY],
+    queryKey: SETTINGS_SESSION_ME_QUERY_KEY,
     queryFn: fetchSessionMeServerSide,
   });
 

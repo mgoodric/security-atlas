@@ -84,9 +84,13 @@ export const NON_ADMIN_SESSION_ME: SessionMe = { is_admin: false };
  * registers under (see page.tsx line ~179:
  * `useQuery({ queryKey: ["settings-session-me"], queryFn: getSessionMe })`).
  *
- * Exported as a const so the layout's `prefetchQuery` cannot drift
- * from the page's `useQuery` -- if the page renames the key, this
- * export's call sites force a typecheck failure rather than a silent
- * cache miss (which would re-introduce the slice-249 flicker).
+ * The page intentionally hard-codes the key inline rather than
+ * importing it from here -- importing a const into a `"use client"`
+ * module that is otherwise pure JSX adds a (tiny) bundle-graph edge
+ * for no behavioural win. The cross-module drift guard is the
+ * runtime equality assertion in admin-prefetch.test.ts:
+ * `expect(SETTINGS_SESSION_ME_QUERY_KEY).toEqual(["settings-session-me"])`
+ * -- if the page renames the key, the test fails and the developer
+ * sees the binding break before merge.
  */
 export const SETTINGS_SESSION_ME_QUERY_KEY = ["settings-session-me"] as const;
