@@ -51,10 +51,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import {
-  fetchDashboardFreshness,
-  type FreshnessReport,
-} from "@/lib/api";
+import { fetchDashboardFreshness, type FreshnessReport } from "@/lib/api";
 
 // ---------------------------------------------------------------------
 // Pure helpers — unit-tested in `dashboard-header-subtitle.test.ts`.

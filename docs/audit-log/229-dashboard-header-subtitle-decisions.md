@@ -37,11 +37,11 @@ from "the freshness response's most-recent `received_at`" and notes
 that "slice 016 added this on the freshness read-model". I verified
 against the v1 wire shape on `main`:
 
-| Source                                                    | Field exposed today                                 |
-| --------------------------------------------------------- | --------------------------------------------------- |
-| `internal/freshness/freshness.go` `ControlFreshness` struct | `RefreshedAt time.Time` ✅                            |
+| Source                                                                | Field exposed today                                         |
+| --------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `internal/freshness/freshness.go` `ControlFreshness` struct           | `RefreshedAt time.Time` ✅                                  |
 | `internal/api/freshnessdrift/handlers.go` `Freshness()` HTTP response | `{bucket, buckets[], total, total_stale}` — NO timestamp ❌ |
-| `web/lib/api.ts` `FreshnessReport` TypeScript shape        | `{bucket, buckets[], total, total_stale}` — NO timestamp ❌ |
+| `web/lib/api.ts` `FreshnessReport` TypeScript shape                   | `{bucket, buckets[], total, total_stale}` — NO timestamp ❌ |
 
 The data IS in the database (the underlying `evidence_freshness` rows
 each have a `refreshed_at` column populated by the slice-016
@@ -170,11 +170,11 @@ the omitted timestamp would be defensive overreach.
 
 ## Verification surfaces
 
-| Surface             | Coverage                                                                                                                          |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| vitest unit         | `web/components/dashboard/dashboard-header-subtitle.test.ts` — 12 cases pinning `computeFreshnessPct` + `formatFreshnessSubtitle` + `formatTenantContext` boundaries (empty, negative, round-to-int, clamp, AC-5 empty-state, AC-1 trim/blank). |
-| Playwright e2e      | `web/e2e/dashboard.spec.ts` — 6 new cases: AC-1 tenant chip via mocked `/api/me/tenants`, AC-2 pct via mocked `/api/dashboard/freshness`, AC-4 "Snapshot unavailable" on aborted freshness, AC-5 "No evidence ingested yet" on total=0, P0-229-2 anti-criterion on "100%", P0-229-1 anti-criterion on the prior marketing copy. |
-| Manual              | not run — chrome-only change, the e2e covers the integrated render across the four state branches (loading is implicit via the skeleton testid path). |
+| Surface        | Coverage                                                                                                                                                                                                                                                                                                                        |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| vitest unit    | `web/components/dashboard/dashboard-header-subtitle.test.ts` — 12 cases pinning `computeFreshnessPct` + `formatFreshnessSubtitle` + `formatTenantContext` boundaries (empty, negative, round-to-int, clamp, AC-5 empty-state, AC-1 trim/blank).                                                                                 |
+| Playwright e2e | `web/e2e/dashboard.spec.ts` — 6 new cases: AC-1 tenant chip via mocked `/api/me/tenants`, AC-2 pct via mocked `/api/dashboard/freshness`, AC-4 "Snapshot unavailable" on aborted freshness, AC-5 "No evidence ingested yet" on total=0, P0-229-2 anti-criterion on "100%", P0-229-1 anti-criterion on the prior marketing copy. |
+| Manual         | not run — chrome-only change, the e2e covers the integrated render across the four state branches (loading is implicit via the skeleton testid path).                                                                                                                                                                           |
 
 ---
 
