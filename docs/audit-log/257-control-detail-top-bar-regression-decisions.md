@@ -14,7 +14,7 @@ during slice 204's UI honesty audit fleet (finding F-204-C-5) to close
 three shell-level chrome parity gaps:
 
 1. **Audit-period banner pill.** Amber pill reading `<framework> ·
-   <period name> in progress` with a pulsing amber dot.
+<period name> in progress` with a pulsing amber dot.
 2. **Tenant breadcrumb.** Read-only `<tenant> > Controls > <control title>`
    wayfinding chip in the topbar left side. (The slice spec proposed
    a three-segment breadcrumb with the control title as the leaf; the
@@ -75,15 +75,15 @@ The slice spec was authored before slices 213 and 223 landed. Every
 acceptance criterion the spec names has a satisfying shipping
 artifact on `main`:
 
-| Slice 257 AC                                                                 | Shipping artifact                                                                                                            | Verdict                                                                                |
-| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| AC-1: Tenant breadcrumb chip rendered in topbar                              | `<Breadcrumb />` renders `<tenant> > <page>` after the brand mark (slice 223)                                                | Equivalent (two-segment vs three-segment — see D4)                                     |
-| AC-2: Breadcrumb leaf for unresolved id reads truncated id                   | Slice 223 breadcrumb renders the SECTION name (`Controls`) for any `/controls/<*>` path, including unresolved ids            | Equivalent in shape, different in copy — slice 152 owns the page-body empty-state copy |
-| AC-3: SOC 2 Type II audit-in-progress amber pill in topbar                   | `InProgressAuditPill` calls `/api/audits` filtered to `status='open'` (slice 213); shipped in shared topbar                  | Equivalent                                                                             |
-| AC-4: User avatar circle with initials + dropdown                            | `UserAvatar` renders display name + initials from `/api/me` (slice 213) in shared topbar                                     | Equivalent                                                                             |
-| AC-5: Chrome work is shared across detail pages (lives in layout, not page)  | All four components mount in `topbar.tsx`, rendered by `(authed)/layout.tsx` for every authed route                          | Equivalent — exceeds AC's "per-detail-page" framing                                    |
+| Slice 257 AC                                                                | Shipping artifact                                                                                                           | Verdict                                                                                |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| AC-1: Tenant breadcrumb chip rendered in topbar                             | `<Breadcrumb />` renders `<tenant> > <page>` after the brand mark (slice 223)                                               | Equivalent (two-segment vs three-segment — see D4)                                     |
+| AC-2: Breadcrumb leaf for unresolved id reads truncated id                  | Slice 223 breadcrumb renders the SECTION name (`Controls`) for any `/controls/<*>` path, including unresolved ids           | Equivalent in shape, different in copy — slice 152 owns the page-body empty-state copy |
+| AC-3: SOC 2 Type II audit-in-progress amber pill in topbar                  | `InProgressAuditPill` calls `/api/audits` filtered to `status='open'` (slice 213); shipped in shared topbar                 | Equivalent                                                                             |
+| AC-4: User avatar circle with initials + dropdown                           | `UserAvatar` renders display name + initials from `/api/me` (slice 213) in shared topbar                                    | Equivalent                                                                             |
+| AC-5: Chrome work is shared across detail pages (lives in layout, not page) | All four components mount in `topbar.tsx`, rendered by `(authed)/layout.tsx` for every authed route                         | Equivalent — exceeds AC's "per-detail-page" framing                                    |
 | AC-6: Vitest covers breadcrumb composition for the four detail-page routes  | `web/lib/page-names.test.ts` covers `/controls/<id>`, `/risks/hierarchy`, `/audits/new` rollups + `/evidence` first-segment | Equivalent — pure helper coverage is the right vitest unit-test surface                |
-| AC-7: Playwright covers avatar menu, pill click, breadcrumb tenant click     | Slice 213's `audits-header.spec.ts` covers avatar + pill; slice 223's `controls-top-bar.spec.ts` covers breadcrumb            | Partial — none target `/controls/{id}` (detail) for shared-chrome assertion           |
+| AC-7: Playwright covers avatar menu, pill click, breadcrumb tenant click    | Slice 213's `audits-header.spec.ts` covers avatar + pill; slice 223's `controls-top-bar.spec.ts` covers breadcrumb          | Partial — none target `/controls/{id}` (detail) for shared-chrome assertion            |
 
 **The genuine remaining gap** is AC-7's `/controls/{id}`-specific
 assertion. Slice 213's e2e covers `/dashboard` + `/audits` for
@@ -124,8 +124,7 @@ file.
 
 The `audits-header.sql` fixture (slice 213) seeds the audit_periods
 row with `status='open'` and name `SOC 2 Type II · Q2 2026` — drives
-the in-progress pill copy. The `controls-top-bar.sql` fixture (slice
-223) seeds the `tenants` row for `DEMO_TENANT_ID` needed for the
+the in-progress pill copy. The `controls-top-bar.sql` fixture (slice 223) seeds the `tenants` row for `DEMO_TENANT_ID` needed for the
 breadcrumb's left segment. The DEMO_CONTROL_ID is seeded by the base
 `fixtures/walkthroughs/00-seed.sql` (applied by `seedFromFixture` on
 every call), so the path `/controls/${seeded.controlId}` resolves
@@ -214,9 +213,10 @@ non-trivial change (the section-vs-leaf shape is load-bearing across
 every detail page on the site). If a future slice files for the
 three-segment shape, it owns the entire breadcrumb component edit +
 the page-names.ts entry for `/controls/[id]` -> "Controls / {title}"
-+ the equivalent for risks/audits/policies + the four detail-page
-e2e updates. That is a v2+ slice; outside scope for this regression-
-protection slice.
+
+- the equivalent for risks/audits/policies + the four detail-page
+  e2e updates. That is a v2+ slice; outside scope for this regression-
+  protection slice.
 
 **What this resolves:** the AC-1 shape mismatch is documented as
 "shipped shape supersedes proposed shape" rather than left as a
