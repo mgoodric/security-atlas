@@ -109,6 +109,12 @@ import {
 } from "./profile-derive";
 import { isAnyKind, kindsLabel } from "./allowed-kinds-display";
 import {
+  PROFILE_CREDENTIAL_BANNER_BODY,
+  PROFILE_CREDENTIAL_BANNER_TITLE,
+  credentialBearerLabel,
+} from "./profile-bearer-display";
+import { isCredentialBearer } from "./credential-bearer";
+import {
   CREDENTIAL_BEARER_BANNER_BODY,
   CREDENTIAL_BEARER_BANNER_TITLE,
   notificationsRenderMode,
@@ -229,12 +235,29 @@ function ProfileSection({ isAdmin }: { isAdmin: boolean }) {
   //     curated nine-zone list in `profile-derive.ts` covers the v1
   //     primary-user persona. Zones outside the list still render
   //     correctly when the backend reports them (synthetic option).
+  //
+  // Slice 250 (D1: Option 1 -- banner + degraded display): when /v1/me
+  // returns the synthetic-credential shape (`isCredentialBearer`
+  // === true), render an honesty banner above a *degraded* row layout:
+  //   - The hero block's initials avatar is replaced with a generic
+  //     "API key" label (the literal "API" or "AP" initials are
+  //     meaningless for a credential).
+  //   - The email row drops the "(read-only · managed by IdP)" caveat
+  //     (credentials are not IdP-backed) and surfaces "(not applicable)".
+  //   - The time-zone editor is hidden -- PATCH /v1/me would 404 for a
+  //     credential bearer per `internal/api/me/profile.go:136`. Showing
+  //     a control that 404s on submit is dishonest.
+  //   - The tenant-role row stays unchanged (the role IS authoritative
+  //     for the credential's authz).
+  // The OIDC-human-user branch is byte-identical to the slice-154
+  // rendering (P0-250-3, AC-3).
   const qc = useQueryClient();
   const profileQuery = useQuery({
     queryKey: ["settings-me-profile"],
     queryFn: getMe,
   });
   const profile: MeProfile | undefined = profileQuery.data;
+  const isCredential = isCredentialBearer(profile);
   const tzMut = useMutation({
     mutationFn: (time_zone: string) => patchMe({ time_zone }),
     onSuccess: () => {
@@ -246,8 +269,9 @@ function ProfileSection({ isAdmin }: { isAdmin: boolean }) {
       <CardHeader>
         <CardTitle>Profile</CardTitle>
         <CardDescription>
-          Synced from your OIDC provider on sign-in. Display name and email are
-          managed by your IdP.
+          {isCredential
+            ? "Describes the credential currently signed in. Personal profile fields require an identity-provider sign-in."
+            : "Synced from your OIDC provider on sign-in. Display name and email are managed by your IdP."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -260,6 +284,11 @@ function ProfileSection({ isAdmin }: { isAdmin: boolean }) {
               {(profileQuery.error as Error).message}
             </AlertDescription>
           </Alert>
+        ) : isCredential ? (
+          <CredentialBearerProfile
+            profile={profile as MeProfile}
+            isAdmin={isAdmin}
+          />
         ) : (
           <>
             <div
@@ -356,6 +385,106 @@ function ProfileSection({ isAdmin }: { isAdmin: boolean }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// CredentialBearerProfile renders the Profile section's degraded
+// branch (slice 250 D1: Option 1). The OIDC-human-user branch above is
+// preserved byte-identical -- this branch is additive.
+//
+// Layout differences vs. the OIDC-human-user branch:
+//   - Banner (Alert) above the rows: title + body identifying the
+//     bearer as a credential. Tone-discipline copy lives in
+//     `./profile-bearer-display.ts`.
+//   - Hero block: instead of two-letter initials, render a generic
+//     "AK" badge (for API Key) + the `credentialBearerLabel` ("API key
+//     …<last4>" or just "API key" for the degenerate sample).
+//   - Email row: "(not applicable)" instead of "(unset)" + IdP caveat.
+//   - Time-zone row: omitted entirely. PATCH /v1/me 404s for credentials
+//     (see `internal/api/me/profile.go:136`); rendering an editor that
+//     fails on submit would be dishonest.
+//   - Tenant-role row: unchanged.
+function CredentialBearerProfile({
+  profile,
+  isAdmin,
+}: {
+  profile: MeProfile;
+  isAdmin: boolean;
+}) {
+  return (
+    <>
+      <Alert data-testid="settings-profile-credential-banner">
+        <AlertTitle data-testid="settings-profile-credential-banner-title">
+          {PROFILE_CREDENTIAL_BANNER_TITLE}
+        </AlertTitle>
+        <AlertDescription data-testid="settings-profile-credential-banner-body">
+          {PROFILE_CREDENTIAL_BANNER_BODY}
+        </AlertDescription>
+      </Alert>
+      <div
+        className="mb-4 flex items-center gap-4"
+        data-testid="settings-profile-hero"
+      >
+        <div
+          className="flex h-14 w-14 items-center justify-center rounded-full bg-muted text-lg font-semibold text-muted-foreground"
+          aria-hidden="true"
+          data-testid="settings-profile-credential-badge"
+        >
+          AK
+        </div>
+        <div>
+          <div
+            className="text-sm font-medium text-foreground"
+            data-testid="settings-profile-credential-label"
+          >
+            {credentialBearerLabel(profile.display_name)}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Credential identifier &middot; not a user account
+          </div>
+        </div>
+      </div>
+      <dl className="grid grid-cols-3 gap-x-4 gap-y-3 text-sm">
+        <dt className="text-muted-foreground">Display name</dt>
+        <dd
+          className="col-span-2 text-foreground"
+          data-testid="settings-profile-display-name"
+        >
+          {credentialBearerLabel(profile.display_name)}
+          <span className="ml-2 text-xs text-muted-foreground">
+            (credential identifier)
+          </span>
+        </dd>
+        <dt className="text-muted-foreground">Email</dt>
+        <dd
+          className="col-span-2 text-muted-foreground"
+          data-testid="settings-profile-credential-email"
+        >
+          (not applicable &middot; credentials are not backed by a user)
+        </dd>
+        <dt className="text-muted-foreground">Tenant role</dt>
+        <dd
+          className="col-span-2 flex flex-wrap items-center gap-1.5"
+          data-testid="settings-profile-roles"
+        >
+          {isAdmin ? (
+            <Badge data-testid="settings-profile-role-admin">admin</Badge>
+          ) : (
+            <Badge variant="outline" data-testid="settings-profile-role-user">
+              user
+            </Badge>
+          )}
+          <RolesTail roles={profile.roles} isAdmin={isAdmin} />
+        </dd>
+        {/*
+         * Time-zone editor intentionally omitted for credential bearers:
+         * PATCH /v1/me 404s for credentials (internal/api/me/profile.go:136).
+         * The picker is hidden rather than shown-disabled because there is
+         * nothing to set -- the credential's time_zone field is always null
+         * on the wire.
+         */}
+      </dl>
+    </>
   );
 }
 
@@ -832,15 +961,14 @@ function NotificationsSection() {
     // Skip the prefs round-trip for credential bearers -- we already
     // know the platform returns the documented 404 + the section won't
     // render the rows. Saves a guaranteed-error fetch on every settings
-    // page load for credential sign-ins.
+    // page load for credential sign-ins. Slice 250 D2 / slice 251 D6
+    // follow-up: the inline duplicate detection has been replaced with
+    // the shared `isCredentialBearer` helper now that slice 250 lifted
+    // it to `./credential-bearer.ts`.
     enabled:
       !profileQuery.isLoading &&
       !profileQuery.error &&
-      !(
-        profileQuery.data &&
-        (profileQuery.data.idp_subject ?? "").trim() === "" &&
-        (profileQuery.data.email ?? "").trim() === ""
-      ),
+      !isCredentialBearer(profileQuery.data),
   });
   const patchMut = useMutation({
     mutationFn: patchMyPreferences,
