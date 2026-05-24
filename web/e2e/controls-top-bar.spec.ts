@@ -209,9 +209,15 @@ test.describe("topbar header chrome (slice 223)", () => {
     await page.goto("/controls");
     const input = page.getByTestId("global-search-input");
     await input.click();
+    // Use waitForRequest so the test waits for the debounced fetch
+    // explicitly instead of snapshotting after a popover-visible check
+    // (slice 274 lesson: auto-waiting beats snapshot assertions on
+    // SSR-hydrated surfaces with debounce semantics).
+    const reqPromise = page.waitForRequest("**/api/search**", {
+      timeout: 10_000,
+    });
     await input.fill("zzznomatch");
-    // Wait for the debounced fetch to fire.
-    await expect(page.getByTestId("global-search-popover")).toBeVisible();
+    await reqPromise;
     expect(searchRequests.length).toBeGreaterThan(0);
     // Every recorded request hits /api/search — the BFF is the only
     // routing surface for search.
