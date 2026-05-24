@@ -48,7 +48,7 @@ returns 0; the test asserts `> 0`. The seeded `api_keys` rows
 ### What ships in this slice
 
 - **Investigation**: reproduce locally (`cd web && npm run test:e2e
-  settings.spec.ts`); capture the actual `/api/admin/credentials`
+settings.spec.ts`); capture the actual `/api/admin/credentials`
   response and compare against the seeded rows.
 - **Root cause + fix**: most likely a seed-fixture extension (add
   missing column) or a Playwright worker-isolation directive on
@@ -89,6 +89,7 @@ no auth or data-path changes.
 ## Notes for the implementing agent
 
 The fastest path is probably:
+
 1. `cd web && npm run test:e2e settings.spec.ts` locally against a
    fresh docker-compose stack to reproduce.
 2. Add `console.log` of the BFF response in the AC-9 test to see
