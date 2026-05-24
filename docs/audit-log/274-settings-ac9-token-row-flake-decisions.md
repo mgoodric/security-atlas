@@ -38,12 +38,12 @@ The escalation pattern matches: post-slice-249 + small page-render overhead from
 
 ## D-274-2 — Empirical disproof of the 4 spec hypotheses
 
-| # | Spec hypothesis | Empirical result |
-|---|---|---|
-| H1 | Fixture cross-contamination: `audits-header.sql` + `settings.sql` share user UUID `44444444-...-440001` via `ON CONFLICT DO NOTHING`; whichever wins clobbers the user-row columns that drive `/v1/me` / `/v1/admin/credentials` projection | FALSE. Applied `audits-header.sql` BEFORE `settings.sql` against a fresh DB (slice 274 worktree, pg-274 docker, all migrations through `20260522020000`). The user row's `idp_issuer`/`idp_subject`/`display_name`/`email` reflect the audits-header values (Sam Operator + urn:atlas:test); BOTH api_keys rows are present with `tenant_id = 00000000-...-d3a0`, `revoked_at IS NULL`. `ListAPIKeysByTenant` (`internal/db/queries/api_keys.sql:30-36`) filters ONLY on `tenant_id = $1 AND revoked_at IS NULL` — the user-row clobber is invisible to it. |
-| H2 | Slice 250 `isCredentialBearer` predicate matches the seeded user shape and gates off Tokens | FALSE on two grounds. (a) `isCredentialBearer` (`web/app/(authed)/settings/credential-bearer.ts:62`) returns true only when `idp_subject===""` AND `email===""`. Both seed-fixture variants populate `email` (`settings-e2e-user@example.invalid` or `demo-operator@example.invalid`). (b) Even if the predicate matched, it gates the Profile section (slice 250 D1: banner + degraded display), not the Tokens section. Tokens section gates only on `isAdmin`. |
-| H3 | Playwright workers parallelism: settings.spec races slice 163's rotate-twice spec at AC-11 | FALSE. AC-9 and AC-11 (slice 163 rotate-twice) live in the SAME spec file under ONE `describe`. `playwright.config.ts` sets `fullyParallel: false`, which serialises tests within a file. Cross-file 2-worker parallelism cannot interleave two tests from the same file. |
-| H4 | Schema drift: a recent migration added a column the BFF projection filters on | FALSE. `grep -RIn 'ALTER TABLE api_keys'` across `migrations/sql/`: only the `ENABLE/FORCE ROW LEVEL SECURITY` lines in the slice-034 migration. No column additions since slice 034. |
+| #   | Spec hypothesis                                                                                                                                                                                                                             | Empirical result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| H1  | Fixture cross-contamination: `audits-header.sql` + `settings.sql` share user UUID `44444444-...-440001` via `ON CONFLICT DO NOTHING`; whichever wins clobbers the user-row columns that drive `/v1/me` / `/v1/admin/credentials` projection | FALSE. Applied `audits-header.sql` BEFORE `settings.sql` against a fresh DB (slice 274 worktree, pg-274 docker, all migrations through `20260522020000`). The user row's `idp_issuer`/`idp_subject`/`display_name`/`email` reflect the audits-header values (Sam Operator + urn:atlas:test); BOTH api_keys rows are present with `tenant_id = 00000000-...-d3a0`, `revoked_at IS NULL`. `ListAPIKeysByTenant` (`internal/db/queries/api_keys.sql:30-36`) filters ONLY on `tenant_id = $1 AND revoked_at IS NULL` — the user-row clobber is invisible to it. |
+| H2  | Slice 250 `isCredentialBearer` predicate matches the seeded user shape and gates off Tokens                                                                                                                                                 | FALSE on two grounds. (a) `isCredentialBearer` (`web/app/(authed)/settings/credential-bearer.ts:62`) returns true only when `idp_subject===""` AND `email===""`. Both seed-fixture variants populate `email` (`settings-e2e-user@example.invalid` or `demo-operator@example.invalid`). (b) Even if the predicate matched, it gates the Profile section (slice 250 D1: banner + degraded display), not the Tokens section. Tokens section gates only on `isAdmin`.                                                                                           |
+| H3  | Playwright workers parallelism: settings.spec races slice 163's rotate-twice spec at AC-11                                                                                                                                                  | FALSE. AC-9 and AC-11 (slice 163 rotate-twice) live in the SAME spec file under ONE `describe`. `playwright.config.ts` sets `fullyParallel: false`, which serialises tests within a file. Cross-file 2-worker parallelism cannot interleave two tests from the same file.                                                                                                                                                                                                                                                                                   |
+| H4  | Schema drift: a recent migration added a column the BFF projection filters on                                                                                                                                                               | FALSE. `grep -RIn 'ALTER TABLE api_keys'` across `migrations/sql/`: only the `ENABLE/FORCE ROW LEVEL SECURITY` lines in the slice-034 migration. No column additions since slice 034.                                                                                                                                                                                                                                                                                                                                                                       |
 
 The 4-hypothesis investigation was the right discipline (it ruled out 4 plausible-looking causes), but the actual root cause was a 5th hypothesis not in the spec list: **test-side timing race in a `.count()` snapshot, widened by slice 249's SSR shape change.**
 
@@ -86,6 +86,7 @@ This decision is documented because it is a deliberate AC interpretation; the al
 ## Reproduction methodology (for the next debugger)
 
 1. **DB-level disproof of H1** (fixture cross-contamination):
+
    ```bash
    docker run -d --name security-atlas-pg-274 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
      -e POSTGRES_DB=security_atlas -e POSTGRES_HOST_AUTH_METHOD=trust -p 5474:5432 \
@@ -105,15 +106,18 @@ This decision is documented because it is a deliberate AC interpretation; the al
    ```
 
 2. **Code-trace for H2** (slice 250 predicate):
+
    - `web/app/(authed)/settings/credential-bearer.ts:62-71` — predicate requires `idp_subject===""` AND `email===""`.
    - `fixtures/e2e/settings.sql:60-68` — seeded `email = 'settings-e2e-user@example.invalid'` (non-empty).
    - `web/app/(authed)/settings/page.tsx:1089-1095` — `ApiTokensSection` gates on `isAdmin`, NOT `isCredentialBearer`.
 
 3. **Code-trace for H3** (Playwright parallelism):
+
    - `web/playwright.config.ts:30` — `fullyParallel: false`.
    - `web/e2e/settings.spec.ts:288` + `:307` — AC-9 and AC-11 are in the SAME `test.describe` in the SAME file.
 
 4. **Code-trace for H4** (schema drift):
+
    ```bash
    grep -RIn "ALTER TABLE api_keys" migrations/sql/
    # -> only the slice-034 ENABLE / FORCE ROW LEVEL SECURITY lines. No column adds.
