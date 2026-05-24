@@ -53,6 +53,7 @@ import (
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
+	searchapi "github.com/mgoodric/security-atlas/internal/api/search"
 	"github.com/mgoodric/security-atlas/internal/api/securityheaders"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	tenantsapi "github.com/mgoodric/security-atlas/internal/api/tenants"
@@ -783,6 +784,16 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/frameworks/posture", dashboardH.FrameworkPosture)
 	root.Get("/v1/activity", dashboardH.Activity)
 	root.Get("/v1/upcoming", dashboardH.Upcoming)
+	// Slice 268: unified cross-domain search (`/v1/search`). Aggregates
+	// lexical ILIKE matches across controls, risks, and evidence into a
+	// single typed-union response. Per-type OPA admit (D3) is invoked
+	// inside the handler — types the caller cannot read are dropped from
+	// the merge and surface in `partial_types`. RLS keeps the per-type
+	// reads tenant-scoped (constitutional invariant #6); no new schema
+	// migration ships with this slice (P0-A1). Closes the slice-228
+	// dashboard ⌘K bar's prerequisite gap.
+	searchH := searchapi.New(s.dbPool, s.authzEngine)
+	root.Get("/v1/search", searchH.Handle)
 	// Slice 094: compliance calendar. Read-only aggregation across four
 	// existing source tables (audit_periods + exceptions + policies +
 	// controls + control_evaluations) plus an iCalendar (RFC 5545) export.

@@ -82,6 +82,7 @@ tags:
   - name: risks
   - name: schemas
   - name: scopes
+  - name: search
   - name: system
   - name: tenants
   - name: ucf
@@ -3283,6 +3284,20 @@ paths:
       summary: GET /v1/scopes/dimensions
       tags: [scopes]
       operationId: get-v1-scopes-dimensions
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/search:
+    get:
+      summary: GET /v1/search — unified lexical search across controls, risks, and evidence
+      tags: [search]
+      operationId: get-v1-search
       security:
         - bearer: []
       responses:

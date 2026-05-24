@@ -37,3 +37,21 @@ catalog_resources := {
     "ucf",
     "scopes",
 }
+
+# Slice 268 — unified cross-domain search (`/v1/search`).
+#
+# The endpoint-level admit is intentionally broad: any authenticated
+# user inside a tenant may HIT `/v1/search`. The per-type narrowing
+# happens INSIDE the handler, which re-invokes the OPA engine with
+# `resource.type = controls|risks|evidence` for each requested type
+# and drops the ones the caller cannot read (surfacing them in the
+# response's `partial_types` field). See slice 268 decision D3 +
+# `internal/api/search/search.go` for the design rationale.
+#
+# Default-deny still applies: callers with NO role (e.g. a fresh
+# bearer-exempt path) fall through to the default-deny baseline.
+allow if {
+    input.action == "read"
+    input.resource.type == "search"
+    count(input.user.roles) > 0
+}
