@@ -269,11 +269,66 @@
     </p>
   </section>
 
-  <!-- SECTION 4: OPERATIONAL METRICS -->
+  <!--
+    SECTION ORDER NOTE — slice 221 D1=A.
+    The canonical board-pack section set + order is the seven keys in
+    internal/board/pack.go SectionKeys (mirrored in web/lib/api.ts
+    BOARD_PACK_SECTION_KEYS):
+      posture, top_risks, coverage_trend, open_findings,
+      operational_metrics, investment, asks.
+    See slice 032 (`docs/audit-log/032-quarterly-board-pack-decisions.md`)
+    for the source-of-truth decision D6. The mockup previously shipped
+    a §06 "Vendor risk burndown" panel and had no "Open findings"
+    section — that divergence was the slice 221 trigger. The mockup
+    now mirrors the live order. A `vendor_burndown` section is filable
+    as a follow-on (option B in slice 221's spec, deferred per D1=A);
+    when that work lands, the spillover slice will re-insert a panel
+    here per the chosen canonical position.
+  -->
+
+  <!-- SECTION 4: OPEN FINDINGS -->
   <section class="bg-white border border-slate-200 rounded-2xl p-7 mb-6">
     <div class="flex items-baseline justify-between mb-5">
       <div>
         <span class="mono text-xs text-slate-400">§ 04</span>
+        <h2 class="text-xl font-semibold tracking-tight">Open findings</h2>
+      </div>
+      <span class="text-xs text-slate-500">Failing control evaluations · as of 2026-03-31</span>
+    </div>
+
+    <p class="mb-3 text-sm text-slate-600">
+      3 open findings as of period end. A finding is a failing control evaluation (slice 032 decision D4).
+    </p>
+
+    <ul class="divide-y divide-slate-100 rounded-lg border border-slate-200">
+      <li class="flex items-center gap-3 p-3">
+        <span class="flex-1 truncate mono text-xs text-slate-700">SCF:IAC-06</span>
+        <span class="inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium bg-amber-50 text-amber-700">stale</span>
+        <span class="mono text-[11px] text-slate-400">2026-03-12</span>
+      </li>
+      <li class="flex items-center gap-3 p-3">
+        <span class="flex-1 truncate mono text-xs text-slate-700">SCF:CRY-04</span>
+        <span class="inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium bg-rose-50 text-rose-700">expired</span>
+        <span class="mono text-[11px] text-slate-400">2026-02-28</span>
+      </li>
+      <li class="flex items-center gap-3 p-3">
+        <span class="flex-1 truncate mono text-xs text-slate-700">SCF:VPM-02</span>
+        <span class="inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium bg-slate-100 text-slate-700">missing</span>
+        <span class="mono text-[11px] text-slate-400">2026-03-22</span>
+      </li>
+    </ul>
+
+    <p class="mt-4 text-xs text-slate-500">
+      Shape mirrors <span class="mono">web/components/board-pack/findings-list.tsx</span>
+      (slice 043). Wire fields are control_id, freshness_status, evaluated_at.
+    </p>
+  </section>
+
+  <!-- SECTION 5: OPERATIONAL METRICS -->
+  <section class="bg-white border border-slate-200 rounded-2xl p-7 mb-6">
+    <div class="flex items-baseline justify-between mb-5">
+      <div>
+        <span class="mono text-xs text-slate-400">§ 05</span>
         <h2 class="text-xl font-semibold tracking-tight">Operational metrics</h2>
       </div>
       <span class="text-xs text-slate-500">Quarterly outcomes</span>
@@ -315,11 +370,11 @@
     </div>
   </section>
 
-  <!-- SECTION 5: INVESTMENT VS COVERAGE -->
+  <!-- SECTION 6: INVESTMENT VS COVERAGE -->
   <section class="bg-white border border-slate-200 rounded-2xl p-7 mb-6">
     <div class="flex items-baseline justify-between mb-5">
       <div>
-        <span class="mono text-xs text-slate-400">§ 05</span>
+        <span class="mono text-xs text-slate-400">§ 06</span>
         <h2 class="text-xl font-semibold tracking-tight">Investment vs coverage</h2>
       </div>
       <span class="text-xs text-slate-500">Q1 spend tied to coverage delta · enter manually</span>
@@ -344,32 +399,6 @@
           <div class="text-xs text-slate-500 mb-1">Implied cost per coverage point</div>
           <div class="text-lg font-semibold text-slate-900">$22,193</div>
         </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- SECTION 6: VENDOR RISK BURNDOWN -->
-  <section class="bg-white border border-slate-200 rounded-2xl p-7 mb-6">
-    <div class="flex items-baseline justify-between mb-5">
-      <div>
-        <span class="mono text-xs text-slate-400">§ 06</span>
-        <h2 class="text-xl font-semibold tracking-tight">Vendor risk burndown</h2>
-      </div>
-      <span class="text-xs text-slate-500">High-criticality reviews</span>
-    </div>
-
-    <div class="grid grid-cols-3 gap-3 text-sm">
-      <div class="border border-slate-200 rounded-lg p-4">
-        <div class="text-xs text-slate-500">High-criticality vendors</div>
-        <div class="text-2xl font-semibold mt-1">14</div>
-      </div>
-      <div class="border border-slate-200 rounded-lg p-4">
-        <div class="text-xs text-slate-500">Reviewed on time</div>
-        <div class="text-2xl font-semibold mt-1 text-emerald-700">12</div>
-      </div>
-      <div class="border border-slate-200 rounded-lg p-4">
-        <div class="text-xs text-slate-500">Past due</div>
-        <div class="text-2xl font-semibold mt-1 text-rose-700">2</div>
       </div>
     </div>
   </section>
