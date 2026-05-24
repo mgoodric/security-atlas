@@ -77,8 +77,10 @@ import {
 } from "./filters";
 import {
   hashPrefix,
+  ledgerSubtitleSuffix,
   observedAtLabel,
   prettyJSON,
+  recordCountMeta,
   scopeLabel,
   sourceSummary,
 } from "./format";
@@ -161,6 +163,10 @@ function EvidencePageInner() {
     () => evidenceQ.data?.evidence ?? [],
     [evidenceQ.data],
   );
+  // Slice 236 — tenant-wide ledger total, surfaced on the wire by the
+  // upstream handler. `undefined` while the query is in flight; the
+  // meta + subtitle branches treat that as "skip the of-M suffix".
+  const ledgerTotal: number | undefined = evidenceQ.data?.total;
   const kindOptions = useMemo(
     () => buildKindOptions(records.map((r) => r.evidence_kind ?? "")),
     [records],
@@ -221,14 +227,27 @@ function EvidencePageInner() {
     },
   ];
 
-  const meta = (
-    <span>
-      Showing{" "}
-      <span className="text-foreground font-medium">{records.length}</span>{" "}
-      record
-      {records.length === 1 ? "" : "s"}
-    </span>
-  );
+  // Slice 236 — the meta line surfaces the filtered window count (N) AND
+  // the tenant-wide ledger total (M) so the operator can distinguish
+  // "filters narrowed to zero" from "ledger is empty tenant-wide".
+  // `ledgerTotal` is undefined until the query lands; fall back to the
+  // old-shape "Showing N records" so the loading state doesn't lie about
+  // the ledger being empty. Once the query resolves, the recordCountMeta
+  // formatter takes over (the empty-ledger branch renders "No records in
+  // ledger yet").
+  const meta =
+    ledgerTotal === undefined ? (
+      <span data-testid="evidence-record-count-meta">
+        Showing{" "}
+        <span className="text-foreground font-medium">{records.length}</span>{" "}
+        record
+        {records.length === 1 ? "" : "s"}
+      </span>
+    ) : (
+      <span data-testid="evidence-record-count-meta">
+        {recordCountMeta(records.length, ledgerTotal)}
+      </span>
+    );
 
   const columns: ListColumn<EvidenceRecord>[] = [
     {
@@ -360,6 +379,18 @@ function EvidencePageInner() {
   // surfaces point at the same place; the inline link uses the same
   // `data-testid="evidence-push-cta-inline"` shape so a Playwright
   // selector can disambiguate it from the action-bar CTA.
+  //
+  // Slice 236 — the subtitle now ALSO surfaces a constant ledger-context
+  // suffix (`append-only · M records`) independent of filter state, so
+  // the operator has a tenant-wide signal even with narrowing filters
+  // applied. The suffix is rendered via `<span>` rather than inline
+  // text so a Playwright selector can target it specifically. When the
+  // ledger is empty (`total === 0`) the suffix collapses to empty —
+  // the meta row's "No records in ledger yet" carries the operator
+  // signal in that case (mockup parity: `Plans/mockups/evidence.html`
+  // line 111).
+  const ledgerSuffix =
+    ledgerTotal === undefined ? "" : ledgerSubtitleSuffix(ledgerTotal);
   const subtitleNode = (
     <>
       Append-only · ingestion separated from evaluation · point-in-time replay
@@ -373,6 +404,14 @@ function EvidencePageInner() {
       >
         {PUSH_CTA_LABEL}
       </a>
+      {ledgerSuffix ? (
+        <>
+          {" · "}
+          <span data-testid="evidence-ledger-subtitle-suffix">
+            {ledgerSuffix}
+          </span>
+        </>
+      ) : null}
     </>
   );
 

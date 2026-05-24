@@ -69,3 +69,50 @@ export function prettyJSON(value: unknown): string {
 export function observedAtLabel(observed_at: string): string {
   return observed_at;
 }
+
+/**
+ * Slice 236 — render the filter-row meta-count string.
+ *
+ * The /evidence page surfaces this in the filter-pill row so the
+ * operator can distinguish three states the previous "Showing N
+ * records" string conflated:
+ *
+ *   1. ledger is empty tenant-wide  → "No records in ledger yet"
+ *   2. filters narrowed to zero     → "Showing 0 of M records"
+ *   3. filters narrow a non-empty
+ *      ledger to a smaller window   → "Showing N of M records"
+ *
+ * Per the slice 236 spec (AC-5), the empty-ledger branch matches a
+ * `total === 0` upstream count regardless of how many rows the filter
+ * predicates returned (they trivially also return zero). The "of M"
+ * suffix only renders when `total > 0`.
+ *
+ * The function takes both inputs as plain `number` for testability —
+ * the page binds `records.length` and `EvidenceListResponse.total`
+ * directly. Negative inputs are not expected from the wire shape but
+ * are clamped to zero defensively.
+ */
+export function recordCountMeta(shown: number, total: number): string {
+  const safeShown = Math.max(0, shown);
+  const safeTotal = Math.max(0, total);
+  if (safeTotal === 0) return "No records in ledger yet";
+  return `Showing ${safeShown} of ${safeTotal} records`;
+}
+
+/**
+ * Slice 236 — render the page-title subtitle's ledger-context suffix.
+ *
+ * The mockup (`Plans/mockups/evidence.html` line 111) shows
+ * `append-only · 14,712 records · 7 connectors`. The connectors count
+ * is deferred to a future slice (P0-236-1 — separate connector
+ * inventory endpoint), so this slice surfaces only the records count.
+ *
+ * When the ledger is empty the suffix collapses to empty string so the
+ * page doesn't render a noisy "0 records" line — the meta-row's
+ * "No records in ledger yet" carries the operator signal in that case.
+ */
+export function ledgerSubtitleSuffix(total: number): string {
+  const safeTotal = Math.max(0, total);
+  if (safeTotal === 0) return "";
+  return `append-only · ${safeTotal} records`;
+}

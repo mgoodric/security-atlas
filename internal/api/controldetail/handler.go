@@ -152,6 +152,22 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Slice 236 — tenant-wide ledger total (ignores filter predicates and
+	// the [since, until] window). Surfaced as `total` on both wire paths
+	// so the frontend can render `Showing N of M records` and
+	// disambiguate "ledger is empty tenant-wide" from "filters narrowed
+	// to zero". Per P0-236-2 the count is NOT filtered; per P0-236-3 it
+	// is not cached outside the request. The same RLS-bound pool the
+	// list query rides keeps tenant isolation intact (canvas invariant
+	// #6). The count is cheap — `evidence_records` is indexed on
+	// `tenant_id` — so the parallel query has no observable cost vs the
+	// list read alone.
+	total, err := h.store.CountEvidenceForTenant(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	if !hasControlID {
 		// Slice 106 tenant-wide path.
 		rows, err := h.store.EvidencePaged(ctx, evidenceListPage{
@@ -177,6 +193,7 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 			"control_id":  "",
 			"evidence":    out,
 			"count":       len(out),
+			"total":       total,
 			"next_cursor": next,
 		})
 		return
@@ -203,6 +220,7 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 		"control_id":  controlID.String(),
 		"evidence":    out,
 		"count":       len(out),
+		"total":       total,
 		"next_cursor": next,
 	})
 }
