@@ -111,4 +111,32 @@ test.describe("/evidence list view", () => {
     //    await expect(page.getByTestId("list-filter-pills")).toBeVisible();
     //    // No left filter sidebar exists. The pill row sits above the table.
   });
+
+  // Slice 233 — UI honesty: "Push evidence" CTA is no longer
+  // permanently-disabled. It is a primary-styled `<a>` pointing at the
+  // canonical CLI push doc (the evidence-primitive doc's "Pushing
+  // evidence from your own tools" section). The subtitle's second
+  // sentence carries the same link inline so operators surfaces both
+  // points to the same destination.
+  test("slice 233 — Push evidence CTA links to the CLI push doc and is navigable", async () => {
+    //    await page.goto("/evidence");
+    //    const cta = page.getByTestId("evidence-push-cta");
+    //    // The button is replaced by an `<a>` — assert it is enabled
+    //    // (no `disabled` or `aria-disabled` attribute) and its href
+    //    // resolves to the canonical CLI quickstart doc.
+    //    await expect(cta).toBeVisible();
+    //    await expect(cta).toBeEnabled();
+    //    await expect(cta).toHaveAttribute(
+    //      "href",
+    //      "/docs/primitives/evidence#pushing-evidence-from-your-own-tools",
+    //    );
+    //    await expect(cta).toHaveAttribute("target", "_blank");
+    //    // The subtitle ALSO carries an inline link to the same destination.
+    //    const inline = page.getByTestId("evidence-push-cta-inline");
+    //    await expect(inline).toBeVisible();
+    //    await expect(inline).toHaveAttribute(
+    //      "href",
+    //      "/docs/primitives/evidence#pushing-evidence-from-your-own-tools",
+    //    );
+  });
 });
