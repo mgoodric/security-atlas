@@ -198,6 +198,86 @@ Two notes on the pattern:
 
 See `docs/audit-log/275-slice-254-tabs-e2e-fix-decisions.md` for the full diagnosis.
 
+Honest correction (slice 276): slice 275's `gotoControlDetail` helper is the right SHAPE, but slice 275's root-cause diagnosis for `control-detail-tabs.spec.ts` was wrong — the actual cause was a missing required field in the mocked `/coverage` payload that crashed the production `<UcfMiniViz>` component's `req.title.slice()` call. See the next subsection.
+
+### Mock payload schema-conformance
+
+Mocked `route.fulfill` payloads MUST satisfy the producer-side TypeScript type, not just the subset of fields the test asserts on. The page consumes more of the type than the test reads, and a missing required field becomes a runtime crash hidden inside the spec's own scaffold.
+
+**The shape of the bug** (slice 276 — `control-detail-tabs.spec.ts`): the spec's `coverage` mock provided `requirement_text` on each requirement row but NOT `title` (the field the `CoverageRequirement` type in `web/lib/api.ts` actually declares). The page's `<UcfMiniViz>` component calls `req.title.slice(0, 34)` directly; with `req.title === undefined`, the `.slice()` throws a `TypeError`, the React render tree above crashes, the page-level error boundary catches it, and the page body is replaced with a generic `"This page couldn't load"` fallback. Every Playwright assertion on `control-tabs` / `control-tab-panel-overview` / etc. then times out — the testid never renders.
+
+The diagnosis was hidden because:
+
+- The screenshot at failure shows a generic chrome-error-looking page; it's easy to mis-read as a navigation failure.
+- The Playwright `expect(...).toBeVisible()` timeout error message is identical whether the page is slow OR crashed.
+- A test that deep-links to a tab that doesn't mount the crashing component (e.g. `?tab=policies` — Policies panel never instantiates `<UcfMiniViz>`) passes in <2s, suggesting the page CAN render fast — which made the "slow mount" hypothesis (slice 275's H1) look plausible.
+
+**The fix**: align the mocked payload with the producer-side type contract. Every required field gets a deterministic value.
+
+**Bad** (slice 254 / slice 275 mock, pre-fix):
+
+```ts
+requirements: [
+  {
+    framework_version_id: seeded.frameworkVersionId,
+    framework_name: "SOC 2",
+    framework_version: "2017",
+    requirement_id: "CC6.6",
+    requirement_text: "logical access controls", // ← NOT a CoverageRequirement field
+    relationship_type: "equal",
+    strength: 1.0,
+    coverage: 0.94,
+  },
+];
+```
+
+**Good** (slice 276 fix):
+
+```ts
+requirements: [
+  {
+    edge_id: "00000000-0000-0000-0000-0000000000e1",
+    requirement_id: "CC6.6",
+    code: "CC6.6", // ← required by CoverageRequirement
+    title: "Logical access controls", // ← required, was the .slice() crash site
+    framework_slug: "soc2", // ← required
+    framework_name: "SOC 2",
+    framework_version: "2017",
+    framework_version_id: seeded.frameworkVersionId,
+    framework_version_status: "active", // ← required
+    relationship_type: "equal",
+    strength: 1.0,
+    coverage: 0.94,
+    source_attribution: "scf", // ← required
+  },
+];
+```
+
+Two debugging heuristics for the next reader hit by this class of bug:
+
+1. **If a Playwright test fails with `expect(locator).toBeVisible()` timeout AND the page screenshot shows `"This page couldn't load"` (or any generic error fallback), the FIRST step is to read the trace's `pageError` events.** The trace viewer surfaces them; the `error-context.md` ARIA snapshot often shows the error-boundary chrome. A `TypeError: Cannot read properties of undefined (reading 'X')` inside `Array.map` is the classic signature of a missing-required-field mock.
+
+2. **When authoring a new mock, import the producer-side type and use it.** TypeScript's structural type system happily accepts a partial mock (it sees the literal as a wider type when assigned to `body: string`); discipline lives in the author. The cheapest discipline is to annotate the payload object with the producer type:
+
+   ```ts
+   const body: ControlCoverage = {
+     control: {
+       /* ... */
+     },
+     anchor: {
+       /* ... */
+     },
+     requirements: [
+       /* ... */
+     ],
+   };
+   await route.fulfill({ status: 200, body: JSON.stringify(body) });
+   ```
+
+   The compiler then flags missing required fields at build time, not at trace-decode time.
+
+See `docs/audit-log/276-control-detail-tabs-deep-fix-decisions.md` for the full diagnosis.
+
 ## How to debug a failure via the trace viewer
 
 When CI fails, the Playwright job uploads `web/playwright-report/` and `web/test-results/` as a workflow artifact named `playwright-report`. Download it, then:
