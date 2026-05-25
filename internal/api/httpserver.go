@@ -16,6 +16,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/adminauditlog"
 	"github.com/mgoodric/security-atlas/internal/api/adminauditperiods"
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
+	"github.com/mgoodric/security-atlas/internal/api/admindemo"
 	"github.com/mgoodric/security-atlas/internal/api/adminsso"
 	"github.com/mgoodric/security-atlas/internal/api/adminsuperadmins"
 	"github.com/mgoodric/security-atlas/internal/api/admintenants"
@@ -972,6 +973,18 @@ func (s *Server) httpHandler() http.Handler {
 	adminTenantsH := admintenants.New(s.dbPool, s.authPool)
 	root.Get("/v1/admin/tenants", adminTenantsH.List)
 	root.Post("/v1/admin/tenants", adminTenantsH.Create)
+	// Slice 278: demo-seed UI button (edge-deployment only).
+	// Triple gate: ATLAS_ENABLE_DEMO_SEED env var (returns 503 when
+	// unset), admin role via slice-035 OPA admin.rego (returns 403
+	// for non-admins), and a me_audit_log row written BEFORE the
+	// seeder runs (fail closed). Per-IP rate limit of 1 invocation
+	// per 60 seconds on Seed + Teardown; Status is unlimited.
+	// authPool is the BYPASSRLS pool required by demoseed.Seeder
+	// (slice 205 LOAD-BEARING design).
+	adminDemoH := admindemo.New(s.authPool, admindemo.DefaultEnabledFunc)
+	root.Get("/v1/admin/demo/status", adminDemoH.Status)
+	root.Post("/v1/admin/demo/seed", adminDemoH.Seed)
+	root.Post("/v1/admin/demo/teardown", adminDemoH.Teardown)
 	auditLogH := adminauditlog.New(s.dbPool)
 	root.Get("/v1/admin/audit-log", auditLogH.List)
 	// Slice 124: unified audit-log aggregation read across all nine

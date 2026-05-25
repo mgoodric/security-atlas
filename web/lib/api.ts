@@ -945,6 +945,103 @@ export async function createAdminTenant(
   return (await res.json()) as CreateTenantResponse;
 }
 
+// ===== Slice 278 — Admin demo-seed UI (binds to internal/api/admindemo) =====
+//
+// Wire shape mirrors `internal/api/admindemo/handler.go`:
+//
+//   GET    /v1/admin/demo/status     -> {enabled: boolean}
+//   POST   /v1/admin/demo/seed       -> seed summary
+//   POST   /v1/admin/demo/teardown   -> {tenant_slug, status: "deleted"}
+//
+// 503 from /seed or /teardown means the env-var gate is unset. The
+// frontend distinguishes the "feature disabled" 503 (banner) from
+// the "transient" 5xx (error toast) via the /status probe.
+
+export type DemoStatusResponse = {
+  enabled: boolean;
+};
+
+export type DemoSeedResponse = {
+  tenant_id: string;
+  tenant_slug: string;
+  controls: number;
+  risks: number;
+  evidence: number;
+  audit_periods: number;
+  samples: number;
+  idempotent: boolean;
+};
+
+export type DemoTeardownResponse = {
+  tenant_slug: string;
+  status: string;
+};
+
+export async function getAdminDemoStatus(
+  bearer: string,
+): Promise<DemoStatusResponse> {
+  const res = await fetch(`${apiBaseURL()}/v1/admin/demo/status`, {
+    headers: { Authorization: `Bearer ${bearer}` },
+  });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) msg = body.error;
+    } catch {
+      // fall through
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as DemoStatusResponse;
+}
+
+export async function postAdminDemoSeed(
+  bearer: string,
+): Promise<DemoSeedResponse> {
+  const res = await fetch(`${apiBaseURL()}/v1/admin/demo/seed`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+    },
+  });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) msg = body.error;
+    } catch {
+      // fall through
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as DemoSeedResponse;
+}
+
+export async function postAdminDemoTeardown(
+  bearer: string,
+): Promise<DemoTeardownResponse> {
+  const res = await fetch(`${apiBaseURL()}/v1/admin/demo/teardown`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+    },
+  });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) msg = body.error;
+    } catch {
+      // fall through
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as DemoTeardownResponse;
+}
+
 // ===== Slice 063 — Admin SSO config (binds to slice 062 backend) =====
 //
 // Wire shape mirrors `internal/api/adminsso/handler.go`:

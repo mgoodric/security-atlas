@@ -50,6 +50,7 @@ tags:
   - name: admin-audit-log
   - name: admin-audit-periods
   - name: admin-credentials
+  - name: admin-demo
   - name: admin-evidence
   - name: admin-exceptions
   - name: admin-feature-flags
@@ -309,6 +310,48 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/demo/seed:
+    post:
+      summary: POST /v1/admin/demo/seed
+      tags: [admin-demo]
+      operationId: post-v1-admin-demo-seed
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/demo/status:
+    get:
+      summary: GET /v1/admin/demo/status
+      tags: [admin-demo]
+      operationId: get-v1-admin-demo-status
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/demo/teardown:
+    post:
+      summary: POST /v1/admin/demo/teardown
+      tags: [admin-demo]
+      operationId: post-v1-admin-demo-teardown
+      security:
+        - adminBearer: []
       responses:
         default:
           description: Default response envelope.
