@@ -76,6 +76,10 @@ const NAV_BASE: NavItem[] = [
   { href: "/audits", label: "Audits" },
   { href: "/policies", label: "Policies" },
   { href: "/vendors", label: "Vendors" },
+  // Slice 263 — Questionnaires sits in the Operations cluster (matches
+  // Calendar / Vendors). All authed users see the entry; per-tenant
+  // write authz is enforced at the API layer (slice 155).
+  { href: "/questionnaires", label: "Questionnaires" },
   { href: "/board-packs", label: "Board Packs" },
   { href: "/catalog/scf", label: "Catalog · SCF" },
   { href: "/settings", label: "Settings" },
