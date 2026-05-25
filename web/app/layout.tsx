@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -140,6 +140,25 @@ export const metadata: Metadata = {
       },
     ],
   },
+};
+
+// Slice 277 — mobile-responsive baseline. The Next.js 16 App Router
+// `viewport` export emits the `<meta name="viewport">` tag in the
+// rendered HTML head. Without it, mobile browsers fall back to the
+// legacy ~980px desktop-emulation width and zoom out, leaving operators
+// with a microscopic UI even on pages whose Tailwind classes would have
+// produced a perfectly usable mobile layout if the viewport were
+// configured. See `docs/issues/277-mobile-responsive-baseline.md` AC-1.
+//
+// `width: "device-width"` — render at the device's actual logical width
+// (375px on iPhone, 412px on Pixel, etc.). `initialScale: 1` — no
+// double-tap-to-zoom default; the page renders at the same density it
+// renders at on desktop. NO `maximum-scale` or `user-scalable=no` —
+// those are accessibility anti-patterns (block pinch-to-zoom for
+// low-vision users); browsers ignore them anyway in modern engines.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({
