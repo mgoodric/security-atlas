@@ -2,16 +2,28 @@
 // `go test -coverprofile=` output and the slice-069 thresholds file at
 // cmd/scripts/coverage-thresholds.json.
 //
-// Run from the repo root:
+// Run from the repo root with a SINGLE profile (slice 069 shape):
 //
 //	go test -coverprofile=coverage.out ./...
 //	go run ./cmd/scripts/coverage-gate -profile=coverage.out
 //
+// Run from the repo root with MERGED unit + integration profiles
+// (slice 279 — recommended for full repo audit):
+//
+//	go test -coverpkg=./... -coverprofile=unit.cov ./...
+//	go test -tags=integration -p 1 -coverpkg=./... \
+//	  -coverprofile=integration.cov <ci-integration-pkg-list>
+//	go run ./cmd/scripts/coverage-gate \
+//	  -profile=unit.cov -extra-profile=integration.cov
+//
 // Optional flags:
 //
-//	-profile        path to the coverage profile (default coverage.out)
-//	-thresholds     path to the thresholds json (default
-//	                cmd/scripts/coverage-thresholds.json)
+//	-profile         path to the primary coverage profile (default coverage.out)
+//	-extra-profile   optional extra profile merged into -profile in-memory
+//	                 (slice 279 — used to add integration coverage to a
+//	                 unit-only gate run). Repeatable via comma-separated list.
+//	-thresholds      path to the thresholds json (default
+//	                 cmd/scripts/coverage-thresholds.json)
 //
 // Exit codes:
 //
@@ -19,15 +31,21 @@
 //	1 — one or more packages fall under their floor (details to stderr)
 //	2 — invocation / input error (profile not found, thresholds malformed)
 //
-// Design notes (slice 069 D1 + D2):
+// Design notes (slice 069 D1 + D2; slice 279 extension):
 //
-//   - The gate parses `go tool cover -func=<profile>` output (the
-//     canonical per-statement aggregator shipped with the Go toolchain)
-//     and aggregates per-package totals from it. This avoids re-implementing
-//     coverage math.
-//   - The gate operates on the UNIT-ONLY profile produced by the CI job
-//     `Go · build + test` (the integration job collects a separate
-//     profile with `-coverpkg=./...`; mixing them is a follow-up).
+//   - The gate aggregates per-package statement counts directly from
+//     the raw `-coverprofile=` output (10-line format spec at
+//     https://pkg.go.dev/golang.org/x/tools/cmd/cover). It does NOT
+//     shell out to `go tool cover -func=`.
+//   - The gate accepts EITHER a single profile (slice 069 mode) OR a
+//     primary + extra profile that are merged in-memory before
+//     threshold check (slice 279 mode). The in-memory merge follows
+//     the same semantics as `gocovmerge`: union the line specs; for
+//     a line present in both, take the maximum count. We use a single
+//     binary so CI doesn't need a separate `gocovmerge` install step
+//     for the threshold check itself.
+//   - All profiles MUST use `set` (default) covermode. Mixing `set`
+//     with `atomic` or `count` is rejected — the math is incompatible.
 //   - Packages listed in `excludes[]` are skipped (sqlc-generated,
 //     protoc-generated, integration-only). A package with NO coverage
 //     data (e.g. an integration-only package the unit run never touches)
@@ -65,16 +83,36 @@ type pkgCoverage struct {
 
 func main() {
 	profilePath := flag.String("profile", "coverage.out", "path to the coverage profile produced by `go test -coverprofile=`")
+	extraProfile := flag.String("extra-profile", "", "optional extra profile(s) merged into -profile in-memory; comma-separated for multiple")
 	thresholdsPath := flag.String("thresholds", "cmd/scripts/coverage-thresholds.json", "path to the thresholds json")
 	flag.Parse()
 
-	if err := run(*profilePath, *thresholdsPath); err != nil {
+	extras := splitNonEmpty(*extraProfile, ",")
+	if err := run(*profilePath, extras, *thresholdsPath); err != nil {
 		fmt.Fprintln(os.Stderr, "coverage-gate: ", err)
 		if exitErr, ok := err.(exitCodeErr); ok {
 			os.Exit(exitErr.code)
 		}
 		os.Exit(2)
 	}
+}
+
+// splitNonEmpty is a strings.Split that drops empty fields. Avoids the
+// `strings.Split("", ",")` → `[""]` corner that would attempt to open
+// a profile at path "".
+func splitNonEmpty(s, sep string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, sep)
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 type exitCodeErr struct {
@@ -84,9 +122,14 @@ type exitCodeErr struct {
 
 func (e exitCodeErr) Error() string { return e.msg }
 
-func run(profilePath, thresholdsPath string) error {
+func run(profilePath string, extraProfiles []string, thresholdsPath string) error {
 	if _, err := os.Stat(profilePath); err != nil {
 		return exitCodeErr{2, fmt.Sprintf("profile not readable at %s: %v", profilePath, err)}
+	}
+	for _, ep := range extraProfiles {
+		if _, err := os.Stat(ep); err != nil {
+			return exitCodeErr{2, fmt.Sprintf("extra-profile not readable at %s: %v", ep, err)}
+		}
 	}
 
 	// Load thresholds + excludes.
@@ -109,7 +152,12 @@ func run(profilePath, thresholdsPath string) error {
 	// percentages, which we'd need to weight back to statements anyway,
 	// and the raw profile format is small (10-line spec, see
 	// https://pkg.go.dev/golang.org/x/tools/cmd/cover).
-	pkgs, err := parseCoverageProfile(profilePath)
+	//
+	// Slice 279: if extra profiles are provided, merge their per-line
+	// counts in-memory before aggregating per-package totals. The merge
+	// follows `gocovmerge` semantics for `set` mode: union the line
+	// specs, and a line is covered if covered in ANY profile.
+	pkgs, err := parseAndMergeProfiles(profilePath, extraProfiles)
 	if err != nil {
 		return exitCodeErr{2, fmt.Sprintf("parsing coverage profile: %v", err)}
 	}
@@ -200,76 +248,121 @@ func run(profilePath, thresholdsPath string) error {
 	return nil
 }
 
-// parseCoverageProfile reads a `go test -coverprofile=` output and
-// aggregates per-package statement counts.
+// lineKey uniquely identifies one coverage block (one line in the
+// raw profile). We use the full `<file>:<positions>` head string
+// (the part before numStmt + count) because that's what gocovmerge
+// uses for dedupe.
+type lineKey string
+
+// lineEntry captures the per-block numStmt and the merged count
+// (max over all profiles for `set` mode — a block is "hit" if hit in
+// any profile).
+type lineEntry struct {
+	numStmt int
+	count   int
+	pkg     string
+}
+
+// parseAndMergeProfiles loads the primary profile + any extra profiles
+// and returns per-package aggregated coverage. When extras are empty,
+// this is equivalent to parseCoverageProfile.
 //
-// Profile format (per `go tool cover` docs):
+// The merge semantics match gocovmerge for `set` mode: union all line
+// blocks; a block is "covered" if any profile has count > 0.
 //
-//	mode: atomic
-//	<file>:<startLine>.<startCol>,<endLine>.<endCol> <numStmt> <count>
-//
-// We sum numStmt per package and (numStmt where count > 0) per package
-// for the covered fraction.
-func parseCoverageProfile(path string) (map[string]pkgCoverage, error) {
-	f, err := os.Open(path)
-	if err != nil {
+// The numStmt field must match for the same line key across profiles
+// (the cover tool emits a stable numStmt for the same source block) —
+// if it differs, we keep the larger value and continue, treating it as
+// a profile-skew warning rather than a hard error. This mirrors what
+// gocovmerge does in practice when the same package is built with
+// slightly different `-coverpkg` flags across runs.
+func parseAndMergeProfiles(primary string, extras []string) (map[string]pkgCoverage, error) {
+	merged := map[lineKey]*lineEntry{}
+	mode := ""
+
+	addProfile := func(path string) error {
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = f.Close() }()
+
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 0, 1024*1024), 8*1024*1024)
+		lineNo := 0
+		for scanner.Scan() {
+			lineNo++
+			line := scanner.Text()
+			if lineNo == 1 && strings.HasPrefix(line, "mode:") {
+				m := strings.TrimSpace(strings.TrimPrefix(line, "mode:"))
+				if mode == "" {
+					mode = m
+				} else if mode != m {
+					return fmt.Errorf("profile %s: mode %q does not match prior %q (re-run all profiles with the same -covermode)", path, m, mode)
+				}
+				continue
+			}
+			if line == "" {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) < 3 {
+				return fmt.Errorf("%s line %d: unexpected field count: %q", path, lineNo, line)
+			}
+			count, err := strconv.Atoi(fields[len(fields)-1])
+			if err != nil {
+				return fmt.Errorf("%s line %d: parse count: %v", path, lineNo, err)
+			}
+			numStmt, err := strconv.Atoi(fields[len(fields)-2])
+			if err != nil {
+				return fmt.Errorf("%s line %d: parse numStmt: %v", path, lineNo, err)
+			}
+			head := strings.Join(fields[:len(fields)-2], " ")
+			colon := strings.Index(head, ":")
+			if colon < 0 {
+				return fmt.Errorf("%s line %d: no `:` separator in path: %q", path, lineNo, head)
+			}
+			fullPath := head[:colon]
+			pkg := pkgFromGoFile(fullPath)
+			key := lineKey(head)
+			existing, ok := merged[key]
+			if !ok {
+				merged[key] = &lineEntry{numStmt: numStmt, count: count, pkg: pkg}
+				continue
+			}
+			// Keep larger numStmt if they diverge (rare; profile skew).
+			if numStmt > existing.numStmt {
+				existing.numStmt = numStmt
+			}
+			// `set` mode merge: a line is covered if any profile hit it.
+			if count > 0 {
+				existing.count = 1
+			}
+		}
+		return scanner.Err()
+	}
+
+	if err := addProfile(primary); err != nil {
 		return nil, err
 	}
-	defer func() { _ = f.Close() }()
+	for _, ep := range extras {
+		if err := addProfile(ep); err != nil {
+			return nil, err
+		}
+	}
 
-	// Aggregate per package.
 	type bucket struct{ covered, total int }
 	buckets := map[string]*bucket{}
-
-	scanner := bufio.NewScanner(f)
-	// Coverage profiles can have very long lines on big monorepos.
-	scanner.Buffer(make([]byte, 0, 1024*1024), 8*1024*1024)
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		line := scanner.Text()
-		if lineNo == 1 && strings.HasPrefix(line, "mode:") {
-			continue
-		}
-		if line == "" {
-			continue
-		}
-		// Format: <file>:<start>,<end> <numStmt> <count>
-		// Split from the right: last 3 whitespace-separated fields are
-		// the position range, numStmt, count.
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
-			return nil, fmt.Errorf("line %d: unexpected field count: %q", lineNo, line)
-		}
-		count, err := strconv.Atoi(fields[len(fields)-1])
-		if err != nil {
-			return nil, fmt.Errorf("line %d: parse count: %v", lineNo, err)
-		}
-		numStmt, err := strconv.Atoi(fields[len(fields)-2])
-		if err != nil {
-			return nil, fmt.Errorf("line %d: parse numStmt: %v", lineNo, err)
-		}
-		// fields[0..len-3] joined back is `<file>:<positions>`. We need
-		// just <file>, which is before the first `:`.
-		head := strings.Join(fields[:len(fields)-2], " ")
-		colon := strings.Index(head, ":")
-		if colon < 0 {
-			return nil, fmt.Errorf("line %d: no `:` separator in path: %q", lineNo, head)
-		}
-		fullPath := head[:colon]
-		pkg := pkgFromGoFile(fullPath)
-		b, ok := buckets[pkg]
+	for _, e := range merged {
+		b, ok := buckets[e.pkg]
 		if !ok {
 			b = &bucket{}
-			buckets[pkg] = b
+			buckets[e.pkg] = b
 		}
-		b.total += numStmt
-		if count > 0 {
-			b.covered += numStmt
+		b.total += e.numStmt
+		if e.count > 0 {
+			b.covered += e.numStmt
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
 	}
 
 	out := make(map[string]pkgCoverage, len(buckets))

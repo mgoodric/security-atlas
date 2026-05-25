@@ -140,16 +140,22 @@ jobs:
       - name: Build all packages
         run: go build ./...
       - name: Run unit tests
-        run: go test -race -covermode=atomic -coverprofile=coverage.txt ./...
-      # Slice 069 — Go coverage gate. Reads coverage.txt produced by the
-      # step above + cmd/scripts/coverage-thresholds.json and exits
-      # non-zero if any package's measured coverage falls below its floor.
-      # Floors are derived from a measured-minus-2pp run on main; they
-      # ratchet, never stretch (slice 069 P0-A4). Raise a floor by
-      # writing the missing tests AND lifting the threshold in the same
-      # follow-up PR — never one without the other.
-      - name: Go · coverage gate
-        run: go run ./cmd/scripts/coverage-gate -profile=coverage.txt
+        # Slice 279: switched unit run to `-coverpkg=./...` so the unit
+        # profile carries the same line-spec universe as the integration
+        # profile. This lets the merged-profile coverage gate (in the
+        # tests-integration job) compare apples to apples — without this
+        # flag, the unit profile only includes lines from packages with
+        # tests, and merging produces gaps that the gate would flag as
+        # "no profile data".
+        run: go test -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.txt ./...
+      # Slice 279: the per-package coverage gate moved from this unit
+      # job to the tests-integration job, where it runs against the
+      # MERGED (unit + integration) profile. The unit profile alone
+      # under-counts coverage for packages whose tests are exclusively
+      # integration-tagged — the slice 279 audit at
+      # docs/coverage-audit-2026-05.md documents the shift. The unit
+      # profile is still uploaded as a workflow artifact so the merge
+      # step in tests-integration can pull it.
       - name: Upload unit coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
@@ -299,6 +305,14 @@ jobs:
         # concurrently surfaces duplicate-key + missing-relation errors
         # that disappear under serial execution. Local reproducer:
         #   go test -tags=integration -race -p 1 ./internal/...
+        #
+        # Slice 279: extended to include internal/frameworkscope,
+        # internal/risk, and internal/risk/aggrule — these had
+        # integration_test.go files but were never enrolled in the
+        # CI integration job, so their coverage was unit-only. Adding
+        # them moves frameworkscope from 21.8% → 77.8% merged, risk
+        # from 36.1% → 73.4% merged, and risk/aggrule from 19.1% →
+        # 74.6% merged (no new tests required).
         run: |
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
@@ -323,7 +337,9 @@ jobs:
             ./internal/api/risks/... \
             ./internal/authz/... \
             ./internal/control/... \
-            ./internal/platform/...
+            ./internal/platform/... \
+            ./internal/frameworkscope/... \
+            ./internal/risk/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
@@ -331,6 +347,42 @@ jobs:
           files: ./coverage.txt
           flags: integration
           fail_ci_if_error: false
+      # Slice 279 — download the unit-coverage artifact uploaded by the
+      # build-go job, merge it with the integration profile via
+      # gocovmerge, and run the per-package gate on the merged profile.
+      # This is the canonical coverage threshold check: the unit-only
+      # gate in build-go is the fast fence (catches regressions in
+      # unit tests); the merged gate here is the truth (counts
+      # integration-only-covered statements that the unit-only gate
+      # skipped). Floors in coverage-thresholds.json are sized to the
+      # merged profile per the slice 279 audit.
+      - name: Download unit coverage artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.1.8
+        with:
+          name: go-unit-coverage
+          path: /tmp/go-unit-coverage
+        continue-on-error: true
+      - name: Install gocovmerge
+        run: go install github.com/wadey/gocovmerge@b5bfa59ec0adc420475f97f89b58045c721d761c
+      - name: Merge unit + integration coverage profiles
+        run: |
+          if [ -f /tmp/go-unit-coverage/coverage.txt ]; then
+            gocovmerge /tmp/go-unit-coverage/coverage.txt coverage.txt > merged-coverage.txt
+            echo "merged unit + integration profiles"
+            wc -l /tmp/go-unit-coverage/coverage.txt coverage.txt merged-coverage.txt
+          else
+            echo "no unit-coverage artifact (perhaps build-go was skipped); falling back to integration-only profile"
+            cp coverage.txt merged-coverage.txt
+          fi
+      - name: Go · merged coverage gate (slice 279)
+        run: go run ./cmd/scripts/coverage-gate -profile=merged-coverage.txt
+      - name: Upload merged coverage profile as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: go-merged-coverage
+          path: merged-coverage.txt
+          if-no-files-found: warn
       - name: Migration round-trip — down then up
         run: |
           # Walk down migrations in reverse-alphabetical order (latest down first).

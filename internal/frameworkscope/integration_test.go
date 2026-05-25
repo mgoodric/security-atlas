@@ -138,11 +138,15 @@ func seedScopeAndControl(t *testing.T, admin *pgxpool.Pool, app *pgxpool.Pool, t
 		cells = append(cells, c)
 	}
 	controlID := uuid.New()
+	bundleID := "legacy_" + controlID.String()
 	if err := withAdminTenant(admin, tenant, func(ctx context.Context, tx pgx.Tx) error {
+		// Slice 279: bundle_id (added by migration 20260511000009) is NOT NULL.
+		// Use the same "legacy_<uuid>" pattern the migration's backfill applies
+		// for pre-existing rows. version defaults to 1.
 		_, err := tx.Exec(ctx, `
-			INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, applicability_expr)
-			VALUES ($1, $2, 'IAC-06', 'MFA', 'IAC', 'automated', $3)
-		`, controlID, tenant, exprJSON)
+			INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, applicability_expr, bundle_id)
+			VALUES ($1, $2, 'IAC-06', 'MFA', 'IAC', 'automated', $3, $4)
+		`, controlID, tenant, exprJSON, bundleID)
 		return err
 	}); err != nil {
 		t.Fatalf("insert control: %v", err)
