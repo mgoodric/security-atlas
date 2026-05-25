@@ -15,7 +15,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -58,10 +58,72 @@ type ActionState =
   | { kind: "success-teardown"; result: TeardownResult }
   | { kind: "error"; message: string };
 
+type EnabledState =
+  | { kind: "loading" }
+  | { kind: "enabled" }
+  | { kind: "disabled" };
+
 export function DemoControls() {
   const [seedDialog, setSeedDialog] = useState(false);
   const [teardownDialog, setTeardownDialog] = useState(false);
   const [state, setState] = useState<ActionState>({ kind: "idle" });
+  const [enabled, setEnabled] = useState<EnabledState>({ kind: "loading" });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/demo/status", {
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          if (!cancelled) setEnabled({ kind: "disabled" });
+          return;
+        }
+        const body = (await res.json()) as { enabled?: boolean };
+        if (cancelled) return;
+        setEnabled({ kind: body.enabled === true ? "enabled" : "disabled" });
+      } catch {
+        if (!cancelled) setEnabled({ kind: "disabled" });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (enabled.kind === "loading") {
+    return (
+      <div
+        data-testid="demo-loading"
+        className="h-12 animate-pulse rounded bg-muted"
+        aria-hidden
+      />
+    );
+  }
+
+  if (enabled.kind === "disabled") {
+    return (
+      <Alert>
+        <AlertTitle>Demo tools are not enabled on this deployment</AlertTitle>
+        <AlertDescription>
+          <p>
+            Set{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">
+              ATLAS_ENABLE_DEMO_SEED=true
+            </code>{" "}
+            in the docker-compose env (or the equivalent secrets surface) and
+            restart the atlas server to expose these actions.
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            This page is intentionally always reachable for admins on every
+            deployment; the buttons are gated on the env var so production
+            deployments cannot accidentally trigger a demo seed.
+          </p>
+        </AlertDescription>
+      </Alert>
+    );
+  }
 
   const busy = state.kind === "running";
 
