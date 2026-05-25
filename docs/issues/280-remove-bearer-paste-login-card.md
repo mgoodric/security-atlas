@@ -107,7 +107,7 @@ middleware so no platform-side change is needed.
       bearer-paste `<Card>`. The page's rendered output contains
       ZERO occurrences of the strings "Bearer token", "Paste a
       bearer token", "Developer sign-in", or the `<input
-    name="token">` field.
+  name="token">` field.
 - [ ] **AC-2.** `web/app/login/actions.ts` no longer exports a
       `signIn` symbol. Only `signInLocal` + `signOut` remain. The
       file's header comment is updated to drop the "Slice 073 ...
@@ -115,7 +115,7 @@ middleware so no platform-side change is needed.
       describe the remaining surface.
 - [ ] **AC-3.** No file in `web/` references the removed `signIn`
       action (`grep -rEn "import.*signIn[^L]\b|action.*signIn[^L]"
-    web/` returns zero non-comment hits).
+  web/` returns zero non-comment hits).
 
 ### Install-state-fails fallback
 
