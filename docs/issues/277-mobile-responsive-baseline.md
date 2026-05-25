@@ -101,11 +101,11 @@ slices get the pass).
 - [ ] **AC-1.** `web/app/layout.tsx` exports `viewport`
       (Next.js App Router pattern):
       `ts
-  export const viewport: Viewport = {
-    width: "device-width",
-    initialScale: 1,
-  };
-  `
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
+`
 - [ ] **AC-2.** The rendered HTML on `/dashboard` includes
       `<meta name="viewport" content="width=device-width,initial-scale=1">`
       (curl-verifiable; asserted by a new vitest or playwright case).
