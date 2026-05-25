@@ -80,8 +80,8 @@ export default async function AdminDemoPage() {
               <code className="rounded bg-muted px-1 py-0.5 text-xs">
                 ATLAS_ENABLE_DEMO_SEED=true
               </code>{" "}
-              in the docker-compose env (or the equivalent secrets surface)
-              and restart the atlas server to expose these actions.
+              in the docker-compose env (or the equivalent secrets surface) and
+              restart the atlas server to expose these actions.
             </p>
             <p className="mt-2 text-xs text-muted-foreground">
               This page is intentionally always reachable for admins on every
@@ -109,17 +109,16 @@ export default async function AdminDemoPage() {
                 slug.
               </div>
               <div>
-                <strong>Tear down demo tenant</strong> — deletes the demo
-                tenant and every row anchored to it. Refuses to operate on a
-                tenant that does not carry the slice-205 forensic mark
-                (typo-safety).
+                <strong>Tear down demo tenant</strong> — deletes the demo tenant
+                and every row anchored to it. Refuses to operate on a tenant
+                that does not carry the slice-205 forensic mark (typo-safety).
               </div>
               <div className="text-xs text-muted-foreground">
                 Both actions are rate-limited to one invocation per 60 seconds
                 per IP. Every click writes a{" "}
                 <code className="rounded bg-muted px-1">demo_seed</code> or{" "}
-                <code className="rounded bg-muted px-1">demo_teardown</code>{" "}
-                row to the audit log before the seeder runs.
+                <code className="rounded bg-muted px-1">demo_teardown</code> row
+                to the audit log before the seeder runs.
               </div>
             </CardContent>
           </Card>

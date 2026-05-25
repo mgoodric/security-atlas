@@ -126,8 +126,8 @@ export function DemoControls() {
         <CardHeader>
           <CardTitle>Reseed demo dataset</CardTitle>
           <CardDescription>
-            Creates or no-ops on the <code>demo</code> tenant and populates
-            it with the slice-205 dataset. Safe to re-click — the seeder is
+            Creates or no-ops on the <code>demo</code> tenant and populates it
+            with the slice-205 dataset. Safe to re-click — the seeder is
             idempotent on the slug.
           </CardDescription>
         </CardHeader>
@@ -147,9 +147,9 @@ export function DemoControls() {
         <CardHeader>
           <CardTitle>Tear down demo tenant</CardTitle>
           <CardDescription>
-            Deletes the demo tenant and every row anchored to it. Reversible
-            by clicking Reseed again afterwards. Refuses to operate on a
-            tenant that does not carry the slice-205 forensic mark.
+            Deletes the demo tenant and every row anchored to it. Reversible by
+            clicking Reseed again afterwards. Refuses to operate on a tenant
+            that does not carry the slice-205 forensic mark.
           </CardDescription>
         </CardHeader>
         <CardFooter>
@@ -181,14 +181,14 @@ export function DemoControls() {
             <p>
               {state.result.idempotent ? (
                 <>
-                  Tenant <code>{state.result.tenant_slug}</code> already
-                  carried the slice-205 forensic mark; no rows were written.
-                  The dataset is already in place.
+                  Tenant <code>{state.result.tenant_slug}</code> already carried
+                  the slice-205 forensic mark; no rows were written. The dataset
+                  is already in place.
                 </>
               ) : (
                 <>
-                  {state.result.controls} controls · {state.result.risks}{" "}
-                  risks · {state.result.evidence} evidence ·{" "}
+                  {state.result.controls} controls · {state.result.risks} risks
+                  · {state.result.evidence} evidence ·{" "}
                   {state.result.audit_periods} audit periods ·{" "}
                   {state.result.samples} samples seeded into tenant{" "}
                   <code>{state.result.tenant_slug}</code>.
@@ -246,8 +246,8 @@ export function DemoControls() {
             <DialogDescription>
               This will delete the <code>demo</code> tenant and every row
               anchored to it. The seeder refuses to operate on a tenant that
-              does not carry the slice-205 forensic mark, so non-demo
-              tenants are safe.
+              does not carry the slice-205 forensic mark, so non-demo tenants
+              are safe.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

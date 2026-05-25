@@ -25,7 +25,7 @@ decision slot. Reuse won.
   `deploy/docker/docker-compose.edge.yml` enables both the CLI and
   the UI button. Slice 205's docs already document the env var.
 - No semantic drift: both surfaces gate the same package (`internal/
-  demoseed`). The env var represents "this deployment opts in to
+demoseed`). The env var represents "this deployment opts in to
   demo-seed functionality" — neutral of which interface invokes it.
 
 **Trade-off accepted:** an operator who wants the CLI but NOT the UI

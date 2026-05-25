@@ -45,9 +45,7 @@ test.describe("admin demo-seed page", () => {
     await authedPage.goto("/admin/demo");
 
     await expect(
-      authedPage.getByText(
-        "Demo tools are not enabled on this deployment",
-      ),
+      authedPage.getByText("Demo tools are not enabled on this deployment"),
     ).toBeVisible();
     // Buttons must NOT render in the disabled branch.
     await expect(authedPage.getByTestId("demo-seed-button")).toHaveCount(0);
