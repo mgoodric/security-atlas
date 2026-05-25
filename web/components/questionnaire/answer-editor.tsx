@@ -81,17 +81,12 @@ interface AnswerEditorProps {
   question: Question;
 }
 
-export function AnswerEditor({
-  questionnaireID,
-  question,
-}: AnswerEditorProps) {
+export function AnswerEditor({ questionnaireID, question }: AnswerEditorProps) {
   // Local state — autosave PATCHes to the server on a debounce.
   const [answerValue, setAnswerValue] = useState(
     question.answer?.answer_value ?? "",
   );
-  const [narrative, setNarrative] = useState(
-    question.answer?.narrative ?? "",
-  );
+  const [narrative, setNarrative] = useState(question.answer?.narrative ?? "");
   const [citations, setCitations] = useState<Citation[]>(
     normalizeCitations(question.answer?.citations ?? []),
   );
@@ -177,9 +172,7 @@ export function AnswerEditor({
           {question.domain ? (
             <>
               <span className="text-border">·</span>
-              <span className="text-muted-foreground">
-                {question.domain}
-              </span>
+              <span className="text-muted-foreground">{question.domain}</span>
             </>
           ) : null}
         </div>
@@ -191,10 +184,7 @@ export function AnswerEditor({
       <div className="overflow-y-auto flex-1 px-7 py-5 space-y-5">
         {/* AC-11 — inline retry banner above the textarea */}
         {saveError ? (
-          <Alert
-            variant="destructive"
-            data-testid="answer-editor-save-error"
-          >
+          <Alert variant="destructive" data-testid="answer-editor-save-error">
             <AlertDescription className="flex items-center justify-between gap-3">
               <span>Last save failed — {saveError}</span>
               <button
@@ -291,9 +281,7 @@ export function AnswerEditor({
             onRemove={(c) => {
               markDirty();
               setCitations(
-                citations.filter(
-                  (x) => !(x.id === c.id && x.type === c.type),
-                ),
+                citations.filter((x) => !(x.id === c.id && x.type === c.type)),
               );
             }}
           />

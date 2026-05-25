@@ -94,16 +94,17 @@ export default function QuestionnaireDetailPage(props: {
 
   const selected = useMemo(() => {
     if (!detailQ.data || !selectedId) return null;
-    return (
-      detailQ.data.questions.find((q) => q.id === selectedId) ?? null
-    );
+    return detailQ.data.questions.find((q) => q.id === selectedId) ?? null;
   }, [detailQ.data, selectedId]);
 
   function selectQuestion(qid: string): void {
     setSelectedId(qid);
     // On mobile, navigate to the editor pane via URL so the
     // back-button returns to the list.
-    if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 767px)").matches
+    ) {
       router.replace(`/questionnaires/${id}?pane=edit`, { scroll: false });
     }
   }
@@ -125,9 +126,7 @@ export default function QuestionnaireDetailPage(props: {
     return (
       <Alert variant="destructive" data-testid="questionnaire-detail-error">
         <AlertTitle>Could not load questionnaire</AlertTitle>
-        <AlertDescription>
-          {(detailQ.error as Error).message}
-        </AlertDescription>
+        <AlertDescription>{(detailQ.error as Error).message}</AlertDescription>
       </Alert>
     );
   }
@@ -229,10 +228,7 @@ export default function QuestionnaireDetailPage(props: {
             </button>
           </div>
           {selected ? (
-            <AnswerEditor
-              questionnaireID={id}
-              question={selected}
-            />
+            <AnswerEditor questionnaireID={id} question={selected} />
           ) : (
             <div
               className="flex-1 flex items-center justify-center text-sm text-muted-foreground"

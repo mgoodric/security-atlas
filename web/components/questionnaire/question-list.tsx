@@ -89,9 +89,7 @@ export function QuestionList({
                 data-question-id={q.id}
                 onClick={() => onSelect(q.id)}
                 className={`w-full text-left block px-3 py-2.5 border-b border-border hover:bg-muted/40 transition-colors ${
-                  selected
-                    ? "bg-primary/5 border-l-2 border-l-primary"
-                    : ""
+                  selected ? "bg-primary/5 border-l-2 border-l-primary" : ""
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
@@ -105,9 +103,7 @@ export function QuestionList({
                 </div>
                 <div className="flex items-center gap-2 mt-1 text-[11px] text-muted-foreground">
                   {q.scf_anchor_id ? (
-                    <span className="font-mono">
-                      SCF:{q.scf_anchor_id}
-                    </span>
+                    <span className="font-mono">SCF:{q.scf_anchor_id}</span>
                   ) : (
                     <span className="text-amber-700 dark:text-amber-500">
                       needs mapping

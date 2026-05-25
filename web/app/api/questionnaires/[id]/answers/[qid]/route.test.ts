@@ -81,9 +81,7 @@ describe("PATCH /api/questionnaires/[id]/answers/[qid]", () => {
     );
     expect(res.status).toBe(200);
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
-    expect(calledURL).toContain(
-      "/v1/questionnaires/q1/answers/q1-question",
-    );
+    expect(calledURL).toContain("/v1/questionnaires/q1/answers/q1-question");
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     expect(init?.method).toBe("PATCH");
     const sent = String(init?.body ?? "");

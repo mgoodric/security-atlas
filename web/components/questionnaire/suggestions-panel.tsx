@@ -81,8 +81,7 @@ export function SuggestionsPanel({
         data-testid="suggestions-panel"
         className="border border-border rounded-xl bg-muted/20 px-5 py-4 text-xs text-muted-foreground"
       >
-        No SCF anchor mapped for this question — no prior answers to
-        surface.
+        No SCF anchor mapped for this question — no prior answers to surface.
       </div>
     );
   }
@@ -121,8 +120,8 @@ export function SuggestionsPanel({
           Prior answers for SCF:{anchor}
         </div>
         <div className="font-mono text-[11px] text-muted-foreground">
-          {items.length} {items.length === 1 ? "entry" : "entries"} ·
-          most recent first
+          {items.length} {items.length === 1 ? "entry" : "entries"} · most
+          recent first
         </div>
       </div>
       {items.map((s) => (

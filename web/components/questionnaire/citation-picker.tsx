@@ -262,10 +262,7 @@ export function CitationChips({
 }) {
   if (citations.length === 0) return null;
   return (
-    <div
-      data-testid="citation-chips"
-      className="flex flex-wrap gap-2 mt-2"
-    >
+    <div data-testid="citation-chips" className="flex flex-wrap gap-2 mt-2">
       {citations.map((c) => (
         <span
           key={`${c.type}:${c.id}`}

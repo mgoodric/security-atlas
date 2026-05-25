@@ -14,6 +14,7 @@
 list view render?
 
 **Options:**
+
 - (a) Single hero CTA: drag-drop zone only.
 - (b) Hero CTA + helper-text card explaining the workflow.
 - (c) Hero CTA + a "Try a sample CAIQ" button.
@@ -34,6 +35,7 @@ The drag-drop zone is self-explanatory.
 land?
 
 **Options:**
+
 - (a) Stay on the list view; show the new questionnaire as a row.
 - (b) Navigate directly to Stage C (`/questionnaires/{id}`).
 - (c) Show a Stage B column-mapping review intercept first.
@@ -56,6 +58,7 @@ intercept without changing this wire shape.
 **Question:** How does the suggestions panel rank prior answers?
 
 **Options:**
+
 - (a) Top 3 by SCF-anchor frequency (deterministic, slice 155 D2).
 - (b) Top 3 by similarity score from an LLM embedding.
 - (c) Top 3 by most-recent.
@@ -78,6 +81,7 @@ top-N verbatim — the FE does not re-rank.
 AnswerLibrary?
 
 **Options:**
+
 - (a) Per-answer checkbox, default OFF.
 - (b) Auto-save every authored answer (no toggle).
 - (c) Separate "Save to library" button next to the save button.
@@ -100,6 +104,7 @@ common case; (a) lets the operator promote inline.
 citation to an answer?
 
 **Options:**
+
 - (a) Unified ⌘K-style command palette wrapping slice 268's
   `/v1/search` (controls + evidence in one palette).
 - (b) Two separate buttons (Cite control / Cite evidence) each opening
@@ -124,6 +129,7 @@ evidence rows with relevance scores. (b) duplicates the search code.
 **Question:** Where in the sidebar does Questionnaires live?
 
 **Options:**
+
 - (a) Operations cluster (same cluster as Calendar / Vendors).
 - (b) Audit cluster (next to Audits / Policies).
 - (c) Top-level under Dashboard.
@@ -146,6 +152,7 @@ leader runs.
 layer?
 
 **Options:**
+
 - (a) Suggestions endpoint is deterministic (slice 155 D2); calling
   it from the FE is fine because it's not an LLM call. The panel
   styling must avoid implying AI inference.

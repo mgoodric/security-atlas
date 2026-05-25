@@ -96,26 +96,23 @@ test.describe("questionnaires (slice 263)", () => {
     });
 
     // 2. Create — POST /api/questionnaires returns the new questionnaire.
-    await page.route(
-      "**/api/questionnaires",
-      async (route, req) => {
-        if (req.method() !== "POST") {
-          await route.fallback();
-          return;
-        }
-        await route.fulfill({
-          status: 201,
-          contentType: "application/json",
-          body: JSON.stringify({
-            id: Q_ID,
-            name: Q_NAME,
-            source_label: "CAIQ",
-            source_filename: Q_NAME,
-            status: "draft",
-          }),
-        });
-      },
-    );
+    await page.route("**/api/questionnaires", async (route, req) => {
+      if (req.method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: Q_ID,
+          name: Q_NAME,
+          source_label: "CAIQ",
+          source_filename: Q_NAME,
+          status: "draft",
+        }),
+      });
+    });
 
     // 3. import-excel — accepts the multipart payload, returns parsed Qs.
     await page.route(
@@ -324,7 +321,9 @@ test.describe("questionnaires (slice 263)", () => {
     // Visit any authed page; the sidebar is the shared shell so the
     // entry should appear regardless of route.
     await page.goto("/dashboard");
-    await expect(page.getByRole("link", { name: "Questionnaires" })).toBeVisible({
+    await expect(
+      page.getByRole("link", { name: "Questionnaires" }),
+    ).toBeVisible({
       timeout: 30_000,
     });
   });

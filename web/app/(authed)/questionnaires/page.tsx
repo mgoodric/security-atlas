@@ -148,9 +148,9 @@ export default function QuestionnairesPage() {
             Questionnaires
           </h1>
           <p className="text-sm text-muted-foreground">
-            Vendor security diligence questionnaires. Upload an Excel
-            workbook to import questions; author answers with prior-
-            answer suggestions and policy / evidence citations.
+            Vendor security diligence questionnaires. Upload an Excel workbook
+            to import questions; author answers with prior- answer suggestions
+            and policy / evidence citations.
           </p>
         </div>
         {!isEmpty && !listQ.isLoading ? (
@@ -271,16 +271,12 @@ function QuestionnaireTable({ items }: { items: Questionnaire[] }) {
                 </div>
               ) : null}
             </TableCell>
-            <TableCell className="text-xs">
-              {q.source_label || "—"}
-            </TableCell>
+            <TableCell className="text-xs">{q.source_label || "—"}</TableCell>
             <TableCell>
               <StatusBadge value={q.status} />
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
-              {q.updated_at
-                ? new Date(q.updated_at).toLocaleString()
-                : "never"}
+              {q.updated_at ? new Date(q.updated_at).toLocaleString() : "never"}
             </TableCell>
           </TableRow>
         ))}
@@ -291,11 +287,7 @@ function QuestionnaireTable({ items }: { items: Questionnaire[] }) {
 
 function StatusBadge({ value }: { value: string }) {
   const variant =
-    value === "final"
-      ? "default"
-      : value === "draft"
-        ? "secondary"
-        : "outline";
+    value === "final" ? "default" : value === "draft" ? "secondary" : "outline";
   return <Badge variant={variant}>{value || "draft"}</Badge>;
 }
 

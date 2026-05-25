@@ -45,7 +45,9 @@ export async function PATCH(
     body = {};
   }
   const upstream = await fetch(
-    `${apiBaseURL()}/v1/questionnaires/${encodeURIComponent(id)}/answers/${encodeURIComponent(qid)}`,
+    `${apiBaseURL()}/v1/questionnaires/${encodeURIComponent(
+      id,
+    )}/answers/${encodeURIComponent(qid)}`,
     {
       method: "PATCH",
       headers: {

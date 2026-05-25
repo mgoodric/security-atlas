@@ -45,7 +45,9 @@ export async function GET(
   // discipline as slice 223's /api/search BFF).
   const qs = new URLSearchParams({ anchor });
   const upstream = await fetch(
-    `${apiBaseURL()}/v1/questionnaires/${encodeURIComponent(id)}/suggestions?${qs.toString()}`,
+    `${apiBaseURL()}/v1/questionnaires/${encodeURIComponent(
+      id,
+    )}/suggestions?${qs.toString()}`,
     {
       headers: { Authorization: `Bearer ${bearer}` },
       cache: "no-store",
