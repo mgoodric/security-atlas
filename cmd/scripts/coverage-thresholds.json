@@ -1,9 +1,45 @@
 {
-  "$comment": "Slice 069 — per-package Go line-coverage floors enforced by cmd/scripts/coverage-gate.",
-  "$methodology": "Floors are derived from a measured `go test -cover ./...` run on main (the CI `Go · build + test` job, unit-only, no integration tag). Each floor is set at `max(0, floor(measured - 2pp))` — the floor RATCHETS the current actual minus a 2-pp noise band, never reaches above it (slice 069 P0-A4).",
-  "$how_to_raise": "Raise a per-package floor in a follow-up slice that (a) writes the additional tests to actually hit the new bar, (b) lifts the number here in the same PR. Do NOT raise floors in a slice that does not also write the tests.",
-  "$how_to_extend": "When a new package lands, add a row here in the same PR. Default floor is the same `floor(measured - 2pp)` calculation. If a package is intentionally untested (sqlc-generated, protoc-generated, integration-tested elsewhere), add it to `excludes` instead.",
-  "$schema_version": 1,
+  "$comment": "Slice 069 — per-package Go line-coverage floors enforced by cmd/scripts/coverage-gate. Slice 279 — measurement extended to MERGED unit + integration profiles via gocovmerge (see docs/coverage-audit-2026-05.md).",
+  "$methodology": "Floors are derived from a measured run on main. Slice 069 used a unit-only profile; slice 279 measures against the gocovmerge-merged unit + integration profile. Each floor is set at `max(0, floor(measured - 2pp))` — the floor RATCHETS the current actual minus a 2-pp noise band, never reaches above it (slice 069 P0-A4).",
+  "$how_to_raise": "Raise a per-package floor in a follow-up slice that (a) writes the additional tests to actually hit the new bar, (b) lifts the number here in the same PR. Do NOT raise floors in a slice that does not also write the tests. The ratchet contract is monotonic ↑ — never lower a floor.",
+  "$how_to_extend": "When a new package lands, add a row here in the same PR. Default floor is `floor(merged_measured - 2pp)`. If a package is intentionally untested (sqlc-generated, protoc-generated, integration-tested elsewhere), add it to `excludes` instead.",
+  "$schema_version": 2,
+  "$tier_recommendations": {
+    "$comment": "Slice 279 — aspirational per-tier targets. NOT enforced. The `thresholds` map continues to enforce per-package floors via cmd/scripts/coverage-gate; this tier block exists as MAINTAINER GUIDANCE for setting floors on NEW packages and for the spillover backlog.",
+    "api_handlers_and_business_logic": {
+      "target_pct": 70,
+      "rationale": "API handlers, business logic, and RLS-touching code are the highest-value test surfaces — every regression here is user-facing.",
+      "examples": [
+        "internal/api/controls",
+        "internal/decision",
+        "internal/risk"
+      ]
+    },
+    "connector_business_logic": {
+      "target_pct": 70,
+      "rationale": "Connector internals (auth + the per-source extractor) are the load-bearing code; slice 069 already set most at 80%+.",
+      "examples": [
+        "connectors/aws/internal/awss3",
+        "connectors/github/internal/githubrepo"
+      ]
+    },
+    "cli_cmd_glue": {
+      "target_pct": null,
+      "floor_policy": "stays_at_measured",
+      "rationale": "cmd/atlas, cmd/atlas-cli, and the connectors' cmd/atlas-* binaries are cobra glue + main entry points. They are integration-tested via the self-host bundle smoke job; no unit-test pressure.",
+      "examples": [
+        "cmd/atlas",
+        "cmd/atlas-cli",
+        "connectors/aws/cmd/aws-connector"
+      ]
+    },
+    "generated_code": {
+      "target_pct": null,
+      "floor_policy": "excluded",
+      "rationale": "sqlc-generated, protoc-generated code. Already in the `excludes` array; tested transitively through the wrapping package.",
+      "examples": ["internal/db/dbx", "internal/proto", "gen/proto"]
+    }
+  },
 
   "thresholds": {
     "cmd/atlas": 0,
@@ -52,15 +88,15 @@
     "connectors/osquery/internal/osqueryauth": 92,
     "connectors/osquery/internal/osqueryposture": 73,
 
-    "internal/api": 11,
+    "internal/api": 69,
     "internal/api/authzmw": 69,
     "internal/api/connectors": 86,
     "internal/api/controldetail": 25,
     "internal/api/controls": 26,
-    "internal/api/credstore": 24,
+    "internal/api/credstore": 69,
     "internal/api/openapi": 71,
     "internal/api/oscalexport": 37,
-    "internal/api/schemaregistry": 26,
+    "internal/api/schemaregistry": 71,
     "internal/api/soc2import": 23,
     "internal/api/tenancymw": 98,
     "internal/api/metrics": 0,
@@ -70,26 +106,26 @@
     "internal/audit/walkthrough": 3,
     "internal/auth/bearer": 68,
     "internal/auth/password": 69,
-    "internal/authz": 29,
-    "internal/board": 20,
+    "internal/authz": 70,
+    "internal/board": 31,
     "internal/canonjson": 87,
     "internal/catalog/metrics": 0,
-    "internal/control": 47,
+    "internal/control": 72,
     "internal/control/attestation": 86,
-    "internal/decision": 2,
-    "internal/eval": 14,
+    "internal/decision": 70,
+    "internal/eval": 65,
     "internal/metrics/eval": 0,
     "internal/metrics/scheduler": 0,
     "internal/evidence/redact": 77,
-    "internal/featureflag": 23,
-    "internal/frameworkscope": 19,
+    "internal/featureflag": 82,
+    "internal/frameworkscope": 75,
     "internal/observability/otel": 13,
     "internal/oscal": 39,
     "internal/policy/seed": 31,
-    "internal/risk": 10,
-    "internal/risk/aggrule": 17,
+    "internal/risk": 71,
+    "internal/risk/aggrule": 72,
     "internal/scope": 33,
-    "internal/tenancy": 51,
+    "internal/tenancy": 90,
     "internal/vendor": 7
   },
 
