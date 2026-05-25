@@ -147,7 +147,7 @@ ship. STRIDE recorded for audit-trail discipline.
 ### CI / measurement
 
 - [ ] **AC-4.** `cmd/scripts/coverage-gate` (or the `Go · build +
-    test` workflow) is extended to run BOTH unit and integration
+  test` workflow) is extended to run BOTH unit and integration
       coverage AND merge the profiles before threshold check. Use
       `gocovmerge` or equivalent.
 - [ ] **AC-5.** CI run on this PR shows the merged-profile coverage
