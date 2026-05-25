@@ -32,6 +32,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
+  DialogPortal,
   DialogTitle,
 } from "@/components/ui/dialog";
 
@@ -280,51 +281,58 @@ export function DemoControls() {
 
       {/* Confirmation dialog: Reseed */}
       <Dialog open={seedDialog} onOpenChange={setSeedDialog}>
-        <DialogContent data-testid="demo-seed-dialog">
-          <DialogHeader>
-            <DialogTitle>Reseed the demo tenant?</DialogTitle>
-            <DialogDescription>
-              This will create (or no-op on) the <code>demo</code> tenant and
-              write the slice-205 dataset. Safe to run on the atlas-edge
-              deployment.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSeedDialog(false)}>
-              Cancel
-            </Button>
-            <Button data-testid="demo-seed-confirm" onClick={runSeed}>
-              Reseed
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        <DialogPortal>
+          <DialogContent data-testid="demo-seed-dialog">
+            <DialogHeader>
+              <DialogTitle>Reseed the demo tenant?</DialogTitle>
+              <DialogDescription>
+                This will create (or no-op on) the <code>demo</code> tenant and
+                write the slice-205 dataset. Safe to run on the atlas-edge
+                deployment.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSeedDialog(false)}>
+                Cancel
+              </Button>
+              <Button data-testid="demo-seed-confirm" onClick={runSeed}>
+                Reseed
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </DialogPortal>
       </Dialog>
 
       {/* Confirmation dialog: Teardown */}
       <Dialog open={teardownDialog} onOpenChange={setTeardownDialog}>
-        <DialogContent data-testid="demo-teardown-dialog">
-          <DialogHeader>
-            <DialogTitle>Tear down the demo tenant?</DialogTitle>
-            <DialogDescription>
-              This will delete the <code>demo</code> tenant and every row
-              anchored to it. The seeder refuses to operate on a tenant that
-              does not carry the slice-205 forensic mark, so non-demo tenants
-              are safe.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setTeardownDialog(false)}>
-              Cancel
-            </Button>
-            <Button
-              data-testid="demo-teardown-confirm"
-              variant="destructive"
-              onClick={runTeardown}
-            >
-              Tear down
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        <DialogPortal>
+          <DialogContent data-testid="demo-teardown-dialog">
+            <DialogHeader>
+              <DialogTitle>Tear down the demo tenant?</DialogTitle>
+              <DialogDescription>
+                This will delete the <code>demo</code> tenant and every row
+                anchored to it. The seeder refuses to operate on a tenant that
+                does not carry the slice-205 forensic mark, so non-demo tenants
+                are safe.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setTeardownDialog(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                data-testid="demo-teardown-confirm"
+                variant="destructive"
+                onClick={runTeardown}
+              >
+                Tear down
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </DialogPortal>
       </Dialog>
     </div>
   );
