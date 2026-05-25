@@ -36,9 +36,9 @@ import { cn } from "@/lib/utils";
 //
 // The server-side authz gate is unchanged (P0-186-1): this is UI chrome
 // only. P0-186-4 fail-closed: a fetch failure / empty body / non-200
-// response collapses to "hide the Admin entry" — never "show by default."
-// The current user may briefly see the entry absent during the initial
-// fetch; rendering ghost admin chrome would be worse than a brief gap.
+// response collapses to "hide the Admin entry." The current user may
+// briefly see the entry absent during the initial fetch; rendering ghost
+// admin chrome would be worse than a brief gap.
 //
 // Slice 214 — NAV item rows now carry an optional `slot` ReactNode
 // rendered right-of-label (the existing flex row gives the slot's
@@ -53,7 +53,14 @@ import { cn } from "@/lib/utils";
 // the existing per-page BFFs. Slot composition stays a server-component
 // concern; the slice 186 admin gate is unchanged because we only added
 // to the NAV item shape, not the predicate.
-type NavItem = {
+//
+// Slice 277 — mobile-responsive baseline. The desktop `<aside>` is
+// hidden at viewport widths `< md` (768px) via `hidden md:flex`; a
+// drawer (`<MobileSidebar>`) takes over below that breakpoint. The
+// nav-item array + admin probe are exported so the mobile drawer
+// renders the SAME nav without re-running the admin probe in two
+// places. Desktop UX at `≥ md` is unchanged (P0-277-1).
+export type NavItem = {
   href: string;
   label: string;
   slot?: ReactNode;
@@ -116,13 +123,34 @@ async function fetchAdminMe(): Promise<{
   }
 }
 
-export async function Sidebar({ active }: { active?: string }) {
+/**
+ * Resolve the nav list for the current request, applying the slice 186
+ * admin-role gate. Shared by the desktop `<Sidebar>` server component
+ * and the mobile drawer (`<MobileSidebar>` consumes the resolved list
+ * via the authed layout) so the admin probe runs once per request.
+ *
+ * Slice 277 — exposed for the mobile-drawer path. The probe and gate
+ * logic are unchanged from slice 186.
+ */
+export async function getAuthedNav(): Promise<NavItem[]> {
   const meBody = await fetchAdminMe();
   const showAdmin = shouldShowAdminEntry(meBody);
-  const nav = showAdmin ? [...NAV_BASE, ADMIN_NAV_ITEM] : NAV_BASE;
+  return showAdmin ? [...NAV_BASE, ADMIN_NAV_ITEM] : NAV_BASE;
+}
 
+export async function Sidebar({ active }: { active?: string }) {
+  const nav = await getAuthedNav();
+
+  // Slice 277 — `hidden md:flex` collapses the desktop sidebar at
+  // viewport widths `< 768px` (Tailwind `md`). At `≥ md` the element
+  // renders inline exactly as it did pre-277 (P0-277-1 — no desktop
+  // UX regression). The mobile drawer (`<MobileSidebar>`) is rendered
+  // from the authed layout and takes over below the breakpoint.
   return (
-    <aside className="w-56 shrink-0 border-r bg-muted/30 p-4">
+    <aside
+      className="hidden w-56 shrink-0 border-r bg-muted/30 p-4 md:block"
+      data-testid="sidebar-desktop"
+    >
       <nav className="flex flex-col gap-1">
         {nav.map((item) => {
           const isActive = active ? active === item.href : false;

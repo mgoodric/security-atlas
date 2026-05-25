@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import Link from "next/link";
 
 import { signOut } from "@/app/login/actions";
@@ -65,10 +67,28 @@ import { UserAvatar } from "@/components/shell/user-avatar";
 //
 // See decisions log `docs/audit-log/223-controls-top-bar-chrome-
 // decisions.md` D1 (subset shipped + spillovers superseded).
-export async function TopBar() {
+//
+// Slice 277 — the topbar now accepts an optional `mobileSidebar` slot
+// (a `<MobileSidebar>` element rendered by `(authed)/layout.tsx`). The
+// element carries `md:hidden` on its trigger button, so the hamburger
+// is visible only at viewport widths `< 768px`. Desktop UX at `≥ md`
+// is unchanged — the trigger renders as a `display:none` element with
+// no layout cost (P0-277-1). The `v0 · self-host` chip is the only
+// fixed-width text the trigger sits next to; we hide it at `< sm`
+// (640px) so the hamburger + logo + breadcrumb fit on phone widths
+// without horizontal scroll.
+export async function TopBar({ mobileSidebar }: { mobileSidebar?: ReactNode }) {
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b bg-background px-6">
-      <div className="flex items-center gap-3">
+    <header className="flex h-14 shrink-0 items-center justify-between border-b bg-background px-4 md:px-6">
+      <div className="flex items-center gap-2 md:gap-3">
+        {/*
+          Slice 277 — mobile sidebar trigger. The component carries
+          `md:hidden` on its outer button, so this slot collapses to
+          empty markup at `≥ md` (no layout footprint, no desktop
+          regression). Mounted left-of-logo to match the canonical
+          mobile-app convention (hamburger always on the leading edge).
+        */}
+        {mobileSidebar}
         <Link
           href="/dashboard"
           className="flex items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -77,7 +97,9 @@ export async function TopBar() {
           <ThemeAwareLogo width={28} height={28} className="h-7 w-7" alt="" />
           <span className="text-base font-semibold">security-atlas</span>
         </Link>
-        <span className="text-xs text-muted-foreground">v0 · self-host</span>
+        <span className="hidden text-xs text-muted-foreground sm:inline">
+          v0 · self-host
+        </span>
         {/*
           Slice 223 — read-only breadcrumb chip `<tenant> > <page>`.
           Distinct from the TenantSwitcher (which is on the right side
