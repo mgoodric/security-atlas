@@ -48,6 +48,26 @@ async function isAdmin(bearer: string): Promise<boolean> {
   return body.is_admin === true;
 }
 
+// Slice 278 — probe the demo-seed env-var gate so the breadcrumb
+// renders the "Demo" link only when the feature is actually enabled.
+// Fail-closed: any error returns false so the link doesn't appear.
+async function isDemoSeedEnabled(bearer: string): Promise<boolean> {
+  try {
+    const h = await headers();
+    const host = h.get("host") ?? "localhost:3000";
+    const proto = h.get("x-forwarded-proto") ?? "http";
+    const res = await fetch(`${proto}://${host}/api/admin/demo/status`, {
+      headers: { Cookie: `${SESSION_COOKIE}=${bearer}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return false;
+    const body = (await res.json()) as { enabled?: boolean };
+    return body.enabled === true;
+  } catch {
+    return false;
+  }
+}
+
 export default async function AdminLayout({
   children,
 }: {
@@ -59,6 +79,9 @@ export default async function AdminLayout({
     redirect("/login?from=/admin");
   }
   const admin = await isAdmin(bearer);
+  // Only probe demo-seed enabled when the caller is admin — non-admins
+  // never see the section anyway, and the probe would 403.
+  const demoEnabled = admin ? await isDemoSeedEnabled(bearer) : false;
 
   return (
     <div className="flex h-screen flex-col">
@@ -67,7 +90,9 @@ export default async function AdminLayout({
         <Sidebar />
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
           {admin ? (
-            <AdminBreadcrumb>{children}</AdminBreadcrumb>
+            <AdminBreadcrumb demoEnabled={demoEnabled}>
+              {children}
+            </AdminBreadcrumb>
           ) : (
             <ForbiddenPanel />
           )}
@@ -77,7 +102,13 @@ export default async function AdminLayout({
   );
 }
 
-function AdminBreadcrumb({ children }: { children: React.ReactNode }) {
+function AdminBreadcrumb({
+  children,
+  demoEnabled,
+}: {
+  children: React.ReactNode;
+  demoEnabled: boolean;
+}) {
   return (
     <div className="space-y-4">
       <nav
@@ -109,6 +140,11 @@ function AdminBreadcrumb({ children }: { children: React.ReactNode }) {
         <Link href="/admin/tenants" className="hover:text-foreground">
           Tenants
         </Link>
+        {demoEnabled ? (
+          <Link href="/admin/demo" className="hover:text-foreground">
+            Demo
+          </Link>
+        ) : null}
       </nav>
       {children}
     </div>

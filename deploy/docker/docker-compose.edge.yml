@@ -281,6 +281,11 @@ services:
       OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-}
       OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-}
       ATLAS_METRICS_FALLBACK_ENABLE: ${ATLAS_METRICS_FALLBACK_ENABLE:-false}
+      # Slice 278: enable the /admin/demo button on the edge instance.
+      # Same env var slice 205's CLI uses; opt-in on edge only, never
+      # on production. The handler returns 503 to all callers when
+      # this is unset.
+      ATLAS_ENABLE_DEMO_SEED: ${ATLAS_ENABLE_DEMO_SEED:-true}
     ports:
       - "${EDGE_ATLAS_HTTP_PORT:-8180}:8080"
       - "${EDGE_ATLAS_GRPC_PORT:-50151}:50051"
