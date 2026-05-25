@@ -59,7 +59,7 @@ The two non-clearing packages:
   (`IsNotFound`, `IsBadScopePredicate`, `FreshnessMaxAge`,
   `NewScheduler`, `NewEngineFactory`) ARE now covered by
   `internal/eval/helpers_test.go`. Floor raised to 65 — a real ratchet
-  from 14. Further lift goes to spillover slice 281.
+  from 14. Further lift goes to spillover slice 282.
 
 - **`internal/board`** — 33.1% merged is 36.9pp short of 70%. The
   uncovered surface is dominated by `pack_store.go` (DB CRUD, 563
@@ -70,7 +70,7 @@ The two non-clearing packages:
   `StoredPack.IsPublished` + `writeOptIntRow` + `allSectionsApproved`
   - `buildPackHTML` + each section's data renderer ARE now covered by
     `internal/board/pack_pdf_html_test.go`. Floor raised to 31 — a real
-    ratchet from 20. Further lift goes to spillover slice 282 (which
+    ratchet from 20. Further lift goes to spillover slice 283 (which
     files the board integration_test scaffold as a separate slice
     rather than bundling it here).
 
@@ -155,7 +155,7 @@ integration profile completes in <1s on an M1.
 
 ### D5 — Spillover slice slot allocation
 
-Spillover slices 281-302 are allocated for the long-tail `unit-add`
+Spillover slices 282-303 are allocated for the long-tail `unit-add`
 packages from the audit. The audit doc names each package + its
 spillover slot. Slot 281 is `internal/eval` (the lift target that
 didn't clear 70% in this slice). Slot 282 is the board
@@ -189,10 +189,10 @@ for a few weeks:
    in eval is the NATS consumer; cleanly testing it needs an in-test
    NATS embed (slice 015's pattern) or a refactor that splits the
    consumer into a pure-logic decode step + a thin NATS-bound IO
-   layer. Spillover slice 281 owns this.
+   layer. Spillover slice 282 owns this.
 
 2. **`internal/board` integration_test scaffold.** Board is the biggest
-   gap (33.1% merged vs 70% target). Spillover slice 282 files the
+   gap (33.1% merged vs 70% target). Spillover slice 283 files the
    integration_test.go scaffold; once it lands, board's merged % will
    move materially (analogous to how slice 279 moved frameworkscope
    from 21.8% → 77.8% by enrolling its integration tests).

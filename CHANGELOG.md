@@ -623,7 +623,7 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   list extension: `internal/risk/aggrule` (17 → 72). Audit doc at
   `docs/coverage-audit-2026-05.md` enumerates every below-70% package
   with a disposition (`unit-add` / `count-integration` / `exempt`) and
-  reserves spillover slice slots 281-302 for the long tail of
+  reserves spillover slice slots 282-303 for the long tail of
   `unit-add` packages not lifted in this slice. The
   `$tier_recommendations` block in `coverage-thresholds.json` is
   DOCUMENTATION only — the per-package `thresholds` map is the only

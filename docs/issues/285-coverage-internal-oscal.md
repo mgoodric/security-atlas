@@ -1,4 +1,4 @@
-# 284 — Coverage lift — `internal/oscal` to 70%+
+# 285 — Coverage lift — `internal/oscal` to 70%+
 
 **Cluster:** Quality
 **Estimate:** 1d (small package) to 3d (large package, see notes)
@@ -57,11 +57,11 @@ The two changes ship in the SAME PR per slice 069's ratchet contract
 
 ## Anti-criteria (P0 — block merge)
 
-- **P0-284-1.** Does NOT raise the `internal/oscal` floor without writing
+- **P0-285-1.** Does NOT raise the `internal/oscal` floor without writing
   the unit tests that hit the new bar.
-- **P0-284-2.** Does NOT lower any existing floor — every change to
+- **P0-285-2.** Does NOT lower any existing floor — every change to
   `thresholds` is monotonically ↑.
-- **P0-284-3.** Does NOT modify `_STATUS.md` from inside this
+- **P0-285-3.** Does NOT modify `_STATUS.md` from inside this
   slice's own commits — orchestrator's surface.
 
 ## Notes for the implementing agent

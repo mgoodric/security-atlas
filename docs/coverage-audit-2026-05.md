@@ -58,7 +58,7 @@ merged); the other four require substantive unit-test additions.
 ### `unit-add` — packages requiring NEW unit tests
 
 These are below 70% even after merging integration coverage.
-Spillover slices (281-301) file each remaining package not in the 5
+Spillover slices (282-303) file each remaining package not in the 5
 lift targets.
 
 | Package                                    | Unit-only % | Merged % | Statements | Disposition    | Spillover # | Notes                                                                  |
@@ -68,28 +68,28 @@ lift targets.
 | `internal/eval`                            | 16.0        | 31.4     | 363        | unit-add       | LIFT (this) | engine + rego + state; lift target                                     |
 | `internal/risk`                            | 12.1        | 36.1     | 820        | unit-add       | LIFT (this) | methodology + severity + treatment; lift target                        |
 | `internal/board`                           | 23.2        | 23.7     | 734        | unit-add       | LIFT (this) | narrative + generator + pack; lift target                              |
-| `internal/scope`                           | 35.0        | 35.3     | 266        | unit-add       | 281         | scope-cell predicate logic; pure-Go unit-testable                      |
-| `internal/oscal`                           | 41.4        | 41.4     | 256        | unit-add       | 282         | OSCAL ingest/export marshalling; pure-data unit-testable               |
-| `internal/risk/aggrule`                    | 18.9        | 19.1     | 418        | unit-add       | 283         | risk aggregation rules; pure logic; sibling to risk lift               |
-| `internal/observability/otel`              | 15.8        | 15.8     | 139        | unit-add       | 284         | tracing wrappers; surface is small; quick unit win                     |
-| `internal/vendor`                          | 9.5         | 10.1     | 179        | unit-add       | 285         | vendor data model + helpers                                            |
-| `internal/audit/walkthrough`               | 3.0         | 6.0      | 418        | unit-add       | 286         | walkthrough store helpers; large package                               |
-| `internal/artifact`                        | 5.7         | 5.7      | 122        | unit-add       | 287         | artifact metadata + redact helpers; small                              |
-| `internal/api/controldetail`               | 25.0        | 29.3     | 273        | unit-add       | 288         | control-detail HTTP handler logic                                      |
-| `internal/api/controls`                    | 26.0        | 26.3     | 559        | unit-add       | 289         | controls HTTP handler — large surface                                  |
-| `internal/api/oscalexport`                 | 37.0        | 39.4     | 33         | unit-add       | 290         | OSCAL export HTTP handler; small surface                               |
-| `internal/api/metrics`                     | 0.0         | 0.4      | 275        | unit-add       | 291         | metrics endpoint; needs handler + auth tests                           |
-| `internal/metrics/eval`                    | 33.0        | 33.0     | 88         | unit-add       | 292         | eval metric reducer; small                                             |
-| `internal/metrics/scheduler`               | 0.0         | 0.0      | 74         | unit-add       | 293         | scheduler stub; surface small but uncovered                            |
-| `internal/catalog/metrics`                 | 0.0         | 64.7     | 153        | unit-add       | 294         | catalog metric emitter; needs unit on the entry helpers                |
-| `connectors/aws/cmd/aws-connector`         | 9.0         | 9.0      | 111        | exempt-leaning | 295         | cobra glue + main; integration-tested; tier 'CLI cmd'                  |
-| `connectors/jira/cmd/atlas-jira`           | 30.4        | 30.4     | 158        | exempt-leaning | 296         | cobra glue; tier 'CLI cmd'                                             |
-| `connectors/github/cmd/atlas-github`       | 15.1        | 15.1     | 199        | exempt-leaning | 297         | cobra glue; tier 'CLI cmd'                                             |
-| `connectors/okta/cmd/atlas-okta`           | 20.7        | 20.7     | 188        | exempt-leaning | 298         | cobra glue; tier 'CLI cmd'                                             |
-| `connectors/osquery/cmd/atlas-osquery`     | 28.2        | 28.2     | 142        | exempt-leaning | 299         | cobra glue; tier 'CLI cmd'                                             |
-| `connectors/1password/cmd/atlas-1password` | 14.8        | 14.8     | 108        | exempt-leaning | 300         | cobra glue; tier 'CLI cmd'                                             |
-| `connectors/manual/cmd/atlas-manual`       | 43.6        | 43.6     | 282        | exempt-leaning | 301         | cobra glue; tier 'CLI cmd'                                             |
-| `connectors/aws/internal/awsauth`          | 66.7        | 66.7     | 36         | unit-add       | 302         | tiny gap (3.3pp); quick unit additions                                 |
+| `internal/scope`                           | 35.0        | 35.3     | 266        | unit-add       | 282         | scope-cell predicate logic; pure-Go unit-testable                      |
+| `internal/oscal`                           | 41.4        | 41.4     | 256        | unit-add       | 283         | OSCAL ingest/export marshalling; pure-data unit-testable               |
+| `internal/risk/aggrule`                    | 18.9        | 19.1     | 418        | unit-add       | 284         | risk aggregation rules; pure logic; sibling to risk lift               |
+| `internal/observability/otel`              | 15.8        | 15.8     | 139        | unit-add       | 285         | tracing wrappers; surface is small; quick unit win                     |
+| `internal/vendor`                          | 9.5         | 10.1     | 179        | unit-add       | 286         | vendor data model + helpers                                            |
+| `internal/audit/walkthrough`               | 3.0         | 6.0      | 418        | unit-add       | 287         | walkthrough store helpers; large package                               |
+| `internal/artifact`                        | 5.7         | 5.7      | 122        | unit-add       | 288         | artifact metadata + redact helpers; small                              |
+| `internal/api/controldetail`               | 25.0        | 29.3     | 273        | unit-add       | 289         | control-detail HTTP handler logic                                      |
+| `internal/api/controls`                    | 26.0        | 26.3     | 559        | unit-add       | 290         | controls HTTP handler — large surface                                  |
+| `internal/api/oscalexport`                 | 37.0        | 39.4     | 33         | unit-add       | 291         | OSCAL export HTTP handler; small surface                               |
+| `internal/api/metrics`                     | 0.0         | 0.4      | 275        | unit-add       | 292         | metrics endpoint; needs handler + auth tests                           |
+| `internal/metrics/eval`                    | 33.0        | 33.0     | 88         | unit-add       | 293         | eval metric reducer; small                                             |
+| `internal/metrics/scheduler`               | 0.0         | 0.0      | 74         | unit-add       | 294         | scheduler stub; surface small but uncovered                            |
+| `internal/catalog/metrics`                 | 0.0         | 64.7     | 153        | unit-add       | 295         | catalog metric emitter; needs unit on the entry helpers                |
+| `connectors/aws/cmd/aws-connector`         | 9.0         | 9.0      | 111        | exempt-leaning | 296         | cobra glue + main; integration-tested; tier 'CLI cmd'                  |
+| `connectors/jira/cmd/atlas-jira`           | 30.4        | 30.4     | 158        | exempt-leaning | 297         | cobra glue; tier 'CLI cmd'                                             |
+| `connectors/github/cmd/atlas-github`       | 15.1        | 15.1     | 199        | exempt-leaning | 298         | cobra glue; tier 'CLI cmd'                                             |
+| `connectors/okta/cmd/atlas-okta`           | 20.7        | 20.7     | 188        | exempt-leaning | 299         | cobra glue; tier 'CLI cmd'                                             |
+| `connectors/osquery/cmd/atlas-osquery`     | 28.2        | 28.2     | 142        | exempt-leaning | 300         | cobra glue; tier 'CLI cmd'                                             |
+| `connectors/1password/cmd/atlas-1password` | 14.8        | 14.8     | 108        | exempt-leaning | 301         | cobra glue; tier 'CLI cmd'                                             |
+| `connectors/manual/cmd/atlas-manual`       | 43.6        | 43.6     | 283        | exempt-leaning | 302         | cobra glue; tier 'CLI cmd'                                             |
+| `connectors/aws/internal/awsauth`          | 66.7        | 66.7     | 36         | unit-add       | 303         | tiny gap (3.3pp); quick unit additions                                 |
 
 ### `count-integration` — already ≥ 70% merged; floor-only lift in this slice
 
@@ -171,7 +171,7 @@ that day.
   go tool cover -func=merged.cov
   ```
 - Maintainer revisits this audit when:
-  - The next batch of spillover lifts (281-302) lands — re-measure to
+  - The next batch of spillover lifts (282-303) lands — re-measure to
     confirm the floor moves matched expectations.
   - Frontend (vitest) coverage gate ships — sister audit needed.
   - A new package lands without a threshold row — the audit policy

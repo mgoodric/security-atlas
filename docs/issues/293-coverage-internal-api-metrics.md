@@ -1,4 +1,4 @@
-# 282 — Coverage lift — `internal/board` to 70%+
+# 293 — Coverage lift — `internal/api/metrics` to 70%+
 
 **Cluster:** Quality
 **Estimate:** 1d (small package) to 3d (large package, see notes)
@@ -9,21 +9,21 @@
 
 Surfaced during slice 279's coverage audit, captured per the
 continuous-batch policy. The audit at
-`docs/coverage-audit-2026-05.md` measured `internal/board` at **33.1% merged
-coverage** (unit-only: 23.7%), below the 70% aspirational target the
+`docs/coverage-audit-2026-05.md` measured `internal/api/metrics` at **0.4% merged
+coverage** (unit-only: 0.0%), below the 70% aspirational target the
 slice established. Slice 279 lifted five highest-leverage packages and
 filed the remaining `unit-add` long tail as per-package spillovers.
 
 **Disposition:** `unit-add`
 
-**Notes:** integration_test.go scaffold needed; board has zero integration tests today; biggest gap (~37pp short)
+**Notes:** metrics endpoint; needs handler + auth tests
 
 ## What ships in this slice
 
-1. **New unit tests** under `internal/board/*_test.go` covering the
+1. **New unit tests** under `internal/api/metrics/*_test.go` covering the
    uncovered branches identified by the slice 279 audit.
 2. **Floor ratchet** in `cmd/scripts/coverage-thresholds.json` from
-   the current `31` to `floor(measured - 2pp)` where
+   the current `0` to `floor(measured - 2pp)` where
    `measured` is the post-test merged %.
 
 The two changes ship in the SAME PR per slice 069's ratchet contract
@@ -31,14 +31,14 @@ The two changes ship in the SAME PR per slice 069's ratchet contract
 
 ## Acceptance criteria
 
-- [ ] **AC-1.** New unit tests for `internal/board` move its merged coverage
+- [ ] **AC-1.** New unit tests for `internal/api/metrics` move its merged coverage
       to ≥ 70%.
 - [ ] **AC-2.** Each test exercises real branches with real assertions
       (no vacuous `expect(true).toBe(true)` patterns).
 - [ ] **AC-3.** Each new test file's first comment block names the
       package's load-bearing functions + the branches the file is
       designed to cover.
-- [ ] **AC-4.** `coverage-thresholds.json` ratchets the `internal/board` floor
+- [ ] **AC-4.** `coverage-thresholds.json` ratchets the `internal/api/metrics` floor
       to merged-measured minus 2pp.
 
 ## Constitutional invariants honored
@@ -57,11 +57,11 @@ The two changes ship in the SAME PR per slice 069's ratchet contract
 
 ## Anti-criteria (P0 — block merge)
 
-- **P0-282-1.** Does NOT raise the `internal/board` floor without writing
+- **P0-293-1.** Does NOT raise the `internal/api/metrics` floor without writing
   the unit tests that hit the new bar.
-- **P0-282-2.** Does NOT lower any existing floor — every change to
+- **P0-293-2.** Does NOT lower any existing floor — every change to
   `thresholds` is monotonically ↑.
-- **P0-282-3.** Does NOT modify `_STATUS.md` from inside this
+- **P0-293-3.** Does NOT modify `_STATUS.md` from inside this
   slice's own commits — orchestrator's surface.
 
 ## Notes for the implementing agent
@@ -74,7 +74,7 @@ notes; then run:
 go test -coverpkg=./... -coverprofile=unit.cov ./...
 go test -tags=integration -p 1 -coverpkg=./... -coverprofile=integration.cov <CI test list>
 gocovmerge unit.cov integration.cov > merged.cov
-go tool cover -func=merged.cov | grep 'internal/board'
+go tool cover -func=merged.cov | grep 'internal/api/metrics'
 ```
 
 to see the per-function gap. Pick the largest pure-Go functions first;

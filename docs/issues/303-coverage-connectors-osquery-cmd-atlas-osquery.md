@@ -1,4 +1,4 @@
-# 292 — Coverage lift — `internal/api/metrics` to 70%+
+# 303 — Coverage lift — `connectors/osquery/cmd/atlas-osquery` to 70%+
 
 **Cluster:** Quality
 **Estimate:** 1d (small package) to 3d (large package, see notes)
@@ -9,21 +9,21 @@
 
 Surfaced during slice 279's coverage audit, captured per the
 continuous-batch policy. The audit at
-`docs/coverage-audit-2026-05.md` measured `internal/api/metrics` at **0.4% merged
-coverage** (unit-only: 0.0%), below the 70% aspirational target the
+`docs/coverage-audit-2026-05.md` measured `connectors/osquery/cmd/atlas-osquery` at **28.2% merged
+coverage** (unit-only: 28.2%), below the 70% aspirational target the
 slice established. Slice 279 lifted five highest-leverage packages and
 filed the remaining `unit-add` long tail as per-package spillovers.
 
-**Disposition:** `unit-add`
+**Disposition:** `exempt-leaning`
 
-**Notes:** metrics endpoint; needs handler + auth tests
+**Notes:** tier 'CLI cmd'
 
 ## What ships in this slice
 
-1. **New unit tests** under `internal/api/metrics/*_test.go` covering the
+1. **New unit tests** under `connectors/osquery/cmd/atlas-osquery/*_test.go` covering the
    uncovered branches identified by the slice 279 audit.
 2. **Floor ratchet** in `cmd/scripts/coverage-thresholds.json` from
-   the current `0` to `floor(measured - 2pp)` where
+   the current `26` to `floor(measured - 2pp)` where
    `measured` is the post-test merged %.
 
 The two changes ship in the SAME PR per slice 069's ratchet contract
@@ -31,14 +31,14 @@ The two changes ship in the SAME PR per slice 069's ratchet contract
 
 ## Acceptance criteria
 
-- [ ] **AC-1.** New unit tests for `internal/api/metrics` move its merged coverage
+- [ ] **AC-1.** New unit tests for `connectors/osquery/cmd/atlas-osquery` move its merged coverage
       to ≥ 70%.
 - [ ] **AC-2.** Each test exercises real branches with real assertions
       (no vacuous `expect(true).toBe(true)` patterns).
 - [ ] **AC-3.** Each new test file's first comment block names the
       package's load-bearing functions + the branches the file is
       designed to cover.
-- [ ] **AC-4.** `coverage-thresholds.json` ratchets the `internal/api/metrics` floor
+- [ ] **AC-4.** `coverage-thresholds.json` ratchets the `connectors/osquery/cmd/atlas-osquery` floor
       to merged-measured minus 2pp.
 
 ## Constitutional invariants honored
@@ -57,11 +57,11 @@ The two changes ship in the SAME PR per slice 069's ratchet contract
 
 ## Anti-criteria (P0 — block merge)
 
-- **P0-292-1.** Does NOT raise the `internal/api/metrics` floor without writing
+- **P0-303-1.** Does NOT raise the `connectors/osquery/cmd/atlas-osquery` floor without writing
   the unit tests that hit the new bar.
-- **P0-292-2.** Does NOT lower any existing floor — every change to
+- **P0-303-2.** Does NOT lower any existing floor — every change to
   `thresholds` is monotonically ↑.
-- **P0-292-3.** Does NOT modify `_STATUS.md` from inside this
+- **P0-303-3.** Does NOT modify `_STATUS.md` from inside this
   slice's own commits — orchestrator's surface.
 
 ## Notes for the implementing agent
@@ -74,7 +74,7 @@ notes; then run:
 go test -coverpkg=./... -coverprofile=unit.cov ./...
 go test -tags=integration -p 1 -coverpkg=./... -coverprofile=integration.cov <CI test list>
 gocovmerge unit.cov integration.cov > merged.cov
-go tool cover -func=merged.cov | grep 'internal/api/metrics'
+go tool cover -func=merged.cov | grep 'connectors/osquery/cmd/atlas-osquery'
 ```
 
 to see the per-function gap. Pick the largest pure-Go functions first;
