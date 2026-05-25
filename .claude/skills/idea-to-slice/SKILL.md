@@ -211,17 +211,42 @@ If `grill-me` is not installed:
 
 Apply Red Team findings back to the draft. Iterate at most twice (first round = obvious fixes; second round = subtle ones); a third round usually means the slice is wrong-shaped and needs Phase 0 / Phase 1 revisit.
 
-### Phase 6 — Write + commit + PR
+### Phase 6 — Write + register + commit + PR
 
 1. Verify next slice slot is still free: `ls docs/issues/[0-9]*.md` plus `gh pr list --search "<NNN>"` — automation may have filled it during Phases 2-5.
 2. If slot is taken: increment + retry. Don't silently overwrite.
 3. Switch to `main`, pull, branch as `docs/<NNN>-<kebab-slug>` (e.g. `docs/094-compliance-calendar`).
 4. Write `docs/issues/<NNN>-<slug>.md`.
-5. Run `pre-commit run --files docs/issues/<NNN>-<slug>.md` to catch prettier reformat. Re-stage if hook modified.
-6. Commit with DCO sign-off (`git commit -s`) using a Conventional Commit subject like `docs(issues): add slice <NNN> — <title>`. Body summarizes scope + key anti-criteria + provenance ("surfaced YYYY-MM-DD during X").
-7. Push with `-u` (`git push -u origin docs/<NNN>-<slug>`).
-8. Open PR with `gh pr create --base main --head docs/<NNN>-<slug>` and a body that mirrors the commit body plus the threat-model summary.
-9. Return the PR URL to the user.
+5. **Register the slice in `docs/issues/_STATUS.md` in the SAME commit** — this is load-bearing for the continuous-batch loop's GUARD-1 (which reads the canonical Status table, not the slice files). Two edits required:
+   a. Add a canonical row under the `## Status table` section. Place it in numeric order (immediately after the row whose number is `<NNN> - 1`). Template:
+
+   ```
+   | <NNN> | <Title — copy from the slice's `# <NNN> — <Title>` line, may truncate parentheticals to fit> | `ready` (or `not-ready` if any dep is unmerged) | — | — | — | — | <one-line notes: cluster · type · estimate · short rationale or provenance reference> |
+   ```
+
+   b. Add a small drift block ABOVE the most recent existing drift block. Template:
+
+   ```
+   ## Drift detected — YYYY-MM-DD (slice <NNN> filed via /idea-to-slice)
+
+   <one-sentence summary: what surface, what cluster, what user-confirmed scope>.
+
+   | Row | Transition | Evidence |
+   | --- | --- | --- |
+   | <NNN> | (new row) → `ready` | spec at `docs/issues/<NNN>-<slug>.md` · PR pending |
+   ```
+
+   c. Update the file's top-of-file `**Last reconciled:** YYYY-MM-DD (...)` marker to reflect the addition.
+
+6. Run `pre-commit run --files docs/issues/<NNN>-<slug>.md docs/issues/_STATUS.md` to catch prettier reformat. Re-stage if hook modified either file.
+7. Commit with DCO sign-off (`git commit -s`) using a Conventional Commit subject like `docs(issues): add slice <NNN> — <title>`. Body summarizes scope + key anti-criteria + provenance ("surfaced YYYY-MM-DD during X"). The slice file AND the `_STATUS.md` edits go in **one commit** — they're one logical unit ("this slice exists + here's the row to track it").
+8. Push with `-u` (`git push -u origin docs/<NNN>-<slug>`).
+9. Open PR with `gh pr create --base main --head docs/<NNN>-<slug>` and a body that mirrors the commit body plus the threat-model summary.
+10. Update the PR body with the canonical row's PR number once `gh pr create` returns it (so the `_STATUS.md` row's notes can cite `gh#<N>`). Optional polish: amend the commit with the resolved PR number in the row.
+11. Return the PR URL to the user.
+
+**Why the `_STATUS.md` registration step is mandatory** (Phase 6.5 in spirit, integrated into Phase 6 as step 5):
+The continuous-batch loop (`Plans/prompts/07-continuous-batch-loop.md`) reads `_STATUS.md` as its single source of truth for pickable work via GUARD-1. A slice file with no canonical row is invisible to the loop — it cannot be picked, cannot be dispatched, cannot be reconciled. Historical sessions (slices 273, 274, 276, 277, 278, 279) all hit this gap and required follow-up reconcile PRs to register their rows retroactively — net cost ~3-5 min churn per slice. Codifying the registration in the same commit eliminates the gap permanently.
 
 **Branch-switch defense:** the security-atlas parallel-batch automation frequently switches the checked-out branch mid-session. After every git operation, re-verify `git branch --show-current` matches the intended branch. If not: stash if dirty, re-switch, cherry-pick the commit onto the right branch, force-push with explicit `--force-with-lease=<branch>:<expected-sha>`. (Session 2026-05-15 hit this pattern three times; the recovery dance is now standard.)
 
@@ -235,9 +260,9 @@ Spillover discipline matches `Plans/prompts/07-continuous-batch-loop.md` Amendme
 
 Per invocation:
 
-- **Primary deliverable**: one `docs/issues/<NNN>-<slug>.md` + one branch + one DCO-signed commit + one PR URL
-- **Secondary deliverables** (only if surfaced): N spillover slice PRs, each labeled with parent-slice reference
-- **Console summary**: 5-line summary including PR URL, AC count, threat-model verdict (CLEAN / has-mitigations / HOLD-pending-review), and any "skill not installed" call-outs
+- **Primary deliverable**: one `docs/issues/<NNN>-<slug>.md` + a `_STATUS.md` row registration (same commit) + one branch + one DCO-signed commit + one PR URL
+- **Secondary deliverables** (only if surfaced): N spillover slice PRs, each labeled with parent-slice reference; each ALSO carrying its own `_STATUS.md` row registration
+- **Console summary**: 5-line summary including PR URL, AC count, threat-model verdict (CLEAN / has-mitigations / HOLD-pending-review), the canonical row's status (`ready` / `not-ready`), and any "skill not installed" call-outs
 
 ## Hard rules
 
@@ -246,6 +271,7 @@ Per invocation:
 - **NEVER** silently install a missing dependency skill. Call it out to the user with the install command and let them decide whether to install or accept the fallback.
 - **NEVER** write more than ONE primary slice per invocation. If the idea genuinely needs N slices, file the first one + N-1 spillover stubs; do NOT bundle into one mega-slice.
 - **NEVER** commit a slice file directly to `main`. The PR is the gate; branch protection enforces it anyway, but the skill should not even try.
+- **NEVER** ship the slice file without the matching `_STATUS.md` row registration in the same commit. A slice with no canonical row is invisible to the continuous-batch loop's GUARD-1 — it cannot be picked. The skill's Phase 6 step 5 is mandatory; skipping it forces a retroactive reconcile PR (~3-5 min churn) and risks the row being forgotten entirely.
 - **NEVER** use vendor-prefixed test fixture tokens in any test reference within the slice — neutral `test-*` only (per slice 05's documented convention).
 - **NEVER** auto-merge the resulting PR. The slice is design work; the maintainer reviews it before it enters the batch queue.
 
