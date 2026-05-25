@@ -224,6 +224,10 @@ Apply Red Team findings back to the draft. Iterate at most twice (first round = 
    | <NNN> | <Title — copy from the slice's `# <NNN> — <Title>` line, may truncate parentheticals to fit> | `ready` (or `not-ready` if any dep is unmerged) | — | — | — | — | <one-line notes: cluster · type · estimate · short rationale or provenance reference> |
    ```
 
+   **Status value (hard rule):** the new row's status MUST be `ready` (spec landed; implementation pending) — NOT `merged`. `merged` is reserved for slices whose **implementation has shipped**, not for slices whose **spec PR has merged**. The two are different events: the spec PR `/idea-to-slice` produces is design work; the implementation lands later via a separate `feat:` PR opened by the continuous-batch loop or a maintainer. Use `not-ready` only when at least one dependency is still unmerged AND the dependency is technical (a slice the implementation imports from), not editorial (e.g., "I want to write the audit doc first" is not a not-ready blocker).
+
+   Historical incident (2026-05-25): a housekeeping PR conflated "spec PR for slice 277 merged" with "slice 277 implementation merged" and set the canonical row to `merged`. The loop's GUARD-1 then skipped slice 277 entirely (counts only `ready` rows). Diagnosed + corrected via a status-only follow-up PR. Avoid by keeping the spec/impl distinction load-bearing: spec landing = `ready`; implementation landing = `merged`.
+
    b. Add a small drift block ABOVE the most recent existing drift block. Template:
 
    ```
@@ -272,6 +276,7 @@ Per invocation:
 - **NEVER** write more than ONE primary slice per invocation. If the idea genuinely needs N slices, file the first one + N-1 spillover stubs; do NOT bundle into one mega-slice.
 - **NEVER** commit a slice file directly to `main`. The PR is the gate; branch protection enforces it anyway, but the skill should not even try.
 - **NEVER** ship the slice file without the matching `_STATUS.md` row registration in the same commit. A slice with no canonical row is invisible to the continuous-batch loop's GUARD-1 — it cannot be picked. The skill's Phase 6 step 5 is mandatory; skipping it forces a retroactive reconcile PR (~3-5 min churn) and risks the row being forgotten entirely.
+- **NEVER** set the new canonical row's status to `merged` just because the spec PR merged. `merged` is reserved for slices whose **implementation** has shipped; the spec PR landing is the start of the slice's life, not the end. Spec landing = `ready`. Implementation landing (a later, separate PR) = `merged`. Conflating the two hides ready work from GUARD-1.
 - **NEVER** use vendor-prefixed test fixture tokens in any test reference within the slice — neutral `test-*` only (per slice 05's documented convention).
 - **NEVER** auto-merge the resulting PR. The slice is design work; the maintainer reviews it before it enters the batch queue.
 
