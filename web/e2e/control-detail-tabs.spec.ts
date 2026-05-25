@@ -22,43 +22,70 @@
 // preamble). The mocked payloads carry deterministic counts so the
 // tab-chip assertions are stable.
 //
-// Slice 275 — auto-wait fix for the tablist-visible assertion.
+// Slice 275 — auto-wait helper for the tablist-visible assertion.
 //
-// The first build of this spec used the Playwright default 5s
-// `toBeVisible` timeout on `page.getByTestId("control-tabs")`. Under
-// CI load (2 parallel workers against a shared docker stack), the
-// page-mount sequence (Suspense fallback → ControlDetailPageInner
-// mount → useSearchParams resolved → coverageQ useQuery fires →
-// fetch awaits mock fulfillment → React re-renders past
-// `coverageQ.isLoading`) routinely exceeded that 5s budget. The page
-// stays in its `coverageQ.isLoading` skeleton branch (testid
-// `control-detail-loading`); the assertion times out.
+// Slice 275 added the `gotoControlDetail` helper that gates the
+// first assertion on the `/coverage` network response. The helper
+// is the canonical Playwright pattern (see web/e2e/README.md
+// "Gating the FIRST visibility assertion on a network round-trip")
+// and remains in place. Slice 275's diagnosis attributed the
+// failure to the page-mount sequence exceeding the default 5s
+// timeout under CI load; the helper + 30s backstop did NOT resolve
+// the failure and the 7 tests were quarantined via `test.skip`.
 //
-// The mocks ARE registered before `page.goto` — every `await
-// page.route(...)` in beforeEach resolves before the test body runs,
-// so the spec's filed "route registration timing" hypothesis (#2) is
-// NOT the root cause. The actual cause is the assertion shape's
-// default 5s polling budget being too short for the mount sequence
-// under CI load (hypothesis #1 in the slice spec — Suspense
-// fallback + coverageQ fetch overhead).
+// Slice 276 — root cause + the actual fix (mock-schema-conformance).
 //
-// The fix follows slice 274 D-274-3's "auto-waiting beats default
-// timeouts" pattern, ratcheted up for the page-mount case:
+// Slice 276 pulled the slice-275 CI failure's playwright trace +
+// error-context and found:
+//   1. Page snapshot at failure: `"This page couldn't load"` — a
+//      Next.js error-boundary fallback, NOT the coverageQ-loading
+//      Skeleton. The page is CRASHING, not slow.
+//   2. All `/api/controls/*` network responses returned 200 — the
+//      `page.route` mocks were intercepting correctly. Slice 275's
+//      "mocks not firing" follow-up note was empirically wrong.
+//   3. The trace captured a pageError:
+//      `TypeError: Cannot read properties of undefined (reading
+//      'slice')` thrown from an Array.map inside the page bundle,
+//      from `web/components/control/ucf-mini-viz.tsx:122` —
+//      `req.title.slice(0, 34)`.
 //
-//   1. After every `page.goto(/controls/{id})`, await a
-//      `page.waitForResponse("**/coverage")` so the assertion that
-//      follows is deterministically gated on the network round-trip
-//      that drives `coverageQ.isLoading` → settled.
-//   2. The first tablist assertion in each test uses an explicit
-//      30s timeout as a CI-load backstop. The `waitForResponse`
-//      above closes the race; the timeout is the floor in case
-//      something downstream (React commit, sticky-position layout)
-//      slips on slow runners.
+// The mocked /coverage payload supplied `requirement_text` on each
+// requirement row but NOT `title` (and several other fields the
+// `CoverageRequirement` type in `web/lib/api.ts` declares as
+// required). The page renders `<UcfMiniViz>` inside the Overview
+// AND Mappings panels; UcfMiniViz calls `req.title.slice(0, 34)`
+// unconditionally; with `title === undefined` the call throws, the
+// React render tree crashes, the error boundary swallows the
+// subtree, and every assertable testid (`control-tabs`,
+// `control-tab-panel-overview`, etc.) is gone.
 //
-// The fix is e2e-only — no production code is touched (slice 275
-// P0-275-2). The `gotoControlDetail(page, opts)` helper encapsulates
-// the navigation + wait pattern so all five originally-racy tests
-// (AC-1, AC-2, AC-8 x2, AC-9) share one implementation.
+// Why AC-8 refresh appeared to pass in 1.3s on the slice 275 CI
+// run: it deep-links to `?tab=policies`, so the Overview panel
+// (and its `<UcfMiniViz>`) never mounts on first paint. The
+// Policies panel renders, the test's assertion on
+// `policies-tab-panel` passes, the test exits before any tab
+// click triggers a Mappings or Overview render that would crash.
+// Clicking Mappings (which AC-8 does) would have crashed too —
+// that test failed.
+//
+// The fix is e2e-only — no production code is touched (slice 276
+// P0-276-2). The `coverage` mock payload now provides every
+// required field on `CoverageRequirement` per the type contract;
+// the `state` / `effectiveness` / `effective-scope` / `risks`
+// mocks are also brought to schema-conformance (defense in depth,
+// so the next renamed-field regression catches at the type
+// boundary, not a runtime undefined-slice TypeError). All seven
+// quarantined tests are un-skipped.
+//
+// The `gotoControlDetail` helper is retained — it's the right
+// pattern for any page whose tablist is gated on a load-bearing
+// useQuery, and the 30s backstop is harmless when the page renders
+// in <1s (which it now does with the mocks fixed). The README
+// section under "Gating the FIRST visibility assertion on a
+// network round-trip" still describes a valid pattern; slice 276
+// adds a sibling subsection on "Mock payload schema-conformance"
+// so future debuggers don't re-diagnose THIS class of bug as a
+// race condition.
 
 import { expect, test } from "./fixtures";
 import type { Page } from "@playwright/test";
@@ -126,32 +153,54 @@ test.describe("control detail tab strip (slice 254)", () => {
             name: "Multi-Factor Authentication",
             description: "MFA spine anchor",
           },
+          // Slice 276 — requirement rows now carry every field the
+          // `CoverageRequirement` type in web/lib/api.ts declares as
+          // required (edge_id, code, title, framework_slug,
+          // framework_version_status, source_attribution). Without
+          // `title`, `web/components/control/ucf-mini-viz.tsx:122`
+          // throws on `req.title.slice(0, 34)` and the page-level
+          // error boundary swallows the entire subtree — see slice
+          // 276 D-276-1.
           requirements: [
             {
-              framework_version_id: seeded.frameworkVersionId,
+              edge_id: "00000000-0000-0000-0000-0000000000e1",
+              requirement_id: "CC6.6",
+              code: "CC6.6",
+              title: "Logical access controls",
+              framework_slug: "soc2",
               framework_name: "SOC 2",
               framework_version: "2017",
-              requirement_id: "CC6.6",
-              requirement_text: "logical access controls",
+              framework_version_id: seeded.frameworkVersionId,
+              framework_version_status: "active",
               relationship_type: "equal",
               strength: 1.0,
               coverage: 0.94,
+              source_attribution: "scf",
             },
             {
-              framework_version_id: "11111111-1111-1111-1111-111111110009",
+              edge_id: "00000000-0000-0000-0000-0000000000e2",
+              requirement_id: "A.8.5",
+              code: "A.8.5",
+              title: "Secure authentication",
+              framework_slug: "iso27001",
               framework_name: "ISO 27001",
               framework_version: "2022",
-              requirement_id: "A.8.5",
-              requirement_text: "secure authentication",
+              framework_version_id: "11111111-1111-1111-1111-111111110009",
+              framework_version_status: "active",
               relationship_type: "equal",
               strength: 1.0,
               coverage: 0.94,
+              source_attribution: "scf",
             },
           ],
         }),
       }),
     );
 
+    // Slice 276 — schema-conformant state row: scope_cell_id (not
+    // scope_cell), result (not computed_state), evaluated_at,
+    // freshness_class, evidence_count_in_window, trigger — every
+    // field the `ControlStateEntry` type declares (web/lib/api.ts).
     await page.route(`**/api/controls/${seeded.controlId}/state`, (route) =>
       route.fulfill({
         status: 200,
@@ -160,10 +209,14 @@ test.describe("control detail tab strip (slice 254)", () => {
           control_id: seeded.controlId,
           states: [
             {
-              scope_cell: "prod-us",
-              computed_state: "pass",
+              scope_cell_id: "00000000-0000-0000-0000-0000000000c1",
+              result: "pass",
               freshness_status: "fresh",
+              evidence_count_in_window: 3,
               last_observed_at: new Date(Date.now() - 8 * 60_000).toISOString(),
+              evaluated_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+              freshness_class: "daily",
+              trigger: "scheduled",
             },
           ],
           count: 1,
@@ -171,10 +224,18 @@ test.describe("control detail tab strip (slice 254)", () => {
       }),
     );
 
+    // Slice 276 — schema-conformant effectiveness payload: the type
+    // `ControlEffectiveness` declares `window_start` + `window_end`
+    // ISO timestamps, NOT a `window_days` integer (which the prior
+    // mock invented). The page's KPI strip reads pass_rate and
+    // pass_count + total_count; the window timestamps surface in
+    // the KPI subtitle copy.
     await page.route(
       `**/api/controls/${seeded.controlId}/effectiveness`,
-      (route) =>
-        route.fulfill({
+      (route) => {
+        const windowEnd = new Date();
+        const windowStart = new Date(windowEnd.getTime() - 30 * 86_400_000);
+        return route.fulfill({
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
@@ -182,25 +243,51 @@ test.describe("control detail tab strip (slice 254)", () => {
             pass_rate: 0.94,
             pass_count: 47,
             total_count: 50,
-            window_days: 30,
+            window_start: windowStart.toISOString(),
+            window_end: windowEnd.toISOString(),
           }),
-        }),
+        });
+      },
     );
 
+    // Slice 276 — schema-conformant effective-scope payload AND
+    // per-framework dispatch. The page issues ONE
+    // `/effective-scope?framework_version=<fv>` call per distinct
+    // framework_version_id in the coverage requirements (two here:
+    // SOC 2 + ISO 27001). The page's tab-count math sums
+    // `effective_scope_count` across all returned scope queries
+    // (`scopeCellSum` in page.tsx); AC-2 asserts the chip reads
+    // "12", so each per-framework response returns 6 cells, summing
+    // to 12. The slice 254 author's mock returned a fixed 12 per
+    // call (totalling 24, which would have failed AC-2 — except the
+    // page crashed before reaching the chip assertion because of
+    // the missing `title` bug, which is why the design flaw was
+    // never observed). Slice 276 fixes both bugs in tandem.
     await page.route(
       `**/api/controls/${seeded.controlId}/effective-scope?**`,
-      (route) =>
-        route.fulfill({
+      (route) => {
+        const url = new URL(route.request().url());
+        const fvParam = url.searchParams.get("framework_version") ?? "";
+        // 6 cells per framework_version × 2 framework_versions = 12.
+        const cells = Array.from({ length: 6 }, (_, i) => ({
+          id: `00000000-0000-0000-0000-0000000000${(0xc0 + i).toString(16)}`,
+          label: `cell-${fvParam.slice(-4)}-${i}`,
+          dimensions: { env: "prod", region: "us", index: i },
+        }));
+        return route.fulfill({
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
             control_id: seeded.controlId,
-            framework_version_id: seeded.frameworkVersionId,
+            framework_version_id: fvParam,
+            framework_scope_id: "00000000-0000-0000-0000-0000000000f1",
+            effective_scope: cells,
+            effective_scope_count: 6,
             in_scope: true,
-            effective_scope_count: 12,
-            out_of_scope_reason: null,
+            out_of_scope_reason: undefined,
           }),
-        }),
+        });
+      },
     );
 
     // Evidence list — three records and no next_cursor so the chip
@@ -275,6 +362,11 @@ test.describe("control detail tab strip (slice 254)", () => {
       }),
     );
 
+    // Slice 276 — `ControlLinkedRisk` declares `inherent_score`
+    // (opaque JSON blob per canvas §2.2; the 5x5 case carries
+    // `{likelihood, impact}`). Adding it matches the type contract
+    // even though the page only renders the residual via
+    // `formatResidualScore`.
     await page.route(`**/api/controls/${seeded.controlId}/risks`, (route) =>
       route.fulfill({
         status: 200,
@@ -285,7 +377,8 @@ test.describe("control detail tab strip (slice 254)", () => {
             {
               risk_id: "00000000-0000-0000-0000-0000000000b1",
               title: "Credential theft via phishing",
-              residual_score: 0.34,
+              inherent_score: { likelihood: 4, impact: 5 },
+              residual_score: { likelihood: 2, impact: 3 },
               link_weight: 0.85,
             },
           ],
@@ -316,7 +409,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     );
   });
 
-  test.skip("AC-1: renders the seven tabs in mockup order with the right labels", async ({
+  test("AC-1: renders the seven tabs in mockup order with the right labels", async ({
     authedPage: page,
   }) => {
     // Slice 275 — wait for the coverage response BEFORE asserting the
@@ -350,7 +443,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     );
   });
 
-  test.skip("AC-2: count chips render the mocked-payload counts", async ({
+  test("AC-2: count chips render the mocked-payload counts", async ({
     authedPage: page,
   }) => {
     // Slice 275 — coverage-response gate (see gotoControlDetail) +
@@ -373,7 +466,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     await expect(page.getByTestId("control-tab-risks-chip")).toHaveText("1");
   });
 
-  test.skip("AC-8: clicking a tab updates `?tab=<key>` and renders that tab's panel", async ({
+  test("AC-8: clicking a tab updates `?tab=<key>` and renders that tab's panel", async ({
     authedPage: page,
   }) => {
     // Slice 275 — coverage-response gate (see gotoControlDetail).
@@ -400,7 +493,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible();
   });
 
-  test.skip("AC-8: refresh on a tab-deep-linked URL lands on that tab", async ({
+  test("AC-8: refresh on a tab-deep-linked URL lands on that tab", async ({
     authedPage: page,
   }) => {
     // Slice 275 — deep-link directly to the Policies tab; the helper
@@ -435,7 +528,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     );
   });
 
-  test.skip("AC-8: unrecognised `?tab=<garbage>` falls through to Overview", async ({
+  test("AC-8: unrecognised `?tab=<garbage>` falls through to Overview", async ({
     authedPage: page,
   }) => {
     // Slice 275 — coverage-response gate via the helper.
@@ -450,7 +543,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     );
   });
 
-  test.skip("AC-9: keyboard Tab navigation walks through the seven tab buttons in DOM order", async ({
+  test("AC-9: keyboard Tab navigation walks through the seven tab buttons in DOM order", async ({
     authedPage: page,
   }) => {
     // Slice 275 — coverage-response gate via the helper.
@@ -480,7 +573,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     }
   });
 
-  test.skip("AC-3 + AC-7: Overview panel preserves the pre-tab layout (P0-254-3)", async ({
+  test("AC-3 + AC-7: Overview panel preserves the pre-tab layout (P0-254-3)", async ({
     authedPage: page,
   }) => {
     // Slice 275 — coverage-response gate via the helper.
