@@ -353,6 +353,17 @@ jobs:
         # helpers_test.go this slice adds for the pure-Go split / cursor
         # / wire-conversion helpers) lifts internal/api/controldetail to
         # 92.7% merged.
+        #
+        # Slice 288: extended to include internal/audit/walkthrough —
+        # the package shipped a 571-line integration_test.go in slice
+        # 027 but was never enrolled in the CI integration job, so the
+        # merged audit measured 6.0%. Enrolling it (alongside the new
+        # export_test.go this slice adds for the pure-Go PDF HTML +
+        # markdown rendering helpers) lifts internal/audit/walkthrough
+        # to 79.9% merged. Only ./internal/audit/walkthrough/... is
+        # added — NOT the ./internal/audit/... umbrella — so adjacent
+        # walkthrough-unrelated audit subpackages (auditor/, notes/,
+        # period/, etc.) are not picked up by this slice's enrollment.
         run: |
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
@@ -384,7 +395,8 @@ jobs:
             ./internal/vendor/... \
             ./internal/policy/... \
             ./internal/board/... \
-            ./internal/api/controldetail/...
+            ./internal/api/controldetail/... \
+            ./internal/audit/walkthrough/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
