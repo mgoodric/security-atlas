@@ -107,7 +107,7 @@
     "internal/auth/bearer": 68,
     "internal/auth/password": 69,
     "internal/authz": 70,
-    "internal/board": 31,
+    "internal/board": 79,
     "internal/canonjson": 87,
     "internal/catalog/metrics": 76,
     "internal/control": 72,

@@ -336,6 +336,15 @@ jobs:
         # exercised only outside the CI gate). Enrolling the entire
         # ./internal/policy/... tree lifts internal/policy/seed from
         # 33.3% → 89.5% merged.
+        #
+        # Slice 283: extended to include internal/board — the slice
+        # added a new integration_test.go covering the slice-031 board
+        # brief Store + Generator and the slice-032 quarterly pack
+        # PackStore + PackGenerator (Insert / Get / List / UpdateSection /
+        # Publish / ListFailingEvaluations) against a real Postgres so
+        # RLS, append-only ledger enforcement, and the draft-only mutation
+        # gate are exercised end-to-end. Enrolling the package lifts
+        # internal/board from 23.7% → 81.6% merged.
         run: |
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
@@ -365,7 +374,8 @@ jobs:
             ./internal/risk/... \
             ./internal/scope/... \
             ./internal/vendor/... \
-            ./internal/policy/...
+            ./internal/policy/... \
+            ./internal/board/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
