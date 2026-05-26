@@ -76,7 +76,7 @@
     "connectors/manual/internal/manuals3": 88,
     "connectors/manual/internal/manualsftp": 84,
 
-    "connectors/okta/cmd/atlas-okta": 18,
+    "connectors/okta/cmd/atlas-okta": 62,
     "connectors/okta/internal/idem": 98,
     "connectors/okta/internal/oktaapps": 77,
     "connectors/okta/internal/oktaauth": 85,
