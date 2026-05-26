@@ -83,7 +83,7 @@
     "connectors/okta/internal/oktapolicy": 69,
     "connectors/okta/internal/oktausers": 78,
 
-    "connectors/osquery/cmd/atlas-osquery": 26,
+    "connectors/osquery/cmd/atlas-osquery": 80,
     "connectors/osquery/internal/idem": 98,
     "connectors/osquery/internal/osqueryauth": 92,
     "connectors/osquery/internal/osqueryposture": 73,
