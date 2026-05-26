@@ -113,7 +113,7 @@
     "internal/control": 72,
     "internal/control/attestation": 86,
     "internal/decision": 70,
-    "internal/eval": 65,
+    "internal/eval": 73,
     "internal/metrics/eval": 0,
     "internal/metrics/scheduler": 0,
     "internal/evidence/redact": 77,
