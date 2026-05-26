@@ -319,6 +319,14 @@ jobs:
         # 024 but was never enrolled here. Adding it (with new Get +
         # Delete + RLS-isolation tests + a unit suite for the pure-Go
         # helpers) moves internal/vendor from 10.1% → 87.2% merged.
+        #
+        # Slice 284: same pattern for internal/scope — it had a complete
+        # integration_test.go suite (slice 017) that was never enrolled
+        # in CI, so the merged audit measured 35.3%. Enrolling lifts
+        # internal/scope to 87.6% merged. Three pre-existing test
+        # inserts gained a `bundle_id` column (NOT-NULL column added by
+        # a later slice; the integration suite had silently bit-rotted
+        # while it was out of CI).
         run: |
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
@@ -346,6 +354,7 @@ jobs:
             ./internal/platform/... \
             ./internal/frameworkscope/... \
             ./internal/risk/... \
+            ./internal/scope/... \
             ./internal/vendor/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
