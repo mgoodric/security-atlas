@@ -3,7 +3,7 @@
 **Cluster:** Quality
 **Estimate:** 1d (small package) to 3d (large package, see notes)
 **Type:** AFK
-**Status:** `not-ready`
+**Status:** `ready`
 
 ## Narrative
 
