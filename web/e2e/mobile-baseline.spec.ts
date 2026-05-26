@@ -32,6 +32,20 @@
 //   - drawer hosts the same nav rows as desktop (assertion on label)
 //   - drawer dismisses cleanly (assertion on hidden state)
 //   - desktop UX at 1280px is unchanged (assertion on inline sidebar)
+//
+// Slice 281 — extension. The same spec file gains a second describe
+// block that pins the `<ListTable>` mobile card-stack collapse on the
+// three priority pages flagged `no` by `docs/responsive-audit.md`:
+// `/controls`, `/risks`, `/evidence`. For each, the spec asserts:
+//
+//   - at 375px the card-branch wrap (`list-cards-wrap`) is visible
+//   - at 375px the table-branch wrap (`list-table-wrap`) is hidden
+//   - at 1280px (desktop) the table wrap is visible AND the cards
+//     wrap is hidden — pinning the no-desktop-UX-regression invariant
+//     (P0-281-1) symmetrically with the mobile assertion
+//
+// The slice 281 extension reuses the slice 277 `authedPage` fixture
+// and the same MOBILE_VIEWPORT constant so the pattern stays unified.
 
 import { expect, test } from "./fixtures";
 
@@ -125,5 +139,91 @@ test.describe("mobile-responsive baseline (slice 277)", () => {
 
     // Desktop sidebar visible (the slice-277-pre baseline).
     await expect(page.getByTestId("sidebar-desktop")).toBeVisible();
+  });
+});
+
+// Slice 281 — list-table card-stack collapse at `< md`.
+//
+// The three priority pages identified by slice 277's audit are
+// `/controls`, `/risks`, `/evidence` — all consume the same shared
+// `<ListTable>` primitive. The slice 281 fix adds a `mobileMode="cards"`
+// opt-in that, at `< md`, renders each row as a card (one `<dl>` with
+// `<dt>` / `<dd>` per column) instead of a horizontal-scrolling table.
+//
+// Spec shape (slice 281 AC-8):
+//   - One assertion per page: at 375px, `list-cards-wrap` is visible
+//     AND `list-table-wrap` is hidden (the load-bearing collapse).
+//   - One desktop-no-regression assertion (covers all three pages):
+//     at 1280px, `list-table-wrap` is visible AND `list-cards-wrap`
+//     is hidden — pins P0-281-1 (no desktop UX regression).
+//
+// The pages share the same primitive, so a per-page assertion is
+// belt-and-suspenders — if any of the three pages forgets to pass
+// `mobileMode="cards"`, the per-page card-wrap assertion fails for
+// that specific page (which is exactly the diagnostic we want — the
+// failure message localises the missing opt-in).
+test.describe("mobile list-table card collapse (slice 281)", () => {
+  // Pages tested. The list is intentionally hard-coded here (rather
+  // than read from a shared constant) so a future slice that adds a
+  // 4th list-table page is forced to update THIS spec — keeping the
+  // mobile audit doc in lock-step with the e2e coverage.
+  const PAGES_WITH_CARD_COLLAPSE: { slug: string; path: string }[] = [
+    { slug: "controls", path: "/controls" },
+    { slug: "risks", path: "/risks" },
+    { slug: "evidence", path: "/evidence" },
+  ];
+
+  for (const { slug, path } of PAGES_WITH_CARD_COLLAPSE) {
+    test(`AC-8 (${slug}): at 375px the card branch is visible and the table branch is hidden`, async ({
+      authedPage: page,
+    }) => {
+      await page.setViewportSize(MOBILE_VIEWPORT);
+      await page.goto(path);
+
+      // Card branch — slice 281's new wrap; `block md:hidden` makes it
+      // visible at 375px. If the page forgot to pass
+      // `mobileMode="cards"`, the cards wrap is not mounted at all and
+      // this assertion fails with a "no element found" message naming
+      // the page slug.
+      const cards = page.getByTestId("list-cards-wrap");
+      await expect(cards).toBeVisible();
+
+      // Table branch — slice 281 attaches `hidden md:block` when the
+      // cards branch is mounted, so at 375px the table is in the DOM
+      // but `display: none`. `toBeHidden()` accepts both "not in the
+      // DOM" and "in the DOM with display:none / visibility:hidden /
+      // size 0" — exactly the visibility-class semantics we want.
+      const table = page.getByTestId("list-table-wrap");
+      await expect(table).toBeHidden();
+
+      // Belt-and-suspenders — assert at least ONE card row renders.
+      // The empty-state fallback would short-circuit BOTH branches
+      // (the component returns `<>{emptyFallback}</>` for `rows.length
+      // === 0`), so a green assertion here also confirms the
+      // upstream / BFF returned at least one row from the seeded
+      // fixture under the `authedPage` fixture. The locator scopes to
+      // the cards wrap so a stray `data-testid="list-card-row"` from a
+      // future sibling component cannot satisfy the count.
+      await expect(cards.getByTestId("list-card-row").first()).toBeVisible();
+    });
+  }
+
+  test("AC-3 carryover: at 1280px (desktop) the table branch is visible and the cards branch is hidden — no desktop UX regression", async ({
+    authedPage: page,
+  }) => {
+    // No viewport set — uses Playwright's `devices["Desktop Chrome"]`
+    // default (1280x720). Pin the inverse of the mobile assertions to
+    // close the loop on P0-281-1 (desktop UX unchanged at every width
+    // `≥ md`).
+    //
+    // Test the controls page only — the symmetry is per-primitive,
+    // not per-page, and asserting all three desktop-side would be
+    // redundant noise. If the responsive-class polarity ever flips
+    // (cards visible at desktop) any one of the three pages fails;
+    // controls is the canonical example.
+    await page.goto("/controls");
+
+    await expect(page.getByTestId("list-table-wrap")).toBeVisible();
+    await expect(page.getByTestId("list-cards-wrap")).toBeHidden();
   });
 });

@@ -36,7 +36,17 @@ export {
   pushCursor,
   type CursorPaginationProps,
 } from "./cursor-pagination";
-export { ListTable, type ListColumn, type ListTableProps } from "./list-table";
+// Slice 281 — `ListTableMobileMode` + `listTableBranchClasses` exported
+// so consumers can opt in to the card-stack collapse (currently
+// `/controls`, `/risks`, `/evidence`) and so the pure-logic branch
+// helper is unit-testable via vitest.
+export {
+  ListTable,
+  listTableBranchClasses,
+  type ListColumn,
+  type ListTableMobileMode,
+  type ListTableProps,
+} from "./list-table";
 export {
   ListLoadingSkeleton,
   type ListLoadingSkeletonProps,

@@ -614,6 +614,12 @@ function ControlsPageInner() {
           router.push(`/controls/${encodeURIComponent(row.anchor.id)}`)
         }
         emptyFallback={emptyState}
+        // Slice 281 — collapse to a card stack at `< md`. Seven-column
+        // anchor table horizontal-scrolls at 375px; the card variant
+        // surfaces the primary affordance (SCF anchor + Name link) at
+        // the top of each card so the row is one-tap. Desktop UX is
+        // unchanged at `≥ md` (P0-281-1).
+        mobileMode="cards"
       />
       {/* Slice 227 — pagination footer. Rendered ONLY when there is at
           least one row in the filtered set; an empty result delegates
