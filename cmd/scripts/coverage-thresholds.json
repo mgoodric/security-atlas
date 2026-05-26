@@ -52,7 +52,7 @@
     "connectors/1password/internal/opaccount": 83,
     "connectors/1password/internal/opauth": 90,
 
-    "connectors/aws/cmd/aws-connector": 7,
+    "connectors/aws/cmd/aws-connector": 63,
     "connectors/aws/internal/awsauth": 95,
     "connectors/aws/internal/awss3": 85,
     "connectors/aws/internal/idem": 98,
