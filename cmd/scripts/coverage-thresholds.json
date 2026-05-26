@@ -121,7 +121,7 @@
     "internal/frameworkscope": 75,
     "internal/observability/otel": 92,
     "internal/oscal": 69,
-    "internal/policy/seed": 31,
+    "internal/policy/seed": 87,
     "internal/risk": 71,
     "internal/risk/aggrule": 72,
     "internal/scope": 85,

@@ -327,6 +327,15 @@ jobs:
         # inserts gained a `bundle_id` column (NOT-NULL column added by
         # a later slice; the integration suite had silently bit-rotted
         # while it was out of CI).
+        #
+        # Slice 297: extended to include internal/policy/... — the slice
+        # added a new seed_integration_test.go covering the DB-touching
+        # Seed() + SQLAnchorResolver.Resolve() paths in
+        # internal/policy/seed (the parent internal/policy also ships an
+        # integration_test.go from slice 022, which was previously
+        # exercised only outside the CI gate). Enrolling the entire
+        # ./internal/policy/... tree lifts internal/policy/seed from
+        # 33.3% → 89.5% merged.
         run: |
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
@@ -355,7 +364,8 @@ jobs:
             ./internal/frameworkscope/... \
             ./internal/risk/... \
             ./internal/scope/... \
-            ./internal/vendor/...
+            ./internal/vendor/... \
+            ./internal/policy/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
@@ -401,6 +411,27 @@ jobs:
           if-no-files-found: warn
       - name: Migration round-trip — down then up
         run: |
+          # Slice 297: TRUNCATE all data tables before the round-trip
+          # so the down migrations cast pure schema, not data. The
+          # integration tests above seed real rows (e.g. policies with
+          # version="1.0.0" semver strings) that the slice-022
+          # policies.down.sql `ALTER COLUMN version TYPE INTEGER USING
+          # version::INTEGER` cannot back-cast. The down migration's
+          # intent was always "schema only" — the truncate makes that
+          # explicit.
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          DECLARE r record;
+          BEGIN
+            FOR r IN
+              SELECT tablename FROM pg_tables
+              WHERE schemaname = 'public'
+                AND tablename NOT IN ('schema_migrations', 'atlas_schema_revisions')
+            LOOP
+              EXECUTE format('TRUNCATE TABLE public.%I CASCADE', r.tablename);
+            END LOOP;
+          END $$;
+          SQL
           # Walk down migrations in reverse-alphabetical order (latest down first).
           for f in $(ls -r migrations/sql/*.down.sql); do
             echo "rolling back $f"
