@@ -91,7 +91,7 @@
     "internal/api": 69,
     "internal/api/authzmw": 69,
     "internal/api/connectors": 86,
-    "internal/api/controldetail": 25,
+    "internal/api/controldetail": 90,
     "internal/api/controls": 26,
     "internal/api/credstore": 69,
     "internal/api/openapi": 71,
