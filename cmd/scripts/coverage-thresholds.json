@@ -101,7 +101,7 @@
     "internal/api/tenancymw": 98,
     "internal/api/metrics": 0,
 
-    "internal/artifact": 3,
+    "internal/artifact": 88,
     "internal/audit/sample": 98,
     "internal/audit/walkthrough": 3,
     "internal/auth/bearer": 68,
