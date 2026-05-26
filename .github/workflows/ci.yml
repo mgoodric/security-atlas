@@ -313,6 +313,12 @@ jobs:
         # them moves frameworkscope from 21.8% → 77.8% merged, risk
         # from 36.1% → 73.4% merged, and risk/aggrule from 19.1% →
         # 74.6% merged (no new tests required).
+        #
+        # Slice 287: extended to include internal/vendor for the same
+        # reason — the package shipped an integration_test.go in slice
+        # 024 but was never enrolled here. Adding it (with new Get +
+        # Delete + RLS-isolation tests + a unit suite for the pure-Go
+        # helpers) moves internal/vendor from 10.1% → 87.2% merged.
         run: |
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
@@ -339,7 +345,8 @@ jobs:
             ./internal/control/... \
             ./internal/platform/... \
             ./internal/frameworkscope/... \
-            ./internal/risk/...
+            ./internal/risk/... \
+            ./internal/vendor/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
