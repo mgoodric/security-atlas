@@ -157,7 +157,7 @@ func insertControl(t *testing.T, admin *pgxpool.Pool, tenantID string, anchorID 
 			 bundle_manifest_yaml, bundle_manifest_hash, bundle_uploaded_at,
 			 bundle_uploaded_by)
 		VALUES ($1, $2, $3, 1, NULL, NULL, $4,
-			$5, '', $6, 'preventive', '',
+			$5, '', $6, 'automated', '',
 			'active', '{"true": true}', '{}'::jsonb,
 			'{}'::jsonb, '{}', NULL,
 			'', $7, now(),
