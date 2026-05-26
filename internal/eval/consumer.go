@@ -65,6 +65,20 @@ func NewEngineFactory(appPool *pgxpool.Pool) engineFactory {
 	}
 }
 
+// controlEvaluator narrows what the IngestSubscriber needs from an Engine —
+// the single EvaluateControl call invoked from handle(). Introducing this
+// seam lets unit tests stub the engine without standing up Postgres +
+// scope.Store, which is the consumer-path coverage gap slice 282 closes.
+// `*Engine` satisfies this interface automatically; public API is unchanged.
+type controlEvaluator interface {
+	EvaluateControl(ctx context.Context, controlID uuid.UUID, trigger string, asOf time.Time) (int, error)
+}
+
+// evaluatorFactory is the unit-testable seam for IngestSubscriber. The
+// public NewIngestSubscriber accepts an engineFactory and wraps it so
+// *Engine values flow through the controlEvaluator interface.
+type evaluatorFactory func() controlEvaluator
+
 // ---- Scheduler: time-based recompute ----
 
 // Scheduler re-evaluates every active control for every tenant on a tick.
@@ -146,11 +160,11 @@ func (s *Scheduler) SweepOnce(ctx context.Context) (int, error) {
 // record. It reads the record's tenant + control_id from the message and
 // runs EvaluateControl for that control.
 type IngestSubscriber struct {
-	stream    jetstream.Stream
-	subject   string
-	newEngine engineFactory
-	logger    *slog.Logger
-	durable   string
+	stream       jetstream.Stream
+	subject      string
+	newEvaluator evaluatorFactory
+	logger       *slog.Logger
+	durable      string
 }
 
 // NewIngestSubscriber constructs an IngestSubscriber over a slice-015
@@ -160,12 +174,17 @@ func NewIngestSubscriber(stream jetstream.Stream, subject string, newEngine engi
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(discardWriter{}, nil))
 	}
+	// Bridge engineFactory (*Engine) → evaluatorFactory (controlEvaluator).
+	// *Engine satisfies controlEvaluator; the closure preserves the per-call
+	// "new engine per evaluation" contract while exposing the narrower
+	// interface to handle().
+	wrap := evaluatorFactory(func() controlEvaluator { return newEngine() })
 	return &IngestSubscriber{
-		stream:    stream,
-		subject:   subject,
-		newEngine: newEngine,
-		logger:    logger,
-		durable:   EvalConsumerDurable,
+		stream:       stream,
+		subject:      subject,
+		newEvaluator: wrap,
+		logger:       logger,
+		durable:      EvalConsumerDurable,
 	}
 }
 
@@ -248,7 +267,7 @@ func (s *IngestSubscriber) handle(ctx context.Context, msg jetstream.Msg) {
 		_ = msg.Term()
 		return
 	}
-	if _, err := s.newEngine().EvaluateControl(tctx, controlID, TriggerIngest, FarFuture); err != nil {
+	if _, err := s.newEvaluator().EvaluateControl(tctx, controlID, TriggerIngest, FarFuture); err != nil {
 		if errors.Is(err, ErrControlNotFound) {
 			// The record references a control that does not exist in-tenant
 			// — not retryable. Ack so it does not redeliver forever.
