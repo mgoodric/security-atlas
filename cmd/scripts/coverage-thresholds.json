@@ -120,7 +120,7 @@
     "internal/featureflag": 82,
     "internal/frameworkscope": 75,
     "internal/observability/otel": 92,
-    "internal/oscal": 39,
+    "internal/oscal": 69,
     "internal/policy/seed": 31,
     "internal/risk": 71,
     "internal/risk/aggrule": 72,
