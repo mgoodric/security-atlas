@@ -406,6 +406,7 @@ jobs:
             ./internal/policy/... \
             ./internal/board/... \
             ./internal/api/controldetail/... \
+            ./internal/api/controls/... \
             ./internal/audit/walkthrough/... \
             ./internal/metrics/scheduler/...
       - name: Upload integration coverage to Codecov

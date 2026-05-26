@@ -92,7 +92,7 @@
     "internal/api/authzmw": 69,
     "internal/api/connectors": 86,
     "internal/api/controldetail": 90,
-    "internal/api/controls": 26,
+    "internal/api/controls": 73,
     "internal/api/credstore": 69,
     "internal/api/openapi": 71,
     "internal/api/oscalexport": 37,
