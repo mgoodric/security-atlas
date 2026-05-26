@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -272,17 +273,20 @@ func TestControlApplicability_AppliesExpression(t *testing.T) {
 
 	// Insert a control with a JSON-AST applicability_expr. We bypass the
 	// Go API for controls (not in this slice) and write directly via the
-	// admin pool with tenant scope applied.
+	// admin pool with tenant scope applied. bundle_id is NOT NULL on
+	// controls (added by a later slice); each test owns a unique bundle
+	// so the per-tenant UNIQUE(bundle_id) constraint is honored.
 	controlID := uuid.NewString()
+	bundleID := "scope-it-" + controlID
 	exprJSON := `{"op":"and","args":[
 		{"op":"in","dim":"environment","values":["prod","staging"]},
 		{"op":"in","dim":"data_classification","values":["restricted","confidential"]}
 	]}`
 	if err := withAdminTenant(admin, tenant, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
-			INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, applicability_expr)
-			VALUES ($1, $2, 'IAC-06', 'MFA', 'IAC', 'automated', $3)
-		`, controlID, tenant, exprJSON)
+			INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, applicability_expr, bundle_id)
+			VALUES ($1, $2, 'IAC-06', 'MFA', 'IAC', 'automated', $3, $4)
+		`, controlID, tenant, exprJSON, bundleID)
 		return err
 	}); err != nil {
 		t.Fatalf("insert control: %v", err)
@@ -330,11 +334,12 @@ func TestControlApplicability_LegacyTrueReturnsAllCells(t *testing.T) {
 	}
 
 	controlID := uuid.NewString()
+	bundleID := "scope-it-legacy-" + controlID
 	if err := withAdminTenant(admin, tenant, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
-			INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, applicability_expr)
-			VALUES ($1, $2, 'IAC-99', 'all', 'IAC', 'automated', 'true')
-		`, controlID, tenant)
+			INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, applicability_expr, bundle_id)
+			VALUES ($1, $2, 'IAC-99', 'all', 'IAC', 'automated', 'true', $3)
+		`, controlID, tenant, bundleID)
 		return err
 	}); err != nil {
 		t.Fatalf("insert control: %v", err)
@@ -422,30 +427,15 @@ func doJSON(t *testing.T, method, url, bearer, body string) (*http.Response, []b
 	return resp, bb
 }
 
+// nilOr returns nil for an empty string, otherwise a strings.Reader
+// wrapping it. Slice 284 removed a previously-local `strings` shim that
+// collided with the stdlib package once unit tests in this same _test
+// package imported `strings` for real.
 func nilOr(s string) io.Reader {
 	if s == "" {
 		return nil
 	}
-	return strings(s)
-}
-
-// strings is a tiny helper to avoid importing strings/Reader inline.
-func strings(s string) io.Reader {
-	return &stringsReader{s: s}
-}
-
-type stringsReader struct {
-	s string
-	i int
-}
-
-func (r *stringsReader) Read(p []byte) (int, error) {
-	if r.i >= len(r.s) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.s[r.i:])
-	r.i += n
-	return n, nil
+	return strings.NewReader(s)
 }
 
 // TestHTTP_CreateAndListCells — AC-2 + AC-7.
@@ -537,12 +527,13 @@ func TestHTTP_ControlApplicability_EndToEnd(t *testing.T) {
 		}
 	}
 	controlID := uuid.NewString()
+	bundleID := "scope-it-http-" + controlID
 	exprJSON := `{"op":"eq","dim":"environment","value":"prod"}`
 	if err := withAdminTenant(admin, tenant, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
-			INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, applicability_expr)
-			VALUES ($1, $2, 'IAC-06', 'MFA', 'IAC', 'automated', $3)
-		`, controlID, tenant, exprJSON)
+			INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, applicability_expr, bundle_id)
+			VALUES ($1, $2, 'IAC-06', 'MFA', 'IAC', 'automated', $3, $4)
+		`, controlID, tenant, exprJSON, bundleID)
 		return err
 	}); err != nil {
 		t.Fatalf("insert control: %v", err)

@@ -124,7 +124,7 @@
     "internal/policy/seed": 31,
     "internal/risk": 71,
     "internal/risk/aggrule": 72,
-    "internal/scope": 33,
+    "internal/scope": 85,
     "internal/tenancy": 90,
     "internal/vendor": 85
   },
