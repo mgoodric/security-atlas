@@ -64,7 +64,7 @@
     "connectors/github/internal/githubwebhook": 83,
     "connectors/github/internal/idem": 98,
 
-    "connectors/jira/cmd/atlas-jira": 28,
+    "connectors/jira/cmd/atlas-jira": 69,
     "connectors/jira/internal/idem": 98,
     "connectors/jira/internal/jiraauth": 94,
     "connectors/jira/internal/jiratickets": 89,
