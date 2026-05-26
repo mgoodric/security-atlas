@@ -345,6 +345,14 @@ jobs:
         # RLS, append-only ledger enforcement, and the draft-only mutation
         # gate are exercised end-to-end. Enrolling the package lifts
         # internal/board from 23.7% → 81.6% merged.
+        #
+        # Slice 290: extended to include internal/api/controldetail —
+        # the package shipped a 932-line integration_test.go in slice
+        # 064 but was never enrolled in the CI integration job, so the
+        # merged audit measured 29.3%. Enrolling it (alongside the new
+        # helpers_test.go this slice adds for the pure-Go split / cursor
+        # / wire-conversion helpers) lifts internal/api/controldetail to
+        # 92.7% merged.
         run: |
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
@@ -375,7 +383,8 @@ jobs:
             ./internal/scope/... \
             ./internal/vendor/... \
             ./internal/policy/... \
-            ./internal/board/...
+            ./internal/board/... \
+            ./internal/api/controldetail/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
