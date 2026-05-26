@@ -374,6 +374,20 @@ jobs:
         # discardWriter / SweepReport / SweepOnce's list-tenants-error
         # wrap. Together they move internal/metrics/scheduler from
         # 0.0% → 78.4% merged.
+        #
+        # Slice 293: extended to include internal/api/metrics — the
+        # slice adds a new integration_test.go covering the post-auth
+        # DB-touching branches (ListCatalog level/category filters,
+        # GetCatalog parents/children, GetCascade default-level +
+        # truncation header, CreateInput happy + wrong-strategy 409 +
+        # not-found 404, ListObservations through the manual-input
+        # replicate trigger, Target upsert insert→update flow + every
+        # accepted direction). The unit tests cover the pre-DB branches
+        # (auth + admin + URL-param + JSON body + direction + UUID
+        # parsing) and every pure helper (numericPtr, numericString,
+        # numericStringMaybe, uuidString, the four wire mappers,
+        # writeJSON, writeError). Together they move internal/api/metrics
+        # from 0.4% → 87.3% merged.
         run: |
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
@@ -408,7 +422,8 @@ jobs:
             ./internal/api/controldetail/... \
             ./internal/api/controls/... \
             ./internal/audit/walkthrough/... \
-            ./internal/metrics/scheduler/...
+            ./internal/metrics/scheduler/... \
+            ./internal/api/metrics/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
