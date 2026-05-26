@@ -103,7 +103,7 @@
 
     "internal/artifact": 88,
     "internal/audit/sample": 98,
-    "internal/audit/walkthrough": 3,
+    "internal/audit/walkthrough": 77,
     "internal/auth/bearer": 68,
     "internal/auth/password": 69,
     "internal/authz": 70,
