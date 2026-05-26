@@ -57,7 +57,7 @@
     "connectors/aws/internal/awss3": 85,
     "connectors/aws/internal/idem": 98,
 
-    "connectors/github/cmd/atlas-github": 13,
+    "connectors/github/cmd/atlas-github": 56,
     "connectors/github/internal/githubauth": 88,
     "connectors/github/internal/githubrepo": 73,
     "connectors/github/internal/githubscim": 72,
