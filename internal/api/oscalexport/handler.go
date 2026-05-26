@@ -19,6 +19,7 @@
 package oscalexport
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -30,12 +31,25 @@ import (
 	"github.com/mgoodric/security-atlas/internal/oscal"
 )
 
-// Handler wires the OSCAL Exporter behind an HTTP route.
-type Handler struct {
-	exporter *oscal.Exporter
+// oscalExporter is the narrow surface the Handler actually uses. The
+// production wiring passes a *oscal.Exporter, which satisfies this
+// interface implicitly. Tests inject a fake to drive the error-mapping
+// branches (ErrPeriodNotFrozen, ErrPeriodNotFound, ErrBridgeUnavailable,
+// ErrRoundTripFailed, ErrSigningFailed) and the happy path without
+// standing up Postgres + the Python oscal-bridge.
+type oscalExporter interface {
+	Export(ctx context.Context, in oscal.ExportInput) (*oscal.Bundle, error)
 }
 
-// New constructs a Handler over a wired Exporter.
+// Handler wires the OSCAL Exporter behind an HTTP route.
+type Handler struct {
+	exporter oscalExporter
+}
+
+// New constructs a Handler over a wired Exporter. The argument is the
+// concrete *oscal.Exporter in production; the field type is an interface
+// purely for unit-test injectability — the production call site at
+// internal/api/httpserver.go does not change.
 func New(exporter *oscal.Exporter) *Handler {
 	return &Handler{exporter: exporter}
 }
