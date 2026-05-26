@@ -648,6 +648,15 @@ function RisksPageInner() {
         rows={pagedRows}
         rowKey={(row) => row.id}
         emptyFallback={emptyState}
+        // Slice 281 — collapse to a card stack at `< md`. The risks
+        // table carries 9 columns (id / title / category / treatment
+        // / owner / residual / severity / review_due / actions); it
+        // horizontal-scrolls badly at 375px and the per-row "View in
+        // hierarchy" link (slice 185 AC-2) is unreachable without
+        // scrolling. The card variant surfaces every column inline as
+        // label/value pairs. Desktop UX is unchanged at `≥ md`
+        // (P0-281-1).
+        mobileMode="cards"
       />
       {/* Slice 246 — pagination footer. Rendered ONLY when there is at
           least one row in the filtered set; an empty result delegates

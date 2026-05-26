@@ -824,6 +824,16 @@ function EvidencePageInner() {
           rowKey={(row) => row.evidence_id}
           onRowClick={openDrawer}
           emptyFallback={noRecordsEmptyState}
+          // Slice 281 — collapse to a card stack at `< md`. The
+          // evidence ledger renders 6 columns (observed / kind /
+          // result / source / scope / hash) which horizontal-scrolls
+          // at 375px. The card variant stacks the provenance label/
+          // value pairs vertically so the operator can scan the
+          // ledger one-handed on mobile. The row-click `openDrawer`
+          // handler still fires (the card carries the same handler)
+          // so the full-record dialog continues to work. Desktop UX
+          // is unchanged at `≥ md` (P0-281-1).
+          mobileMode="cards"
         />
         {/* Slice 237 — cursor-paginated footer. Matches the mockup at
             Plans/mockups/evidence.html lines 266-272. Renders only when
