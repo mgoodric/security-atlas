@@ -119,7 +119,7 @@
     "internal/evidence/redact": 77,
     "internal/featureflag": 82,
     "internal/frameworkscope": 75,
-    "internal/observability/otel": 13,
+    "internal/observability/otel": 92,
     "internal/oscal": 39,
     "internal/policy/seed": 31,
     "internal/risk": 71,
