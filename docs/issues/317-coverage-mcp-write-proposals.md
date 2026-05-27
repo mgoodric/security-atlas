@@ -9,10 +9,10 @@
 
 Surfaced during slice 312's round-3 coverage audit, captured per the continuous-batch policy. The audit at `docs/coverage-audit-2026-05-round-3.md` identified 2 untracked MCP write-proposals packages below 70% merged coverage:
 
-| Package | Unit-only % | Merged % | Statements |
-| ------- | ----------- | -------- | ---------- |
-| `internal/api/mcpwriteproposals` | 0.0 | 0.9 | 108 |
-| `internal/mcp/writeproposals` | 0.0 | 1.8 | 218 |
+| Package                          | Unit-only % | Merged % | Statements |
+| -------------------------------- | ----------- | -------- | ---------- |
+| `internal/api/mcpwriteproposals` | 0.0         | 0.9      | 108        |
+| `internal/mcp/writeproposals`    | 0.0         | 1.8      | 218        |
 
 Both belong to the MCP (Model Context Protocol) write-proposals feature added by slices ~199-220 (MCP server family). `internal/api/mcpwriteproposals` is the HTTP handler; `internal/mcp/writeproposals` is the engine. Grouped because they form one cohesive feature surface that should be lifted together.
 

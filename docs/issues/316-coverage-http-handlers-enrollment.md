@@ -9,11 +9,11 @@
 
 Surfaced during slice 312's round-3 coverage audit, captured per the continuous-batch policy. The audit at `docs/coverage-audit-2026-05-round-3.md` identified 3 untracked HTTP handler packages below 70% merged coverage:
 
-| Package | Unit-only % | Merged % | Statements |
-| ------- | ----------- | -------- | ---------- |
-| `internal/api/calendar` | 38.1 | 40.4 | 223 |
-| `internal/api/search` | 31.8 | 32.2 | 214 |
-| `internal/api/questionnaires` | 0.0 | 5.4 | 147 |
+| Package                       | Unit-only % | Merged % | Statements |
+| ----------------------------- | ----------- | -------- | ---------- |
+| `internal/api/calendar`       | 38.1        | 40.4     | 223        |
+| `internal/api/search`         | 31.8        | 32.2     | 214        |
+| `internal/api/questionnaires` | 0.0         | 5.4      | 147        |
 
 All 3 share the same shape: HTTP handler package, not currently enrolled in CI's `tests-integration` job list, likely already has an `integration_test.go` from its parent slice. Grouped because the enrollment pattern (slice 290 / 291 / 293 / 297 / 310) repeats verbatim.
 

@@ -29,7 +29,7 @@ Slice 312 follow-on to slices 279 (round 1) and 281-311 (round 2). The audit ran
 
 - **Auto-generated `gen/proto/*` (4 packages).** Already covered by the `gen/proto/` directory entry in `excludes[]` — verified by inspection. **No change needed.** Documented in the audit doc for completeness.
 - **Trivial single-statement packages (3 packages).** `catalogs/metrics` (1 stmt) → add to `excludes` for cleanliness. `internal/auth/keystore` (1 stmt, 100%) → floor at 98 in `thresholds` (it's a real public-API surface, just tiny). `internal/api/emptyset` (0 stmts) → add to `excludes` (no statements to cover; preserves the "list a package = it gets tested" invariant by NOT listing zero-statement packages).
-- **CLI scripts (`cmd/scripts/coverage-check`, `cmd/scripts/coverage-gate`) and CLI binaries (`cmd/atlas-mcp`, `cmd/atlas-oscal`, `cmd/atlas-cli/cmdhttp`).** Already in `thresholds` (`cmd/atlas-cli/cmdhttp` is at floor 98) or fall under the existing cmd/atlas-* exempt tier. **Add `cmd/atlas-mcp` and `cmd/atlas-oscal` at floor 0** (matching the `cmd/atlas-cli` + `cmd/atlas` + `cmd/atlas-openapi` exempt-leaning posture). `cmd/scripts/*` add to `excludes` (one-shot CI tools; not the audit's job to gate them).
+- **CLI scripts (`cmd/scripts/coverage-check`, `cmd/scripts/coverage-gate`) and CLI binaries (`cmd/atlas-mcp`, `cmd/atlas-oscal`, `cmd/atlas-cli/cmdhttp`).** Already in `thresholds` (`cmd/atlas-cli/cmdhttp` is at floor 98) or fall under the existing `cmd/atlas-*` exempt tier. **Add `cmd/atlas-mcp` and `cmd/atlas-oscal` at floor 0** (matching the `cmd/atlas-cli` + `cmd/atlas` + `cmd/atlas-openapi` exempt-leaning posture). `cmd/scripts/*` add to `excludes` (one-shot CI tools; not the audit's job to gate them).
 
 **Rationale.** The audit doctrine: every package is in exactly one of `thresholds`, `excludes`, or `go list` (untracked, awaiting triage). Round 3's refresh closes out the untracked column.
 
@@ -39,21 +39,21 @@ Slice 312 follow-on to slices 279 (round 1) and 281-311 (round 2). The audit ran
 
 **Decision.** `max(0, floor(merged_pct - 2pp))` per slice 069 P0-A4 — same formula used for all prior rounds.
 
-| Package | Merged % | New floor |
-| ------- | -------- | --------- |
-| `internal/auth/jwt` | 95.5 | 93 |
-| `internal/auth/jwtmw` | 84.7 | 82 |
-| `internal/auth/keystore` | 100.0 | 98 |
-| `internal/auth/keystore/fsstore` | 76.6 | 74 |
-| `internal/auth/tokensign` | 74.5 | 72 |
-| `internal/catalog` | 100.0 | 98 |
-| `internal/export` | 83.9 | 81 |
-| `internal/mcp` | 82.8 | 80 |
-| `internal/mcp/tools` | 75.0 | 73 |
-| `internal/platform` | 78.9 | 76 |
-| `internal/api/securityheaders` | 100.0 | 98 |
-| `internal/api/testjwt` | 95.2 | 93 |
-| `pkg/sdk-go/oauth` | 86.4 | 84 |
+| Package                          | Merged % | New floor |
+| -------------------------------- | -------- | --------- |
+| `internal/auth/jwt`              | 95.5     | 93        |
+| `internal/auth/jwtmw`            | 84.7     | 82        |
+| `internal/auth/keystore`         | 100.0    | 98        |
+| `internal/auth/keystore/fsstore` | 76.6     | 74        |
+| `internal/auth/tokensign`        | 74.5     | 72        |
+| `internal/catalog`               | 100.0    | 98        |
+| `internal/export`                | 83.9     | 81        |
+| `internal/mcp`                   | 82.8     | 80        |
+| `internal/mcp/tools`             | 75.0     | 73        |
+| `internal/platform`              | 78.9     | 76        |
+| `internal/api/securityheaders`   | 100.0    | 98        |
+| `internal/api/testjwt`           | 95.2     | 93        |
+| `pkg/sdk-go/oauth`               | 86.4     | 84        |
 
 13 packages (corrected from initial 12-count — `internal/auth/keystore` added separately at floor 98).
 
@@ -65,17 +65,17 @@ Slice 312 follow-on to slices 279 (round 1) and 281-311 (round 2). The audit ran
 
 **Decision.** Ratchet 9 packages where measured ≥ floor + 4pp. The 4pp threshold is conservative (slice 069's 2pp band PLUS a 2pp drift buffer); below 4pp, the existing floor is still within range and a ratchet would be premature.
 
-| Package | Floor before | Merged | Floor after | Δ |
-| ------- | ------------ | ------ | ----------- | - |
-| `connectors/github/internal/githubscim` | 72 | 76.6 | 74 | +2 |
-| `connectors/manual/internal/manualsftp` | 84 | 90.0 | 88 | +4 |
-| `connectors/okta/internal/oktapolicy` | 69 | 74.6 | 72 | +3 |
-| `connectors/osquery/internal/osqueryposture` | 73 | 77.2 | 75 | +2 |
-| `internal/api` | 69 | 74.5 | 72 | +3 |
-| `internal/api/controls` | 73 | 77.1 | 75 | +2 |
-| `internal/api/schemaregistry` | 71 | 81.6 | 79 | +8 |
-| `internal/control` | 72 | 78.5 | 76 | +4 |
-| `internal/risk` | 71 | 79.5 | 77 | +6 |
+| Package                                      | Floor before | Merged | Floor after | Δ   |
+| -------------------------------------------- | ------------ | ------ | ----------- | --- |
+| `connectors/github/internal/githubscim`      | 72           | 76.6   | 74          | +2  |
+| `connectors/manual/internal/manualsftp`      | 84           | 90.0   | 88          | +4  |
+| `connectors/okta/internal/oktapolicy`        | 69           | 74.6   | 72          | +3  |
+| `connectors/osquery/internal/osqueryposture` | 73           | 77.2   | 75          | +2  |
+| `internal/api`                               | 69           | 74.5   | 72          | +3  |
+| `internal/api/controls`                      | 73           | 77.1   | 75          | +2  |
+| `internal/api/schemaregistry`                | 71           | 81.6   | 79          | +8  |
+| `internal/control`                           | 72           | 78.5   | 76          | +4  |
+| `internal/risk`                              | 71           | 79.5   | 77          | +6  |
 
 **Rationale.** This is **NOT** a vanity ratchet (P0-312-2 forbids that, but only for packages that haven't been newly tested). The slice 069 ratchet contract — "raise a floor in a follow-up slice that (a) writes the additional tests to actually hit the new bar, (b) lifts the number here in the same PR" — is a hard rule for packages BELOW their measured. For packages ABOVE measured, the slice 069 methodology comment in the JSON says: "Each floor is set at `max(0, floor(measured - 2pp))` — the floor RATCHETS the current actual minus a 2-pp noise band". This is exactly that ratchet, applied retroactively to packages whose measured has drifted upward.
 
@@ -89,17 +89,17 @@ Slice 312 follow-on to slices 279 (round 1) and 281-311 (round 2). The audit ran
 
 **Decision.** 9 slices, grouped by shared pattern:
 
-| Slice | Packages | Rationale |
-| ----- | -------- | --------- |
+| Slice   | Packages                                                                                                       | Rationale                                                                                                                                                          |
+| ------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **313** | `adminauditperiods` + `adminsuperadmins` + `admintenants` + `adminvendors` + `tenants` (5 admin HTTP handlers) | All 5 are admin endpoints; all 5 need CI tests-integration-list enrollment per slice 290 pattern. Group preserves implementing-agent's cohesive surface knowledge. |
-| **314** | `internal/api/oauth` (921 stmts, standalone) | Largest single surface (slice 187 OAuth AS family). Too big to bundle. |
-| **315** | `oauthclient` + `oauthcode` + `revocation` + `userprefs` (4 auth-substrate-v2 small) | All slice 187+ auth surface; each < 100 stmts. Group cohesive. |
-| **316** | `calendar` + `search` + `questionnaires` (3 HTTP handlers) | Each needs slice 290 integration-enrollment. Group cohesive. |
-| **317** | `mcpwriteproposals` + `internal/mcp/writeproposals` (2 MCP write-prop) | Same feature surface (HTTP handler + inner logic). |
-| **318** | `internal/audit` + `audit/sink` + `audit/unifiedlog` (3 audit ledger) | All audit-log family. Group cohesive. |
-| **319** | `internal/questionnaire` (engine, 324 stmts) | Standalone — distinct from `internal/api/questionnaires` HTTP handler. |
-| **320** | `internal/demoseed` (522 stmts, slice 205) | Data-heavy; lower priority; deserves its own focused slice. |
-| **321** | `pkg/sdk-go` (37 stmts, 2.4pp gap) | Tiny gap; quick win. |
+| **314** | `internal/api/oauth` (921 stmts, standalone)                                                                   | Largest single surface (slice 187 OAuth AS family). Too big to bundle.                                                                                             |
+| **315** | `oauthclient` + `oauthcode` + `revocation` + `userprefs` (4 auth-substrate-v2 small)                           | All slice 187+ auth surface; each < 100 stmts. Group cohesive.                                                                                                     |
+| **316** | `calendar` + `search` + `questionnaires` (3 HTTP handlers)                                                     | Each needs slice 290 integration-enrollment. Group cohesive.                                                                                                       |
+| **317** | `mcpwriteproposals` + `internal/mcp/writeproposals` (2 MCP write-prop)                                         | Same feature surface (HTTP handler + inner logic).                                                                                                                 |
+| **318** | `internal/audit` + `audit/sink` + `audit/unifiedlog` (3 audit ledger)                                          | All audit-log family. Group cohesive.                                                                                                                              |
+| **319** | `internal/questionnaire` (engine, 324 stmts)                                                                   | Standalone — distinct from `internal/api/questionnaires` HTTP handler.                                                                                             |
+| **320** | `internal/demoseed` (522 stmts, slice 205)                                                                     | Data-heavy; lower priority; deserves its own focused slice.                                                                                                        |
+| **321** | `pkg/sdk-go` (37 stmts, 2.4pp gap)                                                                             | Tiny gap; quick win.                                                                                                                                               |
 
 **Total spillovers: 9.** Within P0-312-5 cap of 10.
 

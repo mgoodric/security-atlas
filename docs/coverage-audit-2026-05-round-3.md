@@ -22,24 +22,24 @@ Mirrors slice 279 exactly:
 
 ## Headline numbers
 
-| Surface                                                                           | Count |
-| --------------------------------------------------------------------------------- | ----- |
-| Total Go packages across the monorepo (`go list ./...`)                           | 175   |
-| Currently floored in `coverage-thresholds.json`                                   | 76    |
-| Currently `excludes`-listed in `coverage-thresholds.json`                         | 58    |
-| Untracked (in `go list`, neither floored nor excluded)                            | 43    |
-| **Floored + ≥ 70% merged (at-target)**                                            | **73** |
-| **Floored + < 70% merged + > floor (unit-add needed, in-floored-set)**            | **0**  |
-| **Floored + < 70% merged + cmd/* (seam-needed, in-floored-set)**                  | **0**  |
-| **Floored + measured below floor (FLOOR EROSION — gate would fail)**              | **0**  |
-| Floored + at floor 0 (exempt-leaning: cmd/atlas, cmd/atlas-cli, cmd/atlas-openapi) | 3     |
-| Ratchet-up opportunities (floored + measured ≥ floor + 4pp)                       | 9     |
-| Untracked + already-good (≥ 70% merged) — ready to add to thresholds              | 11    |
-| Untracked + trivial (≤ 10 stmts) — add to excludes or low-floor                   | 3     |
-| Untracked + cmd/* (cobra glue) — exempt-leaning                                   | 4     |
-| Untracked + auto-generated (`gen/proto/*`) — add to excludes                      | 4     |
-| Untracked + substantive surface + < 70% — spillover candidates                    | 21    |
-| Excludes-listed + measurable coverage ≥ 30% — review-but-leave (out of audit scope) | 47    |
+| Surface                                                                             | Count  |
+| ----------------------------------------------------------------------------------- | ------ |
+| Total Go packages across the monorepo (`go list ./...`)                             | 175    |
+| Currently floored in `coverage-thresholds.json`                                     | 76     |
+| Currently `excludes`-listed in `coverage-thresholds.json`                           | 58     |
+| Untracked (in `go list`, neither floored nor excluded)                              | 43     |
+| **Floored + ≥ 70% merged (at-target)**                                              | **73** |
+| **Floored + < 70% merged + > floor (unit-add needed, in-floored-set)**              | **0**  |
+| **Floored + < 70% merged + `cmd/*` (seam-needed, in-floored-set)**                  | **0**  |
+| **Floored + measured below floor (FLOOR EROSION — gate would fail)**                | **0**  |
+| Floored + at floor 0 (exempt-leaning: cmd/atlas, cmd/atlas-cli, cmd/atlas-openapi)  | 3      |
+| Ratchet-up opportunities (floored + measured ≥ floor + 4pp)                         | 9      |
+| Untracked + already-good (≥ 70% merged) — ready to add to thresholds                | 11     |
+| Untracked + trivial (≤ 10 stmts) — add to excludes or low-floor                     | 3      |
+| Untracked + `cmd/*` (cobra glue) — exempt-leaning                                   | 4      |
+| Untracked + auto-generated (`gen/proto/*`) — add to excludes                        | 4      |
+| Untracked + substantive surface + < 70% — spillover candidates                      | 21     |
+| Excludes-listed + measurable coverage ≥ 30% — review-but-leave (out of audit scope) | 47     |
 
 **Reading.** Round 2 (slices 281-311) fully drained the floored-but-below-70 backlog. There are no remaining gaps in the floored set. The work since slice 279 has produced 43 new untracked packages, the majority of which are auth-substrate-v2 (slices 187-198) and MCP (slices 199+) surfaces — these get spillover treatment, NOT inline lifts (P0-312-3).
 
@@ -57,58 +57,58 @@ Spillover slices 313-321 handle the long tail, grouped where the pattern repeats
 
 ### Untracked + substantive surface + < 70% — spillover candidates (21 packages, 9 grouped slices)
 
-| Package                            | Unit-only % | Merged % | Statements | Spillover slice | Group rationale                                            |
-| ---------------------------------- | ----------- | -------- | ---------- | --------------- | ---------------------------------------------------------- |
-| `internal/api/adminauditperiods`   | 0.0         | 0.9      | 111        | 313             | admin HTTP handler enrollment (slice 290 pattern)          |
-| `internal/api/adminsuperadmins`    | 0.0         | 0.6      | 165        | 313             | admin HTTP handler enrollment (slice 290 pattern)          |
-| `internal/api/admintenants`        | 0.0         | 0.5      | 188        | 313             | admin HTTP handler enrollment (slice 290 pattern)          |
-| `internal/api/adminvendors`        | 6.9         | 7.7      | 130        | 313             | admin HTTP handler enrollment (slice 290 pattern)          |
-| `internal/api/tenants`             | 0.0         | 0.9      | 110        | 313             | admin HTTP handler enrollment (slice 290 pattern)          |
-| `internal/api/oauth`               | 15.7        | 15.7     | 921        | 314             | slice 187 OAuth AS endpoint family — standalone, large     |
-| `internal/auth/oauthclient`        | 5.7         | 5.7      | 53         | 315             | auth-substrate-v2 small packages — group                   |
-| `internal/auth/oauthcode`          | 0.0         | 0.0      | 89         | 315             | auth-substrate-v2 small packages — group                   |
-| `internal/auth/revocation`         | 18.2        | 18.2     | 44         | 315             | auth-substrate-v2 small packages — group                   |
-| `internal/auth/userprefs`          | 27.8        | 29.6     | 54         | 315             | auth-substrate-v2 small packages — group                   |
-| `internal/api/calendar`            | 38.1        | 40.4     | 223        | 316             | HTTP handler integration-enrollment (slice 290 pattern)    |
-| `internal/api/search`              | 31.8        | 32.2     | 214        | 316             | HTTP handler integration-enrollment (slice 290 pattern)    |
-| `internal/api/questionnaires`      | 0.0         | 5.4      | 147        | 316             | HTTP handler integration-enrollment (slice 290 pattern)    |
-| `internal/api/mcpwriteproposals`   | 0.0         | 0.9      | 108        | 317             | MCP write-proposals stack — group with internal/mcp/writeproposals |
-| `internal/mcp/writeproposals`      | 0.0         | 1.8      | 218        | 317             | MCP write-proposals stack — group                          |
-| `internal/audit`                   | 0.0         | 0.4      | 231        | 318             | audit ledger plumbing — umbrella + sink + unifiedlog       |
-| `internal/audit/sink`              | 67.3        | 67.3     | 150        | 318             | audit ledger plumbing — JUST below 70                      |
-| `internal/audit/unifiedlog`        | 18.8        | 18.8     | 32         | 318             | audit ledger plumbing — tiny surface                       |
-| `internal/questionnaire`           | 26.2        | 26.5     | 324        | 319             | questionnaire engine — standalone                          |
-| `internal/demoseed`                | 4.4         | 4.4      | 522        | 320             | demo-seed dataset (slice 205) — data-heavy, lower priority |
-| `pkg/sdk-go`                       | 67.6        | 67.6     | 37         | 321             | tiny gap (2.4pp); 4-5 unit tests; standalone               |
+| Package                          | Unit-only % | Merged % | Statements | Spillover slice | Group rationale                                                    |
+| -------------------------------- | ----------- | -------- | ---------- | --------------- | ------------------------------------------------------------------ |
+| `internal/api/adminauditperiods` | 0.0         | 0.9      | 111        | 313             | admin HTTP handler enrollment (slice 290 pattern)                  |
+| `internal/api/adminsuperadmins`  | 0.0         | 0.6      | 165        | 313             | admin HTTP handler enrollment (slice 290 pattern)                  |
+| `internal/api/admintenants`      | 0.0         | 0.5      | 188        | 313             | admin HTTP handler enrollment (slice 290 pattern)                  |
+| `internal/api/adminvendors`      | 6.9         | 7.7      | 130        | 313             | admin HTTP handler enrollment (slice 290 pattern)                  |
+| `internal/api/tenants`           | 0.0         | 0.9      | 110        | 313             | admin HTTP handler enrollment (slice 290 pattern)                  |
+| `internal/api/oauth`             | 15.7        | 15.7     | 921        | 314             | slice 187 OAuth AS endpoint family — standalone, large             |
+| `internal/auth/oauthclient`      | 5.7         | 5.7      | 53         | 315             | auth-substrate-v2 small packages — group                           |
+| `internal/auth/oauthcode`        | 0.0         | 0.0      | 89         | 315             | auth-substrate-v2 small packages — group                           |
+| `internal/auth/revocation`       | 18.2        | 18.2     | 44         | 315             | auth-substrate-v2 small packages — group                           |
+| `internal/auth/userprefs`        | 27.8        | 29.6     | 54         | 315             | auth-substrate-v2 small packages — group                           |
+| `internal/api/calendar`          | 38.1        | 40.4     | 223        | 316             | HTTP handler integration-enrollment (slice 290 pattern)            |
+| `internal/api/search`            | 31.8        | 32.2     | 214        | 316             | HTTP handler integration-enrollment (slice 290 pattern)            |
+| `internal/api/questionnaires`    | 0.0         | 5.4      | 147        | 316             | HTTP handler integration-enrollment (slice 290 pattern)            |
+| `internal/api/mcpwriteproposals` | 0.0         | 0.9      | 108        | 317             | MCP write-proposals stack — group with internal/mcp/writeproposals |
+| `internal/mcp/writeproposals`    | 0.0         | 1.8      | 218        | 317             | MCP write-proposals stack — group                                  |
+| `internal/audit`                 | 0.0         | 0.4      | 231        | 318             | audit ledger plumbing — umbrella + sink + unifiedlog               |
+| `internal/audit/sink`            | 67.3        | 67.3     | 150        | 318             | audit ledger plumbing — JUST below 70                              |
+| `internal/audit/unifiedlog`      | 18.8        | 18.8     | 32         | 318             | audit ledger plumbing — tiny surface                               |
+| `internal/questionnaire`         | 26.2        | 26.5     | 324        | 319             | questionnaire engine — standalone                                  |
+| `internal/demoseed`              | 4.4         | 4.4      | 522        | 320             | demo-seed dataset (slice 205) — data-heavy, lower priority         |
+| `pkg/sdk-go`                     | 67.6        | 67.6     | 37         | 321             | tiny gap (2.4pp); 4-5 unit tests; standalone                       |
 
 **9 spillover slices total: 313-321.** Within P0-312-5 cap of 10.
 
 ### Untracked + auto-generated (`gen/proto/*`) → add to `excludes`
 
-| Package                  | Merged % | Statements | Disposition  |
-| ------------------------ | -------- | ---------- | ------------ |
-| `gen/proto/admin/v1`     | 64.9     | 262        | exclude (generated by protoc; covered transitively) |
-| `gen/proto/connectors/v1`| 65.6     | 157        | exclude (generated by protoc; covered transitively) |
-| `gen/proto/evidence/v1`  | 56.9     | 181        | exclude (generated by protoc; covered transitively) |
-| `gen/proto/oscal/v1`     | 32.1     | 548        | exclude (generated by protoc; covered transitively) |
+| Package                   | Merged % | Statements | Disposition                                         |
+| ------------------------- | -------- | ---------- | --------------------------------------------------- |
+| `gen/proto/admin/v1`      | 64.9     | 262        | exclude (generated by protoc; covered transitively) |
+| `gen/proto/connectors/v1` | 65.6     | 157        | exclude (generated by protoc; covered transitively) |
+| `gen/proto/evidence/v1`   | 56.9     | 181        | exclude (generated by protoc; covered transitively) |
+| `gen/proto/oscal/v1`      | 32.1     | 548        | exclude (generated by protoc; covered transitively) |
 
 **Rationale.** The slice 279 tiered-floor doctrine already lists `gen/proto/` as an excluded prefix in the `generated_code` tier (per the `$tier_recommendations` block); the explicit per-package entries in `excludes[]` are required because the current `excludes` list captures `gen/proto/` as a directory but the gate's substring match needs the leaf paths registered or the directory prefix added. Since the existing `excludes` already has `gen/proto/` as a prefix entry, no additional changes are strictly required — these packages are already excluded. Calling them out here for completeness; thresholds.json change is a no-op for this tier.
 
 ### Untracked + trivial → add to `excludes`
 
-| Package                  | Merged % | Statements | Disposition |
-| ------------------------ | -------- | ---------- | ----------- |
-| `internal/api/emptyset`  | 0.0      | 0          | exclude (no statements to cover) |
-| `internal/auth/keystore` | 100.0    | 1          | floored at 98 (already-good entry below) |
+| Package                  | Merged % | Statements | Disposition                                            |
+| ------------------------ | -------- | ---------- | ------------------------------------------------------ |
+| `internal/api/emptyset`  | 0.0      | 0          | exclude (no statements to cover)                       |
+| `internal/auth/keystore` | 100.0    | 1          | floored at 98 (already-good entry below)               |
 | `catalogs/metrics`       | 0.0      | 1          | exclude (single-statement embed file; already covered) |
 
-### Untracked + cmd/* → exempt-leaning
+### Untracked + `cmd/*` → exempt-leaning
 
-| Package                      | Merged % | Statements | Disposition / notes |
-| ---------------------------- | -------- | ---------- | ------------------- |
-| `cmd/atlas-mcp`              | 30.1     | 73         | exempt-leaning (cobra glue + main entry; integration-tested via MCP smoke; if lifted, slice-305 seam pattern) |
-| `cmd/atlas-oscal`            | 0.0      | 31         | exempt-leaning (cobra glue + Python bridge stub) |
-| `cmd/scripts/coverage-check` | 0.0      | 102        | exempt-leaning (CLI tool; smoke-tested via CI usage) |
+| Package                      | Merged % | Statements | Disposition / notes                                                                                                                              |
+| ---------------------------- | -------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `cmd/atlas-mcp`              | 30.1     | 73         | exempt-leaning (cobra glue + main entry; integration-tested via MCP smoke; if lifted, slice-305 seam pattern)                                    |
+| `cmd/atlas-oscal`            | 0.0      | 31         | exempt-leaning (cobra glue + Python bridge stub)                                                                                                 |
+| `cmd/scripts/coverage-check` | 0.0      | 102        | exempt-leaning (CLI tool; smoke-tested via CI usage)                                                                                             |
 | `cmd/scripts/coverage-gate`  | 0.0      | 147        | exempt-leaning (CLI tool; **paradoxically** the very gate that enforces other packages — self-test would be slice-069-recursion territory; punt) |
 
 **Decision.** These 4 packages join the existing exempt-leaning tier; they get no floor (zero pressure to lift) and are tier-documented under `cli_cmd_glue` in `$tier_recommendations`. The 3 connector-cmd packages added in rounds 1+2 (`cmd/atlas-*` for each connector) all sit at 70%+ now — those stay floored.
@@ -136,17 +136,17 @@ Spillover slices 313-321 handle the long tail, grouped where the pattern repeats
 
 These packages are FLOORED and AT-TARGET (≥ 70%) but measured comfortably exceeds floor + 4pp. The ratchet is monotonic + small (per slice 069 P0-A4 noise band):
 
-| Package                                | Floor (before) | Merged % | Floor (after) | Δpp |
-| -------------------------------------- | -------------- | -------- | ------------- | --- |
-| `connectors/github/internal/githubscim`| 72             | 76.6     | 74            | +2  |
-| `connectors/manual/internal/manualsftp`| 84             | 90.0     | 88            | +4  |
-| `connectors/okta/internal/oktapolicy`  | 69             | 74.6     | 72            | +3  |
-| `connectors/osquery/internal/osqueryposture` | 73       | 77.2     | 75            | +2  |
-| `internal/api`                         | 69             | 74.5     | 72            | +3  |
-| `internal/api/controls`                | 73             | 77.1     | 75            | +2  |
-| `internal/api/schemaregistry`          | 71             | 81.6     | 79            | +8  |
-| `internal/control`                     | 72             | 78.5     | 76            | +4  |
-| `internal/risk`                        | 71             | 79.5     | 77            | +6  |
+| Package                                      | Floor (before) | Merged % | Floor (after) | Δpp |
+| -------------------------------------------- | -------------- | -------- | ------------- | --- |
+| `connectors/github/internal/githubscim`      | 72             | 76.6     | 74            | +2  |
+| `connectors/manual/internal/manualsftp`      | 84             | 90.0     | 88            | +4  |
+| `connectors/okta/internal/oktapolicy`        | 69             | 74.6     | 72            | +3  |
+| `connectors/osquery/internal/osqueryposture` | 73             | 77.2     | 75            | +2  |
+| `internal/api`                               | 69             | 74.5     | 72            | +3  |
+| `internal/api/controls`                      | 73             | 77.1     | 75            | +2  |
+| `internal/api/schemaregistry`                | 71             | 81.6     | 79            | +8  |
+| `internal/control`                           | 72             | 78.5     | 76            | +4  |
+| `internal/risk`                              | 71             | 79.5     | 77            | +6  |
 
 **Conservative posture.** Each lift is `floor(merged - 2pp)` with the strict slice 069 noise-band; no aggressive ratchets even when measured allows it. This keeps the ratchet contract honest: a 2pp drop tomorrow shouldn't fail the gate; a 5pp drop should.
 
@@ -196,7 +196,7 @@ Each spillover slice:
 
 - **P0-312-1** (monotonic ratchet) — every threshold change is ↑ or unchanged; zero floors lowered.
 - **P0-312-2** (no vanity ratchet) — zero packages lifted that were already ≥ 70% merged.
-- **P0-312-3** (no inline cmd/* seam refactors) — 4 untracked cmd/* packages are tier-documented as exempt-leaning, not inline-refactored.
+- **P0-312-3** (no inline `cmd/*` seam refactors) — 4 untracked `cmd/*` packages are tier-documented as exempt-leaning, not inline-refactored.
 - **P0-312-4** (no `_INDEX.md` touch) — orchestrator's surface.
 - **P0-312-5** (≤ 10 spillover slices) — 9 spillovers filed.
 - **P0-312-6** (audit distinguishes unit vs merged) — every per-package row reports both columns.

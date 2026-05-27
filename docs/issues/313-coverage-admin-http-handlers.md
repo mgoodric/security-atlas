@@ -9,13 +9,13 @@
 
 Surfaced during slice 312's round-3 coverage audit, captured per the continuous-batch policy. The audit at `docs/coverage-audit-2026-05-round-3.md` identified 5 untracked admin HTTP handler packages all below 70% merged coverage:
 
-| Package | Unit-only % | Merged % | Statements |
-| ------- | ----------- | -------- | ---------- |
-| `internal/api/adminauditperiods` | 0.0 | 0.9 | 111 |
-| `internal/api/adminsuperadmins` | 0.0 | 0.6 | 165 |
-| `internal/api/admintenants` | 0.0 | 0.5 | 188 |
-| `internal/api/adminvendors` | 6.9 | 7.7 | 130 |
-| `internal/api/tenants` | 0.0 | 0.9 | 110 |
+| Package                          | Unit-only % | Merged % | Statements |
+| -------------------------------- | ----------- | -------- | ---------- |
+| `internal/api/adminauditperiods` | 0.0         | 0.9      | 111        |
+| `internal/api/adminsuperadmins`  | 0.0         | 0.6      | 165        |
+| `internal/api/admintenants`      | 0.0         | 0.5      | 188        |
+| `internal/api/adminvendors`      | 6.9         | 7.7      | 130        |
+| `internal/api/tenants`           | 0.0         | 0.9      | 110        |
 
 All 5 share the same shape: admin-scoped HTTP handler, no integration test enrolled in CI's `tests-integration` job, no unit tests for the pure-Go helpers (URL params, JSON validation, wire conversion). They are grouped into a single spillover slice because each is < 200 statements and the integration-enrollment pattern (slice 290 / 291 / 293 / 297 / 310) repeats verbatim across all 5.
 

@@ -9,11 +9,11 @@
 
 Surfaced during slice 312's round-3 coverage audit, captured per the continuous-batch policy. The audit at `docs/coverage-audit-2026-05-round-3.md` identified 3 untracked audit-log packages below 70% merged coverage:
 
-| Package | Unit-only % | Merged % | Statements | Notes |
-| ------- | ----------- | -------- | ---------- | ----- |
-| `internal/audit` | 0.0 | 0.4 | 231 | umbrella / shared types |
-| `internal/audit/sink` | 67.3 | 67.3 | 150 | append-only ledger writer (JUST below 70) |
-| `internal/audit/unifiedlog` | 18.8 | 18.8 | 32 | unified-log entry shape (slice 124) |
+| Package                     | Unit-only % | Merged % | Statements | Notes                                     |
+| --------------------------- | ----------- | -------- | ---------- | ----------------------------------------- |
+| `internal/audit`            | 0.0         | 0.4      | 231        | umbrella / shared types                   |
+| `internal/audit/sink`       | 67.3        | 67.3     | 150        | append-only ledger writer (JUST below 70) |
+| `internal/audit/unifiedlog` | 18.8        | 18.8     | 32         | unified-log entry shape (slice 124)       |
 
 Grouped because all 3 are sibling packages under `internal/audit/` and all 3 are audit-log family. `internal/audit/sink` is just 2.7pp short of 70 — small unit additions clear it. The other 2 need substantive new tests.
 

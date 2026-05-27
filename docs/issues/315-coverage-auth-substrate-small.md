@@ -9,12 +9,12 @@
 
 Surfaced during slice 312's round-3 coverage audit, captured per the continuous-batch policy. The audit at `docs/coverage-audit-2026-05-round-3.md` identified 4 small auth-substrate-v2 packages all below 70% merged coverage:
 
-| Package | Unit-only % | Merged % | Statements | Notes |
-| ------- | ----------- | -------- | ---------- | ----- |
-| `internal/auth/oauthclient` | 5.7 | 5.7 | 53 | OAuth client registry (RFC 7591 / 7592 / dyn-reg) |
-| `internal/auth/oauthcode` | 0.0 | 0.0 | 89 | PKCE auth code store (RFC 7636) |
-| `internal/auth/revocation` | 18.2 | 18.2 | 44 | Revocation list (RFC 7009) |
-| `internal/auth/userprefs` | 27.8 | 29.6 | 54 | User preferences (theme, notifications, etc.) |
+| Package                     | Unit-only % | Merged % | Statements | Notes                                             |
+| --------------------------- | ----------- | -------- | ---------- | ------------------------------------------------- |
+| `internal/auth/oauthclient` | 5.7         | 5.7      | 53         | OAuth client registry (RFC 7591 / 7592 / dyn-reg) |
+| `internal/auth/oauthcode`   | 0.0         | 0.0      | 89         | PKCE auth code store (RFC 7636)                   |
+| `internal/auth/revocation`  | 18.2        | 18.2     | 44         | Revocation list (RFC 7009)                        |
+| `internal/auth/userprefs`   | 27.8        | 29.6     | 54         | User preferences (theme, notifications, etc.)     |
 
 All 4 are slice 187 / 188 / 192 OAuth AS substrate helpers; each is small (≤ 100 statements). Grouped into a single spillover because: (a) each is too small to warrant its own slice, (b) all 4 are sibling packages under `internal/auth/`, (c) the test pattern repeats (store CRUD + RLS isolation + error branches).
 
