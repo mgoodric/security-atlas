@@ -70,7 +70,7 @@
     "connectors/jira/internal/jiratickets": 89,
     "connectors/jira/internal/lineartickets": 85,
 
-    "connectors/manual/cmd/atlas-manual": 41,
+    "connectors/manual/cmd/atlas-manual": 71,
     "connectors/manual/internal/idem": 98,
     "connectors/manual/internal/manualcsv": 94,
     "connectors/manual/internal/manuals3": 88,
