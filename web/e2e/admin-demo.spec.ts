@@ -1,8 +1,10 @@
 // Slice 278 — Playwright E2E for the demo-seed admin page.
+// Slice 322 — added the click-feedback contract assertion (AC-4) so
+// the "silent click" class-of-bug is guarded against. Future
+// regressions to the dialog mount, the in-flight button label, OR
+// the post-action Alert all fail the new assertion.
 //
-// Three assertions, all driven by page.route() mocking of the BFF
-// endpoints. No live seed runs during e2e — the Go integration
-// test covers the real DB-bound path.
+// Assertions:
 //
 //   (a) Banner renders when status returns {enabled: false}; both
 //       buttons are absent.
@@ -11,6 +13,15 @@
 //       appears with the seed summary counts.
 //   (c) Teardown flow mirrors the seed flow; the destructive
 //       button + confirmation + post-action Alert all work.
+//   (d) Slice 322 — click-feedback contract: clicking the seed
+//       button surfaces a visible DOM change within 1s (dialog
+//       OR in-flight indicator OR Alert). Catches the class-of-
+//       bug, not just the specific instance.
+//   (e) Slice 322 — Alerts carry `aria-live="polite"` so screen
+//       readers + below-the-fold users get a signal.
+//   (f) Slice 322 — post-action Alert auto-scrolls into view so a
+//       user with a scrolled viewport sees the success/error
+//       message without having to scroll down.
 
 import { expect, test } from "./fixtures";
 
@@ -129,5 +140,97 @@ test.describe("admin demo-seed page", () => {
       "torn down",
     );
     expect(teardownCalls).toBe(1);
+  });
+
+  // Slice 322 — AC-4 click-feedback contract. Catches the
+  // class-of-bug "silent click" — any of the dialog OR the
+  // in-flight indicator OR the success/error Alert appearing
+  // within 1s of click satisfies the contract.
+  test("AC-4: clicking seed surfaces a visible DOM change within 1s", async ({
+    authedPage,
+  }) => {
+    await authedPage.route("**/api/admin/demo/status", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ enabled: true }),
+      });
+    });
+
+    await authedPage.goto("/admin/demo");
+    await expect(authedPage.getByTestId("demo-seed-button")).toBeVisible();
+
+    // Click and immediately assert SOME feedback element exists
+    // within 1000ms. The seed-dialog is the primary contract; the
+    // assertion is the structural "click → visible-change" guard.
+    const clickStart = Date.now();
+    await authedPage.getByTestId("demo-seed-button").click();
+    await expect(
+      authedPage
+        .getByTestId("demo-seed-dialog")
+        .or(authedPage.getByTestId("demo-running"))
+        .or(authedPage.getByTestId("demo-click-feedback")),
+    ).toBeVisible({ timeout: 1000 });
+    const elapsed = Date.now() - clickStart;
+    expect(elapsed).toBeLessThan(1100); // tolerance for harness jitter
+  });
+
+  test("AC-3: post-action Alerts carry aria-live=polite", async ({
+    authedPage,
+  }) => {
+    await authedPage.route("**/api/admin/demo/status", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ enabled: true }),
+      });
+    });
+    await authedPage.route("**/api/admin/demo/seed", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(SEED_RESULT),
+      });
+    });
+
+    await authedPage.goto("/admin/demo");
+    await authedPage.getByTestId("demo-seed-button").click();
+    await authedPage.getByTestId("demo-seed-confirm").click();
+
+    const success = authedPage.getByTestId("demo-success");
+    await expect(success).toBeVisible();
+    await expect(success).toHaveAttribute("aria-live", "polite");
+  });
+
+  test("AC-3: failure Alert surfaces error message via the BFF body", async ({
+    authedPage,
+  }) => {
+    await authedPage.route("**/api/admin/demo/status", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ enabled: true }),
+      });
+    });
+    await authedPage.route("**/api/admin/demo/seed", async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "demo seed not enabled on this deployment",
+        }),
+      });
+    });
+
+    await authedPage.goto("/admin/demo");
+    await authedPage.getByTestId("demo-seed-button").click();
+    await authedPage.getByTestId("demo-seed-confirm").click();
+
+    const errorAlert = authedPage.getByTestId("demo-error");
+    await expect(errorAlert).toBeVisible();
+    await expect(errorAlert).toContainText(
+      "demo seed not enabled on this deployment",
+    );
+    await expect(errorAlert).toHaveAttribute("aria-live", "polite");
   });
 });

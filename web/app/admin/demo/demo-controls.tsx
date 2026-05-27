@@ -12,10 +12,28 @@
 // D7 — UI does NOT call out the second audit-log row that the
 // seeder writes; that's an implementation detail. The user sees
 // one consolidated post-action summary.
+//
+// Slice 322 — defensive UX additions for the "silent click" class
+// of bug. The reported symptom was "I clicked the load demo data
+// button, but nothing seemed to happen." Root-cause diagnosis is
+// in docs/audit-log/322-admin-demo-button-no-feedback-decisions.md
+// — load-bearing cause is a hybrid of (D) Alert below the fold and
+// (E) no visible in-flight state between click and dialog mount.
+// Fix shape:
+//
+//   - `aria-live="polite"` on every dynamic <Alert>
+//   - `scrollIntoView` on success/error Alert mount
+//   - Brief in-flight "Opening confirmation…" button label so the
+//     user sees feedback even if the dialog mount is delayed by a
+//     slow paint or zoomed-out viewport
+//   - Dev-mode `console.warn` on non-200 BFF responses (operator
+//     diagnostic; gated by NODE_ENV)
+//   - `data-testid="demo-click-feedback"` is the contract anchor
+//     for the e2e click-feedback assertion (AC-4)
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -64,11 +82,24 @@ type EnabledState =
   | { kind: "enabled" }
   | { kind: "disabled" };
 
+// Slice 322 — duration the in-flight "Opening confirmation…" button
+// label is visible after click. 80ms is just long enough to be
+// perceptible on a fast machine and gives a slow machine plenty of
+// time for the dialog to mount before the label resets. The dialog
+// itself takes precedence visually once it appears.
+const CLICK_FEEDBACK_MS = 80;
+
+type ClickFeedback = "idle" | "seed" | "teardown";
+
 export function DemoControls() {
   const [seedDialog, setSeedDialog] = useState(false);
   const [teardownDialog, setTeardownDialog] = useState(false);
   const [state, setState] = useState<ActionState>({ kind: "idle" });
   const [enabled, setEnabled] = useState<EnabledState>({ kind: "loading" });
+  // Slice 322 — in-flight indicator between click and dialog mount.
+  const [clickFeedback, setClickFeedback] = useState<ClickFeedback>("idle");
+  // Slice 322 — scroll-into-view target for post-action Alerts.
+  const alertRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,6 +123,23 @@ export function DemoControls() {
       cancelled = true;
     };
   }, []);
+
+  // Slice 322 — when the action state lands in success or error,
+  // scroll the Alert into view so users with a scrolled or zoomed
+  // viewport see the feedback. `block: "center"` avoids surprising
+  // alignment near viewport edges. Smooth behavior is non-jarring.
+  useEffect(() => {
+    if (
+      state.kind === "success-seed" ||
+      state.kind === "success-teardown" ||
+      state.kind === "error"
+    ) {
+      alertRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }
+  }, [state.kind]);
 
   if (enabled.kind === "loading") {
     return (
@@ -128,6 +176,36 @@ export function DemoControls() {
 
   const busy = state.kind === "running";
 
+  // Slice 322 — click handlers for the two primary buttons.
+  // Each fires the in-flight indicator BEFORE opening the dialog so
+  // even a one-frame paint delay surfaces a visible DOM change. The
+  // indicator auto-clears after CLICK_FEEDBACK_MS or when the dialog
+  // closes — whichever comes first.
+  function handleSeedClick() {
+    setClickFeedback("seed");
+    setSeedDialog(true);
+    window.setTimeout(() => setClickFeedback("idle"), CLICK_FEEDBACK_MS);
+  }
+
+  function handleTeardownClick() {
+    setClickFeedback("teardown");
+    setTeardownDialog(true);
+    window.setTimeout(() => setClickFeedback("idle"), CLICK_FEEDBACK_MS);
+  }
+
+  // Slice 322 — dev-mode diagnostic. In production, the user-facing
+  // Alert surfaces the error; in development, also emit console.warn
+  // so an operator debugging on atlas-edge can see the failure
+  // shape in DevTools without manually opening the network tab.
+  function warnInDev(action: string, res: Response, body: unknown): void {
+    if (process.env.NODE_ENV === "development") {
+      console.warn(
+        `[admin/demo] ${action} returned ${res.status} ${res.statusText}`,
+        body,
+      );
+    }
+  }
+
   async function runSeed() {
     setState({ kind: "running" });
     setSeedDialog(false);
@@ -137,6 +215,7 @@ export function DemoControls() {
         error?: string;
       };
       if (!res.ok) {
+        warnInDev("seed", res, body);
         setState({
           kind: "error",
           message: body.error ?? `${res.status} ${res.statusText}`,
@@ -148,6 +227,9 @@ export function DemoControls() {
         result: body as SeedResult,
       });
     } catch (err) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[admin/demo] seed threw", err);
+      }
       setState({
         kind: "error",
         message: (err as Error).message ?? "network error",
@@ -164,6 +246,7 @@ export function DemoControls() {
         error?: string;
       };
       if (!res.ok) {
+        warnInDev("teardown", res, body);
         setState({
           kind: "error",
           message: body.error ?? `${res.status} ${res.statusText}`,
@@ -175,12 +258,25 @@ export function DemoControls() {
         result: body as TeardownResult,
       });
     } catch (err) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[admin/demo] teardown threw", err);
+      }
       setState({
         kind: "error",
         message: (err as Error).message ?? "network error",
       });
     }
   }
+
+  // Slice 322 — buttons reflect both the request-in-flight `busy`
+  // state AND the brief click-feedback transition so the user always
+  // sees evidence that their click registered.
+  const seedLabel =
+    clickFeedback === "seed" ? "Opening confirmation…" : "Reseed demo dataset";
+  const teardownLabel =
+    clickFeedback === "teardown"
+      ? "Opening confirmation…"
+      : "Tear down demo tenant";
 
   return (
     <div className="space-y-4" data-testid="demo-controls">
@@ -197,10 +293,10 @@ export function DemoControls() {
         <CardFooter>
           <Button
             data-testid="demo-seed-button"
-            onClick={() => setSeedDialog(true)}
+            onClick={handleSeedClick}
             disabled={busy}
           >
-            Reseed demo dataset
+            {seedLabel}
           </Button>
         </CardFooter>
       </Card>
@@ -219,64 +315,102 @@ export function DemoControls() {
           <Button
             data-testid="demo-teardown-button"
             variant="destructive"
-            onClick={() => setTeardownDialog(true)}
+            onClick={handleTeardownClick}
             disabled={busy}
           >
-            Tear down demo tenant
+            {teardownLabel}
           </Button>
         </CardFooter>
       </Card>
 
-      {/* Result alert */}
+      {/*
+        Slice 322 — click-feedback anchor. A hidden but non-empty
+        node that surfaces immediately on click; the e2e contract
+        test (AC-4) anchors on this testid as one of the three
+        "visible DOM change within 1s" acceptable signals. It is
+        sr-only so it does not visually distract; screen readers
+        announce it via aria-live=polite.
+      */}
+      {clickFeedback !== "idle" ? (
+        <div
+          data-testid="demo-click-feedback"
+          aria-live="polite"
+          className="sr-only"
+        >
+          Opening confirmation dialog…
+        </div>
+      ) : null}
+
+      {/*
+        Slice 322 — wrapping div carries the scroll-into-view ref so
+        the underlying <Alert> component does not need forwardRef
+        plumbing. The wrapper also receives aria-live=polite as a
+        belt-and-suspenders signal (the <Alert> has its own
+        aria-live=polite, and role="alert" implicitly announces, but
+        the outer wrapper announces too because some screen readers
+        ignore aria attributes on descendants of role=alert nodes).
+      */}
       {state.kind === "running" ? (
-        <Alert data-testid="demo-running">
-          <AlertTitle>Running…</AlertTitle>
-          <AlertDescription>
-            Action in flight. This typically takes 5-10 seconds.
-          </AlertDescription>
-        </Alert>
+        <div ref={alertRef}>
+          <Alert data-testid="demo-running" aria-live="polite">
+            <AlertTitle>Running…</AlertTitle>
+            <AlertDescription>
+              Action in flight. This typically takes 5-10 seconds.
+            </AlertDescription>
+          </Alert>
+        </div>
       ) : null}
 
       {state.kind === "success-seed" ? (
-        <Alert data-testid="demo-success">
-          <AlertTitle>Demo dataset seeded</AlertTitle>
-          <AlertDescription>
-            <p>
-              {state.result.idempotent ? (
-                <>
-                  Tenant <code>{state.result.tenant_slug}</code> already carried
-                  the slice-205 forensic mark; no rows were written. The dataset
-                  is already in place.
-                </>
-              ) : (
-                <>
-                  {state.result.controls} controls · {state.result.risks} risks
-                  · {state.result.evidence} evidence ·{" "}
-                  {state.result.audit_periods} audit periods ·{" "}
-                  {state.result.samples} samples seeded into tenant{" "}
-                  <code>{state.result.tenant_slug}</code>.
-                </>
-              )}
-            </p>
-          </AlertDescription>
-        </Alert>
+        <div ref={alertRef}>
+          <Alert data-testid="demo-success" aria-live="polite">
+            <AlertTitle>Demo dataset seeded</AlertTitle>
+            <AlertDescription>
+              <p>
+                {state.result.idempotent ? (
+                  <>
+                    Tenant <code>{state.result.tenant_slug}</code> already
+                    carried the slice-205 forensic mark; no rows were written.
+                    The dataset is already in place.
+                  </>
+                ) : (
+                  <>
+                    {state.result.controls} controls · {state.result.risks}{" "}
+                    risks · {state.result.evidence} evidence ·{" "}
+                    {state.result.audit_periods} audit periods ·{" "}
+                    {state.result.samples} samples seeded into tenant{" "}
+                    <code>{state.result.tenant_slug}</code>.
+                  </>
+                )}
+              </p>
+            </AlertDescription>
+          </Alert>
+        </div>
       ) : null}
 
       {state.kind === "success-teardown" ? (
-        <Alert data-testid="demo-success">
-          <AlertTitle>Demo tenant torn down</AlertTitle>
-          <AlertDescription>
-            Tenant <code>{state.result.tenant_slug}</code> deleted along with
-            all anchored rows. Click Reseed to recreate the dataset.
-          </AlertDescription>
-        </Alert>
+        <div ref={alertRef}>
+          <Alert data-testid="demo-success" aria-live="polite">
+            <AlertTitle>Demo tenant torn down</AlertTitle>
+            <AlertDescription>
+              Tenant <code>{state.result.tenant_slug}</code> deleted along with
+              all anchored rows. Click Reseed to recreate the dataset.
+            </AlertDescription>
+          </Alert>
+        </div>
       ) : null}
 
       {state.kind === "error" ? (
-        <Alert variant="destructive" data-testid="demo-error">
-          <AlertTitle>Action failed</AlertTitle>
-          <AlertDescription>{state.message}</AlertDescription>
-        </Alert>
+        <div ref={alertRef}>
+          <Alert
+            variant="destructive"
+            data-testid="demo-error"
+            aria-live="polite"
+          >
+            <AlertTitle>Action failed</AlertTitle>
+            <AlertDescription>{state.message}</AlertDescription>
+          </Alert>
+        </div>
       ) : null}
 
       {/* Confirmation dialog: Reseed */}
