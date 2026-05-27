@@ -131,6 +131,7 @@
     "internal/scope": 85,
     "internal/tenancy": 90,
     "internal/vendor": 85,
+    "pkg/sdk-go": 92,
     "pkg/sdk-go/oauth": 84
   },
   "$exclusions_comment": "Packages that the gate skips entirely. These are either auto-generated (sqlc, protoc) or main-package wrappers integration-tested elsewhere (the connectors' cmd/atlas-* binaries are unit-listed above; cmd/atlas + cmd/atlas-cli are integration-tested by the self-host bundle e2e job).",
