@@ -412,6 +412,16 @@ jobs:
         # the Import BeginTx-error branch via a stub pgxBeginner) lifts
         # internal/api/soc2import to 77.4% merged. Same playbook as
         # slices 290 / 291 / 293 — enrolment is the load-bearing move.
+        #
+        # Slice 315: extended to include the four auth-substrate-v2
+        # small packages (oauthclient + oauthcode + revocation +
+        # userprefs) flagged by the round-3 audit
+        # (docs/coverage-audit-2026-05-round-3.md). Each was <100 stmts
+        # and below 70% merged because none was enrolled in the
+        # integration job. New integration_test.go suites added for
+        # oauthclient, oauthcode, and userprefs (revocation already
+        # shipped a comprehensive one in slice 190). Same playbook as
+        # slices 290 / 297 / 310 — enrolment is the load-bearing move.
         run: |
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
@@ -449,7 +459,11 @@ jobs:
             ./internal/metrics/scheduler/... \
             ./internal/api/metrics/... \
             ./internal/metrics/eval/... \
-            ./internal/api/soc2import/...
+            ./internal/api/soc2import/... \
+            ./internal/auth/oauthclient/... \
+            ./internal/auth/oauthcode/... \
+            ./internal/auth/revocation/... \
+            ./internal/auth/userprefs/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
