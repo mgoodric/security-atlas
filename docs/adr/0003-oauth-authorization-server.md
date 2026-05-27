@@ -206,6 +206,8 @@ The binary vCISO success criterion from slice 141 is fulfilled.
 - RFC 9068 — https://datatracker.ietf.org/doc/html/rfc9068
 - RFC 8693 — https://datatracker.ietf.org/doc/html/rfc8693
 
+See also: [`docs-site/docs/oauth-grants.md`](../../docs-site/docs/oauth-grants.md) — per-grant endpoint-to-file landing map for `internal/api/oauth/` (slice 325).
+
 ---
 
 [← ADR 0002 — Bearer-token storage](./0002-bearer-token-storage.md) · [ADR 0004 — Control detail 404 empty state →](./0004-control-detail-404-empty-state.md)
