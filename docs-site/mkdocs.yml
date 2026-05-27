@@ -111,6 +111,7 @@ nav:
       - Schema registry seed + validate: walkthroughs/schema-registry-seed-and-validate.md
       - OSCAL SSP export: walkthroughs/oscal-ssp-export.md
   - REST API reference: api/index.md
+  - OAuth grants map: oauth-grants.md
   - Troubleshooting:
       - First-time login: troubleshooting/first-login.md
   - Design decisions:
