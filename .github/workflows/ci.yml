@@ -422,6 +422,24 @@ jobs:
         # oauthclient, oauthcode, and userprefs (revocation already
         # shipped a comprehensive one in slice 190). Same playbook as
         # slices 290 / 297 / 310 — enrolment is the load-bearing move.
+        #
+        # Slice 317: extended to include the two MCP write-proposals
+        # packages (internal/api/mcpwriteproposals + internal/mcp/
+        # writeproposals) flagged by the round-3 audit. Both already
+        # shipped comprehensive integration_test.go suites (HTTP handler
+        # + store layer driving HITL approval flow against real Postgres
+        # + RLS + the schema-level ai_assist invariant CHECK) but
+        # neither was enrolled in the CI integration job. New unit
+        # helpers_test.go + appliers_test.go + handlers_test.go added
+        # for the pure-Go pre-DB validation branches (writeCreateErr /
+        # writeTransitionErr / writeServerErr, the four applier parse +
+        # required-field branches, stateToEvidenceResult + the
+        # nullableString/Subject helpers, plus the Create/Confirm
+        # pre-tx rejections). Together with enrolment they lift
+        # internal/mcp/writeproposals from 1.8% → 77.5% merged and
+        # internal/api/mcpwriteproposals from 0.9% → 84.3% merged. Same
+        # playbook as slices 290 / 297 / 310 / 315 — enrolment is the
+        # load-bearing move.
         run: |
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
@@ -463,7 +481,9 @@ jobs:
             ./internal/auth/oauthclient/... \
             ./internal/auth/oauthcode/... \
             ./internal/auth/revocation/... \
-            ./internal/auth/userprefs/...
+            ./internal/auth/userprefs/... \
+            ./internal/api/mcpwriteproposals/... \
+            ./internal/mcp/writeproposals/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
