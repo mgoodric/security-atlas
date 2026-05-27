@@ -97,7 +97,7 @@
     "internal/api/openapi": 71,
     "internal/api/oscalexport": 98,
     "internal/api/schemaregistry": 71,
-    "internal/api/soc2import": 23,
+    "internal/api/soc2import": 75,
     "internal/api/tenancymw": 98,
     "internal/api/metrics": 85,
 
