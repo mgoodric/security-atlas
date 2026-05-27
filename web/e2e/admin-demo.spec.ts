@@ -165,11 +165,16 @@ test.describe("admin demo-seed page", () => {
     // assertion is the structural "click → visible-change" guard.
     const clickStart = Date.now();
     await authedPage.getByTestId("demo-seed-button").click();
+    // .first() — during the 80ms transition both demo-click-feedback
+    // and demo-seed-dialog can be visible simultaneously; strict-mode
+    // rejects multi-match. The contract is "≥1 of the 3 is visible
+    // within 1s", which .first() expresses correctly.
     await expect(
       authedPage
         .getByTestId("demo-seed-dialog")
         .or(authedPage.getByTestId("demo-running"))
-        .or(authedPage.getByTestId("demo-click-feedback")),
+        .or(authedPage.getByTestId("demo-click-feedback"))
+        .first(),
     ).toBeVisible({ timeout: 1000 });
     const elapsed = Date.now() - clickStart;
     expect(elapsed).toBeLessThan(1100); // tolerance for harness jitter
