@@ -15,7 +15,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
-	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
 	"github.com/mgoodric/security-atlas/connectors/github/internal/githubwebhook"
 )
@@ -24,6 +23,23 @@ import (
 // shared signing key. Anti-criterion P0: never accepted via flag, never
 // echoed in logs.
 const EnvWebhookSecret = "GITHUB_WEBHOOK_SECRET"
+
+// Package-level seams (slice 308) for doWebhook. Production code paths
+// stay byte-for-byte unchanged; only the call-site indirection moved so
+// tests can drive listener setup + signal-driven shutdown deterministically
+// without binding a real port. See cmd_run.go for the matching newSDKClient
+// + sdkPushClient seams.
+var (
+	webhookNewHandler = func(secret []byte, pusher githubwebhook.Pusher, now func() time.Time) (http.Handler, error) {
+		h, err := githubwebhook.NewHandler(secret, pusher, now)
+		if err != nil {
+			return nil, err
+		}
+		return h, nil
+	}
+	serverListenAndServe = func(srv *http.Server) error { return srv.ListenAndServe() }
+	signalNotify         = func(c chan<- os.Signal, sig ...os.Signal) { signal.Notify(c, sig...) }
+)
 
 type webhookFlags struct {
 	addr        string
@@ -76,14 +92,14 @@ is empty.`,
 
 func doWebhook(ctx context.Context, f webhookFlags) error {
 	secret := []byte(os.Getenv(EnvWebhookSecret))
-	sdkClient, err := sdk.NewClient(common.endpoint, common.token, sdkOpts()...)
+	sdkClient, err := newSDKClient(common.endpoint, common.token, sdkOpts()...)
 	if err != nil {
 		return fmt.Errorf("sdk client: %w", err)
 	}
 	defer func() { _ = sdkClient.Close() }()
 
 	pusher := &sdkPusher{client: sdkClient, env: f.environment, controlID: f.controlID}
-	handler, err := githubwebhook.NewHandler(secret, pusher, nil)
+	handler, err := webhookNewHandler(secret, pusher, nil)
 	if err != nil {
 		return fmt.Errorf("webhook handler: %w", err)
 	}
@@ -102,11 +118,11 @@ func doWebhook(ctx context.Context, f webhookFlags) error {
 	}
 
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signalNotify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	errCh := make(chan error, 1)
 	go func() {
 		fmt.Printf("github webhook receiver listening addr=%s path=%s env=%s\n", f.addr, f.path, f.environment)
-		errCh <- srv.ListenAndServe()
+		errCh <- serverListenAndServe(srv)
 	}()
 
 	select {
@@ -124,11 +140,12 @@ func doWebhook(ctx context.Context, f webhookFlags) error {
 	return nil
 }
 
-// sdkPusher adapts pkg/sdk-go's Client to the githubwebhook.Pusher
+// sdkPusher adapts the narrow sdkPushClient to the githubwebhook.Pusher
 // interface. Lives in this package so githubwebhook stays free of
-// protobuf dependencies.
+// protobuf dependencies. Slice 308: typed as the seam interface so the
+// newSDKClient seam composes cleanly without a runtime type-assertion.
 type sdkPusher struct {
-	client    *sdk.Client
+	client    sdkPushClient
 	env       string
 	controlID string
 }

@@ -20,6 +20,36 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/github/internal/idem"
 )
 
+// Package-level seams (slice 308): doRun + doWebhook reach through
+// these function variables so tests can swap in fakes for githubauth +
+// githubrepo + githubscim + sdk without hitting real GitHub or a real
+// platform endpoint. Production code paths are byte-for-byte unchanged;
+// only the call-site indirection moved. Mirrors slice 305's awsconnector
+// seam shape.
+var (
+	githubauthResolve   = githubauth.Resolve
+	githubrepoNewClient = func(httpClient *http.Client, baseURL string, creds githubauth.Credential) githubrepo.API {
+		return githubrepo.NewClient(httpClient, baseURL, creds)
+	}
+	githubrepoInspect   = githubrepo.Inspect
+	githubscimNewClient = func(httpClient *http.Client, baseURL string, creds githubauth.Credential) githubscim.API {
+		return githubscim.NewClient(httpClient, baseURL, creds)
+	}
+	githubscimReconcile = githubscim.Reconcile
+	newSDKClient        = func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error) {
+		return sdk.NewClient(endpoint, bearer, opts...)
+	}
+)
+
+// sdkPushClient is the narrow surface doRun + doWebhook consume from
+// sdk.Client. Decoupling here lets tests pass a fake without
+// constructing a real grpc.ClientConn. *sdk.Client satisfies this
+// interface today.
+type sdkPushClient interface {
+	Push(ctx context.Context, record *evidencev1.EvidenceRecord) (*evidencev1.EvidenceReceipt, error)
+	Close() error
+}
+
 type runFlags struct {
 	org             string
 	environment     string
@@ -81,7 +111,7 @@ wires the JWT signer. Use a PAT for now.`,
 }
 
 func doRun(ctx context.Context, f runFlags) error {
-	creds, err := githubauth.Resolve(githubauth.ResolveOpts{
+	creds, err := githubauthResolve(githubauth.ResolveOpts{
 		PreferAppMode: f.useApp,
 		PAT:           f.pat,
 		AppID:         f.appID,
@@ -92,7 +122,7 @@ func doRun(ctx context.Context, f runFlags) error {
 	}
 
 	httpClient := &http.Client{Timeout: 20 * time.Second}
-	sdkClient, err := sdk.NewClient(common.endpoint, common.token, sdkOpts()...)
+	sdkClient, err := newSDKClient(common.endpoint, common.token, sdkOpts()...)
 	if err != nil {
 		return fmt.Errorf("sdk client: %w", err)
 	}
@@ -101,8 +131,8 @@ func doRun(ctx context.Context, f runFlags) error {
 	pushed := 0
 
 	if !f.skipRepoProt {
-		repoAPI := githubrepo.NewClient(httpClient, f.githubBaseURL, creds)
-		states, err := githubrepo.Inspect(ctx, repoAPI, f.org, nil)
+		repoAPI := githubrepoNewClient(httpClient, f.githubBaseURL, creds)
+		states, err := githubrepoInspect(ctx, repoAPI, f.org, nil)
 		if err != nil {
 			return fmt.Errorf("repo-protection inspect: %w", err)
 		}
@@ -122,8 +152,8 @@ func doRun(ctx context.Context, f runFlags) error {
 	}
 
 	if !f.skipSCIM {
-		scimAPI := githubscim.NewClient(httpClient, f.githubBaseURL, creds)
-		users, err := githubscim.Reconcile(ctx, scimAPI, f.org, nil)
+		scimAPI := githubscimNewClient(httpClient, f.githubBaseURL, creds)
+		users, err := githubscimReconcile(ctx, scimAPI, f.org, nil)
 		switch {
 		case errors.Is(err, githubscim.ErrSCIMUnavailable):
 			fmt.Printf("scim: unavailable for org=%s (non-enterprise) — skipping github.scim_user.v1\n", f.org)
