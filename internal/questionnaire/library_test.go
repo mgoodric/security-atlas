@@ -10,6 +10,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -109,6 +110,40 @@ func TestSuggestForAnchor_PropagatesQueryError(t *testing.T) {
 	_, err := SuggestForAnchor(context.Background(), r, "IAC-06", 10)
 	if err == nil {
 		t.Fatal("expected error to propagate, got nil")
+	}
+}
+
+// Slice 319 — exercise the Scan() happy path through the fakeReader so
+// the row-iteration branch in SuggestForAnchor is hit without spinning
+// up Postgres.
+func TestSuggestForAnchor_ScansRows(t *testing.T) {
+	now := time.Now().UTC()
+	r := &fakeReader{rows: &fakeRows{data: [][]any{
+		{"row-uuid-1", "IAC-06", "MFA is enforced.", "ACME-CAIQ-2026", now},
+		{"row-uuid-2", "IAC-06", "Second prior.", "OtherSrc", now.Add(-time.Hour)},
+	}}}
+	got, err := SuggestForAnchor(context.Background(), r, "IAC-06", 10)
+	if err != nil {
+		t.Fatalf("SuggestForAnchor: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 scanned rows, got %d", len(got))
+	}
+	if got[0].ID != "row-uuid-1" || got[0].CanonicalText != "MFA is enforced." {
+		t.Fatalf("first row stitched wrong: %+v", got[0])
+	}
+	if got[1].SourceLabel != "OtherSrc" {
+		t.Fatalf("second row stitched wrong: %+v", got[1])
+	}
+}
+
+// Slice 319 — when the LIMIT is exactly DefaultSuggestionLimit, the
+// clamp must NOT kick in.
+func TestSuggestForAnchor_AcceptsDefaultLimit(t *testing.T) {
+	r := &fakeReader{rows: &fakeRows{data: nil}}
+	_, _ = SuggestForAnchor(context.Background(), r, "IAC-06", DefaultSuggestionLimit)
+	if got := r.lastArgs[1].(int); got != DefaultSuggestionLimit {
+		t.Fatalf("expected limit %d preserved, got %d", DefaultSuggestionLimit, got)
 	}
 }
 
