@@ -7,7 +7,7 @@
 //   - doRun sdk-client construction: newSDKClient error wrap with
 //     "sdk client: " prefix.
 //   - doRun mfa policy branch: pull error wrap ("mfa policy pull: ")
-//     + push error wrap ("push mfa_policy <id>: ") + happy path.
+//   - push error wrap ("push mfa_policy <id>: ") + happy path.
 //   - doRun app assignment branch: pull error wrap ("app assignment
 //     pull: ") + push error wrap ("push app_assignment <id>: ") +
 //     happy path.
