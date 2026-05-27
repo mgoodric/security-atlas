@@ -455,6 +455,20 @@ jobs:
         # (conversion helpers) the engine moves from 26.5% → 79.3%
         # merged. Same playbook as slices 290 / 297 / 310 / 315 —
         # enrolment is the load-bearing move.
+        #
+        # Slice 313: extended to include the five admin HTTP handler
+        # packages (adminauditperiods + adminsuperadmins + admintenants
+        # + adminvendors + tenants) flagged by the round-3 audit. Each
+        # had a comprehensive integration_test.go shipped by its parent
+        # slice (139 / 142 / 143 / 139 / 144 respectively) that was
+        # never enrolled in the integration job, so the merged audit
+        # measured 0.5-7.7% per package. Enrolling them (plus new
+        # helpers_test.go suites for adminauditperiods + adminvendors
+        # + admintenants covering pure-Go pre-DB branches: format
+        # parsing, role gating, column projection, email masking,
+        # writeError, exportLimiter, advisory-key derivation) lifts
+        # each package above the AC-2 70% merged-coverage floor. Same
+        # playbook as slices 290 / 297 / 310 / 315.
         run: |
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
@@ -499,7 +513,12 @@ jobs:
             ./internal/auth/userprefs/... \
             ./internal/api/mcpwriteproposals/... \
             ./internal/mcp/writeproposals/... \
-            ./internal/questionnaire/...
+            ./internal/questionnaire/... \
+            ./internal/api/adminauditperiods/... \
+            ./internal/api/adminsuperadmins/... \
+            ./internal/api/admintenants/... \
+            ./internal/api/adminvendors/... \
+            ./internal/api/tenants/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
