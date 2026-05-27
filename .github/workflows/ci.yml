@@ -398,6 +398,20 @@ jobs:
         # tables that don't exist yet). The unit tests already cover
         # Name() + the registry methods. Together they move
         # internal/metrics/eval from 33.0% → 78.4% merged.
+        #
+        # Slice 310: extended to include internal/api/soc2import — the
+        # package shipped a 287-line integration_test.go in slice 007 but
+        # was never enrolled in the CI integration job, so the merged
+        # audit measured the same 25.2% as the unit-only run (the
+        # integration tests against real Postgres exercise Import +
+        # importIntoTx — every requirement / edge / idempotency / source
+        # _attribution / STRM-distribution branch — but none of that
+        # contributed to coverage). Enrolling it (alongside the new
+        # helpers_test.go this slice adds for the pure-Go helpers
+        # uuidFromString / uuidString / parseDate / edgeContentEqual and
+        # the Import BeginTx-error branch via a stub pgxBeginner) lifts
+        # internal/api/soc2import to 77.4% merged. Same playbook as
+        # slices 290 / 291 / 293 — enrolment is the load-bearing move.
         run: |
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
@@ -434,7 +448,8 @@ jobs:
             ./internal/audit/walkthrough/... \
             ./internal/metrics/scheduler/... \
             ./internal/api/metrics/... \
-            ./internal/metrics/eval/...
+            ./internal/metrics/eval/... \
+            ./internal/api/soc2import/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
