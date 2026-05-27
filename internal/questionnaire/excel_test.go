@@ -147,6 +147,62 @@ func TestParseExcel_NoRecognizableHeaders(t *testing.T) {
 	}
 }
 
+// Slice 319 — additional corner-case unit tests pushing ParseExcel /
+// matchAlias toward 100%.
+//
+// Branches newly covered:
+//   - ParseExcel: single-row workbook (len(rows) < 2) → ErrNoHeaderRow
+//   - ParseExcel: corrupt-bytes payload (excelize.OpenReader error wrap)
+//   - ParseExcel: only `code` recognized in header (missing `text`)
+//     → ErrNoHeaderRow
+//   - matchAlias: empty / whitespace-only cell returns ""
+
+func TestParseExcel_SingleRowOnly(t *testing.T) {
+	// One row total (just the header) — len(rows) < 2 short-circuits to
+	// ErrNoHeaderRow before findHeaderRow runs.
+	raw := makeXLSX(t, [][]string{
+		{"Question ID", "Question"},
+	})
+	_, err := ParseExcel(raw)
+	if err != ErrNoHeaderRow {
+		t.Fatalf("expected ErrNoHeaderRow for single-row workbook, got %v", err)
+	}
+}
+
+func TestParseExcel_CorruptBytes(t *testing.T) {
+	// Non-zip bytes — excelize.OpenReader must error and we wrap it.
+	raw := []byte("this is not a real xlsx file at all")
+	_, err := ParseExcel(raw)
+	if err == nil {
+		t.Fatal("expected ParseExcel to error on corrupt input")
+	}
+	// Wrapped form keeps the prefix.
+	if !strings.HasPrefix(err.Error(), "questionnaire: open xlsx:") {
+		t.Fatalf("expected wrapped open-xlsx error; got %v", err)
+	}
+}
+
+func TestParseExcel_HeaderMissingTextColumn(t *testing.T) {
+	// Header has `code` alias but no `text` alias — load-bearing
+	// hasCode && hasText gate at the bottom of the matcher rejects.
+	raw := makeXLSX(t, [][]string{
+		{"Question ID", "Owner", "Notes"},
+		{"IAM-02", "Alice", "see policy"},
+	})
+	_, err := ParseExcel(raw)
+	if err != ErrNoHeaderRow {
+		t.Fatalf("expected ErrNoHeaderRow when text column missing, got %v", err)
+	}
+}
+
+func TestMatchAlias_EmptyOrWhitespace(t *testing.T) {
+	for _, raw := range []string{"", "   ", "\t\t", "\n"} {
+		if got := matchAlias(raw); got != "" {
+			t.Fatalf("matchAlias(%q) = %q; want empty", raw, got)
+		}
+	}
+}
+
 func TestParseExcel_FormulaCellIsOpaque(t *testing.T) {
 	// Security mitigation: a formula cell must be read as its raw
 	// string, never evaluated. Build a workbook with a formula cell

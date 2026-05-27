@@ -440,6 +440,21 @@ jobs:
         # internal/api/mcpwriteproposals from 0.9% → 84.3% merged. Same
         # playbook as slices 290 / 297 / 310 / 315 — enrolment is the
         # load-bearing move.
+        #
+        # Slice 319: extended to include internal/questionnaire — the
+        # questionnaire engine (Excel parser + AnswerLibrary RLS lookup
+        # + PDF render helpers + Store CRUD over four tables). Was at
+        # 26.5% merged because none of its Store paths had an
+        # in-package integration_test.go (the existing
+        # internal/api/questionnaires integration tests exercise the
+        # Store transitively but the coverage attributes to the HTTP
+        # handler package, not the engine). The new in-package
+        # integration_test.go drives Store CRUD + the RLS isolation
+        # invariant directly. Together with the new pdf_test.go
+        # (pure-Go renderer helpers) + store_helpers_test.go
+        # (conversion helpers) the engine moves from 26.5% → 79.3%
+        # merged. Same playbook as slices 290 / 297 / 310 / 315 —
+        # enrolment is the load-bearing move.
         run: |
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
@@ -483,7 +498,8 @@ jobs:
             ./internal/auth/revocation/... \
             ./internal/auth/userprefs/... \
             ./internal/api/mcpwriteproposals/... \
-            ./internal/mcp/writeproposals/...
+            ./internal/mcp/writeproposals/... \
+            ./internal/questionnaire/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
