@@ -47,7 +47,7 @@
     "cmd/atlas-cli/cmdhttp": 98,
     "cmd/atlas-openapi": 0,
 
-    "connectors/1password/cmd/atlas-1password": 12,
+    "connectors/1password/cmd/atlas-1password": 85,
     "connectors/1password/internal/idem": 98,
     "connectors/1password/internal/opaccount": 83,
     "connectors/1password/internal/opauth": 90,
