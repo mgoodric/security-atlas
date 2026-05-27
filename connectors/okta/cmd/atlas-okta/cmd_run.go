@@ -21,6 +21,28 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/okta/internal/oktausers"
 )
 
+// Package-level seams (slice 309): doRun reaches through these function
+// variables so tests can swap in fakes for the three okta Pull calls
+// and the sdk client constructor without hitting real Okta endpoints
+// or a real platform endpoint. Production code paths are byte-for-byte
+// unchanged; only the call-site indirection moved.
+var (
+	oktapolicyPull = oktapolicy.Pull
+	oktaappsPull   = oktaapps.Pull
+	oktausersPull  = oktausers.Pull
+	newSDKClient   = func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error) {
+		return sdk.NewClient(endpoint, bearer, opts...)
+	}
+)
+
+// sdkPushClient is the narrow surface doRun consumes from sdk.Client.
+// Decoupling here lets tests pass a fake without constructing a real
+// grpc.ClientConn. *sdk.Client satisfies this interface today.
+type sdkPushClient interface {
+	Push(ctx context.Context, record *evidencev1.EvidenceRecord) (*evidencev1.EvidenceReceipt, error)
+	Close() error
+}
+
 type runFlags struct {
 	org              string
 	environment      string
@@ -92,7 +114,7 @@ func doRun(ctx context.Context, f runFlags) error {
 	}
 
 	httpClient := &http.Client{Timeout: 20 * time.Second}
-	sdkClient, err := sdk.NewClient(common.endpoint, common.token, sdkOpts()...)
+	sdkClient, err := newSDKClient(common.endpoint, common.token, sdkOpts()...)
 	if err != nil {
 		return fmt.Errorf("sdk client: %w", err)
 	}
@@ -102,7 +124,7 @@ func doRun(ctx context.Context, f runFlags) error {
 
 	if !f.skipMFAPolicy {
 		api := oktapolicy.NewClient(httpClient, f.oktaBaseURL, creds)
-		states, err := oktapolicy.Pull(ctx, api, nil)
+		states, err := oktapolicyPull(ctx, api, nil)
 		if err != nil {
 			return fmt.Errorf("mfa policy pull: %w", err)
 		}
@@ -123,7 +145,7 @@ func doRun(ctx context.Context, f runFlags) error {
 
 	if !f.skipAppAssign {
 		api := oktaapps.NewClient(httpClient, f.oktaBaseURL, creds)
-		assignments, err := oktaapps.Pull(ctx, api, nil)
+		assignments, err := oktaappsPull(ctx, api, nil)
 		if err != nil {
 			return fmt.Errorf("app assignment pull: %w", err)
 		}
@@ -144,7 +166,7 @@ func doRun(ctx context.Context, f runFlags) error {
 
 	if !f.skipUserLife {
 		api := oktausers.NewClient(httpClient, f.oktaBaseURL, creds)
-		users, err := oktausers.Pull(ctx, api, nil)
+		users, err := oktausersPull(ctx, api, nil)
 		if err != nil {
 			return fmt.Errorf("user lifecycle pull: %w", err)
 		}
