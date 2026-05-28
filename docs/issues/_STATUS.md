@@ -29,9 +29,10 @@ Conflict surface: 316+318 share thresholds.json+ci.yml (known-safe append). 325 
 
 Final of 12 voltagent-qa-sec audit slices filed in the 2026-05-27 audit-planning session. This is the only slice that exercises the platform externally — runs `penetration-tester` agent against `https://atlas-edge.home.gmoney.sh` ONLY (the maintainer's authorized sandbox). Seven in-scope probe surfaces: OIDC auth, JWT handling (ES256 per ADR-0003), evidence push API, tenant isolation (RLS invariant #6), admin surfaces (slices 062/142/143), bootstrap (slice 210), atlas-edge-specific (slices 207-211). Strict P0 anti-criteria: no other hosts, no DoS, no social/physical, no persistence, no lateral movement, no exploit payloads in public log, authorization grant recorded before run. Security · JUDGMENT · 2d.
 
-| Row | Transition          | Evidence                                                     |
-| --- | ------------------- | ------------------------------------------------------------ |
-| 338 | (new row) → `ready` | spec at `docs/issues/338-pentest-atlas-edge.md` · PR pending |
+| Row | Transition                                                          | Evidence                                                     |
+| --- | ------------------------------------------------------------------- | ------------------------------------------------------------ | --- | --- | --- | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 338 | (new row) → `ready`                                                 | spec at `docs/issues/338-pentest-atlas-edge.md` · PR pending |
+| 340 | Investigate + re-enable chromedp `TestRender_ProducesRealPDF` flake | `ready`                                                      | —   | —   | —   | —   | Quality/Infra · JUDGMENT · 1-2d · 5 consecutive CI flakes across slices 312/315/320 · 20-sec chromedp websocket timeout · quarantine `t.Skip` lands in this PR to unblock the merge gate · investigation: StepSecurity egress (117) / Chromium version / runner image / chromedp flags |
 
 **Last reconciled:** 2026-05-27 (slice 337 filed via `/idea-to-slice` — voltagent-qa-sec audit slice 11/12)
 
