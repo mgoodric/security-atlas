@@ -41,6 +41,14 @@ const (
 	// The callback uses this to look up the right IdP for the exchange.
 	IdpCookie = "atlas_oidc_idp"
 
+	// NonceCookie holds the per-flow OIDC `nonce` (slice 365). The
+	// callback verifies the ID token's `nonce` claim against this cookie
+	// value to defend against ID-token replay per OIDC Core §3.1.2.1 +
+	// RFC 9700 §4.5.3. Additive to state + PKCE — covers a distinct
+	// attack class (ID-token replay; state covers CSRF; PKCE covers
+	// code-interception).
+	NonceCookie = "atlas_oidc_nonce"
+
 	// FlowCookieMaxAge is how long state/verifier cookies live. 10 minutes
 	// is generous for a user to authenticate but short enough that an
 	// abandoned tab does not leave persistent verifier material around.
@@ -73,6 +81,14 @@ var ErrUnknownIdp = errors.New("oidc: unknown IdP")
 // ErrStateMismatch is the CSRF guard's sentinel. The callback returns 400
 // when this fires.
 var ErrStateMismatch = errors.New("oidc: state mismatch (CSRF guard)")
+
+// ErrNonceMismatch is the ID-token-replay guard's sentinel (slice 365).
+// Fires when either the per-flow nonce cookie is missing on callback or
+// the ID token's `nonce` claim does not match the cookie value. Kept
+// distinct from ErrStateMismatch so audit-log review can tell a CSRF
+// attempt apart from an ID-token replay attempt — operationally and
+// forensically different signals.
+var ErrNonceMismatch = errors.New("oidc: nonce mismatch (ID-token replay guard)")
 
 // Authenticator drives the RP-side OIDC flow.
 type Authenticator struct {
@@ -118,6 +134,15 @@ func (a *Authenticator) BeginLogin(ctx context.Context, in LoginInput, secureCoo
 	if err != nil {
 		return LoginResult{}, err
 	}
+	// Slice 365 — per-flow OIDC nonce. 16-byte crypto/rand via the same
+	// randomState() helper that backs state (P0-365-5: must use
+	// crypto/rand). The same value is persisted in the NonceCookie and
+	// sent on the authorize URL via coreos.Nonce(). The callback then
+	// verifies the ID token's `nonce` claim matches the cookie.
+	nonce, err := randomState()
+	if err != nil {
+		return LoginResult{}, err
+	}
 	oa := &oauth2.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
@@ -125,12 +150,17 @@ func (a *Authenticator) BeginLogin(ctx context.Context, in LoginInput, secureCoo
 		Endpoint:     provider.Endpoint(),
 		Scopes:       []string{coreos.ScopeOpenID, "email", "profile"},
 	}
-	authURL := oa.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier))
+	authURL := oa.AuthCodeURL(
+		state,
+		oauth2.S256ChallengeOption(verifier),
+		coreos.Nonce(nonce),
+	)
 
 	cookies := []*http.Cookie{
 		flowCookie(StateCookie, state, secureCookies),
 		flowCookie(VerifierCookie, verifier, secureCookies),
 		flowCookie(IdpCookie, in.IdpName, secureCookies),
+		flowCookie(NonceCookie, nonce, secureCookies),
 	}
 	return LoginResult{AuthURL: authURL, Cookies: cookies}, nil
 }
@@ -162,6 +192,17 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 	idpCookie, err := r.Cookie(IdpCookie)
 	if err != nil {
 		return CallbackResult{}, ErrStateMismatch
+	}
+	// Slice 365 — nonce cookie absence is treated as a replay attempt:
+	// every legitimate flow set NonceCookie in BeginLogin. Distinguished
+	// from ErrStateMismatch so audit-log review can tell a CSRF attempt
+	// apart from an ID-token replay attempt (P0-365-4: no bypass path).
+	nonceCookie, err := r.Cookie(NonceCookie)
+	if err != nil {
+		return CallbackResult{}, ErrNonceMismatch
+	}
+	if nonceCookie.Value == "" {
+		return CallbackResult{}, ErrNonceMismatch
 	}
 
 	queryState := r.URL.Query().Get("state")
@@ -200,6 +241,22 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 	idTok, err := verifier.Verify(ctx, rawIDToken)
 	if err != nil {
 		return CallbackResult{}, fmt.Errorf("oidc: id_token verify: %w", err)
+	}
+	// Slice 365 — manual nonce-claim verification. go-oidc v3.18.0's
+	// verifier.Verify explicitly does NOT check nonce
+	// (verify.go:189 — "Verify does NOT do nonce validation, which is
+	// the callers responsibility"); the library exposes the claim as
+	// idTok.Nonce after parse but leaves the comparison to the RP. We
+	// compare against the cookie value the RP persisted in BeginLogin.
+	// Constant-time comparison would over-engineer this — the cookie
+	// value is HttpOnly and the claim is a single equality on a
+	// non-secret session-scoped identifier; the worst outcome of a
+	// non-constant-time compare here is a side-channel that leaks
+	// nothing useful (the attacker already controls the supplied nonce
+	// in the forged ID token they're trying to replay). P0-365-3: do
+	// NOT log either side of the comparison.
+	if idTok.Nonce != nonceCookie.Value {
+		return CallbackResult{}, ErrNonceMismatch
 	}
 	var claims struct {
 		Email             string `json:"email"`
@@ -240,10 +297,11 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 	}, nil
 }
 
-// ClearFlowCookies sets MaxAge=-1 on state/verifier/idp cookies. The login
-// success handler calls this after establishing the session.
+// ClearFlowCookies sets MaxAge=-1 on state/verifier/idp/nonce cookies.
+// The login success handler calls this after establishing the session.
+// Slice 365 added NonceCookie to the list.
 func ClearFlowCookies(w http.ResponseWriter, secure bool) {
-	for _, name := range []string{StateCookie, VerifierCookie, IdpCookie} {
+	for _, name := range []string{StateCookie, VerifierCookie, IdpCookie, NonceCookie} {
 		http.SetCookie(w, &http.Cookie{
 			Name:     name,
 			Value:    "",
