@@ -67,6 +67,7 @@ func pkceFixture(verifier string) (string, string) {
 
 // AC-15: response_type != "code" returns 400 + unsupported_response_type.
 func TestAuthorizeRejectsNonCodeResponseType(t *testing.T) {
+	t.Parallel()
 	// Construct a minimal endpoint by going through the public
 	// constructor. The stubCodeStore/stubClient situation requires
 	// real pgxpool-backed Store — so we test by routing through the
@@ -93,6 +94,7 @@ func TestAuthorizeRejectsNonCodeResponseType(t *testing.T) {
 // computePKCEChallengeS256 helper exposed via a package-level test
 // seam (see below).
 func TestPKCEChallengeRoundTripS256(t *testing.T) {
+	t.Parallel()
 	verifier := "atlas-test-verifier-32-bytes-min-length"
 	_, challenge := pkceFixture(verifier)
 	// Two computations of the same verifier produce identical challenges.
@@ -116,6 +118,7 @@ func TestPKCEChallengeRoundTripS256(t *testing.T) {
 // not requiring Postgres) and asserts the discovery JSON includes
 // authorization_code.
 func TestDiscoveryAdvertisesAuthorizationCodeWhenAuthorizeAttached(t *testing.T) {
+	t.Parallel()
 	h, signer := newHandler(t)
 	_ = signer
 	// Attach a NewTokenEndpoint with nil clients (acceptable per
@@ -155,6 +158,7 @@ func TestDiscoveryAdvertisesAuthorizationCodeWhenAuthorizeAttached(t *testing.T)
 // Constant-time string compare smoke — covers the equal-length /
 // unequal-length branches without leaking which bytes differ.
 func TestConstantTimeEqualBranches(t *testing.T) {
+	t.Parallel()
 	// Equal strings.
 	if !oauth.ExportConstantTimeEqual("abc", "abc") {
 		t.Errorf("equal strings should compare equal")
@@ -171,6 +175,7 @@ func TestConstantTimeEqualBranches(t *testing.T) {
 
 // AC-29 — PKCE verifier round trip.
 func TestComputePKCEChallengeS256(t *testing.T) {
+	t.Parallel()
 	// Test vector from RFC 7636 Appendix B.
 	const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	const wantChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"

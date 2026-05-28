@@ -443,6 +443,37 @@ resolve the check in seconds. If you add a new spec, read
 is worse than no required-check, so run `npm run test:e2e` locally before
 pushing.
 
+### Go test-package convention
+
+Go tests in this repo follow a two-tier convention surfaced by slice
+348 U-5 (sourced from the slice 334 framework audit):
+
+- **Unit tests use the internal test package: `package <pkg>`.** They
+  live in `*_test.go` files (no build tag) and have direct access to
+  package-private identifiers — `freshnessMaxAge`, `computeResult`,
+  `buildBriefHTML`, etc. Internal access is the default for pure-logic
+  unit tests because the audit shape is the function's actual
+  behavior, not the exported surface.
+- **Integration tests use the external test package: `package
+<pkg>_test`.** They live in `*_integration_test.go` files behind
+  the `//go:build integration` build tag and import the package under
+  test through its public API (and through `export_test.go` seams for
+  carefully-named primitives like
+  `oauth.ExportComputePKCEChallengeS256`). External-package shape
+  forces integration tests to exercise the same surface a real caller
+  uses, which is what we want when the test binds against real
+  Postgres / NATS / MinIO.
+
+If you need an internal symbol from an integration test, add an
+`export_test.go` (same-package file, capitalized re-export) rather
+than relaxing the integration test to the internal package — the
+seam is intentional and discoverable.
+
+Pure-unit tests should also call `t.Parallel()` unless they touch
+package-level mutable state (none in this repo today). The
+convention is by-default-parallel; opt out only with an inline
+comment naming the shared state.
+
 ## Empty-set robustness
 
 Every `GET /v1/*` list or aggregate endpoint MUST return `200 OK` with a

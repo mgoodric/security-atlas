@@ -24,10 +24,24 @@ export default defineConfig({
   // started with ATLAS_TEST_MODE=1 (and ATLAS_ISSUER_URL set so the
   // OAuth keystore is wired) before this runs.
   globalSetup: require.resolve("./e2e/global-setup"),
-  // The specs are sequential against a single shared backend; parallelism
-  // across files (workers) is fine, but inside-file tests run serially so
-  // a sign-in in one test does not race with another's network mocks.
-  fullyParallel: false,
+  // Slice 348 P-3 — experiment: lift fullyParallel.
+  //
+  // Pre-slice-201 the `TEST_BEARER` was a static literal shared across
+  // all specs, so two tests racing on the sign-in fixture could
+  // corrupt each other's network-mock setup. Slice 201's JWT migration
+  // moved bearer minting into `globalSetup` per worker, and per-test
+  // `page.route` mocks are scoped to the page's BrowserContext (not
+  // shared across tests). The static-bearer race that justified
+  // `fullyParallel: false` no longer exists.
+  //
+  // Per slice 348 P-3 we enable `fullyParallel: true` and observe 3
+  // consecutive CI runs on this branch. If all 3 are green, the flag
+  // ships. If any run surfaces a race, the flag reverts and the
+  // failure mode lands in the slice 348 decisions log (D-D1) for the
+  // next polish round to address. P0-348-6 forbids keeping
+  // `fullyParallel: true` if any CI run flakes during the 3-run
+  // stress test.
+  fullyParallel: true,
   forbidOnly: isCI,
   retries: isCI ? 1 : 0,
   workers: isCI ? 2 : undefined,

@@ -14,24 +14,9 @@
 // (`ghp_*`, `sk_*`, `eyJ*`, `AKIA*`) per slice 098 P0-A5.
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { mockNextServer } from "../../../lib/test-utils/next-mocks";
 
-vi.mock("next/server", () => {
-  class NextResponse extends Response {
-    static json(
-      body: unknown,
-      init?: { status?: number; headers?: Record<string, string> },
-    ): NextResponse {
-      return new NextResponse(JSON.stringify(body), {
-        status: init?.status ?? 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...(init?.headers ?? {}),
-        },
-      });
-    }
-  }
-  return { NextResponse };
-});
+vi.mock("next/server", () => mockNextServer());
 
 // Slice 224 — the GET handler now reads `req.nextUrl.searchParams`
 // to pluck the optional ?scope=<cell_id> query param and forward it

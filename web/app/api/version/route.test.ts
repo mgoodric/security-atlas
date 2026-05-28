@@ -13,24 +13,9 @@
 // only — NO vendor token prefixes (ghp_*, sk_*, AKIA*, eyJ*).
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { mockNextServer } from "../../../lib/test-utils/next-mocks";
 
-vi.mock("next/server", () => {
-  class NextResponse extends Response {
-    static json(
-      body: unknown,
-      init?: { status?: number; headers?: Record<string, string> },
-    ): NextResponse {
-      return new NextResponse(JSON.stringify(body), {
-        status: init?.status ?? 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...(init?.headers ?? {}),
-        },
-      });
-    }
-  }
-  return { NextResponse };
-});
+vi.mock("next/server", () => mockNextServer());
 
 import { GET } from "./route";
 

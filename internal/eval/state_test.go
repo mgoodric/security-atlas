@@ -12,6 +12,7 @@ import (
 // ===== ISC-11: freshnessMaxAge maps every class to canvas §2.3 max-age =====
 
 func TestFreshnessMaxAge_CanvasTable(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		class string
 		want  time.Duration
@@ -35,6 +36,7 @@ func TestFreshnessMaxAge_CanvasTable(t *testing.T) {
 }
 
 func TestFreshnessMaxAge_UnknownClassFallsBackToMonthly(t *testing.T) {
+	t.Parallel()
 	// A control bundle may declare freshness_class = "hourly" (the bundle
 	// manifest allows it) which the canvas §2.3 evidence enum does not have.
 	// An empty/absent class is also possible. Both fall back to the
@@ -55,6 +57,7 @@ func TestFreshnessMaxAge_UnknownClassFallsBackToMonthly(t *testing.T) {
 // ===== ISC-12..14: computeResult rollup =====
 
 func TestComputeResult_ZeroRecordsIsInconclusive(t *testing.T) {
+	t.Parallel()
 	// AC anti-criterion: a control with no in-window evidence is
 	// `inconclusive`, NOT `fail`. Absence of evidence is not evidence of
 	// failure.
@@ -69,6 +72,7 @@ func TestComputeResult_ZeroRecordsIsInconclusive(t *testing.T) {
 }
 
 func TestComputeResult_AnyFailIsFail(t *testing.T) {
+	t.Parallel()
 	recs := []inWindowRecord{
 		{result: "pass"},
 		{result: "fail"},
@@ -80,6 +84,7 @@ func TestComputeResult_AnyFailIsFail(t *testing.T) {
 }
 
 func TestComputeResult_AllPassIsPass(t *testing.T) {
+	t.Parallel()
 	recs := []inWindowRecord{
 		{result: "pass"},
 		{result: "pass"},
@@ -90,6 +95,7 @@ func TestComputeResult_AllPassIsPass(t *testing.T) {
 }
 
 func TestComputeResult_NaWithoutFailIsNa(t *testing.T) {
+	t.Parallel()
 	// `na` records (the control does not apply to this observation) with no
 	// fail and no pass collapse to `na`. A pass alongside na is still pass —
 	// the control demonstrably operated.
@@ -104,6 +110,7 @@ func TestComputeResult_NaWithoutFailIsNa(t *testing.T) {
 }
 
 func TestComputeResult_InconclusiveRecordWithoutPassOrFail(t *testing.T) {
+	t.Parallel()
 	recs := []inWindowRecord{{result: "inconclusive"}, {result: "na"}}
 	if got := computeResult(recs); got != "inconclusive" {
 		t.Fatalf("computeResult inconclusive+na = %q, want inconclusive", got)
@@ -113,6 +120,7 @@ func TestComputeResult_InconclusiveRecordWithoutPassOrFail(t *testing.T) {
 // ===== ISC-15..17: computeFreshness =====
 
 func TestComputeFreshness_ZeroRecordsIsNoEvidence(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
 	got := computeFreshness(nil, "daily", now)
 	if got != "no_evidence" {
@@ -121,6 +129,7 @@ func TestComputeFreshness_ZeroRecordsIsNoEvidence(t *testing.T) {
 }
 
 func TestComputeFreshness_FreshestWithinWindowIsFresh(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
 	// daily class = 7d window. Freshest record is 2 days old → fresh.
 	recs := []allRecord{
@@ -134,6 +143,7 @@ func TestComputeFreshness_FreshestWithinWindowIsFresh(t *testing.T) {
 }
 
 func TestComputeFreshness_FreshestPastWindowIsStale(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
 	// daily class = 7d window. Freshest record is 10 days old → stale.
 	recs := []allRecord{
@@ -147,6 +157,7 @@ func TestComputeFreshness_FreshestPastWindowIsStale(t *testing.T) {
 }
 
 func TestComputeFreshness_ExactlyAtWindowEdgeIsFresh(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
 	// Record observed exactly 7d ago, daily class = 7d window. The edge is
 	// inclusive — observed_at == cutoff is still fresh.
@@ -160,6 +171,7 @@ func TestComputeFreshness_ExactlyAtWindowEdgeIsFresh(t *testing.T) {
 // ===== ISC-18: evaluation excludes wall-clock — same inputs, same result =====
 
 func TestComputeResult_DeterministicAcrossCalls(t *testing.T) {
+	t.Parallel()
 	recs := []inWindowRecord{{result: "pass"}, {result: "fail"}, {result: "na"}}
 	first := computeResult(recs)
 	for i := 0; i < 100; i++ {
@@ -172,6 +184,7 @@ func TestComputeResult_DeterministicAcrossCalls(t *testing.T) {
 // ===== inWindowRecords: the freshness-window filter =====
 
 func TestInWindowRecords_FiltersByCutoff(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
 	all := []allRecord{
 		{observedAt: now.Add(-1 * 24 * time.Hour), result: "pass"},  // in

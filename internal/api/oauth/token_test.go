@@ -81,6 +81,7 @@ func postForm(t *testing.T, srvURL string, form url.Values) (*http.Response, []b
 // content-type other than application/x-www-form-urlencoded MUST be
 // rejected with 400 + invalid_request.
 func TestTokenEndpoint_RejectsNonFormContentType(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTokenTestServer(t)
 
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+oauth.PathToken, strings.NewReader(`{"foo":"bar"}`))
@@ -104,6 +105,7 @@ func TestTokenEndpoint_RejectsNonFormContentType(t *testing.T) {
 // returns invalid_request; unknown grant_type returns
 // unsupported_grant_type.
 func TestTokenEndpoint_DispatchTable(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTokenTestServer(t)
 
 	cases := []struct {
@@ -137,6 +139,7 @@ func TestTokenEndpoint_DispatchTable(t *testing.T) {
 // contains the target; the AS mints a new JWT with the swapped
 // current_tenant_id and the same super_admin / roles.
 func TestTokenEndpoint_TokenExchange_HappyPath(t *testing.T) {
+	t.Parallel()
 	srv, signer, _ := newTokenTestServer(t)
 
 	tenantA := uuid.New()
@@ -215,6 +218,7 @@ func TestTokenEndpoint_TokenExchange_HappyPath(t *testing.T) {
 // subject_token's available_tenants AND super_admin is false, the
 // exchange MUST be rejected with 403 + invalid_target.
 func TestTokenEndpoint_TokenExchange_RejectsTenantNotInAllowlist(t *testing.T) {
+	t.Parallel()
 	srv, signer, _ := newTokenTestServer(t)
 
 	tenantA := uuid.New()
@@ -255,6 +259,7 @@ func TestTokenEndpoint_TokenExchange_RejectsTenantNotInAllowlist(t *testing.T) {
 // super_admin escape hatch in AC-12: even when the target is NOT in
 // available_tenants, a subject_token with super_admin=true succeeds.
 func TestTokenEndpoint_TokenExchange_SuperAdminCanCross(t *testing.T) {
+	t.Parallel()
 	srv, signer, _ := newTokenTestServer(t)
 
 	tenantA := uuid.New()
@@ -309,6 +314,7 @@ func TestTokenEndpoint_TokenExchange_SuperAdminCanCross(t *testing.T) {
 // produce a minted token with super_admin=false even when the
 // target tenant is fully allowed.
 func TestTokenEndpoint_TokenExchange_NeverElevatesSuperAdmin(t *testing.T) {
+	t.Parallel()
 	srv, signer, _ := newTokenTestServer(t)
 
 	tenantA := uuid.New()
@@ -361,6 +367,7 @@ func TestTokenEndpoint_TokenExchange_NeverElevatesSuperAdmin(t *testing.T) {
 // invalid_token, AND the rejection MUST happen before any claim
 // (including available_tenants) is read.
 func TestTokenEndpoint_TokenExchange_RejectsBadSignature(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTokenTestServer(t)
 
 	// Mint a token under a DIFFERENT keystore — the test server's
@@ -406,6 +413,7 @@ func TestTokenEndpoint_TokenExchange_RejectsBadSignature(t *testing.T) {
 // shape check: a non-UUID target tenant id must 400 with
 // invalid_request, not 403.
 func TestTokenEndpoint_TokenExchange_RejectsBadTargetUUID(t *testing.T) {
+	t.Parallel()
 	srv, signer, _ := newTokenTestServer(t)
 	tok, err := signer.Sign(context.Background(), jwt.AtlasClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -431,6 +439,7 @@ func TestTokenEndpoint_TokenExchange_RejectsBadTargetUUID(t *testing.T) {
 // AC-18: after AttachTokenEndpoint, the discovery document MUST
 // advertise both grant types.
 func TestTokenEndpoint_DiscoveryAdvertisesGrantsAfterAttach(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTokenTestServer(t)
 
 	resp, err := http.Get(srv.URL + oauth.PathDiscovery)
@@ -480,6 +489,7 @@ func TestTokenEndpoint_DiscoveryAdvertisesGrantsAfterAttach(t *testing.T) {
 //
 // We use a custom-rate harness, not the shared newTokenTestServer.
 func TestTokenEndpoint_RateLimit(t *testing.T) {
+	t.Parallel()
 	ks, err := fsstore.Open(t.TempDir())
 	if err != nil {
 		t.Fatalf("fsstore.Open: %v", err)

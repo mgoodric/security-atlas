@@ -299,11 +299,41 @@ jobs:
         run: ./scripts/audit-rls.sh
       - name: Run integration tests
         # `-p 1` serializes test packages so multiple binaries do not
-        # race on the shared Postgres test database. The db,
-        # schemaregistry, and evidence/ingest packages share rows in
-        # evidence_kind_schemas and evidence_records; running them
-        # concurrently surfaces duplicate-key + missing-relation errors
-        # that disappear under serial execution. Local reproducer:
+        # race on shared PLATFORM-LAYER rows in the test database.
+        # The concrete colliding tables are:
+        #
+        #   * evidence_kind_schemas — schema-registry seed rows
+        #     INSERTed by both schemaregistry and evidence/ingest
+        #     test setup; (kind, version) primary key races on
+        #     concurrent ON CONFLICT DO NOTHING.
+        #   * scf_anchors — slice 006 seed rows that downstream
+        #     packages INSERT additional anchors on top of;
+        #     cross-binary ordering is non-deterministic.
+        #   * evidence_records — append-only ledger writes whose
+        #     (tenant_id, kind, idempotency_key) unique index
+        #     enforces the slice 003 ingestion contract; multiple
+        #     binaries hitting the same triple collide.
+        #
+        # IMPORTANT: `-p 1` is NOT about RLS. The RLS pattern
+        # (internal/tenancy/apply.go: SET LOCAL app.current_tenant)
+        # is transaction-scoped, so two parallel binaries each in
+        # their own BEGIN ... ROLLBACK with their own tenant GUC
+        # cannot leak across. The colliding rows above live at the
+        # platform / shared-seed / append-only-ledger layer, NOT in
+        # tenant-scoped tables — that's the actual reason -p 1 is
+        # load-bearing. See the "-p 1 rationale review" section of
+        # docs/audits/334-test-framework-review.md for the full
+        # analysis.
+        #
+        # Future relaxation path (v3, NOT now): split this job into
+        # a Phase A (serial, -p 1) over the shared-seed packages
+        # (db, schemaregistry, evidence/ingest, catalog) and a
+        # Phase B (parallel, -p N) over the tenant-scoped packages
+        # (controls, risks, evidence/records post-seed, policies,
+        # audit, vendor). Only worth doing once integration-job
+        # wall-clock becomes a merge-velocity problem.
+        #
+        # Local reproducer:
         #   go test -tags=integration -race -p 1 ./internal/...
         #
         # Slice-by-slice enrolment history for the package list below

@@ -13,6 +13,8 @@
 // call it have their own test in app/api/admin/me/route.test.ts.
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { mockNextServer } from "../../lib/test-utils/next-mocks";
+import { TEST_BEARER_TOKEN } from "../../lib/test-utils/test-tokens";
 
 // `next/headers` and `next/server` only run inside a Next.js request
 // context. We mock both so the helper is testable in plain Node. The
@@ -26,23 +28,7 @@ vi.mock("next/headers", () => ({
   }),
 }));
 
-vi.mock("next/server", () => {
-  class NextResponse extends Response {
-    static json(
-      body: unknown,
-      init?: { status?: number; headers?: Record<string, string> },
-    ): NextResponse {
-      return new NextResponse(JSON.stringify(body), {
-        status: init?.status ?? 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...(init?.headers ?? {}),
-        },
-      });
-    }
-  }
-  return { NextResponse };
-});
+vi.mock("next/server", () => mockNextServer());
 
 import { SESSION_COOKIE } from "../auth";
 import { forwardJSON } from "./bff";
@@ -66,7 +52,7 @@ describe("forwardJSON", () => {
   });
 
   test("forwards Authorization: Bearer <cookie> to upstream on GET", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(SESSION_COOKIE, TEST_BEARER_TOKEN);
 
     let capturedURL = "";
     let capturedInit: RequestInit | undefined;
@@ -89,14 +75,14 @@ describe("forwardJSON", () => {
     expect(capturedURL).toBe("http://atlas:8080/v1/audit/notes");
     expect(capturedInit?.method).toBe("GET");
     const headers = capturedInit?.headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer test-bearer-token");
+    expect(headers.Authorization).toBe(`Bearer ${TEST_BEARER_TOKEN}`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean };
     expect(body.ok).toBe(true);
   });
 
   test("passes upstream non-2xx status through verbatim", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(SESSION_COOKIE, TEST_BEARER_TOKEN);
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response('{"error":"forbidden"}', {
         status: 403,
@@ -111,7 +97,7 @@ describe("forwardJSON", () => {
   });
 
   test("sends POST with Content-Type and serialized body when jsonBody set", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(SESSION_COOKIE, TEST_BEARER_TOKEN);
 
     let capturedInit: RequestInit | undefined;
     vi.spyOn(globalThis, "fetch").mockImplementation(

@@ -1,24 +1,10 @@
 // Slice 263 — vitest coverage for PATCH /api/questionnaires/[id]/answers/[qid].
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { mockNextServer } from "../../../../../../lib/test-utils/next-mocks";
+import { TEST_BEARER_263 } from "../../../../../../lib/test-utils/test-tokens";
 
-vi.mock("next/server", () => {
-  class NextResponse extends Response {
-    static json(
-      body: unknown,
-      init?: { status?: number; headers?: Record<string, string> },
-    ): NextResponse {
-      return new NextResponse(JSON.stringify(body), {
-        status: init?.status ?? 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...(init?.headers ?? {}),
-        },
-      });
-    }
-  }
-  return { NextResponse };
-});
+vi.mock("next/server", () => mockNextServer());
 
 const mockCookieGet = vi.fn();
 
@@ -60,7 +46,7 @@ describe("PATCH /api/questionnaires/[id]/answers/[qid]", () => {
   });
 
   test("forwards bearer + json body to upstream PATCH", async () => {
-    mockCookieGet.mockReturnValue({ value: "test-bearer-263" });
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -90,7 +76,7 @@ describe("PATCH /api/questionnaires/[id]/answers/[qid]", () => {
   });
 
   test("propagates upstream 500 verbatim", async () => {
-    mockCookieGet.mockReturnValue({ value: "test-bearer-263" });
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "boom" }), { status: 500 }),
     );
