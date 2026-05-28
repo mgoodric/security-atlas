@@ -77,7 +77,7 @@ Execution slice; injects controlled failures via `docker stop` /
 - [ ] **AC-6.** Pre-execution checklist from slice 335 §Experiment 5
       satisfied (idempotency keys in use; fresh tenant scope).
 - [ ] **AC-7.** SDK client pushes at 1/s for 60s; `docker-compose
-  restart atlas` injected after 10s.
+restart atlas` injected after 10s.
 - [ ] **AC-8.** Final `evidence_records` row count for the test
       tenant equals 60 — NOT more (duplicates) and NOT less (lost).
 - [ ] **AC-9.** All record IDs unique.
