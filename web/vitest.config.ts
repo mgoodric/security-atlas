@@ -24,12 +24,38 @@
 //     (BFF route handlers, lib/api/bff.ts).
 //   * Playwright e2e specs (web/e2e/**) are excluded — they run via the
 //     `playwright test` runner, not vitest.
+//
+// Slice 347 — per-file coverage ratchet. The `coverage.thresholds` map
+// is read from `coverage-thresholds.json` (sibling file, mirrors the
+// Go-side `cmd/scripts/coverage-thresholds.json` shape). Each floor =
+// max(0, floor(measured - 2pp)). The ratchet is enforced by vitest's
+// own threshold-check; the existing CI `Frontend · vitest` job fails
+// red on any per-file regression below floor. Closes slice 334 V-1
+// (HIGH) and slice 069's deferred follow-up "raise the bar" promise.
 
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const dirname = fileURLToPath(new URL(".", import.meta.url));
+
+// Slice 347 — load per-file thresholds. The JSON file is the canonical
+// source so that ratchet lifts are a clean numerical diff, not a TS
+// edit. Metadata keys ($comment, $methodology, $how_to_raise, etc.)
+// are stripped before handing the map to vitest; only `thresholds` is
+// forwarded.
+type FileThresholds = {
+  statements: number;
+  branches: number;
+  functions: number;
+  lines: number;
+};
+const thresholdsFile = JSON.parse(
+  readFileSync(resolve(dirname, "coverage-thresholds.json"), "utf8"),
+) as { thresholds: Record<string, FileThresholds> };
+const perFileThresholds: Record<string, FileThresholds> =
+  thresholdsFile.thresholds;
 
 export default defineConfig({
   resolve: {
@@ -118,6 +144,19 @@ export default defineConfig({
         "app/audit-log/**/*.tsx",
         "components/**/*.tsx",
       ],
+      // Slice 347 — per-file ratchet. vitest matches each glob key with
+      // micromatch against the file's path relative to the workspace
+      // root (cwd). Each value is a {statements, branches, functions,
+      // lines} floor seeded at floor(measured - 2pp). vitest's built-in
+      // check fails red on any per-file regression. To raise a floor,
+      // write the tests AND lift the number in coverage-thresholds.json
+      // in the same PR (slice 069 contract; P0-347-1 monotonic ↑).
+      thresholds: {
+        // autoUpdate: false (default) — slice 347 D3 defers automation
+        // to a follow-up so the first round of ratchet hygiene is
+        // hand-curated and reviewable.
+        ...perFileThresholds,
+      },
     },
   },
 });
