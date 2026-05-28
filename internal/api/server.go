@@ -116,10 +116,14 @@ type Server struct {
 	jwtIssuer   string
 	jwtAudience string
 
-	// Slice 191: the migration URL surfaced in the 410 deprecation
-	// responder's body so operators see a machine-readable path to
-	// the OAuth migration guide. Empty falls back to omitting the
-	// field; cmd/atlas wires it via AttachDeprecationMigrationURL.
+	// Slice 191 + 326: the migration URL originally surfaced in the
+	// retired 410 deprecation responder's body. The slice 326
+	// retirement removes the responder; the field is RESERVED for
+	// future deprecation events (e.g. a v2 API cutover) so the
+	// wiring path through cmd/atlas + ATLAS_OAUTH_DEPRECATION_URL
+	// does not have to be rebuilt every time. Currently unread by
+	// any handler — set via AttachDeprecationMigrationURL but not
+	// consumed until a new deprecation responder is wired.
 	deprecationMigrationURL string
 
 	// Slice 192: BYPASSRLS pool used by GET /v1/me/tenants for
@@ -138,11 +142,13 @@ type Server struct {
 // 073's platform_status writer.
 func (s *Server) AttachAuthPool(p *pgxpool.Pool) { s.authPool = p }
 
-// AttachDeprecationMigrationURL wires the slice-191 410 responder's
-// `migration_url` body field. cmd/atlas sets this to the operator-
-// facing docs path (e.g., `https://atlas.example.com/docs/migration/oauth`)
-// at startup. P0-191-3: the URL MUST be present so clients hitting
-// the 410 know where to go.
+// AttachDeprecationMigrationURL wires the deprecation-event migration
+// URL. cmd/atlas sets this from `ATLAS_OAUTH_DEPRECATION_URL` at
+// startup. The slice 191 410-Gone responder that consumed this field
+// was retired in slice 326; the wiring path is preserved as
+// "reserved for future deprecation events" so the next API cutover
+// can mount a new responder without re-plumbing config. Currently
+// unread by any handler.
 func (s *Server) AttachDeprecationMigrationURL(url string) {
 	s.deprecationMigrationURL = url
 }

@@ -440,17 +440,21 @@ func main() {
 			logger.Info("atlas: OAuth device-authorization endpoints wired",
 				"interval_seconds", oauthapi.DevicePollInterval)
 
-			// Slice 191: the migration URL the 410 responder surfaces
-			// in its body. Defaults to the docs-site path relative to
-			// the issuer when ATLAS_OAUTH_DEPRECATION_URL is unset; an
-			// override lets self-host operators point at their own
-			// migration runbook.
+			// Slice 191 + 326: the deprecation-event migration URL.
+			// Defaults to the docs-site path relative to the issuer
+			// when ATLAS_OAUTH_DEPRECATION_URL is unset; an override
+			// lets self-host operators point at their own migration
+			// runbook. The slice 191 410-Gone responder that consumed
+			// this URL was retired in slice 326; the wiring is
+			// preserved as "reserved for future deprecation events"
+			// so the next API cutover does not have to re-plumb
+			// config + env var + flag.
 			migrationURL := os.Getenv("ATLAS_OAUTH_DEPRECATION_URL")
 			if migrationURL == "" {
 				migrationURL = issuer + "/docs/migration/oauth"
 			}
 			srv.AttachDeprecationMigrationURL(migrationURL)
-			logger.Info("atlas: legacy bearer deprecation responder wired",
+			logger.Info("atlas: deprecation migration URL configured (reserved; no responder mounted post-slice-326)",
 				"migration_url", migrationURL)
 
 			// Slice 190: revocation-list sweeper goroutine. DELETEs
