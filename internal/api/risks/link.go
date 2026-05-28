@@ -84,7 +84,7 @@ func (h *Handler) LinkControl(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, risk.ErrLinkWeightOutOfRange):
 			writeError(w, http.StatusBadRequest, err.Error())
 		default:
-			writeServerErr(w, "link control", err)
+			writeServerErr(w, r, "link control", err)
 		}
 		return
 	}
@@ -92,7 +92,7 @@ func (h *Handler) LinkControl(w http.ResponseWriter, r *http.Request) {
 	// Re-read the risk so linked_control_ids[] reflects the new link (AC-1).
 	rk, err := h.store.Get(ctx, riskID)
 	if err != nil {
-		writeServerErr(w, "get risk after link", err)
+		writeServerErr(w, r, "get risk after link", err)
 		return
 	}
 	body := map[string]any{"risk": riskWireFrom(rk)}
@@ -102,7 +102,7 @@ func (h *Handler) LinkControl(w http.ResponseWriter, r *http.Request) {
 	if h.deriver != nil {
 		res, derr := h.deriver.DeriveAndPersist(ctx, riskID, false)
 		if derr != nil {
-			writeServerErr(w, "derive residual after link", derr)
+			writeServerErr(w, r, "derive residual after link", derr)
 			return
 		}
 		body["residual"] = residualWireFrom(res)

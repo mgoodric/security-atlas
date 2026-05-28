@@ -101,7 +101,7 @@ func (h *Handler) Aggregate(w http.ResponseWriter, r *http.Request) {
 			errors.Is(err, risk.ErrInvalidLevel):
 			writeError(w, http.StatusBadRequest, err.Error())
 		default:
-			writeServerErr(w, "aggregate", err)
+			writeServerErr(w, r, "aggregate", err)
 		}
 		return
 	}
@@ -132,7 +132,7 @@ func (h *Handler) LiveAggregation(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "aggregation parent not found")
 			return
 		}
-		writeServerErr(w, "live aggregation", err)
+		writeServerErr(w, r, "live aggregation", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

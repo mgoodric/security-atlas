@@ -38,6 +38,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -164,7 +165,7 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 	// gate; this is the second leg.
 	allowed, err := h.callerAllowedUnified(r.Context(), tenantID, cred.UserID, cred.IsAdmin)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "role probe: "+err.Error())
+		httperr.WriteInternal(w, r, "role probe", err)
 		return
 	}
 	if !allowed {
@@ -250,7 +251,7 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "unified audit-log: "+err.Error())
+		httperr.WriteInternal(w, r, "unified audit-log", err)
 		return
 	}
 

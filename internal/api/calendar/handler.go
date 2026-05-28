@@ -32,6 +32,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -175,7 +176,7 @@ func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.store.ListEvents(ctx, from, to, h.nowFn(), typeFilter, int32(truncateThreshold+1))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "calendar", err)
 		return
 	}
 
@@ -282,7 +283,7 @@ func (h *Handler) ICS(w http.ResponseWriter, r *http.Request) {
 	// can't carry cookies.
 	ctx, terr := tenancy.WithTenant(r.Context(), cred.TenantID)
 	if terr != nil {
-		writeError(w, http.StatusInternalServerError, terr.Error())
+		httperr.WriteInternal(w, r, "calendar", terr)
 		return
 	}
 
@@ -299,7 +300,7 @@ func (h *Handler) ICS(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.store.ListEvents(ctx, from, to, h.nowFn(), typeFilter, int32(truncateThreshold+1))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "calendar", err)
 		return
 	}
 	if len(rows) > truncateThreshold {

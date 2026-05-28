@@ -79,6 +79,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
@@ -247,7 +248,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		ORDER BY created_at ASC, id ASC
 	`)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list tenants: "+err.Error())
+		httperr.WriteInternal(w, r, "list tenants", err)
 		return
 	}
 	defer rows.Close()
@@ -263,7 +264,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			createdByRaw *uuid.UUID
 		)
 		if err := rows.Scan(&id, &name, &slug, &isBootstrap, &createdAt, &createdByRaw); err != nil {
-			writeError(w, http.StatusInternalServerError, "scan tenant: "+err.Error())
+			httperr.WriteInternal(w, r, "scan tenant", err)
 			return
 		}
 		var createdByStr *string
@@ -281,7 +282,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, "iterate tenants: "+err.Error())
+		httperr.WriteInternal(w, r, "iterate tenants", err)
 		return
 	}
 
@@ -364,7 +365,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	actorTenantID, terr := actorTenantFromContext(r.Context())
 	if terr != nil {
-		writeError(w, http.StatusInternalServerError, terr.Error())
+		httperr.WriteInternal(w, r, "admin tenants", terr)
 		return
 	}
 
@@ -392,8 +393,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError,
-				"read actor identity: "+err.Error())
+			httperr.WriteInternal(w, r, "read actor identity", err)
 			return
 		}
 	}
@@ -409,7 +409,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	)
 	tx, err := h.authPool.BeginTx(r.Context(), pgx.TxOptions{})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "begin tx: "+err.Error())
+		httperr.WriteInternal(w, r, "begin tx", err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -432,7 +432,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.Exec(r.Context(),
 		`SELECT pg_advisory_xact_lock($1)`, actorLockKey,
 	); err != nil {
-		writeError(w, http.StatusInternalServerError, "acquire actor lock: "+err.Error())
+		httperr.WriteInternal(w, r, "acquire actor lock", err)
 		return
 	}
 
@@ -446,7 +446,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		 WHERE actor_user_id = $1 AND action = $2 AND occurred_at > $3`,
 		actorID, auditActionCreate, rateCutoff,
 	).Scan(&rateCount); err != nil {
-		writeError(w, http.StatusInternalServerError, "rate check: "+err.Error())
+		httperr.WriteInternal(w, r, "rate check", err)
 		return
 	}
 	if rateCount >= h.limit {
@@ -477,7 +477,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			uniqueViolation = true
 			uniqueColumn = pgErr.ConstraintName
 		} else {
-			writeError(w, http.StatusInternalServerError, "insert tenant: "+err.Error())
+			httperr.WriteInternal(w, r, "insert tenant", err)
 			return
 		}
 	}
@@ -508,7 +508,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		dimensionID, tenantID, defaultDimensionName,
 		`["prod", "staging", "dev"]`,
 	); err != nil {
-		writeError(w, http.StatusInternalServerError, "insert scope_dimension: "+err.Error())
+		httperr.WriteInternal(w, r, "insert scope_dimension", err)
 		return
 	}
 
@@ -528,7 +528,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		cellID, tenantID, defaultScopeCellLabel,
 		`{"environment": "prod"}`, dimensionsHash,
 	); err != nil {
-		writeError(w, http.StatusInternalServerError, "insert scope_cell: "+err.Error())
+		httperr.WriteInternal(w, r, "insert scope_cell", err)
 		return
 	}
 
@@ -541,7 +541,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			newUserID, tenantID, actorEmail, actorDisplayName,
 			actorIdpIssuer, actorIdpSubject,
 		); err != nil {
-			writeError(w, http.StatusInternalServerError, "insert creator users row: "+err.Error())
+			httperr.WriteInternal(w, r, "insert creator users row", err)
 			return
 		}
 		if _, err := tx.Exec(r.Context(),
@@ -549,7 +549,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			 VALUES ($1, $2, 'admin', $3)`,
 			tenantID, newUserID.String(), adminRoleGrantedBy,
 		); err != nil {
-			writeError(w, http.StatusInternalServerError, "insert creator user_roles row: "+err.Error())
+			httperr.WriteInternal(w, r, "insert creator user_roles row", err)
 			return
 		}
 		creatorAdminUserID = &newUserID
@@ -572,7 +572,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		actorTenantID,
 		payload,
 	); err != nil {
-		writeError(w, http.StatusInternalServerError, "insert super_admin_audit_log: "+err.Error())
+		httperr.WriteInternal(w, r, "insert super_admin_audit_log", err)
 		return
 	}
 
@@ -590,13 +590,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		 VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, 'core')`,
 		actorTenantID, actorID, auditActionCreate, beforeBlob, afterBlob,
 	); err != nil {
-		writeError(w, http.StatusInternalServerError, "insert me_audit_log: "+err.Error())
+		httperr.WriteInternal(w, r, "insert me_audit_log", err)
 		return
 	}
 
 	// Commit.
 	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "commit: "+err.Error())
+		httperr.WriteInternal(w, r, "commit tx", err)
 		return
 	}
 

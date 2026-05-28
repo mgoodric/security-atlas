@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -46,7 +47,7 @@ func (h *Handler) ListVisible(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.store.ListVisibleThemes(r.Context())
 	if err != nil {
-		writeServerErr(w, "list themes", err)
+		writeServerErr(w, r, "list themes", err)
 		return
 	}
 	out := make([]themeWire, len(rows))
@@ -87,7 +88,7 @@ func (h *Handler) AssignThemes(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "risk not found")
 			return
 		}
-		writeServerErr(w, "get risk themes", err)
+		writeServerErr(w, r, "get risk themes", err)
 		return
 	}
 	merged := mergeThemes(current, req.Themes)
@@ -99,7 +100,7 @@ func (h *Handler) AssignThemes(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, risk.ErrNotFound):
 			writeError(w, http.StatusNotFound, "risk not found")
 		default:
-			writeServerErr(w, "assign themes", err)
+			writeServerErr(w, r, "assign themes", err)
 		}
 		return
 	}
@@ -129,7 +130,7 @@ func (h *Handler) RemoveTheme(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "risk not found")
 			return
 		}
-		writeServerErr(w, "get risk themes", err)
+		writeServerErr(w, r, "get risk themes", err)
 		return
 	}
 	remaining := removeTheme(current, theme)
@@ -145,7 +146,7 @@ func (h *Handler) RemoveTheme(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, risk.ErrNotFound):
 			writeError(w, http.StatusNotFound, "risk not found")
 		default:
-			writeServerErr(w, "remove theme", err)
+			writeServerErr(w, r, "remove theme", err)
 		}
 		return
 	}
@@ -211,8 +212,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }

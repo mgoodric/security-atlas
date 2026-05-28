@@ -24,6 +24,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/audit/auditor"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -86,7 +87,7 @@ func (h *Handler) AuditPeriod(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.store.ListAssignmentsFor(ctx, cred.UserID)
 	if err != nil {
-		writeServerErr(w, "list assignments", err)
+		writeServerErr(w, r, "list assignments", err)
 		return
 	}
 	if len(rows) == 0 {
@@ -116,7 +117,7 @@ func (h *Handler) AuditPeriods(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.store.ListAssignmentsFor(ctx, cred.UserID)
 	if err != nil {
-		writeServerErr(w, "list assignments", err)
+		writeServerErr(w, r, "list assignments", err)
 		return
 	}
 	out := make([]assignmentWire, len(rows))
@@ -161,8 +162,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }

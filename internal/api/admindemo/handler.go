@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/demoseed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -186,7 +187,7 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 
 	actorID, actorTenantID, err := h.resolveActor(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "resolve actor: "+err.Error())
+		httperr.WriteInternal(w, r, "resolve actor", err)
 		return
 	}
 
@@ -203,7 +204,7 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		"status": "invoked",
 	}
 	if err := h.writeAuditRows(r.Context(), auditActionSeed, actorID, actorTenantID, auditPayload); err != nil {
-		writeError(w, http.StatusInternalServerError, "audit write failed; seed not invoked: "+err.Error())
+		httperr.WriteInternal(w, r, "audit write failed; seed not invoked", err)
 		return
 	}
 
@@ -211,7 +212,7 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 	// a re-click on an already-seeded tenant returns Idempotent=true.
 	seeder, err := demoseed.NewSeeder(h.authPool, demoseed.DefaultScale)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "build seeder: "+err.Error())
+		httperr.WriteInternal(w, r, "build seeder", err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
@@ -222,7 +223,7 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		ActorTenantID: actorTenantID,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "seed failed: "+err.Error())
+		httperr.WriteInternal(w, r, "seed failed", err)
 		return
 	}
 
@@ -262,7 +263,7 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 
 	actorID, actorTenantID, err := h.resolveActor(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "resolve actor: "+err.Error())
+		httperr.WriteInternal(w, r, "resolve actor", err)
 		return
 	}
 
@@ -272,19 +273,19 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 		"status": "invoked",
 	}
 	if err := h.writeAuditRows(r.Context(), auditActionTeardown, actorID, actorTenantID, auditPayload); err != nil {
-		writeError(w, http.StatusInternalServerError, "audit write failed; teardown not invoked: "+err.Error())
+		httperr.WriteInternal(w, r, "audit write failed; teardown not invoked", err)
 		return
 	}
 
 	seeder, err := demoseed.NewSeeder(h.authPool, demoseed.DefaultScale)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "build seeder: "+err.Error())
+		httperr.WriteInternal(w, r, "build seeder", err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 	if err := seeder.Teardown(ctx, demoTenantSlug, actorID, actorTenantID); err != nil {
-		writeError(w, http.StatusInternalServerError, "teardown failed: "+err.Error())
+		httperr.WriteInternal(w, r, "teardown failed", err)
 		return
 	}
 

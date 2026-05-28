@@ -55,6 +55,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -179,7 +180,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "no SSO config")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "fetch sso: "+err.Error())
+		httperr.WriteInternal(w, r, "fetch sso", err)
 		return
 	}
 
@@ -242,7 +243,7 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		return gErr
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "check existing: "+err.Error())
+		httperr.WriteInternal(w, r, "check existing", err)
 		return
 	}
 	if !exists && req.ClientSecret == "" {
@@ -280,7 +281,7 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		return qErr
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "upsert sso: "+err.Error())
+		httperr.WriteInternal(w, r, "upsert sso", err)
 		return
 	}
 
@@ -344,7 +345,7 @@ func (h *Handler) Preflight(w http.ResponseWriter, r *http.Request) {
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, discURL, nil)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "build request: "+err.Error())
+		httperr.WriteInternal(w, r, "build request", err)
 		return
 	}
 	client := h.preflightOpts.HTTPClient
@@ -353,7 +354,7 @@ func (h *Handler) Preflight(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "discovery fetch failed: "+err.Error())
+		httperr.WriteStatus(w, r, http.StatusBadGateway, "discovery fetch failed", err)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -365,7 +366,7 @@ func (h *Handler) Preflight(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, h.preflightOpts.MaxBodyBytes+1))
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "read body: "+err.Error())
+		httperr.WriteStatus(w, r, http.StatusBadGateway, "read body", err)
 		return
 	}
 	if int64(len(body)) > h.preflightOpts.MaxBodyBytes {
@@ -375,7 +376,7 @@ func (h *Handler) Preflight(w http.ResponseWriter, r *http.Request) {
 
 	var parsedDoc PreflightResponse
 	if err := json.Unmarshal(body, &parsedDoc); err != nil {
-		writeError(w, http.StatusBadGateway, "discovery body not JSON: "+err.Error())
+		httperr.WriteStatus(w, r, http.StatusBadGateway, "discovery body not JSON", err)
 		return
 	}
 

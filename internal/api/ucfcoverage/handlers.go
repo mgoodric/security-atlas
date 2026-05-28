@@ -52,6 +52,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
@@ -157,7 +158,7 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	req, ok, err := h.lookupRequirement(ctx, chi.URLParam(r, "id"))
 	if err != nil {
-		writeServerErr(w, "lookup requirement", err)
+		writeServerErr(w, r, "lookup requirement", err)
 		return
 	}
 	if !ok {
@@ -168,7 +169,7 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 	scfFV := h.resolveSCFRelease(ctx, r)
 	anchors, err := h.listAnchorsForRequirement(ctx, req.ID, scfFV)
 	if err != nil {
-		writeServerErr(w, "list anchors for requirement", err)
+		writeServerErr(w, r, "list anchors for requirement", err)
 		return
 	}
 
@@ -178,7 +179,7 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 	}
 	controls, err := h.listControlsForAnchors(ctx, anchorIDs)
 	if err != nil {
-		writeServerErr(w, "list controls for anchors", err)
+		writeServerErr(w, r, "list controls for anchors", err)
 		return
 	}
 
@@ -223,7 +224,7 @@ func (h *Handler) AnchorRequirements(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	anchor, ok, err := h.lookupAnchor(ctx, chi.URLParam(r, "id"))
 	if err != nil {
-		writeServerErr(w, "lookup anchor", err)
+		writeServerErr(w, r, "lookup anchor", err)
 		return
 	}
 	if !ok {
@@ -248,14 +249,14 @@ func (h *Handler) AnchorRequirements(w http.ResponseWriter, r *http.Request) {
 			FrameworkVersionID: fv.ID,
 		})
 		if err != nil {
-			writeServerErr(w, "list requirements for anchor (pinned)", err)
+			writeServerErr(w, r, "list requirements for anchor (pinned)", err)
 			return
 		}
 		out = mapPinnedRequirements(got)
 	} else {
 		got, err := h.q.ListRequirementsForAnchor(ctx, anchor.ID)
 		if err != nil {
-			writeServerErr(w, "list requirements for anchor", err)
+			writeServerErr(w, r, "list requirements for anchor", err)
 			return
 		}
 		out = mapRequirements(got)
@@ -317,7 +318,7 @@ func (h *Handler) ControlCoverage(w http.ResponseWriter, r *http.Request) {
 		controlOK = true
 		return nil
 	}); err != nil {
-		writeServerErr(w, "lookup control", err)
+		writeServerErr(w, r, "lookup control", err)
 		return
 	}
 	if !controlOK {
@@ -341,7 +342,7 @@ func (h *Handler) ControlCoverage(w http.ResponseWriter, r *http.Request) {
 	// Anchor metadata: pull from scf_anchors directly (catalog read).
 	anchor, err := h.q.GetSCFAnchorByID(ctx, ctrl.ScfAnchorID)
 	if err != nil {
-		writeServerErr(w, "lookup control anchor", err)
+		writeServerErr(w, r, "lookup control anchor", err)
 		return
 	}
 	out["anchor"] = anchorWireFromRow(anchor)
@@ -360,14 +361,14 @@ func (h *Handler) ControlCoverage(w http.ResponseWriter, r *http.Request) {
 			FrameworkVersionID: fv.ID,
 		})
 		if err != nil {
-			writeServerErr(w, "list requirements for control (pinned)", err)
+			writeServerErr(w, r, "list requirements for control (pinned)", err)
 			return
 		}
 		reqs = mapPinnedRequirements(got)
 	} else {
 		got, err := h.q.ListRequirementsForAnchor(ctx, ctrl.ScfAnchorID)
 		if err != nil {
-			writeServerErr(w, "list requirements for control", err)
+			writeServerErr(w, r, "list requirements for control", err)
 			return
 		}
 		reqs = mapRequirements(got)
@@ -393,7 +394,7 @@ func (h *Handler) ControlCoverage(w http.ResponseWriter, r *http.Request) {
 	// omitted entirely, preserving the slice-008 shape.
 	if h.engine != nil && h.scopeStore != nil && h.fwScopeStore != nil && len(reqs) > 0 {
 		if err := h.applyCoverage(ctx, cid, reqs); err != nil {
-			writeServerErr(w, "compute coverage", err)
+			writeServerErr(w, r, "compute coverage", err)
 			return
 		}
 	}
@@ -926,8 +927,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }

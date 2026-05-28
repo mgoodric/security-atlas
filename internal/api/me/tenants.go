@@ -113,7 +113,7 @@ func (h *TenantsHandler) ListTenants(w http.ResponseWriter, r *http.Request) {
 
 	names, err := h.loadTenantNames(r.Context(), claims.AvailableTenants)
 	if err != nil {
-		writeServerErr(w, "list tenants", err)
+		writeServerErr(w, r, "list tenants", err)
 		return
 	}
 

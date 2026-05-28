@@ -65,6 +65,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -192,7 +193,7 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 	for _, t := range admitted {
 		typeHits, qerr := h.searchType(r.Context(), t, q, tokens)
 		if qerr != nil {
-			writeServerErr(w, "search "+t, qerr)
+			writeServerErr(w, r, "search "+t, qerr)
 			return
 		}
 		hits = append(hits, typeHits...)
@@ -661,8 +662,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 )
 
 // HTTPHandler exposes the slice-014 routes:
@@ -53,7 +54,7 @@ func (h *HTTPHandler) ListHTTP(w http.ResponseWriter, r *http.Request) {
 	limit, offset := h.pagination(r)
 	rows, err := h.svc.List(r.Context(), cred.TenantID, limit, offset)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list: " + err.Error()})
+		httperr.WriteInternal(w, r, "list", err)
 		return
 	}
 	out := make([]map[string]any, len(rows))
@@ -82,7 +83,7 @@ func (h *HTTPHandler) GetHTTP(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "schema not found"})
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "get: " + err.Error()})
+		httperr.WriteInternal(w, r, "get", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"schema": wireFullItem(row)})

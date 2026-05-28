@@ -43,6 +43,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -169,7 +170,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		Body:        body,
 	})
 	if err != nil {
-		h.writeStoreErr(w, "put artifact", err)
+		h.writeStoreErr(w, r, "put artifact", err)
 		return
 	}
 
@@ -223,7 +224,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 
 	pre, err := h.store.Presign(ctx, id, ttl)
 	if err != nil {
-		h.writeStoreErr(w, "presign artifact", err)
+		h.writeStoreErr(w, r, "presign artifact", err)
 		return
 	}
 
@@ -265,7 +266,7 @@ func (h *Handler) toWire(a artifact.Artifact) artifactWire {
 	}
 }
 
-func (h *Handler) writeStoreErr(w http.ResponseWriter, op string, err error) {
+func (h *Handler) writeStoreErr(w http.ResponseWriter, r *http.Request, op string, err error) {
 	switch {
 	case errors.Is(err, artifact.ErrNotFound):
 		// Important: 404, NOT 403. Avoids existence-disclosure to
@@ -278,7 +279,7 @@ func (h *Handler) writeStoreErr(w http.ResponseWriter, op string, err error) {
 	case errors.Is(err, artifact.ErrHashMismatch):
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": op + ": " + err.Error()})
+		httperr.WriteInternal(w, r, op, err)
 	}
 }
 

@@ -43,6 +43,7 @@ import (
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -152,7 +153,7 @@ func (h *Handler) MyAcknowledgments(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnauthorized, "credential carries no user id")
 			return
 		}
-		writeServerErr(w, "list pending acks", err)
+		writeServerErr(w, r, "list pending acks", err)
 		return
 	}
 	out := pendingResponse{
@@ -221,7 +222,7 @@ func (h *Handler) Acknowledge(w http.ResponseWriter, r *http.Request) {
 		Caller:   ackCallerFromCred(cred),
 	})
 	if rerr != nil {
-		h.writeRecordError(w, rerr)
+		h.writeRecordError(w, r, rerr)
 		return
 	}
 	// Build the evidence payload.
@@ -296,7 +297,7 @@ func (h *Handler) AcknowledgmentRate(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(rerr, policy.ErrAckPolicyNotPublished):
 			writeError(w, http.StatusConflict, "policy is not in published state")
 		default:
-			writeServerErr(w, "compute rate", rerr)
+			writeServerErr(w, r, "compute rate", rerr)
 		}
 		return
 	}
@@ -336,7 +337,7 @@ func (h *Handler) writeAckResp(w http.ResponseWriter, ack policy.Ack, emissionOK
 	writeJSON(w, status, resp)
 }
 
-func (h *Handler) writeRecordError(w http.ResponseWriter, err error) {
+func (h *Handler) writeRecordError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, policy.ErrNotFound):
 		writeError(w, http.StatusNotFound, "policy not found")
@@ -349,7 +350,7 @@ func (h *Handler) writeRecordError(w http.ResponseWriter, err error) {
 	case errors.Is(err, policy.ErrAckMissingPolicyID):
 		writeError(w, http.StatusBadRequest, "policy id is required")
 	default:
-		writeServerErr(w, "record acknowledgment", err)
+		writeServerErr(w, r, "record acknowledgment", err)
 	}
 }
 
@@ -395,8 +396,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, errorBody{Error: msg})
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, errorBody{
-		Error: op + ": " + err.Error(),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }

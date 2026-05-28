@@ -35,6 +35,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	policypdf "github.com/mgoodric/security-atlas/internal/policy/pdf"
@@ -183,7 +184,7 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:                   cred.ID,
 	})
 	if err != nil {
-		h.writeCreateErr(w, err)
+		h.writeCreateErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"policy": wireFromPolicy(created)})
@@ -214,7 +215,7 @@ func (h *Handler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 	if includesAckRate(r) {
 		out, err := h.listPoliciesWithAckRate(ctx, statusFilter)
 		if err != nil {
-			writeServerErr(w, "list policies (with ack_rate)", err)
+			writeServerErr(w, r, "list policies (with ack_rate)", err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"policies": out, "count": len(out)})
@@ -223,7 +224,7 @@ func (h *Handler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 	filter := policy.ListFilter{Status: statusFilter}
 	rows, err := h.store.List(ctx, filter)
 	if err != nil {
-		writeServerErr(w, "list policies", err)
+		writeServerErr(w, r, "list policies", err)
 		return
 	}
 	out := make([]policyWire, len(rows))
@@ -406,7 +407,7 @@ func (h *Handler) GetPolicy(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("versions") == "true" {
 		chain, err := h.store.VersionChain(ctx, id)
 		if err != nil {
-			writeServerErr(w, "version chain", err)
+			writeServerErr(w, r, "version chain", err)
 			return
 		}
 		if len(chain) == 0 {
@@ -426,7 +427,7 @@ func (h *Handler) GetPolicy(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "policy not found")
 			return
 		}
-		writeServerErr(w, "get policy", err)
+		writeServerErr(w, r, "get policy", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(p)})
@@ -446,7 +447,7 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 	}
 	updated, err := h.store.SubmitForReview(ctx, id, cred.ID)
 	if err != nil {
-		h.writeTransitionErr(w, err)
+		h.writeTransitionErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(updated)})
@@ -470,7 +471,7 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 	}
 	approved, err := h.store.Approve(ctx, id, cred.ID)
 	if err != nil {
-		h.writeTransitionErr(w, err)
+		h.writeTransitionErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(approved)})
@@ -520,7 +521,7 @@ func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 		PublishedBy:   cred.ID,
 	})
 	if err != nil {
-		h.writePublishErr(w, err)
+		h.writePublishErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"policy": wireFromPolicy(published)})
@@ -546,7 +547,7 @@ func (h *Handler) PDF(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "policy not found")
 			return
 		}
-		writeServerErr(w, "get policy", err)
+		writeServerErr(w, r, "get policy", err)
 		return
 	}
 	doc := policypdf.Doc{
@@ -568,7 +569,7 @@ func (h *Handler) PDF(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "pdf renderer unavailable: chrome not installed")
 			return
 		}
-		writeServerErr(w, "render pdf", err)
+		writeServerErr(w, r, "render pdf", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/pdf")
@@ -579,7 +580,7 @@ func (h *Handler) PDF(w http.ResponseWriter, r *http.Request) {
 
 // ----- helpers -----
 
-func (h *Handler) writeCreateErr(w http.ResponseWriter, err error) {
+func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, policy.ErrTitleRequired),
 		errors.Is(err, policy.ErrVersionRequired),
@@ -589,22 +590,22 @@ func (h *Handler) writeCreateErr(w http.ResponseWriter, err error) {
 		errors.Is(err, policy.ErrCreatedByRequired):
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:
-		writeServerErr(w, "create policy", err)
+		writeServerErr(w, r, "create policy", err)
 	}
 }
 
-func (h *Handler) writeTransitionErr(w http.ResponseWriter, err error) {
+func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, policy.ErrNotFound):
 		writeError(w, http.StatusNotFound, "policy not found")
 	case errors.Is(err, policy.ErrWrongState):
 		writeError(w, http.StatusConflict, "policy not in expected state for this transition")
 	default:
-		writeServerErr(w, "transition", err)
+		writeServerErr(w, r, "transition", err)
 	}
 }
 
-func (h *Handler) writePublishErr(w http.ResponseWriter, err error) {
+func (h *Handler) writePublishErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, policy.ErrOrphanPublish):
 		writeError(w, http.StatusConflict, err.Error())
@@ -615,7 +616,7 @@ func (h *Handler) writePublishErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, policy.ErrInvalidVersion):
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:
-		writeServerErr(w, "publish policy", err)
+		writeServerErr(w, r, "publish policy", err)
 	}
 }
 
@@ -703,8 +704,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }

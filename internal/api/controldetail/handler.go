@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -181,7 +182,7 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 	// list read alone.
 	total, err := h.store.CountEvidenceForTenant(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "controldetail", err)
 		return
 	}
 
@@ -199,7 +200,7 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 			pageRows:        pageRows,
 		})
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			httperr.WriteInternal(w, r, "controldetail", err)
 			return
 		}
 		page, next := splitEvidenceListPage(rows, pageRows)
@@ -225,7 +226,7 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 		pageRows: pageRows,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "controldetail", err)
 		return
 	}
 
@@ -255,7 +256,7 @@ func (h *Handler) Policies(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.store.PoliciesForControl(ctx, controlID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "controldetail", err)
 		return
 	}
 	out := make([]policyWire, len(rows))
@@ -287,7 +288,7 @@ func (h *Handler) Risks(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.store.RisksForControl(ctx, controlID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "controldetail", err)
 		return
 	}
 	out := make([]riskWire, len(rows))
@@ -335,7 +336,7 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 		pageRows: pageRows,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "controldetail", err)
 		return
 	}
 

@@ -39,6 +39,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/audit/walkthrough"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -152,7 +153,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	wt, err := h.store.Create(ctx, in)
 	if err != nil {
-		h.writeStoreErr(w, "create walkthrough", err)
+		h.writeStoreErr(w, r, "create walkthrough", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"walkthrough": toWire(wt)})
@@ -172,7 +173,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	wt, err := h.store.Get(ctx, id)
 	if err != nil {
-		h.writeStoreErr(w, "get walkthrough", err)
+		h.writeStoreErr(w, r, "get walkthrough", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"walkthrough": toWire(wt)})
@@ -187,7 +188,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	ws, err := h.store.List(ctx)
 	if err != nil {
-		h.writeStoreErr(w, "list walkthroughs", err)
+		h.writeStoreErr(w, r, "list walkthroughs", err)
 		return
 	}
 	out := make([]walkthroughWire, len(ws))
@@ -297,7 +298,7 @@ func (h *Handler) AddAttachment(w http.ResponseWriter, r *http.Request) {
 		Body:        body,
 	})
 	if err != nil {
-		writeArtifactErr(w, "store attachment blob", err)
+		writeArtifactErr(w, r, "store attachment blob", err)
 		return
 	}
 
@@ -313,7 +314,7 @@ func (h *Handler) AddAttachment(w http.ResponseWriter, r *http.Request) {
 		UploadedBy:     cred.ID,
 	})
 	if err != nil {
-		h.writeStoreErr(w, "add attachment", err)
+		h.writeStoreErr(w, r, "add attachment", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"walkthrough": toWire(wt)})
@@ -337,7 +338,7 @@ func (h *Handler) Finalize(w http.ResponseWriter, r *http.Request) {
 	}
 	wt, err := h.store.Finalize(ctx, id, cred.ID)
 	if err != nil {
-		h.writeStoreErr(w, "finalize walkthrough", err)
+		h.writeStoreErr(w, r, "finalize walkthrough", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"walkthrough": toWire(wt)})
@@ -366,7 +367,7 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	}
 	wt, err := h.store.Get(ctx, id)
 	if err != nil {
-		h.writeStoreErr(w, "get walkthrough (export)", err)
+		h.writeStoreErr(w, r, "get walkthrough (export)", err)
 		return
 	}
 	switch format {
@@ -384,7 +385,7 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusServiceUnavailable, "PDF rendering unavailable: chromedp browser missing")
 				return
 			}
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "render PDF: " + err.Error()})
+			httperr.WriteInternal(w, r, "render PDF", err)
 			return
 		}
 		w.Header().Set("Content-Type", "application/pdf")
@@ -464,7 +465,7 @@ func toWire(wt walkthrough.Walkthrough) walkthroughWire {
 	return out
 }
 
-func (h *Handler) writeStoreErr(w http.ResponseWriter, op string, err error) {
+func (h *Handler) writeStoreErr(w http.ResponseWriter, r *http.Request, op string, err error) {
 	switch {
 	case errors.Is(err, walkthrough.ErrNotFound):
 		writeError(w, http.StatusNotFound, "walkthrough not found")
@@ -473,11 +474,11 @@ func (h *Handler) writeStoreErr(w http.ResponseWriter, op string, err error) {
 	case errors.Is(err, walkthrough.ErrPeriodFrozen):
 		writeError(w, http.StatusConflict, "audit period is frozen")
 	default:
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": op + ": " + err.Error()})
+		httperr.WriteInternal(w, r, op, err)
 	}
 }
 
-func writeArtifactErr(w http.ResponseWriter, op string, err error) {
+func writeArtifactErr(w http.ResponseWriter, r *http.Request, op string, err error) {
 	switch {
 	case errors.Is(err, artifact.ErrOversized):
 		writeError(w, http.StatusRequestEntityTooLarge, err.Error())
@@ -486,7 +487,7 @@ func writeArtifactErr(w http.ResponseWriter, op string, err error) {
 	case errors.Is(err, artifact.ErrHashMismatch):
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": op + ": " + err.Error()})
+		httperr.WriteInternal(w, r, op, err)
 	}
 }
 

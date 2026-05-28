@@ -32,6 +32,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -137,7 +138,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, aggrule.ErrDuplicateRuleID):
 			writeError(w, http.StatusConflict, err.Error())
 		default:
-			writeServerErr(w, "create aggregation rule", err)
+			writeServerErr(w, r, "create aggregation rule", err)
 		}
 		return
 	}
@@ -157,7 +158,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	rules, err := h.store.List(r.Context(), statusFilter)
 	if err != nil {
-		writeServerErr(w, "list aggregation rules", err)
+		writeServerErr(w, r, "list aggregation rules", err)
 		return
 	}
 	out := make([]ruleWire, len(rules))
@@ -184,7 +185,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "aggregation rule not found")
 			return
 		}
-		writeServerErr(w, "get aggregation rule", err)
+		writeServerErr(w, r, "get aggregation rule", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rule": ruleWireFrom(sr)})
@@ -233,7 +234,7 @@ func (h *Handler) transition(w http.ResponseWriter, r *http.Request, activate bo
 			if !activate {
 				op = "deactivate aggregation rule"
 			}
-			writeServerErr(w, op, err)
+			writeServerErr(w, r, op, err)
 		}
 		return
 	}
@@ -293,8 +294,6 @@ func writeValidationError(w http.ResponseWriter, err error) {
 	writeError(w, http.StatusBadRequest, err.Error())
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }

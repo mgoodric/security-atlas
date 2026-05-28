@@ -26,6 +26,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -98,7 +99,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			// parent_id pointed to a missing (or cross-tenant) unit.
 			writeError(w, http.StatusBadRequest, err.Error())
 		default:
-			writeServerErr(w, "create org_unit", err)
+			writeServerErr(w, r, "create org_unit", err)
 		}
 		return
 	}
@@ -118,7 +119,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "org_unit not found")
 			return
 		}
-		writeServerErr(w, "get org_unit", err)
+		writeServerErr(w, r, "get org_unit", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"org_unit": wireFrom(out)})
@@ -145,7 +146,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.store.ListOrgUnits(r.Context())
 	if err != nil {
-		writeServerErr(w, "list org_units", err)
+		writeServerErr(w, r, "list org_units", err)
 		return
 	}
 	out := make([]wire, len(rows))
@@ -159,7 +160,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("include_risk_counts") == "true" {
 		counts, cerr := h.store.RiskCountsByOrgUnit(r.Context())
 		if cerr != nil {
-			writeServerErr(w, "risk counts by org_unit", cerr)
+			writeServerErr(w, r, "risk counts by org_unit", cerr)
 			return
 		}
 		// Index the one-query result by org_unit id, then attach to each
@@ -219,7 +220,7 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, risk.ErrNotFound):
 			writeError(w, http.StatusNotFound, err.Error())
 		default:
-			writeServerErr(w, "update org_unit", err)
+			writeServerErr(w, r, "update org_unit", err)
 		}
 		return
 	}
@@ -238,7 +239,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "org_unit not found")
 			return
 		}
-		writeServerErr(w, "delete org_unit", err)
+		writeServerErr(w, r, "delete org_unit", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -284,8 +285,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }

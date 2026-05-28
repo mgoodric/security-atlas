@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -81,7 +82,7 @@ func (h *Handler) CreateCell(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, scope.ErrInvalidDimension):
 			writeError(w, http.StatusBadRequest, err.Error())
 		default:
-			writeServerErr(w, "create cell", err)
+			writeServerErr(w, r, "create cell", err)
 		}
 		return
 	}
@@ -96,7 +97,7 @@ func (h *Handler) ListCells(w http.ResponseWriter, r *http.Request) {
 	}
 	cells, err := h.store.ListCells(ctx)
 	if err != nil {
-		writeServerErr(w, "list cells", err)
+		writeServerErr(w, r, "list cells", err)
 		return
 	}
 	out := make([]cellWire, len(cells))
@@ -114,7 +115,7 @@ func (h *Handler) ListDimensions(w http.ResponseWriter, r *http.Request) {
 	}
 	dims, err := h.store.ListDimensions(ctx)
 	if err != nil {
-		writeServerErr(w, "list dimensions", err)
+		writeServerErr(w, r, "list dimensions", err)
 		return
 	}
 	type dimWire struct {
@@ -151,7 +152,7 @@ func (h *Handler) ControlApplicability(w http.ResponseWriter, r *http.Request) {
 	}
 	cells, err := h.store.ControlApplicability(ctx, controlID)
 	if err != nil {
-		writeServerErr(w, "control applicability", err)
+		writeServerErr(w, r, "control applicability", err)
 		return
 	}
 	out := make([]cellWire, len(cells))
@@ -195,8 +196,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }

@@ -35,6 +35,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -137,7 +138,7 @@ func (h *Handler) CreateException(w http.ResponseWriter, r *http.Request) {
 	}
 	created, err := h.store.Create(ctx, in)
 	if err != nil {
-		h.writeCreateErr(w, err)
+		h.writeCreateErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"exception": exceptionWireFrom(created)})
@@ -153,7 +154,7 @@ func (h *Handler) ListExceptions(w http.ResponseWriter, r *http.Request) {
 	filter := exception.ListFilter{Status: strings.TrimSpace(r.URL.Query().Get("status"))}
 	rows, err := h.store.List(ctx, filter)
 	if err != nil {
-		writeServerErr(w, "list exceptions", err)
+		writeServerErr(w, r, "list exceptions", err)
 		return
 	}
 	out := make([]exceptionWire, len(rows))
@@ -181,7 +182,7 @@ func (h *Handler) GetException(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "exception not found")
 			return
 		}
-		writeServerErr(w, "get exception", err)
+		writeServerErr(w, r, "get exception", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"exception": exceptionWireFrom(e)})
@@ -211,7 +212,7 @@ func (h *Handler) Expiring(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.store.Expiring(ctx, time.Now().UTC(), within)
 	if err != nil {
-		writeServerErr(w, "list expiring", err)
+		writeServerErr(w, r, "list expiring", err)
 		return
 	}
 	out := make([]exceptionWire, len(rows))
@@ -239,7 +240,7 @@ func (h *Handler) AuditLog(w http.ResponseWriter, r *http.Request) {
 	}
 	entries, err := h.store.ListAuditLog(ctx, id)
 	if err != nil {
-		writeServerErr(w, "list audit log", err)
+		writeServerErr(w, r, "list audit log", err)
 		return
 	}
 	type entryWire struct {
@@ -290,7 +291,7 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 	}
 	approved, err := h.store.Approve(ctx, id, cred.ID)
 	if err != nil {
-		h.writeTransitionErr(w, err)
+		h.writeTransitionErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"exception": exceptionWireFrom(approved)})
@@ -318,7 +319,7 @@ func (h *Handler) Deny(w http.ResponseWriter, r *http.Request) {
 	}
 	denied, err := h.store.Deny(ctx, id, cred.ID, req.Reason)
 	if err != nil {
-		h.writeTransitionErr(w, err)
+		h.writeTransitionErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"exception": exceptionWireFrom(denied)})
@@ -350,7 +351,7 @@ func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
 	}
 	activated, err := h.store.Activate(ctx, id, cred.ID, effectiveFrom)
 	if err != nil {
-		h.writeTransitionErr(w, err)
+		h.writeTransitionErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"exception": exceptionWireFrom(activated)})
@@ -358,7 +359,7 @@ func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
 
 // ----- helpers -----
 
-func (h *Handler) writeCreateErr(w http.ResponseWriter, err error) {
+func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, exception.ErrControlRequired),
 		errors.Is(err, exception.ErrJustificationRequired),
@@ -374,11 +375,11 @@ func (h *Handler) writeCreateErr(w http.ResponseWriter, err error) {
 			writeError(w, http.StatusBadRequest, "control_id does not exist in tenant")
 			return
 		}
-		writeServerErr(w, "create exception", err)
+		writeServerErr(w, r, "create exception", err)
 	}
 }
 
-func (h *Handler) writeTransitionErr(w http.ResponseWriter, err error) {
+func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, exception.ErrNotFound):
 		writeError(w, http.StatusNotFound, "exception not found")
@@ -387,7 +388,7 @@ func (h *Handler) writeTransitionErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, exception.ErrSegregationOfDuties):
 		writeError(w, http.StatusForbidden, "approver must differ from requester (segregation of duties)")
 	default:
-		writeServerErr(w, "transition", err)
+		writeServerErr(w, r, "transition", err)
 	}
 }
 
@@ -479,8 +480,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }

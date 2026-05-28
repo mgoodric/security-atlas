@@ -26,6 +26,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 	"github.com/mgoodric/security-atlas/internal/vendor"
 )
@@ -117,7 +118,7 @@ func (h *Handler) CreateVendor(w http.ResponseWriter, r *http.Request) {
 	}
 	v, err := h.store.Create(ctx, in)
 	if err != nil {
-		h.writeStoreErr(w, "create vendor", err)
+		h.writeStoreErr(w, r, "create vendor", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"vendor": h.toWire(v)})
@@ -158,7 +159,7 @@ func (h *Handler) ListVendors(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.store.List(ctx, f)
 	if err != nil {
-		h.writeStoreErr(w, "list vendors", err)
+		h.writeStoreErr(w, r, "list vendors", err)
 		return
 	}
 	out := make([]vendorWire, 0, len(rows))
@@ -182,7 +183,7 @@ func (h *Handler) GetVendor(w http.ResponseWriter, r *http.Request) {
 	}
 	v, err := h.store.Get(ctx, id)
 	if err != nil {
-		h.writeStoreErr(w, "get vendor", err)
+		h.writeStoreErr(w, r, "get vendor", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"vendor": h.toWire(v)})
@@ -208,7 +209,7 @@ func (h *Handler) UpdateVendor(w http.ResponseWriter, r *http.Request) {
 	}
 	v, err := h.store.Update(ctx, id, in)
 	if err != nil {
-		h.writeStoreErr(w, "update vendor", err)
+		h.writeStoreErr(w, r, "update vendor", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"vendor": h.toWire(v)})
@@ -227,7 +228,7 @@ func (h *Handler) DeleteVendor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.Delete(ctx, id); err != nil {
-		h.writeStoreErr(w, "delete vendor", err)
+		h.writeStoreErr(w, r, "delete vendor", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -260,7 +261,7 @@ func (h *Handler) Burndown(w http.ResponseWriter, r *http.Request) {
 	}
 	bd, err := h.store.Burndown(ctx, asOf, crit)
 	if err != nil {
-		h.writeStoreErr(w, "burndown", err)
+		h.writeStoreErr(w, r, "burndown", err)
 		return
 	}
 	out := burndownWire{
@@ -389,7 +390,7 @@ func (h *Handler) tenantContext(r *http.Request) (context.Context, bool) {
 	return r.Context(), true
 }
 
-func (h *Handler) writeStoreErr(w http.ResponseWriter, op string, err error) {
+func (h *Handler) writeStoreErr(w http.ResponseWriter, r *http.Request, op string, err error) {
 	switch {
 	case errors.Is(err, vendor.ErrVendorNotFound):
 		writeError(w, http.StatusNotFound, "vendor not found")
@@ -398,7 +399,7 @@ func (h *Handler) writeStoreErr(w http.ResponseWriter, op string, err error) {
 	case errors.Is(err, vendor.ErrDuplicateDomain):
 		writeError(w, http.StatusConflict, "a vendor with this domain already exists")
 	default:
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": op + ": " + err.Error()})
+		httperr.WriteInternal(w, r, op, err)
 	}
 }
 

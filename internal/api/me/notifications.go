@@ -114,7 +114,7 @@ func (h *NotificationsHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, unread, err := h.store.ListForRecipient(ctx, cred.UserID, limit, offset)
 	if err != nil {
-		writeServerErr(w, "list notifications", err)
+		writeServerErr(w, r, "list notifications", err)
 		return
 	}
 	out := make([]notificationWire, len(rows))
@@ -158,7 +158,7 @@ func (h *NotificationsHandler) MarkRead(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusNotFound, "notification not found")
 			return
 		}
-		writeServerErr(w, "mark notification read", err)
+		writeServerErr(w, r, "mark notification read", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"notification": notificationWireFrom(n)})

@@ -58,6 +58,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -163,7 +164,7 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 			Result: "error:role_probe", Reason: err.Error(),
 			IncludePayload: includePayloadPtr(includePayload),
 		})
-		writeError(w, http.StatusInternalServerError, "role probe: "+err.Error())
+		httperr.WriteInternal(w, r, "role probe", err)
 		return
 	}
 	if !allowed {
