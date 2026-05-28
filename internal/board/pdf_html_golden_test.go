@@ -36,6 +36,7 @@ package board
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -44,12 +45,17 @@ func TestBuildBriefHTML_Golden(t *testing.T) {
 	got := buildBriefHTML(sampleStoredBrief())
 
 	goldenPath := filepath.Join("testdata", "board_brief.golden.html")
-	want, err := os.ReadFile(goldenPath)
+	wantBytes, err := os.ReadFile(goldenPath)
 	if err != nil {
 		t.Fatalf("read golden %q: %v (run `go test -tags=goldenupdate -run TestBuildBriefHTML_Golden ./internal/board/` to regenerate)", goldenPath, err)
 	}
+	// Golden file is stored as POSIX-text (with a trailing LF) so the
+	// pre-commit end-of-file-fixer leaves it alone. The
+	// `buildBriefHTML` output has no trailing LF, so trim before
+	// comparing — bytes-equal up to that one normalization.
+	want := strings.TrimRight(string(wantBytes), "\n")
 
-	if got != string(want) {
+	if got != want {
 		// On mismatch surface a useful diagnostic. Avoid dumping
 		// the entire HTML to the failure message — it's ~3KB and
 		// most differences are localized. Surface the first
@@ -84,6 +90,6 @@ func TestBuildBriefHTML_Golden(t *testing.T) {
 			endWant = len(want)
 		}
 		t.Fatalf("buildBriefHTML golden mismatch at byte %d:\n  got [%d..%d]: %q\n  want[%d..%d]: %q\n(rerun `go test -tags=goldenupdate -run TestBuildBriefHTML_Golden ./internal/board/` to update)",
-			divergeAt, start, endGot, got[start:endGot], start, endWant, string(want)[start:endWant])
+			divergeAt, start, endGot, got[start:endGot], start, endWant, want[start:endWant])
 	}
 }
