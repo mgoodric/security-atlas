@@ -41,6 +41,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -137,6 +138,13 @@ export default function AdminTenantsPage() {
     return null;
   }
 
+  // Slice 363 — form-error association. When the submit-error Alert is
+  // mounted, every input in the form points its aria-describedby at the
+  // Alert's stable id so SR users hear the error when tabbing back to
+  // an input. See `web/components/ui/checkbox.tsx` header for the full
+  // convention.
+  const createErrorId = createError ? "create-tenant-error" : undefined;
+
   return (
     <div className="space-y-6" data-testid="admin-tenants-page">
       <div>
@@ -204,6 +212,7 @@ export default function AdminTenantsPage() {
                   onChange={(e) => setName(e.target.value)}
                   spellCheck={false}
                   autoComplete="off"
+                  aria-describedby={createErrorId}
                 />
               </div>
               <div className="space-y-1">
@@ -221,17 +230,17 @@ export default function AdminTenantsPage() {
                   onChange={(e) => setSlug(e.target.value)}
                   spellCheck={false}
                   autoComplete="off"
+                  aria-describedby={createErrorId}
                 />
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <input
+              <Checkbox
                 id="tenant-join-as-admin"
                 data-testid="tenant-join-as-admin"
-                type="checkbox"
-                className="h-4 w-4 rounded border-input"
                 checked={joinAsAdmin}
-                onChange={(e) => setJoinAsAdmin(e.target.checked)}
+                onCheckedChange={(checked) => setJoinAsAdmin(checked === true)}
+                aria-describedby={createErrorId}
               />
               <label
                 htmlFor="tenant-join-as-admin"
@@ -249,7 +258,11 @@ export default function AdminTenantsPage() {
               {createMutation.isPending ? "Creating…" : "Create tenant"}
             </Button>
             {createError ? (
-              <Alert variant="destructive">
+              <Alert
+                variant="destructive"
+                id="create-tenant-error"
+                aria-live="polite"
+              >
                 <AlertTitle>Create failed</AlertTitle>
                 <AlertDescription data-testid="create-tenant-error">
                   {createError}

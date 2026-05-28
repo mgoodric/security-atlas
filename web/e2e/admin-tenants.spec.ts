@@ -174,4 +174,77 @@ test.describe("admin tenants management page", () => {
       "slug already in use",
     );
   });
+
+  // Slice 363 — assert the form-error association pattern: when the
+  // submit-error Alert mounts, every input in the form carries
+  // `aria-describedby="create-tenant-error"` resolving to the Alert
+  // element's stable id. The Alert also carries `aria-live="polite"`
+  // (complementary to its existing `role="alert"` — assertive
+  // interrupts, polite waits, both fire). See
+  // `web/components/ui/checkbox.tsx` for the convention.
+  test("a11y: submit-with-error wires aria-describedby on inputs to the alert id (WCAG 3.3.1)", async ({
+    authedPage,
+  }) => {
+    await authedPage.route("**/api/admin/tenants", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ items: [SEED_BOOTSTRAP] }),
+        });
+        return;
+      }
+      if (route.request().method() === "POST") {
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "slug already in use" }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await authedPage.goto("/admin/tenants");
+
+    // Pre-submit: inputs have NO aria-describedby (no alert mounted).
+    await expect(
+      authedPage.getByTestId("tenant-name-input"),
+    ).not.toHaveAttribute("aria-describedby", /.+/);
+    await expect(
+      authedPage.getByTestId("tenant-slug-input"),
+    ).not.toHaveAttribute("aria-describedby", /.+/);
+
+    // Submit a request that the upstream rejects with 409.
+    await authedPage.getByTestId("tenant-name-input").fill("Triggering");
+    await authedPage.getByTestId("tenant-slug-input").fill("test-tenant-a");
+    await authedPage.getByTestId("create-tenant-submit").click();
+
+    // Error alert mounts.
+    const errorDesc = authedPage.getByTestId("create-tenant-error");
+    await expect(errorDesc).toBeVisible();
+
+    // The wrapping Alert element (NOT the description div) carries the
+    // stable id + aria-live. We locate it directly by id; CSS selectors
+    // need to escape `#` since it's a literal element id.
+    const alertEl = authedPage.locator("#create-tenant-error");
+    await expect(alertEl).toBeVisible();
+    await expect(alertEl).toHaveAttribute("role", "alert");
+    await expect(alertEl).toHaveAttribute("aria-live", "polite");
+
+    // Every input now carries aria-describedby pointing at the alert.
+    await expect(authedPage.getByTestId("tenant-name-input")).toHaveAttribute(
+      "aria-describedby",
+      "create-tenant-error",
+    );
+    await expect(authedPage.getByTestId("tenant-slug-input")).toHaveAttribute(
+      "aria-describedby",
+      "create-tenant-error",
+    );
+    // The Checkbox primitive forwards aria-describedby to the Base-UI
+    // root; assert by the testid we attached to the primitive.
+    await expect(
+      authedPage.getByTestId("tenant-join-as-admin"),
+    ).toHaveAttribute("aria-describedby", "create-tenant-error");
+  });
 });
