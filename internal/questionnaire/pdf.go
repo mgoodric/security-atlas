@@ -30,6 +30,13 @@ import (
 // generous.
 const PDFTimeout = 30 * time.Second
 
+// chromedpWSURLReadTimeout overrides chromedp's hardcoded 20s
+// wsURLReadTimeout watchdog (see chromedp v0.15.1 allocate.go:249).
+// Slice 340 diagnosed this watchdog firing on Harden-Runner audit-
+// mode-stretched Chrome startup; this slice fans the fix out to
+// the four sibling PDF renderers. See slice 341.
+const chromedpWSURLReadTimeout = 60 * time.Second
+
 // ErrChromeUnavailable signals the headless browser isn't available
 // in this environment. The HTTP handler maps this to 503 so operators
 // can run the platform without Chrome (PDF export disabled) until they
@@ -81,6 +88,7 @@ func RenderPDF(ctx context.Context, in PDFInput) ([]byte, error) {
 			chromedp.DisableGPU,
 			chromedp.Headless,
 			chromedp.Flag("hide-scrollbars", true),
+			chromedp.WSURLReadTimeout(chromedpWSURLReadTimeout),
 		)
 		var allocCtx context.Context
 		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)

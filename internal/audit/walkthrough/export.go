@@ -30,6 +30,13 @@ import (
 // 45s is generous for CI where Chrome may cold-start under contention.
 const PDFTimeout = 45 * time.Second
 
+// chromedpWSURLReadTimeout overrides chromedp's hardcoded 20s
+// wsURLReadTimeout watchdog (see chromedp v0.15.1 allocate.go:249).
+// Slice 340 diagnosed this watchdog firing on Harden-Runner audit-
+// mode-stretched Chrome startup; this slice fans the fix out to
+// the four sibling PDF renderers. See slice 341.
+const chromedpWSURLReadTimeout = 60 * time.Second
+
 // ErrChromeUnavailable is returned when chromedp could not launch a
 // browser. Handlers map this to 503 so operators can run the platform
 // without Chrome (PDF endpoint disabled) until they install it.
@@ -136,6 +143,7 @@ func RenderPDF(ctx context.Context, w Walkthrough) ([]byte, error) {
 			chromedp.DisableGPU,
 			chromedp.Headless,
 			chromedp.Flag("hide-scrollbars", true),
+			chromedp.WSURLReadTimeout(chromedpWSURLReadTimeout),
 		)
 		var allocCtx context.Context
 		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)
