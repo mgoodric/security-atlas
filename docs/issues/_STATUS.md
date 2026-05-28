@@ -3,6 +3,21 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
+**Last reconciled:** 2026-05-28 (slice 328 audit report + 3 spillover slices filed — slots 369/370/371 — voltagent-qa-sec code-reviewer pass)
+
+## Drift detected — 2026-05-28 (slice 328 audit complete + 3 spillover slices filed)
+
+Slice 328 comprehensive code-review audit complete. Audit report at `docs/audits/328-code-review-comprehensive-report.md`; decisions log at `docs/audit-log/328-code-review-comprehensive-decisions.md`. 13 findings classified: 0 Critical, 2 High, 4 Medium, 3 Low, 4 Informational. Zero correctness bugs surfaced. Findings are dominated by reuse/structure (god-files, duplicated helpers) and convention drift (auth substrate clock injection); the codebase is exceptionally clean on doc density, TODO debt (4 hits codebase-wide), and package-boundary direction (zero violations). Slice 327 cross-reference: zero duplicate findings.
+
+Two High findings filed as spillover slices: H-1 (writeJSON/writeError consolidation across 50+ packages, slot 369) and H-2 (web/lib/api.ts 2901-LOC god-file split, slot 370). One Medium filed as spillover slice: M-2 (auth-substrate clock injection drift across sessions/apikeystore/jwtmw, slot 371). Three Mediums filed as audit-report-only per JUDGMENT (M-1 httpserver.go god-file is architectural-project shape not slice shape; M-3 SESSION_COOKIE rename bundles into H-2; M-4 Python OSCAL str(exc) is cross-referenced to slice 327's M-2 thread for maintainer choice).
+
+| Row | Transition            | Evidence                                                                                                                                                                                                        |
+| --- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 328 | `ready` → `in-review` | PR pending · audit report + decisions log + 3 spillover slice docs · 0/2/4/3/4 findings (Critical/High/Medium/Low/Informational) · zero correctness bugs · zero slice-327 duplicates                            |
+| 369 | (new row) → `ready`   | spec at `docs/issues/369-httpresp-shared-helper-consolidation.md` · H-1 spillover from slice 328 · infra · 3d · 101 duplicate-helper consolidation into `internal/api/httpresp` mirror of slice 367's `httperr` |
+| 370 | (new row) → `ready`   | spec at `docs/issues/370-web-api-client-split.md` · H-2 spillover from slice 328 · web · 3d · `web/lib/api.ts` 2901-LOC + 219-export split into per-domain files under `web/lib/api/`                           |
+| 371 | (new row) → `ready`   | spec at `docs/issues/371-auth-clock-injection-substrate.md` · M-2 spillover from slice 328 · auth · 1d · clock-injection convention drift across sessions + apikeystore + jwtmw                                 |
+
 **Last reconciled:** 2026-05-28 (claim-stake · batch 130 · 340 → in-progress — chromedp flake investigation)
 
 ## Drift detected — 2026-05-27 (slice 340 → in-review + slice 341 filed)
