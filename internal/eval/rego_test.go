@@ -17,6 +17,7 @@ import (
 // ===== ISC-19: a Rego evidence query evaluates with input = records only =====
 
 func TestEvalRegoQuery_PassWhenAllRecordsPass(t *testing.T) {
+	t.Parallel()
 	// The query inspects input.records and asserts every record passed.
 	policy := `
 package evidence.query
@@ -38,6 +39,7 @@ result := "pass" if {
 }
 
 func TestEvalRegoQuery_FailWhenARecordFails(t *testing.T) {
+	t.Parallel()
 	policy := `
 package evidence.query
 import rego.v1
@@ -58,6 +60,7 @@ result := "pass" if {
 }
 
 func TestEvalRegoQuery_EmptyRecordsHandled(t *testing.T) {
+	t.Parallel()
 	// With zero records the policy's default branch fires. The engine maps a
 	// non-pass Rego result over an empty record set to `inconclusive` at the
 	// caller; evalRegoQuery itself just returns whatever the policy said.
@@ -80,6 +83,7 @@ result := "pass" if {
 }
 
 func TestEvalRegoQuery_EmptyPolicyErrors(t *testing.T) {
+	t.Parallel()
 	if _, err := evalRegoQuery(context.Background(), "", nil); err == nil {
 		t.Fatalf("evalRegoQuery(empty policy) should error")
 	}
@@ -88,6 +92,7 @@ func TestEvalRegoQuery_EmptyPolicyErrors(t *testing.T) {
 // ===== ISC-20 + ISC-21: the sandbox strips network/runtime builtins =====
 
 func TestEvalRegoQuery_HTTPSendRejectedAtCompileTime(t *testing.T) {
+	t.Parallel()
 	// A query that tries to reach the network must fail to COMPILE — the
 	// builtin is not in the restricted capability set. This is the
 	// structural half of the AI-assist-boundary guarantee: a
@@ -110,6 +115,7 @@ result := "pass" if {
 }
 
 func TestEvalRegoQuery_OPARuntimeRejectedAtCompileTime(t *testing.T) {
+	t.Parallel()
 	hostile := `
 package evidence.query
 import rego.v1
@@ -125,6 +131,7 @@ result := "pass" if {
 }
 
 func TestSandboxCapabilities_StripsDeniedBuiltins(t *testing.T) {
+	t.Parallel()
 	caps := evalSandboxCapabilities()
 	for _, b := range caps.Builtins {
 		switch b.Name {

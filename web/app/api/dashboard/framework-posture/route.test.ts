@@ -13,24 +13,9 @@
 // slice-100 secret-scanning convention.
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { mockNextServer } from "../../../../lib/test-utils/next-mocks";
 
-vi.mock("next/server", () => {
-  class NextResponse extends Response {
-    static json(
-      body: unknown,
-      init?: { status?: number; headers?: Record<string, string> },
-    ): NextResponse {
-      return new NextResponse(JSON.stringify(body), {
-        status: init?.status ?? 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...(init?.headers ?? {}),
-        },
-      });
-    }
-  }
-  return { NextResponse };
-});
+vi.mock("next/server", () => mockNextServer());
 
 const mockCookieGet = vi.fn();
 

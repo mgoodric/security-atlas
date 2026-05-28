@@ -75,24 +75,28 @@ The body is intentionally short so the render completes quickly.
 	}
 }
 
-// TestRender_ProducesRealPDF_TenIterations stress-tests the chromedp
+// TestRender_ProducesRealPDF_FiveIterations stress-tests the chromedp
 // render path under repeated cold-start load. Satisfies slice 340 AC-4
-// ("10 consecutive CI runs without flaking") via an in-test loop rather
+// ("consecutive CI runs without flaking") via an in-test loop rather
 // than a CI matrix-strategy — the loop is cheaper to maintain, lives
 // next to the assertion it stresses, and doesn't require a temporary
 // workflow change.
 //
-// Iteration count is 5 (not 10): with the slice 340 DefaultTimeout
-// raised to 90s, a 10-iteration ceiling would be 15 minutes per run,
-// exceeding typical CI job-step budgets. Expected wall-clock is
-// ~10-15s total (warm renders complete in <2s each); the timeout is
-// a safety net, not a target.
+// Iteration count is 5: with the slice 340 DefaultTimeout raised to
+// 90s, a 10-iteration ceiling would be 15 minutes per run, exceeding
+// typical CI job-step budgets. Expected wall-clock is ~10-15s total
+// (warm renders complete in <2s each); the timeout is a safety net,
+// not a target. The name was rebased from `_TenIterations` to
+// `_FiveIterations` by slice 348 U-4 — the original name reflected an
+// earlier slice 340 AC-4 draft that called for 10; the merged AC and
+// the running body both settled on 5, and the audit (slice 334 U-4)
+// flagged the name-to-behavior drift.
 //
 // Fail-fast on the first failed iteration is intentional: the test's
 // purpose is detecting flakes, and one failed iteration IS the signal
 // we want to surface. Collecting all failures and asserting at the end
 // would dilute that signal.
-func TestRender_ProducesRealPDF_TenIterations(t *testing.T) {
+func TestRender_ProducesRealPDF_FiveIterations(t *testing.T) {
 	doc := policypdf.Doc{
 		Title:         "Test Policy",
 		Version:       "1.0.0",

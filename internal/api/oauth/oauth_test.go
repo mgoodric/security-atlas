@@ -39,6 +39,7 @@ func newRouter(h *oauth.Handler) chi.Router {
 // ISC-20 + ISC-22 + ISC-23 + AC-7: JWKS endpoint returns a valid JWK
 // Set with cache headers and no auth.
 func TestJWKSHandlerReturnsKeys(t *testing.T) {
+	t.Parallel()
 	h, _ := newHandler(t)
 	r := newRouter(h)
 
@@ -72,6 +73,7 @@ func TestJWKSHandlerReturnsKeys(t *testing.T) {
 // ISC-21: multi-key support — JWKS handler always returns an array
 // shape, even when only one key is present.
 func TestJWKSHandlerReturnsArrayShape(t *testing.T) {
+	t.Parallel()
 	h, _ := newHandler(t)
 	r := newRouter(h)
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
@@ -94,6 +96,7 @@ func TestJWKSHandlerReturnsArrayShape(t *testing.T) {
 // ISC-38 + AC-11: JWKS round-trip. Sign a token with the keystore,
 // fetch JWKS, verify the JWT using the published public key.
 func TestJWKSRoundTripVerifiesSignedJWT(t *testing.T) {
+	t.Parallel()
 	h, signer := newHandler(t)
 	r := newRouter(h)
 
@@ -145,6 +148,7 @@ func TestJWKSRoundTripVerifiesSignedJWT(t *testing.T) {
 // and an empty grant_types_supported array (honest about what's
 // stubbed).
 func TestOIDCDiscoveryDocument(t *testing.T) {
+	t.Parallel()
 	h, _ := newHandler(t)
 	r := newRouter(h)
 
@@ -219,6 +223,7 @@ func TestOIDCDiscoveryDocument(t *testing.T) {
 // `slice_pending` error body pointing at the future slice that lands
 // the real handler.
 func TestOAuthStubsReturn501(t *testing.T) {
+	t.Parallel()
 	h, _ := newHandler(t)
 	r := newRouter(h)
 

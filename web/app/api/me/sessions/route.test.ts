@@ -13,6 +13,7 @@
 // same forwarding shape per slice 110 AC-2 + AC-4.
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { mockNextServer } from "../../../../lib/test-utils/next-mocks";
 
 const cookieStore = new Map<string, string>();
 
@@ -23,23 +24,7 @@ vi.mock("next/headers", () => ({
   }),
 }));
 
-vi.mock("next/server", () => {
-  class NextResponse extends Response {
-    static json(
-      body: unknown,
-      init?: { status?: number; headers?: Record<string, string> },
-    ): NextResponse {
-      return new NextResponse(body === null ? "null" : JSON.stringify(body), {
-        status: init?.status ?? 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...(init?.headers ?? {}),
-        },
-      });
-    }
-  }
-  return { NextResponse };
-});
+vi.mock("next/server", () => mockNextServer());
 
 import { SESSION_COOKIE, OIDC_SESSION_COOKIE } from "@/lib/auth";
 import { GET, DELETE } from "./route";

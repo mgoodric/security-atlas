@@ -11,24 +11,10 @@
 // token prefixes (per slice 098 P0-A5 + GitGuardian discipline).
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { mockNextServer } from "../../../lib/test-utils/next-mocks";
+import { TEST_BEARER_263 } from "../../../lib/test-utils/test-tokens";
 
-vi.mock("next/server", () => {
-  class NextResponse extends Response {
-    static json(
-      body: unknown,
-      init?: { status?: number; headers?: Record<string, string> },
-    ): NextResponse {
-      return new NextResponse(JSON.stringify(body), {
-        status: init?.status ?? 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...(init?.headers ?? {}),
-        },
-      });
-    }
-  }
-  return { NextResponse };
-});
+vi.mock("next/server", () => mockNextServer());
 
 const mockCookieGet = vi.fn();
 
@@ -69,7 +55,7 @@ describe("GET /api/questionnaires", () => {
   });
 
   test("forwards bearer + returns upstream list on success", async () => {
-    mockCookieGet.mockReturnValue({ value: "test-bearer-263" });
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -100,11 +86,11 @@ describe("GET /api/questionnaires", () => {
     expect(calledURL).toContain("/v1/questionnaires");
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     const headers = init?.headers as Record<string, string> | undefined;
-    expect(headers?.Authorization).toBe("Bearer test-bearer-263");
+    expect(headers?.Authorization).toBe(`Bearer ${TEST_BEARER_263}`);
   });
 
   test("propagates upstream error status on GET", async () => {
-    mockCookieGet.mockReturnValue({ value: "test-bearer-263" });
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response("server error", { status: 502 }),
     );
@@ -133,7 +119,7 @@ describe("POST /api/questionnaires", () => {
   });
 
   test("forwards body and bearer on POST", async () => {
-    mockCookieGet.mockReturnValue({ value: "test-bearer-263" });
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -157,7 +143,7 @@ describe("POST /api/questionnaires", () => {
   });
 
   test("propagates upstream error status on POST", async () => {
-    mockCookieGet.mockReturnValue({ value: "test-bearer-263" });
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response("server error", { status: 500 }),
     );

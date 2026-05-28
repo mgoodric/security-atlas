@@ -1,24 +1,10 @@
 // Slice 263 — vitest coverage for the multipart import-excel BFF.
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { mockNextServer } from "../../../../../lib/test-utils/next-mocks";
+import { TEST_BEARER_263 } from "../../../../../lib/test-utils/test-tokens";
 
-vi.mock("next/server", () => {
-  class NextResponse extends Response {
-    static json(
-      body: unknown,
-      init?: { status?: number; headers?: Record<string, string> },
-    ): NextResponse {
-      return new NextResponse(JSON.stringify(body), {
-        status: init?.status ?? 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...(init?.headers ?? {}),
-        },
-      });
-    }
-  }
-  return { NextResponse };
-});
+vi.mock("next/server", () => mockNextServer());
 
 const mockCookieGet = vi.fn();
 
@@ -62,7 +48,7 @@ describe("POST /api/questionnaires/[id]/import-excel", () => {
   });
 
   test("forwards multipart body and bearer", async () => {
-    mockCookieGet.mockReturnValue({ value: "test-bearer-263" });
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ questions: [], unmapped_columns: [] }), {
         status: 201,
@@ -86,12 +72,12 @@ describe("POST /api/questionnaires/[id]/import-excel", () => {
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     expect(init?.method).toBe("POST");
     const headers = init?.headers as Record<string, string> | undefined;
-    expect(headers?.Authorization).toBe("Bearer test-bearer-263");
+    expect(headers?.Authorization).toBe(`Bearer ${TEST_BEARER_263}`);
     expect(init?.body).toBeInstanceOf(FormData);
   });
 
   test("propagates upstream 413 too-large", async () => {
-    mockCookieGet.mockReturnValue({ value: "test-bearer-263" });
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "upload exceeds size cap" }), {
         status: 413,

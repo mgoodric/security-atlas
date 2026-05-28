@@ -6,6 +6,7 @@
 // renders the default page only.
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { mockNextServer } from "../../../../../lib/test-utils/next-mocks";
 
 const cookieStore = new Map<string, string>();
 
@@ -16,24 +17,7 @@ vi.mock("next/headers", () => ({
   }),
 }));
 
-vi.mock("next/server", () => {
-  class NextRequest extends Request {}
-  class NextResponse extends Response {
-    static json(
-      body: unknown,
-      init?: { status?: number; headers?: Record<string, string> },
-    ): NextResponse {
-      return new NextResponse(body === null ? "null" : JSON.stringify(body), {
-        status: init?.status ?? 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...(init?.headers ?? {}),
-        },
-      });
-    }
-  }
-  return { NextRequest, NextResponse };
-});
+vi.mock("next/server", () => mockNextServer());
 
 import { GET } from "./route";
 

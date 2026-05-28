@@ -18,6 +18,10 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  TEST_BEARER_A,
+  TEST_BEARER_B,
+} from "../../../lib/test-utils/test-tokens";
+import {
   initialState,
   reduce,
   type FreshTokenState,
@@ -124,20 +128,20 @@ describe("plaintext-once invariant under realistic flow", () => {
     let state = initialState;
     state = reduce(state, {
       kind: "ISSUED",
-      bearer: "test-bearer-a",
+      bearer: TEST_BEARER_A,
       last4: "aaaa",
       issued_at: "2026-05-15T00:00:00Z",
     });
     state = reduce(state, {
       kind: "ISSUED",
-      bearer: "test-bearer-b",
+      bearer: TEST_BEARER_B,
       last4: "bbbb",
       issued_at: "2026-05-16T00:00:00Z",
     });
     // Only the most-recent plaintext survives in state. The prior
     // one is GC'd.
-    expect(JSON.stringify(state)).not.toContain("test-bearer-a");
-    expect(JSON.stringify(state)).toContain("test-bearer-b");
+    expect(JSON.stringify(state)).not.toContain(TEST_BEARER_A);
+    expect(JSON.stringify(state)).toContain(TEST_BEARER_B);
   });
 });
 
