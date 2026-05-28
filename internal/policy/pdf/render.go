@@ -39,9 +39,27 @@ type Doc struct {
 }
 
 // DefaultTimeout is the wall-clock budget for a single render. Headless
-// Chrome boot + PrintToPDF on a 1-page policy is typically <2s; 30s is
-// generous.
-const DefaultTimeout = 30 * time.Second
+// Chrome boot + PrintToPDF on a 1-page policy is typically <2s on a
+// developer laptop, but the GitHub Actions ubuntu-latest runner with
+// StepSecurity Harden-Runner audit-mode egress instrumentation (slice 117)
+// can take 20-40s to print its DevTools websocket URL on a cold start
+// because Chrome's startup network calls (component-updater, GPU blocklist
+// refresh) traverse the audited egress hook. The 90s budget = 60s WS-URL
+// read window (see chromedpWSURLReadTimeout below) + 30s render headroom.
+// Slice 340 raised this from the original 30s after diagnosing the
+// `--- FAIL: TestRender_ProducesRealPDF (20.04s)` chromedp websocket-url
+// timeout flake (5 consecutive CI failures across slices 312/315/320).
+const DefaultTimeout = 90 * time.Second
+
+// chromedpWSURLReadTimeout overrides chromedp's hardcoded 20s
+// "wait for Chrome to print `DevTools listening on ws://...` to stderr"
+// timer. The default fires at 20.0s flat in CI when Chrome's startup is
+// stretched by Harden-Runner audit-mode latency (slice 117) — see
+// internal slice 340 decisions log for the diagnosis trail. 60s is the
+// canonical "make chromedp work in CI containers" value used by
+// upstream chromedp examples. Local fast-path renders are unaffected
+// because Chrome prints the WS URL in <1s on a warm machine.
+const chromedpWSURLReadTimeout = 60 * time.Second
 
 // ErrChromeUnavailable is returned when chromedp could not launch a
 // browser. The HTTP handler maps this to 503 so operators can run the
@@ -81,6 +99,12 @@ func Render(ctx context.Context, doc Doc) ([]byte, error) {
 			chromedp.DisableGPU,
 			chromedp.Headless,
 			chromedp.Flag("hide-scrollbars", true),
+			// Slice 340: extend chromedp's hardcoded 20s "wait for
+			// DevTools websocket URL" watchdog to 60s. Without this,
+			// the GitHub Actions runner with Harden-Runner audit-mode
+			// (slice 117) flakes at exactly 20.04s in 4-of-5 runs.
+			// Local renders complete in <1s and are unaffected.
+			chromedp.WSURLReadTimeout(chromedpWSURLReadTimeout),
 		)
 		var allocCtx context.Context
 		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)

@@ -22,14 +22,15 @@ import (
 )
 
 func TestRender_ProducesRealPDF(t *testing.T) {
-	// Temporarily quarantined per slice 340 — chromedp websocket-url
-	// timeout flake has bit 5 consecutive CI runs across slices 312
-	// / 314 / 315 / 320 (4 attempts on PR #753 alone). The flake is
-	// in the chromedp/headless-Chrome layer, not in the test or the
-	// pdf renderer itself. Quarantine unblocks the merge gate while
-	// the root cause is investigated. Track at slice 340.
-	t.Skip("chromedp flake — see slice 340 for re-enable")
-
+	// Slice 340 re-enable: the chromedp websocket-url-timeout flake
+	// (5 consecutive CI failures across slices 312/315/320, all at
+	// exactly 20.04s) was diagnosed as chromedp's hardcoded 20s
+	// wsURLReadTimeout firing before Chrome on the GHA runner could
+	// print its `DevTools listening on ws://...` line to stderr,
+	// stretched by Harden-Runner audit-mode egress instrumentation
+	// (slice 117). Fix landed in render.go: WSURLReadTimeout(60s) +
+	// DefaultTimeout 30s→90s. Full diagnosis at
+	// docs/audit-log/340-chromedp-flake-decisions.md.
 	doc := policypdf.Doc{
 		Title:         "Test Policy",
 		Version:       "1.0.0",
