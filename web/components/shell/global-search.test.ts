@@ -20,7 +20,14 @@
 
 import { describe, expect, test } from "vitest";
 
-import { groupByType, hrefForHit, isShortcutTrigger } from "./global-search";
+import {
+  groupByType,
+  hrefForHit,
+  isShortcutTrigger,
+  LISTBOX_ID,
+  optionIdFor,
+  resultCountAnnouncement,
+} from "./global-search";
 
 interface Hit {
   id: string;
@@ -142,5 +149,66 @@ describe("isShortcutTrigger", () => {
     expect(isShortcutTrigger({ key: "", metaKey: true, ctrlKey: false })).toBe(
       false,
     );
+  });
+});
+
+// Slice 361 — WCAG 4.1.2 Name/Role/Value combobox wiring helpers.
+// `optionIdFor` and `resultCountAnnouncement` are exported so the pure
+// logic can be regression-pinned without standing up the full
+// component.
+describe("optionIdFor (slice 361)", () => {
+  test("controls row id encodes the type prefix + the upstream id", () => {
+    expect(optionIdFor("controls", "cc-1-2-3")).toBe(
+      "global-search-option-controls-cc-1-2-3",
+    );
+  });
+
+  test("risks row id encodes the type prefix + the upstream id", () => {
+    expect(optionIdFor("risks", "r-007")).toBe(
+      "global-search-option-risks-r-007",
+    );
+  });
+
+  test("evidence row id encodes the type prefix + the upstream id", () => {
+    expect(optionIdFor("evidence", "ev-42")).toBe(
+      "global-search-option-evidence-ev-42",
+    );
+  });
+
+  test("type-prefix isolates collisions across the three render buckets", () => {
+    // Two upstream rows with the same id but different types must
+    // resolve to distinct DOM ids (the input's `aria-activedescendant`
+    // must name exactly one row).
+    const controlsId = optionIdFor("controls", "shared");
+    const risksId = optionIdFor("risks", "shared");
+    const evidenceId = optionIdFor("evidence", "shared");
+    expect(new Set([controlsId, risksId, evidenceId]).size).toBe(3);
+  });
+});
+
+describe("resultCountAnnouncement (slice 361)", () => {
+  test("zero results announces 'No results'", () => {
+    expect(resultCountAnnouncement(0)).toBe("No results");
+  });
+
+  test("one result uses singular form (SR voice naturalness)", () => {
+    expect(resultCountAnnouncement(1)).toBe("1 result");
+  });
+
+  test("two results uses plural form", () => {
+    expect(resultCountAnnouncement(2)).toBe("2 results");
+  });
+
+  test("larger counts use plural form", () => {
+    expect(resultCountAnnouncement(45)).toBe("45 results");
+  });
+});
+
+describe("LISTBOX_ID (slice 361)", () => {
+  test("is the stable id the input's aria-controls resolves to", () => {
+    // Constant by design — pinned so a future rename surfaces a
+    // failing test rather than a silent divergence between the input
+    // and the popover.
+    expect(LISTBOX_ID).toBe("global-search-listbox");
   });
 });
