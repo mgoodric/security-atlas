@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -124,62 +123,22 @@ func (s *Server) httpHandler() http.Handler {
 	// internal/api/securityheaders/middleware.go.
 	root.Use(securityheaders.Middleware)
 	root.Use(corsMiddleware)
-	// Slice 190: JWT validation middleware. When wired via
-	// AttachJWTValidator, this runs BEFORE the legacy bearer
-	// middleware (slice 034) so a JWT-bearing request is gated by
-	// the OAuth AS signature + claim + revocation pipeline. The
-	// middleware naturally passes through requests with no
-	// JWT-shaped Authorization header AND no JWT cookie — the
-	// downstream legacy bearer middleware then handles the opaque
-	// bearer path. Exempt prefixes mirror the legacy middleware so
-	// `/oauth/*` (which authenticates itself via client_credentials)
-	// is not double-gated. P0-190-9 — JWT middleware operates only
-	// on `/v1/*` effectively, by virtue of letting all other paths
-	// fall through to their own handling.
-	// Slice 191 CUTOVER (P0-191-11) — COMPLETED by slice 197.
+	// Slice 190 + 197 + 326: JWT validation middleware is the SOLE
+	// auth middleware on `/v1/*`. The slice 191 `legacyBearerDeprecation`
+	// 410-Gone responder for `atlas_`-prefixed legacy bearers was
+	// retired in slice 326 after the slice 191 → 197 → 201 cutover
+	// closed. Any caller still presenting a legacy `atlas_`-prefixed
+	// bearer now traverses the JWT path: `jwtmw.extractJWT` rejects
+	// the shape (only `eyJ`-prefixed tokens are JWT candidates), the
+	// middleware passes through, and the `requireCredential` gate
+	// below terminates the request with 401. The legacy migration URL
+	// remains documented in the v1.X release notes for any holder
+	// still on the legacy path.
 	//
-	// The legacy 410 deprecation responder catches any `atlas_`-prefixed
-	// bearer (the slice 034 production prefix from `bearer.PrefixProd`)
-	// and returns 410 Gone + a JSON body carrying the migration URL
-	// (P0-191-3). Non-legacy traffic falls through to the JWT middleware
-	// below. JWTs always start "eyJ"; they cannot collide with the
-	// "atlas_" prefix.
-	//
-	// Slice 197 closed the cutover by:
-	//
-	//   1. Migrating ~30 integration test fixtures from
-	//      `srv.IssueBootstrapCredential` (slice 034 opaque bearer) to
-	//      `srv.IssueTestJWT` (slice 190 JWT path).
-	//   2. Removing the `atlas_test_` carve-out from the responder
-	//      below (`legacyBearerDeprecation`).
-	//   3. Removing the `httpAuthMiddlewareWithExemptions` mount that
-	//      used to follow this comment block. The function still
-	//      exists (used by the middleware's own integration tests in
-	//      `securityheaders_integration_test.go` +
-	//      `metrics_endpoint_test.go`).
-	//
-	// After slice 197: `/v1/*` is gated EXCLUSIVELY on the slice 190
-	// JWT middleware (when wired). Legacy `atlas_`-prefixed bearers
-	// always 410. The credstore + apikeystore packages remain for
-	// historical-record reads (`/v1/admin/credentials` GET) and the
-	// fixed-token bootstrap path (`IssueBootstrapFixedAdminCredential`,
-	// still used by slice 037's docker-compose bundle's one-shot
-	// container). Their retirement is a v3 work item (slice 191 D3).
-	root.Use(legacyBearerDeprecation(s.deprecationMigrationURL,
-		"/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state",
-		"/v1/calendar.ics", "/.well-known/", "/oauth/token", "/oauth/authorize",
-		"/oauth/revoke", "/oauth/introspect", "/oauth/device_authorization"))
-	// Slice 190: JWT validation middleware. After the slice 197 cutover
-	// completion this is the ONLY auth middleware on `/v1/*`. Requests
-	// without a JWT-shaped Authorization header AND without a JWT
-	// cookie pass through unchanged — handlers that require a credential
-	// fail their per-handler auth check.
-	//
-	// Slice 197: gated on `s.jwtSigner != nil` only — the revocation
-	// store is optional. Integration tests wire the signer via
-	// `Server.IssueTestJWT` and pass nil for the revocation store
+	// Gated on `s.jwtSigner != nil`. Integration tests wire the signer
+	// via `Server.IssueTestJWT` and pass nil for the revocation store
 	// (the middleware short-circuits revocation lookup on a nil store
-	// per `jwtmw.Middleware` line 150).
+	// per `jwtmw.Middleware`).
 	if s.jwtSigner != nil {
 		// Slice 191 narrowing: the JWT bypass list previously included
 		// the entire `/oauth/` prefix. Slice 191 adds two routes —
@@ -201,13 +160,17 @@ func (s *Server) httpHandler() http.Handler {
 			"/oauth/authorize", "/oauth/revoke", "/oauth/introspect",
 			"/oauth/device_authorization", "/v1/test/issue-jwt"))
 		// Slice 197: fail-closed credential requirement. The slice 190
-		// JWT middleware passes through requests with NO JWT shape so
-		// the legacy bearer middleware could pick them up; with the
-		// legacy mount removed in slice 197, those requests would
-		// otherwise reach handlers unauthenticated. This middleware
-		// fires AFTER jwtmw and returns 401 on any non-exempt path
-		// that has no credential in context. The exempt set mirrors
-		// the JWT middleware bypass list.
+		// JWT middleware passes through requests with NO JWT shape
+		// (e.g. malformed bearers or no Authorization header); without
+		// this gate they would reach handlers unauthenticated. This
+		// middleware fires AFTER jwtmw and returns 401 on any
+		// non-exempt path that has no credential in context. The
+		// exempt set mirrors the JWT middleware bypass list.
+		//
+		// Slice 326: this gate is the post-retirement terminus for
+		// legacy `atlas_`-prefixed bearers. `jwtmw.extractJWT` rejects
+		// them as non-JWT shape and passes through; this middleware
+		// then 401s. The slice 191 410-Gone responder is retired.
 		//
 		// P0-191-1 invariant restored at the platform level: there is
 		// no auth-bypass window for requests with no token.
@@ -1187,95 +1150,6 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// legacyBearerDeprecation is the slice 191 410 Gone responder. It
-// runs BEFORE the JWT middleware so requests presenting a legacy
-// slice-034 api_keys-shaped bearer (any `atlas_...` token) receive
-// a 410 with a machine-readable migration URL — never a silent 401
-// from a downstream "no credential" check. P0-191-11 (fail-closed
-// cutover); P0-191-3 (migration URL in body).
-//
-// Slice 197: the `atlas_test_` carve-out present in slice 191's
-// partial cutover is REMOVED. Every `atlas_`-prefixed bearer hits
-// 410 — including the legacy `atlas_test_` shape that integration
-// fixtures used. After slice 197 those fixtures mint JWTs via
-// `Server.IssueTestJWT`, so the only callers seeing 410 are real
-// legacy production keys.
-//
-// The detection is intentionally narrow: we only match the prefix
-// pattern the slice 034 `bearer.Generate` function emits. JWT
-// bearers always start "eyJ" (the base64url-encoded JWS header
-// `{`); they cannot collide with the "atlas_" prefix.
-//
-// Exempt prefixes mirror the JWT middleware's bypass list — the
-// `/oauth/*`, `/.well-known/*`, `/auth/*`, `/health`, `/metrics`,
-// and public metadata paths are unauthenticated by design and
-// must not trip the deprecation guard.
-func legacyBearerDeprecation(migrationURL string, exempt ...string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Same exact-vs-prefix semantic as jwtBypass: entries
-			// ending in "/" are prefix matches; entries without a
-			// trailing slash are exact-path matches. Lets us exempt
-			// `/oauth/device_authorization` (RFC 8628 §3.1 endpoint
-			// — public, no auth required) without simultaneously
-			// exempting `/oauth/device_authorization/approve` and
-			// `/deny` (slice 191 authenticated approval endpoints).
-			for _, p := range exempt {
-				if p == "" {
-					continue
-				}
-				if strings.HasSuffix(p, "/") {
-					if strings.HasPrefix(r.URL.Path, p) {
-						next.ServeHTTP(w, r)
-						return
-					}
-				} else if r.URL.Path == p {
-					next.ServeHTTP(w, r)
-					return
-				}
-			}
-			auth := r.Header.Get("Authorization")
-			if auth == "" {
-				next.ServeHTTP(w, r)
-				return
-			}
-			parts := strings.SplitN(strings.TrimSpace(auth), " ", 2)
-			if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
-				next.ServeHTTP(w, r)
-				return
-			}
-			tok := strings.TrimSpace(parts[1])
-			// Match the slice 034 `bearer.Generate` prefix. JWTs
-			// always start "eyJ"; OAuth opaque tokens have neither
-			// shape today (v1 mints JWTs only).
-			//
-			// Slice 197 removed the `atlas_test_` carve-out — every
-			// `atlas_`-prefixed bearer (production or legacy-test)
-			// returns 410. Integration test fixtures mint JWTs via
-			// `Server.IssueTestJWT` (slice 190 path) and never reach
-			// this branch.
-			if !strings.HasPrefix(tok, "atlas_") {
-				next.ServeHTTP(w, r)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			// Surface deprecation metadata via standard headers so
-			// CLI clients can program against them in addition to
-			// reading the JSON body.
-			w.Header().Set("Deprecation", "true")
-			if migrationURL != "" {
-				w.Header().Set("Link", `<`+migrationURL+`>; rel="deprecation"`)
-			}
-			w.WriteHeader(http.StatusGone)
-			body := map[string]string{"error": "api_key_deprecated"}
-			if migrationURL != "" {
-				body["migration_url"] = migrationURL
-			}
-			_ = json.NewEncoder(w).Encode(body)
-		})
-	}
 }
 
 // requireCredential is the slice 197 fail-closed credential gate. It
