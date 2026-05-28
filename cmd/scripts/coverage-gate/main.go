@@ -31,7 +31,7 @@
 //	1 — one or more packages fall under their floor (details to stderr)
 //	2 — invocation / input error (profile not found, thresholds malformed)
 //
-// Design notes (slice 069 D1 + D2; slice 279 extension):
+// Design notes (slice 069 D1 + D2; slice 279 extension; slice 350 advisory):
 //
 //   - The gate aggregates per-package statement counts directly from
 //     the raw `-coverprofile=` output (10-line format spec at
@@ -52,6 +52,15 @@
 //     is treated as excluded — not a failure.
 //   - A package present in `thresholds` with measured coverage below its
 //     floor is the failure case.
+//   - Slice 350: the optional `$security_critical_packages` block names
+//     a subset of packages (auth-substrate-v2 + tenancy) and an
+//     `advisory_target_pct`. The gate emits an ADVISORY warning to
+//     stderr when a tier package's measured coverage falls below the
+//     advisory target — but does NOT fail. The hard floor in
+//     `thresholds` is the only failure surface. The advisory exists for
+//     visibility; lifting hard floors toward the advisory target is
+//     per-package follow-up slice work. See
+//     docs/audit-log/350-branch-coverage-floor-decisions.md.
 package main
 
 import (
@@ -69,8 +78,30 @@ import (
 // thresholdsFile mirrors cmd/scripts/coverage-thresholds.json.
 type thresholdsFile struct {
 	// Allow arbitrary $-prefixed comment fields without complaint.
-	Thresholds map[string]float64 `json:"thresholds"`
-	Excludes   []string           `json:"excludes"`
+	Thresholds               map[string]float64        `json:"thresholds"`
+	Excludes                 []string                  `json:"excludes"`
+	SecurityCriticalPackages *securityCriticalPackages `json:"$security_critical_packages,omitempty"`
+}
+
+// securityCriticalPackages is the slice 350 tier MARKER. It names a
+// subset of packages (the auth-substrate-v2 + tenancy spine) that earn
+// an ADVISORY-only stricter coverage check on top of their existing
+// per-package line-coverage floor in `thresholds`.
+//
+// The advisory is non-blocking: coverage-gate prints a warning to
+// stderr when a tier package's measured coverage falls below
+// AdvisoryTargetPct, but does NOT fail the gate. Lifting hard floors
+// toward the advisory target is per-package follow-up slice work (each
+// lift slice writes the tests AND raises the threshold in the same PR
+// per the slice 069 monotonic-ratchet contract).
+//
+// The naming is deliberately "statement coverage" not "branch
+// coverage" — Go's -coverprofile= emits per-basic-block profiles which
+// approximate but do not implement McCabe branch coverage on compound
+// predicates. See slice 350 decisions log D1.
+type securityCriticalPackages struct {
+	AdvisoryTargetPct float64  `json:"advisory_target_pct"`
+	Packages          []string `json:"packages"`
 }
 
 // pkgCoverage is the aggregated result for one package.
@@ -225,14 +256,84 @@ func run(profilePath string, extraProfiles []string, thresholdsPath string) erro
 		}
 	}
 
+	// Slice 350 — security-critical advisory pass. Tier membership is
+	// declared in the `$security_critical_packages` block; per-package
+	// hard floors stay in `thresholds` and were already enforced above.
+	// This pass adds an ADVISORY warning when a tier package's measured
+	// coverage falls below the tier's `advisory_target_pct`. It does
+	// NOT fail the gate — lifting hard floors toward the advisory
+	// target is per-package follow-up slice work.
+	type secAdvisory struct {
+		pkg    string
+		got    float64
+		target float64
+	}
+	type secMissing struct {
+		pkg string
+	}
+	var (
+		secAdvisories []secAdvisory
+		secMissings   []secMissing
+	)
+	if t.SecurityCriticalPackages != nil && len(t.SecurityCriticalPackages.Packages) > 0 {
+		target := t.SecurityCriticalPackages.AdvisoryTargetPct
+		secKeys := make([]string, len(t.SecurityCriticalPackages.Packages))
+		copy(secKeys, t.SecurityCriticalPackages.Packages)
+		sort.Strings(secKeys)
+		for _, key := range secKeys {
+			if isExcluded(key) {
+				// A security-critical advisory on an excluded package is a
+				// configuration error — surface as a missing-data note so the
+				// drift is visible. The advisory itself does not fire.
+				secMissings = append(secMissings, secMissing{pkg: key})
+				continue
+			}
+			cov, ok := pkgs[key]
+			if !ok {
+				// Same policy as the hard-floor pass: a tier package with no
+				// coverage data in the profile is a drift signal, not a
+				// failure.
+				secMissings = append(secMissings, secMissing{pkg: key})
+				continue
+			}
+			if cov.coveragePct+1e-9 < target {
+				secAdvisories = append(secAdvisories, secAdvisory{
+					pkg: key, got: cov.coveragePct, target: target,
+				})
+			}
+		}
+	}
+
 	// Report.
 	fmt.Printf("coverage-gate: checked %d packages, %d failed, %d warnings (no profile data)\n",
 		checked, len(failures), skippedNoF)
+	if t.SecurityCriticalPackages != nil && len(t.SecurityCriticalPackages.Packages) > 0 {
+		fmt.Printf("coverage-gate (security-critical advisory, target %.0f%%): %d tier package(s), %d advisory, %d no-data\n",
+			t.SecurityCriticalPackages.AdvisoryTargetPct,
+			len(t.SecurityCriticalPackages.Packages),
+			len(secAdvisories),
+			len(secMissings),
+		)
+	}
 
 	if len(warnings) > 0 {
 		fmt.Fprintln(os.Stderr, "\ncoverage-gate WARNINGS (threshold present, no profile data):")
 		for _, w := range warnings {
 			fmt.Fprintf(os.Stderr, "  %s\n", w.pkg)
+		}
+	}
+
+	if len(secAdvisories) > 0 {
+		fmt.Fprintln(os.Stderr, "\ncoverage-gate ADVISORY (security-critical tier, slice 350 — non-blocking):")
+		for _, a := range secAdvisories {
+			fmt.Fprintf(os.Stderr, "  %s: got %.1f%% < advisory target %.1f%%\n", a.pkg, a.got, a.target)
+		}
+	}
+
+	if len(secMissings) > 0 {
+		fmt.Fprintln(os.Stderr, "\ncoverage-gate SECURITY-CRITICAL NO-DATA (slice 350 tier package excluded or absent from profile):")
+		for _, m := range secMissings {
+			fmt.Fprintf(os.Stderr, "  %s\n", m.pkg)
 		}
 	}
 
@@ -244,7 +345,11 @@ func run(profilePath string, extraProfiles []string, thresholdsPath string) erro
 		return exitCodeErr{1, fmt.Sprintf("%d package(s) below floor", len(failures))}
 	}
 
-	fmt.Println("ALL CHECKS PASS")
+	if len(secAdvisories) > 0 {
+		fmt.Println("HARD FLOORS PASS · security-critical advisory not yet met (non-blocking)")
+	} else {
+		fmt.Println("ALL CHECKS PASS")
+	}
 	return nil
 }
 
