@@ -6,7 +6,7 @@
 
 This is the section the existing tools get wrong. It is the heart of the platform.
 
-> **Deep dive:** the graph model is fully worked out — diagrams, traversal queries, versioning, storage decisions, and a concrete "one MFA evidence record satisfies six frameworks" walkthrough — in the companion document [`UCF_GRAPH_MODEL.md`](../UCF_GRAPH_MODEL.md).
+> **Deep dive:** the graph model is fully worked out (diagrams, traversal queries, versioning, storage decisions, and a concrete "one MFA evidence record satisfies six frameworks" walkthrough) in the companion document [`UCF_GRAPH_MODEL.md`](../UCF_GRAPH_MODEL.md).
 
 ## 3.1 The graph, not the spreadsheet
 
@@ -24,17 +24,17 @@ Because all framework-to-framework relationships are derived through SCF anchors
 
 NIST IR 8477 defines five relationship types, each with a strength score 0.0–1.0:
 
-| Relationship      | Meaning                                                                        | Example                                              |
-| ----------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------- |
-| `subset_of`       | Source is fully covered by target.                                             | `ISO27001:A.9.4.2 subset_of SCF:IAC-22`              |
-| `superset_of`     | Source covers more than target.                                                | `SCF:IAC-01 superset_of SOC2:CC6.1` (SCF is broader) |
-| `intersects_with` | Partial overlap.                                                               | `PCI:8.3 intersects_with HIPAA:164.312(d)`           |
-| `equal`           | Logically equivalent.                                                          | `NIST_800_53:AC-2 equal SCF:IAC-15`                  |
-| `no_relationship` | Confirmed _no_ overlap. (Yes, this is data — it suppresses false suggestions.) |                                                      |
+| Relationship      | Meaning                                                                       | Example                                              |
+| ----------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `subset_of`       | Source is fully covered by target.                                            | `ISO27001:A.9.4.2 subset_of SCF:IAC-22`              |
+| `superset_of`     | Source covers more than target.                                               | `SCF:IAC-01 superset_of SOC2:CC6.1` (SCF is broader) |
+| `intersects_with` | Partial overlap.                                                              | `PCI:8.3 intersects_with HIPAA:164.312(d)`           |
+| `equal`           | Logically equivalent.                                                         | `NIST_800_53:AC-2 equal SCF:IAC-15`                  |
+| `no_relationship` | Confirmed _no_ overlap. (Yes, this is data; it suppresses false suggestions.) |                                                      |
 
 A **strength** field captures auditor judgment: `(equal, 1.0)` is full confidence; `(intersects_with, 0.4)` flags partial coverage that needs supplemental evidence.
 
-This means **one piece of evidence can satisfy N controls automatically** when their SCF anchors are connected, and the platform can compute _coverage strength_ per requirement: if your evidence covers SCF:IAC-22 with strength 1.0, and ISO27001:A.9.4.2 → SCF:IAC-22 with strength 0.8, the ISO requirement is covered at 0.8 — and the UI surfaces the gap.
+This means **one piece of evidence can satisfy N controls automatically** when their SCF anchors are connected, and the platform can compute _coverage strength_ per requirement: if your evidence covers SCF:IAC-22 with strength 1.0, and ISO27001:A.9.4.2 → SCF:IAC-22 with strength 0.8, the ISO requirement is covered at 0.8, and the UI surfaces the gap.
 
 ## 3.3 Versioning strategy
 
@@ -63,7 +63,7 @@ We ship SCF (latest release) as the default control catalog. Users can:
 - Override with a custom catalog while keeping SCF as the mapping spine.
 - Import additional catalogs (NIST 800-53, CSA CCM if licensed) as alternative anchor sets.
 
-We treat **CSA CCM** as opt-in import for cloud-native overlays, because its commercial-product embed terms are murky for a distributed OSS product. We treat **UCF Common Controls Hub** as off-limits — proprietary IP.
+We treat **CSA CCM** as opt-in import for cloud-native overlays, because its commercial-product embed terms are murky for a distributed OSS product. We treat **UCF Common Controls Hub** as off-limits (proprietary IP).
 
 ---
 
