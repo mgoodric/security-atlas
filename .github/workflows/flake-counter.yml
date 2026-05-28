@@ -1,0 +1,140 @@
+name: flake-counter
+
+# Slice 352 — flake budget weekly counter + dashboard refresh.
+#
+# Runs every Monday 09:00 UTC (matching `edge-image-prune.yml`'s cadence
+# — keeps maintainer cron-noise to one slot per week). Walks the last
+# 7 days of `ci.yml` workflow runs via the GitHub Actions REST API,
+# detects re-run-cleared-on-same-SHA flakes per surface, regenerates
+# `docs/flake-budget-dashboard.md`, and files / appends to a
+# `flake-investigation` GitHub issue when a per-surface trigger
+# threshold is crossed.
+#
+# `workflow_dispatch` allows the maintainer to:
+#   - Run an ad-hoc recompute outside the weekly cadence
+#   - Rebuild the 90-day baseline (`window_days: 90`) when the budget
+#     numbers are re-tuned
+#   - Dry-run a counter pass without issue-filing or dashboard write
+#
+# The dashboard is committed back to `main` directly (not via PR) — it
+# is a derived artifact, and the change is reviewable in the repo's
+# commit history. The maintainer can revert it like any other commit
+# if the counter misbehaves.
+
+on:
+  schedule:
+    # Mondays 09:00 UTC. Matches edge-image-prune to consolidate
+    # weekly cron review into one slot. Weekly cadence is the minimum
+    # required by the budget (AC-3); finer granularity would multiply
+    # the API call cost without commensurate signal value.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      window_days:
+        description: "How many days to walk (default: 7)"
+        required: false
+        type: string
+        default: "7"
+      open_issues:
+        description: "File flake-investigation issues when a threshold is crossed"
+        required: false
+        type: boolean
+        default: true
+      dry_run:
+        description: "Print would-be dashboard content instead of committing"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  # Default workflow-level perms are read-only. The single job widens
+  # exactly what it needs.
+  contents: read
+
+concurrency:
+  # Serialize counter runs. Concurrent scheduled + manual runs would
+  # race on the same dashboard commit.
+  group: flake-counter
+  cancel-in-progress: false
+
+jobs:
+  count:
+    name: Flake counter · weekly
+    runs-on: ubuntu-latest
+    permissions:
+      # Need `contents: write` to commit the regenerated dashboard back
+      # to main. `issues: write` for the trigger automation that files
+      # / appends to flake-investigation issues. No `pull-requests`
+      # write — we do not open PRs from this workflow.
+      contents: write
+      issues: write
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Checkout (full history, branch=main)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: main
+          # We commit back to main; the default GITHUB_TOKEN is the
+          # checkout token AND the push token. Branch protection on
+          # main does NOT block GITHUB_TOKEN pushes by default — the
+          # rule is "require PR for human pushes", but workflow-token
+          # pushes from a configured workflow are first-class. If
+          # branch-protection.json ever tightens to disallow this,
+          # the workflow will fail and the maintainer is alerted by
+          # the broken cron, which is the right failure mode.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run flake counter
+        id: count
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FLAKE_WINDOW_DAYS: ${{ inputs.window_days || '7' }}
+          FLAKE_OPEN_ISSUES: ${{ (inputs.open_issues == null && 'true') || (inputs.open_issues && 'true') || 'false' }}
+          FLAKE_DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+          FLAKE_VERBOSE: "true"
+          FLAKE_REPO: ${{ github.repository }}
+        run: bash scripts/flake-counter.sh
+
+      - name: Normalize dashboard formatting (prettier idempotence)
+        # Without this step the dashboard re-formats on every cron run
+        # because the script emits compact markdown tables and prettier
+        # rewrites them to column-aligned tables. Running prettier here
+        # makes the cron's output idempotent: a subsequent
+        # `pre-commit run` (locally or in CI) is a no-op against this
+        # file. `ubuntu-latest` ships node out of the box; npx pulls
+        # prettier per-invocation (~3s) which is acceptable for the
+        # weekly cadence and keeps the workflow hermetic.
+        if: ${{ !inputs.dry_run }}
+        run: npx --yes prettier@3.3.3 --write docs/flake-budget-dashboard.md
+
+      - name: Commit dashboard if changed
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- docs/flake-budget-dashboard.md; then
+            echo "No dashboard change to commit."
+            exit 0
+          fi
+          # The bot identity matches existing project automation (per
+          # slice 207 edge-image-prune commits — same pattern).
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/flake-budget-dashboard.md
+          git commit -m "chore(quality): refresh flake-budget dashboard
+
+          Generated by .github/workflows/flake-counter.yml (slice 352).
+          See docs/flake-budget.md for budget definition + interpretation."
+          # Retry-on-conflict: another commit may have landed during
+          # the API walk. Rebase and re-push once; fail hard on second
+          # conflict so the maintainer sees the broken cron.
+          if ! git push origin main; then
+            git pull --rebase origin main
+            git push origin main
+          fi
