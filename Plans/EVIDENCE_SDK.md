@@ -7,16 +7,18 @@
 
 ## 1. The framing — one ingestion API, two SDK profiles
 
-The evidence ledger (canvas §4.3) is an append-only stream. It has exactly **one** canonical inbound API: `IngestEvidence(record) → EvidenceReceipt`. Everything that produces evidence — first-party connectors, community connectors, CI/CD pipelines, webhooks, manual UI uploads, middleware proxies, ad-hoc CLI invocations — eventually reduces to a call against that endpoint.
+The evidence ledger (canvas §4.3) is an append-only stream. It has exactly **one** canonical inbound API: `EvidenceIngestService.Push(record) → EvidenceReceipt` — a single gRPC RPC defined in `proto/evidence/v1/evidence.proto`. Everything that produces evidence — first-party connectors, community connectors, CI/CD pipelines, webhooks, manual UI uploads, middleware proxies, ad-hoc CLI invocations — eventually reduces to a call against that endpoint.
 
-The SDK is the contract surface around that endpoint. It supports two **complementary** profiles, not a primary and a fallback:
+The SDK is the contract surface around that endpoint. It supports two **complementary** profiles, not a primary and a fallback. The distinction is about how the connector process retrieves data **from its source**, not about a separate platform-side wire shape:
 
-| Profile                          | Direction         | Who initiates                                       | Use when                                                                                      |
-| -------------------------------- | ----------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| **Connector** (pull / subscribe) | Platform → Source | security-atlas reaches out and queries / subscribes | Source has a stable API and we have credentials to reach it                                   |
-| **Pusher** (push)                | Source → Platform | Source initiates and pushes to security-atlas       | Source is behind a firewall, ephemeral (CI), event-emitting (webhook), or owns its scheduling |
+| Profile                          | Source-side direction | Who initiates the source-side fetch                                       | Use when                                                                                      |
+| -------------------------------- | --------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **Connector** (pull / subscribe) | Connector → Source    | Connector schedules and queries / subscribes against the source's API     | Source has a stable API and the connector holds credentials to reach it                       |
+| **Pusher** (push)                | Source → Connector    | Source initiates and emits to the connector (or directly to the platform) | Source is behind a firewall, ephemeral (CI), event-emitting (webhook), or owns its scheduling |
 
-Many real connectors implement **both profiles** — e.g., the GitHub connector pulls org/repo state on a schedule _and_ receives push events from GitHub's webhook subscription. Both flow into the same ledger via the same `IngestEvidence` call.
+Both profiles emit to the same platform-side RPC (`EvidenceIngestService.Push`). The profile distinction lives in the connector process's own scheduling, not on the wire — every connector binary (`atlas-aws`, `atlas-github`, `atlas-okta`, `atlas-1password`, `atlas-osquery`, `atlas-jira`, `atlas-manual`) is a long-running process that holds source-side credentials and calls `sdkClient.Push(ctx, record)` against the platform. The platform never reaches outward to a connector to invoke a `Pull` or `Subscribe` RPC; that scheduling is the connector's own concern.
+
+Many real connectors implement **both profiles** — e.g., the GitHub connector pulls org/repo state on a schedule _and_ receives push events from GitHub's webhook subscription. Both flow into the same ledger via the same `Push` call.
 
 ```mermaid
 graph LR
@@ -78,21 +80,45 @@ Push is also the **enablement story for non-engineers**: writing a one-line shel
 
 ---
 
-## 3. Connector profile (pull / subscribe) — recap
+## 3. Connector profile (pull / subscribe) — the in-process loop
 
-The connector profile from canvas §4.1 is unchanged in intent. Methods are exposed over a gRPC contract; the connector runs as a separate process and can be written in any language.
+The connector profile is **not** a separate platform-side gRPC surface. It is the internal loop pattern a connector binary follows when it reaches out to its source. The platform never schedules a connector's pull — the connector schedules itself, runs the source-side query (or receives the subscription event), maps the result, and emits to the platform via the canonical `EvidenceIngestService.Push` RPC.
 
-| Method                            | Returns                  | Notes                                                                                                                     |
-| --------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| `Describe()`                      | `ConnectorManifest`      | name, version, supported source types, required scopes, rate-limit hints, **profiles_supported: [pull, subscribe, push]** |
-| `AuthMethods()`                   | `[AuthMethod]`           | OIDC, API key, IAM role, OAuth flow, SCIM token                                                                           |
-| `HealthCheck(creds)`              | `HealthResult`           | Reachability + token validity                                                                                             |
-| `ListEvidenceKinds()`             | `[EvidenceKind]`         | Each kind references a registered schema URI                                                                              |
-| `Pull(kind, since, scope_filter)` | `Stream<EvidenceRecord>` | Snapshot/query mode                                                                                                       |
-| `Subscribe(kind, scope_filter)`   | `Stream<EvidenceRecord>` | Long-lived stream from source events                                                                                      |
-| `VerifyProvenance(record)`        | `bool`                   | Cryptographic re-verification when applicable                                                                             |
+The canonical loop:
 
-A connector **declares which profiles** each evidence kind supports. The platform routes accordingly. The connector profile is platform-owned scheduling — security-atlas decides when to call `Pull` and how often.
+```
+[ config-load: endpoint, bearer, source-system identity ]
+        │
+        ▼
+[ register: ConnectorRegistryService.Register on startup ]
+        │
+        ▼
+[ auth: produce a vendor-native session for the source ]
+        │
+        ▼
+[ source-side pull | subscribe | webhook-receipt ]
+        │
+        ▼
+[ map: source-record → EvidenceRecord ]
+        │
+        ▼
+[ emit: sdkClient.Push(ctx, record) → Receipt ]
+        │
+        ▼
+[ loop or exit ]
+```
+
+The reference implementation is the AWS S3 connector. Read [`connectors/aws/cmd/aws-connector/cmd_run.go`](../connectors/aws/cmd/aws-connector/cmd_run.go) — it inspects each S3 bucket's encryption configuration, maps the result, and pushes one `EvidenceRecord` per (bucket × observation). The whole binary is ~600 LOC; the loop is ~50.
+
+Each connector **declares its source-side fetch direction** at registration time via the `profiles_supported []string` field on `ConnectorRegistryService.Register` — `["pull"]` for scheduled-poll connectors, `["subscribe"]` for event-stream connectors, `["push"]` for webhook-receipt connectors, `["pull", "subscribe"]` for hybrids. This is operator-facing metadata so the platform UI can surface "AWS pulls on a schedule" vs "GitHub also accepts webhooks." It does **not** describe a separate platform-side wire shape — the wire is unconditionally `Push`.
+
+### What does NOT exist on the wire
+
+Earlier drafts of this doc and of canvas §4.1 implied a richer platform → connector gRPC surface with methods like `Describe()`, `AuthMethods()`, `HealthCheck(creds)`, `ListEvidenceKinds()`, `Pull(kind, since, scope_filter)`, `Subscribe(kind, scope_filter)`, and `VerifyProvenance(record)`. **None of those RPCs exist.** Community connector authors should not implement against them, and contributors who land a new connector should not propose them.
+
+The architectural reason: each such RPC would require the platform to schedule and connect _out_ to connectors, moving credentials platform-side and adding scheduling state to the platform. Push-only-on-the-wire keeps credentials in the connector, the platform's surface area minimal, and matches how every modern observability/security platform works (Datadog Agent, OpenTelemetry Collector, GitHub Actions webhook receivers). Connector self-description, health, evidence-kind enumeration, and provenance verification are **per-connector concerns**, surfaced via logs / metrics / per-connector subcommands (`atlas-aws register`, `atlas-aws run`) rather than via a platform-pulled gRPC.
+
+The two RPCs that **do** exist on the connector-management surface are `ConnectorRegistryService.Register` (the connector self-announces at startup) and `ConnectorRegistryService.List` (the operator introspects the live connector set). Full proto: [`proto/connectors/v1/connectors.proto`](../proto/connectors/v1/connectors.proto).
 
 ---
 

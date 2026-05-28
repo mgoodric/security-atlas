@@ -6,26 +6,16 @@
 
 ## 4.1 Evidence SDK (defined first, before any connector)
 
-The SDK contract is the architectural commitment. The ledger has exactly one canonical inbound API: `IngestEvidence(record) → EvidenceReceipt`. The SDK exposes that API through **two complementary profiles**, not a primary and a fallback:
+The SDK contract is the architectural commitment. The ledger has exactly one canonical inbound API: `EvidenceIngestService.Push(record) → EvidenceReceipt` — a single gRPC RPC. The SDK exposes that one RPC through **two complementary profiles** that describe how a connector retrieves data **from its source**, not how the platform reaches a connector (the platform never reaches outward to a connector):
 
-| Profile                          | Direction         | Who initiates                                       | Use when                                                                                      |
-| -------------------------------- | ----------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| **Connector** (pull / subscribe) | Platform → Source | security-atlas reaches out and queries / subscribes | Source has a stable API and we have credentials to reach it                                   |
-| **Pusher** (push)                | Source → Platform | Source initiates and pushes to security-atlas       | Source is behind a firewall, ephemeral (CI), event-emitting (webhook), or owns its scheduling |
+| Profile                          | Source-side direction | Who initiates the source-side fetch                                       | Use when                                                                                      |
+| -------------------------------- | --------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **Connector** (pull / subscribe) | Connector → Source    | Connector schedules and queries / subscribes against the source's API     | Source has a stable API and the connector holds credentials to reach it                       |
+| **Pusher** (push)                | Source → Connector    | Source initiates and emits to the connector (or directly to the platform) | Source is behind a firewall, ephemeral (CI), event-emitting (webhook), or owns its scheduling |
 
-Many real connectors implement both. The GitHub connector pulls org/repo state on a schedule _and_ receives push events from GitHub's webhook subscription — both flow into the same ledger via the same `IngestEvidence` call. CI/CD evidence (SAST, SCA, container scans, deploy events) is push-only by nature. Custom internal tools, aggregating middleware, telemetry-tap configurations (Vector / OTEL collectors), and air-gapped data diodes all become first-class evidence sources via push.
+Many real connectors implement both. The GitHub connector pulls org/repo state on a schedule _and_ receives push events from GitHub's webhook subscription — both flow into the same ledger via the same `Push` call. CI/CD evidence (SAST, SCA, container scans, deploy events) is push-only by nature. Custom internal tools, aggregating middleware, telemetry-tap configurations (Vector / OTEL collectors), and air-gapped data diodes all become first-class evidence sources via push.
 
-Connector profile methods (gRPC, language-agnostic, runs as a separate process):
-
-| Method                            | Returns                  | Notes                                                                                            |
-| --------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------ |
-| `Describe()`                      | `ConnectorManifest`      | name, version, supported source types, required scopes, rate-limit hints, **profiles_supported** |
-| `AuthMethods()`                   | `[AuthMethod]`           | OIDC, API key, IAM role, OAuth flow, SCIM token                                                  |
-| `HealthCheck(creds)`              | `HealthResult`           | Can we reach the source?                                                                         |
-| `ListEvidenceKinds()`             | `[EvidenceKind]`         | Each kind has a registered schema URI.                                                           |
-| `Pull(kind, since, scope_filter)` | `Stream<EvidenceRecord>` | Snapshot/query mode.                                                                             |
-| `Subscribe(kind, scope_filter)`   | `Stream<EvidenceRecord>` | Event-driven streams (when source supports).                                                     |
-| `VerifyProvenance(record)`        | `bool`                   | Cryptographic re-verification when applicable.                                                   |
+Connector binaries are long-running processes that hold source-side credentials, run the configured source-side loop (pull / subscribe / webhook-receipt), and emit each record via `sdkClient.Push(ctx, record)`. The connector-management surface (`proto/connectors/v1/connectors.proto`) exposes exactly two RPCs: `ConnectorRegistryService.Register` (the connector self-announces at startup with `profiles_supported []string` describing its source-side fetch direction) and `ConnectorRegistryService.List` (operator introspection). There is no platform-initiated `Pull` / `Subscribe` / `Describe` / `AuthMethods` / `HealthCheck` / `ListEvidenceKinds` / `VerifyProvenance` RPC — those are per-connector concerns surfaced via the connector's own logs / metrics / subcommands. See [`EVIDENCE_SDK.md`](../EVIDENCE_SDK.md) §3 for the in-process loop pattern and a "what does NOT exist on the wire" callout for contributors.
 
 Pusher profile surface (REST + gRPC + CLI + per-language SDKs):
 
