@@ -45,7 +45,7 @@ Final of 12 voltagent-qa-sec audit slices filed in the 2026-05-27 audit-planning
 | 340 | Investigate + re-enable chromedp `TestRender_ProducesRealPDF` flake          | `merged` · batch 130 at `dd6f09d6` via #758 · root cause: chromedp 20s `wsURLReadTimeout` watchdog firing on Harden-Runner audit-mode-stretched Chrome startup · fix: `WSURLReadTimeout(60s)` + `DefaultTimeout` 30s→90s · `TestRender_ProducesRealPDF_TenIterations` stress test added · spillover slice 341 filed |
 | 341 | Apply chromedp `WSURLReadTimeout` fix to remaining 4 PDF renderers           | `merged` · batch 131 at `36434fe5` via #761 · fan-out to 4 sibling renderers (board/pdf, board/pack_pdf, questionnaire/pdf, audit/walkthrough/export) · D1: per-package not per-file (board package contains 2 renderers)                                                                                           |
 
-**Last reconciled:** 2026-05-28 (batch 135 · slice 347 vitest coverage ratchet merged at `c9f035fc` via #773)
+**Last reconciled:** 2026-05-28 (batch 136 · slice 333 QA strategy gap analysis merged at `b68f589c` via #776)
 
 ## Drift detected — 2026-05-27 (slice 337 filed via /idea-to-slice)
 
