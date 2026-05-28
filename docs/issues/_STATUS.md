@@ -5,6 +5,15 @@
 
 **Last reconciled:** 2026-05-28 (claim-stake · batch 130 · 340 → in-progress — chromedp flake investigation)
 
+## Drift detected — 2026-05-27 (slice 340 → in-review + slice 341 filed)
+
+Slice 340 investigation + fix landed: chromedp `wsURLReadTimeout` flake diagnosed (deterministic 20.0s clustering matches the chromedp hardcoded watchdog at `allocate.go:249`; cause is slice 117 Harden-Runner audit-mode stretching Chrome's component-updater startup network calls past the 20s threshold). Fix: `WSURLReadTimeout(60s)` + `DefaultTimeout` 30s→90s in `internal/policy/pdf/render.go`. `t.Skip` removed. Decisions log at `docs/audit-log/340-chromedp-flake-decisions.md`. Spillover slice 341 filed for fan-out to the other four PDF renderers (board/pdf, board/pack_pdf, questionnaire/pdf, audit/walkthrough/export) which share the same exposure.
+
+| Row | Transition            | Evidence                                                                                                    |
+| --- | --------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 340 | `ready` → `in-review` | PR pending · root cause: chromedp 20s wsURLReadTimeout watchdog · fix: WSURLReadTimeout(60s)                |
+| 341 | (new row) → `ready`   | spec at `docs/issues/341-chromedp-wsurlreadtimeout-fanout.md` · spillover from 340 · fan-out to 4 renderers |
+
 ## Drift detected — 2026-05-27 (parallel batch 129 claim-stake)
 
 Three-slice batch:
@@ -30,9 +39,9 @@ Conflict surface: 316+318 share thresholds.json+ci.yml (known-safe append). 325 
 Final of 12 voltagent-qa-sec audit slices filed in the 2026-05-27 audit-planning session. This is the only slice that exercises the platform externally — runs `penetration-tester` agent against `https://atlas-edge.home.gmoney.sh` ONLY (the maintainer's authorized sandbox). Seven in-scope probe surfaces: OIDC auth, JWT handling (ES256 per ADR-0003), evidence push API, tenant isolation (RLS invariant #6), admin surfaces (slices 062/142/143), bootstrap (slice 210), atlas-edge-specific (slices 207-211). Strict P0 anti-criteria: no other hosts, no DoS, no social/physical, no persistence, no lateral movement, no exploit payloads in public log, authorization grant recorded before run. Security · JUDGMENT · 2d.
 
 | Row | Transition                                                          | Evidence                                                     |
-| --- | ------------------------------------------------------------------- | ------------------------------------------------------------ | --- | --- | --- | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| --- | ------------------------------------------------------------------- | ------------------------------------------------------------ | --- | --- | --- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 338 | (new row) → `ready`                                                 | spec at `docs/issues/338-pentest-atlas-edge.md` · PR pending |
-| 340 | Investigate + re-enable chromedp `TestRender_ProducesRealPDF` flake | `ready`                                                      | —   | —   | —   | —   | Quality/Infra · JUDGMENT · 1-2d · 5 consecutive CI flakes across slices 312/315/320 · 20-sec chromedp websocket timeout · quarantine `t.Skip` lands in this PR to unblock the merge gate · investigation: StepSecurity egress (117) / Chromium version / runner image / chromedp flags |
+| 340 | Investigate + re-enable chromedp `TestRender_ProducesRealPDF` flake | `in-review`                                                  | —   | —   | —   | —   | Quality/Infra · JUDGMENT · 1-2d · 5 consecutive CI flakes across slices 312/315/320 · root cause: chromedp 20s `wsURLReadTimeout` watchdog firing on Harden-Runner audit-mode-stretched Chrome startup · fix: `WSURLReadTimeout(60s)` + `DefaultTimeout` 30s→90s in `internal/policy/pdf/render.go` · `t.Skip` removed · decisions log at `docs/audit-log/340-chromedp-flake-decisions.md` · spillover slice 341 filed for fan-out to 4 sibling PDF renderers |
 
 **Last reconciled:** 2026-05-27 (slice 337 filed via `/idea-to-slice` — voltagent-qa-sec audit slice 11/12)
 
