@@ -51,10 +51,10 @@ semantic stretch.
    on Escape / outside-click / Enter-to-navigate; the listbox is
    never persistently focused. The interactive-descendant concern
    (focus management ambiguity) does not apply because focus stays
-   on the input throughout — ArrowDown shifts the *visible*
+   on the input throughout — ArrowDown shifts the _visible_
    highlight via `activeIndex` + `aria-activedescendant`, not the
    keyboard-tab focus. The input is the focused control; the
-   listbox rows are *named*, not *focused*.
+   listbox rows are _named_, not _focused_.
 
 4. **No SR-user validation available.** Path 2 is the canonical
    shape per the WAI-ARIA Authoring Practices; the slice doc
@@ -101,7 +101,7 @@ announced when ArrowDown highlights them, AND the cause traces to
 - **"No results" branch rationale.** The slice doc explicitly calls
   out the SR gap: typing → silence. The `"No results"` branch is
   what closes that gap when the search returns zero hits. The
-  live-region is *only* mounted when `showPopover` is true AND
+  live-region is _only_ mounted when `showPopover` is true AND
   `!loading`, so an SR user does not hear "No results" on every page
   load — only when they have typed enough to trigger a search and
   the search has come back empty.
@@ -120,7 +120,7 @@ announced when ArrowDown highlights them, AND the cause traces to
 **Decision:** The `aria-live="polite"` region is a sibling of the
 listbox, not a child. Carries `role="status"` (implicit
 `aria-live="polite"` + AT-affordance for status-message handling)
-*and* an explicit `aria-live="polite"` (defense-in-depth for older
+_and_ an explicit `aria-live="polite"` (defense-in-depth for older
 AT engines that do not derive aria-live from role=status). Carries
 `aria-atomic="true"` so the entire announcement re-fires when the
 count changes (vs partial-diff announcements that some SR engines
