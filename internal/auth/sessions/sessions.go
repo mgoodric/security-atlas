@@ -74,17 +74,42 @@ type Session struct {
 }
 
 // Store wraps the sessions table with tenancy plumbing.
+//
+// Slice 371: the `clock` field is the injection point for the wall-clock
+// source. Production wiring leaves it at its default — a `func() time.Time`
+// closure that returns `time.Now().UTC()`. Tests override via WithClock so
+// session-expiry boundary assertions are deterministic. This mirrors the
+// established pattern in internal/board, internal/evidence/ingest,
+// internal/drift, and internal/api/admintenants (positive baselines).
 type Store struct {
-	pool *pgxpool.Pool
-	ttl  time.Duration
+	pool  *pgxpool.Pool
+	ttl   time.Duration
+	clock func() time.Time
 }
 
 // NewStore constructs a Store. ttl defaults to DefaultTTL when zero.
+// The clock defaults to `time.Now().UTC()` and is overridable via WithClock
+// for deterministic tests (slice 371).
 func NewStore(pool *pgxpool.Pool, ttl time.Duration) *Store {
 	if ttl == 0 {
 		ttl = DefaultTTL
 	}
-	return &Store{pool: pool, ttl: ttl}
+	return &Store{
+		pool:  pool,
+		ttl:   ttl,
+		clock: func() time.Time { return time.Now().UTC() },
+	}
+}
+
+// WithClock overrides the wall-clock source. Test-only — production wiring
+// leaves the default in place. Returns the Store for chain construction,
+// mirroring internal/api/admintenants/handler.go:185.
+func (s *Store) WithClock(fn func() time.Time) *Store {
+	if fn == nil {
+		return s
+	}
+	s.clock = fn
+	return s
 }
 
 // NewID returns a fresh 256-bit random session id, URL-base64 encoded.
@@ -134,7 +159,7 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Session, error) {
 		return Session{}, err
 	}
 	q := dbx.New(tx)
-	expiresAt := time.Now().UTC().Add(s.ttl)
+	expiresAt := s.clock().Add(s.ttl)
 	ua := truncateUserAgent(in.UserAgent)
 	row, err := q.CreateSession(ctx, dbx.CreateSessionParams{
 		ID:         id,
@@ -180,12 +205,17 @@ func (s *Store) Read(ctx context.Context, tenantID uuid.UUID, id string) (Sessio
 	if row.RevokedAt.Valid {
 		return Session{}, ErrRevoked
 	}
-	if !row.ExpiresAt.Valid || time.Now().UTC().After(row.ExpiresAt.Time) {
+	now := s.clock()
+	if !row.ExpiresAt.Valid || now.After(row.ExpiresAt.Time) {
 		return Session{}, ErrExpired
 	}
-	// Sliding-window refresh: if close to expiry, extend in-tx.
-	if time.Until(row.ExpiresAt.Time) < RefreshThreshold {
-		newExpiry := time.Now().UTC().Add(s.ttl)
+	// Sliding-window refresh: if close to expiry, extend in-tx. The
+	// "close to expiry" predicate uses the same injected clock as the
+	// expiry check above so tests can pin it deterministically (slice
+	// 371). Pre-371 this branch used time.Until which silently re-read
+	// the wall clock — the injected clock substitutes cleanly.
+	if row.ExpiresAt.Time.Sub(now) < RefreshThreshold {
+		newExpiry := now.Add(s.ttl)
 		if err := q.TouchSession(ctx, dbx.TouchSessionParams{
 			TenantID:  pgtype.UUID{Bytes: tenantID, Valid: true},
 			ID:        id,
