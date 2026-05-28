@@ -490,6 +490,28 @@ jobs:
         # AllKinds order contract), enrolment lifts the three packages
         # above the AC-1 70% merged-coverage floor. Same playbook as
         # slices 290 / 297 / 310 / 315.
+        #
+        # Slice 320: extended to include internal/demoseed — the slice
+        # 205 demo dataset seeder. The package shipped a 341-line
+        # integration_test.go (slice 205) that drove TestApply_Happy /
+        # _Idempotent / _RefusesPopulated / _CrossTenantIsolation /
+        # _Scale / _RejectsInvalidSlug against real Postgres but was
+        # never enrolled in the CI integration job, so the merged audit
+        # measured 4.4% (unit-only — only the password generator + names
+        # constants were exercised). Enrolling it (alongside new
+        # helpers_test.go for the pure-Go writer helpers — withTenant /
+        # currentTenantOf / nullableUUID / nonZeroOrSelf /
+        # nonZeroOrTenant / periodStatus / frozenHashOrNil /
+        # frozenByOrNil / sha256Of / capitalize / kindToConnector /
+        # riskScoreJSON / fictionalUserEmail / buildEvidencePayload
+        # default branch + seeder_test.go for NewSeeder / WithClock /
+        # validateSlug / pgIsUndefinedTable / applyScale /
+        # hashCanonicalJSON / hexString) lifts internal/demoseed from
+        # 4.4% → 83.1% merged. Same playbook as slices 290 / 297 / 310
+        # / 315 — enrolment is the load-bearing move, with unit-tests
+        # paying off the pure-Go branches the integration test cannot
+        # reach (error-path constructors, sentinel-error detection,
+        # scale-clamp edge cases).
         run: |
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
@@ -542,7 +564,8 @@ jobs:
             ./internal/api/adminsuperadmins/... \
             ./internal/api/admintenants/... \
             ./internal/api/adminvendors/... \
-            ./internal/api/tenants/...
+            ./internal/api/tenants/... \
+            ./internal/demoseed/...
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
