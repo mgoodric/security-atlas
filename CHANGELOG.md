@@ -13,6 +13,8 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Fixed
 
+* **fix(a11y): slice 362 — in-progress audit pill dark-mode contrast lift (WCAG 1.4.3).** The in-progress audit pill at `web/components/shell/in-progress-audit-pill.tsx` had its dark-mode inner-`<span>` text class changed from `text-amber-300` to `text-amber-200` to lift the measured contrast over the composited `bg-amber-950/40` surface to **15.77:1** (Tailwind 4 oklch native) / **14.08:1** (Tailwind 3 hex cross-check), well above the WCAG 1.4.3 AA floor of 4.5:1. Light-mode pill, `animate-pulse` dot, and `aria-label`/`title` semantics unchanged. Closes slice 331 finding A11Y-4. The build-time math also showed the pre-fix baseline was likely already AA-compliant (~12–14:1 against the true dark shell bg vs slice 331's ~3.2:1 estimate); maintainer may re-grade A11Y-4 post-merge. Full decision trail at `docs/audit-log/362-a11y-audit-pill-dark-contrast-decisions.md`.
+
 * **chromedp WS-URL fan-out (slice 341):** `WSURLReadTimeout(60s)` applied to `internal/board/pdf.go`, `internal/board/pack_pdf.go`, `internal/questionnaire/pdf.go`, `internal/audit/walkthrough/export.go` — preventive measure following slice 340's diagnostic.
 
 * **fix(policy/pdf):** slice 340 — chromedp `TestRender_ProducesRealPDF`
