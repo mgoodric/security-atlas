@@ -333,6 +333,42 @@ opens.
 
 ---
 
+## Engineer-as-collaborator local-vs-CI delta
+
+A class-of-bug surfaced during the cluster D experiment that warrants
+recording (per `feedback_local_vs_ci_delta`): the local pre-fix golden
+test passed in the worktree but the committed file lacked the trim,
+causing the first CI run on `Go · build + test` and
+`Go · integration (Postgres RLS)` to fail on the
+`TestBuildBriefHTML_Golden` assertion. The committed file's
+`if got != string(want)` compared the trimmed `got` against the
+raw 2265-byte golden (with trailing LF), so the test surfaced
+`length drift: got=2264 want=2265`.
+
+**Diagnosis:**
+
+- Golden file is POSIX-text-canonical (2265 bytes with trailing LF)
+  — pre-commit's `end-of-file-fixer` enforces this.
+- `buildBriefHTML` output is 2264 bytes (no trailing LF).
+- The fix is `strings.TrimRight(string(wantBytes), "\n")` before
+  comparison. The committed file lost that trim during the
+  prettier-rewrite + `git add -A` window — the local file had the
+  trim, the committed file did not.
+
+**Fix:** commit `cd360cb9` lands the trim symmetrically. The updater
+file (`pdf_html_golden_update_test.go`) writes with explicit
+trailing LF (`[]byte(got+"\n")`) to keep the round-trip symmetric.
+
+**Lesson recorded:** before pushing, run the exact CI assertion
+command on the committed tree (`git stash && go test
+-run TestBuildBriefHTML_Golden ./internal/board/`) instead of the
+working-tree version. The local fix can lose to the prettier-then-add
+window if the Edit tool's serialization doesn't survive the
+formatter's re-write. This is a flavor of the project's
+`feedback_local_vs_ci_delta` lesson, surfaced fresh here.
+
+---
+
 ## Engineer-as-collaborator adjacent gaps surfaced
 
 The audit script for the coverage `excludes` (U-2) surfaced one
