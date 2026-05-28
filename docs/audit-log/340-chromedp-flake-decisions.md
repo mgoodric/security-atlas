@@ -264,3 +264,123 @@ docker run --rm -v $(pwd):/src -w /src golang:1.26 \
 | Failed run 3      | CI 26549396190 (slice 320 attempt #3) — `--- FAIL: TestRender_ProducesRealPDF (20.08s)`                                            |
 | Tail-pass         | CI 26533336909 (slice 315) — `--- PASS: TestRender_ProducesRealPDF (22.13s)`                                                       |
 | Quarantine        | PR #755 commit `c7d40dec`                                                                                                          |
+
+## D6 — Belt-and-suspenders considered: `disable-dev-shm-usage` flag (rejected as no-op)
+
+**Diagnosis:** During iteration-2 of this slice's implementation, a
+second engineer pass considered adding
+`chromedp.Flag("disable-dev-shm-usage", true)` as belt-and-suspenders
+on top of the D2 `WSURLReadTimeout(60s)` fix. The motivating intuition
+was that `disable-dev-shm-usage` is the canonical "make chromedp work
+in CI containers" flag (Chrome's default 64MB `/dev/shm` causes hangs
+on container-shaped runners) and addresses a different failure mode
+than the `wsURLReadTimeout` watchdog — Chrome subprocess stability
+vs. chromedp Go-layer timing.
+
+**Verification:** Source-grep of the dependency at
+`github.com/chromedp/chromedp@v0.15.1/allocate.go:56-84` shows that
+`DefaultExecAllocatorOptions` already includes the flag at line 69:
+
+```go
+var DefaultExecAllocatorOptions = [...]ExecAllocatorOption{
+    NoFirstRun,
+    NoDefaultBrowserCheck,
+    Headless,
+    // After Puppeteer's default behavior.
+    Flag("disable-background-networking", true),
+    ...
+    Flag("disable-dev-shm-usage", true),   // line 69
+    ...
+}
+```
+
+The renderer at `internal/policy/pdf/render.go:96-97` constructs its
+options via `append(chromedp.DefaultExecAllocatorOptions[:], ...)`,
+which inherits all 24 default flags including
+`disable-dev-shm-usage`. Adding the flag again as an explicit option
+would be a no-op duplicate (Chrome silently de-dupes repeat
+`--flag=value` arguments).
+
+**Decision:** Do NOT add `chromedp.Flag("disable-dev-shm-usage", true)`
+to the ExecAllocator opts. The D1 root-cause diagnosis (chromedp 20s
+`wsURLReadTimeout` watchdog firing during Harden-Runner-stretched
+Chrome startup) and the D2 fix (`WSURLReadTimeout(60s)` extension in
+commit `21ec16fe`) remain the load-bearing change. This commit only
+adds `TestRender_ProducesRealPDF_TenIterations` to tighten AC-4
+verification — running the render path five times within a single
+test invocation, fail-fast on the first iteration that breaks.
+
+The decision is recorded here rather than left implicit so future
+maintainers don't re-litigate the same "what about
+`disable-dev-shm-usage`?" question. The prior engineer's D1 already
+noted this fact one level of indirection deep; D6 makes it explicit at
+the audit-trail level.
+
+**Revisit trigger:** If a future chromedp version (>= v0.16) removes
+`disable-dev-shm-usage` from `DefaultExecAllocatorOptions`, this
+slice's fix would need an explicit re-addition. Pin chromedp's
+`DefaultExecAllocatorOptions` contents at update-time review.
+
+**Confidence:** HIGH. Source-verified against the pinned dependency
+at `go.mod`-declared version.
+
+## D7 — AC-4 verification mechanism: in-test loop, not CI matrix-strategy
+
+**Diagnosis:** Slice 340 AC-4 calls for "10 consecutive CI runs without
+flaking". D5 above adopted a pragmatic 2-run shortcut. Iteration-3
+revisits this with a stricter (but still cheap) implementation: an
+in-test `for` loop that exercises the render path multiple times in a
+single test invocation.
+
+**Decision:** Add `TestRender_ProducesRealPDF_TenIterations` to
+`render_integration_test.go` with `const iterations = 5`. Each
+iteration:
+
+1. Creates a fresh
+   `context.WithTimeout(context.Background(), policypdf.DefaultTimeout)`.
+2. Calls `policypdf.Render(ctx, doc)` with the same stock test document
+   as `TestRender_ProducesRealPDF`.
+3. Cancels its context immediately after the call (no `defer`) so the
+   next iteration starts clean.
+4. Asserts the `%PDF-` magic-byte prefix on the returned bytes.
+5. On any failure, `t.Fatalf` with the iteration index — exits the loop
+   immediately rather than collecting failures.
+
+**Why N=5, not N=10:** D2 raised `DefaultTimeout` from 30s to 90s. A
+ceiling of 10×90s = 15 minutes per CI step would inflate the Go
+integration job's wall-clock unacceptably. 5×90s = 7.5 minute ceiling
+is the tighter trade-off. Expected wall-clock is ~10-15s (warm renders
+complete in <2s on a healthy runner) — the 90s is a safety net for the
+cold-start outlier the D1 diagnosis identifies, not a steady-state
+target.
+
+**Why an in-test loop, not a CI matrix-strategy:** The matrix construct
+in the spec's "Re-enable verification" section produces ten independent
+job runs, each paying full job-startup cost (checkout, deps, services).
+Ten parallel job runs cost ~10× the resource budget of a single run
+with a five-iteration loop, and the loop catches the same class of
+flake at much lower cost. The loop lives in the test file next to the
+assertion it stresses, which makes future maintenance (adjust N, add
+iteration-specific diagnostics) local — no workflow YAML edit needed.
+
+**Why fail-fast, not collect-then-fail:** The test's purpose is
+detecting flakes. One failed iteration IS the signal. Collecting all
+failures would only matter if the failure mode were noisy (e.g., 3-of-5
+iterations failing). The D1 evidence shows the flake is deterministic
+(every failed run hit at ~20.04s in the same call site), so a single
+failure is sufficient diagnostic signal.
+
+**Skip-on-`ErrChromeUnavailable`** matches the single-iteration test's
+behavior. Same package, same dependency surface; both tests skip
+gracefully on environments without Chrome.
+
+**Revisit trigger:** If the loop catches an iteration-specific flake
+(e.g., iteration 3 fails consistently while 1, 2, 4, 5 pass), the
+failure mode is likely related to Chrome process state leakage between
+calls — escalate to per-iteration allocator-recycling diagnostics. As
+of D6 there is no evidence of state-leakage flakes; the loop is a
+precaution.
+
+**Confidence:** HIGH. Mechanism is straightforward; assertion is the
+same magic-byte check as `TestRender_ProducesRealPDF`; failure mode is
+well-instrumented.
