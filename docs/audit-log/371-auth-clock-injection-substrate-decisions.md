@@ -13,9 +13,9 @@ convention previously used by `internal/board`,
 `internal/api/admintenants`:
 
 - `internal/auth/sessions/Store` gains a `clock func() time.Time` field
-  + a `WithClock(fn) *Store` setter. The three drift sites at
+  alongside a `WithClock(fn) *Store` setter. The three drift sites at
   `sessions.go:137,183,188` route through `s.clock()`.
-- `internal/auth/apikeystore/Store` gains the same field + setter. The
+- `internal/auth/apikeystore/Store` gains the same field and setter. The
   three drift sites at `apikeystore.go:165,251,293` route through
   `s.clock()`.
 - `internal/auth/jwtmw` — the package already exposed
@@ -24,8 +24,11 @@ convention previously used by `internal/board`,
   `time.Now()` in host-local zone. Slice 371 normalizes it to
   `time.Now().UTC()` for parity with the rest of the codebase.
 
-Six new unit tests ship (two per package each at minimum, plus a
-fourth for jwtmw covering the slice-371 fallback contract).
+Fourteen new unit tests ship across three new `clock_test.go` files
+(sessions: 5; apikeystore: 5; jwtmw: 4). Each exercises a boundary
+case the slice doc calls out — TTL→expired transition at exactly
+`now + ttl`, rotation-grace at `T + grace`, JWT validity at exact
+`iat = nbf`, JWT rejection at exact `exp` and one second before `nbf`.
 
 ## Decisions
 
@@ -40,6 +43,7 @@ guard that no-ops on `WithClock(nil)`.
 (`cp := *s; cp.clock = fn; return &cp`).
 
 **Rationale:**
+
 - Both shapes are present in the codebase, but the slice doc + the
   orchestrator brief explicitly call out the
   `internal/api/admintenants/handler.go:185` shape as the target —
@@ -66,6 +70,7 @@ the canonical shape in `internal/board/generator.go:61`,
 which is what `internal/auth/oauthcode/oauthcode.go:118` uses today.
 
 **Rationale:**
+
 - UTC is the documented baseline — every persisted timestamp in the
   platform is stored as `timestamptz` (per migrations) and JSON-
   serialized as RFC 3339 with a Z suffix. Carrying a host-local
@@ -90,6 +95,7 @@ the nil-fallback at `middleware.go:nowTime` return
 with `Options.Clock func() time.Time`, matching the Store-style.
 
 **Rationale:**
+
 - The downstream consumers — `tokensign.Signer.Verify` and
   `jwt.Validate` — operate on Unix-seconds integers (`int64`). The
   current shape lets the middleware pass `opts.Now()` directly
@@ -143,6 +149,7 @@ for sessions/apikeystore, `internal/auth/jwtmw/integration_test.go`
 for jwtmw).
 
 **Rationale:**
+
 - The slice doc invariants ("session VALID at T+3599, INVALID at
   T+3600+ε") are expressible at the arithmetic level — the predicate
   is `now.After(expiresAt)` regardless of whether the timestamp came
@@ -180,35 +187,36 @@ complete.
 ## Acceptance criteria (per slice doc)
 
 - [x] AC-1: `internal/auth/sessions/Store`,
-  `internal/auth/apikeystore/Store`, `internal/auth/jwtmw/Middleware`
-  each carry a `clock`/Now injection point with a UTC-returning
-  default.
+      `internal/auth/apikeystore/Store`, `internal/auth/jwtmw/Middleware`
+      each carry a `clock`/Now injection point with a UTC-returning
+      default.
 - [x] AC-2: Setter (Store: `WithClock(fn) *Store`) or config field
-  (Middleware: `Options.Now`) exposed on each.
+      (Middleware: `Options.Now`) exposed on each.
 - [x] AC-3: All 7 explicitly-listed drift sites + the time.Until
-  refresh predicate at sessions.go:187 (D6) route through the
-  injected clock.
-- [x] AC-4: 6 new tests (2 per package — sessions 5 / apikeystore 5
-  / jwtmw 4). Each exercises a time-dependent edge via the injected
-  clock.
+      refresh predicate at sessions.go:187 (D6) route through the
+      injected clock.
+- [x] AC-4: 14 new tests across three new `clock_test.go` files
+      (sessions 5 / apikeystore 5 / jwtmw 4). Each exercises a
+      time-dependent edge via the injected clock — meets the
+      orchestrator's "≥ 6 minimum (2 per package)" floor with room.
 - [x] AC-6 (orchestrator brief): decisions log D1+ recorded
-  (this file).
+      (this file).
 - [x] AC-7: `pre-commit run --all-files` clean — see PR CI.
 
 ## Anti-criteria (P0)
 
 - [x] P0-371-1: Does NOT change runtime behavior under the default
-  clock. Defaults are identical wall-clock semantics; the only delta
-  is the UTC-zone normalization in jwtmw's nil-fallback (was
-  host-local, now UTC — observable only via `time.Location()`, not
-  via Unix-seconds claim comparisons).
+      clock. Defaults are identical wall-clock semantics; the only delta
+      is the UTC-zone normalization in jwtmw's nil-fallback (was
+      host-local, now UTC — observable only via `time.Location()`, not
+      via Unix-seconds claim comparisons).
 - [x] P0-371-2: Does NOT touch `fsstore.go:236`. The directory-naming
-  use site is unchanged.
+      use site is unchanged.
 - [x] P0-371-3: Does NOT change TTL durations, rotation graces, or
-  policy constants. `DefaultTTL`, `RefreshThreshold`, the 7-day
-  rotation-grace fallback are unchanged.
+      policy constants. `DefaultTTL`, `RefreshThreshold`, the 7-day
+      rotation-grace fallback are unchanged.
 - [x] P0-371-4: Does NOT add a new dependency. All test imports come
-  from the existing transitive set.
+      from the existing transitive set.
 
 ## Files touched
 
@@ -216,10 +224,10 @@ complete.
   swept 3 drift sites + Read-path time.Until → s.clock() Sub
 - `internal/auth/sessions/clock_test.go` — new unit tests (5)
 - `internal/auth/apikeystore/apikeystore.go` — clock field + WithClock
-  + swept 3 drift sites
+  - swept 3 drift sites
 - `internal/auth/apikeystore/clock_test.go` — new unit tests (5)
 - `internal/auth/jwtmw/middleware.go` — nil-fallback UTC normalization
-  + doc-comment alignment
+  - doc-comment alignment
 - `internal/auth/jwtmw/clock_test.go` — new unit tests (4)
 - `CHANGELOG.md` — Unreleased / Changed bullet
 - `docs/audit-log/371-auth-clock-injection-substrate-decisions.md` —
