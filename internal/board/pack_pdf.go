@@ -28,6 +28,10 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
+// Note: chromedpWSURLReadTimeout is declared in pdf.go (same package).
+// Slice 341 fans the slice 340 fix across packages; within package board
+// both renderers share the single declaration.
+
 // RenderPackPDF returns a PDF byte stream for the stored pack. The returned
 // bytes begin with the literal `%PDF-` magic header. Blocking; caller
 // supplies the timeout via ctx. Returns ErrChromeUnavailable (shared with
@@ -53,6 +57,7 @@ func RenderPackPDF(ctx context.Context, sp StoredPack) ([]byte, error) {
 			chromedp.DisableGPU,
 			chromedp.Headless,
 			chromedp.Flag("hide-scrollbars", true),
+			chromedp.WSURLReadTimeout(chromedpWSURLReadTimeout),
 		)
 		var allocCtx context.Context
 		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)

@@ -13,6 +13,8 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Fixed
 
+* **chromedp WS-URL fan-out (slice 341):** `WSURLReadTimeout(60s)` applied to `internal/board/pdf.go`, `internal/board/pack_pdf.go`, `internal/questionnaire/pdf.go`, `internal/audit/walkthrough/export.go` — preventive measure following slice 340's diagnostic.
+
 * **fix(policy/pdf):** slice 340 — chromedp `TestRender_ProducesRealPDF`
   integration test re-enabled after diagnosing the websocket-url-timeout
   flake (5 consecutive CI failures across slices 312/315/320, all
