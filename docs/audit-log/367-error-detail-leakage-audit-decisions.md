@@ -32,15 +32,15 @@ that recommendation.
 
 **Inventory.** The CWE-209 5xx surface across `internal/api/`:
 
-| Source                                                                                            | Sites |
-| ------------------------------------------------------------------------------------------------- | ----- |
-| Direct `writeError(w, http.StatusInternalServerError, "<op>: "+err.Error())`                      | ~70   |
-| Direct `writeJSON(w, http.StatusInternalServerError, map[string]string{"error": ... err.Error()})` | ~12   |
-| Bare `writeError(w, http.StatusInternalServerError, err.Error())` (no op label)                   | ~12   |
-| `writeBadGateway` / `writeServiceUnavailable` (502 / 503 / 504)                                   | ~6    |
-| Per-package `writeServerErr(w, op, err)` helper                                                   | ~20   |
+| Source                                                                                                        | Sites |
+| ------------------------------------------------------------------------------------------------------------- | ----- |
+| Direct `writeError(w, http.StatusInternalServerError, "<op>: "+err.Error())`                                  | ~70   |
+| Direct `writeJSON(w, http.StatusInternalServerError, map[string]string{"error": ... err.Error()})`            | ~12   |
+| Bare `writeError(w, http.StatusInternalServerError, err.Error())` (no op label)                               | ~12   |
+| `writeBadGateway` / `writeServiceUnavailable` (502 / 503 / 504)                                               | ~6    |
+| Per-package `writeServerErr(w, op, err)` helper                                                               | ~20   |
 | Per-handler `writeStoreErr` / `writePackError` / `writeBundleError` / `writeCreateErr` / `writeTransitionErr` | ~25   |
-| Per-handler `writePublishErr` / `writeRecordError` / `writeArtifactErr` / `writeStateErr` (specialty) | ~5    |
+| Per-handler `writePublishErr` / `writeRecordError` / `writeArtifactErr` / `writeStateErr` (specialty)         | ~5    |
 
 Total: **~150 source-level sites** (each per-package helper expands
 into N callers; the audit's "36 sites" number under-counted the
@@ -71,7 +71,7 @@ slice.
 literal shape:
 
 ```json
-{"error":"internal error","request_id":"<uuid>"}
+{ "error": "internal error", "request_id": "<uuid>" }
 ```
 
 Plus a matching `X-Request-Id` response header. Status code stays at
@@ -79,11 +79,11 @@ the original (500, 502, 503, 504). Content-Type stays `application/json`.
 
 **Why "internal error".** Three candidates were considered:
 
-| Wording                                       | Pro                                        | Con                                                                                                |
-| --------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `"internal error"`                            | terse; matches HTTP 500's plain meaning    | nondescript; relies on the `request_id` field for operator-pivot value                              |
-| `"server error; see request id <uuid>"`       | self-documenting; embeds the id in prose   | mixes machine and human content in one field; complicates client parsing; redundant with json field |
-| `"an unexpected error occurred"`              | softer tone for end-user-facing surfaces   | longer; "unexpected" is wishy-washy when many 5xx are entirely expected internally                  |
+| Wording                                 | Pro                                      | Con                                                                                                 |
+| --------------------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `"internal error"`                      | terse; matches HTTP 500's plain meaning  | nondescript; relies on the `request_id` field for operator-pivot value                              |
+| `"server error; see request id <uuid>"` | self-documenting; embeds the id in prose | mixes machine and human content in one field; complicates client parsing; redundant with json field |
+| `"an unexpected error occurred"`        | softer tone for end-user-facing surfaces | longer; "unexpected" is wishy-washy when many 5xx are entirely expected internally                  |
 
 `"internal error"` won — it pairs cleanly with the structured
 `request_id` field, leaves the human-prose pivot to UI layers
