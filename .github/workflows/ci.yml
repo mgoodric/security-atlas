@@ -469,6 +469,27 @@ jobs:
         # writeError, exportLimiter, advisory-key derivation) lifts
         # each package above the AC-2 70% merged-coverage floor. Same
         # playbook as slices 290 / 297 / 310 / 315.
+        #
+        # Slice 318: extended to include the three audit-log family
+        # packages (internal/audit umbrella + internal/audit/sink +
+        # internal/audit/unifiedlog) flagged by the round-3 audit. The
+        # umbrella shipped a 660-line integration_test.go in slice 026
+        # but was never enrolled, leaving merged coverage at 0.4%; the
+        # sink package shipped a 330-line integration_test.go in slice
+        # 126 covering AC-7 (100-record happy path) + AC-8 (10001-record
+        # backpressure fallback) but the package was also unenrolled,
+        # leaving merged at 67.3% (unit-only); the unifiedlog package
+        # had no in-package integration test at all. A new unifiedlog
+        # integration_test.go (this slice) drives Query against real
+        # Postgres + RLS for the canonical-shape, tenant-isolation,
+        # kind-filter, empty-range, and actor-filter branches.
+        # Together with helpers_test.go (umbrella pure-Go predicate
+        # canonicalization + validation guards) and helpers_test.go
+        # (sink Default reader + Shutdown ctx-cancel + no-op discard
+        # paths) and joinkinds_test.go (unifiedlog CSV serializer +
+        # AllKinds order contract), enrolment lifts the three packages
+        # above the AC-1 70% merged-coverage floor. Same playbook as
+        # slices 290 / 297 / 310 / 315.
         run: |
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
@@ -502,6 +523,9 @@ jobs:
             ./internal/board/... \
             ./internal/api/controldetail/... \
             ./internal/api/controls/... \
+            ./internal/audit \
+            ./internal/audit/sink/... \
+            ./internal/audit/unifiedlog/... \
             ./internal/audit/walkthrough/... \
             ./internal/metrics/scheduler/... \
             ./internal/api/metrics/... \
