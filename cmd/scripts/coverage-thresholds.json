@@ -3,7 +3,29 @@
   "$methodology": "Floors are derived from a measured run on main. Slice 069 used a unit-only profile; slice 279 measures against the gocovmerge-merged unit + integration profile. Each floor is set at `max(0, floor(measured - 2pp))` — the floor RATCHETS the current actual minus a 2-pp noise band, never reaches above it (slice 069 P0-A4).",
   "$how_to_raise": "Raise a per-package floor in a follow-up slice that (a) writes the additional tests to actually hit the new bar, (b) lifts the number here in the same PR. Do NOT raise floors in a slice that does not also write the tests. The ratchet contract is monotonic ↑ — never lower a floor.",
   "$how_to_extend": "When a new package lands, add a row here in the same PR. Default floor is `floor(merged_measured - 2pp)`. If a package is intentionally untested (sqlc-generated, protoc-generated, integration-tested elsewhere), add it to `excludes` instead.",
-  "$schema_version": 2,
+  "$schema_version": 3,
+  "$security_critical_packages": {
+    "$comment": "Slice 350 — security-critical tier MARKER. A named subset of the auth-substrate-v2 + tenancy spine where an error-branch regression is the worst outcome the platform can produce. Tier membership is the marker; the hard per-package floor stays in `thresholds` (slice 069 contract, unchanged). This block adds an ADVISORY-only check on top: coverage-gate prints a warning (not a failure) when a tier package falls below `advisory_target_pct`. The advisory is intentionally non-blocking — lifting hard floors toward 90% is per-package follow-up slice work (each one writes the tests AND lifts the threshold in the same PR per the slice 069 monotonic-ratchet contract).",
+    "$trigger": "Slice 333 Q-4 in docs/audits/333-qa-strategy-gap-analysis.md: a 75% line-floor on `internal/api/oauth` can be satisfied by happy-path coverage while dangerous error branches (invalid grant, expired code, revoked token, tenant-switch denied, super_admin escalation refused) sit untested.",
+    "$measurement_caveat": "Go's `-coverprofile=` (in any -covermode: set / count / atomic) emits per-basic-block profiles. This is closer to statement coverage than to McCabe branch coverage — for simple conditionals each block effectively represents one arm, but for compound predicates (`a && b`, `a || b`) the gate cannot distinguish which sub-predicate caused a branch to be skipped. The tier is therefore a more-aggressive STATEMENT-coverage advisory on a named subset of packages, not literal branch coverage. See docs/audit-log/350-branch-coverage-floor-decisions.md D1 for the toolchain rationale.",
+    "$advisory_vs_hard": "Two checks per tier package: (1) HARD floor from `thresholds` enforced as a gate failure (existing slice 069 behavior, unchanged). (2) ADVISORY 90% target — coverage-gate emits a warning to stderr when measured coverage < advisory_target_pct, but does NOT fail. The advisory exists for visibility without blocking CI; future slices each lift a package's hard floor toward 90% as they enrol new tests.",
+    "$how_to_lift_toward_advisory": "Each lift is its own slice. A lift slice (a) writes the missing tests, (b) raises the package's hard floor in `thresholds`. The ratchet contract is monotonic ↑ — never lower a hard floor.",
+    "$how_to_extend_roster": "Extending beyond auth-substrate-v2 + tenancy requires explicit justification — this tier exists for the load-bearing security primitives. Round-2 expansion may add packages once the value of the tier is demonstrated.",
+    "$roster_rationale": "internal/auth/{jwt,keystore,tokensign,oauthclient,oauthcode,revocation,userprefs} = JWT signing + OAuth code grant + revocation + user-prefs primitives. internal/api/oauth = the OAuth 2.0 AS HTTP surface (slice 187+). internal/api/authzmw = the authorization middleware enforcing RBAC + super_admin gates. internal/tenancy = the RLS context-propagation primitive.",
+    "advisory_target_pct": 90,
+    "packages": [
+      "internal/api/authzmw",
+      "internal/api/oauth",
+      "internal/auth/jwt",
+      "internal/auth/keystore",
+      "internal/auth/oauthclient",
+      "internal/auth/oauthcode",
+      "internal/auth/revocation",
+      "internal/auth/tokensign",
+      "internal/auth/userprefs",
+      "internal/tenancy"
+    ]
+  },
   "$tier_recommendations": {
     "$comment": "Slice 279 — aspirational per-tier targets. NOT enforced. The `thresholds` map continues to enforce per-package floors via cmd/scripts/coverage-gate; this tier block exists as MAINTAINER GUIDANCE for setting floors on NEW packages and for the spillover backlog.",
     "api_handlers_and_business_logic": {
