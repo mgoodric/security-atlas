@@ -14,6 +14,20 @@ The web workspace has two test surfaces. They cover different things and have di
 - **CI:** the `Frontend · vitest` job runs every PR that touches `web/` (slice-061 path-filter pattern).
 - **Adding a test:** drop a `*.test.ts` file next to the module under test. The vitest `include` glob picks it up automatically.
 
+### Coverage ratchet (slice 347)
+
+The `Frontend · vitest` CI job enforces a **per-file coverage ratchet**. Floors live in `web/coverage-thresholds.json` (a sibling of `vitest.config.ts`) and are checked by vitest's own `coverage.thresholds` machinery. The job fails red on any per-file regression below floor.
+
+The rule mirrors the Go-side `cmd/scripts/coverage-thresholds.json` (slice 069):
+
+- **Floor methodology.** Each per-file floor is `max(0, floor(measured - 2pp))` — the floor ratchets the current actual minus a 2-pp noise band, never above. The 2-pp band absorbs measurement noise from minor refactors that re-shuffle covered branches.
+- **Monotonic ↑.** Never lower a floor in isolation. If a refactor genuinely drops a file's measured coverage and you want to ship anyway, file a follow-up slice that explains the regression and writes the tests to restore the floor; do not edit the threshold down to make CI pass.
+- **Raise procedure.** To lift a floor: (a) write the additional tests that hit the new bar, (b) lift the number in `coverage-thresholds.json` in the same PR. Do not raise floors in a slice that doesn't also write the tests.
+- **Extend procedure.** When a new test brings non-zero coverage to a previously-omitted file, add a row to `coverage-thresholds.json` in the same PR. Default floor is `floor(measured - 2pp)`.
+- **0% files.** Files in the coverage `include` set that currently measure 0/0/0/0 are intentionally omitted from the threshold map — the ratchet starts at truth, not aspiration. They contribute no enforcement signal until a first test brings non-zero coverage.
+
+To inspect the current measured baseline locally: `cd web && npm run test:coverage` writes `web/coverage/coverage-summary.json`. Diff that against `coverage-thresholds.json` to see headroom before raising a floor.
+
 ## Playwright (end-to-end)
 
 - **Runner:** `playwright test`

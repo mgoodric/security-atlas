@@ -1,0 +1,653 @@
+{
+  "$comment": "Slice 347 — per-file vitest coverage floors enforced by vitest's built-in coverage.thresholds. Mirrors the Go-side cmd/scripts/coverage-thresholds.json shape (slice 069 + the 17-slice retroactive enrolment trail). Closes the TS-side gap identified by slice 334 V-1 (HIGH).",
+  "$methodology": "Floors are derived from a measured `npm run test:coverage` run on the slice 347 baseline. Each floor is set at `max(0, floor(measured - 2pp))` — the floor RATCHETS the current actual minus a 2-pp noise band, never reaches above it (slice 069 P0-A4 mirror via P0-347-3).",
+  "$how_to_raise": "Raise a per-file floor in a follow-up slice that (a) writes the additional tests to actually hit the new bar, (b) lifts the number here in the same PR. Do NOT raise floors in a slice that does not also write the tests. The ratchet contract is monotonic ↑ — never lower a floor (P0-347-1).",
+  "$how_to_extend": "When a new test file lands and brings new measured coverage on a previously-uncovered module, add a row here in the same PR. Default floor is `floor(measured - 2pp)`. 0% files are intentionally omitted — they have no floor signal until a first test brings non-zero coverage; the omission is documented and not a regression.",
+  "$omitted_zero_pct_count": 71,
+  "$omitted_zero_pct_rationale": "71 files in the coverage `include` set measured 0/0/0/0 at slice 347 baseline (no tests reach them yet). They are intentionally omitted from the threshold map — the ratchet starts at truth, not aspiration (P0-347-3). When a future slice adds the first test for one of these files, it lifts the file into the map with floor = floor(measured - 2pp). Until then, they contribute no enforcement signal, which is the correct shape for a monotonic ratchet.",
+  "$schema_version": 1,
+  "thresholds": {
+    "app/(authed)/audits/filters.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/audits/format.ts": {
+      "statements": 97,
+      "branches": 94,
+      "functions": 98,
+      "lines": 97
+    },
+    "app/(authed)/audits/oscal-export-future.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/controls/[id]/tabs.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/controls/error-classifier.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/controls/filters.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/controls/new-control-future.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/evidence/filters.ts": {
+      "statements": 98,
+      "branches": 96,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/evidence/format.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/evidence/push-cta.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/exceptions/filters.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/policies/ack-rate.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/policies/ack-window.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/policies/filters.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/policies/header-counts.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/policies/header-cta-future.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/policies/scaffold-future.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/risks/filters.ts": {
+      "statements": 98,
+      "branches": 95,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/risks/new/validate.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/settings/admin-prefetch.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/settings/allowed-kinds-display.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/settings/credential-bearer.ts": {
+      "statements": 98,
+      "branches": 82,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/settings/notif-bearer-mode.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/settings/profile-bearer-display.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/settings/profile-derive.ts": {
+      "statements": 94,
+      "branches": 78,
+      "functions": 98,
+      "lines": 94
+    },
+    "app/(authed)/settings/session-line.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/settings/theme.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/settings/token-state.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/admin/audit-periods/export/route.ts": {
+      "statements": 98,
+      "branches": 88,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/admin/demo/status/route.ts": {
+      "statements": 98,
+      "branches": 69,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/admin/evidence/export/route.ts": {
+      "statements": 98,
+      "branches": 88,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/admin/exceptions/export/route.ts": {
+      "statements": 98,
+      "branches": 88,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/admin/me/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/admin/policies/export/route.ts": {
+      "statements": 98,
+      "branches": 88,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/admin/samples/export/route.ts": {
+      "statements": 98,
+      "branches": 88,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/admin/tenants/route.ts": {
+      "statements": 94,
+      "branches": 73,
+      "functions": 98,
+      "lines": 94
+    },
+    "app/api/admin/vendors/export/route.ts": {
+      "statements": 98,
+      "branches": 88,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/anchors/export/route.ts": {
+      "statements": 98,
+      "branches": 88,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/audit-log/export/route.ts": {
+      "statements": 98,
+      "branches": 88,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/audit-log/unified/route.ts": {
+      "statements": 88,
+      "branches": 64,
+      "functions": 98,
+      "lines": 88
+    },
+    "app/api/audits/route.ts": {
+      "statements": 93,
+      "branches": 88,
+      "functions": 98,
+      "lines": 93
+    },
+    "app/api/calendar/route.ts": {
+      "statements": 98,
+      "branches": 78,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/calendar/subscription/route.ts": {
+      "statements": 64,
+      "branches": 73,
+      "functions": 98,
+      "lines": 64
+    },
+    "app/api/controls-list/route.ts": {
+      "statements": 98,
+      "branches": 73,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/controls/[id]/history/route.ts": {
+      "statements": 98,
+      "branches": 73,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/controls/[id]/policies/route.ts": {
+      "statements": 98,
+      "branches": 73,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/controls/[id]/risks/route.ts": {
+      "statements": 98,
+      "branches": 73,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/controls/export/route.ts": {
+      "statements": 98,
+      "branches": 88,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/controls/history/export/route.ts": {
+      "statements": 98,
+      "branches": 88,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/controls/route.ts": {
+      "statements": 98,
+      "branches": 78,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/dashboard/activity/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/dashboard/framework-posture/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/dashboard/proxy.ts": {
+      "statements": 98,
+      "branches": 73,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/dashboard/risks/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/dashboard/upcoming/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/evidence/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/exceptions/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/install-state/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/install/mark-first-signin/route.ts": {
+      "statements": 95,
+      "branches": 82,
+      "functions": 98,
+      "lines": 95
+    },
+    "app/api/me/route.ts": {
+      "statements": 93,
+      "branches": 78,
+      "functions": 98,
+      "lines": 93
+    },
+    "app/api/me/sessions/_headers.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/me/sessions/[id]/route.ts": {
+      "statements": 85,
+      "branches": 64,
+      "functions": 98,
+      "lines": 85
+    },
+    "app/api/me/sessions/route.ts": {
+      "statements": 88,
+      "branches": 79,
+      "functions": 98,
+      "lines": 88
+    },
+    "app/api/policies/route.ts": {
+      "statements": 98,
+      "branches": 69,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/questionnaires/[id]/answers/[qid]/route.ts": {
+      "statements": 92,
+      "branches": 81,
+      "functions": 98,
+      "lines": 92
+    },
+    "app/api/questionnaires/[id]/export-pdf/route.ts": {
+      "statements": 98,
+      "branches": 81,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/questionnaires/[id]/import-excel/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/questionnaires/[id]/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/questionnaires/[id]/suggestions/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/questionnaires/route.ts": {
+      "statements": 93,
+      "branches": 88,
+      "functions": 98,
+      "lines": 93
+    },
+    "app/api/risks/export/route.ts": {
+      "statements": 98,
+      "branches": 88,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/risks/route.ts": {
+      "statements": 93,
+      "branches": 74,
+      "functions": 98,
+      "lines": 93
+    },
+    "app/api/search/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/tenants/[id]/route.ts": {
+      "statements": 84,
+      "branches": 64,
+      "functions": 98,
+      "lines": 84
+    },
+    "app/api/version/route.ts": {
+      "statements": 98,
+      "branches": 73,
+      "functions": 98,
+      "lines": 98
+    },
+    "components/board-pack/pack-breadcrumb-segments.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "components/board-pack/pack-header-meta.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "components/board-pack/posture-coverage-caption.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "components/calendar/link-for.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "components/control/coverage.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "components/control/strm.ts": {
+      "statements": 0,
+      "branches": 98,
+      "functions": 98,
+      "lines": 0
+    },
+    "components/dashboards-metrics/format.ts": {
+      "statements": 0,
+      "branches": 98,
+      "functions": 98,
+      "lines": 0
+    },
+    "components/questionnaire/types.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/admin-nav.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/api.ts": {
+      "statements": 16,
+      "branches": 88,
+      "functions": 15,
+      "lines": 16
+    },
+    "lib/api/anchors-export.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/api/audit-log.ts": {
+      "statements": 71,
+      "branches": 93,
+      "functions": 81,
+      "lines": 71
+    },
+    "lib/api/audit.ts": {
+      "statements": 0,
+      "branches": 98,
+      "functions": 98,
+      "lines": 0
+    },
+    "lib/api/bff.ts": {
+      "statements": 56,
+      "branches": 98,
+      "functions": 48,
+      "lines": 56
+    },
+    "lib/api/controls-export.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/api/controls-history-export.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/api/exceptions-export.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/api/metrics.ts": {
+      "statements": 21,
+      "branches": 93,
+      "functions": 13,
+      "lines": 21
+    },
+    "lib/api/risks-export.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/auth.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/auth/oauth-client.ts": {
+      "statements": 52,
+      "branches": 85,
+      "functions": 83,
+      "lines": 52
+    },
+    "lib/auth/switch-tenant.ts": {
+      "statements": 95,
+      "branches": 68,
+      "functions": 98,
+      "lines": 95
+    },
+    "lib/auth/tenant-broadcast.ts": {
+      "statements": 92,
+      "branches": 85,
+      "functions": 81,
+      "lines": 92
+    },
+    "lib/display-name.ts": {
+      "statements": 98,
+      "branches": 91,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/page-names.ts": {
+      "statements": 98,
+      "branches": 86,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/relative-time.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/safe-redirect.ts": {
+      "statements": 98,
+      "branches": 86,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/secure-cookie.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/theme-aware-logo.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/theme-class.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/utils.ts": {
+      "statements": 48,
+      "branches": 98,
+      "functions": 0,
+      "lines": 48
+    },
+    "proxy.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    }
+  }
+}
