@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/drift"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -79,7 +80,7 @@ func (h *Handler) Freshness(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.freshness.List(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "freshnessdrift", err)
 		return
 	}
 
@@ -169,7 +170,7 @@ func (h *Handler) Drift(w http.ResponseWriter, r *http.Request) {
 
 	report, err := h.drift.Report(ctx, window)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "freshnessdrift", err)
 		return
 	}
 

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -81,7 +82,7 @@ func (h *Handler) FrameworkPosture(w http.ResponseWriter, r *http.Request) {
 	cutoff := pgTimestamptz(time.Now().UTC().Add(-trendWindow))
 	rows, err := h.store.FrameworkPosture(ctx, cutoff)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "dashboard", err)
 		return
 	}
 
@@ -135,7 +136,7 @@ func (h *Handler) Activity(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.store.ActivityFeed(ctx, cursor, pageRows)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "dashboard", err)
 		return
 	}
 
@@ -198,7 +199,7 @@ func (h *Handler) Upcoming(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.store.UpcomingItems(ctx, category, cursor, pageRows)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "dashboard", err)
 		return
 	}
 

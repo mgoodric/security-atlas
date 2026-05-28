@@ -23,6 +23,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -166,7 +167,7 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 			risk.IsTreatmentValidation(err):
 			writeError(w, http.StatusBadRequest, err.Error())
 		default:
-			writeServerErr(w, "create risk", err)
+			writeServerErr(w, r, "create risk", err)
 		}
 		return
 	}
@@ -222,7 +223,7 @@ func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
 	}
 	risks, err := h.store.List(ctx, filter)
 	if err != nil {
-		writeServerErr(w, "list risks", err)
+		writeServerErr(w, r, "list risks", err)
 		return
 	}
 	out := make([]riskWire, len(risks))
@@ -258,7 +259,7 @@ func (h *Handler) ThemeHeatmap(w http.ResponseWriter, r *http.Request) {
 	}
 	cells, err := h.store.ThemeOrgUnitHeatmap(ctx)
 	if err != nil {
-		writeServerErr(w, "theme heatmap", err)
+		writeServerErr(w, r, "theme heatmap", err)
 		return
 	}
 	type cellWire struct {
@@ -299,7 +300,7 @@ func (h *Handler) GetRisk(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "risk not found")
 			return
 		}
-		writeServerErr(w, "get risk", err)
+		writeServerErr(w, r, "get risk", err)
 		return
 	}
 	body := map[string]any{"risk": riskWireFrom(rk)}
@@ -310,7 +311,7 @@ func (h *Handler) GetRisk(w http.ResponseWriter, r *http.Request) {
 	if h.deriver != nil {
 		res, derr := h.deriver.Derive(ctx, id, false)
 		if derr != nil {
-			writeServerErr(w, "derive residual", derr)
+			writeServerErr(w, r, "derive residual", derr)
 			return
 		}
 		body["residual"] = residualWireFrom(res)
@@ -335,7 +336,7 @@ func (h *Handler) DeleteRisk(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "risk not found")
 			return
 		}
-		writeServerErr(w, "delete risk", err)
+		writeServerErr(w, r, "delete risk", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -352,7 +353,7 @@ func (h *Handler) Heatmap(w http.ResponseWriter, r *http.Request) {
 	}
 	cells, err := h.store.Heatmap(ctx)
 	if err != nil {
-		writeServerErr(w, "heatmap", err)
+		writeServerErr(w, r, "heatmap", err)
 		return
 	}
 	// Dense 5x5 view — likelihood rows (1..5), impact cols (1..5).
@@ -511,8 +512,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }

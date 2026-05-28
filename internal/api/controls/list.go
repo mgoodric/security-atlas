@@ -32,6 +32,7 @@ package controls
 import (
 	"net/http"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -87,7 +88,7 @@ func (h *ListHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.store.List(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list controls: "+err.Error())
+		httperr.WriteInternal(w, r, "list controls", err)
 		return
 	}
 

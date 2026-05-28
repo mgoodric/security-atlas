@@ -106,7 +106,7 @@ func (h *SessionsHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.sessions.ListForUser(ctx, tenantUUID, userUUID)
 	if err != nil {
-		writeServerErr(w, "list sessions", err)
+		writeServerErr(w, r, "list sessions", err)
 		return
 	}
 	currentID := currentSessionIDFromRequest(r)
@@ -145,7 +145,7 @@ func (h *SessionsHandler) RevokeSession(w http.ResponseWriter, r *http.Request) 
 	}
 	updated, err := h.sessions.RevokeForUser(ctx, tenantUUID, userUUID, id)
 	if err != nil {
-		writeServerErr(w, "revoke session", err)
+		writeServerErr(w, r, "revoke session", err)
 		return
 	}
 	if !updated {
@@ -181,7 +181,7 @@ func (h *SessionsHandler) RevokeOtherSessions(w http.ResponseWriter, r *http.Req
 	currentID := currentSessionIDFromRequest(r)
 	n, err := h.sessions.RevokeOthersForUser(ctx, tenantUUID, userUUID, currentID)
 	if err != nil {
-		writeServerErr(w, "revoke other sessions", err)
+		writeServerErr(w, r, "revoke other sessions", err)
 		return
 	}
 	if n > 0 {

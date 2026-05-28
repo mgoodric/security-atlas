@@ -108,6 +108,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -249,8 +250,7 @@ func (h *Handler) ExportDashboard(w http.ResponseWriter, r *http.Request) {
 			Result: "error:snapshot",
 			Reason: snapErr.Error(),
 		})
-		writeError(w, http.StatusInternalServerError,
-			"compose dashboard snapshot: "+snapErr.Error())
+		httperr.WriteInternal(w, r, "compose dashboard snapshot", snapErr)
 		return
 	}
 

@@ -514,6 +514,15 @@ jobs:
         with:
           version: latest
 
+      # Slice 367 — CWE-209 errleak check. Rejects new code reflecting
+      # err.Error() into 5xx JSON response bodies. Background: slice 327
+      # audit finding M-2 (`docs/audits/327-...-report.md`). The
+      # analyzer lives at cmd/scripts/errleak-lint and is invoked as a
+      # plain `go run` so it runs on the same setup-go cache as the
+      # golangci-lint step above. A hit exits 3 and fails the CI check.
+      - name: Go · errleak (slice 367 CWE-209 guard)
+        run: go run ./cmd/scripts/errleak-lint ./internal/api/...
+
   lint-go-stub:
     name: Go · lint
     needs: changes

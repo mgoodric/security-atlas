@@ -54,6 +54,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -177,7 +178,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return qErr
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list audit log: "+err.Error())
+		httperr.WriteInternal(w, r, "list audit log", err)
 		return
 	}
 

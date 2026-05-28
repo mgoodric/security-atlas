@@ -83,6 +83,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
@@ -244,7 +245,7 @@ func (h *Handler) ExportAuditPeriods(w http.ResponseWriter, r *http.Request) {
 			Result: "error:db",
 			Reason: err.Error(),
 		})
-		writeError(w, http.StatusInternalServerError, "list audit periods: "+err.Error())
+		httperr.WriteInternal(w, r, "list audit periods", err)
 		return
 	}
 

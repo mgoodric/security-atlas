@@ -39,6 +39,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/audit/notes"
 	"github.com/mgoodric/security-atlas/internal/audit/notifications"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -170,7 +171,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, notes.ErrNotFound):
 			writeError(w, http.StatusBadRequest, "parent_note_id not found or not visible to caller")
 		default:
-			writeServerErr(w, "create audit note", err)
+			writeServerErr(w, r, "create audit note", err)
 		}
 		return
 	}
@@ -225,7 +226,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.store.ListForAuthorAndPeriod(ctx, periodID, authorID)
 	if err != nil {
-		writeServerErr(w, "list audit notes", err)
+		writeServerErr(w, r, "list audit notes", err)
 		return
 	}
 	out := make([]noteWire, len(rows))
@@ -285,7 +286,7 @@ func (h *Handler) Thread(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "scope_type must be one of control|finding|sample|period|walkthrough")
 			return
 		}
-		writeServerErr(w, "list audit-note thread", err)
+		writeServerErr(w, r, "list audit-note thread", err)
 		return
 	}
 	out := make([]noteWire, len(rows))
@@ -321,8 +322,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }

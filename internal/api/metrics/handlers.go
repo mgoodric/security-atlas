@@ -38,6 +38,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -166,7 +167,7 @@ func (h *Handler) ListCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := dbx.New(h.pool).ListMetricsCatalog(r.Context(), params)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list catalog: "+err.Error())
+		httperr.WriteInternal(w, r, "list catalog", err)
 		return
 	}
 	out := make([]metricWire, 0, len(rows))
@@ -197,17 +198,17 @@ func (h *Handler) GetCatalog(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "metric not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "get catalog: "+err.Error())
+		httperr.WriteInternal(w, r, "get catalog", err)
 		return
 	}
 	parents, err := q.ListMetricCatalogParents(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list parents: "+err.Error())
+		httperr.WriteInternal(w, r, "list parents", err)
 		return
 	}
 	children, err := q.ListMetricCatalogChildren(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list children: "+err.Error())
+		httperr.WriteInternal(w, r, "list children", err)
 		return
 	}
 	out := metricDetailWire{
@@ -253,7 +254,7 @@ func (h *Handler) GetCascade(w http.ResponseWriter, r *http.Request) {
 		DepthLimit: depth,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "cascade: "+err.Error())
+		httperr.WriteInternal(w, r, "cascade", err)
 		return
 	}
 	out := make([]cascadeNodeWire, 0, len(rows))
@@ -332,7 +333,7 @@ func (h *Handler) ListObservations(w http.ResponseWriter, r *http.Request) {
 		return inErr
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "observations: "+err.Error())
+		httperr.WriteInternal(w, r, "observations", err)
 		return
 	}
 	page := observationsPageWire{
@@ -378,7 +379,7 @@ func (h *Handler) CreateInput(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "metric not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "lookup: "+err.Error())
+		httperr.WriteInternal(w, r, "lookup", err)
 		return
 	}
 	if cat.ComputeStrategy != "manual_input" && cat.ComputeStrategy != "external_integration" {
@@ -424,7 +425,7 @@ func (h *Handler) CreateInput(w http.ResponseWriter, r *http.Request) {
 		return inErr
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "insert input: "+err.Error())
+		httperr.WriteInternal(w, r, "insert input", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, inputWireFromRow(row))
@@ -455,7 +456,7 @@ func (h *Handler) GetTarget(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "no target set")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "get target: "+err.Error())
+		httperr.WriteInternal(w, r, "get target", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, targetWireFromRow(row))
@@ -521,7 +522,7 @@ func (h *Handler) UpsertTarget(w http.ResponseWriter, r *http.Request) {
 		return inErr
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "upsert target: "+err.Error())
+		httperr.WriteInternal(w, r, "upsert target", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, targetWireFromRow(row))

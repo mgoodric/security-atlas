@@ -58,7 +58,7 @@ func (h *PreferencesHandler) GetPreferences(w http.ResponseWriter, r *http.Reque
 	}
 	out, err := h.prefs.Get(ctx, tenantUUID, userUUID)
 	if err != nil {
-		writeServerErr(w, "get preferences", err)
+		writeServerErr(w, r, "get preferences", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"preferences": preferencesWire(out)})
@@ -118,7 +118,7 @@ func (h *PreferencesHandler) PatchPreferences(w http.ResponseWriter, r *http.Req
 	// Snapshot prior state for audit-log diff (before-image).
 	before, err := h.prefs.Get(ctx, tenantUUID, userUUID)
 	if err != nil {
-		writeServerErr(w, "load preferences before patch", err)
+		writeServerErr(w, r, "load preferences before patch", err)
 		return
 	}
 	if err := h.prefs.Upsert(ctx, tenantUUID, userUUID, matrix); err != nil {
@@ -130,12 +130,12 @@ func (h *PreferencesHandler) PatchPreferences(w http.ResponseWriter, r *http.Req
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		writeServerErr(w, "upsert preferences", err)
+		writeServerErr(w, r, "upsert preferences", err)
 		return
 	}
 	after, err := h.prefs.Get(ctx, tenantUUID, userUUID)
 	if err != nil {
-		writeServerErr(w, "load preferences after patch", err)
+		writeServerErr(w, r, "load preferences after patch", err)
 		return
 	}
 	// Audit-log: only the cells the patch touched.

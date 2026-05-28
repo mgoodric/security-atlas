@@ -38,6 +38,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -141,7 +142,7 @@ func (h *Handler) CreateProposal(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:      cred.ID,
 	})
 	if err != nil {
-		h.writeCreateErr(w, err)
+		h.writeCreateErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"proposal": proposalWireFrom(created)})
@@ -160,7 +161,7 @@ func (h *Handler) ListProposals(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.store.List(ctx, filter)
 	if err != nil {
-		writeServerErr(w, "list proposals", err)
+		writeServerErr(w, r, "list proposals", err)
 		return
 	}
 	out := make([]proposalWire, len(rows))
@@ -188,7 +189,7 @@ func (h *Handler) GetProposal(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "proposal not found")
 			return
 		}
-		writeServerErr(w, "get proposal", err)
+		writeServerErr(w, r, "get proposal", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"proposal": proposalWireFrom(p)})
@@ -212,7 +213,7 @@ func (h *Handler) ConfirmProposal(w http.ResponseWriter, r *http.Request) {
 	}
 	confirmed, err := h.store.Confirm(ctx, id, cred.ID)
 	if err != nil {
-		h.writeTransitionErr(w, err)
+		h.writeTransitionErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"proposal": proposalWireFrom(confirmed)})
@@ -240,7 +241,7 @@ func (h *Handler) RejectProposal(w http.ResponseWriter, r *http.Request) {
 	}
 	rejected, err := h.store.Reject(ctx, id, req.Reason)
 	if err != nil {
-		h.writeTransitionErr(w, err)
+		h.writeTransitionErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"proposal": proposalWireFrom(rejected)})
@@ -248,7 +249,7 @@ func (h *Handler) RejectProposal(w http.ResponseWriter, r *http.Request) {
 
 // ----- helpers -----
 
-func (h *Handler) writeCreateErr(w http.ResponseWriter, err error) {
+func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, writeproposals.ErrUnknownTool),
 		errors.Is(err, writeproposals.ErrInvalidInput):
@@ -256,11 +257,11 @@ func (h *Handler) writeCreateErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, writeproposals.ErrPendingCapExceeded):
 		writeError(w, http.StatusTooManyRequests, "pending proposal cap exceeded; approve or reject existing proposals before filing more")
 	default:
-		writeServerErr(w, "create proposal", err)
+		writeServerErr(w, r, "create proposal", err)
 	}
 }
 
-func (h *Handler) writeTransitionErr(w http.ResponseWriter, err error) {
+func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, writeproposals.ErrNotFound):
 		writeError(w, http.StatusNotFound, "proposal not found")
@@ -269,7 +270,7 @@ func (h *Handler) writeTransitionErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, writeproposals.ErrUnknownTool):
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:
-		writeServerErr(w, "transition", err)
+		writeServerErr(w, r, "transition", err)
 	}
 }
 
@@ -294,8 +295,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }

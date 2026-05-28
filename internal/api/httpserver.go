@@ -51,6 +51,7 @@ import (
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	policyacksapi "github.com/mgoodric/security-atlas/internal/api/policyacks"
 	questionnairesapi "github.com/mgoodric/security-atlas/internal/api/questionnaires"
+	"github.com/mgoodric/security-atlas/internal/api/requestidmw"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
@@ -122,6 +123,15 @@ func (s *Server) httpHandler() http.Handler {
 	// (MEDIUM-HIGH finding); see docs/audits/2026-Q2-security-audit.md and
 	// internal/api/securityheaders/middleware.go.
 	root.Use(securityheaders.Middleware)
+	// Slice 367: request-ID middleware sits AFTER securityheaders (so
+	// security headers still apply to every response) but BEFORE
+	// corsMiddleware and the JWT chain so every downstream handler
+	// (including the auth-failure paths) sees a stable request ID.
+	// The helper in internal/api/httperr consumes this ID to correlate
+	// the client's generic-5xx response with the slog log line that
+	// carries the full err.Error(). See docs/audits/327-... finding M-2
+	// and docs/audit-log/367-error-detail-leakage-audit-decisions.md.
+	root.Use(requestidmw.Middleware)
 	root.Use(corsMiddleware)
 	// Slice 190 + 197 + 326: JWT validation middleware is the SOLE
 	// auth middleware on `/v1/*`. The slice 191 `legacyBearerDeprecation`

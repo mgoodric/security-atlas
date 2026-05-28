@@ -43,6 +43,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/decision"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -168,7 +169,7 @@ func (h *Handler) CreateDecision(w http.ResponseWriter, r *http.Request) {
 	}
 	created, err := h.store.Create(ctx, in)
 	if err != nil {
-		h.writeStoreErr(w, "create decision", err)
+		h.writeStoreErr(w, r, "create decision", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"decision": decisionWireFrom(created)})
@@ -237,7 +238,7 @@ func (h *Handler) ListDecisions(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.store.List(ctx, filter)
 	if err != nil {
-		h.writeStoreErr(w, "list decisions", err)
+		h.writeStoreErr(w, r, "list decisions", err)
 		return
 	}
 	out := make([]decisionWire, len(rows))
@@ -257,7 +258,7 @@ func (h *Handler) Overdue(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.store.Overdue(ctx, time.Now().UTC())
 	if err != nil {
-		h.writeStoreErr(w, "list overdue decisions", err)
+		h.writeStoreErr(w, r, "list overdue decisions", err)
 		return
 	}
 	out := make([]decisionWire, len(rows))
@@ -282,7 +283,7 @@ func (h *Handler) GetDecision(w http.ResponseWriter, r *http.Request) {
 	}
 	d, lk, err := h.store.GetWithLinkage(ctx, id)
 	if err != nil {
-		h.writeStoreErr(w, "get decision", err)
+		h.writeStoreErr(w, r, "get decision", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -305,7 +306,7 @@ func (h *Handler) AuditLog(w http.ResponseWriter, r *http.Request) {
 	}
 	entries, err := h.store.ListAudit(ctx, id)
 	if err != nil {
-		h.writeStoreErr(w, "list decision audit log", err)
+		h.writeStoreErr(w, r, "list decision audit log", err)
 		return
 	}
 	type entryWire struct {
@@ -368,7 +369,7 @@ func (h *Handler) UpdateDecision(w http.ResponseWriter, r *http.Request) {
 	}
 	updated, err := h.store.Update(ctx, id, in)
 	if err != nil {
-		h.writeStoreErr(w, "update decision", err)
+		h.writeStoreErr(w, r, "update decision", err)
 		return
 	}
 
@@ -377,7 +378,7 @@ func (h *Handler) UpdateDecision(w http.ResponseWriter, r *http.Request) {
 	if req.AuditNarrativeOptOut != nil && *req.AuditNarrativeOptOut != updated.AuditNarrativeOptOut {
 		updated, err = h.store.SetAuditNarrativeOptOut(ctx, id, *req.AuditNarrativeOptOut, cred.ID)
 		if err != nil {
-			h.writeStoreErr(w, "set audit-narrative opt-out", err)
+			h.writeStoreErr(w, r, "set audit-narrative opt-out", err)
 			return
 		}
 	}
@@ -413,7 +414,7 @@ func (h *Handler) Supersede(w http.ResponseWriter, r *http.Request) {
 	}
 	superseded, err := h.store.Supersede(ctx, id, supersededBy, cred.ID)
 	if err != nil {
-		h.writeStoreErr(w, "supersede decision", err)
+		h.writeStoreErr(w, r, "supersede decision", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"decision": decisionWireFrom(superseded)})
@@ -451,7 +452,7 @@ func (h *Handler) AddLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.AddLink(ctx, id, decision.LinkKind(kind), targetID, cred.ID); err != nil {
-		h.writeStoreErr(w, "add link", err)
+		h.writeStoreErr(w, r, "add link", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -486,7 +487,7 @@ func (h *Handler) RemoveLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.RemoveLink(ctx, id, decision.LinkKind(kind), targetID, cred.ID); err != nil {
-		h.writeStoreErr(w, "remove link", err)
+		h.writeStoreErr(w, r, "remove link", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -505,7 +506,7 @@ func (h *Handler) RemoveLink(w http.ResponseWriter, r *http.Request) {
 //	ErrWrongState                    -> 409
 //	validation errors                -> 400
 //	anything else                    -> 500
-func (h *Handler) writeStoreErr(w http.ResponseWriter, op string, err error) {
+func (h *Handler) writeStoreErr(w http.ResponseWriter, r *http.Request, op string, err error) {
 	switch {
 	case errors.Is(err, decision.ErrNotFound):
 		writeError(w, http.StatusNotFound, "decision not found")
@@ -523,7 +524,7 @@ func (h *Handler) writeStoreErr(w http.ResponseWriter, op string, err error) {
 		errors.Is(err, decision.ErrInvalidLinkKind):
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:
-		writeServerErr(w, op, err)
+		writeServerErr(w, r, op, err)
 	}
 }
 
@@ -613,8 +614,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }

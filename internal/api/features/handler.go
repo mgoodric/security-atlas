@@ -25,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 )
 
@@ -61,7 +62,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Store.List logs and falls back internally; reaching here is
 		// the rare class (tenant-context error etc.).
-		writeError(w, http.StatusInternalServerError, "list failed: "+err.Error())
+		httperr.WriteInternal(w, r, "list failed", err)
 		return
 	}
 	items := make([]ListItem, 0, len(flags))
@@ -130,7 +131,7 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, featureflag.ErrEmptyActor):
 			writeError(w, http.StatusBadRequest, "actor identity missing")
 		default:
-			writeError(w, http.StatusInternalServerError, "toggle failed: "+err.Error())
+			httperr.WriteInternal(w, r, "toggle failed", err)
 		}
 		return
 	}

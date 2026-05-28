@@ -108,12 +108,12 @@ func (h *ProfileHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	}
 	wire, err := h.buildProfile(ctx, cred)
 	if err != nil {
-		writeServerErr(w, "get profile", err)
+		writeServerErr(w, r, "get profile", err)
 		return
 	}
 	roles, rerr := h.resolveRoles(ctx, cred)
 	if rerr != nil {
-		writeServerErr(w, "resolve roles", rerr)
+		writeServerErr(w, r, "resolve roles", rerr)
 		return
 	}
 	wire.Roles = roles
@@ -166,7 +166,7 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "user not found")
 			return
 		}
-		writeServerErr(w, "load profile", err)
+		writeServerErr(w, r, "load profile", err)
 		return
 	}
 	newDisplay := current.DisplayName
@@ -182,7 +182,7 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 		wire := profileWireFrom(current, cred)
 		roles, rerr := h.resolveRoles(ctx, cred)
 		if rerr != nil {
-			writeServerErr(w, "resolve roles", rerr)
+			writeServerErr(w, r, "resolve roles", rerr)
 			return
 		}
 		wire.Roles = roles
@@ -196,7 +196,7 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 		TimeZone:    newTZ,
 	})
 	if err != nil {
-		writeServerErr(w, "update profile", err)
+		writeServerErr(w, r, "update profile", err)
 		return
 	}
 	// Audit-log entry. Failure here is logged but NOT fatal to the PATCH — the
@@ -210,7 +210,7 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	wire := profileWireFrom(updated, cred)
 	roles, rerr := h.resolveRoles(ctx, cred)
 	if rerr != nil {
-		writeServerErr(w, "resolve roles", rerr)
+		writeServerErr(w, r, "resolve roles", rerr)
 		return
 	}
 	wire.Roles = roles

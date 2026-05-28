@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -93,7 +94,7 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 		OwnerRoles:     req.OwnerRoles,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "issue failed: "+err.Error())
+		httperr.WriteInternal(w, r, "issue failed", err)
 		return
 	}
 	resp := IssueResponse{
@@ -148,7 +149,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	creds, err := h.store.List(r.Context(), cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list failed: "+err.Error())
+		httperr.WriteInternal(w, r, "list failed", err)
 		return
 	}
 	items := make([]ListItem, 0, len(creds))
@@ -209,7 +210,7 @@ func (h *Handler) Rotate(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "unknown credential id")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "rotate failed: "+err.Error())
+		httperr.WriteInternal(w, r, "rotate failed", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -245,7 +246,7 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "unknown credential id")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "revoke failed: "+err.Error())
+		httperr.WriteInternal(w, r, "revoke failed", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

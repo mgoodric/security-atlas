@@ -34,6 +34,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -122,7 +123,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:          cred.ID,
 	})
 	if err != nil {
-		writeServerErr(w, "create audit period", err)
+		writeServerErr(w, r, "create audit period", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
@@ -148,7 +149,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "audit period not found")
 			return
 		}
-		writeServerErr(w, "get audit period", err)
+		writeServerErr(w, r, "get audit period", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"audit_period": periodWireFrom(p)})
@@ -163,7 +164,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	ps, err := h.store.List(ctx)
 	if err != nil {
-		writeServerErr(w, "list audit periods", err)
+		writeServerErr(w, r, "list audit periods", err)
 		return
 	}
 	out := make([]periodWire, len(ps))
@@ -200,7 +201,7 @@ func (h *Handler) Freeze(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, period.ErrAlreadyFrozen):
 			writeError(w, http.StatusConflict, "audit period is already frozen")
 		default:
-			writeServerErr(w, "freeze audit period", err)
+			writeServerErr(w, r, "freeze audit period", err)
 		}
 		return
 	}
@@ -239,7 +240,7 @@ func (h *Handler) ControlState(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "audit period not found")
 			return
 		}
-		writeServerErr(w, "control-state", err)
+		writeServerErr(w, r, "control-state", err)
 		return
 	}
 	out := make([]controlStateObservationWire, len(obs))
@@ -285,7 +286,7 @@ func (h *Handler) AttachPopulation(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "audit period not found")
 			return
 		}
-		writeServerErr(w, "attach population", err)
+		writeServerErr(w, r, "attach population", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -358,8 +359,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }

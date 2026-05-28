@@ -36,11 +36,17 @@ test-frontend:
     cd web && npm test --if-present
 
 # Run all linters (Go + frontend + Python)
-lint: lint-go lint-frontend lint-python
+lint: lint-go lint-errleak lint-frontend lint-python
 
 # Lint Go (golangci-lint)
 lint-go:
     golangci-lint run ./...
+
+# Slice 367 — CWE-209 errleak check.
+# Rejects new code that reflects err.Error() into a 5xx JSON response body.
+# Background: docs/audits/327-...-report.md finding M-2.
+lint-errleak:
+    go run ./cmd/scripts/errleak-lint ./internal/api/...
 
 # Lint frontend (eslint)
 lint-frontend:

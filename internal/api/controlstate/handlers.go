@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -101,7 +102,7 @@ func (h *Handler) State(w http.ResponseWriter, r *http.Request) {
 
 	states, err := h.engine.ControlState(ctx, controlID, scopePredicate, asOf)
 	if err != nil {
-		writeStateErr(w, err)
+		writeStateErr(w, r, err)
 		return
 	}
 
@@ -143,7 +144,7 @@ func (h *Handler) Effectiveness(w http.ResponseWriter, r *http.Request) {
 
 	eff, err := h.engine.Effectiveness(ctx, controlID)
 	if err != nil {
-		writeStateErr(w, err)
+		writeStateErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, effectivenessWire{
@@ -171,14 +172,14 @@ func tenantContext(r *http.Request) (context.Context, bool) {
 // writeStateErr maps an engine error to an HTTP status. ErrControlNotFound /
 // pgx.ErrNoRows → 404; a malformed scope predicate → 400; everything else →
 // 500.
-func writeStateErr(w http.ResponseWriter, err error) {
+func writeStateErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case eval.IsNotFound(err):
 		writeError(w, http.StatusNotFound, "control not found")
 	case eval.IsBadScopePredicate(err):
 		writeError(w, http.StatusBadRequest, "scope predicate is malformed: "+err.Error())
 	default:
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		httperr.WriteInternal(w, r, "controlstate", err)
 	}
 }
 

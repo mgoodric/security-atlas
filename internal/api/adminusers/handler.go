@@ -50,6 +50,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -148,7 +149,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return qErr
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list users: "+err.Error())
+		httperr.WriteInternal(w, r, "list users", err)
 		return
 	}
 
@@ -197,7 +198,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "user not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "get user: "+err.Error())
+		httperr.WriteInternal(w, r, "get user", err)
 		return
 	}
 
@@ -285,7 +286,7 @@ func (h *Handler) PatchRoles(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "patch roles: "+err.Error())
+		httperr.WriteInternal(w, r, "patch roles", err)
 		return
 	}
 
@@ -304,7 +305,7 @@ func (h *Handler) PatchRoles(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "user not found after role update")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "refetch user: "+err.Error())
+		httperr.WriteInternal(w, r, "refetch user", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, userResponseFromGetRow(row))

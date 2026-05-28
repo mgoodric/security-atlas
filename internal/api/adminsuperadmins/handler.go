@@ -66,6 +66,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
@@ -181,7 +182,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return queryRows.Err()
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list super_admins: "+err.Error())
+		httperr.WriteInternal(w, r, "list super_admins", err)
 		return
 	}
 
@@ -229,7 +230,7 @@ func (h *Handler) Grant(w http.ResponseWriter, r *http.Request) {
 	}
 	actorTenantID, terr := actorTenantFromContext(r.Context())
 	if terr != nil {
-		writeError(w, http.StatusInternalServerError, terr.Error())
+		httperr.WriteInternal(w, r, "adminsuperadmins", terr)
 		return
 	}
 
@@ -324,7 +325,7 @@ func (h *Handler) Grant(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "grant super_admin: "+err.Error())
+		httperr.WriteInternal(w, r, "grant super_admin", err)
 		return
 	}
 
@@ -383,7 +384,7 @@ func (h *Handler) Demote(w http.ResponseWriter, r *http.Request) {
 	}
 	actorTenantID, terr := actorTenantFromContext(r.Context())
 	if terr != nil {
-		writeError(w, http.StatusInternalServerError, terr.Error())
+		httperr.WriteInternal(w, r, "adminsuperadmins", terr)
 		return
 	}
 
@@ -481,7 +482,7 @@ func (h *Handler) Demote(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "demote super_admin: "+err.Error())
+		httperr.WriteInternal(w, r, "demote super_admin", err)
 		return
 	}
 	if res.notFound {

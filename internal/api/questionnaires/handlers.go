@@ -24,6 +24,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -84,7 +85,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		SourceFilename: req.SourceFilename,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, q)
@@ -100,7 +101,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := h.store.ListQuestionnaires(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"questionnaires": list})
@@ -167,7 +168,7 @@ func (h *Handler) ImportExcel(w http.ResponseWriter, r *http.Request) {
 
 	added, err := h.store.AddQuestionsFromParse(ctx, id, parsed.Questions)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, importResponse{
@@ -199,7 +200,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	qs, err := h.store.ListQuestionsWithAnswers(ctx, id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, getResponse{Questionnaire: q, Questions: qs})
@@ -246,7 +247,7 @@ func (h *Handler) UpsertAnswer(w http.ResponseWriter, r *http.Request) {
 		SourceLabel:     req.SourceLabel,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, a)
@@ -268,7 +269,7 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := h.store.SuggestForAnchorWithPool(ctx, anchor, questionnaire.DefaultSuggestionLimit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"suggestions": list})
@@ -291,7 +292,7 @@ func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.store.ListQuestionsWithAnswers(ctx, id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
 	in := questionnaire.PDFInput{
@@ -323,7 +324,7 @@ func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "PDF export disabled: chrome not available in this deployment")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/pdf")

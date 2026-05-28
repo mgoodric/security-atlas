@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -28,6 +27,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -151,7 +151,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		writeServerErr(w, "create framework_scope", err)
+		writeServerErr(w, r, "create framework_scope", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"framework_scope": toWire(out)})
@@ -189,7 +189,7 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		writeServerErr(w, "patch framework_scope", err)
+		writeServerErr(w, r, "patch framework_scope", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -217,7 +217,7 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, frameworkscope.ErrWrongState):
 			writeError(w, http.StatusConflict, "scope must be in `draft` to submit")
 		default:
-			writeServerErr(w, "submit framework_scope", err)
+			writeServerErr(w, r, "submit framework_scope", err)
 		}
 		return
 	}
@@ -288,7 +288,7 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, frameworkscope.ErrWrongState):
 			writeError(w, http.StatusConflict, "scope must be in `review` to approve")
 		default:
-			writeServerErr(w, "approve framework_scope", err)
+			writeServerErr(w, r, "approve framework_scope", err)
 		}
 		return
 	}
@@ -330,7 +330,7 @@ func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, frameworkscope.ErrAnotherActivated):
 			writeError(w, http.StatusConflict, "another scope is already activated for this framework version")
 		default:
-			writeServerErr(w, "activate framework_scope", err)
+			writeServerErr(w, r, "activate framework_scope", err)
 		}
 		return
 	}
@@ -354,7 +354,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "framework_scope not found")
 			return
 		}
-		writeServerErr(w, "get framework_scope", err)
+		writeServerErr(w, r, "get framework_scope", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"framework_scope": toWire(out)})
@@ -395,7 +395,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusOK, map[string]any{"framework_scopes": []scopeWire{}})
 				return
 			}
-			writeServerErr(w, "as_of framework_scope", err)
+			writeServerErr(w, r, "as_of framework_scope", err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"framework_scopes": []scopeWire{toWire(out)}})
@@ -408,7 +408,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		State:              state,
 	})
 	if err != nil {
-		writeServerErr(w, "list framework_scopes", err)
+		writeServerErr(w, r, "list framework_scopes", err)
 		return
 	}
 	out := make([]scopeWire, len(rows))
@@ -450,7 +450,7 @@ func (h *Handler) EffectiveScope(w http.ResponseWriter, r *http.Request) {
 	// Load the control's applicability set (slice-017 store).
 	applicability, err := h.scopeStore.ControlApplicability(ctx, controlID)
 	if err != nil {
-		writeServerErr(w, "control applicability", err)
+		writeServerErr(w, r, "control applicability", err)
 		return
 	}
 	// Load the active framework_scope. If none is activated, the control
@@ -469,13 +469,13 @@ func (h *Handler) EffectiveScope(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		writeServerErr(w, "activated framework_scope", err)
+		writeServerErr(w, r, "activated framework_scope", err)
 		return
 	}
 
 	cells, err := frameworkscope.EffectiveScope(ctx, applicability, activated.Predicate)
 	if err != nil {
-		writeServerErr(w, "intersect", err)
+		writeServerErr(w, r, "intersect", err)
 		return
 	}
 	wireCells := make([]map[string]any, len(cells))
@@ -546,8 +546,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": fmt.Sprintf("%s: %s", op, err.Error()),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }

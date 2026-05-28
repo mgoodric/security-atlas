@@ -40,6 +40,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
@@ -222,7 +223,7 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 			// the row; the explicit check is for clarity.
 			writeError(w, http.StatusNotFound, "tenant not found")
 		default:
-			writeError(w, http.StatusInternalServerError, "rename tenant: "+err.Error())
+			httperr.WriteInternal(w, r, "rename tenant", err)
 		}
 		return
 	}

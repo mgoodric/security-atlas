@@ -17,6 +17,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -112,14 +113,14 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 	// cred.TenantID. Confirm; bail if absent (would mean misconfig).
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusInternalServerError, "tenant context: "+err.Error())
+		httperr.WriteInternal(w, r, "tenant context", err)
 		return
 	}
 
 	bundle, err := h.readBundle(r)
 	if err != nil {
 		// Map parser errors to 4xx; everything else is 500.
-		writeBundleError(w, err)
+		writeBundleError(w, r, err)
 		return
 	}
 
@@ -146,7 +147,7 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 			// anchor. 404 communicates "the thing you referenced isn't there".
 			writeError(w, http.StatusNotFound, err.Error())
 		default:
-			writeError(w, http.StatusInternalServerError, "persist: "+err.Error())
+			httperr.WriteInternal(w, r, "persist", err)
 		}
 		return
 	}
@@ -254,7 +255,7 @@ func parseInline(rawYAML []byte) (*control.Bundle, error) {
 
 // writeBundleError maps a *control.ErrBundleMalformed (or wrapped) to a 400.
 // Unknown errors fall through to a 500.
-func writeBundleError(w http.ResponseWriter, err error) {
+func writeBundleError(w http.ResponseWriter, r *http.Request, err error) {
 	var m control.ErrBundleMalformed
 	if errors.As(err, &m) {
 		writeError(w, http.StatusBadRequest, m.Error())
@@ -265,7 +266,7 @@ func writeBundleError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, ue.Error())
 		return
 	}
-	writeError(w, http.StatusInternalServerError, "internal: "+err.Error())
+	httperr.WriteInternal(w, r, "internal", err)
 }
 
 func writeError(w http.ResponseWriter, code int, msg string) {

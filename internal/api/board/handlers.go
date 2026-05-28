@@ -32,6 +32,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	board "github.com/mgoodric/security-atlas/internal/board"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -112,7 +113,7 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "period_end must be a YYYY-MM-DD date")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "board", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, briefWireFromStored(stored))
@@ -143,7 +144,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "board brief not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "board", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, briefWireFromStored(stored))
@@ -159,7 +160,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	stored, err := h.store.List(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "board", err)
 		return
 	}
 	wires := make([]briefWire, 0, len(stored))
@@ -189,7 +190,7 @@ func (h *Handler) Markdown(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "board brief not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "board", err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
@@ -224,7 +225,7 @@ func (h *Handler) PDF(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "board brief not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "board", err)
 		return
 	}
 
@@ -237,7 +238,7 @@ func (h *Handler) PDF(w http.ResponseWriter, r *http.Request) {
 				"PDF rendering unavailable: chrome browser not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "board", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/pdf")

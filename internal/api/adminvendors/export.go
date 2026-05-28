@@ -79,6 +79,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -233,7 +234,7 @@ func (h *Handler) ExportVendors(w http.ResponseWriter, r *http.Request) {
 			Result: "error:db",
 			Reason: err.Error(),
 		})
-		writeError(w, http.StatusInternalServerError, "list vendors: "+err.Error())
+		httperr.WriteInternal(w, r, "list vendors", err)
 		return
 	}
 

@@ -35,6 +35,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	board "github.com/mgoodric/security-atlas/internal/board"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -115,7 +116,7 @@ func (h *PackHandler) Generate(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "period_end must be a YYYY-MM-DD date")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "board", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, packWireFromStored(stored))
@@ -138,7 +139,7 @@ func (h *PackHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	stored, err := h.store.Get(ctx, id)
 	if err != nil {
-		h.writePackError(w, err)
+		h.writePackError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, packWireFromStored(stored))
@@ -154,7 +155,7 @@ func (h *PackHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	stored, err := h.store.List(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "board", err)
 		return
 	}
 	wires := make([]packWire, 0, len(stored))
@@ -215,7 +216,7 @@ func (h *PackHandler) UpdateSection(w http.ResponseWriter, r *http.Request) {
 	}
 	stored, err := h.store.UpdateSection(ctx, id, edit)
 	if err != nil {
-		h.writePackError(w, err)
+		h.writePackError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, packWireFromStored(stored))
@@ -250,7 +251,7 @@ func (h *PackHandler) ApproveSection(w http.ResponseWriter, r *http.Request) {
 	}
 	stored, err := h.store.UpdateSection(ctx, id, edit)
 	if err != nil {
-		h.writePackError(w, err)
+		h.writePackError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, packWireFromStored(stored))
@@ -295,7 +296,7 @@ func (h *PackHandler) Publish(w http.ResponseWriter, r *http.Request) {
 
 	stored, err := h.store.Publish(ctx, id, req.PublishedBy)
 	if err != nil {
-		h.writePackError(w, err)
+		h.writePackError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, packWireFromStored(stored))
@@ -317,7 +318,7 @@ func (h *PackHandler) Markdown(w http.ResponseWriter, r *http.Request) {
 	}
 	stored, err := h.store.Get(ctx, id)
 	if err != nil {
-		h.writePackError(w, err)
+		h.writePackError(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
@@ -348,7 +349,7 @@ func (h *PackHandler) PDF(w http.ResponseWriter, r *http.Request) {
 	}
 	stored, err := h.store.Get(ctx, id)
 	if err != nil {
-		h.writePackError(w, err)
+		h.writePackError(w, r, err)
 		return
 	}
 
@@ -361,7 +362,7 @@ func (h *PackHandler) PDF(w http.ResponseWriter, r *http.Request) {
 				"PDF rendering unavailable: chrome browser not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "board", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/pdf")
@@ -372,7 +373,7 @@ func (h *PackHandler) PDF(w http.ResponseWriter, r *http.Request) {
 }
 
 // writePackError maps a board pack domain error to the right HTTP status.
-func (h *PackHandler) writePackError(w http.ResponseWriter, err error) {
+func (h *PackHandler) writePackError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, board.ErrPackNotFound):
 		writeError(w, http.StatusNotFound, "board pack not found")
@@ -383,7 +384,7 @@ func (h *PackHandler) writePackError(w http.ResponseWriter, err error) {
 	case errors.Is(err, board.ErrPackNotReady):
 		writeError(w, http.StatusConflict, err.Error())
 	default:
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "board", err)
 	}
 }
 

@@ -25,6 +25,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/audit"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -127,7 +128,7 @@ func (h *Handler) CreatePopulation(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:       cred,
 	})
 	if err != nil {
-		writeServerErr(w, "create population", err)
+		writeServerErr(w, r, "create population", err)
 		return
 	}
 
@@ -155,7 +156,7 @@ func (h *Handler) GetPopulation(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "population not found")
 			return
 		}
-		writeServerErr(w, "get population", err)
+		writeServerErr(w, r, "get population", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"population": populationWireFrom(pop)})
@@ -201,7 +202,7 @@ func (h *Handler) DrawSample(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, audit.ErrEmptyPopulation):
 			writeError(w, http.StatusBadRequest, "population is empty")
 		default:
-			writeServerErr(w, "draw sample", err)
+			writeServerErr(w, r, "draw sample", err)
 		}
 		return
 	}
@@ -229,7 +230,7 @@ func (h *Handler) GetSample(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "sample not found")
 			return
 		}
-		writeServerErr(w, "get sample", err)
+		writeServerErr(w, r, "get sample", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"sample": sampleWireFrom(sample)})
@@ -277,7 +278,7 @@ func (h *Handler) Annotate(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, audit.ErrInvalidAnnotation):
 			writeError(w, http.StatusBadRequest, "invalid annotation result")
 		default:
-			writeServerErr(w, "annotate sample", err)
+			writeServerErr(w, r, "annotate sample", err)
 		}
 		return
 	}
@@ -299,7 +300,7 @@ func (h *Handler) ListAnnotations(w http.ResponseWriter, r *http.Request) {
 	}
 	anns, err := h.store.ListAnnotations(ctx, sampleID)
 	if err != nil {
-		writeServerErr(w, "list annotations", err)
+		writeServerErr(w, r, "list annotations", err)
 		return
 	}
 	out := make([]annotationWire, len(anns))
@@ -389,8 +390,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
+func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
+	httperr.WriteInternal(w, r, op, err)
 }
