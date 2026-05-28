@@ -29,10 +29,27 @@ export default async function AuthedLayout({
 
   return (
     <div className="flex h-screen flex-col">
+      {/* Slice 359 (a11y A11Y-1): visually-hidden skip-link that
+        becomes visible on focus. WCAG SC 2.4.1 Bypass Blocks (Level
+        A). Lets keyboard-only users skip the TopBar + Sidebar (~25
+        affordances) on every authed page navigation. Must remain
+        the first focusable element inside the authed layout. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        Skip to main content
+      </a>
       <TopBar mobileSidebar={<MobileSidebar nav={mobileNav} />} />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="flex-1 overflow-y-auto p-6"
+        >
+          {children}
+        </main>
       </div>
       {/* Slice 072: build-version footer. Fixed-position; does not
         consume layout space. `print:hidden` keeps it off the
