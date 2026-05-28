@@ -67,6 +67,16 @@ export default async function LoginPage({
   // first-install (slice 141 will handle that case with a real picker).
   const bootstrapTenantID = await fetchBootstrapTenantID();
 
+  // Slice 363 — form-error association. The two cards each wrap an
+  // independent form (signInLocal vs bearer-paste signIn), so each
+  // owns a distinct errorId; aria-describedby on every input points
+  // at the corresponding Alert's id when the Alert is mounted. See
+  // `web/components/ui/checkbox.tsx` for the convention.
+  const signinLocalErrorId =
+    error && bootstrapTenantID ? "signin-local-error" : undefined;
+  const signinTokenErrorId =
+    error && !bootstrapTenantID ? "signin-token-error" : undefined;
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
       <div className="w-full max-w-md space-y-4">
@@ -106,7 +116,12 @@ export default async function LoginPage({
             </CardHeader>
             <CardContent>
               {error ? (
-                <Alert variant="destructive" className="mb-4">
+                <Alert
+                  variant="destructive"
+                  className="mb-4"
+                  id="signin-local-error"
+                  aria-live="polite"
+                >
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
               ) : null}
@@ -128,6 +143,7 @@ export default async function LoginPage({
                     placeholder="you@example.com"
                     required
                     autoComplete="email"
+                    aria-describedby={signinLocalErrorId}
                   />
                 </div>
                 <div className="space-y-2">
@@ -140,6 +156,7 @@ export default async function LoginPage({
                     type="password"
                     required
                     autoComplete="current-password"
+                    aria-describedby={signinLocalErrorId}
                   />
                 </div>
                 <Button type="submit" className="w-full">
@@ -168,7 +185,12 @@ export default async function LoginPage({
               (otherwise the error renders in the local-auth card to keep
               context with the form the operator just submitted). */}
             {error && !bootstrapTenantID ? (
-              <Alert variant="destructive" className="mb-4">
+              <Alert
+                variant="destructive"
+                className="mb-4"
+                id="signin-token-error"
+                aria-live="polite"
+              >
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             ) : null}
@@ -185,6 +207,7 @@ export default async function LoginPage({
                   placeholder="long opaque string"
                   required
                   autoComplete="off"
+                  aria-describedby={signinTokenErrorId}
                 />
               </div>
               <Button type="submit" className="w-full">
