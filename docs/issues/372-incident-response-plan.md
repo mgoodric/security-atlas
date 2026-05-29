@@ -3,7 +3,7 @@
 **Cluster:** Governance
 **Estimate:** 1d
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `in-review`
 
 ## Narrative
 
