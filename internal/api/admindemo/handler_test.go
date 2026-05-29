@@ -13,6 +13,7 @@
 package admindemo
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,9 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/auth/jwt"
+	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // --- helpers ---
@@ -68,6 +72,61 @@ func requestWithOwnerRoleAdmin(method, path string) *http.Request {
 	}
 	ctx := authctx.WithCredential(r.Context(), cred)
 	return r.WithContext(ctx)
+}
+
+// --- resolveActor (slice 385 regression) ---
+
+// The atlas JWT Subject is "user:<uuid>", not a bare UUID. Before slice
+// 385, resolveActor called uuid.Parse(claims.Subject) directly, which
+// failed on the prefix and returned "actor user_id missing" → every
+// demo-seed click 500'd. The prior unit/integration tests only ever set
+// the actor via the legacy credstore bare-UUID path, so they never
+// exercised this. This test drives the real JWT path.
+func TestResolveActor_JWTSubjectCarriesUserPrefix(t *testing.T) {
+	userID := uuid.New()
+	tenantID := uuid.New()
+
+	ctx := jwtmw.WithClaimsForTest(context.Background(), &jwt.AtlasClaims{
+		RegisteredClaims: jwt.RegisteredClaims{Subject: "user:" + userID.String()},
+	})
+	ctx, err := tenancy.WithTenant(ctx, tenantID.String())
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+
+	gotUser, gotTenant, err := (&Handler{}).resolveActor(ctx)
+	if err != nil {
+		t.Fatalf("resolveActor returned error on a real JWT subject (the slice-385 bug): %v", err)
+	}
+	if gotUser != userID {
+		t.Errorf("actor user_id = %s, want %s", gotUser, userID)
+	}
+	if gotTenant != tenantID {
+		t.Errorf("actor tenant_id = %s, want %s", gotTenant, tenantID)
+	}
+}
+
+// A bare UUID subject (no "user:" prefix) must still resolve — the strip
+// is a no-op for already-bare values.
+func TestResolveActor_BareUUIDSubjectStillWorks(t *testing.T) {
+	userID := uuid.New()
+	tenantID := uuid.New()
+
+	ctx := jwtmw.WithClaimsForTest(context.Background(), &jwt.AtlasClaims{
+		RegisteredClaims: jwt.RegisteredClaims{Subject: userID.String()},
+	})
+	ctx, err := tenancy.WithTenant(ctx, tenantID.String())
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+
+	gotUser, _, err := (&Handler{}).resolveActor(ctx)
+	if err != nil {
+		t.Fatalf("resolveActor errored on bare UUID subject: %v", err)
+	}
+	if gotUser != userID {
+		t.Errorf("actor user_id = %s, want %s", gotUser, userID)
+	}
 }
 
 // --- Status ---
