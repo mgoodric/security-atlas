@@ -14,6 +14,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/adminauditlog"
 	"github.com/mgoodric/security-atlas/internal/api/adminauditperiods"
+	"github.com/mgoodric/security-atlas/internal/api/adminauthzbundle"
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
 	"github.com/mgoodric/security-atlas/internal/api/admindemo"
 	"github.com/mgoodric/security-atlas/internal/api/adminsso"
@@ -933,6 +934,21 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/admin/super-admins", superAdminsH.List)
 	root.Post("/v1/admin/super-admins", superAdminsH.Grant)
 	root.Delete("/v1/admin/super-admins/{user_id}", superAdminsH.Demote)
+
+	// Slice 378: authz bundle hot-reload. super_admin-gated; reloads
+	// the embedded policies/authz/*.rego bundle without a process
+	// restart. The atomic.Pointer-backed Engine swap (slice 378 AC-1
+	// + AC-2) means in-flight Decide calls during a reload see
+	// either the old query or the new one — never a partial state.
+	// The matrix validator runs against the CANDIDATE query BEFORE
+	// the swap (slice 378 AC-3); matrix failure leaves the engine
+	// serving the prior bundle. Closes slice 332 F-OPA-2 (High).
+	// When the engine is not yet attached (unit-server harness), the
+	// handler returns 503 to every request.
+	if s.authzEngine != nil {
+		authzBundleH := adminauthzbundle.New(s.dbPool, s.authzEngine)
+		root.Post("/v1/admin/authz-bundle/reload", authzBundleH.Reload)
+	}
 
 	// Slice 143: create-tenant flow. super_admin-gated; the handler
 	// reads jwtmw.FromContext().SuperAdmin; the OPA super_admin.rego
