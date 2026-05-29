@@ -60,7 +60,12 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  /* a11y slice 360 (closes slice 331 A11Y-2): lifted from oklch(0.556 0 0)
+     (#737373, ~4.74:1 on --background — thin margin over the WCAG 1.4.3 AA
+     4.5:1 floor) to oklch(0.52 0 0) (#636363, ~5.51:1) for comfortable
+     headroom while staying visibly muted. See
+     docs/audit-log/360-a11y-muted-foreground-light-contrast-decisions.md. */
+  --muted-foreground: oklch(0.52 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
