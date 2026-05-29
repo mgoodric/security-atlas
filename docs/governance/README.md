@@ -29,31 +29,25 @@ operational detail.
 
 ## Current documents
 
-| Document                                                                           | Purpose                                                                                                              | Filed by  | Reviewed  |
-| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | --------- | --------- |
-| [`incident-response.md`](./incident-response.md)                                   | How the project responds to security and operational incidents affecting itself.                                     | Slice 372 | Annual    |
-| [`business-continuity.md`](./business-continuity.md)                               | RTO / RPO targets and restore procedures for the project's own properties; bus-factor & succession operationalized.  | Slice 373 | Annual    |
-| [`access-review.md`](./access-review.md)                                           | Periodic-review cadence for the GitHub repository, CI secrets, third-party Apps, signing keys, and PATs.             | Slice 374 | Annual    |
-| [`data-retention.md`](./data-retention.md)                                         | Retention durations and disposal procedures per data category, with framework-floor mapping and legal-hold override. | Slice 375 | Annual    |
-| [`board-narrative-tone-anti-patterns.md`](./board-narrative-tone-anti-patterns.md) | Canonical list of phrases the board-narrative AI-assist system prompt rejects.                                       | Slice 182 | As-needed |
+| Document                                                                           | Purpose                                                                                                                                                                          | Filed by  | Reviewed  |
+| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------- |
+| [`incident-response.md`](./incident-response.md)                                   | How the project responds to security and operational incidents affecting itself.                                                                                                 | Slice 372 | Annual    |
+| [`business-continuity.md`](./business-continuity.md)                               | RTO / RPO targets and restore procedures for the project's own properties; bus-factor & succession operationalized.                                                              | Slice 373 | Annual    |
+| [`access-review.md`](./access-review.md)                                           | Periodic-review cadence for the GitHub repository, CI secrets, third-party Apps, signing keys, and PATs.                                                                         | Slice 374 | Annual    |
+| [`data-retention.md`](./data-retention.md)                                         | Retention durations and disposal procedures per data category, with framework-floor mapping and legal-hold override.                                                             | Slice 375 | Annual    |
+| [`asset-inventory.md`](./asset-inventory.md)                                       | Project asset inventory: code repos, container images, cryptographic material, deploy infrastructure, third-party integrations, documentation surfaces — with criticality tiers. | Slice 376 | Annual    |
+| [`board-narrative-tone-anti-patterns.md`](./board-narrative-tone-anti-patterns.md) | Canonical list of phrases the board-narrative AI-assist system prompt rejects.                                                                                                   | Slice 182 | As-needed |
+
+The five governance documents at slices **372 + 373 + 374 + 375 + 376** form the **COMPLETE slice 329 audit-driven governance chain** — every High-severity finding (H-1 through H-5) from the slice 329 compliance meta-audit is closed by a corresponding document above. The chain provides the operator-side policy-artifact surface a third-party security reviewer expects to see before examining technical control evidence.
 
 ---
 
 ## Planned documents
 
-The following governance documents are scheduled for filing in
-upcoming slices. They were identified by the slice 329 compliance
-meta-audit as load-bearing operator-side artifacts for the v1 binary
-success criterion.
-
-| Slice | Document (path tbd)                  | Purpose                                                                | Audit finding |
-| ----- | ------------------------------------ | ---------------------------------------------------------------------- | ------------- |
-| 376   | `docs/governance/asset-inventory.md` | Enumerated project assets with owner, classification, and criticality. | 329 H-5       |
-
-The order above reflects the audit's prioritization (H-1 most-load-
-bearing for v1 binary criterion). Each slice can land independently;
-once filed, this index is updated to move the row out of the
-"planned" section above.
+No governance documents are currently in the planned-but-not-filed
+state. The slice 329 audit-driven governance chain is complete; new
+governance documents may be filed in response to future audits, new
+constitutional commitments, or material project-shape evolution.
 
 ---
 
