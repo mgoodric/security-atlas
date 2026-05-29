@@ -1,127 +1,252 @@
-// Slice 151 — Playwright E2E for the /risks/new control-link multi-select.
+// Slice 151 — Playwright E2E for the /risks/new control-link
+// multi-select.
 //
-// Runner status: Playwright IS installed in `web/`. This spec is
-// quarantined behind slice 082 (seed-data harness) per the
-// established precedent for slice 094 / 098 / 100 / 105 / 147 / 149 / 157.
-// When that harness lands, the un-commented assertions below become
-// the gate. Test bodies are preserved verbatim as a reviewable contract.
-//
-// Run locally (once seed harness lands):
-//   cd web
-//   npx playwright install chromium      # once per machine
-//   PLAYWRIGHT_RUN_QUARANTINED=1 npx playwright test e2e/risks-create-control-link.spec.ts
-//
-// Pre-conditions the seed-data harness (slice 082) must establish
-// before the commented assertions are turned on:
-//   - PLATFORM_BASE_URL points at a running platform instance.
-//   - TEST_BEARER carries a credential in a tenant that already has
-//     >=2 active controls (slice 065 SOC 2 starter kit suffices).
-//   - At least one control's title is searchable by the substring
-//     "access" so the search filter assertion is deterministic.
+// Un-quarantined by slice 351 (AC-4, disposition (a)). The legacy
+// `test.skip(!PLAYWRIGHT_RUN_QUARANTINED)` + commented bodies were the
+// slice-082-era placeholder. The `ControlMultiSelect` component +
+// validation ship; no underlying product bug. Rewritten as a LIVE
+// mocked spec per the `questionnaires.spec.ts` `route.fulfill`
+// convention (anti-criterion P0-4).
 //
 // AC coverage:
 //   AC-3  Multi-select renders ONLY when treatment === 'mitigate'.
-//   AC-4  Client-side validation blocks submit with mitigate + 0 selected.
+//   AC-4  Client-side validation blocks submit with mitigate + 0 links.
 //   AC-5  Form posts linked_control_ids when mitigate + selection exists.
-//   AC-6  Newly created risk appears in the risk list with linked control.
+//   AC-6  Newly created risk appears in the risk list.
+//
+// The control picker fetches `/api/controls-list` (TenantControl[]). We
+// seed two deterministic controls, one matching the "access" filter so
+// the search-narrowing assertion is stable.
+//
+// Determinism: every async boundary auto-waits or gates on
+// `page.waitForResponse(...)`. No sleeps; no `.count()` snapshots.
+//
+// Hard rule (P0-A9): neutral test strings only; no vendor-prefixed
+// tokens.
 
-import { test } from "@playwright/test";
+import { expect, test } from "./fixtures";
+
+const CONTROL_ACCESS_ID = "33333333-3333-3333-3333-3333000ac001";
+const CONTROL_OTHER_ID = "33333333-3333-3333-3333-3333000bk002";
+const CREATED_RISK_ID = "00000000-0000-0000-0000-0000000r1s02";
+const NEW_RISK_TITLE = "E2E ctrl-link mitigate risk";
+
+function controlsBody() {
+  return {
+    controls: [
+      {
+        id: CONTROL_ACCESS_ID,
+        title: "Logical access controls",
+        control_family: "IAC",
+        scf_id: "IAC-06",
+        lifecycle_state: "active",
+        bundle_id: "soc2-starter",
+      },
+      {
+        id: CONTROL_OTHER_ID,
+        title: "Backup integrity verification",
+        control_family: "BCD",
+        scf_id: "BCD-11",
+        lifecycle_state: "active",
+        bundle_id: "soc2-starter",
+      },
+    ],
+    count: 2,
+  };
+}
 
 test.describe("/risks/new control-link multi-select", () => {
-  test.skip(
-    !process.env.PLAYWRIGHT_RUN_QUARANTINED,
-    "quarantined until slice 082 seed harness lands",
-  );
+  test("multi-select renders only when treatment is mitigate (AC-3)", async ({
+    authedPage: page,
+  }) => {
+    await page.route("**/api/controls-list", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(controlsBody()),
+      });
+    });
 
-  // test("multi-select renders only when treatment is mitigate (AC-3)", async ({
-  //   authedPage,
-  // }) => {
-  //   await authedPage.goto("/risks/new");
-  //   // Default treatment is mitigate per initialState(); picker visible.
-  //   await expect(
-  //     authedPage.getByTestId("risks-create-control-multi-select"),
-  //   ).toBeVisible();
-  //
-  //   // Switch to avoid; picker should disappear.
-  //   await authedPage
-  //     .getByTestId("risks-create-treatment")
-  //     .selectOption("avoid");
-  //   await expect(
-  //     authedPage.getByTestId("risks-create-control-multi-select"),
-  //   ).toHaveCount(0);
-  //
-  //   // Switch back to mitigate; picker returns.
-  //   await authedPage
-  //     .getByTestId("risks-create-treatment")
-  //     .selectOption("mitigate");
-  //   await expect(
-  //     authedPage.getByTestId("risks-create-control-multi-select"),
-  //   ).toBeVisible();
-  // });
-  //
-  // test("client-side validation blocks submit with mitigate + 0 links (AC-4)", async ({
-  //   authedPage,
-  // }) => {
-  //   await authedPage.goto("/risks/new");
-  //   await authedPage.getByTestId("risks-create-title").fill("E2E ctrl-link risk");
-  //   await authedPage
-  //     .getByTestId("risks-create-treatment-owner")
-  //     .fill("e2e-owner");
-  //   // Treatment defaults to mitigate; no controls selected.
-  //   await authedPage.getByTestId("risks-create-submit").click();
-  //
-  //   // Stays on /risks/new and shows the required-error inline.
-  //   await expect(authedPage).toHaveURL(/\/risks\/new$/);
-  //   await expect(
-  //     authedPage.getByTestId("risks-create-control-multi-select-required-error"),
-  //   ).toBeVisible();
-  // });
-  //
-  // test("submits with linked_control_ids when at least one control selected (AC-5+AC-6)", async ({
-  //   authedPage,
-  // }) => {
-  //   await authedPage.goto("/risks/new");
-  //   await authedPage
-  //     .getByTestId("risks-create-title")
-  //     .fill("E2E ctrl-link mitigate risk");
-  //   await authedPage
-  //     .getByTestId("risks-create-treatment-owner")
-  //     .fill("e2e-owner");
-  //
-  //   // Filter and pick the first matching control via the search box.
-  //   await authedPage
-  //     .getByTestId("risks-create-control-multi-select-filter")
-  //     .fill("access");
-  //   const firstOption = authedPage
-  //     .getByTestId(/risks-create-control-multi-select-checkbox-/)
-  //     .first();
-  //   await firstOption.check();
-  //
-  //   await authedPage.getByTestId("risks-create-submit").click();
-  //   await expect(authedPage).toHaveURL(/\/risks(\?|$)/);
-  //   await expect(
-  //     authedPage
-  //       .getByTestId("risks-row-title")
-  //       .filter({ hasText: "E2E ctrl-link mitigate risk" }),
-  //   ).toBeVisible();
-  // });
-  //
-  // test("clear-selection button empties the picker (AC-1 behavior)", async ({
-  //   authedPage,
-  // }) => {
-  //   await authedPage.goto("/risks/new");
-  //   const firstOption = authedPage
-  //     .getByTestId(/risks-create-control-multi-select-checkbox-/)
-  //     .first();
-  //   await firstOption.check();
-  //   await expect(
-  //     authedPage.getByTestId("risks-create-control-multi-select-summary"),
-  //   ).toContainText("1 selected");
-  //   await authedPage
-  //     .getByTestId("risks-create-control-multi-select-clear")
-  //     .click();
-  //   await expect(
-  //     authedPage.getByTestId("risks-create-control-multi-select-summary"),
-  //   ).toContainText("0 selected");
-  // });
+    await page.goto("/risks/new");
+    await expect(page.getByTestId("risks-create-form")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // Default treatment is mitigate per initialState() → picker visible.
+    await expect(
+      page.getByTestId("risks-create-control-multi-select"),
+    ).toBeVisible({ timeout: 30_000 });
+
+    // Switch to avoid → picker disappears.
+    await page.getByTestId("risks-create-treatment").selectOption("avoid");
+    await expect(
+      page.getByTestId("risks-create-control-multi-select"),
+    ).toHaveCount(0);
+
+    // Back to mitigate → picker returns.
+    await page.getByTestId("risks-create-treatment").selectOption("mitigate");
+    await expect(
+      page.getByTestId("risks-create-control-multi-select"),
+    ).toBeVisible();
+  });
+
+  test("client-side validation blocks submit with mitigate + 0 links (AC-4)", async ({
+    authedPage: page,
+  }) => {
+    let postFired = false;
+    await page.route("**/api/controls-list", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(controlsBody()),
+      });
+    });
+    await page.route("**/api/risks", async (route, req) => {
+      if (req.method() === "POST") postFired = true;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ risks: [] }),
+      });
+    });
+
+    await page.goto("/risks/new");
+    await expect(page.getByTestId("risks-create-form")).toBeVisible({
+      timeout: 30_000,
+    });
+    await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
+    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+    // Treatment defaults to mitigate; no controls selected → submit is
+    // blocked client-side with the required-error.
+    await page.getByTestId("risks-create-submit").click();
+
+    await expect(page).toHaveURL(/\/risks\/new$/);
+    await expect(
+      page.getByTestId("risks-create-control-multi-select-required-error"),
+    ).toBeVisible({ timeout: 30_000 });
+    expect(postFired).toBe(false);
+  });
+
+  test("filter narrows the picker; selecting a control posts linked_control_ids and the row appears (AC-5 + AC-6)", async ({
+    authedPage: page,
+  }) => {
+    let created = false;
+    let postedLinkedIds: string[] | undefined;
+
+    await page.route("**/api/controls-list", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(controlsBody()),
+      });
+    });
+    await page.route("**/api/risks", async (route, req) => {
+      if (req.method() === "GET") {
+        const risks = created
+          ? [
+              {
+                id: CREATED_RISK_ID,
+                title: NEW_RISK_TITLE,
+                category: "operational",
+                treatment: "mitigate",
+                treatment_owner: "e2e-owner",
+                methodology: "nist_800_30",
+                inherent_score: { likelihood: 3, impact: 3, severity: 9 },
+                status: "open",
+              },
+            ]
+          : [];
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ risks }),
+        });
+        return;
+      }
+      // POST — capture the linked_control_ids the form posted.
+      const body = JSON.parse(req.postData() ?? "{}") as {
+        linked_control_ids?: string[];
+      };
+      postedLinkedIds = body.linked_control_ids;
+      created = true;
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          risk: {
+            id: CREATED_RISK_ID,
+            title: NEW_RISK_TITLE,
+            category: "operational",
+            treatment: "mitigate",
+            treatment_owner: "e2e-owner",
+            methodology: "nist_800_30",
+            inherent_score: { likelihood: 3, impact: 3, severity: 9 },
+            status: "open",
+          },
+        }),
+      });
+    });
+
+    await page.goto("/risks/new");
+    await expect(page.getByTestId("risks-create-form")).toBeVisible({
+      timeout: 30_000,
+    });
+    await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
+    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+
+    // Picker is visible (mitigate default). Wait for the controls list.
+    await expect(
+      page.getByTestId("risks-create-control-multi-select"),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(
+      page.getByTestId("risks-create-control-multi-select-list"),
+    ).toBeVisible({ timeout: 30_000 });
+
+    // Filter narrows to the "access" control only.
+    await page
+      .getByTestId("risks-create-control-multi-select-filter")
+      .fill("access");
+    await expect(
+      page.getByTestId(
+        `risks-create-control-multi-select-option-${CONTROL_ACCESS_ID}`,
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId(
+        `risks-create-control-multi-select-option-${CONTROL_OTHER_ID}`,
+      ),
+    ).toHaveCount(0);
+
+    // Select it; the summary reflects 1 selected.
+    await page
+      .getByTestId(
+        `risks-create-control-multi-select-checkbox-${CONTROL_ACCESS_ID}`,
+      )
+      .check();
+    await expect(
+      page.getByTestId("risks-create-control-multi-select-summary"),
+    ).toContainText("1 selected");
+
+    // Submit; the POST carries the linked control id.
+    const createResp = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/risks") &&
+        r.request().method() === "POST" &&
+        r.status() === 201,
+      { timeout: 30_000 },
+    );
+    await page.getByTestId("risks-create-submit").click();
+    await createResp;
+
+    expect(postedLinkedIds).toEqual([CONTROL_ACCESS_ID]);
+
+    // Routed back; the new row appears.
+    await expect(page).toHaveURL(/\/risks(\?|$)/, { timeout: 30_000 });
+    await expect(
+      page
+        .getByTestId("risks-row-title")
+        .filter({ hasText: NEW_RISK_TITLE })
+        .first(),
+    ).toBeVisible({ timeout: 30_000 });
+  });
 });

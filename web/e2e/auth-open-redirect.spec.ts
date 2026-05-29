@@ -19,27 +19,30 @@
 // always-required gate; this spec is the belt-and-suspenders
 // integration verification.
 //
-// Skip condition: when `TEST_BEARER` is not set the worker-scoped
-// authedPage fixture would throw. To keep the spec skip-rather-than-
-// error in local dev runs, we guard on the env var at file scope —
-// matching the slice-073 first-time-login.spec.ts pattern of an
-// explicit skip when preconditions aren't available.
+// Un-quarantined by slice 351 (AC-4, disposition (a)).
+//
+// Former skip condition: a file-scope `test.skip(!HAS_BEARER, ...)`
+// where `HAS_BEARER = !!process.env.TEST_BEARER` was evaluated at
+// module-load. That guard dated to the pre-slice-201 era when the
+// harness provided no bearer and `authedPage` would throw. Slice 201's
+// `globalSetup` (web/e2e/global-setup.ts) now mints a JWT via the
+// env-gated `POST /v1/test/issue-jwt` and writes it into
+// `process.env.TEST_BEARER` BEFORE any worker imports a spec — so the
+// guard was vestigial and always skipped the spec in environments where
+// it should have RUN. The spec body itself was fixed by slice 161 (the
+// racy `waitForURL` → settled-pathname wait; see
+// docs/audit-log/161-playwright-auth-open-redirect-spec-drift-decisions.md).
+// Removing the guard makes this an honest live end-to-end security
+// regression gate against the real login form. If the bearer is somehow
+// absent, the `authedPage` fixture throws a clear error — which is the
+// correct fail-loud behaviour for a required gate, not a silent skip.
 //
 // Hard rule (P0-A9 from slice 069's fixtures): no vendor-prefixed token
 // strings in this file. GitGuardian scans test files too.
 
-import { expect, test } from "@playwright/test";
+import { test as authed, expect } from "./fixtures";
 
-import { test as authed } from "./fixtures";
-
-const HAS_BEARER = !!process.env.TEST_BEARER;
-
-test.describe("open-redirect defense on signIn", () => {
-  test.skip(
-    !HAS_BEARER,
-    "TEST_BEARER not set — skip until the seed harness provides one",
-  );
-
+authed.describe("open-redirect defense on signIn", () => {
   authed(
     "sign-in with attacker ?from= lands on /dashboard, not attacker URL",
     async ({ authedPage }) => {
