@@ -33,6 +33,7 @@ operational detail.
 | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | --------- | --------- |
 | [`incident-response.md`](./incident-response.md)                                   | How the project responds to security and operational incidents affecting itself.                                    | Slice 372 | Annual    |
 | [`business-continuity.md`](./business-continuity.md)                               | RTO / RPO targets and restore procedures for the project's own properties; bus-factor & succession operationalized. | Slice 373 | Annual    |
+| [`access-review.md`](./access-review.md)                                           | Periodic-review cadence for the GitHub repository, CI secrets, third-party Apps, signing keys, and PATs.            | Slice 374 | Annual    |
 | [`board-narrative-tone-anti-patterns.md`](./board-narrative-tone-anti-patterns.md) | Canonical list of phrases the board-narrative AI-assist system prompt rejects.                                      | Slice 182 | As-needed |
 
 ---
@@ -44,11 +45,10 @@ upcoming slices. They were identified by the slice 329 compliance
 meta-audit as load-bearing operator-side artifacts for the v1 binary
 success criterion.
 
-| Slice | Document (path tbd)                                 | Purpose                                                                               | Audit finding |
-| ----- | --------------------------------------------------- | ------------------------------------------------------------------------------------- | ------------- |
-| 374   | `docs/governance/access-review-cadence.md`          | Documented cadence for reviewing GitHub org / CI / third-party-service access rights. | 329 H-3       |
-| 375   | `docs/governance/data-retention-disposal-policy.md` | Retention periods and disposal procedures per data class.                             | 329 H-4       |
-| 376   | `docs/governance/asset-inventory.md`                | Enumerated project assets with owner, classification, and criticality.                | 329 H-5       |
+| Slice | Document (path tbd)                                 | Purpose                                                                | Audit finding |
+| ----- | --------------------------------------------------- | ---------------------------------------------------------------------- | ------------- |
+| 375   | `docs/governance/data-retention-disposal-policy.md` | Retention periods and disposal procedures per data class.              | 329 H-4       |
+| 376   | `docs/governance/asset-inventory.md`                | Enumerated project assets with owner, classification, and criticality. | 329 H-5       |
 
 The order above reflects the audit's prioritization (H-1 most-load-
 bearing for v1 binary criterion). Each slice can land independently;
