@@ -32,6 +32,17 @@ func NewSeeder(pool *pgxpool.Pool) *Seeder {
 	return &Seeder{pool: pool}
 }
 
+// nonNilStrings returns a non-nil copy of s. metrics_catalog.source_slices
+// is NOT NULL, and pgx encodes a nil []string as SQL NULL (the column
+// DEFAULT only applies when the column is omitted from the INSERT, not when
+// NULL is passed explicitly). The previous append([]string(nil), s...)
+// returned nil for empty input, so a metric with `source_slices: []` (e.g.
+// backup_restore_validation) violated the NOT NULL constraint and aborted
+// the entire catalog seed transaction, leaving metrics_catalog empty.
+func nonNilStrings(s []string) []string {
+	return append(make([]string, 0, len(s)), s...)
+}
+
 // SeedFromEmbedded loads the embedded metrics catalog and applies it to
 // the DB. Convenience wrapper used by cmd/atlas at boot.
 func (s *Seeder) SeedFromEmbedded(ctx context.Context, evaluators EvaluatorRegistry) (Report, error) {
@@ -67,7 +78,7 @@ func (s *Seeder) Apply(ctx context.Context, c *Catalog) (Report, error) {
 			Unit:            m.Unit,
 			Cadence:         string(m.Cadence),
 			ComputeStrategy: string(m.ComputeStrategy),
-			SourceSlices:    append([]string(nil), m.SourceSlices...),
+			SourceSlices:    nonNilStrings(m.SourceSlices),
 			Notes:           m.Notes,
 		}
 		// sqlc emits pointer types for nullable columns under
