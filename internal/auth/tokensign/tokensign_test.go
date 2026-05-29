@@ -16,7 +16,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 )
 
-func makeClaims(t *testing.T) jwt.AtlasClaims {
+func makeClaims(t testing.TB) jwt.AtlasClaims {
 	t.Helper()
 	now := time.Now().UTC()
 	tenant := uuid.New()

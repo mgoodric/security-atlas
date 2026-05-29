@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 
 	jose "github.com/go-jose/go-jose/v4"
 
@@ -47,16 +48,68 @@ const SignatureAlgorithmString = "ES256"
 var AllowedAlgs = []jose.SignatureAlgorithm{jose.ES256}
 
 // Signer produces and verifies atlas JWTs against a backing keystore.
+//
+// signerCache memoises the constructed jose.Signer per active KeyID
+// (slice 381 F-OAUTH-2). go-jose's NewSigner does an internal algorithm
+// lookup + JWK marshal on every call; at sustained mint rates (a
+// multi-connector bootstrap fan-out) that allocation is avoidable since
+// the signing key is stable between rotations. The cache key is the
+// KeyID string; during a slice-366 rotation overlap multiple KeyIDs may
+// be active across the window, so each gets its own cached jose.Signer.
+// Reset() empties the cache and is the invalidation hook a future
+// keystore.Rotate caller invokes.
 type Signer struct {
 	store keystore.KeyStore
+
+	// signerCache maps KeyID (string) -> jose.Signer. A jose.Signer is
+	// safe for concurrent use, so sharing one across goroutines is sound.
+	signerCache sync.Map
 }
 
 // New returns a Signer that asks store for the active signing key on
 // every Sign call and the full verification set on every Verify call.
-// Keys are not cached at this layer — keystore implementations cache
-// internally and bear that responsibility.
+// The constructed jose.Signer is cached per KeyID; verification keys are
+// not cached at this layer — keystore implementations cache internally
+// and bear that responsibility.
 func New(store keystore.KeyStore) *Signer {
 	return &Signer{store: store}
+}
+
+// Reset empties the cached jose.Signer set. It MUST be called whenever
+// the backing keystore rotates its active signing key so a stale
+// jose.Signer (bound to a rotated-out KeyID) is never reused. The v1
+// keystore.Rotate is a stub (keystore.ErrRotateUnsupported); when the
+// end-to-end rotation flow lands, its caller invokes Reset after a
+// successful Rotate. Safe to call concurrently with Sign — the next
+// Sign for a still-active KeyID simply rebuilds + re-caches.
+func (s *Signer) Reset() {
+	s.signerCache.Range(func(k, _ any) bool {
+		s.signerCache.Delete(k)
+		return true
+	})
+}
+
+// cachedSigner returns the jose.Signer for the given signing key,
+// building + caching it on first use for that KeyID. Concurrent callers
+// for the same uncached KeyID may each build a signer; LoadOrStore keeps
+// exactly one in the map (the redundant builds are GC'd) so steady-state
+// is one jose.Signer per active KeyID.
+func (s *Signer) cachedSigner(sk keystore.SigningKey) (jose.Signer, error) {
+	if v, ok := s.signerCache.Load(sk.KeyID); ok {
+		return v.(jose.Signer), nil
+	}
+	signer, err := jose.NewSigner(jose.SigningKey{
+		Algorithm: SignatureAlgorithm,
+		Key: jose.JSONWebKey{
+			Key:   sk.Key,
+			KeyID: sk.KeyID,
+		},
+	}, (&jose.SignerOptions{}).WithType("JWT"))
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := s.signerCache.LoadOrStore(sk.KeyID, signer)
+	return actual.(jose.Signer), nil
 }
 
 // Sign marshals claims as JSON, wraps them in a JWS using ES256, and
@@ -73,13 +126,7 @@ func (s *Signer) Sign(ctx context.Context, claims jwt.AtlasClaims) (string, erro
 	if !isES256Key(sk.Key) {
 		return "", fmt.Errorf("tokensign: signing key is not ES256-compatible (curve %v)", sk.Key.Curve)
 	}
-	signer, err := jose.NewSigner(jose.SigningKey{
-		Algorithm: SignatureAlgorithm,
-		Key: jose.JSONWebKey{
-			Key:   sk.Key,
-			KeyID: sk.KeyID,
-		},
-	}, (&jose.SignerOptions{}).WithType("JWT"))
+	signer, err := s.cachedSigner(sk)
 	if err != nil {
 		return "", fmt.Errorf("tokensign: new signer: %w", err)
 	}
