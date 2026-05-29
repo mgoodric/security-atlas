@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -75,7 +76,7 @@ func (h *Handler) FrameworkPosture(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, ok := tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
@@ -96,10 +97,11 @@ func (h *Handler) FrameworkPosture(w http.ResponseWriter, r *http.Request) {
 			TrendDelta90d:      p.TrendDelta90d,
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"frameworks": out,
 		"count":      len(out),
 	})
+
 }
 
 // ===== AC-2: GET /v1/activity =====
@@ -119,18 +121,18 @@ func (h *Handler) Activity(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, ok := tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
 	cursor, err := decodeCursor(r.URL.Query().Get("cursor"), firstPageActivity())
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	pageRows, err := parseLimit(r.URL.Query().Get("limit"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -152,11 +154,12 @@ func (h *Handler) Activity(w http.ResponseWriter, r *http.Request) {
 			Summary:      jsonOrNull(ev.Summary),
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"activity":    out,
 		"count":       len(out),
 		"next_cursor": next,
 	})
+
 }
 
 // ===== AC-4: GET /v1/upcoming =====
@@ -176,24 +179,25 @@ func (h *Handler) Upcoming(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, ok := tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
 	category := r.URL.Query().Get("category")
 	if category != "" && !validUpcomingCategory(category) {
-		writeError(w, http.StatusBadRequest,
+		httpresp.WriteError(w, http.StatusBadRequest,
 			"category must be one of: exception, policy_ack, vendor_review, audit_period")
+
 		return
 	}
 	cursor, err := decodeCursor(r.URL.Query().Get("cursor"), firstPageUpcoming())
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	pageRows, err := parseLimit(r.URL.Query().Get("limit"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -214,11 +218,12 @@ func (h *Handler) Upcoming(w http.ResponseWriter, r *http.Request) {
 			ResourceID:   it.ResourceID,
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"upcoming":    out,
 		"count":       len(out),
 		"next_cursor": next,
 	})
+
 }
 
 // ===== page-splitting =====
@@ -268,16 +273,6 @@ func tenantContext(r *http.Request) (context.Context, bool) {
 		return nil, false
 	}
 	return r.Context(), true
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
 }
 
 // pgTimestamptz wraps a time.Time as a pgtype.Timestamptz. A zero time

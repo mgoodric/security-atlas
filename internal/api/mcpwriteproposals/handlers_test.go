@@ -47,6 +47,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -461,7 +462,7 @@ func TestWriteServerErr_GenericInternalError(t *testing.T) {
 	t.Parallel()
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/v1/whatever", nil)
-	writeServerErr(w, r, "list proposals", errors.New("db down"))
+	httperr.WriteInternal(w, r, "list proposals", errors.New("db down"))
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", w.Code)
 	}

@@ -67,6 +67,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -195,12 +196,12 @@ func (h *HistoryExportHandler) ExportControlsHistory(w http.ResponseWriter, r *h
 	// Role gate (defense-in-depth) — same pattern slice 137 uses.
 	cred, ok := authctx.CredentialFromContext(ctx)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return
 	}
 	tenantID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "invalid tenant in credential")
+		httpresp.WriteError(w, http.StatusInternalServerError, "invalid tenant in credential")
 		return
 	}
 	userIdentifier := cred.UserID
@@ -218,7 +219,7 @@ func (h *HistoryExportHandler) ExportControlsHistory(w http.ResponseWriter, r *h
 			Result: "denied:bad_request",
 			Reason: formatErr.Error(),
 		})
-		writeError(w, http.StatusBadRequest, formatErr.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, formatErr.Error())
 		return
 	}
 
@@ -232,7 +233,7 @@ func (h *HistoryExportHandler) ExportControlsHistory(w http.ResponseWriter, r *h
 			Result: "denied:forbidden",
 			Reason: "role does not grant controls/program-read access",
 		})
-		writeError(w, http.StatusForbidden, "role does not grant controls/program-read access")
+		httpresp.WriteError(w, http.StatusForbidden, "role does not grant controls/program-read access")
 		return
 	}
 
@@ -270,7 +271,7 @@ func (h *HistoryExportHandler) ExportControlsHistory(w http.ResponseWriter, r *h
 			Result: "denied:bad_format",
 			Reason: err.Error(),
 		})
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -293,7 +294,7 @@ func (h *HistoryExportHandler) ExportControlsHistory(w http.ResponseWriter, r *h
 			Result: "error:query",
 			Reason: queryErr,
 		})
-		writeError(w, http.StatusInternalServerError, "list controls history for export: "+queryErr)
+		httpresp.WriteError(w, http.StatusInternalServerError, "list controls history for export: "+queryErr)
 		return
 	}
 
@@ -304,10 +305,11 @@ func (h *HistoryExportHandler) ExportControlsHistory(w http.ResponseWriter, r *h
 			Reason:   fmt.Sprintf("rowCap=%d", rowCap),
 			RowCount: len(rows),
 		})
-		writeError(w, http.StatusRequestEntityTooLarge,
+		httpresp.WriteError(w, http.StatusRequestEntityTooLarge,
 			fmt.Sprintf("export would exceed row cap of %d controls; "+
 				"contact the maintainer if your lineage legitimately exceeds this ceiling",
 				rowCap))
+
 		return
 	}
 

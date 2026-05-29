@@ -346,10 +346,22 @@ func TestGenerate_MalformedPeriodEndIs400(t *testing.T) {
 	env := testServer(t, app, tenant)
 
 	for _, bad := range []string{"2026-13-01", "not-a-date", "04/30/2026", ""} {
-		resp, _ := doJSON(t, env, http.MethodPost, "/v1/board-briefs",
+		resp, decoded := doJSON(t, env, http.MethodPost, "/v1/board-briefs",
 			map[string]string{"period_end": bad})
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("AC-1: POST period_end=%q = %d, want 400", bad, resp.StatusCode)
+		}
+		// Slice 369 — AC-5 contract lock. This 400 path now flows through
+		// the shared internal/api/httpresp.WriteError helper. Assert the
+		// wire shape it produces directly: application/json Content-Type and
+		// a single-key {"error": <msg>} envelope. If httpresp ever drifts
+		// (e.g. adds request_id, switches to RFC 7807) this fails here, in
+		// the package that previously owned its own writeError copy.
+		if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("AC-5: period_end=%q error Content-Type = %q, want application/json", bad, ct)
+		}
+		if _, ok := decoded["error"]; !ok {
+			t.Errorf("AC-5: period_end=%q error body = %v, want httpresp.WriteError {\"error\": ...} envelope", bad, decoded)
 		}
 	}
 }

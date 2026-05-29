@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 )
 
@@ -42,11 +44,11 @@ func (h *Handler) AnchorRequirements(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	anchor, ok, err := h.lookupAnchor(ctx, chi.URLParam(r, "id"))
 	if err != nil {
-		writeServerErr(w, r, "lookup anchor", err)
+		httperr.WriteInternal(w, r, "lookup anchor", err)
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "anchor not found")
+		httpresp.WriteError(w, http.StatusNotFound, "anchor not found")
 		return
 	}
 
@@ -56,10 +58,11 @@ func (h *Handler) AnchorRequirements(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			// Pin resolves to nothing: empty list, not 404 — the anchor
 			// exists; only the pin found no matches.
-			writeJSON(w, http.StatusOK, map[string]any{
+			httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 				"anchor":       anchorWireFromRow(anchor),
 				"requirements": []requirementForAnchorWire{},
 			})
+
 			return
 		}
 		got, err := h.q.ListRequirementsForAnchorByFrameworkVersion(ctx, dbx.ListRequirementsForAnchorByFrameworkVersionParams{
@@ -67,23 +70,24 @@ func (h *Handler) AnchorRequirements(w http.ResponseWriter, r *http.Request) {
 			FrameworkVersionID: fv.ID,
 		})
 		if err != nil {
-			writeServerErr(w, r, "list requirements for anchor (pinned)", err)
+			httperr.WriteInternal(w, r, "list requirements for anchor (pinned)", err)
 			return
 		}
 		out = mapPinnedRequirements(got)
 	} else {
 		got, err := h.q.ListRequirementsForAnchor(ctx, anchor.ID)
 		if err != nil {
-			writeServerErr(w, r, "list requirements for anchor", err)
+			httperr.WriteInternal(w, r, "list requirements for anchor", err)
 			return
 		}
 		out = mapRequirements(got)
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"anchor":       anchorWireFromRow(anchor),
 		"requirements": out,
 	})
+
 }
 
 // lookupAnchor resolves the {id} path segment to a scf_anchors row,

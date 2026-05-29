@@ -36,6 +36,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	policypdf "github.com/mgoodric/security-atlas/internal/policy/pdf"
@@ -155,17 +156,17 @@ type policyWire struct {
 func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	linkedIDs, err := parseUUIDs(req.LinkedControlIDs)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "linked_control_ids contains invalid UUID: "+err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, "linked_control_ids contains invalid UUID: "+err.Error())
 		return
 	}
 	ackRoles := req.AcknowledgmentRequiredRoles
@@ -187,7 +188,7 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 		h.writeCreateErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"policy": wireFromPolicy(created)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"policy": wireFromPolicy(created)})
 }
 
 // ListPolicies handles GET /v1/policies?status=...
@@ -208,30 +209,30 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
 	if includesAckRate(r) {
 		out, err := h.listPoliciesWithAckRate(ctx, statusFilter)
 		if err != nil {
-			writeServerErr(w, r, "list policies (with ack_rate)", err)
+			httperr.WriteInternal(w, r, "list policies (with ack_rate)", err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"policies": out, "count": len(out)})
+		httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policies": out, "count": len(out)})
 		return
 	}
 	filter := policy.ListFilter{Status: statusFilter}
 	rows, err := h.store.List(ctx, filter)
 	if err != nil {
-		writeServerErr(w, r, "list policies", err)
+		httperr.WriteInternal(w, r, "list policies", err)
 		return
 	}
 	out := make([]policyWire, len(rows))
 	for i, p := range rows {
 		out[i] = wireFromPolicy(p)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"policies": out, "count": len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policies": out, "count": len(out)})
 }
 
 // listPoliciesWithAckRate is the slice-107 `?include=ack_rate` path.
@@ -396,53 +397,53 @@ func timestamptzPtr(t pgtype.Timestamptz) *time.Time {
 func (h *Handler) GetPolicy(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	if r.URL.Query().Get("versions") == "true" {
 		chain, err := h.store.VersionChain(ctx, id)
 		if err != nil {
-			writeServerErr(w, r, "version chain", err)
+			httperr.WriteInternal(w, r, "version chain", err)
 			return
 		}
 		if len(chain) == 0 {
-			writeError(w, http.StatusNotFound, "policy not found")
+			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
 			return
 		}
 		out := make([]policyWire, len(chain))
 		for i, p := range chain {
 			out[i] = wireFromPolicy(p)
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"versions": out, "count": len(out)})
+		httpresp.WriteJSON(w, http.StatusOK, map[string]any{"versions": out, "count": len(out)})
 		return
 	}
 	p, err := h.store.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, policy.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "policy not found")
+			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
 			return
 		}
-		writeServerErr(w, r, "get policy", err)
+		httperr.WriteInternal(w, r, "get policy", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(p)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(p)})
 }
 
 // Submit handles PATCH /v1/policies/{id}/submit (draft -> under_review).
 func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	updated, err := h.store.SubmitForReview(ctx, id, cred.ID)
@@ -450,23 +451,23 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 		h.writeTransitionErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(updated)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(updated)})
 }
 
 // Approve handles PATCH /v1/policies/{id}/approve (AC-4).
 func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !cred.IsApprover && !cred.IsAdmin {
-		writeError(w, http.StatusForbidden, "approver role required")
+		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	approved, err := h.store.Approve(ctx, id, cred.ID)
@@ -474,7 +475,7 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		h.writeTransitionErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(approved)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(approved)})
 }
 
 // Publish handles POST /v1/policies/{id}/publish (AC-1 versioned row,
@@ -483,34 +484,34 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !cred.IsApprover && !cred.IsAdmin {
-		writeError(w, http.StatusForbidden, "approver role required for publish")
+		httpresp.WriteError(w, http.StatusForbidden, "approver role required for publish")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	var req publishReq
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
 	}
 	if req.NewVersion == "" {
-		writeError(w, http.StatusBadRequest, "new_version is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "new_version is required")
 		return
 	}
 	var effective *time.Time
 	if req.EffectiveDate != nil && *req.EffectiveDate != "" {
 		t, err := time.Parse("2006-01-02", *req.EffectiveDate)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "effective_date must be YYYY-MM-DD")
+			httpresp.WriteError(w, http.StatusBadRequest, "effective_date must be YYYY-MM-DD")
 			return
 		}
 		effective = &t
@@ -524,7 +525,7 @@ func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 		h.writePublishErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"policy": wireFromPolicy(published)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"policy": wireFromPolicy(published)})
 }
 
 // PDF handles GET /v1/policies/{id}/pdf (AC-5). Returns
@@ -533,21 +534,21 @@ func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) PDF(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	p, err := h.store.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, policy.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "policy not found")
+			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
 			return
 		}
-		writeServerErr(w, r, "get policy", err)
+		httperr.WriteInternal(w, r, "get policy", err)
 		return
 	}
 	doc := policypdf.Doc{
@@ -566,10 +567,10 @@ func (h *Handler) PDF(w http.ResponseWriter, r *http.Request) {
 	pdfBytes, err := h.renderPDF(renderCtx, doc)
 	if err != nil {
 		if errors.Is(err, policypdf.ErrChromeUnavailable) {
-			writeError(w, http.StatusServiceUnavailable, "pdf renderer unavailable: chrome not installed")
+			httpresp.WriteError(w, http.StatusServiceUnavailable, "pdf renderer unavailable: chrome not installed")
 			return
 		}
-		writeServerErr(w, r, "render pdf", err)
+		httperr.WriteInternal(w, r, "render pdf", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/pdf")
@@ -588,35 +589,35 @@ func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err err
 		errors.Is(err, policy.ErrOwnerRoleRequired),
 		errors.Is(err, policy.ErrApproverRoleRequired),
 		errors.Is(err, policy.ErrCreatedByRequired):
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 	default:
-		writeServerErr(w, r, "create policy", err)
+		httperr.WriteInternal(w, r, "create policy", err)
 	}
 }
 
 func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, policy.ErrNotFound):
-		writeError(w, http.StatusNotFound, "policy not found")
+		httpresp.WriteError(w, http.StatusNotFound, "policy not found")
 	case errors.Is(err, policy.ErrWrongState):
-		writeError(w, http.StatusConflict, "policy not in expected state for this transition")
+		httpresp.WriteError(w, http.StatusConflict, "policy not in expected state for this transition")
 	default:
-		writeServerErr(w, r, "transition", err)
+		httperr.WriteInternal(w, r, "transition", err)
 	}
 }
 
 func (h *Handler) writePublishErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, policy.ErrOrphanPublish):
-		writeError(w, http.StatusConflict, err.Error())
+		httpresp.WriteError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, policy.ErrNotFound):
-		writeError(w, http.StatusNotFound, "policy not found")
+		httpresp.WriteError(w, http.StatusNotFound, "policy not found")
 	case errors.Is(err, policy.ErrWrongState):
-		writeError(w, http.StatusConflict, "policy not in expected state for publish")
+		httpresp.WriteError(w, http.StatusConflict, "policy not in expected state for publish")
 	case errors.Is(err, policy.ErrInvalidVersion):
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 	default:
-		writeServerErr(w, r, "publish policy", err)
+		httperr.WriteInternal(w, r, "publish policy", err)
 	}
 }
 
@@ -692,18 +693,4 @@ func uuidsToStrings(us []uuid.UUID) []string {
 		out[i] = u.String()
 	}
 	return out
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
-	httperr.WriteInternal(w, r, op, err)
 }

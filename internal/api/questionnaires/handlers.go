@@ -25,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -67,16 +68,16 @@ type createRequest struct {
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	var req createRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "request body must be JSON")
+		httpresp.WriteError(w, http.StatusBadRequest, "request body must be JSON")
 		return
 	}
 	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	q, err := h.store.CreateQuestionnaire(ctx, questionnaire.CreateQuestionnaireParams{
@@ -88,7 +89,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, q)
+	httpresp.WriteJSON(w, http.StatusCreated, q)
 }
 
 // ===== GET /v1/questionnaires =====
@@ -96,7 +97,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	list, err := h.store.ListQuestionnaires(ctx)
@@ -104,7 +105,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"questionnaires": list})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"questionnaires": list})
 }
 
 // ===== POST /v1/questionnaires/{id}/import-excel =====
@@ -122,12 +123,12 @@ type importResponse struct {
 func (h *Handler) ImportExcel(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id := chi.URLParam(r, "id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "id is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "id is required")
 		return
 	}
 
@@ -135,19 +136,19 @@ func (h *Handler) ImportExcel(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, questionnaire.MaxUploadBytes)
 
 	if err := r.ParseMultipartForm(questionnaire.MaxUploadBytes); err != nil {
-		writeError(w, http.StatusRequestEntityTooLarge, "upload exceeds size cap")
+		httpresp.WriteError(w, http.StatusRequestEntityTooLarge, "upload exceeds size cap")
 		return
 	}
 	file, _, err := r.FormFile("file")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "missing file field")
+		httpresp.WriteError(w, http.StatusBadRequest, "missing file field")
 		return
 	}
 	defer func() { _ = file.Close() }()
 
 	raw, err := io.ReadAll(file)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "could not read upload")
+		httpresp.WriteError(w, http.StatusBadRequest, "could not read upload")
 		return
 	}
 
@@ -155,13 +156,13 @@ func (h *Handler) ImportExcel(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, questionnaire.ErrUploadTooLarge):
-			writeError(w, http.StatusRequestEntityTooLarge, err.Error())
+			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, err.Error())
 		case errors.Is(err, questionnaire.ErrEmptyWorkbook),
 			errors.Is(err, questionnaire.ErrNoHeaderRow),
 			errors.Is(err, questionnaire.ErrTooManyRows):
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		}
 		return
 	}
@@ -171,10 +172,11 @@ func (h *Handler) ImportExcel(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, importResponse{
+	httpresp.WriteJSON(w, http.StatusCreated, importResponse{
 		Questions:       added,
 		UnmappedColumns: parsed.UnmappedColumns,
 	})
+
 }
 
 // ===== GET /v1/questionnaires/{id} =====
@@ -189,13 +191,13 @@ type getResponse struct {
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id := chi.URLParam(r, "id")
 	q, err := h.store.GetQuestionnaire(ctx, id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "questionnaire not found")
+		httpresp.WriteError(w, http.StatusNotFound, "questionnaire not found")
 		return
 	}
 	qs, err := h.store.ListQuestionsWithAnswers(ctx, id)
@@ -203,7 +205,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, getResponse{Questionnaire: q, Questions: qs})
+	httpresp.WriteJSON(w, http.StatusOK, getResponse{Questionnaire: q, Questions: qs})
 }
 
 // ===== PATCH /v1/questionnaires/{id}/answers/{qid} =====
@@ -223,17 +225,17 @@ type upsertAnswerRequest struct {
 func (h *Handler) UpsertAnswer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	qid := chi.URLParam(r, "qid")
 	if qid == "" {
-		writeError(w, http.StatusBadRequest, "qid is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "qid is required")
 		return
 	}
 	var req upsertAnswerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "request body must be JSON")
+		httpresp.WriteError(w, http.StatusBadRequest, "request body must be JSON")
 		return
 	}
 	a, err := h.store.UpsertAnswer(ctx, questionnaire.AnswerParams{
@@ -250,7 +252,7 @@ func (h *Handler) UpsertAnswer(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, a)
+	httpresp.WriteJSON(w, http.StatusOK, a)
 }
 
 // ===== GET /v1/questionnaires/{id}/suggestions?anchor=IAC-06&limit=10 =====
@@ -259,12 +261,12 @@ func (h *Handler) UpsertAnswer(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	anchor := r.URL.Query().Get("anchor")
 	if anchor == "" {
-		writeError(w, http.StatusBadRequest, "anchor query param is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "anchor query param is required")
 		return
 	}
 	list, err := h.store.SuggestForAnchorWithPool(ctx, anchor, questionnaire.DefaultSuggestionLimit)
@@ -272,7 +274,7 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"suggestions": list})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"suggestions": list})
 }
 
 // ===== POST /v1/questionnaires/{id}/export-pdf =====
@@ -281,13 +283,13 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id := chi.URLParam(r, "id")
 	q, err := h.store.GetQuestionnaire(ctx, id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "questionnaire not found")
+		httpresp.WriteError(w, http.StatusNotFound, "questionnaire not found")
 		return
 	}
 	items, err := h.store.ListQuestionsWithAnswers(ctx, id)
@@ -321,7 +323,7 @@ func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 	buf, err := questionnaire.RenderPDF(pdfCtx, in)
 	if err != nil {
 		if errors.Is(err, questionnaire.ErrChromeUnavailable) {
-			writeError(w, http.StatusServiceUnavailable, "PDF export disabled: chrome not available in this deployment")
+			httpresp.WriteError(w, http.StatusServiceUnavailable, "PDF export disabled: chrome not available in this deployment")
 			return
 		}
 		httperr.WriteInternal(w, r, "questionnaires", err)
@@ -329,14 +331,4 @@ func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/pdf")
 	_, _ = w.Write(buf)
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
 }

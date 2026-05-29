@@ -36,6 +36,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	board "github.com/mgoodric/security-atlas/internal/board"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -93,33 +94,33 @@ type packGenerateRequest struct {
 func (h *PackHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	var req packGenerateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "request body must be JSON with a period_end field")
+		httpresp.WriteError(w, http.StatusBadRequest, "request body must be JSON with a period_end field")
 		return
 	}
 	if strings.TrimSpace(req.PeriodEnd) == "" {
-		writeError(w, http.StatusBadRequest, "period_end is required (YYYY-MM-DD)")
+		httpresp.WriteError(w, http.StatusBadRequest, "period_end is required (YYYY-MM-DD)")
 		return
 	}
 	if _, err := time.Parse("2006-01-02", req.PeriodEnd); err != nil {
-		writeError(w, http.StatusBadRequest, "period_end must be a YYYY-MM-DD date")
+		httpresp.WriteError(w, http.StatusBadRequest, "period_end must be a YYYY-MM-DD date")
 		return
 	}
 
 	stored, err := h.gen.Generate(ctx, req.PeriodEnd)
 	if err != nil {
 		if errors.Is(err, board.ErrPackBadPeriodEnd) {
-			writeError(w, http.StatusBadRequest, "period_end must be a YYYY-MM-DD date")
+			httpresp.WriteError(w, http.StatusBadRequest, "period_end must be a YYYY-MM-DD date")
 			return
 		}
 		httperr.WriteInternal(w, r, "board", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, packWireFromStored(stored))
+	httpresp.WriteJSON(w, http.StatusCreated, packWireFromStored(stored))
 }
 
 // Get handles GET /v1/board-packs/{id}.
@@ -130,7 +131,7 @@ func (h *PackHandler) Generate(w http.ResponseWriter, r *http.Request) {
 func (h *PackHandler) Get(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, chi.URLParam(r, "id"))
@@ -142,7 +143,7 @@ func (h *PackHandler) Get(w http.ResponseWriter, r *http.Request) {
 		h.writePackError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, packWireFromStored(stored))
+	httpresp.WriteJSON(w, http.StatusOK, packWireFromStored(stored))
 }
 
 // List handles GET /v1/board-packs — every pack for the tenant, newest
@@ -150,7 +151,7 @@ func (h *PackHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *PackHandler) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	stored, err := h.store.List(ctx)
@@ -162,7 +163,7 @@ func (h *PackHandler) List(w http.ResponseWriter, r *http.Request) {
 	for _, sp := range stored {
 		wires = append(wires, packWireFromStored(sp))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"packs": wires})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"packs": wires})
 }
 
 // updateSectionRequest is the PUT /v1/board-packs/{id}/sections/{key} body.
@@ -194,7 +195,7 @@ type updateSectionRequest struct {
 func (h *PackHandler) UpdateSection(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, chi.URLParam(r, "id"))
@@ -205,7 +206,7 @@ func (h *PackHandler) UpdateSection(w http.ResponseWriter, r *http.Request) {
 
 	var req updateSectionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "request body must be JSON")
+		httpresp.WriteError(w, http.StatusBadRequest, "request body must be JSON")
 		return
 	}
 
@@ -219,7 +220,7 @@ func (h *PackHandler) UpdateSection(w http.ResponseWriter, r *http.Request) {
 		h.writePackError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, packWireFromStored(stored))
+	httpresp.WriteJSON(w, http.StatusOK, packWireFromStored(stored))
 }
 
 // ApproveSection handles POST /v1/board-packs/{id}/sections/{key}/approve
@@ -235,7 +236,7 @@ func (h *PackHandler) UpdateSection(w http.ResponseWriter, r *http.Request) {
 func (h *PackHandler) ApproveSection(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, chi.URLParam(r, "id"))
@@ -254,7 +255,7 @@ func (h *PackHandler) ApproveSection(w http.ResponseWriter, r *http.Request) {
 		h.writePackError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, packWireFromStored(stored))
+	httpresp.WriteJSON(w, http.StatusOK, packWireFromStored(stored))
 }
 
 // publishRequest is the POST /v1/board-packs/{id}/publish body.
@@ -277,7 +278,7 @@ type publishRequest struct {
 func (h *PackHandler) Publish(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, chi.URLParam(r, "id"))
@@ -286,11 +287,11 @@ func (h *PackHandler) Publish(w http.ResponseWriter, r *http.Request) {
 	}
 	var req publishRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "request body must be JSON with a published_by field")
+		httpresp.WriteError(w, http.StatusBadRequest, "request body must be JSON with a published_by field")
 		return
 	}
 	if strings.TrimSpace(req.PublishedBy) == "" {
-		writeError(w, http.StatusBadRequest, "published_by is required (the human approving publication)")
+		httpresp.WriteError(w, http.StatusBadRequest, "published_by is required (the human approving publication)")
 		return
 	}
 
@@ -299,7 +300,7 @@ func (h *PackHandler) Publish(w http.ResponseWriter, r *http.Request) {
 		h.writePackError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, packWireFromStored(stored))
+	httpresp.WriteJSON(w, http.StatusOK, packWireFromStored(stored))
 }
 
 // Markdown handles GET /v1/board-packs/{id}.md (AC-6).
@@ -309,7 +310,7 @@ func (h *PackHandler) Publish(w http.ResponseWriter, r *http.Request) {
 func (h *PackHandler) Markdown(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, chi.URLParam(r, "id"))
@@ -340,7 +341,7 @@ func (h *PackHandler) Markdown(w http.ResponseWriter, r *http.Request) {
 func (h *PackHandler) PDF(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, chi.URLParam(r, "id"))
@@ -358,8 +359,9 @@ func (h *PackHandler) PDF(w http.ResponseWriter, r *http.Request) {
 	pdfBytes, err := board.RenderPackPDF(renderCtx, stored)
 	if err != nil {
 		if errors.Is(err, board.ErrChromeUnavailable) {
-			writeError(w, http.StatusServiceUnavailable,
+			httpresp.WriteError(w, http.StatusServiceUnavailable,
 				"PDF rendering unavailable: chrome browser not found")
+
 			return
 		}
 		httperr.WriteInternal(w, r, "board", err)
@@ -376,13 +378,13 @@ func (h *PackHandler) PDF(w http.ResponseWriter, r *http.Request) {
 func (h *PackHandler) writePackError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, board.ErrPackNotFound):
-		writeError(w, http.StatusNotFound, "board pack not found")
+		httpresp.WriteError(w, http.StatusNotFound, "board pack not found")
 	case errors.Is(err, board.ErrUnknownSection):
-		writeError(w, http.StatusNotFound, "unknown board pack section key")
+		httpresp.WriteError(w, http.StatusNotFound, "unknown board pack section key")
 	case errors.Is(err, board.ErrPackNotDraft):
-		writeError(w, http.StatusConflict, "board pack is published and immutable")
+		httpresp.WriteError(w, http.StatusConflict, "board pack is published and immutable")
 	case errors.Is(err, board.ErrPackNotReady):
-		writeError(w, http.StatusConflict, err.Error())
+		httpresp.WriteError(w, http.StatusConflict, err.Error())
 	default:
 		httperr.WriteInternal(w, r, "board", err)
 	}

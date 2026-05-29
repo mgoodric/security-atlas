@@ -33,6 +33,7 @@ import (
 	"net/http"
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -82,7 +83,7 @@ func (h *ListHandler) List(w http.ResponseWriter, r *http.Request) {
 	// was reached without a credential (misconfig) — 401 keeps the
 	// shape consistent with the other bearer-auth'd handlers.
 	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
@@ -103,5 +104,5 @@ func (h *ListHandler) List(w http.ResponseWriter, r *http.Request) {
 			BundleID:       c.BundleID,
 		}
 	}
-	writeJSON(w, http.StatusOK, listResp{Controls: out, Count: len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, listResp{Controls: out, Count: len(out)})
 }

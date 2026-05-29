@@ -17,6 +17,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/risk"
 )
@@ -51,32 +53,32 @@ type aggregationWire struct {
 func (h *Handler) Aggregate(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	var req aggregateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Parent.Title == "" {
-		writeError(w, http.StatusBadRequest, "parent.title is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "parent.title is required")
 		return
 	}
 	childIDs, err := parseUUIDs(req.ChildRiskIDs)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "child_risk_ids: "+err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, "child_risk_ids: "+err.Error())
 		return
 	}
 	if len(childIDs) == 0 {
-		writeError(w, http.StatusBadRequest, "child_risk_ids must contain at least one UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "child_risk_ids must contain at least one UUID")
 		return
 	}
 	var orgUnitID *uuid.UUID
 	if req.Parent.OrgUnitID != nil && *req.Parent.OrgUnitID != "" {
 		u, perr := uuid.Parse(*req.Parent.OrgUnitID)
 		if perr != nil {
-			writeError(w, http.StatusBadRequest, "parent.org_unit_id must be a UUID")
+			httpresp.WriteError(w, http.StatusBadRequest, "parent.org_unit_id must be a UUID")
 			return
 		}
 		orgUnitID = &u
@@ -94,21 +96,22 @@ func (h *Handler) Aggregate(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, risk.ErrChildrenNotFound):
 			// AC-10: cross-tenant child id (or missing id) -> 404 with a
 			// non-enumerating message.
-			writeError(w, http.StatusNotFound, "one or more child risks not found")
+			httpresp.WriteError(w, http.StatusNotFound, "one or more child risks not found")
 		case errors.Is(err, risk.ErrEmptyChildren),
 			errors.Is(err, risk.ErrUnknownSeverityFunction),
 			errors.Is(err, risk.ErrIncompatibleMethodology),
 			errors.Is(err, risk.ErrInvalidLevel):
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
-			writeServerErr(w, r, "aggregate", err)
+			httperr.WriteInternal(w, r, "aggregate", err)
 		}
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{
 		"aggregation": aggregationWireFrom(res),
 		"risk":        riskWireFrom(res.Parent),
 	})
+
 }
 
 // LiveAggregation handles GET /v1/risks/{id}/aggregation (AC-8, AC-9).
@@ -118,26 +121,27 @@ func (h *Handler) Aggregate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) LiveAggregation(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	res, err := h.store.LiveAggregation(ctx, id)
 	if err != nil {
 		if errors.Is(err, risk.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "aggregation parent not found")
+			httpresp.WriteError(w, http.StatusNotFound, "aggregation parent not found")
 			return
 		}
-		writeServerErr(w, r, "live aggregation", err)
+		httperr.WriteInternal(w, r, "live aggregation", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"aggregation": aggregationWireFrom(res),
 	})
+
 }
 
 func aggregationWireFrom(res risk.AggregateResult) aggregationWire {

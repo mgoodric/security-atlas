@@ -44,6 +44,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/decision"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -132,26 +133,26 @@ type decisionWire struct {
 func (h *Handler) CreateDecision(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if strings.TrimSpace(req.Title) == "" {
-		writeError(w, http.StatusBadRequest, "title is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "title is required")
 		return
 	}
 	// AI-assist boundary: decision_maker is human-required. There is no
 	// path that creates a Decision without it.
 	if strings.TrimSpace(req.DecisionMaker) == "" {
-		writeError(w, http.StatusBadRequest, "decision_maker is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "decision_maker is required")
 		return
 	}
 	if req.DecidedAt == nil {
-		writeError(w, http.StatusBadRequest, "decided_at is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "decided_at is required")
 		return
 	}
 
@@ -172,7 +173,7 @@ func (h *Handler) CreateDecision(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreErr(w, r, "create decision", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"decision": decisionWireFrom(created)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"decision": decisionWireFrom(created)})
 }
 
 // ListDecisions handles GET /v1/decisions (AC-2). Filters:
@@ -195,18 +196,18 @@ func (h *Handler) ListDecisions(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	filter := decision.ListFilter{Status: strings.TrimSpace(r.URL.Query().Get("status"))}
 	if raw := strings.TrimSpace(r.URL.Query().Get("revisit_due_within_days")); raw != "" {
 		days, err := strconv.Atoi(raw)
 		if err != nil || days < 0 {
-			writeError(w, http.StatusBadRequest, "revisit_due_within_days must be a non-negative integer")
+			httpresp.WriteError(w, http.StatusBadRequest, "revisit_due_within_days must be a non-negative integer")
 			return
 		}
 		if days > MaxRevisitWindowDays {
-			writeError(w, http.StatusBadRequest, "revisit_due_within_days exceeds maximum")
+			httpresp.WriteError(w, http.StatusBadRequest, "revisit_due_within_days exceeds maximum")
 			return
 		}
 		filter.RevisitDueWithinDays = days
@@ -221,7 +222,7 @@ func (h *Handler) ListDecisions(w http.ResponseWriter, r *http.Request) {
 	if raw := strings.TrimSpace(r.URL.Query().Get("revisit_by_from")); raw != "" {
 		from, err := time.Parse("2006-01-02", raw)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "revisit_by_from must be an ISO date (YYYY-MM-DD)")
+			httpresp.WriteError(w, http.StatusBadRequest, "revisit_by_from must be an ISO date (YYYY-MM-DD)")
 			return
 		}
 		f := from.UTC()
@@ -230,7 +231,7 @@ func (h *Handler) ListDecisions(w http.ResponseWriter, r *http.Request) {
 	if raw := strings.TrimSpace(r.URL.Query().Get("revisit_by_to")); raw != "" {
 		to, err := time.Parse("2006-01-02", raw)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "revisit_by_to must be an ISO date (YYYY-MM-DD)")
+			httpresp.WriteError(w, http.StatusBadRequest, "revisit_by_to must be an ISO date (YYYY-MM-DD)")
 			return
 		}
 		t := to.UTC()
@@ -245,7 +246,7 @@ func (h *Handler) ListDecisions(w http.ResponseWriter, r *http.Request) {
 	for i, d := range rows {
 		out[i] = decisionWireFrom(d)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"decisions": out, "count": len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"decisions": out, "count": len(out)})
 }
 
 // Overdue handles GET /v1/decisions/overdue (AC-6). Active decisions whose
@@ -253,7 +254,7 @@ func (h *Handler) ListDecisions(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Overdue(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	rows, err := h.store.Overdue(ctx, time.Now().UTC())
@@ -265,7 +266,7 @@ func (h *Handler) Overdue(w http.ResponseWriter, r *http.Request) {
 	for i, d := range rows {
 		out[i] = decisionWireFrom(d)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"decisions": out, "count": len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"decisions": out, "count": len(out)})
 }
 
 // GetDecision handles GET /v1/decisions/{id} (AC-2). Returns the decision
@@ -273,12 +274,12 @@ func (h *Handler) Overdue(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetDecision(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	d, lk, err := h.store.GetWithLinkage(ctx, id)
@@ -286,22 +287,23 @@ func (h *Handler) GetDecision(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreErr(w, r, "get decision", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"decision": decisionWireFrom(d),
 		"linkage":  linkageWireFrom(lk),
 	})
+
 }
 
 // AuditLog handles GET /v1/decisions/{id}/audit-log (AC-3 read).
 func (h *Handler) AuditLog(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	entries, err := h.store.ListAudit(ctx, id)
@@ -328,24 +330,24 @@ func (h *Handler) AuditLog(w http.ResponseWriter, r *http.Request) {
 			OccurredAt: e.OccurredAt,
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": out, "count": len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"entries": out, "count": len(out)})
 }
 
 // UpdateDecision handles PATCH /v1/decisions/{id} (AC-3).
 func (h *Handler) UpdateDecision(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	var req updateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
@@ -382,7 +384,7 @@ func (h *Handler) UpdateDecision(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"decision": decisionWireFrom(updated)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"decision": decisionWireFrom(updated)})
 }
 
 // Supersede handles POST /v1/decisions/{id}/supersede (AC-4). The
@@ -390,26 +392,26 @@ func (h *Handler) UpdateDecision(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Supersede(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	var req supersedeReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if strings.TrimSpace(req.SupersededBy) == "" {
-		writeError(w, http.StatusBadRequest, "superseded_by is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "superseded_by is required")
 		return
 	}
 	supersededBy, err := uuid.Parse(req.SupersededBy)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "superseded_by must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "superseded_by must be a UUID")
 		return
 	}
 	superseded, err := h.store.Supersede(ctx, id, supersededBy, cred.ID)
@@ -417,50 +419,51 @@ func (h *Handler) Supersede(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreErr(w, r, "supersede decision", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"decision": decisionWireFrom(superseded)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"decision": decisionWireFrom(superseded)})
 }
 
 // AddLink handles POST /v1/decisions/{id}/links/{kind} (AC-5). Idempotent.
 func (h *Handler) AddLink(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	kind := chi.URLParam(r, "kind")
 	if !decision.ValidLinkKind(kind) {
-		writeError(w, http.StatusBadRequest, "kind must be one of: risks, controls, exceptions, scope_predicates")
+		httpresp.WriteError(w, http.StatusBadRequest, "kind must be one of: risks, controls, exceptions, scope_predicates")
 		return
 	}
 	var req linkReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if strings.TrimSpace(req.TargetID) == "" {
-		writeError(w, http.StatusBadRequest, "target_id is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "target_id is required")
 		return
 	}
 	targetID, err := uuid.Parse(req.TargetID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "target_id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "target_id must be a UUID")
 		return
 	}
 	if err := h.store.AddLink(ctx, id, decision.LinkKind(kind), targetID, cred.ID); err != nil {
 		h.writeStoreErr(w, r, "add link", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"linked":      true,
 		"kind":        kind,
 		"target_id":   targetID.String(),
 		"decision_id": id.String(),
 	})
+
 }
 
 // RemoveLink handles DELETE /v1/decisions/{id}/links/{kind}/{targetID}
@@ -468,34 +471,35 @@ func (h *Handler) AddLink(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) RemoveLink(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	kind := chi.URLParam(r, "kind")
 	if !decision.ValidLinkKind(kind) {
-		writeError(w, http.StatusBadRequest, "kind must be one of: risks, controls, exceptions, scope_predicates")
+		httpresp.WriteError(w, http.StatusBadRequest, "kind must be one of: risks, controls, exceptions, scope_predicates")
 		return
 	}
 	targetID, err := uuid.Parse(chi.URLParam(r, "targetID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "targetID must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "targetID must be a UUID")
 		return
 	}
 	if err := h.store.RemoveLink(ctx, id, decision.LinkKind(kind), targetID, cred.ID); err != nil {
 		h.writeStoreErr(w, r, "remove link", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"linked":      false,
 		"kind":        kind,
 		"target_id":   targetID.String(),
 		"decision_id": id.String(),
 	})
+
 }
 
 // ----- helpers -----
@@ -509,22 +513,22 @@ func (h *Handler) RemoveLink(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) writeStoreErr(w http.ResponseWriter, r *http.Request, op string, err error) {
 	switch {
 	case errors.Is(err, decision.ErrNotFound):
-		writeError(w, http.StatusNotFound, "decision not found")
+		httpresp.WriteError(w, http.StatusNotFound, "decision not found")
 	case errors.Is(err, decision.ErrCrossTenantLink):
 		// AC-9: a cross-tenant (or absent) link target is reported as 404,
 		// never as a 403 -- a 403 would confirm the entity exists.
-		writeError(w, http.StatusNotFound, "link target not found")
+		httpresp.WriteError(w, http.StatusNotFound, "link target not found")
 	case errors.Is(err, decision.ErrWrongState):
-		writeError(w, http.StatusConflict, "decision not in expected state for this operation")
+		httpresp.WriteError(w, http.StatusConflict, "decision not in expected state for this operation")
 	case errors.Is(err, decision.ErrTitleRequired),
 		errors.Is(err, decision.ErrDecisionMakerRequired),
 		errors.Is(err, decision.ErrDecidedAtRequired),
 		errors.Is(err, decision.ErrSupersededByRequired),
 		errors.Is(err, decision.ErrSelfSupersede),
 		errors.Is(err, decision.ErrInvalidLinkKind):
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 	default:
-		writeServerErr(w, r, op, err)
+		httperr.WriteInternal(w, r, op, err)
 	}
 }
 
@@ -602,18 +606,4 @@ func splitCSV(raw string) []string {
 		}
 	}
 	return out
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
-	httperr.WriteInternal(w, r, op, err)
 }

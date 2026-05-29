@@ -36,6 +36,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -102,29 +103,29 @@ type exceptionWire struct {
 func (h *Handler) CreateException(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.ControlID == "" {
-		writeError(w, http.StatusBadRequest, "control_id is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "control_id is required")
 		return
 	}
 	controlID, err := uuid.Parse(req.ControlID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "control_id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "control_id must be a UUID")
 		return
 	}
 	if strings.TrimSpace(req.Justification) == "" {
-		writeError(w, http.StatusBadRequest, "justification is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "justification is required")
 		return
 	}
 	if req.ExpiresAt == nil {
-		writeError(w, http.StatusBadRequest, "expires_at is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "expires_at is required")
 		return
 	}
 
@@ -141,51 +142,51 @@ func (h *Handler) CreateException(w http.ResponseWriter, r *http.Request) {
 		h.writeCreateErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"exception": exceptionWireFrom(created)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"exception": exceptionWireFrom(created)})
 }
 
 // ListExceptions handles GET /v1/exceptions (filterable by ?status=).
 func (h *Handler) ListExceptions(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	filter := exception.ListFilter{Status: strings.TrimSpace(r.URL.Query().Get("status"))}
 	rows, err := h.store.List(ctx, filter)
 	if err != nil {
-		writeServerErr(w, r, "list exceptions", err)
+		httperr.WriteInternal(w, r, "list exceptions", err)
 		return
 	}
 	out := make([]exceptionWire, len(rows))
 	for i, e := range rows {
 		out[i] = exceptionWireFrom(e)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"exceptions": out, "count": len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"exceptions": out, "count": len(out)})
 }
 
 // GetException handles GET /v1/exceptions/{id}.
 func (h *Handler) GetException(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	e, err := h.store.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, exception.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "exception not found")
+			httpresp.WriteError(w, http.StatusNotFound, "exception not found")
 			return
 		}
-		writeServerErr(w, r, "get exception", err)
+		httperr.WriteInternal(w, r, "get exception", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"exception": exceptionWireFrom(e)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"exception": exceptionWireFrom(e)})
 }
 
 // Expiring handles GET /v1/exceptions/expiring?within=30d (AC-6).
@@ -197,50 +198,51 @@ func (h *Handler) GetException(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Expiring(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	withinStr := strings.TrimSpace(r.URL.Query().Get("within"))
 	within, err := parseWithin(withinStr)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "within must look like '30d', '12h', or '45m'")
+		httpresp.WriteError(w, http.StatusBadRequest, "within must look like '30d', '12h', or '45m'")
 		return
 	}
 	if within > MaxExpiringWindow {
-		writeError(w, http.StatusBadRequest, "within exceeds maximum (365d)")
+		httpresp.WriteError(w, http.StatusBadRequest, "within exceeds maximum (365d)")
 		return
 	}
 	rows, err := h.store.Expiring(ctx, time.Now().UTC(), within)
 	if err != nil {
-		writeServerErr(w, r, "list expiring", err)
+		httperr.WriteInternal(w, r, "list expiring", err)
 		return
 	}
 	out := make([]exceptionWire, len(rows))
 	for i, e := range rows {
 		out[i] = exceptionWireFrom(e)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"exceptions": out,
 		"count":      len(out),
 		"within":     within.String(),
 	})
+
 }
 
 // AuditLog handles GET /v1/exceptions/{id}/audit-log (AC-7 read).
 func (h *Handler) AuditLog(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	entries, err := h.store.ListAuditLog(ctx, id)
 	if err != nil {
-		writeServerErr(w, r, "list audit log", err)
+		httperr.WriteInternal(w, r, "list audit log", err)
 		return
 	}
 	type entryWire struct {
@@ -270,23 +272,23 @@ func (h *Handler) AuditLog(w http.ResponseWriter, r *http.Request) {
 		}
 		out[i] = w
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": out, "count": len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"entries": out, "count": len(out)})
 }
 
 // Approve handles PATCH /v1/exceptions/{id}/approve (AC-3).
 func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !cred.IsApprover && !cred.IsAdmin {
-		writeError(w, http.StatusForbidden, "approver role required")
+		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	approved, err := h.store.Approve(ctx, id, cred.ID)
@@ -294,23 +296,23 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		h.writeTransitionErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"exception": exceptionWireFrom(approved)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"exception": exceptionWireFrom(approved)})
 }
 
 // Deny handles PATCH /v1/exceptions/{id}/deny (AC-3 terminal path).
 func (h *Handler) Deny(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !cred.IsApprover && !cred.IsAdmin {
-		writeError(w, http.StatusForbidden, "approver role required")
+		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	var req denyReq
@@ -322,23 +324,23 @@ func (h *Handler) Deny(w http.ResponseWriter, r *http.Request) {
 		h.writeTransitionErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"exception": exceptionWireFrom(denied)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"exception": exceptionWireFrom(denied)})
 }
 
 // Activate handles PATCH /v1/exceptions/{id}/activate (AC-4 enable).
 func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !cred.IsApprover && !cred.IsAdmin {
-		writeError(w, http.StatusForbidden, "approver role required")
+		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	var req activateReq
@@ -354,7 +356,7 @@ func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
 		h.writeTransitionErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"exception": exceptionWireFrom(activated)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"exception": exceptionWireFrom(activated)})
 }
 
 // ----- helpers -----
@@ -365,30 +367,30 @@ func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err err
 		errors.Is(err, exception.ErrJustificationRequired),
 		errors.Is(err, exception.ErrRequesterRequired),
 		errors.Is(err, exception.ErrExpiresAtRequired):
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, exception.ErrExpiresAtExceedsCap):
-		writeError(w, http.StatusBadRequest, "expires_at exceeds 365-day cap")
+		httpresp.WriteError(w, http.StatusBadRequest, "expires_at exceeds 365-day cap")
 	case errors.Is(err, exception.ErrExpiresAtInPast):
-		writeError(w, http.StatusBadRequest, "expires_at must be in the future")
+		httpresp.WriteError(w, http.StatusBadRequest, "expires_at must be in the future")
 	default:
 		if strings.Contains(err.Error(), "control_id does not exist") {
-			writeError(w, http.StatusBadRequest, "control_id does not exist in tenant")
+			httpresp.WriteError(w, http.StatusBadRequest, "control_id does not exist in tenant")
 			return
 		}
-		writeServerErr(w, r, "create exception", err)
+		httperr.WriteInternal(w, r, "create exception", err)
 	}
 }
 
 func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, exception.ErrNotFound):
-		writeError(w, http.StatusNotFound, "exception not found")
+		httpresp.WriteError(w, http.StatusNotFound, "exception not found")
 	case errors.Is(err, exception.ErrWrongState):
-		writeError(w, http.StatusConflict, "exception not in expected state for this transition")
+		httpresp.WriteError(w, http.StatusConflict, "exception not in expected state for this transition")
 	case errors.Is(err, exception.ErrSegregationOfDuties):
-		writeError(w, http.StatusForbidden, "approver must differ from requester (segregation of duties)")
+		httpresp.WriteError(w, http.StatusForbidden, "approver must differ from requester (segregation of duties)")
 	default:
-		writeServerErr(w, r, "transition", err)
+		httperr.WriteInternal(w, r, "transition", err)
 	}
 }
 
@@ -468,18 +470,4 @@ func parseWithin(s string) (time.Duration, error) {
 		return time.Duration(num) * time.Minute, nil
 	}
 	return 0, errors.New("unknown duration unit")
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
-	httperr.WriteInternal(w, r, op, err)
 }

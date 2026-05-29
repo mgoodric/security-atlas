@@ -36,7 +36,7 @@ test-frontend:
     cd web && npm test --if-present
 
 # Run all linters (Go + frontend + Python)
-lint: lint-go lint-errleak lint-frontend lint-python
+lint: lint-go lint-errleak lint-duphelper lint-frontend lint-python
 
 # Lint Go (golangci-lint)
 lint-go:
@@ -47,6 +47,13 @@ lint-go:
 # Background: docs/audits/327-...-report.md finding M-2.
 lint-errleak:
     go run ./cmd/scripts/errleak-lint ./internal/api/...
+
+# Slice 369 — duplicate-helper check.
+# Rejects new package-local writeJSON/writeError/writeServerErr declarations
+# in internal/api/* that duplicate the shared httpresp/httperr helpers.
+# Background: docs/audits/328-code-review-comprehensive-report.md finding H-1.
+lint-duphelper:
+    go run ./cmd/scripts/duphelper-lint ./internal/api/...
 
 # Lint frontend (eslint)
 lint-frontend:

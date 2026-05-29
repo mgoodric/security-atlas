@@ -59,6 +59,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
@@ -159,7 +160,7 @@ type reloadResponse struct {
 // fields without breaking the v1 empty-body contract.
 func (h *Handler) Reload(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.engine == nil {
-		writeError(w, http.StatusServiceUnavailable, "authz engine not wired")
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "authz engine not wired")
 		return
 	}
 	if !requireSuperAdmin(w, r) {
@@ -168,7 +169,7 @@ func (h *Handler) Reload(w http.ResponseWriter, r *http.Request) {
 
 	actorID := actorFromContext(r.Context())
 	if actorID == uuid.Nil {
-		writeError(w, http.StatusInternalServerError, "actor user_id not on context")
+		httpresp.WriteError(w, http.StatusInternalServerError, "actor user_id not on context")
 		return
 	}
 	actorTenantID, terr := actorTenantFromContext(r.Context())
@@ -183,7 +184,7 @@ func (h *Handler) Reload(w http.ResponseWriter, r *http.Request) {
 	// per binary and the audit log records all reloads regardless.
 	if !h.checkAndStampRate(actorID, time.Now()) {
 		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(h.rateLimit.Seconds())))
-		writeError(w, http.StatusTooManyRequests, "reload rate limit exceeded; try again later")
+		httpresp.WriteError(w, http.StatusTooManyRequests, "reload rate limit exceeded; try again later")
 		return
 	}
 
@@ -200,7 +201,7 @@ func (h *Handler) Reload(w http.ResponseWriter, r *http.Request) {
 		// it as 4xx with the error detail so the operator can debug
 		// the bundle. Compile-failure also surfaces here. Wrap
 		// errors are NOT logged at ERROR — they are operator-driven.
-		writeError(w, http.StatusUnprocessableEntity, "reload rejected: "+rErr.Error())
+		httpresp.WriteError(w, http.StatusUnprocessableEntity, "reload rejected: "+rErr.Error())
 		return
 	}
 
@@ -236,12 +237,13 @@ func (h *Handler) Reload(w http.ResponseWriter, r *http.Request) {
 		PayloadJSON:   sinkPayload,
 	})
 
-	writeJSON(w, http.StatusOK, reloadResponse{
+	httpresp.WriteJSON(w, http.StatusOK, reloadResponse{
 		ReloadedAt:         reloadedAt,
 		MatrixPassed:       true,
 		BeforeBundleSHA256: beforeSHA,
 		AfterBundleSHA256:  afterSHA,
 	})
+
 }
 
 // writeAuditRows persists the dual audit-log rows inside one
@@ -336,7 +338,7 @@ func requireSuperAdmin(w http.ResponseWriter, r *http.Request) bool {
 	if claims != nil && claims.SuperAdmin {
 		return true
 	}
-	writeError(w, http.StatusForbidden, "super_admin required")
+	httpresp.WriteError(w, http.StatusForbidden, "super_admin required")
 	return false
 }
 
@@ -371,16 +373,4 @@ func mustMarshal(v any) []byte {
 		panic(fmt.Sprintf("adminauthzbundle: json marshal: %v", err))
 	}
 	return b
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -97,11 +98,11 @@ type uploadResp struct {
 func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "authentication required")
+		httpresp.WriteError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
 	if !cred.IsAdmin && !isMachineActor(cred) {
-		writeError(w, http.StatusForbidden, "admin credential required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return
 	}
 
@@ -126,7 +127,7 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 
 	// Slice-017 applicability_expr validator (AC-5).
 	if err := bundle.ValidateApplicabilityExpr(); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -134,7 +135,7 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 	// unknown evidence_kind is a missing-dep parse failure too).
 	if h.registry != nil {
 		if err := bundle.ValidateEvidenceKinds(ctx, h.registry); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -145,7 +146,7 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, control.ErrSCFAnchorUnknown):
 			// Canvas invariant 7 — refuse to persist a control without an
 			// anchor. 404 communicates "the thing you referenced isn't there".
-			writeError(w, http.StatusNotFound, err.Error())
+			httpresp.WriteError(w, http.StatusNotFound, err.Error())
 		default:
 			httperr.WriteInternal(w, r, "persist", err)
 		}
@@ -169,7 +170,7 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 	if result.SupersededID != (uuid.UUID{}) {
 		resp.SupersededID = result.SupersededID.String()
 	}
-	writeJSON(w, status, resp)
+	httpresp.WriteJSON(w, status, resp)
 }
 
 // readBundle parses the request body into a *control.Bundle. Two shapes are
@@ -258,23 +259,13 @@ func parseInline(rawYAML []byte) (*control.Bundle, error) {
 func writeBundleError(w http.ResponseWriter, r *http.Request, err error) {
 	var m control.ErrBundleMalformed
 	if errors.As(err, &m) {
-		writeError(w, http.StatusBadRequest, m.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, m.Error())
 		return
 	}
 	var ue control.ErrUnknownEvidenceKind
 	if errors.As(err, &ue) {
-		writeError(w, http.StatusBadRequest, ue.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, ue.Error())
 		return
 	}
 	httperr.WriteInternal(w, r, "internal", err)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
 }

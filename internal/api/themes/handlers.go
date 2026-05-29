@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -42,19 +43,19 @@ type assignReq struct {
 // ListVisible handles GET /v1/themes.
 func (h *Handler) ListVisible(w http.ResponseWriter, r *http.Request) {
 	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	rows, err := h.store.ListVisibleThemes(r.Context())
 	if err != nil {
-		writeServerErr(w, r, "list themes", err)
+		httperr.WriteInternal(w, r, "list themes", err)
 		return
 	}
 	out := make([]themeWire, len(rows))
 	for i, t := range rows {
 		out[i] = themeWire{Name: t.Name, Description: t.Description, Source: string(t.Source)}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"themes": out, "count": len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"themes": out, "count": len(out)})
 }
 
 // AssignThemes handles POST /v1/risks/{id}/themes. Replaces the risk's
@@ -64,17 +65,17 @@ func (h *Handler) ListVisible(w http.ResponseWriter, r *http.Request) {
 // risks.themes"). Unknown themes -> 400. Cross-tenant risk -> 404.
 func (h *Handler) AssignThemes(w http.ResponseWriter, r *http.Request) {
 	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	riskID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	var req assignReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Themes == nil {
@@ -85,10 +86,10 @@ func (h *Handler) AssignThemes(w http.ResponseWriter, r *http.Request) {
 	current, err := h.store.GetRiskThemes(r.Context(), riskID)
 	if err != nil {
 		if errors.Is(err, risk.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "risk not found")
+			httpresp.WriteError(w, http.StatusNotFound, "risk not found")
 			return
 		}
-		writeServerErr(w, r, "get risk themes", err)
+		httperr.WriteInternal(w, r, "get risk themes", err)
 		return
 	}
 	merged := mergeThemes(current, req.Themes)
@@ -96,41 +97,41 @@ func (h *Handler) AssignThemes(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, risk.ErrUnknownTheme):
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, risk.ErrNotFound):
-			writeError(w, http.StatusNotFound, "risk not found")
+			httpresp.WriteError(w, http.StatusNotFound, "risk not found")
 		default:
-			writeServerErr(w, r, "assign themes", err)
+			httperr.WriteInternal(w, r, "assign themes", err)
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"risk": riskWireFrom(updated)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"risk": riskWireFrom(updated)})
 }
 
 // RemoveTheme handles DELETE /v1/risks/{id}/themes/{theme}. Idempotent:
 // removing an absent theme returns 204 without error.
 func (h *Handler) RemoveTheme(w http.ResponseWriter, r *http.Request) {
 	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	riskID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	theme := chi.URLParam(r, "theme")
 	if theme == "" {
-		writeError(w, http.StatusBadRequest, "theme must be provided")
+		httpresp.WriteError(w, http.StatusBadRequest, "theme must be provided")
 		return
 	}
 	current, err := h.store.GetRiskThemes(r.Context(), riskID)
 	if err != nil {
 		if errors.Is(err, risk.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "risk not found")
+			httpresp.WriteError(w, http.StatusNotFound, "risk not found")
 			return
 		}
-		writeServerErr(w, r, "get risk themes", err)
+		httperr.WriteInternal(w, r, "get risk themes", err)
 		return
 	}
 	remaining := removeTheme(current, theme)
@@ -142,11 +143,11 @@ func (h *Handler) RemoveTheme(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, risk.ErrUnknownTheme):
 			// Should not happen — `remaining` is a subset of `current`,
 			// which was already valid — but surface defensively.
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, risk.ErrNotFound):
-			writeError(w, http.StatusNotFound, "risk not found")
+			httpresp.WriteError(w, http.StatusNotFound, "risk not found")
 		default:
-			writeServerErr(w, r, "remove theme", err)
+			httperr.WriteInternal(w, r, "remove theme", err)
 		}
 		return
 	}
@@ -200,18 +201,4 @@ func riskWireFrom(r risk.Risk) riskWire {
 		Themes: append([]string(nil), r.Themes...),
 		Level:  string(r.Level),
 	}
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
-	httperr.WriteInternal(w, r, op, err)
 }

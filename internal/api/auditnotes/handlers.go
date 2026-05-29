@@ -40,6 +40,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/notes"
 	"github.com/mgoodric/security-atlas/internal/audit/notifications"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -118,27 +119,27 @@ func noteWireFrom(n notes.Note) noteWire {
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	authorID := cred.UserID
 	if authorID == "" {
-		writeError(w, http.StatusUnauthorized, "user id missing on credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "user id missing on credential")
 		return
 	}
 
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	periodID, err := uuid.Parse(req.AuditPeriodID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "audit_period_id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "audit_period_id must be a UUID")
 		return
 	}
 	if req.Body == "" {
-		writeError(w, http.StatusBadRequest, "body must be non-empty")
+		httpresp.WriteError(w, http.StatusBadRequest, "body must be non-empty")
 		return
 	}
 
@@ -153,7 +154,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.ParentNoteID != nil && *req.ParentNoteID != "" {
 		parent, err := uuid.Parse(*req.ParentNoteID)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "parent_note_id must be a UUID")
+			httpresp.WriteError(w, http.StatusBadRequest, "parent_note_id must be a UUID")
 			return
 		}
 		in.ParentNoteID = &parent
@@ -163,15 +164,15 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, notes.ErrInvalidScopeType):
-			writeError(w, http.StatusBadRequest, "scope_type must be one of control|finding|sample|period|walkthrough")
+			httpresp.WriteError(w, http.StatusBadRequest, "scope_type must be one of control|finding|sample|period|walkthrough")
 		case errors.Is(err, notes.ErrInvalidVisibility):
-			writeError(w, http.StatusBadRequest, "visibility must be one of auditor_only|shared")
+			httpresp.WriteError(w, http.StatusBadRequest, "visibility must be one of auditor_only|shared")
 		case errors.Is(err, notes.ErrParentMismatch):
-			writeError(w, http.StatusBadRequest, "parent_note_id is in a different scope or audit_period")
+			httpresp.WriteError(w, http.StatusBadRequest, "parent_note_id is in a different scope or audit_period")
 		case errors.Is(err, notes.ErrNotFound):
-			writeError(w, http.StatusBadRequest, "parent_note_id not found or not visible to caller")
+			httpresp.WriteError(w, http.StatusBadRequest, "parent_note_id not found or not visible to caller")
 		default:
-			writeServerErr(w, r, "create audit note", err)
+			httperr.WriteInternal(w, r, "create audit note", err)
 		}
 		return
 	}
@@ -195,7 +196,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{"audit_note": noteWireFrom(created.Note)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"audit_note": noteWireFrom(created.Note)})
 }
 
 // List handles GET /v1/audit-notes?audit_period_id=<UUID>.
@@ -205,38 +206,39 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	authorID := cred.UserID
 	if authorID == "" {
-		writeError(w, http.StatusUnauthorized, "user id missing on credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "user id missing on credential")
 		return
 	}
 	raw := r.URL.Query().Get("audit_period_id")
 	if raw == "" {
-		writeError(w, http.StatusBadRequest, "audit_period_id query parameter is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "audit_period_id query parameter is required")
 		return
 	}
 	periodID, err := uuid.Parse(raw)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "audit_period_id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "audit_period_id must be a UUID")
 		return
 	}
 
 	rows, err := h.store.ListForAuthorAndPeriod(ctx, periodID, authorID)
 	if err != nil {
-		writeServerErr(w, r, "list audit notes", err)
+		httperr.WriteInternal(w, r, "list audit notes", err)
 		return
 	}
 	out := make([]noteWire, len(rows))
 	for i, n := range rows {
 		out[i] = noteWireFrom(n)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"audit_notes": out,
 		"count":       len(out),
 	})
+
 }
 
 // Thread handles GET /v1/audit-notes/thread.
@@ -253,29 +255,29 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Thread(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	callerID := cred.UserID
 	if callerID == "" {
-		writeError(w, http.StatusUnauthorized, "user id missing on credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "user id missing on credential")
 		return
 	}
 
 	q := r.URL.Query()
 	rawPeriod := q.Get("audit_period_id")
 	if rawPeriod == "" {
-		writeError(w, http.StatusBadRequest, "audit_period_id query parameter is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "audit_period_id query parameter is required")
 		return
 	}
 	periodID, err := uuid.Parse(rawPeriod)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "audit_period_id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "audit_period_id must be a UUID")
 		return
 	}
 	scopeType := q.Get("scope_type")
 	if scopeType == "" {
-		writeError(w, http.StatusBadRequest, "scope_type query parameter is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "scope_type query parameter is required")
 		return
 	}
 	scopeID := q.Get("scope_id")
@@ -283,20 +285,21 @@ func (h *Handler) Thread(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.store.ListThreadForScope(ctx, periodID, scopeType, scopeID, callerID)
 	if err != nil {
 		if errors.Is(err, notes.ErrInvalidScopeType) {
-			writeError(w, http.StatusBadRequest, "scope_type must be one of control|finding|sample|period|walkthrough")
+			httpresp.WriteError(w, http.StatusBadRequest, "scope_type must be one of control|finding|sample|period|walkthrough")
 			return
 		}
-		writeServerErr(w, r, "list audit-note thread", err)
+		httperr.WriteInternal(w, r, "list audit-note thread", err)
 		return
 	}
 	out := make([]noteWire, len(rows))
 	for i, n := range rows {
 		out[i] = noteWireFrom(n)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"audit_notes": out,
 		"count":       len(out),
 	})
+
 }
 
 // ----- helpers -----
@@ -310,18 +313,4 @@ func (h *Handler) authnContext(r *http.Request) (context.Context, credstore.Cred
 		return nil, credstore.Credential{}, false
 	}
 	return r.Context(), cred, true
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
-	httperr.WriteInternal(w, r, op, err)
 }

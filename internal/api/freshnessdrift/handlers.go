@@ -13,13 +13,13 @@
 package freshnessdrift
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/drift"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -70,11 +70,11 @@ type freshnessClassBucket struct {
 func (h *Handler) Freshness(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if bucket := r.URL.Query().Get("bucket"); bucket != "" && bucket != "class" {
-		writeError(w, http.StatusBadRequest, "bucket must be 'class' (the only supported bucketing)")
+		httpresp.WriteError(w, http.StatusBadRequest, "bucket must be 'class' (the only supported bucketing)")
 		return
 	}
 
@@ -122,12 +122,13 @@ func (h *Handler) Freshness(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"bucket":      "class",
 		"buckets":     buckets,
 		"total":       len(rows),
 		"total_stale": totalStale,
 	})
+
 }
 
 // ----- drift wire shapes -----
@@ -151,7 +152,7 @@ type driftRowWire struct {
 func (h *Handler) Drift(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
@@ -159,7 +160,7 @@ func (h *Handler) Drift(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("since"); raw != "" {
 		parsed, perr := parseSinceDays(raw)
 		if perr != nil {
-			writeError(w, http.StatusBadRequest, "since must be of the form 'Nd' (days), e.g. 7d")
+			httpresp.WriteError(w, http.StatusBadRequest, "since must be of the form 'Nd' (days), e.g. 7d")
 			return
 		}
 		window = parsed
@@ -183,13 +184,14 @@ func (h *Handler) Drift(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"since":             report.SinceDate.UTC().Format("2006-01-02"),
 		"through":           report.ThroughDate.UTC().Format("2006-01-02"),
 		"delta":             report.Delta,
 		"flipped_out_count": len(flips),
 		"flipped_out":       flips,
 	})
+
 }
 
 // parseSinceDays parses a "Nd" duration (days only) into a time.Duration.
@@ -220,13 +222,3 @@ var errBadSince = badSinceError{}
 type badSinceError struct{}
 
 func (badSinceError) Error() string { return "since must be of the form 'Nd' (days)" }
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}

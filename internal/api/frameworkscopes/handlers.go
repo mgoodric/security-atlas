@@ -28,6 +28,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -122,23 +123,23 @@ func toWire(s frameworkscope.FrameworkScope) scopeWire {
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	var req createReq
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	fvID, err := uuid.Parse(req.FrameworkVersionID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "framework_version_id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "framework_version_id must be a UUID")
 		return
 	}
 	out, err := h.store.Create(ctx, frameworkscope.CreateRequest{
@@ -148,13 +149,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, frameworkscope.ErrPredicateMalformed) {
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		writeServerErr(w, r, "create framework_scope", err)
+		httperr.WriteInternal(w, r, "create framework_scope", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"framework_scope": toWire(out)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"framework_scope": toWire(out)})
 }
 
 // Patch — AC-9. PATCH /v1/framework-scopes/{id}. Body may include predicate.
@@ -163,7 +164,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, r)
@@ -172,37 +173,38 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 	var req patchReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	if len(req.Predicate) == 0 {
-		writeError(w, http.StatusBadRequest, "predicate is required for PATCH")
+		httpresp.WriteError(w, http.StatusBadRequest, "predicate is required for PATCH")
 		return
 	}
 	out, invalidated, err := h.store.UpdatePredicate(ctx, id, []byte(req.Predicate))
 	if err != nil {
 		if errors.Is(err, frameworkscope.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "framework_scope not found")
+			httpresp.WriteError(w, http.StatusNotFound, "framework_scope not found")
 			return
 		}
 		if errors.Is(err, frameworkscope.ErrPredicateMalformed) {
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		writeServerErr(w, r, "patch framework_scope", err)
+		httperr.WriteInternal(w, r, "patch framework_scope", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"framework_scope":      toWire(out),
 		"approval_invalidated": invalidated,
 	})
+
 }
 
 // Submit — AC-6. PATCH /v1/framework-scopes/{id}/submit.
 func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, r)
@@ -213,15 +215,15 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, frameworkscope.ErrNotFound):
-			writeError(w, http.StatusNotFound, "framework_scope not found")
+			httpresp.WriteError(w, http.StatusNotFound, "framework_scope not found")
 		case errors.Is(err, frameworkscope.ErrWrongState):
-			writeError(w, http.StatusConflict, "scope must be in `draft` to submit")
+			httpresp.WriteError(w, http.StatusConflict, "scope must be in `draft` to submit")
 		default:
-			writeServerErr(w, r, "submit framework_scope", err)
+			httperr.WriteInternal(w, r, "submit framework_scope", err)
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"framework_scope": toWire(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"framework_scope": toWire(out)})
 }
 
 // Approve — AC-7. PATCH /v1/framework-scopes/{id}/approve. Approver-role gate.
@@ -234,18 +236,18 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok || cred.TenantID == "" {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !cred.IsApprover && !cred.IsAdmin {
-		writeError(w, http.StatusForbidden, "approver role required")
+		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
 		return
 	}
 	// Slice 033: tenancy.Middleware already set app.current_tenant from
 	// cred.TenantID. Confirm; bail if absent (would mean misconfig).
 	ctx := r.Context()
 	if _, terr := tenancy.TenantFromContext(ctx); terr != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, r)
@@ -258,20 +260,20 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		dec := json.NewDecoder(r.Body)
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 			return
 		}
 	}
 	// Sanity-check the file fields: URL + hash come in pairs.
 	if (req.ApprovalEvidenceFileURL != "") != (req.ApprovalEvidenceFileHash != "") {
-		writeError(w, http.StatusBadRequest, "approval_evidence_file_url and approval_evidence_file_hash must be provided together")
+		httpresp.WriteError(w, http.StatusBadRequest, "approval_evidence_file_url and approval_evidence_file_hash must be provided together")
 		return
 	}
 	// Sha256 hex is 64 chars; reject anything else loudly so clients don't
 	// pass placeholder hashes by accident. Note: we do NOT verify that the
 	// hash matches an actual S3 object — that's slice-036's domain.
 	if req.ApprovalEvidenceFileHash != "" && !isLikelySha256Hex(req.ApprovalEvidenceFileHash) {
-		writeError(w, http.StatusBadRequest, "approval_evidence_file_hash must be a 64-char hex sha256")
+		httpresp.WriteError(w, http.StatusBadRequest, "approval_evidence_file_hash must be a 64-char hex sha256")
 		return
 	}
 
@@ -284,22 +286,22 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, frameworkscope.ErrNotFound):
-			writeError(w, http.StatusNotFound, "framework_scope not found")
+			httpresp.WriteError(w, http.StatusNotFound, "framework_scope not found")
 		case errors.Is(err, frameworkscope.ErrWrongState):
-			writeError(w, http.StatusConflict, "scope must be in `review` to approve")
+			httpresp.WriteError(w, http.StatusConflict, "scope must be in `review` to approve")
 		default:
-			writeServerErr(w, r, "approve framework_scope", err)
+			httperr.WriteInternal(w, r, "approve framework_scope", err)
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"framework_scope": toWire(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"framework_scope": toWire(out)})
 }
 
 // Activate — AC-8. PATCH /v1/framework-scopes/{id}/activate.
 func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, r)
@@ -308,40 +310,40 @@ func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
 	}
 	var req activateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	if strings.TrimSpace(req.EffectiveFrom) == "" {
-		writeError(w, http.StatusBadRequest, "effective_from is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "effective_from is required")
 		return
 	}
 	t, err := time.Parse(time.RFC3339, req.EffectiveFrom)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "effective_from must be RFC3339: "+err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, "effective_from must be RFC3339: "+err.Error())
 		return
 	}
 	out, err := h.store.Activate(ctx, id, t)
 	if err != nil {
 		switch {
 		case errors.Is(err, frameworkscope.ErrNotFound):
-			writeError(w, http.StatusNotFound, "framework_scope not found")
+			httpresp.WriteError(w, http.StatusNotFound, "framework_scope not found")
 		case errors.Is(err, frameworkscope.ErrWrongState):
-			writeError(w, http.StatusConflict, "scope must be in `approved` to activate")
+			httpresp.WriteError(w, http.StatusConflict, "scope must be in `approved` to activate")
 		case errors.Is(err, frameworkscope.ErrAnotherActivated):
-			writeError(w, http.StatusConflict, "another scope is already activated for this framework version")
+			httpresp.WriteError(w, http.StatusConflict, "another scope is already activated for this framework version")
 		default:
-			writeServerErr(w, r, "activate framework_scope", err)
+			httperr.WriteInternal(w, r, "activate framework_scope", err)
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"framework_scope": toWire(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"framework_scope": toWire(out)})
 }
 
 // Get — single scope by id.
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, r)
@@ -351,13 +353,13 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	out, err := h.store.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, frameworkscope.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "framework_scope not found")
+			httpresp.WriteError(w, http.StatusNotFound, "framework_scope not found")
 			return
 		}
-		writeServerErr(w, r, "get framework_scope", err)
+		httperr.WriteInternal(w, r, "get framework_scope", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"framework_scope": toWire(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"framework_scope": toWire(out)})
 }
 
 // List — AC-10, AC-13. Supports ?framework_version=<uuid>, ?state=<state>,
@@ -367,38 +369,38 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	var fvID *uuid.UUID
 	if v := strings.TrimSpace(r.URL.Query().Get("framework_version")); v != "" {
 		parsed, err := uuid.Parse(v)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "framework_version must be a UUID")
+			httpresp.WriteError(w, http.StatusBadRequest, "framework_version must be a UUID")
 			return
 		}
 		fvID = &parsed
 	}
 	if asOf := strings.TrimSpace(r.URL.Query().Get("as_of")); asOf != "" {
 		if fvID == nil {
-			writeError(w, http.StatusBadRequest, "as_of requires framework_version")
+			httpresp.WriteError(w, http.StatusBadRequest, "as_of requires framework_version")
 			return
 		}
 		t, err := time.Parse(time.RFC3339, asOf)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "as_of must be RFC3339: "+err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, "as_of must be RFC3339: "+err.Error())
 			return
 		}
 		out, err := h.store.AsOf(ctx, *fvID, t)
 		if err != nil {
 			if errors.Is(err, frameworkscope.ErrNotFound) {
-				writeJSON(w, http.StatusOK, map[string]any{"framework_scopes": []scopeWire{}})
+				httpresp.WriteJSON(w, http.StatusOK, map[string]any{"framework_scopes": []scopeWire{}})
 				return
 			}
-			writeServerErr(w, r, "as_of framework_scope", err)
+			httperr.WriteInternal(w, r, "as_of framework_scope", err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"framework_scopes": []scopeWire{toWire(out)}})
+		httpresp.WriteJSON(w, http.StatusOK, map[string]any{"framework_scopes": []scopeWire{toWire(out)}})
 		return
 	}
 
@@ -408,14 +410,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		State:              state,
 	})
 	if err != nil {
-		writeServerErr(w, r, "list framework_scopes", err)
+		httperr.WriteInternal(w, r, "list framework_scopes", err)
 		return
 	}
 	out := make([]scopeWire, len(rows))
 	for i, s := range rows {
 		out[i] = toWire(s)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"framework_scopes": out})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"framework_scopes": out})
 }
 
 // EffectiveScope — AC-11. GET /v1/controls/{id}/effective-scope.
@@ -427,30 +429,30 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) EffectiveScope(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	controlIDStr := chi.URLParam(r, "id")
 	controlID, err := uuid.Parse(controlIDStr)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "control id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "control id must be a UUID")
 		return
 	}
 	fvStr := strings.TrimSpace(r.URL.Query().Get("framework_version"))
 	if fvStr == "" {
-		writeError(w, http.StatusBadRequest, "framework_version query parameter is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "framework_version query parameter is required")
 		return
 	}
 	fvID, err := uuid.Parse(fvStr)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "framework_version must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "framework_version must be a UUID")
 		return
 	}
 
 	// Load the control's applicability set (slice-017 store).
 	applicability, err := h.scopeStore.ControlApplicability(ctx, controlID)
 	if err != nil {
-		writeServerErr(w, r, "control applicability", err)
+		httperr.WriteInternal(w, r, "control applicability", err)
 		return
 	}
 	// Load the active framework_scope. If none is activated, the control
@@ -458,7 +460,7 @@ func (h *Handler) EffectiveScope(w http.ResponseWriter, r *http.Request) {
 	activated, err := h.store.Activated(ctx, fvID)
 	if err != nil {
 		if errors.Is(err, frameworkscope.ErrNotFound) {
-			writeJSON(w, http.StatusOK, map[string]any{
+			httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 				"control_id":            controlID.String(),
 				"framework_version_id":  fvID.String(),
 				"framework_scope_id":    nil,
@@ -467,15 +469,16 @@ func (h *Handler) EffectiveScope(w http.ResponseWriter, r *http.Request) {
 				"in_scope":              false,
 				"out_of_scope_reason":   "no activated framework_scope for this framework_version",
 			})
+
 			return
 		}
-		writeServerErr(w, r, "activated framework_scope", err)
+		httperr.WriteInternal(w, r, "activated framework_scope", err)
 		return
 	}
 
 	cells, err := frameworkscope.EffectiveScope(ctx, applicability, activated.Predicate)
 	if err != nil {
-		writeServerErr(w, r, "intersect", err)
+		httperr.WriteInternal(w, r, "intersect", err)
 		return
 	}
 	wireCells := make([]map[string]any, len(cells))
@@ -486,7 +489,7 @@ func (h *Handler) EffectiveScope(w http.ResponseWriter, r *http.Request) {
 			"dimensions": c.Dimensions,
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"control_id":            controlID.String(),
 		"framework_version_id":  fvID.String(),
 		"framework_scope_id":    activated.ID.String(),
@@ -494,6 +497,7 @@ func (h *Handler) EffectiveScope(w http.ResponseWriter, r *http.Request) {
 		"effective_scope_count": len(wireCells),
 		"in_scope":              len(wireCells) > 0,
 	})
+
 }
 
 // ----- helpers -----
@@ -516,7 +520,7 @@ func parseID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return uuid.UUID{}, false
 	}
 	return id, true
@@ -534,18 +538,4 @@ func isLikelySha256Hex(s string) bool {
 		}
 	}
 	return true
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
-	httperr.WriteInternal(w, r, op, err)
 }

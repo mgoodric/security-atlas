@@ -24,6 +24,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/notifications"
 )
 
@@ -79,11 +81,11 @@ func notificationWireFrom(n notifications.Notification) notificationWire {
 func (h *NotificationsHandler) List(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if cred.UserID == "" {
-		writeError(w, http.StatusUnauthorized, "user id missing on credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "user id missing on credential")
 		return
 	}
 
@@ -94,7 +96,7 @@ func (h *NotificationsHandler) List(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("limit"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 32)
 		if err != nil || n <= 0 {
-			writeError(w, http.StatusBadRequest, "limit must be a positive integer")
+			httpresp.WriteError(w, http.StatusBadRequest, "limit must be a positive integer")
 			return
 		}
 		if n > 200 {
@@ -106,7 +108,7 @@ func (h *NotificationsHandler) List(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("offset"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 32)
 		if err != nil || n < 0 {
-			writeError(w, http.StatusBadRequest, "offset must be a non-negative integer")
+			httpresp.WriteError(w, http.StatusBadRequest, "offset must be a non-negative integer")
 			return
 		}
 		offset = int32(n)
@@ -114,18 +116,19 @@ func (h *NotificationsHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, unread, err := h.store.ListForRecipient(ctx, cred.UserID, limit, offset)
 	if err != nil {
-		writeServerErr(w, r, "list notifications", err)
+		httperr.WriteInternal(w, r, "list notifications", err)
 		return
 	}
 	out := make([]notificationWire, len(rows))
 	for i, n := range rows {
 		out[i] = notificationWireFrom(n)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"notifications": out,
 		"count":         len(out),
 		"unread_count":  unread,
 	})
+
 }
 
 // MarkRead handles PATCH /v1/me/notifications/{id}/read.
@@ -135,33 +138,33 @@ func (h *NotificationsHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *NotificationsHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if cred.UserID == "" {
-		writeError(w, http.StatusUnauthorized, "user id missing on credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "user id missing on credential")
 		return
 	}
 	raw := chi.URLParam(r, "id")
 	if raw == "" {
-		writeError(w, http.StatusBadRequest, "id path parameter is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "id path parameter is required")
 		return
 	}
 	id, err := uuid.Parse(raw)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	n, err := h.store.MarkRead(ctx, id, cred.UserID)
 	if err != nil {
 		if errors.Is(err, notifications.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "notification not found")
+			httpresp.WriteError(w, http.StatusNotFound, "notification not found")
 			return
 		}
-		writeServerErr(w, r, "mark notification read", err)
+		httperr.WriteInternal(w, r, "mark notification read", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"notification": notificationWireFrom(n)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"notification": notificationWireFrom(n)})
 }
 
 // ----- helpers shared with audit_period.go -----

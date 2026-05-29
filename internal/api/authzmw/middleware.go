@@ -32,11 +32,11 @@
 package authzmw
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
@@ -72,7 +72,7 @@ func Middleware(engine *authz.Engine, audit *authz.AuditWriter, exempt ...string
 
 			decision, err := engine.Decide(r.Context(), in)
 			if err != nil {
-				writeError(w, http.StatusInternalServerError, "authorization engine error")
+				httpresp.WriteError(w, http.StatusInternalServerError, "authorization engine error")
 				return
 			}
 
@@ -98,7 +98,7 @@ func Middleware(engine *authz.Engine, audit *authz.AuditWriter, exempt ...string
 			// logs but does not change the response (the user is
 			// already denied).
 			if !decision.Allow {
-				writeError(w, http.StatusForbidden, "forbidden")
+				httpresp.WriteError(w, http.StatusForbidden, "forbidden")
 				_, _ = audit.Write(r.Context(), rec)
 				return
 			}
@@ -108,7 +108,7 @@ func Middleware(engine *authz.Engine, audit *authz.AuditWriter, exempt ...string
 			// allow). Then call next.
 			if audit != nil {
 				if _, err := audit.Write(r.Context(), rec); err != nil {
-					writeError(w, http.StatusInternalServerError, "audit log write failed")
+					httpresp.WriteError(w, http.StatusInternalServerError, "audit log write failed")
 					return
 				}
 			}
@@ -123,10 +123,4 @@ func Middleware(engine *authz.Engine, audit *authz.AuditWriter, exempt ...string
 func IsCredentialPresent(r *http.Request) bool {
 	_, ok := authctx.CredentialFromContext(r.Context())
 	return ok
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }

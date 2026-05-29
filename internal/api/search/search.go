@@ -56,7 +56,6 @@ package search
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -66,6 +65,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -153,29 +153,30 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 	// a missing tenant means an unauthenticated path reached the
 	// handler — 401 keeps shape with the rest of the /v1/* surface.
 	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
 	// AC-2 / AC-7: validate q length.
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if len(q) < MinQueryLen {
-		writeError(w, http.StatusBadRequest,
+		httpresp.WriteError(w, http.StatusBadRequest,
 			fmt.Sprintf("q must be at least %d characters", MinQueryLen))
+
 		return
 	}
 
 	// AC-2 / AC-7: validate limit.
 	limit, err := parseLimit(r.URL.Query().Get("limit"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// AC-2 / AC-7: validate types CSV. Empty (default) = all three.
 	requestedTypes, err := parseTypes(r.URL.Query().Get("types"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -193,7 +194,7 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 	for _, t := range admitted {
 		typeHits, qerr := h.searchType(r.Context(), t, q, tokens)
 		if qerr != nil {
-			writeServerErr(w, r, "search "+t, qerr)
+			httperr.WriteInternal(w, r, "search "+t, qerr)
 			return
 		}
 		hits = append(hits, typeHits...)
@@ -223,11 +224,12 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 		partial = []string{}
 	}
 
-	writeJSON(w, http.StatusOK, searchResp{
+	httpresp.WriteJSON(w, http.StatusOK, searchResp{
 		Hits:         hits,
 		Count:        len(hits),
 		PartialTypes: partial,
 	})
+
 }
 
 // partitionByAdmit splits requestedTypes into (admitted, denied) by
@@ -650,18 +652,4 @@ func escapeLike(s string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
-	httperr.WriteInternal(w, r, op, err)
 }
