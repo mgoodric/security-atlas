@@ -2323,3 +2323,55 @@ jobs:
 
       - name: Run check-openapi-drift.sh
         run: bash scripts/check-openapi-drift.sh
+
+  # ====================================================================
+  # Slice 345 — integration-job enrolment-discovery guard.
+  #
+  # Asserts that every Go package carrying a `//go:build integration`
+  # build tag is enrolled in the integration job's explicit package
+  # list in the "Run integration tests" step above. A package that
+  # ships an integration_test.go but is not enumerated there silently
+  # runs no integration tests in CI (slice 334 framework-audit finding
+  # I-1). Runs `scripts/audit-integration-enrolment.sh`.
+  #
+  # Why BLOCKING (matches slice 128 actions-pin-check / slice 140
+  # openapi-drift-check; differs from the informational pattern of
+  # slices 069/089/109/120/127): the gap is invisible by construction
+  # — a forgotten enrolment produces a GREEN build whose integration
+  # suite never ran. The 17-slice retroactive-enrolment trail (279,
+  # 283, 284, 287, 288, 290, 293, 294, 295, 297, 310, 313, 315, 317,
+  # 318, 319, 320) is the empirical cost of not failing the build.
+  #
+  # Known-gaps allowlist: when this guard shipped the tree already
+  # carried a 38-package enrolment backlog (slice 345 anti-criterion
+  # P0-345-1 forbids retroactively enrolling them here). They are
+  # waived in the script's KNOWN_UNENROLLED allowlist and drained by
+  # slice 387. The guard still fails on the NEXT forgotten package.
+  #
+  # Why no stub-twin (slice 061 convention): the script is fast (sub-
+  # second, pure bash + grep, no network), deliberately ignores
+  # `changes.code` (any PR that adds an integration_test.go must be
+  # caught even if it touches no other code), and runs unconditionally.
+  # Mirrors actions-pin-check / openapi-drift-check stub-omission.
+  #
+  # Local repro: `bash scripts/audit-integration-enrolment.sh`
+  #   self-test: `bash scripts/audit-integration-enrolment_test.sh`
+  # See: CONTRIBUTING.md "Integration-test enrolment" + slice 345.
+  # ====================================================================
+  integration-enrolment-check:
+    name: integration-enrolment-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Run audit-integration-enrolment self-test
+        run: bash scripts/audit-integration-enrolment_test.sh
+
+      - name: Run audit-integration-enrolment.sh
+        run: bash scripts/audit-integration-enrolment.sh

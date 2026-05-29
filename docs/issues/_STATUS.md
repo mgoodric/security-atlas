@@ -3,7 +3,23 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-29 (batch 163 merged — slices 344 + 360 + 381 on main)
+**Last reconciled:** 2026-05-29 (batch 164 claim-stake — slices 345 + 351 + 369 → in-progress · CI integration-enrolment discovery + e2e flow-gap fill + httpresp helper consolidation · disjoint trees: .github/workflows · web/e2e · internal/api)
+
+## Drift detected — 2026-05-29 (batch 164 claim-stake · slices 345 + 351 + 369)
+
+Three-slice continuous-loop batch from the post-batch-163 ready set:
+
+- **345** (CI integration-job enrolment-discovery primitive) — infra · 0.5d · AFK · closes slice 334 I-1. Fails CI when a package has a `//go:build integration` tag but is missing from the ci.yml integration-job list.
+- **351** (e2e critical multi-tenant flow gap audit + spec fill) — Quality/e2e · 2-3d · AFK · closes slice 333 Q-9. Adds tenant-switch spec + addresses quarantined flows (re-quarantine-with-justification or spillover if a flow has a real underlying bug).
+- **369** (consolidate writeJSON/writeError → `internal/api/httpresp`) — Infra · 3d · JUDGMENT · closes slice 328 H-1. 101 duplicate-helper call sites across 50+ internal/api packages into a shared package (mirror of slice 367's httperr). Instructed NOT to touch ci.yml (avoids 345 collision).
+
+Conflict surface: disjoint trees — .github/workflows (345) vs web/e2e (351) vs internal/api Go (369). Shared touch-points limited to CHANGELOG (append-safe). Zero migrations. Open-questions check: CLEAN.
+
+| Row | Transition              | Evidence                                                                                        |
+| --- | ----------------------- | ----------------------------------------------------------------------------------------------- |
+| 345 | `ready` → `in-progress` | batch 164 claim-stake · branch `infra/345-ci-integration-enrolment-discovery` · slice 334 I-1   |
+| 351 | `ready` → `in-progress` | batch 164 claim-stake · branch `quality/351-e2e-critical-flow-gap-audit` · slice 333 Q-9        |
+| 369 | `ready` → `in-progress` | batch 164 claim-stake · branch `infra/369-httpresp-shared-helper-consolidation` · slice 328 H-1 |
 
 ## Drift detected — 2026-05-29 (parallel batch 163 merged)
 

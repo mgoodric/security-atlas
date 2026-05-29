@@ -44,9 +44,19 @@ import { test, expect } from "@playwright/test";
 const RUN_AGAINST_PROD_BUILD = !!process.env.ATLAS_PROD_BUILD;
 
 test.describe("logo + public assets render in production-build standalone", () => {
+  // Slice 351 (AC-4, disposition (b) — re-quarantine with justification
+  // + spillover). Same real harness gap as
+  // bff-cookie-production-build.spec.ts: this asserts the slice-153
+  // standalone-public-assets regression that ONLY manifests under the
+  // production-build standalone server (the `output: "standalone"`
+  // tracer does not copy web/public/). CI runs against `npm start`, and
+  // no CI job provisions the standalone server. Re-quarantined rather
+  // than green-washed against the dev server. Shared spillover: slice
+  // 387 (one standalone-server CI harness unblocks both prod-build
+  // specs). Runnable locally per the invocation block above.
   test.skip(
     !RUN_AGAINST_PROD_BUILD,
-    "ATLAS_PROD_BUILD not set — quarantined behind slice 082 (no seed harness for the standalone server yet)",
+    "ATLAS_PROD_BUILD not set — quarantined behind slice 387 (no CI harness for the production-build standalone server yet); runnable locally with ATLAS_PROD_BUILD=1",
   );
 
   test("/logo-light.svg returns 200 + image/svg+xml", async ({ page }) => {
