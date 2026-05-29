@@ -3,7 +3,23 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-29 (batch 162 merged — slices 366 + 380 + 342 on main, plus two live-bug hotfixes 385 + 386 surfaced + fixed during the session)
+**Last reconciled:** 2026-05-29 (batch 163 claim-stake — slices 344 + 360 + 381 → in-progress · CLAUDE.md tone discipline + light-mode muted-foreground contrast + perf cleanup round 1 · disjoint trees: CLAUDE.md · web/app/globals.css · Go-internal)
+
+## Drift detected — 2026-05-29 (batch 163 claim-stake · slices 344 + 360 + 381)
+
+Three-slice continuous-loop batch from the post-batch-162 ready set:
+
+- **344** (CLAUDE.md tone-discipline expansion) — Docs · 0.5d · JUDGMENT · closes slice 337 spillover. Adds repetition-discipline + project-specific-exceptions notes to CLAUDE.md.
+- **360** (light-mode `--muted-foreground` contrast lift) — Frontend/a11y · 1d · JUDGMENT · closes slice 331 A11Y-2 (High). Lifts the `web/app/globals.css` token over the WCAG 1.4.3 4.5:1 floor.
+- **381** (perf cleanup round 1) — Performance · 2d · AFK · closes the slice 332 Low-finding bundle (F-ING-2/3, F-UCF-2, F-OAUTH-2/3, F-OTEL-2) across ingest/ucf/oauth/keystore + an OTEL operator runbook addition.
+
+Conflict surface: fully disjoint — CLAUDE.md (344) vs web/app/globals.css (360) vs Go-internal + docs/runbooks (381). Shared touch-points limited to CHANGELOG (append-safe). Zero migrations. 381 builds on slice 366's keystore/tokensign work (merged; sequential, not a conflict). Open-questions check: CLEAN.
+
+| Row | Transition              | Evidence                                                                                      |
+| --- | ----------------------- | --------------------------------------------------------------------------------------------- |
+| 344 | `ready` → `in-progress` | batch 163 claim-stake · branch `docs/344-claude-md-tone-discipline` · slice 337 spillover     |
+| 360 | `ready` → `in-progress` | batch 163 claim-stake · branch `frontend/360-muted-foreground-contrast` · slice 331 A11Y-2    |
+| 381 | `ready` → `in-progress` | batch 163 claim-stake · branch `perf/381-perf-cleanup-round-1` · slice 332 Low-finding bundle |
 
 ## Drift detected — 2026-05-29 (parallel batch 162 merged + hotfixes 385/386)
 
