@@ -3,7 +3,7 @@
 **Cluster:** Performance / Operability
 **Estimate:** 1d
 **Type:** AFK (mechanically verifiable)
-**Status:** `ready`
+**Status:** `in-review`
 
 ## Narrative
 

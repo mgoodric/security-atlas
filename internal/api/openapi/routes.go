@@ -178,6 +178,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "PATCH", Path: "/v1/vendors/{id}", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "PATCH /v1/vendors/{id}"},
 	{Method: "POST", Path: "/auth/local/login", Tag: "auth", Tier: "none", Internal: false, Summary: "POST /auth/local/login"},
 	{Method: "POST", Path: "/auth/logout", Tag: "auth", Tier: "none", Internal: false, Summary: "POST /auth/logout"},
+	{Method: "POST", Path: "/v1/admin/authz-bundle/reload", Tag: "admin-authz-bundle", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/authz-bundle/reload"},
 	{Method: "POST", Path: "/v1/admin/credentials", Tag: "admin-credentials", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/credentials"},
 	{Method: "POST", Path: "/v1/admin/credentials/{id}/revoke", Tag: "admin-credentials", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/credentials/{id}/revoke"},
 	{Method: "POST", Path: "/v1/admin/credentials/{id}/rotate", Tag: "admin-credentials", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/credentials/{id}/rotate"},

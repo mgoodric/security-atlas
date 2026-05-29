@@ -49,6 +49,7 @@ tags:
   - name: activity
   - name: admin-audit-log
   - name: admin-audit-periods
+  - name: admin-authz-bundle
   - name: admin-credentials
   - name: admin-demo
   - name: admin-evidence
@@ -241,6 +242,20 @@ paths:
       summary: GET /v1/admin/audit-periods/export
       tags: [admin-audit-periods]
       operationId: get-v1-admin-audit-periods-export
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/authz-bundle/reload:
+    post:
+      summary: POST /v1/admin/authz-bundle/reload
+      tags: [admin-authz-bundle]
+      operationId: post-v1-admin-authz-bundle-reload
       security:
         - adminBearer: []
       responses:
