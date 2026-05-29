@@ -59,7 +59,11 @@ import { cookies } from "next/headers";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { getQueryClient } from "@/lib/queryClient";
 
-import { prefetchDashboard } from "./dashboard-prefetch";
+import {
+  E2E_NO_PREFETCH_COOKIE,
+  prefetchDashboard,
+  serverPrefetchBypassed,
+} from "./dashboard-prefetch";
 
 export default async function DashboardLayout({
   children,
@@ -73,9 +77,25 @@ export default async function DashboardLayout({
   const jar = await cookies();
   const bearer = jar.get(SESSION_COOKIE)?.value;
 
-  // Parallel fan-out: all six panels prefetched concurrently. Fails
-  // soft per panel (D3).
-  await prefetchDashboard(queryClient, bearer);
+  // Slice 380 e2e seam: the pre-existing dashboard.spec.ts intercepts
+  // panel data via Playwright `page.route(...)` -- a BROWSER-side mock
+  // that cannot reach the SSR `Promise.all` prefetch. When the e2e
+  // harness sets the `e2e_no_prefetch` cookie AND the server runs in
+  // test mode (ATLAS_TEST_MODE=1, set only by the CI Playwright job and
+  // the self-host test profile), the layout SKIPS the SSR prefetch so
+  // the page falls back to its pure client-side `useQuery` path --
+  // restoring exactly the behavior those `page.route` mocks rely on.
+  // The double gate (env AND cookie) means production can never trip
+  // this even if an attacker forges the cookie -- ATLAS_TEST_MODE is
+  // never "1" in a production deployment. See decisions log D6.
+  const bypassPrefetch =
+    serverPrefetchBypassed() && jar.get(E2E_NO_PREFETCH_COOKIE)?.value === "1";
+
+  if (!bypassPrefetch) {
+    // Parallel fan-out: all six panels prefetched concurrently. Fails
+    // soft per panel (D3).
+    await prefetchDashboard(queryClient, bearer);
+  }
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>

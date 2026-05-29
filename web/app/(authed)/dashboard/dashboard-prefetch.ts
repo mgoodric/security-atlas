@@ -67,6 +67,31 @@ export const DASHBOARD_QUERY_KEYS = {
   activity: ["dashboard", "activity"],
 } as const;
 
+// E2E_NO_PREFETCH_COOKIE is the test-only cookie name the e2e harness
+// sets to ask the dashboard layout to SKIP the SSR `Promise.all`
+// prefetch, so the page falls back to its pure client-side `useQuery`
+// path. This exists because the pre-existing `web/e2e/dashboard.spec.ts`
+// intercepts panel data via Playwright `page.route(...)` (a BROWSER-side
+// mock) and the slice-229 subtitle empty/error tests + the AC-7
+// degrade-independently test depend on that interception reaching the
+// initial render. The SSR prefetch is invisible to `page.route`; with
+// the prefetch skipped, those mocks work exactly as before. The cookie
+// is honored ONLY when `serverPrefetchBypassed()` is true (see below),
+// so it is inert in production. See decisions log D6.
+export const E2E_NO_PREFETCH_COOKIE = "e2e_no_prefetch";
+
+// serverPrefetchBypassed reports whether the server is allowed to honor
+// the E2E_NO_PREFETCH_COOKIE. It returns true ONLY when the process runs
+// in test mode (`ATLAS_TEST_MODE=1`) -- the same env gate the Go-side
+// `/v1/test/issue-jwt` endpoint uses (internal/api/testissuejwt.go),
+// set by the CI Playwright job (.github/workflows/ci.yml) and the
+// self-host test profile, and NEVER set in a production deployment.
+// Reading `process.env` here (not `NEXT_PUBLIC_*`) keeps the flag
+// server-only; it can never be inspected or forged from the browser.
+export function serverPrefetchBypassed(): boolean {
+  return process.env.ATLAS_TEST_MODE === "1";
+}
+
 // A single panel's server-side prefetch spec: the queryKey to seed and
 // the bearer-taking upstream fn to call. The fn signatures intentionally
 // match the `(bearer) => Promise<T>` shape `dashboardProxy` already

@@ -121,6 +121,71 @@ impact.
 
 **Confidence:** high.
 
+### D6 — e2e seam: SSR prefetch is skipped under a test-only cookie + env gate, NOT a test rewrite or quarantine
+
+**The regression (surfaced post-push by CI):** moving the dashboard's
+initial fetch server-side (D1) broke 9 pre-existing tests in
+`web/e2e/dashboard.spec.ts`. Those tests assert the **client-side**
+binding contract — either that a panel's `/api/dashboard/*` BFF request
+fires, or that a Playwright `page.route(...)` browser-side mock shapes
+the panel (the slice-229 subtitle empty/error states + the AC-7
+degrade-independently test). `page.route` intercepts **browser**
+requests; it cannot reach the SSR `Promise.all` prefetch, so the panels
+rendered real seeded data instead of the per-test mocks (e.g. the
+subtitle read "evidence freshness 50% within window" where the test
+expected "No evidence ingested yet").
+
+**Options considered:**
+
+1. **`test.skip` / quarantine the 9 tests** (slice 275 pattern).
+2. **Rewrite the 9 tests to assert against deterministic seeded state**
+   (the slice-249 `/settings` SSR-prefetch precedent).
+3. **Add a test-only seam that skips the SSR prefetch** when the e2e
+   harness asks, so the page falls back to the pure client-side
+   `useQuery` path those tests already exercise.
+
+**Chosen:** Option 3.
+
+**Rationale:** Option 1 is a last resort, not a first move — the
+failures are a direct, fixable consequence of the architecture change,
+not a flake. Option 2 would _weaken_ the tests: the slice-229 subtitle
+empty/error and AC-7 degrade-independently tests assert _reactions to
+specific upstream shapes_ (zero-total, abort, slow) that seeded state
+cannot deterministically produce — rewriting them to seeded assertions
+would drop exactly the behavior they pin. Option 3 keeps every one of
+the 9 tests **byte-for-byte honest**: with the SSR prefetch skipped, the
+page uses its client `useQuery` path, `page.route` mocks intercept as
+before, and the BFF-request-fired assertions hold (the client now fires
+the request the prefetch would otherwise have pre-served). The SSR
+fan-out is covered by the sibling `dashboard-server-component.spec.ts`.
+This is the correct separation of concerns: `dashboard.spec.ts` =
+client-binding + refresh contract (which slice 380 AC-3/AC-5 require to
+keep working); the new spec = SSR fan-out contract.
+
+**The seam shape (security-reviewed):** the layout skips the prefetch
+ONLY when BOTH (a) `serverPrefetchBypassed()` returns true — i.e.
+`process.env.ATLAS_TEST_MODE === "1"`, the same server-only env gate the
+Go-side `/v1/test/issue-jwt` endpoint uses
+(`internal/api/testissuejwt.go`), set by the CI Playwright job and the
+self-host test profile and NEVER in production — AND (b) the request
+carries the `e2e_no_prefetch=1` cookie. The env gate is read from
+`process.env` (not `NEXT_PUBLIC_*`), so it is invisible to and
+unforgeable from the browser. A forged cookie in production is inert
+because `ATLAS_TEST_MODE` is never "1" there. The double gate means the
+seam cannot degrade production behavior under any client-controlled
+input. `serverPrefetchBypassed` + `E2E_NO_PREFETCH_COOKIE` are
+unit-tested (exact-match "1", unset, and non-"1" values).
+
+**On AC-7 fail-soft (the guidance's behavior-gap concern):** with the
+seam, AC-7 runs in pure client mode, so its `page.route(... abort)`
+produces the panel's own error+retry UI exactly as before — no behavior
+gap. The SSR fail-soft path (D3) independently preserves the same
+property in production: a failed prefetch leaves the panel unseeded, so
+the client `useQuery` re-fetches and renders the panel's error/skeleton.
+Both paths surface per-panel degradation; neither swallows it.
+
+**Confidence:** high.
+
 ---
 
 ## Revisit once in use
@@ -152,13 +217,14 @@ impact.
 
 ## Confidence summary
 
-| Decision                                      | Confidence |
-| --------------------------------------------- | ---------- |
-| D1 — slice-249 prefetch pattern over pure-RSC | high       |
-| D2 — per-panel TanStack state satisfies AC-2  | high       |
-| D3 — fail-soft via `setQueryData`-on-success  | high       |
-| D4 — no explicit `Cache-Control` header       | medium     |
-| D5 — `vi.mock` factory over `vi.spyOn`        | high       |
+| Decision                                        | Confidence |
+| ----------------------------------------------- | ---------- |
+| D1 — slice-249 prefetch pattern over pure-RSC   | high       |
+| D2 — per-panel TanStack state satisfies AC-2    | high       |
+| D3 — fail-soft via `setQueryData`-on-success    | high       |
+| D4 — no explicit `Cache-Control` header         | medium     |
+| D5 — `vi.mock` factory over `vi.spyOn`          | high       |
+| D6 — e2e prefetch-bypass seam over rewrite/skip | high       |
 
 No `low`-confidence decisions. The single `medium` (D4) tops the revisit
 list at item 2.

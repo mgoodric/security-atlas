@@ -19,7 +19,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DASHBOARD_PANEL_PREFETCHES,
   DASHBOARD_QUERY_KEYS,
+  E2E_NO_PREFETCH_COOKIE,
   prefetchDashboard,
+  serverPrefetchBypassed,
 } from "./dashboard-prefetch";
 
 // Mock the typed client module. `dashboard-prefetch.ts` imports the six
@@ -180,5 +182,43 @@ describe("prefetchDashboard (parallel fan-out, fail-soft)", () => {
 
     expect(mocked.getFrameworkPosture).not.toHaveBeenCalled();
     expect(qc.getQueryData(["dashboard", "framework-posture"])).toBeUndefined();
+  });
+});
+
+describe("E2E_NO_PREFETCH_COOKIE", () => {
+  it("is the test-only bypass cookie name the layout reads", () => {
+    expect(E2E_NO_PREFETCH_COOKIE).toBe("e2e_no_prefetch");
+  });
+});
+
+describe("serverPrefetchBypassed (test-mode gate, D6)", () => {
+  const original = process.env.ATLAS_TEST_MODE;
+
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env.ATLAS_TEST_MODE;
+    } else {
+      process.env.ATLAS_TEST_MODE = original;
+    }
+  });
+
+  it("is true only when ATLAS_TEST_MODE === '1'", () => {
+    process.env.ATLAS_TEST_MODE = "1";
+    expect(serverPrefetchBypassed()).toBe(true);
+  });
+
+  it("is false when ATLAS_TEST_MODE is unset (production posture)", () => {
+    delete process.env.ATLAS_TEST_MODE;
+    expect(serverPrefetchBypassed()).toBe(false);
+  });
+
+  it("is false for any value other than the literal '1'", () => {
+    // A truthy-but-not-"1" value must NOT enable the bypass -- the gate
+    // is an exact-match check, mirroring the Go-side ATLAS_TEST_MODE
+    // convention (internal/api/testissuejwt.go).
+    process.env.ATLAS_TEST_MODE = "true";
+    expect(serverPrefetchBypassed()).toBe(false);
+    process.env.ATLAS_TEST_MODE = "0";
+    expect(serverPrefetchBypassed()).toBe(false);
   });
 });
