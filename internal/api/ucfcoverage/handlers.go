@@ -47,10 +47,8 @@ package ucfcoverage
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -59,7 +57,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
@@ -318,18 +315,4 @@ func uuidStr(u pgtype.UUID) string {
 		return ""
 	}
 	return uuid.UUID(u.Bytes).String()
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
-	httperr.WriteInternal(w, r, op, err)
 }

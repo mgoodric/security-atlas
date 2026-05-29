@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 )
@@ -42,7 +44,7 @@ func (h *Handler) ControlCoverage(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	cid, err := uuid.Parse(idStr)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "control id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "control id must be a UUID")
 		return
 	}
 
@@ -65,11 +67,11 @@ func (h *Handler) ControlCoverage(w http.ResponseWriter, r *http.Request) {
 		controlOK = true
 		return nil
 	}); err != nil {
-		writeServerErr(w, r, "lookup control", err)
+		httperr.WriteInternal(w, r, "lookup control", err)
 		return
 	}
 	if !controlOK {
-		writeError(w, http.StatusNotFound, "control not found")
+		httpresp.WriteError(w, http.StatusNotFound, "control not found")
 		return
 	}
 
@@ -82,14 +84,14 @@ func (h *Handler) ControlCoverage(w http.ResponseWriter, r *http.Request) {
 		// "not yet mapped to the canonical graph."
 		out["anchor"] = nil
 		out["requirements"] = []requirementForAnchorWire{}
-		writeJSON(w, http.StatusOK, out)
+		httpresp.WriteJSON(w, http.StatusOK, out)
 		return
 	}
 
 	// Anchor metadata: pull from scf_anchors directly (catalog read).
 	anchor, err := h.q.GetSCFAnchorByID(ctx, ctrl.ScfAnchorID)
 	if err != nil {
-		writeServerErr(w, r, "lookup control anchor", err)
+		httperr.WriteInternal(w, r, "lookup control anchor", err)
 		return
 	}
 	out["anchor"] = anchorWireFromRow(anchor)
@@ -100,7 +102,7 @@ func (h *Handler) ControlCoverage(w http.ResponseWriter, r *http.Request) {
 		fv, ok := h.resolveFrameworkVersion(ctx, fvParam)
 		if !ok {
 			out["requirements"] = []requirementForAnchorWire{}
-			writeJSON(w, http.StatusOK, out)
+			httpresp.WriteJSON(w, http.StatusOK, out)
 			return
 		}
 		got, err := h.q.ListRequirementsForAnchorByFrameworkVersion(ctx, dbx.ListRequirementsForAnchorByFrameworkVersionParams{
@@ -108,14 +110,14 @@ func (h *Handler) ControlCoverage(w http.ResponseWriter, r *http.Request) {
 			FrameworkVersionID: fv.ID,
 		})
 		if err != nil {
-			writeServerErr(w, r, "list requirements for control (pinned)", err)
+			httperr.WriteInternal(w, r, "list requirements for control (pinned)", err)
 			return
 		}
 		reqs = mapPinnedRequirements(got)
 	} else {
 		got, err := h.q.ListRequirementsForAnchor(ctx, ctrl.ScfAnchorID)
 		if err != nil {
-			writeServerErr(w, r, "list requirements for control", err)
+			httperr.WriteInternal(w, r, "list requirements for control", err)
 			return
 		}
 		reqs = mapRequirements(got)
@@ -141,13 +143,13 @@ func (h *Handler) ControlCoverage(w http.ResponseWriter, r *http.Request) {
 	// omitted entirely, preserving the slice-008 shape.
 	if h.engine != nil && h.scopeStore != nil && h.fwScopeStore != nil && len(reqs) > 0 {
 		if err := h.applyCoverage(ctx, cid, reqs); err != nil {
-			writeServerErr(w, r, "compute coverage", err)
+			httperr.WriteInternal(w, r, "compute coverage", err)
 			return
 		}
 	}
 
 	out["requirements"] = reqs
-	writeJSON(w, http.StatusOK, out)
+	httpresp.WriteJSON(w, http.StatusOK, out)
 }
 
 // applyCoverage fills the `coverage` field on each requirement in `reqs`.

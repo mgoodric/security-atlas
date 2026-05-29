@@ -39,6 +39,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -174,10 +175,11 @@ func (h *Handler) ListCatalog(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		out = append(out, metricWireFromRow(row))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"metrics": out,
 		"count":   len(out),
 	})
+
 }
 
 // ===== GetCatalog (GET /v1/metrics/{id}) =====
@@ -188,14 +190,14 @@ func (h *Handler) ListCatalog(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetCatalog(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "id required")
+		httpresp.WriteError(w, http.StatusBadRequest, "id required")
 		return
 	}
 	q := dbx.New(h.pool)
 	row, err := q.GetMetricCatalog(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "metric not found")
+			httpresp.WriteError(w, http.StatusNotFound, "metric not found")
 			return
 		}
 		httperr.WriteInternal(w, r, "get catalog", err)
@@ -222,7 +224,7 @@ func (h *Handler) GetCatalog(w http.ResponseWriter, r *http.Request) {
 	for _, c := range children {
 		out.Children = append(out.Children, metricWireFromRow(c))
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpresp.WriteJSON(w, http.StatusOK, out)
 }
 
 // ===== GetCascade (GET /v1/metrics/cascade) =====
@@ -272,13 +274,14 @@ func (h *Handler) GetCascade(w http.ResponseWriter, r *http.Request) {
 	if truncated {
 		w.Header().Set("X-Cascade-Truncated", "true")
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"nodes":      out,
 		"count":      len(out),
 		"depth":      depth,
 		"truncated":  truncated,
 		"root_level": level,
 	})
+
 }
 
 // ===== ListObservations (GET /v1/metrics/{id}/observations) =====
@@ -289,12 +292,12 @@ func (h *Handler) GetCascade(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListObservations(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id := chi.URLParam(r, "id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "id required")
+		httpresp.WriteError(w, http.StatusBadRequest, "id required")
 		return
 	}
 	since := time.Now().Add(-DefaultObservationWindow)
@@ -302,7 +305,7 @@ func (h *Handler) ListObservations(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("since"); raw != "" {
 		t, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "since must be RFC3339")
+			httpresp.WriteError(w, http.StatusBadRequest, "since must be RFC3339")
 			return
 		}
 		since = t
@@ -310,7 +313,7 @@ func (h *Handler) ListObservations(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("until"); raw != "" {
 		t, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "until must be RFC3339")
+			httpresp.WriteError(w, http.StatusBadRequest, "until must be RFC3339")
 			return
 		}
 		until = t
@@ -343,7 +346,7 @@ func (h *Handler) ListObservations(w http.ResponseWriter, r *http.Request) {
 		page.Observations = append(page.Observations, observationWireFromRow(o))
 	}
 	page.Count = len(page.Observations)
-	writeJSON(w, http.StatusOK, page)
+	httpresp.WriteJSON(w, http.StatusOK, page)
 }
 
 // ===== CreateInput (POST /v1/metrics/{id}/inputs) =====
@@ -355,46 +358,47 @@ func (h *Handler) ListObservations(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateInput(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !cred.IsAdmin {
-		writeError(w, http.StatusForbidden, "admin role required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	id := chi.URLParam(r, "id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "id required")
+		httpresp.WriteError(w, http.StatusBadRequest, "id required")
 		return
 	}
 	var req inputCreateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	// Verify the catalog row exists and is manual_input.
 	cat, err := dbx.New(h.pool).GetMetricCatalog(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "metric not found")
+			httpresp.WriteError(w, http.StatusNotFound, "metric not found")
 			return
 		}
 		httperr.WriteInternal(w, r, "lookup", err)
 		return
 	}
 	if cat.ComputeStrategy != "manual_input" && cat.ComputeStrategy != "external_integration" {
-		writeError(w, http.StatusConflict,
+		httpresp.WriteError(w, http.StatusConflict,
 			fmt.Sprintf("metric %s has compute_strategy=%q; manual input not permitted", id, cat.ComputeStrategy))
+
 		return
 	}
 	enteredBy, err := uuid.Parse(cred.UserID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "credential user id is not a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "credential user id is not a UUID")
 		return
 	}
 	tenantUUID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "tenant id is not a UUID")
+		httpresp.WriteError(w, http.StatusInternalServerError, "tenant id is not a UUID")
 		return
 	}
 	when := time.Now().UTC()
@@ -407,7 +411,7 @@ func (h *Handler) CreateInput(w http.ResponseWriter, r *http.Request) {
 	}
 	var numeric pgtype.Numeric
 	if err := numeric.Scan(fmt.Sprintf("%g", req.NumericValue)); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid numeric_value")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid numeric_value")
 		return
 	}
 	var row dbx.MetricInput
@@ -428,7 +432,7 @@ func (h *Handler) CreateInput(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "insert input", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, inputWireFromRow(row))
+	httpresp.WriteJSON(w, http.StatusCreated, inputWireFromRow(row))
 }
 
 // ===== Target read + upsert =====
@@ -437,12 +441,12 @@ func (h *Handler) CreateInput(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetTarget(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id := chi.URLParam(r, "id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "id required")
+		httpresp.WriteError(w, http.StatusBadRequest, "id required")
 		return
 	}
 	var row dbx.MetricTarget
@@ -453,45 +457,45 @@ func (h *Handler) GetTarget(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "no target set")
+			httpresp.WriteError(w, http.StatusNotFound, "no target set")
 			return
 		}
 		httperr.WriteInternal(w, r, "get target", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, targetWireFromRow(row))
+	httpresp.WriteJSON(w, http.StatusOK, targetWireFromRow(row))
 }
 
 // UpsertTarget handles PUT /v1/metrics/{id}/target.
 func (h *Handler) UpsertTarget(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !cred.IsAdmin {
-		writeError(w, http.StatusForbidden, "admin role required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	id := chi.URLParam(r, "id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "id required")
+		httpresp.WriteError(w, http.StatusBadRequest, "id required")
 		return
 	}
 	var req targetUpsertReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	switch req.Direction {
 	case "higher_is_better", "lower_is_better", "target_is_better":
 	default:
-		writeError(w, http.StatusBadRequest, "direction must be higher_is_better, lower_is_better, or target_is_better")
+		httpresp.WriteError(w, http.StatusBadRequest, "direction must be higher_is_better, lower_is_better, or target_is_better")
 		return
 	}
 	tenantUUID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "tenant id is not a UUID")
+		httpresp.WriteError(w, http.StatusInternalServerError, "tenant id is not a UUID")
 		return
 	}
 	target := numericPtr(req.TargetValue)
@@ -501,7 +505,7 @@ func (h *Handler) UpsertTarget(w http.ResponseWriter, r *http.Request) {
 	if req.OwnerUserID != "" {
 		u, err := uuid.Parse(req.OwnerUserID)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "owner_user_id must be a UUID")
+			httpresp.WriteError(w, http.StatusBadRequest, "owner_user_id must be a UUID")
 			return
 		}
 		owner = pgtype.UUID{Bytes: u, Valid: true}
@@ -525,7 +529,7 @@ func (h *Handler) UpsertTarget(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "upsert target", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, targetWireFromRow(row))
+	httpresp.WriteJSON(w, http.StatusOK, targetWireFromRow(row))
 }
 
 // ===== helpers =====
@@ -667,14 +671,4 @@ func numericStringMaybe(n pgtype.Numeric) string {
 		return ""
 	}
 	return numericString(n)
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
 }

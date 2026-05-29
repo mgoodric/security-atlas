@@ -18,13 +18,13 @@ package me
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/auditor"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -78,28 +78,29 @@ func assignmentWireFrom(a auditor.Assignment) assignmentWire {
 func (h *Handler) AuditPeriod(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if cred.UserID == "" {
-		writeError(w, http.StatusUnauthorized, "user id missing on credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "user id missing on credential")
 		return
 	}
 	rows, err := h.store.ListAssignmentsFor(ctx, cred.UserID)
 	if err != nil {
-		writeServerErr(w, r, "list assignments", err)
+		httperr.WriteInternal(w, r, "list assignments", err)
 		return
 	}
 	if len(rows) == 0 {
-		writeError(w, http.StatusNotFound, "no audit period assigned")
+		httpresp.WriteError(w, http.StatusNotFound, "no audit period assigned")
 		return
 	}
 	// ListAssignmentsFor returns ORDER BY period_start DESC -- index 0 is
 	// the most-recently-started assignment. AC-5 says "active period";
 	// most-recent-start is the v1 interpretation.
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"audit_period": assignmentWireFrom(rows[0]),
 	})
+
 }
 
 // AuditPeriods handles GET /v1/me/audit-periods -- AC-6. Returns the
@@ -108,26 +109,27 @@ func (h *Handler) AuditPeriod(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) AuditPeriods(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if cred.UserID == "" {
-		writeError(w, http.StatusUnauthorized, "user id missing on credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "user id missing on credential")
 		return
 	}
 	rows, err := h.store.ListAssignmentsFor(ctx, cred.UserID)
 	if err != nil {
-		writeServerErr(w, r, "list assignments", err)
+		httperr.WriteInternal(w, r, "list assignments", err)
 		return
 	}
 	out := make([]assignmentWire, len(rows))
 	for i, a := range rows {
 		out[i] = assignmentWireFrom(a)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"audit_periods": out,
 		"count":         len(out),
 	})
+
 }
 
 // ----- helpers -----
@@ -150,18 +152,4 @@ func authnContext(r *http.Request) (context.Context, credstore.Credential, bool)
 // it delegates to the package-level authnContext.
 func (h *Handler) authnContext(r *http.Request) (context.Context, credstore.Credential, bool) {
 	return authnContext(r)
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeServerErr(w http.ResponseWriter, r *http.Request, op string, err error) {
-	httperr.WriteInternal(w, r, op, err)
 }

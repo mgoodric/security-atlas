@@ -17,6 +17,7 @@ import (
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
 
@@ -135,7 +136,7 @@ type errorBody struct {
 func (h *HTTPHandler) PushHTTP(w http.ResponseWriter, r *http.Request) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, errorBody{Error: "authentication required"})
+		httpresp.WriteJSON(w, http.StatusUnauthorized, errorBody{Error: "authentication required"})
 		return
 	}
 
@@ -143,7 +144,7 @@ func (h *HTTPHandler) PushHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.limiter != nil {
 		if wait := h.limiter.take(cred.ID); wait > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds()+0.5)))
-			writeJSON(w, http.StatusTooManyRequests, errorBody{Error: "rate limit exceeded", Code: "rate_limited"})
+			httpresp.WriteJSON(w, http.StatusTooManyRequests, errorBody{Error: "rate limit exceeded", Code: "rate_limited"})
 			return
 		}
 	}
@@ -153,17 +154,17 @@ func (h *HTTPHandler) PushHTTP(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeJSON(w, http.StatusRequestEntityTooLarge, errorBody{Error: "body too large or unreadable: " + err.Error(), Code: "oversized"})
+		httpresp.WriteJSON(w, http.StatusRequestEntityTooLarge, errorBody{Error: "body too large or unreadable: " + err.Error(), Code: "oversized"})
 		return
 	}
 	if len(body) == 0 {
-		writeJSON(w, http.StatusBadRequest, errorBody{Error: "request body is empty"})
+		httpresp.WriteJSON(w, http.StatusBadRequest, errorBody{Error: "request body is empty"})
 		return
 	}
 
 	var req pushRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid JSON body: " + err.Error()})
+		httpresp.WriteJSON(w, http.StatusBadRequest, errorBody{Error: "invalid JSON body: " + err.Error()})
 		return
 	}
 
@@ -173,11 +174,11 @@ func (h *HTTPHandler) PushHTTP(w http.ResponseWriter, r *http.Request) {
 		batch = append([]recordWire{*req.Record}, batch...)
 	}
 	if len(batch) == 0 {
-		writeJSON(w, http.StatusBadRequest, errorBody{Error: "no records in request"})
+		httpresp.WriteJSON(w, http.StatusBadRequest, errorBody{Error: "no records in request"})
 		return
 	}
 	if len(batch) > h.maxBatch {
-		writeJSON(w, http.StatusBadRequest, errorBody{Error: fmt.Sprintf("batch exceeds %d records", h.maxBatch)})
+		httpresp.WriteJSON(w, http.StatusBadRequest, errorBody{Error: fmt.Sprintf("batch exceeds %d records", h.maxBatch)})
 		return
 	}
 
@@ -185,7 +186,7 @@ func (h *HTTPHandler) PushHTTP(w http.ResponseWriter, r *http.Request) {
 	for i, rec := range batch {
 		proto, perr := recordWireToProto(rec)
 		if perr != nil {
-			writeJSON(w, http.StatusBadRequest, errorBody{Error: fmt.Sprintf("record[%d]: %s", i, perr.Error())})
+			httpresp.WriteJSON(w, http.StatusBadRequest, errorBody{Error: fmt.Sprintf("record[%d]: %s", i, perr.Error())})
 			return
 		}
 		receipt, decision, err := h.dispatch(r.Context(), proto, cred)
@@ -211,7 +212,7 @@ func (h *HTTPHandler) PushHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(receipts[0])
 		return
 	}
-	writeJSON(w, http.StatusOK, pushResponse{Receipts: receipts})
+	httpresp.WriteJSON(w, http.StatusOK, pushResponse{Receipts: receipts})
 }
 
 // dispatch routes a single record through either the slice-015
@@ -258,10 +259,11 @@ func writeBatchError(w http.ResponseWriter, index int, decision ingest.Decision,
 		statusCode = http.StatusRequestEntityTooLarge
 		code = "oversized_payload"
 	}
-	writeJSON(w, statusCode, errorBody{
+	httpresp.WriteJSON(w, statusCode, errorBody{
 		Error: fmt.Sprintf("record[%d] %s: %s", index, decision.String(), err.Error()),
 		Code:  code,
 	})
+
 }
 
 // recordWireToProto converts the wire shape into the slice-003 proto
@@ -333,12 +335,6 @@ func wireResultToProto(s string) (evidencev1.Result, bool) {
 		return evidencev1.Result_RESULT_INCONCLUSIVE, true
 	}
 	return evidencev1.Result_RESULT_UNSPECIFIED, false
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
 }
 
 // ---- token bucket rate limiter ----

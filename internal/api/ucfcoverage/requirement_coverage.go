@@ -7,6 +7,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 )
 
@@ -46,18 +48,18 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	req, ok, err := h.lookupRequirement(ctx, chi.URLParam(r, "id"))
 	if err != nil {
-		writeServerErr(w, r, "lookup requirement", err)
+		httperr.WriteInternal(w, r, "lookup requirement", err)
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "requirement not found")
+		httpresp.WriteError(w, http.StatusNotFound, "requirement not found")
 		return
 	}
 
 	scfFV := h.resolveSCFRelease(ctx, r)
 	anchors, err := h.listAnchorsForRequirement(ctx, req.ID, scfFV)
 	if err != nil {
-		writeServerErr(w, r, "list anchors for requirement", err)
+		httperr.WriteInternal(w, r, "list anchors for requirement", err)
 		return
 	}
 
@@ -67,11 +69,11 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 	}
 	controls, err := h.listControlsForAnchors(ctx, anchorIDs)
 	if err != nil {
-		writeServerErr(w, r, "list controls for anchors", err)
+		httperr.WriteInternal(w, r, "list controls for anchors", err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"requirement": requirementWire{
 			ID:    uuidStr(req.ID),
 			Code:  req.Code,
@@ -81,6 +83,7 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 		"anchors":  anchorWiresFromAnchors(anchors),
 		"controls": controlWiresFromRows(controls),
 	})
+
 }
 
 // anchorEdge is the internal in-memory shape of "one SCF anchor with

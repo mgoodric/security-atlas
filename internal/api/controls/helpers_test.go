@@ -56,6 +56,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
 
@@ -306,7 +307,7 @@ func TestWriteControlLookupError_OtherErrorMapsTo500(t *testing.T) {
 func TestWriteJSON_ContractContentTypeAndStatus(t *testing.T) {
 	t.Parallel()
 	rr := httptest.NewRecorder()
-	writeJSON(rr, http.StatusOK, map[string]any{"x": 1})
+	httpresp.WriteJSON(rr, http.StatusOK, map[string]any{"x": 1})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d; want 200", rr.Code)
 	}
@@ -321,7 +322,7 @@ func TestWriteJSON_ContractContentTypeAndStatus(t *testing.T) {
 func TestWriteError_ShapeEnvelope(t *testing.T) {
 	t.Parallel()
 	rr := httptest.NewRecorder()
-	writeError(rr, http.StatusBadRequest, "boom")
+	httpresp.WriteError(rr, http.StatusBadRequest, "boom")
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d; want 400", rr.Code)
 	}

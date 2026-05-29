@@ -40,6 +40,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/audit/walkthrough"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -114,26 +115,26 @@ type attachmentWire struct {
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !canWrite(cred) {
-		writeError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
 		return
 	}
 
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Narrative == "" {
-		writeError(w, http.StatusBadRequest, "narrative is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "narrative is required")
 		return
 	}
 	ctrlID, err := uuid.Parse(req.ControlID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "control_id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "control_id must be a UUID")
 		return
 	}
 	in := walkthrough.CreateInput{
@@ -145,7 +146,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.AuditPeriodID != "" {
 		pid, err := uuid.Parse(req.AuditPeriodID)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "audit_period_id must be a UUID")
+			httpresp.WriteError(w, http.StatusBadRequest, "audit_period_id must be a UUID")
 			return
 		}
 		in.AuditPeriodID = &pid
@@ -156,19 +157,19 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreErr(w, r, "create walkthrough", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"walkthrough": toWire(wt)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"walkthrough": toWire(wt)})
 }
 
 // Get handles GET /v1/walkthroughs/{id}. AC-4 + AC-6.
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	wt, err := h.store.Get(ctx, id)
@@ -176,14 +177,14 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreErr(w, r, "get walkthrough", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"walkthrough": toWire(wt)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"walkthrough": toWire(wt)})
 }
 
 // List handles GET /v1/walkthroughs.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	ws, err := h.store.List(ctx)
@@ -195,7 +196,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	for i, wt := range ws {
 		out[i] = toWire(wt)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"walkthroughs": out, "count": len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"walkthroughs": out, "count": len(out)})
 }
 
 // AddAttachment handles POST /v1/walkthroughs/{id}/attachments (AC-2).
@@ -212,20 +213,20 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) AddAttachment(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !canWrite(cred) {
-		writeError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
 		return
 	}
 	if h.uploader == nil {
-		writeError(w, http.StatusServiceUnavailable, "artifact store not configured")
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "artifact store not configured")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 
@@ -233,16 +234,16 @@ func (h *Handler) AddAttachment(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(MaxMultipartMemory); err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", MaxAttachmentBytes))
+			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", MaxAttachmentBytes))
 			return
 		}
-		writeError(w, http.StatusBadRequest, "invalid multipart body: "+err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid multipart body: "+err.Error())
 		return
 	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "missing `file` form part")
+		httpresp.WriteError(w, http.StatusBadRequest, "missing `file` form part")
 		return
 	}
 	defer func() { _ = file.Close() }()
@@ -251,18 +252,18 @@ func (h *Handler) AddAttachment(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", MaxAttachmentBytes))
+			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", MaxAttachmentBytes))
 			return
 		}
-		writeError(w, http.StatusBadRequest, "read body: "+err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, "read body: "+err.Error())
 		return
 	}
 	if int64(len(body)) > MaxAttachmentBytes {
-		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", MaxAttachmentBytes))
+		httpresp.WriteError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", MaxAttachmentBytes))
 		return
 	}
 	if len(body) == 0 {
-		writeError(w, http.StatusBadRequest, "empty file")
+		httpresp.WriteError(w, http.StatusBadRequest, "empty file")
 		return
 	}
 
@@ -282,7 +283,7 @@ func (h *Handler) AddAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 	var probe any
 	if err := json.Unmarshal([]byte(annotationsRaw), &probe); err != nil {
-		writeError(w, http.StatusBadRequest, "annotations must be valid JSON")
+		httpresp.WriteError(w, http.StatusBadRequest, "annotations must be valid JSON")
 		return
 	}
 
@@ -317,23 +318,23 @@ func (h *Handler) AddAttachment(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreErr(w, r, "add attachment", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"walkthrough": toWire(wt)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"walkthrough": toWire(wt)})
 }
 
 // Finalize handles POST /v1/walkthroughs/{id}:finalize.
 func (h *Handler) Finalize(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !canWrite(cred) {
-		writeError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	wt, err := h.store.Finalize(ctx, id, cred.ID)
@@ -341,7 +342,7 @@ func (h *Handler) Finalize(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreErr(w, r, "finalize walkthrough", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"walkthrough": toWire(wt)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"walkthrough": toWire(wt)})
 }
 
 // Export handles GET /v1/walkthroughs/{id}/export?format=pdf|json (AC-5).
@@ -353,12 +354,12 @@ func (h *Handler) Finalize(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
@@ -382,7 +383,7 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		buf, err := walkthrough.RenderPDF(ctx2, wt)
 		if err != nil {
 			if errors.Is(err, walkthrough.ErrChromeUnavailable) {
-				writeError(w, http.StatusServiceUnavailable, "PDF rendering unavailable: chromedp browser missing")
+				httpresp.WriteError(w, http.StatusServiceUnavailable, "PDF rendering unavailable: chromedp browser missing")
 				return
 			}
 			httperr.WriteInternal(w, r, "render PDF", err)
@@ -393,7 +394,7 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(buf)
 	default:
-		writeError(w, http.StatusBadRequest, "format must be 'json' or 'pdf'")
+		httpresp.WriteError(w, http.StatusBadRequest, "format must be 'json' or 'pdf'")
 	}
 }
 
@@ -468,11 +469,11 @@ func toWire(wt walkthrough.Walkthrough) walkthroughWire {
 func (h *Handler) writeStoreErr(w http.ResponseWriter, r *http.Request, op string, err error) {
 	switch {
 	case errors.Is(err, walkthrough.ErrNotFound):
-		writeError(w, http.StatusNotFound, "walkthrough not found")
+		httpresp.WriteError(w, http.StatusNotFound, "walkthrough not found")
 	case errors.Is(err, walkthrough.ErrFinalized):
-		writeError(w, http.StatusConflict, "walkthrough is finalized")
+		httpresp.WriteError(w, http.StatusConflict, "walkthrough is finalized")
 	case errors.Is(err, walkthrough.ErrPeriodFrozen):
-		writeError(w, http.StatusConflict, "audit period is frozen")
+		httpresp.WriteError(w, http.StatusConflict, "audit period is frozen")
 	default:
 		httperr.WriteInternal(w, r, op, err)
 	}
@@ -481,22 +482,12 @@ func (h *Handler) writeStoreErr(w http.ResponseWriter, r *http.Request, op strin
 func writeArtifactErr(w http.ResponseWriter, r *http.Request, op string, err error) {
 	switch {
 	case errors.Is(err, artifact.ErrOversized):
-		writeError(w, http.StatusRequestEntityTooLarge, err.Error())
+		httpresp.WriteError(w, http.StatusRequestEntityTooLarge, err.Error())
 	case errors.Is(err, artifact.ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, artifact.ErrHashMismatch):
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 	default:
 		httperr.WriteInternal(w, r, op, err)
 	}
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
 }

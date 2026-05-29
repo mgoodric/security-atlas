@@ -61,6 +61,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -94,12 +95,12 @@ const adminSurfaceTag = "admin"
 func (h *Handler) ActivityList(w http.ResponseWriter, r *http.Request) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return
 	}
 	tenantID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "invalid tenant in credential")
+		httpresp.WriteError(w, http.StatusInternalServerError, "invalid tenant in credential")
 		return
 	}
 	// Caller's stable identity for both the SQL-layer row-visibility
@@ -113,7 +114,7 @@ func (h *Handler) ActivityList(w http.ResponseWriter, r *http.Request) {
 
 	params, perr := parseUnifiedParams(r)
 	if perr != nil {
-		writeError(w, http.StatusBadRequest, perr.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, perr.Error())
 		return
 	}
 
@@ -231,8 +232,9 @@ func (h *Handler) ActivityList(w http.ResponseWriter, r *http.Request) {
 			PayloadJSON:   e.PayloadJSON,
 		})
 	}
-	writeJSON(w, http.StatusOK, UnifiedListResponse{
+	httpresp.WriteJSON(w, http.StatusOK, UnifiedListResponse{
 		Entries:    out,
 		NextCursor: encodeUnifiedCursor(nextCursor),
 	})
+
 }

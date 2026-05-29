@@ -23,6 +23,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 )
 
 // hasProgramRead reports whether the credential carries an explicit
@@ -41,7 +42,7 @@ func hasProgramRead(c credstore.Credential) bool {
 func requireProgramRead(w http.ResponseWriter, r *http.Request) bool {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok || !hasProgramRead(cred) {
-		writeError(w, http.StatusForbidden, "role does not grant risk/program-read access")
+		httpresp.WriteError(w, http.StatusForbidden, "role does not grant risk/program-read access")
 		return false
 	}
 	return true

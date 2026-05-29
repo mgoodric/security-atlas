@@ -18,6 +18,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/demoseed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -146,7 +147,7 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
 	}
-	writeJSON(w, http.StatusOK, statusResponse{Enabled: h.isEnabled()})
+	httpresp.WriteJSON(w, http.StatusOK, statusResponse{Enabled: h.isEnabled()})
 }
 
 // Seed handles POST /v1/admin/demo/seed.
@@ -172,16 +173,16 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.isEnabled() {
-		writeError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
 		return
 	}
 	if !h.limiter.allow(clientIP(r), h.clock()) {
 		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(rateLimitWindow.Seconds())))
-		writeError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
+		httpresp.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
 		return
 	}
 	if h.authPool == nil {
-		writeError(w, http.StatusServiceUnavailable, "demo seed not available: no auth pool")
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not available: no auth pool")
 		return
 	}
 
@@ -227,7 +228,7 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, seedResponse{
+	httpresp.WriteJSON(w, http.StatusOK, seedResponse{
 		TenantID:     res.TenantID.String(),
 		TenantSlug:   res.TenantSlug,
 		Controls:     res.Controls,
@@ -237,6 +238,7 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		Samples:      res.Samples,
 		Idempotent:   res.Idempotent,
 	})
+
 }
 
 // Teardown handles POST /v1/admin/demo/teardown.
@@ -248,16 +250,16 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.isEnabled() {
-		writeError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
 		return
 	}
 	if !h.limiter.allow(clientIP(r), h.clock()) {
 		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(rateLimitWindow.Seconds())))
-		writeError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
+		httpresp.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
 		return
 	}
 	if h.authPool == nil {
-		writeError(w, http.StatusServiceUnavailable, "demo seed not available: no auth pool")
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not available: no auth pool")
 		return
 	}
 
@@ -289,10 +291,11 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, teardownResponse{
+	httpresp.WriteJSON(w, http.StatusOK, teardownResponse{
 		TenantSlug: demoTenantSlug,
 		Status:     "deleted",
 	})
+
 }
 
 // requireAdmin enforces the admin role. Defense in depth: the OPA
@@ -312,7 +315,7 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return false
 	}
 	if cred.IsAdmin {
@@ -323,7 +326,7 @@ func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 			return true
 		}
 	}
-	writeError(w, http.StatusForbidden, "admin role required")
+	httpresp.WriteError(w, http.StatusForbidden, "admin role required")
 	return false
 }
 
@@ -489,15 +492,3 @@ func (l *ipBucketLimiter) allow(ip string, now time.Time) bool {
 }
 
 // --- helpers ---
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}

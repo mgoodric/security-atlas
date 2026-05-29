@@ -84,6 +84,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
@@ -153,12 +154,12 @@ func (h *Handler) ExportAuditPeriods(w http.ResponseWriter, r *http.Request) {
 
 	cred, ok := authctx.CredentialFromContext(ctx)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return
 	}
 	tenantID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "invalid tenant in credential")
+		httpresp.WriteError(w, http.StatusInternalServerError, "invalid tenant in credential")
 		return
 	}
 	userIdentifier := cred.UserID
@@ -175,7 +176,7 @@ func (h *Handler) ExportAuditPeriods(w http.ResponseWriter, r *http.Request) {
 			Result: "denied:bad_request",
 			Reason: parseErr.Error(),
 		})
-		writeError(w, http.StatusBadRequest, parseErr.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, parseErr.Error())
 		return
 	}
 
@@ -190,7 +191,7 @@ func (h *Handler) ExportAuditPeriods(w http.ResponseWriter, r *http.Request) {
 			Result: "denied:forbidden",
 			Reason: "caller lacks admin|auditor|grc_engineer role",
 		})
-		writeError(w, http.StatusForbidden, "admin, auditor, or grc_engineer role required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin, auditor, or grc_engineer role required")
 		return
 	}
 
@@ -229,7 +230,7 @@ func (h *Handler) ExportAuditPeriods(w http.ResponseWriter, r *http.Request) {
 			Result: "denied:bad_format",
 			Reason: err.Error(),
 		})
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -256,9 +257,10 @@ func (h *Handler) ExportAuditPeriods(w http.ResponseWriter, r *http.Request) {
 			Reason:   fmt.Sprintf("rowCap=%d", defaultExportRowCap),
 			RowCount: len(periods),
 		})
-		writeError(w, http.StatusRequestEntityTooLarge,
+		httpresp.WriteError(w, http.StatusRequestEntityTooLarge,
 			fmt.Sprintf("export would exceed row cap of %d audit periods; "+
 				"narrow the request scope and retry", defaultExportRowCap))
+
 		return
 	}
 
@@ -467,12 +469,6 @@ func (h *Handler) inTx(ctx context.Context, fn func(context.Context, *dbx.Querie
 }
 
 // ===== HTTP helpers =====
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
 
 // countingWriter wraps an io.Writer and counts bytes written. Used to
 // record body byte-count for the meta-audit row.

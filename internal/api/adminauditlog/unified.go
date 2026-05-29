@@ -39,6 +39,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -132,12 +133,12 @@ type metaAuditResult struct {
 func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return
 	}
 	tenantID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "invalid tenant in credential")
+		httpresp.WriteError(w, http.StatusInternalServerError, "invalid tenant in credential")
 		return
 	}
 	// Caller's stable identity for the meta-audit row. Prefer the resolved
@@ -150,7 +151,7 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 
 	params, perr := parseUnifiedParams(r)
 	if perr != nil {
-		writeError(w, http.StatusBadRequest, perr.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, perr.Error())
 		return
 	}
 	// Slice 270: the slice 124 admin endpoint is admit-gated to
@@ -169,7 +170,7 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !allowed {
-		writeError(w, http.StatusForbidden, "admin, auditor, or grc_engineer role required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin, auditor, or grc_engineer role required")
 		return
 	}
 
@@ -271,10 +272,11 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 			PayloadJSON:   e.PayloadJSON,
 		})
 	}
-	writeJSON(w, http.StatusOK, UnifiedListResponse{
+	httpresp.WriteJSON(w, http.StatusOK, UnifiedListResponse{
 		Entries:    out,
 		NextCursor: encodeUnifiedCursor(nextCursor),
 	})
+
 }
 
 // callerAllowedUnified is the defense-in-depth role probe. IsAdmin short-circuits

@@ -17,6 +17,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
@@ -37,22 +39,22 @@ type linkControlReq struct {
 func (h *Handler) LinkControl(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	riskID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	var req linkControlReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	controlID, err := uuid.Parse(req.ControlID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "control_id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "control_id must be a UUID")
 		return
 	}
 
@@ -77,14 +79,14 @@ func (h *Handler) LinkControl(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, risk.ErrNotFound):
 			// AC-1: linking on an unknown risk -> 404.
-			writeError(w, http.StatusNotFound, "risk not found")
+			httpresp.WriteError(w, http.StatusNotFound, "risk not found")
 		case errors.Is(err, risk.ErrControlNotFound):
 			// AC-1: linking an unknown control -> 404.
-			writeError(w, http.StatusNotFound, "control not found")
+			httpresp.WriteError(w, http.StatusNotFound, "control not found")
 		case errors.Is(err, risk.ErrLinkWeightOutOfRange):
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
-			writeServerErr(w, r, "link control", err)
+			httperr.WriteInternal(w, r, "link control", err)
 		}
 		return
 	}
@@ -92,7 +94,7 @@ func (h *Handler) LinkControl(w http.ResponseWriter, r *http.Request) {
 	// Re-read the risk so linked_control_ids[] reflects the new link (AC-1).
 	rk, err := h.store.Get(ctx, riskID)
 	if err != nil {
-		writeServerErr(w, r, "get risk after link", err)
+		httperr.WriteInternal(w, r, "get risk after link", err)
 		return
 	}
 	body := map[string]any{"risk": riskWireFrom(rk)}
@@ -102,12 +104,12 @@ func (h *Handler) LinkControl(w http.ResponseWriter, r *http.Request) {
 	if h.deriver != nil {
 		res, derr := h.deriver.DeriveAndPersist(ctx, riskID, false)
 		if derr != nil {
-			writeServerErr(w, r, "derive residual after link", derr)
+			httperr.WriteInternal(w, r, "derive residual after link", derr)
 			return
 		}
 		body["residual"] = residualWireFrom(res)
 	}
-	writeJSON(w, http.StatusOK, body)
+	httpresp.WriteJSON(w, http.StatusOK, body)
 }
 
 // applyWeight validates an optional [0,1] weight from the request body and
@@ -118,7 +120,7 @@ func applyWeight(w http.ResponseWriter, field string, val *float64, dst *float64
 		return true
 	}
 	if *val < 0 || *val > 1 {
-		writeError(w, http.StatusBadRequest, field+" must be between 0 and 1")
+		httpresp.WriteError(w, http.StatusBadRequest, field+" must be between 0 and 1")
 		return false
 	}
 	*dst = *val
