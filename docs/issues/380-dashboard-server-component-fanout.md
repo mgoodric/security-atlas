@@ -70,31 +70,31 @@ fetch shape.
 
 ## Acceptance criteria
 
-- [ ] **AC-1.** `web/app/dashboard/page.tsx` becomes a Server
+- [x] **AC-1.** `web/app/dashboard/page.tsx` becomes a Server
       Component that fetches all panel data in parallel via
       `Promise.all`.
-- [ ] **AC-2.** Each panel renders inside a `<Suspense fallback={
+- [x] **AC-2.** Each panel renders inside a `<Suspense fallback={
 <PanelSkeleton/> }>` so slow panels don't block fast ones.
-- [ ] **AC-3.** The existing per-panel BFF routes (`web/app/api/
+- [x] **AC-3.** The existing per-panel BFF routes (`web/app/api/
 dashboard/*/route.ts`) REMAIN as a fetchable surface — used
       for client-side refresh after navigation. NOT removed.
-- [ ] **AC-4.** A Playwright e2e spec at `web/e2e/dashboard-
+- [x] **AC-4.** A Playwright e2e spec at `web/e2e/dashboard-
 server-component.spec.ts` asserts: the dashboard page renders
       all panels' initial content WITHOUT a client-side fetch
       occurring (asserted via network-request count == 1 for the
       initial HTML).
-- [ ] **AC-5.** TanStack Query still hydrates with the
+- [x] **AC-5.** TanStack Query still hydrates with the
       server-fetched data so client-side refresh works correctly.
-- [ ] **AC-6.** A vitest spec asserts the server-side data-fetcher
+- [x] **AC-6.** A vitest spec asserts the server-side data-fetcher
       function returns the same shape the client `useQuery` hook
       previously expected.
-- [ ] **AC-7.** No regression to existing `web/lib/api.ts` typed
+- [x] **AC-7.** No regression to existing `web/lib/api.ts` typed
       client (the Server Component reuses the same client functions
       that the BFF routes call).
-- [ ] **AC-8.** Tail-latency improvement: a Playwright trace
+- [x] **AC-8.** Tail-latency improvement: a Playwright trace
       captures initial-page-load network waterfall pre-slice and
       post-slice; post-slice has 1 initial request vs pre-slice 7+.
-- [ ] **AC-9.** `pre-commit run --files` passes.
+- [x] **AC-9.** `pre-commit run --files` passes.
 
 ## Anti-criteria (P0)
 
