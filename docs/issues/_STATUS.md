@@ -3,7 +3,27 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-29 (batch 162 claim-stake — slices 366 + 380 + 342 → in-progress · JWT key rotation + dashboard Server Component fan-out + vision-canvas tone rewrite · disjoint trees: internal/auth · web/ · Plans/canvas)
+**Last reconciled:** 2026-05-29 (batch 162 merged — slices 366 + 380 + 342 on main, plus two live-bug hotfixes 385 + 386 surfaced + fixed during the session)
+
+## Drift detected — 2026-05-29 (parallel batch 162 merged + hotfixes 385/386)
+
+All three batch-162 slices merged to main. Two additional hotfixes (385, 386) were surfaced and shipped during the same session while diagnosing a live demo-seed failure on `atlas-edge`.
+
+- **366** JWT signing key rotation end-to-end → merged at `405a375f` via #863 (closes slice 327 M-1).
+- **380** dashboard Server Component fan-out → merged at `8e353f14` via #862 (closes slice 332 F-BFF-2). Required a follow-up fix on the PR branch: the SSR prefetch bypassed Playwright `page.route` client-side mocks, breaking 9 existing `dashboard.spec.ts` tests; resolved via an SSR-honoring e2e seam.
+- **342** vision-canvas tone rewrite → merged at `a85499bd` via #861 (closes slice 337 high-density finding).
+- **385** demo-seed 500 fix (`resolveActor` rejected the `user:` JWT subject prefix) → merged at `549f0a80` via #864. Diagnosed by live reproduction against atlas-edge.
+- **386** metrics_catalog seed fix (empty `source_slices` → nil → SQL NULL → NOT NULL abort of the whole catalog tx) → merged at `cac076a3` via #865. Surfaced during 385 diagnosis.
+
+Known follow-up (not yet filed): metrics evaluator query drift — evaluators query `framework_id`/`policy_versions` but the schema has `framework_version_id`/`policies`. Documented in the 385/386 out-of-scope sections.
+
+| Row | Transition               | Evidence                                                                |
+| --- | ------------------------ | ----------------------------------------------------------------------- |
+| 366 | `in-progress` → `merged` | merged at `405a375f` via #863                                           |
+| 380 | `in-progress` → `merged` | merged at `8e353f14` via #862 (SSR e2e-seam fix-on-branch)              |
+| 342 | `in-progress` → `merged` | merged at `a85499bd` via #861                                           |
+| 385 | (new row) → `merged`     | hotfix · merged at `549f0a80` via #864 · demo-seed actor subject prefix |
+| 386 | (new row) → `merged`     | hotfix · merged at `cac076a3` via #865 · metrics_catalog source_slices  |
 
 ## Drift detected — 2026-05-29 (batch 162 claim-stake · slices 366 + 380 + 342)
 
