@@ -25,6 +25,12 @@
       "functions": 98,
       "lines": 98
     },
+    "app/(authed)/dashboard/dashboard-prefetch.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "app/(authed)/controls/[id]/tabs.ts": {
       "statements": 98,
       "branches": 98,
