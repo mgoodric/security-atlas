@@ -107,6 +107,53 @@ other). Mutators serialise on a dedicated `loadMu`; readers (`Get`,
 existing Rotate-during-Verify integration test. The slice-366
 rotation/overlap/prune contract and its tests are preserved unchanged.
 
+### D5 — F-ING-3: the wall-clock gate is a PATHOLOGICAL-regression ceiling (100ms), measured median-of-9, not a microsecond budget
+
+**Defect found post-push.** The first cut of
+`TestHashRecord_AtMaxPayloadUnderBudget` asserted a best-of-5 single
+sample against a 5ms hard ceiling. On the M3 dev box the 1 MiB hash runs
+~0.8ms, but on a shared CI runner under load it runs ~5-7ms — so the 5ms
+ceiling sat **on top of** the observed cost and flaked (`Go · build +
+test` failed on PR #870 at 5.71ms vs 5ms). That is a flake generator: it
+would intermittently block unrelated PRs without any real regression. The
+hashing logic was not changed by this slice — this was purely a
+calibration error.
+
+**Root cause.** I conflated two different questions. AC-12's intent is
+"did `HashRecord` become **pathologically** slow at the 1 MiB ceiling?"
+(an accidental O(payload²) re-canonicalisation, or a per-byte allocation
+blowup). That is an **order-of-magnitude** question. A 5ms ceiling instead
+tried to assert a precise microsecond budget, which is inherently noisy on
+shared hardware and answers the wrong question.
+
+**Decision.**
+
+1. **Ceiling = 100ms** (`maxPayloadHashBudget`). A non-pathological 1 MiB
+   hash costs ~1-7ms across runners (linear: one SHA-256 pass + one
+   deterministic proto marshal). A pathological superlinear regression at
+   1 MiB would cost **hundreds of ms to seconds** — two-to-three orders of
+   magnitude higher. 100ms sits in the dead zone: ~14-125× above any
+   realistic CI sample (runner noise can never reach it) yet far below any
+   superlinear pathology (a real regression always trips it). A 1ms bump
+   (5→6) was explicitly rejected — it stays in the noise band and would
+   still flake.
+2. **Measurement = median-of-9 with a discarded warmup**
+   (`medianHashDuration`). The median is robust in **both** directions: a
+   single slow scheduler hiccup can't inflate it (unlike a mean), and a
+   single fast outlier can't mask a genuine regression (unlike the
+   original best-of-N). N is odd so the median is a real sample.
+3. **The `testing.B` benchmark stays the precise-number artifact.**
+   `BenchmarkHashRecordAtMaxPayload` re-publishes a steady ~441µs/op (14
+   allocs) for trend-watching; its self-assert uses the SAME generous
+   100ms pathological ceiling, so a `-bench`-only run still catches an
+   order-of-magnitude regression but never flakes.
+
+**Validation.** Stable across `-count=20`, `-race -count=5`, and
+`-cpu=1 -count=10` contention runs; verbose median-of-9 logs ~791µs
+against the 100ms ceiling (~126× headroom). No production code changed —
+the diff is confined to `internal/canonjson/canonjson_test.go`, so patch
+coverage is unaffected (the changed lines are themselves test code).
+
 ---
 
 ## Anti-criteria honored
