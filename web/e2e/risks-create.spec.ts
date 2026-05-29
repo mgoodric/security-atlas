@@ -1,80 +1,202 @@
 // Slice 105 — Playwright E2E for the /risks/new risk-create form.
 //
-// Runner status (post-slice-069 / 079 audit):
-// Playwright IS installed in `web/`. This spec is quarantined behind
-// slice 082 (the seed-data harness) per slice 079's decision; when that
-// harness lands, the un-commented assertions below become the gate. The
-// test bodies are preserved verbatim as a reviewable contract per the
-// slice 040 / 042 / 056 / 060 / 064 / 071 / 094 / 098 / 100 precedent.
+// Un-quarantined by slice 351 (AC-4, disposition (a)). The legacy
+// `test.skip(!PLAYWRIGHT_RUN_QUARANTINED)` guard + commented bodies were
+// a slice-082-era placeholder ("seed harness not landed yet"). The
+// harness DID land (slice 082 + 201) and the `/risks/new` page
+// (risk-form.tsx) ships every asserted testid. There is no underlying
+// product bug — so per anti-criterion P0-4 this is rewritten as a LIVE
+// mocked spec following the `questionnaires.spec.ts` `route.fulfill`
+// convention.
 //
-// Run locally (once seed harness lands):
-//   cd web
-//   npx playwright install chromium      # once per machine
-//   npx playwright test e2e/risks-create.spec.ts
+// HONESTY CORRECTION vs the old commented bodies (the project's
+// UI-honesty value): the old `submits a risk` test relied on the
+// default treatment (`mitigate`) NOT requiring a linked control, and
+// the old `upstream 4xx` test expected an empty title to bounce off the
+// SERVER. Both are now stale:
 //
-// Pre-conditions the seed-data harness (slice 082) must establish
-// before the commented assertions are turned on:
-//   - PLATFORM_BASE_URL points at a running platform instance.
-//   - TEST_BEARER carries a credential in a tenant where /risks renders
-//     the true-zero empty state (no risks seeded for this tenant). The
-//     `Add first risk` CTA on `/risks` must route to `/risks/new`.
+//   - `mitigate` requires >=1 linked control CLIENT-SIDE
+//     (validateRiskForm), so a bare "fill title + submit" with the
+//     default treatment is blocked client-side. This spec selects
+//     treatment `accept` for the happy path (no link rule).
+//   - Empty title is gated CLIENT-SIDE — it renders
+//     `risks-create-title-error` inline and never contacts the server.
+//     This spec asserts the ACTUAL client-side behaviour, not the
+//     obsolete server-bounce.
 //
-// AC-8 coverage targets:
-//   1. Empty-state CTA on /risks navigates to /risks/new.
-//   2. Form submit creates a risk and routes back to /risks.
-//   3. Newly created row appears in the list (cache invalidation).
-//   4. Server-side validation error (empty title) surfaces inline
-//      without losing user input.
+// Determinism: navigation + submit are gated on `expect(...)` auto-wait
+// and `page.waitForResponse(...)`; no sleeps, no `.count()` snapshots.
+//
+// Hard rule (P0-A9): neutral test strings only; no vendor-prefixed
+// tokens.
 
-import { test } from "@playwright/test";
+import { expect, test } from "./fixtures";
+
+const NEW_RISK_TITLE = "E2E test risk — unauthorized data export";
+const CREATED_RISK_ID = "00000000-0000-0000-0000-0000000r1s01";
 
 test.describe("/risks/new risk-create form", () => {
-  test.skip(
-    !process.env.PLAYWRIGHT_RUN_QUARANTINED,
-    "quarantined until slice 082 seed harness lands",
-  );
+  test("empty-state CTA on /risks routes to /risks/new", async ({
+    authedPage: page,
+  }) => {
+    // True-zero ledger so the "Add first risk" CTA renders (not the
+    // filter-empty "Clear filters" CTA).
+    await page.route("**/api/risks", async (route, req) => {
+      if (req.method() !== "GET") {
+        await route.fallback();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ risks: [], count: 0 }),
+      });
+    });
 
-  // test("empty-state CTA on /risks routes to /risks/new", async ({
-  //   authedPage,
-  // }) => {
-  //   await authedPage.goto("/risks");
-  //   const cta = authedPage.getByRole("button", { name: /add first risk/i });
-  //   await cta.click();
-  //   await expect(authedPage).toHaveURL(/\/risks\/new$/);
-  // });
-  //
-  // test("submits a risk and routes back to /risks with the new row", async ({
-  //   authedPage,
-  // }) => {
-  //   await authedPage.goto("/risks/new");
-  //   await authedPage.getByTestId("risks-create-title").fill("E2E test risk");
-  //   await authedPage
-  //     .getByTestId("risks-create-treatment-owner")
-  //     .fill("e2e-owner");
-  //   // Defaults: category=operational, methodology=nist_800_30,
-  //   // treatment=mitigate, likelihood=3, impact=3.
-  //   await authedPage.getByTestId("risks-create-submit").click();
-  //   await expect(authedPage).toHaveURL(/\/risks(\?|$)/);
-  //   await expect(
-  //     authedPage.getByTestId("risks-row-title").filter({ hasText: "E2E test risk" }),
-  //   ).toBeVisible();
-  // });
-  //
-  // test("upstream 4xx surfaces inline without clearing form input", async ({
-  //   authedPage,
-  // }) => {
-  //   await authedPage.goto("/risks/new");
-  //   // Leave title empty to trigger the slice-019 "title is required" 400.
-  //   // (HTML required is also set; the test pre-conditions a browser run
-  //   // that bypasses native validation to verify backend-error rendering.)
-  //   await authedPage
-  //     .getByTestId("risks-create-treatment-owner")
-  //     .fill("e2e-owner");
-  //   await authedPage.getByTestId("risks-create-submit").click();
-  //   await expect(authedPage.getByTestId("risks-create-error")).toBeVisible();
-  //   // Form state preserved.
-  //   await expect(
-  //     authedPage.getByTestId("risks-create-treatment-owner"),
-  //   ).toHaveValue("e2e-owner");
-  // });
+    const listResp = page.waitForResponse(
+      (r) => r.url().includes("/api/risks") && r.status() === 200,
+      { timeout: 30_000 },
+    );
+    await page.goto("/risks");
+    await listResp;
+
+    const cta = page.getByTestId("list-empty-state-cta");
+    await expect(cta).toBeVisible({ timeout: 30_000 });
+    await expect(cta).toContainText(/add first risk/i);
+    await cta.click();
+    await expect(page).toHaveURL(/\/risks\/new$/, { timeout: 30_000 });
+  });
+
+  test("submits a risk (treatment=accept) and routes back to /risks with the new row", async ({
+    authedPage: page,
+  }) => {
+    // List GET: empty before create, holds the new row after.
+    let created = false;
+    await page.route("**/api/risks", async (route, req) => {
+      if (req.method() === "GET") {
+        const risks = created
+          ? [
+              {
+                id: CREATED_RISK_ID,
+                title: NEW_RISK_TITLE,
+                category: "operational",
+                treatment: "accept",
+                treatment_owner: "e2e-owner",
+                methodology: "nist_800_30",
+                inherent_score: { likelihood: 3, impact: 3, severity: 9 },
+                status: "open",
+              },
+            ]
+          : [];
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ risks, count: risks.length }),
+        });
+        return;
+      }
+      // POST = create. The BFF returns { risk } on 201 (slice 105
+      // contract — see web/app/(authed)/risks/new/actions.ts).
+      created = true;
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          risk: {
+            id: CREATED_RISK_ID,
+            title: NEW_RISK_TITLE,
+            category: "operational",
+            treatment: "accept",
+            treatment_owner: "e2e-owner",
+            methodology: "nist_800_30",
+            inherent_score: { likelihood: 3, impact: 3, severity: 9 },
+            status: "open",
+          },
+        }),
+      });
+    });
+
+    await page.goto("/risks/new");
+    await expect(page.getByTestId("risks-create-form")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
+    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+    // treatment=accept avoids the mitigate-requires-linked-control
+    // client-side validation rule (validateRiskForm).
+    await page.getByTestId("risks-create-treatment").selectOption("accept");
+
+    const createResp = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/risks") &&
+        r.request().method() === "POST" &&
+        r.status() === 201,
+      { timeout: 30_000 },
+    );
+    await page.getByTestId("risks-create-submit").click();
+    await createResp;
+
+    // AC: routed back to /risks and the new row appears (cache
+    // invalidation + re-fetch).
+    await expect(page).toHaveURL(/\/risks(\?|$)/, { timeout: 30_000 });
+    await expect(
+      page
+        .getByTestId("risks-row-title")
+        .filter({ hasText: NEW_RISK_TITLE })
+        .first(),
+    ).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("empty title is gated client-side: no server round-trip, input preserved", async ({
+    authedPage: page,
+  }) => {
+    // HONEST behaviour (verified locally): the title <input> carries the
+    // native HTML5 `required` attribute, so the browser blocks the form
+    // submit BEFORE React's `handleSubmit` runs when title is empty.
+    // That means: no POST /api/risks fires, the page stays on
+    // /risks/new, and the user's other input is preserved. (The
+    // React-level `risks-create-title-error` testid only renders when
+    // native validation is bypassed — it is the belt to native
+    // validation's suspenders; this spec asserts the gate that actually
+    // fires first.) If a POST DID fire on an empty title, that would be
+    // the bug this spec guards against.
+    let postFired = false;
+    await page.route("**/api/risks", async (route, req) => {
+      if (req.method() === "POST") {
+        postFired = true;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ risks: [], count: 0 }),
+      });
+    });
+
+    await page.goto("/risks/new");
+    await expect(page.getByTestId("risks-create-form")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // Leave title empty; fill owner + pick a no-link treatment. Submit.
+    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+    await page.getByTestId("risks-create-treatment").selectOption("accept");
+    await page.getByTestId("risks-create-submit").click();
+
+    // The title input is flagged invalid by native validation; the form
+    // did not submit. Assert the form did not navigate and no POST went
+    // out. The title input reports the native invalid state.
+    const titleInvalid = await page
+      .getByTestId("risks-create-title")
+      .evaluate((el) => (el as HTMLInputElement).validity.valueMissing);
+    expect(titleInvalid).toBe(true);
+
+    // Form state preserved (owner not cleared) — honest UX.
+    await expect(page.getByTestId("risks-create-treatment-owner")).toHaveValue(
+      "e2e-owner",
+    );
+    // Stayed on the create form; no server round-trip happened.
+    await expect(page).toHaveURL(/\/risks\/new$/);
+    expect(postFired).toBe(false);
+  });
 });
