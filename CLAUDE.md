@@ -118,11 +118,17 @@ Board narratives are the highest-risk AI-assist surface because board members ar
 
 Full updated list maintained at slice 182's tone-anti-pattern reference document.
 
+- Repetition discipline: vary recurring terminology in adjacent occurrences. The project's domain jargon ("load-bearing", "first-pass", "tracer-bullet", "diligence the diligence tool") is canonical, but flag if any single term appears 3+ times in one document — at that point the term is wearing thin and a synonym or a more specific phrasing usually reads cleaner.
+
+**Project-specific exceptions:** the persona's Tier 2 list flags some words as AI-isms that this project uses literally. The canonical example is "harness" — slice 178 names the UI honesty audit (Playwright) harness, and downstream slices reference it by that name. Do not rewrite these literal references; the persona's list is supplementary, this project's list is canonical.
+
 **Schema-level extensions when board-narrative v0 ships:** the `ai_assisted=true ↔ human_approver` invariant extends to require additional columns on board-narrative records: `prompt_version TEXT NOT NULL`, `model_name TEXT NOT NULL`, `model_version TEXT NOT NULL`, `model_provider TEXT NOT NULL` (e.g., `'ollama-local'` or `'anthropic-api'`). Old reports stay immutable — versioning is snapshot-at-generation, not retroactive.
 
 **Default local model + refresh cadence:** Llama 3.1 8B Instruct as the default for board narratives at v0 (runs on 8-12GB GPU; commodity hardware). Quality caveat explicitly documented for operators. Cloud LLM opt-in per tenant for higher quality. **Default model recommendation refreshes every 6-12 months** as local models improve — the refresh is a documented maintenance task, not a slice (maintainer reviews + updates the operator docs).
 
 **Implementation timing:** board-narrative v0 is v2+ work. Foundation pre-commitments land via slice 182.
+
+**Forward note (banned-phrase enforcement):** the banned-phrase list above must be wired into the LLM system prompt when board-narrative v0 ships (slice 182's v2 continuation). No enforcement surface exists in v1 — the v1 board narrative is template-only (`internal/board/narrative.go`, a pure `text/template` renderer with no LLM call site). The list is documented here but not yet runtime-enforced; the v2 slice that introduces the call site owns wiring it in.
 
 **This boundary governs the product at runtime — not the development process.** It is constitutional and unchanged. Separately, the _slice-development_ workflow has a `JUDGMENT` slice type (formerly `HITL`): when building a slice, Claude makes the subjective build-time calls itself (control-text accuracy, UX copy, rule-DSL shape, OSCAL conformance choices) and records them in a decisions log rather than blocking the merge on a human sign-off — the maintainer iterates post-deployment. That is a process choice about _how we build_. It does NOT touch this boundary, which is about _how the shipped product behaves_: the product still never publishes an audit-binding artifact without one-click human approval. Never conflate the two. See `Plans/prompts/04-per-slice-template.md` "Slice types".
 
