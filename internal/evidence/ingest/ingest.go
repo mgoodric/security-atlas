@@ -31,6 +31,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
@@ -178,6 +179,27 @@ type Service struct {
 	// to "push" — connector / webhook callers can construct a Service
 	// with a different path tag via WithPath.
 	path string
+	// marshalLedger is the protojson-marshal seam for the bytes that
+	// LAND in the ledger (and feed the canonjson hash). Slice 379
+	// (F-ING-1 closure) split the protojson marshal sites into two
+	// semantically-distinct buckets:
+	//
+	//   1. PRE-redact marshal — for size-check + schema-validation.
+	//      Bytes are discarded after the checks. Stays a direct
+	//      `protojson.Marshal(rec.GetPayload())` call below; the
+	//      bytes never reach the ledger.
+	//   2. POST-redact marshal — for hash + ledger payload column.
+	//      This is the only marshal whose output is RETAINED. Routed
+	//      through this seam so the AC-1 unit test + AC-8 benchmark
+	//      can count "marshals whose bytes we keep" and assert == 1.
+	//
+	// Production code constructs Service with `protojson.Marshal`
+	// here. Tests swap in a counting wrapper to assert AC-1. This is
+	// the cleanest expression of slice 379's "one marshal of record"
+	// semantics — see decisions log D1 for the contradiction
+	// resolution between AC-3 (slice-doc typo) and P0-4 (canonical
+	// slice 015 D2 order).
+	marshalLedger func(proto.Message) ([]byte, error)
 }
 
 // New constructs a Service over the supplied pool and validator. Pass
@@ -190,11 +212,25 @@ func New(pool *pgxpool.Pool, validator SchemaValidator) *Service {
 		panic("ingest: validator is required")
 	}
 	return &Service{
-		pool:  pool,
-		valid: validator,
-		clock: func() time.Time { return time.Now().UTC() },
-		path:  "push",
+		pool:          pool,
+		valid:         validator,
+		clock:         func() time.Time { return time.Now().UTC() },
+		path:          "push",
+		marshalLedger: protojson.Marshal,
 	}
+}
+
+// withLedgerMarshaler returns a copy of s using the supplied marshal
+// function for the bytes-we-keep (post-redact / no-redaction-rules)
+// path. Test-only seam — production code uses the package default
+// (`protojson.Marshal`). Lower-cased so it stays unexported;
+// tests in the same package poke this via a sibling test-helper file.
+func (s *Service) withLedgerMarshaler(m func(proto.Message) ([]byte, error)) *Service {
+	copy := *s
+	if m != nil {
+		copy.marshalLedger = m
+	}
+	return &copy
 }
 
 // WithClock returns a copy of s with the supplied clock. Tests pin a
@@ -266,6 +302,24 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	}
 
 	// AC-6 partial: oversize gate (slice 036 will redirect to S3).
+	//
+	// Slice 015 D2 invariant order: size-check → schema-validate → redact
+	// → hash → write. The pre-redact marshal here serves the first two
+	// steps. On the no-redaction-rules path these bytes are also reused
+	// for the ledger write below (single marshal — already optimal). On
+	// the redaction-rules path these bytes are discarded after schema
+	// validation; a second marshal is issued via `s.marshalLedger` AFTER
+	// redact runs (slice 379 closes the double-marshal F-ING-1 by routing
+	// the bytes-we-keep marshal through that explicit seam, so AC-1 +
+	// AC-8 can count "marshals whose output is retained" and assert == 1
+	// on the redaction-bearing code path).
+	//
+	// P0-3: the size-check is enforced on the pre-redact bytes. The
+	// redactor REPLACES scalar leaves with the short literal Marker
+	// (`<<REDACTED>>`); the redacted form is strictly equal-or-smaller
+	// in byte length than the unredacted form, so a passing pre-redact
+	// size check guarantees a passing post-redact size check. No
+	// post-redact size check is needed.
 	payloadJSON, err := protojson.Marshal(rec.GetPayload())
 	if err != nil {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedValidation, "payload marshal: "+err.Error(), pgtype.UUID{})
@@ -305,9 +359,18 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	// we treat it as "no rules" — this keeps the slice-013 InMemory
 	// fallback unchanged.
 	//
-	// Anti-criterion (P0): we never log the raw payloadJSON here. The
+	// Anti-criterion (P0-2): we never log the raw payloadJSON here. The
 	// only error path through this block surfaces the rule string or
 	// the redactor's own error, not the payload.
+	//
+	// Slice 379 (F-ING-1 closure): when redaction rules apply, we DISCARD
+	// the pre-redact `payloadJSON` (it served its purpose for size-check
+	// and schema-validation above), redact in-place on the unmarshaled
+	// proto, then issue a single marshal-of-record through `s.marshalLedger`
+	// to produce the bytes that land in the ledger and feed the hash.
+	// On the no-rules path, `payloadJSON` already IS the bytes-of-record
+	// (the pre-redact marshal serves all three purposes — single marshal,
+	// already optimal).
 	if lookup, ok := s.valid.(RedactionLookup); ok {
 		rules, rerr := lookup.RedactionRulesFor(ctx, cred.TenantID, rec.EvidenceKind, rec.SchemaVersion)
 		if rerr != nil {
@@ -323,10 +386,14 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 				return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: redaction apply: %w", aerr)
 			}
 			rec.Payload = redacted
-			// Re-marshal so payloadJSON (used below for the DB write) is
-			// the redacted form. Hashing happens below — it will hash
-			// the redacted record. The unredacted form is GC'd here.
-			redactedJSON, merr := protojson.Marshal(redacted)
+			// The pre-redact `payloadJSON` is discarded here; the next
+			// reference to `payloadJSON` is the post-redact bytes from
+			// `s.marshalLedger`. The unredacted form is unreferenced and
+			// GC-eligible immediately. AC-1: this is the ONE marshal
+			// whose output is retained on the redaction-bearing code
+			// path; the test seam counts calls to `s.marshalLedger`
+			// and asserts == 1.
+			redactedJSON, merr := s.marshalLedger(redacted)
 			if merr != nil {
 				s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError,
 					"payload re-marshal after redact", pgtype.UUID{})
@@ -526,6 +593,14 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 // belt-and-braces "no tenant" branch returns before writeAudit fires).
 func (s *Service) writeAudit(ctx context.Context, cred credstore.Credential, idem, kind string, decision Decision, reason string, recordID pgtype.UUID) {
 	if cred.TenantID == "" {
+		return
+	}
+	// Defensive: writeAudit is intentionally best-effort. A nil pool
+	// (only possible in same-package unit tests that exercise pre-DB
+	// branches via the marshal seam — slice 379) means "skip the audit
+	// write" rather than panic. Production constructors guarantee a
+	// non-nil pool via `New()`.
+	if s.pool == nil {
 		return
 	}
 	tenantCtx, terr := tenancy.WithTenant(context.WithoutCancel(ctx), cred.TenantID)
