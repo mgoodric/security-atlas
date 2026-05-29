@@ -116,9 +116,14 @@ func TestWriteInternal_ReusesRequestIDFromContext(t *testing.T) {
 // TestWriteInternal_LogsFullErrorServerSide — the original (possibly
 // sensitive) error text MUST land in the slog log line so operators can
 // triage. P0-367-2 says we never weaken server-side logging.
+//
+// NOT t.Parallel: this test mutates slog.Default() (global state), which
+// races with the package's other 6 t.Parallel tests that call
+// WriteInternal (which itself reads slog.Default for logging). Race
+// surfaced deterministically on slice 378 PR #851; was intermittent
+// before. Serializing this single test fixes the race without weakening
+// the rest of the suite's parallelism.
 func TestWriteInternal_LogsFullErrorServerSide(t *testing.T) {
-	t.Parallel()
-
 	// Capture slog output.
 	buf := &bytes.Buffer{}
 	prev := slog.Default()
