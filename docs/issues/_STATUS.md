@@ -3,7 +3,26 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-29 (batch 163 claim-stake — slices 344 + 360 + 381 → in-progress · CLAUDE.md tone discipline + light-mode muted-foreground contrast + perf cleanup round 1 · disjoint trees: CLAUDE.md · web/app/globals.css · Go-internal)
+**Last reconciled:** 2026-05-29 (batch 163 merged — slices 344 + 360 + 381 on main)
+
+## Drift detected — 2026-05-29 (parallel batch 163 merged)
+
+All three batch-163 slices merged to main.
+
+- **344** CLAUDE.md tone-discipline expansion → merged at `7e014299` via #868 (closes slice 337 spillover).
+- **360** light-mode `--muted-foreground` contrast lift → merged at `7671991b` via #869 (closes slice 331 A11Y-2 High; token lifted to 5.51:1). Required one scheduler-flake rerun on the integration job.
+- **381** perf cleanup round 1 (6 slice-332 Low findings) → merged at `9145cd5a` via #870, **UNSTABLE-codecov-only** (all required checks green; `codecov/patch` red on the new production lines — tokensign per-KeyID signer cache, keystore `atomic.Pointer` snapshot, ingest reject-audit tx timeout). Engineer also recalibrated its own brittle F-ING-3 test (5ms hard budget → 100ms pathological-gate + median-of-9) after it tripped `Go · build + test` on a slow runner. Two stale audit premises corrected in-slice (F-OAUTH-2 unreachable AC; F-OTEL-2 wrong default sampler).
+
+Process notes for the maintainer:
+
+- **Recurring flake:** `internal/metrics/scheduler` `TestRun_FiresInlineSweepAndExitsOnCancel` (`post-Run observations = 0; want >= 1`) blocked unrelated PRs 3× this session (#788, #859, #869) — each time it passed on rerun. Worth a dedicated flake-investigation slice (timing-dependent inline-sweep assertion under load).
+- **Coverage follow-up:** slice 381's F-ING-2 ingest reject-audit timeout path is the likely codecov/patch dip; a small targeted test would restore patch coverage if desired.
+
+| Row | Transition               | Evidence                                                                    |
+| --- | ------------------------ | --------------------------------------------------------------------------- |
+| 344 | `in-progress` → `merged` | merged at `7e014299` via #868                                               |
+| 360 | `in-progress` → `merged` | merged at `7671991b` via #869 (1 scheduler-flake rerun)                     |
+| 381 | `in-progress` → `merged` | merged at `9145cd5a` via #870 (UNSTABLE-codecov; F-ING-3 test recalibrated) |
 
 ## Drift detected — 2026-05-29 (batch 163 claim-stake · slices 344 + 360 + 381)
 
