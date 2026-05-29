@@ -49,6 +49,31 @@ test.describe("dashboard view", () => {
     seedFromFixture("dashboard");
   });
 
+  // Slice 380: the dashboard now prefetches all six panels server-side
+  // (`Promise.all` in dashboard-prefetch.ts) and ships them via
+  // HydrationBoundary, so on a cold load the client fires no
+  // `/api/dashboard/*` request. Every test in THIS file, however,
+  // asserts the CLIENT-side binding contract: that the panel's BFF
+  // route is hit, or that a Playwright `page.route(...)` browser-side
+  // mock shapes the panel (the slice-229 subtitle empty/error states +
+  // the AC-7 degrade-independently test). Those browser-side mocks
+  // cannot intercept the SSR prefetch. We therefore set the test-only
+  // `e2e_no_prefetch` cookie (honored only under ATLAS_TEST_MODE=1, per
+  // dashboard-prefetch.ts `serverPrefetchBypassed`) so the layout skips
+  // the SSR prefetch and the page uses its pure client-side `useQuery`
+  // path -- exactly the surface these tests exercise. The SSR fan-out
+  // itself is covered by the sibling
+  // `dashboard-server-component.spec.ts`. See decisions log D6.
+  test.beforeEach(async ({ authedPage: page, baseURL }) => {
+    await page.context().addCookies([
+      {
+        name: "e2e_no_prefetch",
+        value: "1",
+        url: baseURL ?? "http://localhost:3000",
+      },
+    ]);
+  });
+
   test("AC-1: /dashboard renders the full program dashboard layout", async ({
     authedPage: page,
   }) => {

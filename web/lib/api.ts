@@ -80,6 +80,14 @@ async function apiFetch(path: string, bearer: string): Promise<Response> {
     headers: {
       Authorization: `Bearer ${bearer}`,
     },
+    // Slice 380 (P0-2): server-side fan-out prefetch (dashboard
+    // layout.tsx) calls these typed fns directly during SSR. The
+    // upstream answer depends on the bearer, so the response must never
+    // enter the Next.js data cache — a cached row would leak Tenant A's
+    // posture into Tenant B's render. Matches the BFF proxy's existing
+    // `cache: "no-store"` (lib/api/bff.ts forwardJSON) so the direct and
+    // proxied paths have identical caching posture.
+    cache: "no-store",
   });
   if (!res.ok) {
     throw new APIError(res.status, `${res.status} ${res.statusText}`);
