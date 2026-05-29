@@ -3,7 +3,30 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-29 (batch 164 claim-stake — slices 345 + 351 + 369 → in-progress · CI integration-enrolment discovery + e2e flow-gap fill + httpresp helper consolidation · disjoint trees: .github/workflows · web/e2e · internal/api)
+**Last reconciled:** 2026-05-29 (batch 164 merged — slices 345 + 351 + 369 on main; 5 spillovers filed 387-391; spillover-number collision resolved in this reconcile)
+
+## Drift detected — 2026-05-29 (parallel batch 164 merged + 5 spillovers + collision fix)
+
+All three batch-164 slices merged to main.
+
+- **345** CI integration-job enrolment-discovery guard → merged at `10230d18` via #873 (closes slice 334 I-1). Building the guard surfaced a **38-package integration-test enrolment backlog** (packages with `//go:build integration` that never run in CI — incl. `internal/api/oauth` 28 test funcs, `internal/exception` 22); recorded in a monotonic-shrink `KNOWN_UNENROLLED` allowlist, drain tracked as slice 390.
+- **351** e2e critical multi-tenant flow gap fill → merged at `b95383ed` via #875 (closes slice 333 Q-9). Added tenant-switch + evidence-push specs; un-skipped 4 quarantined specs (fixed stale bodies); re-quarantined 2 prod-build specs with justification (spillover 387); deferred the real-RLS cross-tenant assertion to spillover 389 (test harness mints single-tenant JWTs only — honestly named, not faked).
+- **369** consolidate writeJSON/writeError → `internal/api/httpresp` → merged at `99ad0a9b` via #874, **UNSTABLE-codecov-only** (closes slice 328 H-1). 103 helpers / 1131 call sites consolidated; writeServerErr adapters retired (closes slice 367 §D2); duphelper-lint analyzer added (CI wiring deferred to spillover 391). Required one fix-on-branch: the refactor dipped `internal/api/authzmw` below its 69% coverage floor (removing fully-covered helpers from a sub-100% package lowers the %) — restored to 75.9% with a real `IsCredentialPresent` test (floor not lowered).
+
+**Spillover-number collision resolved:** all three Engineers raced and computed "next = 387". Final unique assignment: 351 kept **387** (e2e-prod-build-standalone-ci-harness), **388** (e2e-board-pack-export), **389** (e2e-multi-tenant-jwt-real-rls-leak); 345's drain renumbered to **390** (integration-enrolment-backlog-drain); 369's CI-wiring renumbered to **391** (duphelper-lint-ci-wiring). All internal cross-refs (decisions logs, CHANGELOG, script comments, CONTRIBUTING) updated; 351's code-spec refs left intact.
+
+Process note: recurring scheduler flake (`TestRun_FiresInlineSweepAndExitsOnCancel`) did not recur this batch; codecov/patch advisory red on 369 (refactor adds new httpresp/analyzer lines).
+
+| Row | Transition               | Evidence                                                                                                              |
+| --- | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| 345 | `in-progress` → `merged` | merged at `10230d18` via #873 (surfaced 38-pkg backlog → slice 390)                                                   |
+| 351 | `in-progress` → `merged` | merged at `b95383ed` via #875 (spillovers 387/388/389)                                                                |
+| 369 | `in-progress` → `merged` | merged at `99ad0a9b` via #874 (UNSTABLE-codecov; authzmw floor fix; spillover 391)                                    |
+| 387 | (new row) → `ready`      | spec `387-e2e-prod-build-standalone-ci-harness.md` · slice 351 spillover · web/e2e+CI                                 |
+| 388 | (new row) → `ready`      | spec `388-e2e-board-pack-export-end-to-end.md` · slice 351 spillover (P1) · web/e2e                                   |
+| 389 | (new row) → `ready`      | spec `389-e2e-multi-tenant-jwt-real-rls-leak-spec.md` · slice 351 spillover · test-JWT harness + real-RLS leak spec   |
+| 390 | (new row) → `ready`      | spec `390-integration-enrolment-backlog-drain.md` · slice 345 spillover · drain 38-pkg integration backlog            |
+| 391 | (new row) → `ready`      | spec `391-duphelper-lint-ci-wiring.md` · slice 369 spillover · wire duphelper-lint as CI hard-fail (after 345 ci.yml) |
 
 ## Drift detected — 2026-05-29 (batch 164 claim-stake · slices 345 + 351 + 369)
 

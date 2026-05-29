@@ -34,7 +34,7 @@ exactly: unconditional (no `changes.code` gate — any PR that adds an
 `integration_test.go` must be caught even if it touches no other code),
 no stub-twin, blocking.
 
-## D2 — The known-gaps allowlist + slice-387 spillover (the load-bearing call)
+## D2 — The known-gaps allowlist + slice-390 spillover (the load-bearing call)
 
 **The premise that "the list is current" is empirically false.** Building
 the guard surfaced that **38 packages carry a `//go:build integration`
@@ -69,14 +69,14 @@ with exactly the 38 packages, baked into the script. The guard:
 
 The allowlist is a **ratchet — shrink only** (same discipline as slice
 069's coverage `excludes`). Draining the 38 is filed as **spillover
-slice 387** (`docs/issues/387-integration-enrolment-backlog-drain.md`),
+slice 390** (`docs/issues/390-integration-enrolment-backlog-drain.md`),
 which enrols the packages in batches (security-critical first) and
 removes each from the allowlist as it adds it to the list. A stale-waiver
 hygiene check in the script (exit 2) prevents the allowlist from rotting:
 a waiver for a package that no longer carries the tag fails loud.
 
 This is the honest root-cause resolution: slice 345 builds the _guard_
-that surfaces the gap (its job); slice 387 _drains_ the backlog (separate
+that surfaces the gap (its job); slice 390 _drains_ the backlog (separate
 work, per the slice's own anti-criteria and slice 348's design intent).
 
 ## D3 — Path normalization keys on the `internal/` segment
@@ -117,7 +117,7 @@ the real audit. Mirrors `check-branch-protection-drift_test.sh` (slice 127) and 
 
 ## Spillover filed
 
-- **Slice 387** — `docs/issues/387-integration-enrolment-backlog-drain.md`
+- **Slice 390** — `docs/issues/390-integration-enrolment-backlog-drain.md`
   — drain the 38-package enrolment backlog the guard surfaced. Status
   `ready`, depends on #345 (this slice) + #348 (merged).
 
