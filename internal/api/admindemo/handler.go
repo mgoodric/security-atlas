@@ -329,18 +329,32 @@ func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 
 // resolveActor reads actor user_id + actor tenant_id from the
 // request context. Both are required for audit-log row tagging.
+// subjectUserID strips the "user:" prefix the auth substrate places on
+// JWT subjects (Subject = "user:<uuid>"). A bare UUID with no prefix is
+// returned unchanged, so this is safe for both the JWT path and any
+// legacy bare-UUID credential.
+func subjectUserID(s string) string {
+	return strings.TrimPrefix(s, "user:")
+}
+
 func (h *Handler) resolveActor(ctx context.Context) (uuid.UUID, uuid.UUID, error) {
 	var actorID uuid.UUID
 	if claims := jwtmw.FromContext(ctx); claims != nil {
-		if u, err := uuid.Parse(claims.Subject); err == nil {
+		// The atlas JWT Subject is "user:<uuid>" (auth-substrate-v2
+		// convention — see internal/api/auth/http.go and
+		// internal/api/oauth/pkce.go). Strip the prefix before parsing;
+		// a bare UUID (no prefix) survives TrimPrefix unchanged.
+		if u, err := uuid.Parse(subjectUserID(claims.Subject)); err == nil {
 			actorID = u
 		}
 	}
 	if actorID == uuid.Nil {
 		// Legacy bearer path — try the credstore credential's UserID.
+		// jwtmw also populates this with the "user:<uuid>" Subject, so
+		// strip the prefix here too.
 		cred, _ := authctx.CredentialFromContext(ctx)
 		if cred.UserID != "" {
-			if u, err := uuid.Parse(cred.UserID); err == nil {
+			if u, err := uuid.Parse(subjectUserID(cred.UserID)); err == nil {
 				actorID = u
 			}
 		}
