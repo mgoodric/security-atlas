@@ -61,6 +61,17 @@ const MaxObservedAtSkew = 24 * time.Hour
 // explicit error pointing the caller at payload_uri.
 const MaxPayloadBytes = 1 << 20 // 1 MiB
 
+// auditWriteTimeout bounds the independent, best-effort reject-audit
+// transaction (slice 381 F-ING-2). Each reject path opens its own tx to
+// satisfy the tenant GUC requirement; under a reject storm (a
+// misconfigured connector replaying at >100 RPS) those connection
+// acquires can pile up. A 3-second ceiling — matching the slice-188
+// best-effort audit pattern (internal/api/oauth) — caps the per-reject
+// connect-attempt so a saturated pool fails the audit write fast rather
+// than blocking. The verdict is already reached before writeAudit runs,
+// so a timed-out audit write is dropped silently (best-effort by design).
+const auditWriteTimeout = 3 * time.Second
+
 // SchemaValidator is the validation hook into slice 014. Service.Process
 // calls ValidatePayload for every record before any DB write. The
 // signature mirrors `schemaregistry.Service.ValidatePayload`.
@@ -603,10 +614,16 @@ func (s *Service) writeAudit(ctx context.Context, cred credstore.Credential, ide
 	if s.pool == nil {
 		return
 	}
+	// Detach from the request context (the verdict is already reached;
+	// the audit write must survive the caller returning) but bound the
+	// detached context to auditWriteTimeout so a saturated pool can't
+	// stack unbounded connect-attempts on the reject path (F-ING-2).
 	tenantCtx, terr := tenancy.WithTenant(context.WithoutCancel(ctx), cred.TenantID)
 	if terr != nil {
 		return
 	}
+	tenantCtx, cancel := context.WithTimeout(tenantCtx, auditWriteTimeout)
+	defer cancel()
 	_ = pgx.BeginTxFunc(tenantCtx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		if terr := tenancy.ApplyTenant(tenantCtx, tx); terr != nil {
 			return terr

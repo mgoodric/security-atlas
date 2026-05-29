@@ -244,6 +244,8 @@ If you have Watchtower turned on, set `ATLAS_MIGRATE_ON_START=true` only if ever
 
 The platform exports OTEL traces, metrics, and logs by default. Point `OTEL_EXPORTER_OTLP_ENDPOINT` at your collector of choice. The bundled docker-compose at [`deploy/docker/observability-compose.yml`](../deploy/docker/observability-compose.yml) brings up Prometheus + Grafana + Tempo + Loki for evaluation.
 
+Once telemetry is enabled, see [`docs/operator/observability-tuning.md`](operator/observability-tuning.md) for keeping trace-emission overhead bounded under load — in particular the `OTEL_TRACES_SAMPLER` recipe for high database query rates.
+
 ---
 
 ## Upgrading from an older release

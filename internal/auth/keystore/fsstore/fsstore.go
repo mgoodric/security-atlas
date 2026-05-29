@@ -29,6 +29,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mgoodric/security-atlas/internal/auth/keystore"
@@ -73,13 +74,38 @@ func PruneCutoff(now time.Time, accessTokenLifetime, overlap time.Duration) time
 	return now.Add(-accessTokenLifetime).Add(-overlap)
 }
 
+// snapshot is the immutable in-memory view of the keystore at one
+// point in time. load(), generate(), Rotate(), and Prune() construct a
+// fresh snapshot and swap it in atomically; readers (Get, List, Prune)
+// take the current pointer once and never mutate what it points at. The
+// `verify` slice is therefore shareable across callers without a
+// defensive copy (slice 381 F-OAUTH-3) — neither the slice header nor
+// the *ecdsa.PublicKey elements are ever mutated after publication.
+type snapshot struct {
+	signing keystore.SigningKey
+	verify  []keystore.VerificationKey
+}
+
 // Store is the concrete filesystem-backed KeyStore.
+//
+// `cur` holds the active immutable snapshot (atomic.Pointer so Get is a
+// lock-free pointer load). `loadMu` serialises mutators (load/generate/
+// Rotate/Prune) so two concurrent disk rescans can't interleave their
+// swaps; readers never take loadMu.
 type Store struct {
 	dir string
 
-	mu      sync.RWMutex
-	signing keystore.SigningKey
-	verify  []keystore.VerificationKey
+	loadMu sync.Mutex
+	cur    atomic.Pointer[snapshot]
+}
+
+// current returns the active snapshot, or an empty one if the store has
+// not been loaded yet (defensive: Open always loads before returning).
+func (s *Store) current() snapshot {
+	if p := s.cur.Load(); p != nil {
+		return *p
+	}
+	return snapshot{}
 }
 
 // ResolvePath chooses the keystore directory in this order:
@@ -109,7 +135,7 @@ func Open(dir string) (*Store, error) {
 	if err := s.load(); err != nil {
 		return nil, err
 	}
-	if s.signing.Key == nil {
+	if s.current().signing.Key == nil {
 		if err := s.generate(); err != nil {
 			return nil, err
 		}
@@ -118,17 +144,20 @@ func Open(dir string) (*Store, error) {
 }
 
 // Get returns the active signing key and the full verification set.
+//
+// The returned []VerificationKey is an IMMUTABLE handle: it is the exact
+// slice published by the most recent load/rotate/prune, shared across
+// every caller, never copied per call (slice 381 F-OAUTH-3). Callers
+// MUST treat it as read-only — neither the slice nor its *ecdsa.PublicKey
+// elements may be mutated. A subsequent load/rotate/prune publishes a
+// brand-new slice via atomic swap, so a handle a caller already holds
+// keeps pointing at a stable, consistent set (no torn reads).
 func (s *Store) Get(_ context.Context) (keystore.SigningKey, []keystore.VerificationKey, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.signing.Key == nil {
+	snap := s.current()
+	if snap.signing.Key == nil {
 		return keystore.SigningKey{}, nil, errors.New("fsstore: no signing key loaded")
 	}
-	// Defensive copy of verify slice header (the keys themselves are
-	// immutable public-key pointers).
-	vks := make([]keystore.VerificationKey, len(s.verify))
-	copy(vks, s.verify)
-	return s.signing, vks, nil
+	return snap.signing, snap.verify, nil
 }
 
 // Rotate generates a fresh ES256 keypair, persists it to disk at mode
@@ -145,9 +174,10 @@ func (s *Store) Get(_ context.Context) (keystore.SigningKey, []keystore.Verifica
 // timestamp until the new KeyID sorts strictly after the current
 // signer. P0-366-1: this method NEVER logs private key material.
 func (s *Store) Rotate(_ context.Context) error {
-	s.mu.RLock()
-	prevKID := s.signing.KeyID
-	s.mu.RUnlock()
+	s.loadMu.Lock()
+	defer s.loadMu.Unlock()
+
+	prevKID := s.current().signing.KeyID
 
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -183,11 +213,12 @@ func (s *Store) Rotate(_ context.Context) error {
 // A KeyID that does not parse as the expected timestamp format is left
 // untouched (defensive: never delete a file we cannot reason about).
 func (s *Store) Prune(_ context.Context, cutoff time.Time) ([]string, error) {
-	s.mu.RLock()
-	signingKID := s.signing.KeyID
-	verify := make([]keystore.VerificationKey, len(s.verify))
-	copy(verify, s.verify)
-	s.mu.RUnlock()
+	s.loadMu.Lock()
+	defer s.loadMu.Unlock()
+
+	snap := s.current()
+	signingKID := snap.signing.KeyID
+	verify := snap.verify
 
 	removed := make([]string, 0)
 	for _, vk := range verify {
@@ -231,11 +262,9 @@ type KeyInfo struct {
 // Signing=true — the alphabetically-last KeyID. Age is computed from the
 // KeyID timestamp; a KeyID that does not parse reports Age 0.
 func (s *Store) List(_ context.Context) ([]KeyInfo, error) {
-	s.mu.RLock()
-	signingKID := s.signing.KeyID
-	verify := make([]keystore.VerificationKey, len(s.verify))
-	copy(verify, s.verify)
-	s.mu.RUnlock()
+	snap := s.current()
+	signingKID := snap.signing.KeyID
+	verify := snap.verify
 
 	now := time.Now()
 	infos := make([]KeyInfo, 0, len(verify))
@@ -285,10 +314,9 @@ func (s *Store) load() error {
 			signing = keystore.SigningKey{KeyID: kid, Key: priv}
 		}
 	}
-	s.mu.Lock()
-	s.signing = signing
-	s.verify = verify
-	s.mu.Unlock()
+	// Publish the fresh immutable snapshot atomically. The verify slice
+	// is never mutated after this point, so Get can hand it out directly.
+	s.cur.Store(&snapshot{signing: signing, verify: verify})
 	return nil
 }
 
@@ -304,10 +332,10 @@ func (s *Store) generate() error {
 	if err := writePrivateKey(path, priv); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	s.signing = keystore.SigningKey{KeyID: kid, Key: priv}
-	s.verify = []keystore.VerificationKey{{KeyID: kid, Key: &priv.PublicKey}}
-	s.mu.Unlock()
+	s.cur.Store(&snapshot{
+		signing: keystore.SigningKey{KeyID: kid, Key: priv},
+		verify:  []keystore.VerificationKey{{KeyID: kid, Key: &priv.PublicKey}},
+	})
 	return nil
 }
 
