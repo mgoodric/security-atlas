@@ -102,22 +102,11 @@ func TestPrivateKeyFileModeIs0600(t *testing.T) {
 	}
 }
 
-// TestRotateReturnsUnsupportedInV1 covers ISC-2: the interface declares
-// Rotate; the v1 implementation returns ErrRotateUnsupported.
-func TestRotateReturnsUnsupportedInV1(t *testing.T) {
-	dir := t.TempDir()
-	store, err := fsstore.Open(dir)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	err = store.Rotate(context.Background())
-	if err == nil {
-		t.Fatal("expected Rotate to return ErrRotateUnsupported, got nil")
-	}
-	if err != keystore.ErrRotateUnsupported {
-		t.Fatalf("expected ErrRotateUnsupported, got %v", err)
-	}
-}
+// Slice 366: TestRotateReturnsUnsupportedInV1 was retired here — the
+// Rotate stub is replaced by the end-to-end implementation tested in
+// rotate_test.go. The keystore.ErrRotateUnsupported sentinel remains
+// declared for interface-doc compatibility but fsstore.Rotate no longer
+// returns it.
 
 // TestDefaultPathFromEnv covers ISC-4 + D3: ATLAS_KEYSTORE_PATH overrides
 // the compiled-in default, and an empty path resolves to the default.

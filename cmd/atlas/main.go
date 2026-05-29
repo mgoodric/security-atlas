@@ -30,6 +30,7 @@ import (
 	auditsink "github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
+	"github.com/mgoodric/security-atlas/internal/auth/keystore"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthcode"
@@ -471,6 +472,22 @@ func main() {
 		if sk, _, err := ks.Get(context.Background()); err == nil {
 			logger.Info("atlas: OAuth AS scaffolding wired", "issuer", issuer, "signing_kid", sk.KeyID)
 		}
+
+		// Slice 366: scheduled JWT signing-key rotation. The keystore
+		// has the active key in scope here; start a background ticker
+		// that rotates on a configurable cadence (annual default) and
+		// prunes keys past the overlap window after each rotation.
+		// ATLAS_KEY_ROTATION_INTERVAL overrides the cadence for dev
+		// loops / high-security deployments. Runs with its own
+		// context.Background-derived lifetime, matching the existing
+		// sweeper goroutines (auth-code, revoked-token). P0-366-1: the
+		// scheduler logs only KeyIDs, never key material.
+		rotationInterval := keyRotationInterval()
+		rotCtx, rotCancel := context.WithCancel(context.Background())
+		go runKeyRotationScheduler(rotCtx, ks, rotationInterval, logger)
+		_ = rotCancel
+		logger.Info("atlas: JWT key rotation scheduler started",
+			"interval", rotationInterval.String())
 	}
 
 	// Slice 065 bug #1 / AC-3 note: the two bootstrap credential-issuance
@@ -1157,5 +1174,109 @@ func doRevokedSweep(ctx context.Context, store *revocation.Store, logger *slog.L
 	}
 	if n > 0 {
 		logger.Info("atlas: oauth_revoked_tokens swept", "rows_deleted", n)
+	}
+}
+
+// defaultKeyRotationInterval is the slice-366 default cadence for the
+// scheduled JWT signing-key rotation: annual. ADR-0003 § Key rotation
+// strategy originally penciled 90 days; the slice-366 spec lands on
+// annual as the v1 default (operators on high-security deployments
+// shorten via ATLAS_KEY_ROTATION_INTERVAL). The discrepancy is recorded
+// in docs/audit-log/366-jwt-key-rotation-decisions.md (D2).
+const defaultKeyRotationInterval = 365 * 24 * time.Hour
+
+// keyRotationInterval resolves the rotation cadence from
+// ATLAS_KEY_ROTATION_INTERVAL (a Go duration string), falling back to
+// the annual default. A non-parseable or non-positive value logs to
+// stderr and uses the default.
+func keyRotationInterval() time.Duration {
+	raw := os.Getenv("ATLAS_KEY_ROTATION_INTERVAL")
+	if raw == "" {
+		return defaultKeyRotationInterval
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		fmt.Fprintf(os.Stderr, "atlas: ATLAS_KEY_ROTATION_INTERVAL=%q invalid: %v — using default %s\n",
+			raw, err, defaultKeyRotationInterval)
+		return defaultKeyRotationInterval
+	}
+	return d
+}
+
+// keyRotator is the keystore surface the rotation scheduler needs.
+// Satisfied by *fsstore.Store; narrowed to an interface so the
+// scheduler is unit-testable with a fake. P0-366-1: none of these
+// methods expose key material.
+type keyRotator interface {
+	Rotate(ctx context.Context) error
+	Prune(ctx context.Context, cutoff time.Time) ([]string, error)
+	Get(ctx context.Context) (keystore.SigningKey, []keystore.VerificationKey, error)
+}
+
+// runKeyRotationScheduler is the slice-366 scheduled rotation goroutine.
+// Every `interval` it rotates the signing key, then prunes keys past the
+// overlap window. It does NOT rotate immediately on startup — the active
+// key from the previous boot is still within its cryptoperiod (rotating
+// on every restart would churn the JWKS needlessly). The goroutine runs
+// until ctx is cancelled (process shutdown).
+//
+// AC-7: every rotation writes one structured audit log line carrying the
+// previous + new signing KeyIDs, the actor ("scheduler"), and the event
+// name. Key rotation is a PLATFORM-level event (the keystore + JWKS are
+// shared across tenants), so it is logged via the structured logger
+// rather than a per-tenant audit-log table — see the slice-366 decisions
+// log D3. P0-366-1: only KeyIDs appear; never key bytes.
+func runKeyRotationScheduler(ctx context.Context, ks keyRotator, interval time.Duration, logger *slog.Logger) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			doKeyRotation(ctx, ks, logger)
+		}
+	}
+}
+
+// doKeyRotation performs one rotation + prune cycle and emits the AC-7
+// audit log line. Errors are logged and the cycle is abandoned until the
+// next tick (a failed rotation leaves the prior key active — fail-safe).
+func doKeyRotation(ctx context.Context, ks keyRotator, logger *slog.Logger) {
+	before, _, err := ks.Get(ctx)
+	if err != nil {
+		logger.Error("atlas: key-rotation: read active key", "err", err)
+		return
+	}
+	if err := ks.Rotate(ctx); err != nil {
+		logger.Error("atlas: key-rotation: rotate failed", "previous_signing_kid", before.KeyID, "err", err)
+		return
+	}
+	after, _, err := ks.Get(ctx)
+	if err != nil {
+		logger.Error("atlas: key-rotation: read new key", "err", err)
+		return
+	}
+	// AC-7: forensic audit line for the rotation event. Platform-level
+	// event; no tenant. KeyIDs only (P0-366-1).
+	logger.Info("atlas: audit_event=key_rotation",
+		"actor", "scheduler",
+		"event", "key_rotation",
+		"previous_signing_kid", before.KeyID,
+		"new_signing_kid", after.KeyID,
+		"occurred_at", time.Now().UTC().Format(time.RFC3339))
+
+	// Prune keys past the overlap window. The active signer is never
+	// pruned (P0-366-2). Prune failure is non-fatal — the rotation
+	// itself already succeeded; stale keys are pruned on the next tick.
+	cutoff := fsstore.PruneCutoff(time.Now(), fsstore.DefaultAccessTokenLifetime, fsstore.DefaultRotationOverlap)
+	removed, err := ks.Prune(ctx, cutoff)
+	if err != nil {
+		logger.Warn("atlas: key-rotation: prune failed", "err", err)
+		return
+	}
+	if len(removed) > 0 {
+		logger.Info("atlas: key-rotation: pruned keys past overlap window",
+			"count", len(removed), "pruned_kids", removed)
 	}
 }

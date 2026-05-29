@@ -130,6 +130,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newFeaturesCmd())
 	root.AddCommand(newBootstrapCmd())
 	root.AddCommand(newOAuthCmd())
+	root.AddCommand(newKeysCmd())
 	root.AddCommand(newLoginCmd())
 	root.AddCommand(newDemoCmd())
 	root.AddCommand(newVersionCmd())
