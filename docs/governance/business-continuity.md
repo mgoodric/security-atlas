@@ -255,44 +255,37 @@ Until then, single-person continuity is the honest answer.
 
 ## 4. Asset and dependency inventory cross-reference
 
-The full, owned-and-maintained asset inventory ships in slice
-**376** at `docs/governance/asset-inventory.md` (planned per the
-[governance README](./README.md) "Planned documents" table; not yet
-filed). When 376 lands, this section's table is replaced by a single
-cross-reference. Until then, this section is the working inventory for
-the assets BCP/DR touches.
+**As of 2026-05-28 (slice 376), the canonical asset inventory for
+the project lives at [`docs/governance/asset-inventory.md`](./asset-inventory.md).**
+That document is the source of truth for the project's full asset
+surface — code repositories, container images, cryptographic
+material, deploy infrastructure, third-party integrations, and
+documentation surfaces — with owner, criticality tier, location,
+backup status, access surface, and lifecycle status per asset.
 
-### Load-bearing assets enumerated by tier
+This section, which previously held a BCP working subset, is
+superseded by the canonical inventory. The two documents bind as
+follows:
 
-| Asset                                                                     | Tier | Restore priority | Restore procedure                | Notes                                                                                                                      |
-| ------------------------------------------------------------------------- | ---- | ---------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| GitHub repository `mgoodric/security-atlas`                               | 0    | P0               | §6 Scenario E                    | Distributed by git design; maintainer-local mirror is the canonical recovery substrate                                     |
-| Tagged releases on GitHub Releases                                        | 0    | P0               | §6 Scenario E + Tier 1 rebuild   | Git tags reproduce; release-asset payloads rebuild from tag                                                                |
-| Container registry `ghcr.io/mgoodric/security-atlas`                      | 1    | P1               | §6 Scenario E (registry rebuild) | Images are reproducible from tagged commits per `Dockerfile`s in-tree                                                      |
-| Docs site (GitHub Pages, mkdocs-material)                                 | 2    | P1               | Re-deploy from `main`            | `.github/workflows/docs.yml` is the deploy substrate                                                                       |
-| CHANGELOG, issue tracker, advisories                                      | 2    | P1               | Inherent in repo recovery        | All content lives in repo + GitHub-native surfaces                                                                         |
-| SaaS instance — Unraid host                                               | 3    | P0               | §6 Scenario A                    | Parity rebuild + Docker compose re-up                                                                                      |
-| SaaS instance — Postgres state                                            | 3    | P0               | §6 Scenario B                    | `pg_dump` nightly per `docs/SELF_HOSTING.md`; canvas invariant #6 (RLS) constrains restore — tenant_id integrity must hold |
-| SaaS instance — evidence object storage                                   | 3    | P0               | §6 Scenario C                    | Append-only evidence ledger (canvas invariant #3) enables replay; sha256-per-record integrity check                        |
-| SaaS instance — observability stack (Prometheus + Tempo + Loki + Grafana) | 3    | P2               | Docker compose re-up             | Stateful state is loss-acceptable — re-instrumentation rebuilds the active dashboard                                       |
-| OIDC RP client secret                                                     | 4    | P0               | §6 Scenario E (rotation)         | Rotated on suspected compromise; deployed via env-var                                                                      |
-| JWT signing keys (ES256 per slice 187 D1)                                 | 4    | P0               | §6 Scenario E (rotation)         | Currently no documented rotation cadence — slice 327 finding M-1, tracked at slice 366                                     |
-| `BRANCH_PROTECTION_READ_TOKEN` PAT                                        | 4    | P1               | §6 Scenario E (rotation)         | Documented at [ADR-0005](../adr/0005-branch-protection-pat-vs-app.md)                                                      |
-| cosign signing key (when slice 368 lands)                                 | 4    | P0               | §6 Scenario E (rotation)         | Future state — when slice 368 cosign migration lands, the cosign key joins this row                                        |
-| Codecov account state                                                     | 4    | P2               | Vendor-recovered                 | Re-uploadable from CI rerun on the affected branches                                                                       |
-| GitGuardian account state                                                 | 4    | P2               | Vendor-recovered                 | Re-scans active branches on reconnection                                                                                   |
+- **Tier 1 assets** in `asset-inventory.md` §4 (project-stopping
+  on loss/compromise) are the assets whose restore is documented
+  in §6 of this BCP plan. Specifically, the SaaS instance's
+  Postgres state, evidence object storage, evidence ledger, RLS
+  policy set, and Unraid host (all Tier 1) map to BCP Scenarios
+  A-D; the GitHub repository (Tier 1) maps to BCP Scenario E.
+- **Tier 2 assets** in `asset-inventory.md` §4 (significant
+  degradation on loss/compromise) include the container registry,
+  observability stack, and supporting credentials. They map to
+  BCP Scenarios A and E with lower restore priority.
+- **Cryptographic material** inventoried at `asset-inventory.md`
+  §3.3 includes the OAuth AS JWT signing keys, OIDC RP client
+  secret, `BRANCH_PROTECTION_READ_TOKEN`, and the cosign signing
+  key (when slice 368 lands). The recovery posture for each is
+  rotation, governed by BCP §5 Tier 4 + §6 Scenario D / E.
 
-### Why this section is shorter than a full inventory
-
-Slice 376's asset inventory is the canonical document for all
-project assets (it will enumerate maintainer workstation,
-secrets-handling boundaries, and any other operational asset the BCP
-does not directly restore). This section's table is **the BCP working
-subset** — assets whose loss triggers a recovery procedure in §6.
-
-When slice 376 lands, this table becomes a cross-reference rather than
-a working copy. The two documents are kept consistent at every annual
-review.
+When the asset inventory or this BCP plan changes, the two
+documents are reconciled at the annual review (per §11) to keep
+the cross-references valid.
 
 ---
 
