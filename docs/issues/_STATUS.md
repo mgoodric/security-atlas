@@ -3,7 +3,23 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-29 (batch 161 claim-stake — slice 379 single-marshal redaction in-progress · F-ING-1 Medium 0.5d AFK · single-file change `internal/evidence/ingest/ingest.go`)
+**Last reconciled:** 2026-05-29 (batch 162 claim-stake — slices 366 + 380 + 342 → in-progress · JWT key rotation + dashboard Server Component fan-out + vision-canvas tone rewrite · disjoint trees: internal/auth · web/ · Plans/canvas)
+
+## Drift detected — 2026-05-29 (batch 162 claim-stake · slices 366 + 380 + 342)
+
+Three-slice continuous-loop batch picked from the post-batch-161 ready set. All three close prior audit spillovers:
+
+- **366** (JWT signing key rotation end-to-end) — Auth · 3d · JUDGMENT · closes slice 327 M-1. Implements the `Rotate`/`Prune` orchestration ADR-0003 deferred, plus `atlas keys` CLI, scheduled rotation job, JWKS overlap-window test, runbook.
+- **380** (dashboard Server Component fan-out) — Perf/Frontend · 1.5d · JUDGMENT · closes slice 332 F-BFF-2. Re-shapes `web/app/dashboard/` to fetch panels server-side via `Promise.all` + streaming.
+- **342** (vision-canvas tone rewrite) — Docs · 0.5d · JUDGMENT · closes slice 337 spillover. Removes "best-in-class" banned-phrase hit + em-dash saturation in `Plans/canvas/01-vision.md`.
+
+Conflict surface: fully disjoint trees — Go-auth (366) vs web (380) vs one markdown file (342). Shared touch-points limited to CHANGELOG (append-safe). Zero migrations in this batch (366 is filesystem-keystore, no DB). 368 deliberately excluded — shares `cmd/atlas` CLI registration with 366. Open-questions check: CLEAN (the "key rotation" mentions in 11-open-questions are under resolved OQ #21; 366 implements the ADR-0003-deferred piece, not an open decision).
+
+| Row | Transition              | Evidence                                                                                                                                  |
+| --- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| 366 | `ready` → `in-progress` | batch 162 claim-stake · branch `auth/366-jwt-key-rotation` · slice 327 M-1 · `internal/auth/keystore/fsstore` Rotate/Prune + `atlas keys` |
+| 380 | `ready` → `in-progress` | batch 162 claim-stake · branch `frontend/380-dashboard-sc-fanout` · slice 332 F-BFF-2 · `web/app/dashboard` SC + Promise.all fan-out      |
+| 342 | `ready` → `in-progress` | batch 162 claim-stake · branch `docs/342-vision-canvas-tone` · slice 337 spillover · `Plans/canvas/01-vision.md` tone-only rewrite        |
 
 ## Drift detected — 2026-05-29 (batch 161 claim-stake · slice 379)
 
