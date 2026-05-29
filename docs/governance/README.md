@@ -29,10 +29,11 @@ operational detail.
 
 ## Current documents
 
-| Document                                                                           | Purpose                                                                          | Filed by  | Reviewed  |
-| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------- | --------- |
-| [`incident-response.md`](./incident-response.md)                                   | How the project responds to security and operational incidents affecting itself. | Slice 372 | Annual    |
-| [`board-narrative-tone-anti-patterns.md`](./board-narrative-tone-anti-patterns.md) | Canonical list of phrases the board-narrative AI-assist system prompt rejects.   | Slice 182 | As-needed |
+| Document                                                                           | Purpose                                                                                                             | Filed by  | Reviewed  |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | --------- | --------- |
+| [`incident-response.md`](./incident-response.md)                                   | How the project responds to security and operational incidents affecting itself.                                    | Slice 372 | Annual    |
+| [`business-continuity.md`](./business-continuity.md)                               | RTO / RPO targets and restore procedures for the project's own properties; bus-factor & succession operationalized. | Slice 373 | Annual    |
+| [`board-narrative-tone-anti-patterns.md`](./board-narrative-tone-anti-patterns.md) | Canonical list of phrases the board-narrative AI-assist system prompt rejects.                                      | Slice 182 | As-needed |
 
 ---
 
@@ -45,7 +46,6 @@ success criterion.
 
 | Slice | Document (path tbd)                                 | Purpose                                                                               | Audit finding |
 | ----- | --------------------------------------------------- | ------------------------------------------------------------------------------------- | ------------- |
-| 373   | `docs/governance/business-continuity.md`            | RTO / RPO targets and recovery procedures for the project's own properties.           | 329 H-2       |
 | 374   | `docs/governance/access-review-cadence.md`          | Documented cadence for reviewing GitHub org / CI / third-party-service access rights. | 329 H-3       |
 | 375   | `docs/governance/data-retention-disposal-policy.md` | Retention periods and disposal procedures per data class.                             | 329 H-4       |
 | 376   | `docs/governance/asset-inventory.md`                | Enumerated project assets with owner, classification, and criticality.                | 329 H-5       |
