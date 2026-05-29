@@ -141,13 +141,38 @@ delegation equivalence, and JSON escaping.
 
 ## D9 — Coverage floor (P0-369-5)
 
-No package can regress below its floor from this migration. Removing a _covered_
-trivial helper (the helpers were small and frequently exercised) drops equal
-counts from a package's covered and total statements; removing covered
-statements never lowers the coverage percentage. The metrics floor (85, the
-only active floor on a unit-coverable touched package) is unaffected — its two
-unit tests now cover `httpresp` instead, and the 4 deleted statements were
-covered. No threshold lift is needed, so the slice-069 ratchet is untouched.
+**CORRECTION (post-CI).** The original claim here — "removing covered trivial
+statements never lowers a package's percentage" — is **WRONG for a sub-100%
+package**, and the slice-069 merged-coverage gate correctly caught it on PR #874:
+
+```
+coverage-gate FAILURES:
+  internal/api/authzmw: got 69.0% < floor 69.0%
+```
+
+The arithmetic: `internal/api/authzmw` sat at ~69% coverage. Its local
+`writeJSON`/`writeError` were 100%-covered lines. Removing N fully-covered
+statements from a package at coverage ratio `c/t` yields `(c−N)/(t−N)`, which is
+LOWER than `c/t` whenever `c/t < 1` (you strip the high-coverage lines and leave
+the lower-covered remainder behind). For authzmw this dragged the aggregate just
+under the 69.0% floor. The "covered and total drop by equal counts so the ratio
+holds" reasoning only holds for a package already at 100% — a false generalisation.
+
+**Fix (per CLAUDE.md testing discipline — ratchet is monotonic-increase-only, so
+the floor is NOT lowered):** added `TestIsCredentialPresent` to
+`internal/api/authzmw/middleware_test.go`, exercising the previously-0%-covered
+exported `IsCredentialPresent` helper (both absent and present branches + a
+context-isolation assertion). This lifts authzmw unit coverage from 69.0% →
+**75.9%**, restoring headroom above the floor. The test asserts real behavior
+(the helper faithfully reflects `authctx.CredentialFromContext` and reads
+per-request context, not process-global state), not mere line execution.
+
+The `metrics` floor (85) was NOT tripped — its two relocated unit tests still
+exercise the same logic via `httpresp`, and `go test ./internal/api/metrics/`
+stays above 85 on the merged profile. authzmw was the single sub-floor case
+because it was the lowest-coverage touched package with a tight (floor == measured)
+margin. No threshold was lifted (the ratchet forbids it for a refactor regression);
+the floor stays at 69.0 and the package now measures comfortably above it.
 `httpresp` is left out of `coverage-thresholds.json` for parity with `httperr`
 (also not listed); it sits at 100% regardless.
 
@@ -161,4 +186,7 @@ covered. No threshold lift is needed, so the slice-069 ratchet is untouched.
   were trivial `httperr.WriteInternal` delegates; no sentinel-mapping helper
   touched. ✅
 - **P0-369-4** (no auto-merge): PR opened for review, not merged. ✅
-- **P0-369-5** (no coverage regression): see D9. ✅
+- **P0-369-5** (no coverage regression): the merged-coverage gate caught an
+  authzmw regression (sub-100%-package arithmetic — see D9 correction); fixed by
+  adding a meaningful `IsCredentialPresent` test that lifts authzmw to 75.9%,
+  above the unchanged 69.0% floor. Floor NOT lowered (ratchet is monotonic). ✅

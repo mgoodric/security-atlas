@@ -139,6 +139,42 @@ func TestMiddleware_NoTenantCredentialDenied(t *testing.T) {
 	}
 }
 
+// TestIsCredentialPresent covers the exported helper the matrix
+// integration test relies on to assert a credential is established on
+// the context before authz runs. The contract is a faithful reflection
+// of authctx.CredentialFromContext: false when no credential was placed
+// on the request context, true once one has been. Both branches are
+// asserted so the helper can't silently invert (a false "present" would
+// let the matrix test pass against an unauthenticated request).
+func TestIsCredentialPresent(t *testing.T) {
+	t.Parallel()
+
+	// Absent: a bare request has no credential on its context.
+	bare := httptest.NewRequest(http.MethodGet, "/v1/risks", nil)
+	if authzmw.IsCredentialPresent(bare) {
+		t.Fatalf("IsCredentialPresent = true for a request with no credential in context")
+	}
+
+	// Present: once authctx.WithCredential seeds the context, the helper
+	// reports true.
+	cred := credstore.Credential{
+		ID:       "key_present",
+		TenantID: uuid.NewString(),
+		UserID:   "key_present",
+	}
+	withCred := bare.WithContext(authctx.WithCredential(bare.Context(), cred))
+	if !authzmw.IsCredentialPresent(withCred) {
+		t.Fatalf("IsCredentialPresent = false after authctx.WithCredential seeded the context")
+	}
+
+	// The original request is unchanged (WithContext returns a copy) —
+	// guards against the helper reading process-global state instead of
+	// the per-request context.
+	if authzmw.IsCredentialPresent(bare) {
+		t.Fatalf("IsCredentialPresent = true on the original request after deriving a credentialed copy")
+	}
+}
+
 // TestMiddleware_CatalogReadAllowedForAnyCredential covers the public
 // catalog allow rule in defaults.rego -- viewer-class credentials can
 // read /v1/anchors etc.
