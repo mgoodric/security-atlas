@@ -205,6 +205,14 @@ openapi-drift-check:
 audit-rls:
     ./scripts/audit-rls.sh
 
+# Assert every Go package carrying a `//go:build integration` build tag is
+# enrolled in the integration job's explicit package list in
+# .github/workflows/ci.yml. Fails (naming the missing package) when a
+# tagged package is neither listed nor on the slice-345 KNOWN_UNENROLLED
+# allowlist. Slice 334 framework-audit finding I-1; slice 345.
+audit-integration-enrolment:
+    ./scripts/audit-integration-enrolment.sh
+
 # Import an SCF catalog JSON release into Postgres. DATABASE_URL must point
 # at a role with INSERT on scf_anchors (atlas_migrate by default).
 import-scf path:
