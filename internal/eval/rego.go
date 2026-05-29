@@ -27,6 +27,8 @@ import (
 
 	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/open-policy-agent/opa/v1/rego"
+
+	"github.com/mgoodric/security-atlas/internal/eval/regocache"
 )
 
 // ErrRegoQuery wraps any failure evaluating a Rego evidence query: a compile
@@ -78,15 +80,43 @@ type regoInputRecord struct {
 	ObservedAt time.Time `json:"observed_at"`
 }
 
+// evidenceQueryModuleName is the fixed module name passed to OPA. Kept as
+// a const so it participates in the cache key deterministically — every
+// evalRegoQuery call uses the same module name, so the key varies only
+// with the policy text + capabilities.
+const evidenceQueryModuleName = "evidence_query.rego"
+
+// defaultRegoCache caches compiled evidence-query policies across
+// evalRegoQuery calls. Package-level because the engine factory pattern
+// (NewEngineFactory) constructs a fresh Engine per evaluation; a
+// per-Engine cache would never warm. Slice 332 audit F-OPA-1 closure.
+//
+// Cache lifetime = process lifetime. Bounded in practice by the active
+// control population (~200 at v1 scale per slice doc 377 Notes #1); an
+// LRU eviction policy is a v2 add-on if custom-control authoring grows
+// the policy population unbounded.
+var defaultRegoCache = regocache.New()
+
 // evalRegoQuery compiles and evaluates a Rego evidence query against the
 // in-window records. Returns the policy's `result` assignment as a string.
 //
 // SANDBOX CONTRACT (see package doc): input is ONLY {records: [...]}, no
 // store, no custom functions, capability set restricted so network/runtime
 // builtins fail at compile time.
+//
+// PERFORMANCE: the compiled query is cached in defaultRegoCache keyed by
+// (policy text || capability fingerprint). The first call for a given
+// (policy, capabilities) pair compiles via PrepareForEval; subsequent
+// calls re-use the cached *rego.PreparedEvalQuery. Closes slice 332
+// audit F-OPA-1.
 func evalRegoQuery(ctx context.Context, policy string, records []inWindowRecord) (string, error) {
 	if policy == "" {
 		return "", fmt.Errorf("%w: policy is empty", ErrRegoQuery)
+	}
+
+	q, err := defaultRegoCache.GetOrPrepare(ctx, policy, evalSandboxCapabilities(), regoQuery, evidenceQueryModuleName)
+	if err != nil {
+		return "", fmt.Errorf("%w: compile: %v", ErrRegoQuery, err)
 	}
 
 	inRecs := make([]regoInputRecord, len(records))
@@ -95,17 +125,7 @@ func evalRegoQuery(ctx context.Context, policy string, records []inWindowRecord)
 	}
 	input := map[string]interface{}{"records": inRecs}
 
-	q, err := rego.New(
-		rego.Query(regoQuery),
-		rego.Module("evidence_query.rego", policy),
-		rego.Input(input),
-		rego.Capabilities(evalSandboxCapabilities()),
-	).PrepareForEval(ctx)
-	if err != nil {
-		return "", fmt.Errorf("%w: compile: %v", ErrRegoQuery, err)
-	}
-
-	rs, err := q.Eval(ctx)
+	rs, err := q.Eval(ctx, rego.EvalInput(input))
 	if err != nil {
 		return "", fmt.Errorf("%w: eval: %v", ErrRegoQuery, err)
 	}

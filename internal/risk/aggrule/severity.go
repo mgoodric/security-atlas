@@ -18,6 +18,7 @@ import (
 	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/open-policy-agent/opa/v1/rego"
 
+	"github.com/mgoodric/security-atlas/internal/eval/regocache"
 	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
@@ -103,6 +104,16 @@ func sandboxCapabilities() *ast.Capabilities {
 	return caps
 }
 
+// customSeverityModuleName is the fixed module name passed to OPA. Kept
+// as a const so it participates in the cache key deterministically.
+const customSeverityModuleName = "custom_severity.rego"
+
+// defaultRegoCache caches compiled custom_rego severity policies across
+// evalCustomRego calls. Package-level (distinct from internal/eval's
+// cache — different policy population, separate cache surface; see D4 of
+// docs/audit-log/377). Slice 332 audit F-OPA-1 closure for this site.
+var defaultRegoCache = regocache.New()
+
 // evalCustomRego compiles and evaluates a tenant-authored Rego policy.
 //
 // SANDBOX CONTRACT (the AI-assist-boundary guarantee):
@@ -112,9 +123,20 @@ func sandboxCapabilities() *ast.Capabilities {
 //     even compilable. A policy referencing them fails at PrepareForEval.
 //   - The policy bytes travel WITH the rule (aggregation_rules.rule_body) so
 //     nothing is fetched at evaluation time.
+//
+// PERFORMANCE: the compiled query is cached in defaultRegoCache keyed by
+// (policy text || capability fingerprint). The first call for a given
+// (policy, capabilities) pair compiles via PrepareForEval; subsequent
+// calls re-use the cached *rego.PreparedEvalQuery. Closes slice 332
+// audit F-OPA-1 at this call site.
 func evalCustomRego(ctx context.Context, policy string, scores []ChildSeverity) (int, error) {
 	if policy == "" {
 		return 0, fmt.Errorf("%w: policy is empty", ErrCustomRego)
+	}
+
+	q, err := defaultRegoCache.GetOrPrepare(ctx, policy, sandboxCapabilities(), customRegoQuery, customSeverityModuleName)
+	if err != nil {
+		return 0, fmt.Errorf("%w: compile: %v", ErrCustomRego, err)
 	}
 
 	sevInts := make([]interface{}, len(scores))
@@ -126,17 +148,7 @@ func evalCustomRego(ctx context.Context, policy string, scores []ChildSeverity) 
 		"child_count":      len(scores),
 	}
 
-	q, err := rego.New(
-		rego.Query(customRegoQuery),
-		rego.Module("custom_severity.rego", policy),
-		rego.Input(input),
-		rego.Capabilities(sandboxCapabilities()),
-	).PrepareForEval(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("%w: compile: %v", ErrCustomRego, err)
-	}
-
-	rs, err := q.Eval(ctx)
+	rs, err := q.Eval(ctx, rego.EvalInput(input))
 	if err != nil {
 		return 0, fmt.Errorf("%w: eval: %v", ErrCustomRego, err)
 	}
