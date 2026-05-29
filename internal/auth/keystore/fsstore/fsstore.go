@@ -47,6 +47,32 @@ const keyFileExt = ".key"
 // a load-bearing invariant.
 const privateKeyFileMode os.FileMode = 0o600
 
+// DefaultRotationOverlap is the slice-366 default overlap window: how
+// long a rotated-out key is retained as a verification key beyond the
+// access-token lifetime before it becomes eligible for pruning. 24h
+// matches ADR-0003 § Key rotation strategy (24× the 1h access-token
+// TTL). Operators can lengthen it; P0-366-3 forbids shrinking the
+// effective retention below the access-token lifetime.
+const DefaultRotationOverlap = 24 * time.Hour
+
+// DefaultAccessTokenLifetime mirrors internal/api/oauth.AccessTokenLifetime
+// (1h). Duplicated here as a const rather than imported because the
+// keystore package must not depend on the api/oauth package (layering:
+// oauth depends on keystore, never the reverse). The prune cutoff is
+// now - AccessTokenLifetime - RotationOverlap, so a token in flight when
+// its signing key rotates out keeps verifying for its full lifetime plus
+// the overlap window (P0-366-3).
+const DefaultAccessTokenLifetime = time.Hour
+
+// PruneCutoff returns the timestamp before which keys are eligible for
+// pruning: now - accessTokenLifetime - overlap. Keys whose KeyID
+// timestamp is at or before the returned instant may be pruned (except
+// the active signer — P0-366-2). Centralised so the CLI and the
+// scheduled job compute the same cutoff.
+func PruneCutoff(now time.Time, accessTokenLifetime, overlap time.Duration) time.Time {
+	return now.Add(-accessTokenLifetime).Add(-overlap)
+}
+
 // Store is the concrete filesystem-backed KeyStore.
 type Store struct {
 	dir string
@@ -105,9 +131,126 @@ func (s *Store) Get(_ context.Context) (keystore.SigningKey, []keystore.Verifica
 	return s.signing, vks, nil
 }
 
-// Rotate is the interface stub — see ADR-0003 § Key rotation strategy.
+// Rotate generates a fresh ES256 keypair, persists it to disk at mode
+// 0600 (atomic temp+rename, same discipline as generate), and reloads
+// the in-memory state so the new key becomes the active signer while
+// every prior key remains in the verification set for the overlap
+// window (slice 366 AC-1).
+//
+// Rotate relies on the KeyID format (yyyymmddThhmmssZ, 1-second
+// granularity) being chronological-lexicographic: writing a newer KeyID
+// makes it the alphabetically-last filename, which load() treats as the
+// active signer. Two rotations within the same wall-clock second would
+// collide on the KeyID; the retry below regenerates with a bumped
+// timestamp until the new KeyID sorts strictly after the current
+// signer. P0-366-1: this method NEVER logs private key material.
 func (s *Store) Rotate(_ context.Context) error {
-	return keystore.ErrRotateUnsupported
+	s.mu.RLock()
+	prevKID := s.signing.KeyID
+	s.mu.RUnlock()
+
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return fmt.Errorf("fsstore: rotate generate: %w", err)
+	}
+	kid := newKeyID()
+	// Guarantee the new KeyID sorts strictly after the current signer so
+	// load() promotes it to active. If a rotation lands in the same
+	// second as the previous key's KeyID, bump to the next second.
+	for kid <= prevKID {
+		kid = nextKeyIDAfter(kid)
+	}
+	path := filepath.Join(s.dir, kid+keyFileExt)
+	if err := writePrivateKey(path, priv); err != nil {
+		return err
+	}
+	// Reload so the in-memory signing/verify reflect the new + retained
+	// keys exactly as a fresh boot would see them.
+	if err := s.load(); err != nil {
+		return fmt.Errorf("fsstore: rotate reload: %w", err)
+	}
+	return nil
+}
+
+// Prune removes keypair files whose KeyID timestamp is at or before
+// cutoff, EXCEPT the active signing key, which is never removed
+// regardless of its age (P0-366-2). It returns the KeyIDs that were
+// removed and reloads the in-memory state so pruned keys drop out of the
+// verification set. Callers compute cutoff as
+// now - AccessTokenLifetime - RotationOverlap (P0-366-3 guarantees the
+// minimum retention exceeds any in-flight token's lifetime).
+//
+// A KeyID that does not parse as the expected timestamp format is left
+// untouched (defensive: never delete a file we cannot reason about).
+func (s *Store) Prune(_ context.Context, cutoff time.Time) ([]string, error) {
+	s.mu.RLock()
+	signingKID := s.signing.KeyID
+	verify := make([]keystore.VerificationKey, len(s.verify))
+	copy(verify, s.verify)
+	s.mu.RUnlock()
+
+	removed := make([]string, 0)
+	for _, vk := range verify {
+		if vk.KeyID == signingKID {
+			// P0-366-2: never prune the active signer.
+			continue
+		}
+		issued, ok := parseKeyID(vk.KeyID)
+		if !ok {
+			continue
+		}
+		if issued.After(cutoff) {
+			continue
+		}
+		path := filepath.Join(s.dir, vk.KeyID+keyFileExt)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return removed, fmt.Errorf("fsstore: prune remove %s: %w", vk.KeyID, err)
+		}
+		removed = append(removed, vk.KeyID)
+	}
+	if len(removed) > 0 {
+		if err := s.load(); err != nil {
+			return removed, fmt.Errorf("fsstore: prune reload: %w", err)
+		}
+	}
+	return removed, nil
+}
+
+// KeyInfo is the operator-facing description of one stored keypair. It
+// carries ONLY the KeyID, the key's age, and its role — never any
+// private (or public) key material (P0-366-1). It is the shape the
+// `atlas-cli keys list` command renders.
+type KeyInfo struct {
+	KeyID   string
+	Age     time.Duration
+	Signing bool
+}
+
+// List returns one KeyInfo per stored keypair, oldest first (the same
+// chronological-lexicographic order load() uses). Exactly one entry has
+// Signing=true — the alphabetically-last KeyID. Age is computed from the
+// KeyID timestamp; a KeyID that does not parse reports Age 0.
+func (s *Store) List(_ context.Context) ([]KeyInfo, error) {
+	s.mu.RLock()
+	signingKID := s.signing.KeyID
+	verify := make([]keystore.VerificationKey, len(s.verify))
+	copy(verify, s.verify)
+	s.mu.RUnlock()
+
+	now := time.Now()
+	infos := make([]KeyInfo, 0, len(verify))
+	for _, vk := range verify {
+		var age time.Duration
+		if issued, ok := parseKeyID(vk.KeyID); ok {
+			age = now.Sub(issued)
+		}
+		infos = append(infos, KeyInfo{
+			KeyID:   vk.KeyID,
+			Age:     age,
+			Signing: vk.KeyID == signingKID,
+		})
+	}
+	return infos, nil
 }
 
 // load rescans the directory for .key files and rehydrates the keypair
@@ -227,11 +370,38 @@ func writePrivateKey(path string, priv *ecdsa.PrivateKey) error {
 	return nil
 }
 
+// keyIDLayout is the time layout for KeyID strings. 16 ASCII chars,
+// lexicographically sortable, no slashes or spaces.
+const keyIDLayout = "20060102T150405Z"
+
 // newKeyID returns a deterministic-by-time KeyID that sorts in
 // chronological order so the latest-generated key is also the
 // alphabetically-last filename.
 func newKeyID() string {
-	// Format: yyyymmddThhmmssZ — RFC3339 minus separators. 16 ASCII
-	// chars, lexicographically sortable, no slashes or spaces.
-	return time.Now().UTC().Format("20060102T150405Z")
+	return time.Now().UTC().Format(keyIDLayout)
+}
+
+// parseKeyID parses a KeyID back into the UTC instant it encodes. The
+// second return value is false for any string that does not match the
+// keyIDLayout (e.g. an operator-renamed file); callers treat an
+// unparseable KeyID as "do not reason about its age" — never prune it.
+func parseKeyID(kid string) (time.Time, bool) {
+	t, err := time.Parse(keyIDLayout, kid)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// nextKeyIDAfter returns the KeyID one second after the given KeyID.
+// Used by Rotate to break a same-second collision so the freshly
+// generated key sorts strictly after the current signer. If kid does
+// not parse, it falls back to the current time (which is necessarily
+// later than any sub-current KeyID in practice).
+func nextKeyIDAfter(kid string) string {
+	t, ok := parseKeyID(kid)
+	if !ok {
+		return newKeyID()
+	}
+	return t.Add(time.Second).Format(keyIDLayout)
 }

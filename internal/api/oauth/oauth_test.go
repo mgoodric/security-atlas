@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	jose "github.com/go-jose/go-jose/v4"
@@ -67,6 +68,61 @@ func TestJWKSHandlerReturnsKeys(t *testing.T) {
 		if k.KeyID == "" {
 			t.Fatal("JWK kid missing")
 		}
+	}
+}
+
+// Slice 366 AC-6: after the keystore rotates, the JWKS endpoint
+// advertises BOTH the new active key AND the retained old key for the
+// overlap window. Verifiers caching JWKS thus accept tokens signed with
+// either key until the old key is pruned.
+func TestJWKSPublishesBothKeysAfterRotation(t *testing.T) {
+	t.Parallel()
+	store, err := fsstore.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("fsstore.Open: %v", err)
+	}
+	skBefore, _, _ := store.Get(context.Background())
+
+	h := oauth.New(store, oauth.Config{Issuer: testIssuer})
+	r := newRouter(h)
+
+	// Rotate — the new key becomes active, the old key is retained.
+	// KeyID granularity is one second; advance a full second so the new
+	// KeyID sorts strictly after the original.
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)) + 5*time.Millisecond)
+	if err := store.Rotate(context.Background()); err != nil {
+		t.Fatalf("Rotate: %v", err)
+	}
+	skAfter, _, _ := store.Get(context.Background())
+	if skAfter.KeyID == skBefore.KeyID {
+		t.Fatalf("rotation did not change the active key")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var set jose.JSONWebKeySet
+	if err := json.Unmarshal(w.Body.Bytes(), &set); err != nil {
+		t.Fatalf("unmarshal JWK Set: %v", err)
+	}
+	if len(set.Keys) != 2 {
+		t.Fatalf("expected 2 keys in JWKS after rotation, got %d", len(set.Keys))
+	}
+	kids := map[string]bool{}
+	for _, k := range set.Keys {
+		if !k.IsPublic() {
+			t.Fatal("JWKS must contain only public keys after rotation")
+		}
+		kids[k.KeyID] = true
+	}
+	if !kids[skBefore.KeyID] {
+		t.Fatalf("JWKS missing pre-rotation kid %q", skBefore.KeyID)
+	}
+	if !kids[skAfter.KeyID] {
+		t.Fatalf("JWKS missing post-rotation kid %q", skAfter.KeyID)
 	}
 }
 

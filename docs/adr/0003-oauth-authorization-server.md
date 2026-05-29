@@ -1,6 +1,6 @@
 # ADR 0003 — OAuth 2.0 Authorization Server with JWT access tokens carrying tenant-in-claim
 
-**Status:** Accepted · Scaffolding shipped (slice 187, 2026-05-20)
+**Status:** Accepted · Scaffolding shipped (slice 187, 2026-05-20) · Key rotation implemented (slice 366, 2026-05-29)
 
 **Date:** 2026-05-20
 
@@ -88,12 +88,20 @@ The decision favors the modern default over the conservative one because atlas h
 
 ## Key rotation strategy
 
-Slice 187 ships multi-key data structures + multi-key JWKS support so rotation can be added without refactoring. The end-to-end rotation flow itself is a follow-on slice. The designed-shape decisions (recorded here so the follow-on slice has a starting point):
+**Status: implemented end-to-end (slice 366, 2026-05-29).** Slice 187 shipped the multi-key data structures + multi-key JWKS support; slice 366 lit up the orchestration (`fsstore.Store.Rotate` / `Prune` / `List`, the `atlas-cli keys` commands, the scheduled rotation job in `cmd/atlas`, and the operational runbook). Closes the slice-327 security audit finding M-1.
 
-- **Cadence:** 90 days. NIST SP 800-57 recommends 1-2 years for signing keys; AWS KMS defaults to 365d; GCP KMS supports 30d/90d/365d. 90d is a conservative midpoint operators can lengthen at config time.
-- **Overlap window:** 24 hours. Access tokens default to 1h TTL (slice 188); 24h is 24× that — sufficient time for every refresh-token holder to obtain a new access token under the new key before the old key sunsets.
+The shipped shape:
+
+- **Cadence:** annual default (`ATLAS_KEY_ROTATION_INTERVAL`, Go duration string). The slice-366 spec landed on annual as the v1 default — NIST SP 800-57 recommends 1-3 years for ES256 signing keys, and annual is comfortably inside that band for a forward-security rotation (operators on high-security deployments shorten via the env var, e.g. `2160h` for 90 days). This supersedes the 90-day figure penciled in the original draft of this section; the discrepancy and its rationale are recorded in `docs/audit-log/366-jwt-key-rotation-decisions.md` (D2).
+- **Overlap window:** 24 hours (`fsstore.DefaultRotationOverlap`). Access tokens default to 1h TTL (slice 188); 24h is 24× that — sufficient time for every refresh-token holder to obtain a new access token under the new key before the old key sunsets. The prune cutoff is `now − AccessTokenLifetime − overlap`, so no JWT in flight is ever invalidated mid-validation (P0-366-3).
 - **JWKS cache TTL:** 1 hour (`Cache-Control: max-age=3600` on JWKS responses). Verifiers re-fetch hourly; during the 24h overlap they will see both keys ~24×.
-- **Existing token treatment:** tokens signed with the rotated-out key keep working until natural expiry. NO revocation on rotation. Rotation is for forward security (defense against undiscovered key exposure), not for incident response — incident response uses `/oauth/revoke` (slice 190).
+- **Existing token treatment:** tokens signed with the rotated-out key keep working until natural expiry. NO revocation on rotation. Rotation is for forward security (defense against undiscovered key exposure), not for incident response — incident response uses `/oauth/revoke` (slice 190) or an emergency prune-with-`--overlap 0` (see the runbook).
+- **Audit trail:** every rotation writes a structured platform-level audit log line (`audit_event=key_rotation`) carrying the previous + new signing KeyIDs. Key material never appears in any log (P0-366-1 / P0-187-6).
+- **Active-key protection:** the active signing key is never pruned regardless of age (P0-366-2).
+
+**Operational guide:** `docs/runbooks/jwt-key-rotation.md` covers routine annual rotation, manual rotation, emergency (suspected-compromise) rotation, key recovery, and JWKS publication impact.
+
+**Revisit (deferred to v3):** a KMS/HSM-backed keystore backend (AWS KMS, GCP KMS, PKCS#11 HSM) where the private key never leaves the security module and rotation is the KMS's responsibility. The `keystore.KeyStore` interface was designed (slice 187) so a KMS backend slots in without changing any caller; the v1 filesystem backend is the self-host-friendly default. Tracked as a separate v3 ADR per the slice-366 decisions log.
 
 ## Endpoint exemptions (auth middleware)
 
