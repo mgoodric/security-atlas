@@ -3,7 +3,19 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 172 claim-stake — slice 314 → in-progress (N=1 solo) · oauth coverage lift to 70%)
+**Last reconciled:** 2026-05-30 (batch 172 merged — slice 314 on main; oauth coverage 15.7%→74.7%; surfaced+fixed a 5-slice-old device-flow test bug)
+
+## Drift detected — 2026-05-30 (parallel batch 172 merged · slice 314 solo)
+
+- **314** coverage lift `internal/api/oauth` → merged at `63eb82f6` via #909. Lifted merged coverage **15.7% → 74.7%** (≥70% AC-1). Enrolled `internal/api/oauth` in CI's integration job (its slice-187/188/189/190/191 integration suites carried `//go:build integration` but were never in the CI package list — never run) and removed it from `KNOWN_UNENROLLED`. Added 6 unit suites (introspect/revoke/authorize/wellknown/device/helpers) + a real-Postgres DBUserResolver integration suite. **Enrolling the dormant suite surfaced + fixed a 5-slice-old device-flow test path bug (404'd undetected)** — concrete validation of slice 390's premise. Floor set to 72. Merged CLEAN after a squash-rebase to clear a branch-scoped GitGuardian flag on a since-neutralized fixture (HEAD always clean).
+
+**Coordination resolved:** 314 owns the `internal/api/oauth` enrolment in ci.yml + the `KNOWN_UNENROLLED` removal. **Slice 401 (drain batch 1) must now rebase around this** — oauth is already enrolled, so 401's batch-1 set effectively drops to oidc/jwtmw/users/period (4 pkgs); its doc's oauth line is satisfied by 314.
+
+**POOL STATUS:** loop-ready = 401 (drain batch 1, rebase per above), 409 (dashboard contract-tier / 394-unblock, JUDGMENT). NO-AUTO-MERGE / maintainer-gated: 400 (cosign spike — decision gate). Sequential/blocked: 402-408 (drain batches, gated on prior), 394 (blocked on 409).
+
+| Row | Transition               | Evidence                                                                                     |
+| --- | ------------------------ | -------------------------------------------------------------------------------------------- |
+| 314 | `in-progress` → `merged` | merged at `63eb82f6` via #909 (oauth 15.7%→74.7%; device-flow bug fixed; enrols oauth in CI) |
 
 ## Drift detected — 2026-05-30 (batch 172 claim-stake · slice 314 solo)
 
