@@ -25,6 +25,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
 )
@@ -88,6 +89,13 @@ func newHandler(t *testing.T, tenantID uuid.UUID) (*admincreds.Handler, *apikeys
 			next.ServeHTTP(w, req.WithContext(ctx))
 		})
 	})
+	// Mirror the production middleware stack: tenancymw derives the tenant
+	// from the injected credential and seeds tenancy.WithTenant on the
+	// request context, which the store's ApplyTenant requires (slice 033).
+	// Without it every handler that opens a tenant-scoped tx fails with
+	// "tenancy: no tenant in context" — the failure these never-CI-run
+	// tests had latently carried since the slice-033 contract landed.
+	r.Use(tenancymw.Middleware)
 	r.Post("/v1/admin/credentials", h.Issue)
 	r.Get("/v1/admin/credentials", h.List)
 	r.Post("/v1/admin/credentials/{id}/rotate", h.Rotate)
