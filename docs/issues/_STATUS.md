@@ -3,7 +3,22 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 175 claim-stake — slice 403 → in-progress (N=1 solo) · integration-enrolment drain batch 3)
+**Last reconciled:** 2026-05-30 (batch 175 merged — slice 403 on main; drain 15/38; 404 unblocked)
+
+## Drift detected — 2026-05-30 (parallel batch 175 merged · slice 403 solo)
+
+- **403** integration-enrolment drain batch 3 → merged at `afa262ea` via #918. Enrolled admin-users/aggregation/api-root (adminusers/aggregationrules/api/me/decisions); all 5 green on first run — no breakage this batch (clean, like 401; unlike 314/402 which each found a real bug). api-root enrolled as bare `./internal/api` (mirrors `./internal/audit` precedent, NOT recursive `/...`). `KNOWN_UNENROLLED` 28→23. Real floors (adminusers 61, aggregationrules 59, me 43, decisions 18; api-root unchanged 72) — all merged==own-suite, phantom-free. No spillover. (decisions @ 18% own — most handlers 0% — noted as a future coverage candidate.)
+
+Backlog-drain progress: **15 of 38** packages drained; 23 remain across batches 404-408.
+
+**Now-unblocked:** 404 (drain batch 4 — api domain handlers A: board/calendar/policies/vendors/search) flips `not-ready` → `ready` (dep #403 merged).
+
+**POOL STATUS:** loop-ready = 404 (drain batch 4), 409 (dashboard contract-tier / 394-unblock, JUDGMENT). Maintainer-gated: 400 (cosign spike). Sequential: 405-408. Blocked: 394 (on 409).
+
+| Row | Transition               | Evidence                                                                          |
+| --- | ------------------------ | --------------------------------------------------------------------------------- |
+| 403 | `in-progress` → `merged` | merged at `afa262ea` via #918 (5 pkgs green; KNOWN_UNENROLLED 28→23; no breakage) |
+| 404 | `not-ready` → `ready`    | dep #403 merged — drain batch 4 now pickable                                      |
 
 ## Drift detected — 2026-05-30 (batch 175 claim-stake · slice 403 solo)
 
