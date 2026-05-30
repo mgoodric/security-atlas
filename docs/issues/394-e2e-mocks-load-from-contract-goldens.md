@@ -72,6 +72,11 @@ follow-on.
   risks, audit). Filing more contract-tier rollout slices for those
   routes is the unblocking precondition; doing this work against only 4
   goldens is premature (D5 reason 1).
+- **#409** (contract-tier rollout: dashboard + high-traffic e2e routes) —
+  the concrete unblocker filed 2026-05-30. It records the dashboard/
+  controls/risks/audit goldens (resolving the ADR-0007 DB-seam constraint
+  per-endpoint) and flips THIS slice to `ready` once coverage is
+  sufficient. 394 stays `blocked` until #409 lands.
 
 ## Cross-references
 
