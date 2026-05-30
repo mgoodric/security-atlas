@@ -1310,32 +1310,24 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    # Slice 387 — ADVISORY (continue-on-error). The harness itself is
-    # proven: the slice-153 logo-render-production-build.spec.ts guard runs
-    # GREEN against the booted standalone server in this leg (build +
-    # standalone boot + public/ copy all work). The companion slice-146
-    # bff-cookie-production-build.spec.ts is NOT yet runnable — its body
-    # carries two dev-server-shaped assumptions that only surface now that
-    # the spec finally executes against a real standalone server:
-    #   (1) it asserts the browser fires `/api/dashboard/` BFF fetches, but
-    #       under the PRODUCTION build the dashboard panels are
-    #       server-rendered (RSC), so zero client-side BFF calls fire — the
-    #       page renders fully authenticated (auth works; this is NOT the
-    #       slice-146 cookie regression, which would have shown a login
-    #       page), so `bffResponses.length > 0` is a false assertion for the
-    #       prod build;
-    #   (2) it calls `context.addCookies` with
-    #       `domain: new URL(authedPage.url()).hostname` before any
-    #       navigation, so `authedPage.url()` is `about:blank`, the hostname
-    #       is empty, and Playwright rejects the cookie.
-    # Fixing those is a spec-BODY change, out of slice 387's scope (the
-    # brief forbids touching the spec bodies). Filed as spillover slice 399
-    # (docs/issues/399-bff-cookie-prod-build-spec-body-fix.md). Until it
-    # lands, this leg runs ONLY the logo spec and is non-blocking so the
-    # proven harness ships. Promote to blocking (drop continue-on-error,
-    # add bff-cookie-production-build.spec.ts back to the run) when slice
-    # 399 corrects the body.
-    continue-on-error: true
+    # Slice 399 — BLOCKING. This leg builds + boots the Next.js
+    # `output: "standalone"` server (slice 387 harness) and runs BOTH
+    # prod-build-only regression specs against it with ATLAS_PROD_BUILD=1:
+    #   - logo-render-production-build.spec.ts (slice 153) — the standalone
+    #     tracer drops web/public/, so the build:standalone `cp` is what
+    #     keeps the logo + OG/Twitter assets resolving.
+    #   - bff-cookie-production-build.spec.ts (slice 146) — the
+    #     NODE_ENV-coupled cookie attribute that dropped the auth cookie on
+    #     the BFF round-trip under the standalone server's plain-HTTP
+    #     transport (proxy → /login → panel JSON.parse of login HTML →
+    #     "Unexpected token '<'"). Slice 399 re-shaped its two assertions to
+    #     be RSC-aware (under the prod build the panels are server-rendered,
+    #     so the guard asserts an authenticated render + absence of the
+    #     JSON-parse-HTML signature rather than a client-side BFF-call
+    #     count) and fixed the addCookies domain (baseURL origin, not
+    #     about:blank). See docs/audit-log/399-bff-cookie-prod-build-spec-fix-decisions.md.
+    # The `continue-on-error` advisory shim that slice 387 carried while the
+    # cookie spec body was deferred is now removed — the leg blocks on red.
     services:
       postgres:
         image: postgres:16-alpine
@@ -1488,15 +1480,13 @@ jobs:
         # rest of the suite). reuseExistingServer=true (CI=true) attaches
         # to the standalone server started above.
         #
-        # Currently runs the slice-153 logo spec ONLY — it passes green and
-        # proves the harness. bff-cookie-production-build.spec.ts (slice
-        # 146) is held back to spillover slice 399 (its body has two
-        # dev-server-shaped assumptions that fail under the prod build; see
-        # the continue-on-error comment on this job). Add it back here when
-        # slice 399 fixes the body, and drop continue-on-error.
+        # Slice 399 — runs BOTH prod-build specs: the slice-153 logo spec
+        # and the slice-146 bff-cookie spec (its body re-shaped to be
+        # RSC-aware). The job is now blocking (continue-on-error removed).
         working-directory: web
         run: |
           npx playwright test \
+            bff-cookie-production-build.spec.ts \
             logo-render-production-build.spec.ts
       - name: Upload Playwright report on failure
         if: failure()
