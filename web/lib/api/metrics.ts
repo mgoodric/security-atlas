@@ -20,7 +20,7 @@
 // Browser-side calls go through the BFF under `/api/metrics/**` (slice
 // 040 pattern) so the bearer cookie never leaves the server.
 
-import { apiBaseURL, APIError } from "@/lib/api";
+import { apiBaseURL, APIError } from "@/lib/api/base";
 
 // ===== wire shapes =====
 

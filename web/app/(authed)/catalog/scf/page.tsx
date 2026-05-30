@@ -23,7 +23,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { APIError, listAnchors } from "@/lib/api";
+import { listAnchors } from "@/lib/api/anchors";
+import { APIError } from "@/lib/api/base";
 import {
   ANCHORS_EXPORT_FORMATS,
   ANCHORS_EXPORT_FORMAT_LABELS,

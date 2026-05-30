@@ -77,15 +77,17 @@ import {
   fetchControlPolicies,
   fetchControlRisks,
   fetchControlState,
-  fetchEvidenceList,
   type ControlCoverage,
   type ControlHistoryResponse,
   type ControlLinkedPoliciesResponse,
   type ControlLinkedRisksResponse,
   type ControlStateResponse,
   type EffectiveScopeResponse,
+} from "@/lib/api/control-detail";
+import {
+  fetchEvidenceList,
   type EvidenceListResponse,
-} from "@/lib/api";
+} from "@/lib/api/evidence";
 import { formatResidualScore } from "@/app/(authed)/risks/filters";
 
 import { classifyControlDetailError } from "../error-classifier";

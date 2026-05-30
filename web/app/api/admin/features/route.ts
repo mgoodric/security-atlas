@@ -8,7 +8,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { listFeatureFlags } from "@/lib/api";
+import { listFeatureFlags } from "@/lib/api/admin";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 export async function GET() {

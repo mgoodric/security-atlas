@@ -71,7 +71,7 @@ import {
   fetchPoliciesList,
   type PoliciesListResponse,
   type Policy,
-} from "@/lib/api";
+} from "@/lib/api/policies";
 
 import {
   ackRateAriaLabel,

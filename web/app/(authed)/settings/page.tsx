@@ -88,9 +88,11 @@ import {
   AdminCredentialIssueResponse,
   AdminCredentialListResponse,
   AdminCredentialRotateResponse,
+} from "@/lib/api/admin";
+import { getSessionMe } from "@/lib/api/board";
+import {
   getMe,
   getMyPreferences,
-  getSessionMe,
   listMySessions,
   MePreferences,
   MeProfile,
@@ -98,7 +100,7 @@ import {
   patchMe,
   patchMyPreferences,
   revokeMySession,
-} from "@/lib/api";
+} from "@/lib/api/me";
 import { applyThemeClass } from "@/lib/theme-class";
 
 import {

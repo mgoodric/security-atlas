@@ -58,7 +58,10 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
-import type { ControlStateResponse, ControlStateEntry } from "@/lib/api";
+import type {
+  ControlStateResponse,
+  ControlStateEntry,
+} from "@/lib/api/control-detail";
 import { relativeTimeOrNever } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 

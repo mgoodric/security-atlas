@@ -22,7 +22,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import type { Risk } from "@/lib/api";
+import type { Risk } from "@/lib/api/risks";
 
 import { countHighSeverityRisks } from "./sidebar-counts";
 

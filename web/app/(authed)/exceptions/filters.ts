@@ -11,7 +11,7 @@
 // honored: no invented columns — only `status` and `control_id` from
 // the wire are referenced.
 
-import type { Exception, ExceptionStatus } from "@/lib/api";
+import type { Exception, ExceptionStatus } from "@/lib/api/exceptions";
 
 /**
  * The "all values" sentinel. Used as the default filter value on every

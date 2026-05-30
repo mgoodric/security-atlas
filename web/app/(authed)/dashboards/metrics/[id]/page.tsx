@@ -47,7 +47,7 @@ import {
   fetchTarget,
   type Observation,
 } from "@/lib/api/metrics";
-import { getSessionMe } from "@/lib/api";
+import { getSessionMe } from "@/lib/api/board";
 
 export default function MetricDetailPage({
   params,

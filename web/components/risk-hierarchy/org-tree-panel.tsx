@@ -27,7 +27,7 @@ import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
-import type { OrgUnit } from "@/lib/api";
+import type { OrgUnit } from "@/lib/api/risk-hierarchy";
 
 type TreeNode = OrgUnit & { children: TreeNode[] };
 

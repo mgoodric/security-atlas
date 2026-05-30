@@ -42,7 +42,7 @@ import {
   CalendarSubscriptionResponse,
   createCalendarSubscription,
   fetchCalendarEvents,
-} from "@/lib/api";
+} from "@/lib/api/calendar";
 
 const ALL_TYPES = ["audit", "exception", "policy", "control"] as const;
 type AllowedType = (typeof ALL_TYPES)[number];

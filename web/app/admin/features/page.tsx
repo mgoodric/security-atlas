@@ -27,7 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FeatureFlag, FeatureFlagListResponse } from "@/lib/api";
+import { FeatureFlag, FeatureFlagListResponse } from "@/lib/api/admin";
 
 async function fetchFlags(): Promise<FeatureFlag[]> {
   const res = await fetch(`/api/admin/features`);

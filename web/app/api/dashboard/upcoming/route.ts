@@ -1,4 +1,4 @@
-import { getUpcoming } from "@/lib/api";
+import { getUpcoming } from "@/lib/api/dashboard";
 import { dashboardProxy } from "../proxy";
 
 // Slice 157 — server-side proxy for GET /v1/upcoming (slice 066 AC-4).

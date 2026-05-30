@@ -29,7 +29,9 @@
 //     - `since`: preset window key (`24h` / `7d` / `30d` / `audit`),
 //       mapped to an RFC3339 cutoff client-side via `sinceCutoff`.
 
-import type { Anchor, EvidenceResultEnum, ScopeCell } from "@/lib/api";
+import type { Anchor } from "@/lib/api/anchors";
+import type { ScopeCell } from "@/lib/api/controls-list";
+import type { EvidenceResultEnum } from "@/lib/api/evidence";
 
 /**
  * The "all values" sentinel. Used as the default filter value on the

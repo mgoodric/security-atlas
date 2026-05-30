@@ -5,7 +5,7 @@
 // slice 149) so the bearer cookie stays httpOnly. The BFF forwards to
 // the slice-028 `POST /v1/audit-periods` backend write path unchanged.
 
-import { APIError } from "@/lib/api";
+import { APIError } from "@/lib/api/base";
 
 // Wire shape mirrors `createReq` in
 // `internal/api/auditperiods/handlers.go` exactly. All four fields are

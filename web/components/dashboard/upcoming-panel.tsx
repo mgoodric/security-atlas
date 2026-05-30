@@ -17,7 +17,7 @@
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
 import { Badge } from "@/components/ui/badge";
-import type { UpcomingResponse } from "@/lib/api";
+import type { UpcomingResponse } from "@/lib/api/dashboard";
 
 function daysUntil(iso: string): number {
   const then = new Date(iso).getTime();

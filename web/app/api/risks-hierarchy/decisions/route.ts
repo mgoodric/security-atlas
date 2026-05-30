@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 
-import { getDecisions } from "@/lib/api";
+import { getDecisions } from "@/lib/api/risk-hierarchy";
 import { hierarchyProxy } from "../proxy";
 
 // Slice 056 — server-side proxy for GET /v1/decisions (slice 055

@@ -29,7 +29,7 @@
 // Constitutional anti-criterion P0-A3 honored: only fields that exist
 // on `policyWire` are referenced — no invented columns.
 
-import type { Policy } from "@/lib/api";
+import type { Policy } from "@/lib/api/policies";
 
 /**
  * The "all values" sentinel. Used as the default filter value on every

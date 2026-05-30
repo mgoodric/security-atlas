@@ -25,7 +25,7 @@ import {
   AdminCredentialListResponse,
   FeatureFlag,
   FeatureFlagListResponse,
-} from "@/lib/api";
+} from "@/lib/api/admin";
 
 async function fetchCreds(): Promise<AdminCredential[]> {
   const res = await fetch(`/api/admin/credentials`);

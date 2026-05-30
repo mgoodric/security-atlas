@@ -15,7 +15,7 @@
 // backend `?include=ack_rate` extension lands (spillover slice 107),
 // the page passes the joined cell here.
 
-import type { PolicyAckRate } from "@/lib/api";
+import type { PolicyAckRate } from "@/lib/api/policies";
 
 export type AckRateBand = "green" | "amber" | "red" | "none";
 

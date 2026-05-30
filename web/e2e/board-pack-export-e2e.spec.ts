@@ -64,8 +64,11 @@
 
 import { expect, test } from "./fixtures";
 
-import type { BoardPack, BoardPackSection } from "@/lib/api";
-import { BOARD_PACK_SECTION_KEYS } from "@/lib/api";
+import {
+  BOARD_PACK_SECTION_KEYS,
+  type BoardPack,
+  type BoardPackSection,
+} from "@/lib/api/board";
 
 // Neutral test ids. The pack id threads the whole chain: it is what the
 // generate POST returns, what the detail page fetches, and what the PDF

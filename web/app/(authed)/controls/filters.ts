@@ -7,7 +7,7 @@
 // Constitutional commitment: this module knows nothing about React,
 // useSearchParams, or the BFF. It is data-in, data-out.
 
-import type { Anchor } from "@/lib/api";
+import type { Anchor } from "@/lib/api/anchors";
 
 /**
  * The "all values" sentinel. Used as the default filter value on every

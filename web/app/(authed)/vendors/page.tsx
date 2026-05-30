@@ -24,7 +24,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { APIError, Vendor, VendorBurndown } from "@/lib/api";
+import { APIError } from "@/lib/api/base";
+import { Vendor, VendorBurndown } from "@/lib/api/vendors";
 
 // Slice 024 — vendor lite list view. The filters are query-param-driven so
 // a deep link survives reload and the user can bookmark "high + overdue".

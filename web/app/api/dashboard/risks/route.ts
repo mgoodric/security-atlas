@@ -1,4 +1,4 @@
-import { getMitigateRisks } from "@/lib/api";
+import { getMitigateRisks } from "@/lib/api/dashboard";
 import { dashboardProxy } from "../proxy";
 
 // Slice 157 — server-side proxy for GET /v1/risks?treatment=mitigate

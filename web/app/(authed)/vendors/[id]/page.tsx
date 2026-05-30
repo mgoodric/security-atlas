@@ -6,7 +6,8 @@ import { use, useEffect } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import { APIError, Vendor } from "@/lib/api";
+import { APIError } from "@/lib/api/base";
+import { Vendor } from "@/lib/api/vendors";
 
 import { VendorForm } from "../vendor-form";
 import { updateVendorFromCookieSession } from "../actions";

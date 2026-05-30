@@ -38,15 +38,15 @@ import { FrameworkPosturePanel } from "@/components/dashboard/framework-posture-
 import { RecentDriftPanel } from "@/components/dashboard/recent-drift-panel";
 import { TopRisksPanel } from "@/components/dashboard/top-risks-panel";
 import { UpcomingPanel } from "@/components/dashboard/upcoming-panel";
+import { APIError } from "@/lib/api/base";
 import {
-  APIError,
   fetchDashboardActivity,
   fetchDashboardDrift,
   fetchDashboardFrameworkPosture,
   fetchDashboardFreshness,
   fetchDashboardRisks,
   fetchDashboardUpcoming,
-} from "@/lib/api";
+} from "@/lib/api/dashboard";
 
 export default function DashboardPage() {
   const router = useRouter();

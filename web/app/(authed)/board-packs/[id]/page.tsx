@@ -25,14 +25,14 @@ import {
 } from "@/components/board-pack/top-risks-table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
+import { APIError } from "@/lib/api/base";
 import {
-  APIError,
   BOARD_PACK_SECTION_KEYS,
   BoardPack,
   BoardPackSection,
   getBoardPack,
   getSessionMe,
-} from "@/lib/api";
+} from "@/lib/api/board";
 
 // Slice 043 — quarterly board pack preview/export view.
 //
