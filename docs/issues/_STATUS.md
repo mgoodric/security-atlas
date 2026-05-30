@@ -3,7 +3,24 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-29 (batch 165 claim-stake — slices 349 + 389 + 391 → in-progress · contract-test eval + multi-tenant RLS-leak spec + duphelper CI wiring · disjoint trees: docs · testissuejwt+web/e2e · ci.yml+cmd/scripts)
+**Last reconciled:** 2026-05-30 (batch 165 merged — slices 349 + 389 + 391 on main; 1 spillover 392; no collision this batch)
+
+## Drift detected — 2026-05-30 (parallel batch 165 merged)
+
+All three batch-165 slices merged to main.
+
+- **349** contract-test-tier evaluation + golden-file pilot → merged at `30c501ad` via #879. **ADOPT** (ADR-0007): golden-file contract tier (provider Go recorder → shared golden → consumer vitest assert), zero new tooling/CI/gate. Pilot for `GET /v1/install-state` (slice-210 bug history); drift sensitivity proven empirically. Broad rollout → spillover 392.
+- **389** multi-tenant JWT harness + real-RLS cross-tenant-leak spec → merged at `a5d274a9` via #880 (closes slice 351 spillover). Extended `internal/api/testissuejwt` to mint multi-tenant JWTs (ATLAS_TEST_MODE gate kept airtight); new e2e spec asserts tenant-A rows are invisible under tenant-B through REAL Postgres RLS. Key insight: super_admin clears OPA authz but does NOT bypass RLS (tenant GUC drives visibility). Advances the v1 binary tenant-isolation criterion. CLEAN.
+- **391** wire duphelper-lint into CI → merged at `b324adcd` via #878 (closes slice 369 spillover). `Go · duphelper` hard-failure step in the `lint-go` job; closes slice 369 AC-4.
+
+Process note: no spillover-number collision this batch (only 349 filed one → 392); scheduler flake did not recur; all three merged without rerun (389 even CLEAN, no codecov dip).
+
+| Row | Transition               | Evidence                                                                                                              |
+| --- | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| 349 | `in-progress` → `merged` | merged at `30c501ad` via #879 (ADR-0007; spillover 392)                                                               |
+| 389 | `in-progress` → `merged` | merged at `a5d274a9` via #880 (real-RLS multi-tenant spec)                                                            |
+| 391 | `in-progress` → `merged` | merged at `b324adcd` via #878 (duphelper CI guard)                                                                    |
+| 392 | (new row) → `ready`      | spec `392-contract-test-tier-rollout.md` · slice 349 spillover · broad golden-file contract rollout (dep #349 merged) |
 
 ## Drift detected — 2026-05-29 (batch 165 claim-stake · slices 349 + 389 + 391)
 
