@@ -101,12 +101,23 @@ func wipeTenantControls(t *testing.T) {
 	t.Helper()
 	pool := openPool(t, adminDSN(t))
 	defer pool.Close()
-	// CASCADE order: any FK from evidence_records (slice 002+) into
-	// controls must already be cleared; the test suite never creates
-	// those. If a future slice writes evidence here, this helper will
-	// need to clear that table first.
-	if _, err := pool.Exec(context.Background(), `DELETE FROM controls`); err != nil {
-		t.Fatalf("wipe controls: %v", err)
+	// FK order: clear the children that FK-reference controls BEFORE
+	// deleting controls, else the global DELETE hits
+	// evidence_records_tenant_id_control_id_fkey (and the
+	// control_evaluations FK). This package does not itself write
+	// evidence_records, but under CI's serial `-p 1` run the prior
+	// package (internal/demoseed) leaves evidence_records rows under the
+	// shared tenant — so the global wipe must clear them first.
+	// (Slice 405: this latent FK-wipe-ordering bug was hidden because the
+	// package never ran in CI alongside demoseed.)
+	for _, q := range []string{
+		`DELETE FROM evidence_records`,
+		`DELETE FROM control_evaluations`,
+		`DELETE FROM controls`,
+	} {
+		if _, err := pool.Exec(context.Background(), q); err != nil {
+			t.Fatalf("wipe (%s): %v", q, err)
+		}
 	}
 }
 
@@ -772,17 +783,24 @@ func soc2017FrameworkVersionID(t *testing.T) uuid.UUID {
 }
 
 // wipeTenantState clears the per-tenant working set that slice 256
-// tests rely on: controls, evaluations, framework_scopes, scope_cells.
-// Catalog rows (scf_anchors / framework_versions / etc.) stay intact.
-// scope_cells is cleared so the in-scope test's seeded cell does not leak
-// into the out-of-scope / no-data tests within the same run (deleted last
-// because control_evaluations FK-references it ON DELETE CASCADE — and
-// evaluations are already cleared above).
+// tests rely on: evidence_records, evaluations, framework_scopes,
+// controls, scope_cells. Catalog rows (scf_anchors / framework_versions
+// / etc.) stay intact. FK order: the children that FK-reference controls
+// (evidence_records, control_evaluations) are deleted BEFORE controls,
+// else the global DELETE hits evidence_records_tenant_id_control_id_fkey
+// under CI's serial `-p 1` run (the prior package internal/demoseed
+// leaves evidence_records rows under the shared tenant). scope_cells is
+// cleared last so the in-scope test's seeded cell does not leak into the
+// out-of-scope / no-data tests within the same run (control_evaluations
+// FK-references scope_cells ON DELETE CASCADE and is already cleared
+// above). (Slice 405: latent FK-wipe-ordering bug hidden because the
+// package never ran in CI alongside demoseed.)
 func wipeTenantState(t *testing.T) {
 	t.Helper()
 	pool := openPool(t, adminDSN(t))
 	defer pool.Close()
 	for _, q := range []string{
+		`DELETE FROM evidence_records`,
 		`DELETE FROM control_evaluations`,
 		`DELETE FROM framework_scopes`,
 		`DELETE FROM controls`,

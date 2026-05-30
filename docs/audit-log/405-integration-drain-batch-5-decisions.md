@@ -111,6 +111,61 @@ run. Full `ucfcoverage` suite green after the fix (18 sub-tests, zero SKIP,
 zero FAIL); the sibling tests still pass because their null expectations hold
 regardless of cell presence.
 
+## `internal/api/ucfcoverage` — SECOND find: FK-wipe-ordering test-isolation bug (CI-only)
+
+After the PR's first push, CI run `26697205353` failed the ENTIRE
+`internal/api/ucfcoverage` suite (all 14 top-level tests), each with:
+
+```
+wipe controls: ERROR: update or delete on table "controls" violates foreign key
+constraint "evidence_records_tenant_id_control_id_fkey" on table "evidence_records" (SQLSTATE 23503)
+```
+
+This is a textbook slice-390-thesis hit — a latent test-isolation bug that was
+invisible while the package ran only in isolation and surfaced the moment it
+ran in CI's serial `-p 1` job alongside its neighbours.
+
+**Root cause (test-harness ordering, NOT a product bug).** Both wipe helpers
+issued an un-tenant-restricted global `DELETE FROM controls` WITHOUT first
+clearing the children that FK-reference `controls`. The
+`evidence_records_tenant_id_control_id_fkey` constraint is `ON DELETE RESTRICT`
+(not CASCADE), so a single referencing `evidence_records` row makes the
+`controls` delete fail. In CI the integration job runs `-p 1` serially and
+`./internal/demoseed/...` runs immediately before `ucfcoverage`, leaving
+`evidence_records` rows that reference controls under the shared tenant. The
+package's own wipe then 23503-faults. The stale comment at the old
+`wipeTenantControls` (lines 104-107) literally predicted this: "If a future
+slice writes evidence here, this helper will need to clear that table first."
+The contaminating writer turned out to be a _neighbouring_ package, not this
+one — exactly the cross-package coupling the never-run state hid.
+
+**Why a test fix, not a product change, and no coverage-floor change.** The FK
+is correct product behaviour (you cannot delete a control while evidence
+references it). The defect is purely that the test's cleanup deleted parents
+before children. The fix mirrors the pattern the other enrolled packages
+already use (e.g. `controlstate`'s `state_integration_test.go` deletes
+`control_evaluations` + `evidence_records` before `controls`). The `70` floor
+for `ucfcoverage` is unchanged.
+
+**Fix.** In `wipeTenantControls`, replaced the single `DELETE FROM controls`
+with an ordered loop `evidence_records → control_evaluations → controls`
+(children before parent), kept the global un-tenant-restricted form (the
+cross-tenant tests need both tenants cleared), and updated the stale comment.
+In `wipeTenantState`, inserted `DELETE FROM evidence_records` at the head of
+the loop (before `control_evaluations`), giving the FK-safe order
+`evidence_records → control_evaluations → framework_scopes → controls →
+scope_cells`.
+
+**Verification (reproduced the CI condition, did not just re-run in isolation).**
+Against a fresh harness, seeded a contaminating `evidence_records` row
+referencing a control under the shared tenant, then ran the _buggy_ (pre-fix)
+suite with `-count=1`: reproduced the exact 23503 FK error across every test
+(matching the CI log). Restored the fix and re-ran against the SAME
+contaminated DB: 18/18 sub-tests PASS, zero FAIL, no FK error. Also ran the
+faithful CI ordering `go test -tags=integration -p 1 -count=1
+./internal/demoseed/... ./internal/api/ucfcoverage/...` together with a
+contaminating row present — both packages green.
+
 ## `internal/api/emptyset` — zero-statement package, KEEP on excludes
 
 `internal/api/emptyset` contains only `doc.go` (a package comment) — the actual
@@ -151,20 +206,31 @@ the dominant contributor — is unaffected.)
 
 ## Tests fixed
 
-- `internal/api/ucfcoverage/integration_test.go` — added `seedScopeCell`
-  helper, seeded one scope cell in `TestControlCoverage_Slice256_InScopeRowReturnsNumeric`,
-  and added `scope_cells` to `wipeTenantState` cleanup (stale-test fix).
+- `internal/api/ucfcoverage/integration_test.go` (find 1, local) — added
+  `seedScopeCell` helper, seeded one scope cell in
+  `TestControlCoverage_Slice256_InScopeRowReturnsNumeric`, and added
+  `scope_cells` to `wipeTenantState` cleanup (stale-test fix).
+- `internal/api/ucfcoverage/integration_test.go` (find 2, CI-only) — reordered
+  both wipe helpers to delete the FK children (`evidence_records`,
+  `control_evaluations`) before `controls`, fixing the
+  `evidence_records_tenant_id_control_id_fkey` (23503) failure that surfaced
+  when the package ran in CI's serial `-p 1` job after `internal/demoseed`.
+  Updated the stale `wipeTenantControls` comment.
 
 ## Product fix
 
-**None.** The `ucfcoverage` failure was a test-setup gap, not a product bug
-(unlike slice 402's audit-export `CallerIsPrivileged` finding). The handler's
-`null`-on-empty-universe behaviour is the documented slice-256 contract.
+**None.** Both `ucfcoverage` failures were test-harness defects, not product
+bugs (unlike slice 402's audit-export `CallerIsPrivileged` finding). Find 1's
+`null`-on-empty-universe behaviour is the documented slice-256 contract; find
+2's `ON DELETE RESTRICT` FK is correct product behaviour (a control cannot be
+deleted while evidence references it) — the bug was that the test deleted
+parents before children.
 
 ## Spillover
 
-**None.** No genuine product bug requiring separate design work surfaced. The
-single failure was a stale test, fixed in place.
+**None.** Neither failure needed separate design work. Both were
+test-isolation / setup defects fixed in place — the exact class of latent bug
+the slice-390 enrolment drain exists to surface.
 
 ## Coverage dispositions (summary)
 
@@ -204,7 +270,9 @@ justified, no orphans).
   `excludes` (`ucfcoverage`, api `freshnessdrift`, `audit/notes`) + their
   `$exclude_justifications` entries; `emptyset` kept on `excludes`
   (zero-statement); `questionnaires` was never gated and gains its first floor.
-- `internal/api/ucfcoverage/integration_test.go` — `seedScopeCell` helper +
-  in-scope-test seed + `wipeTenantState` scope_cells cleanup (stale-test fix).
+- `internal/api/ucfcoverage/integration_test.go` — find 1: `seedScopeCell`
+  helper + in-scope-test seed + `wipeTenantState` scope_cells cleanup; find 2:
+  reordered both wipe helpers to clear `evidence_records` + `control_evaluations`
+  before `controls` (FK-ordering test-isolation fix) + updated stale comment.
 - `CHANGELOG.md` — Unreleased › Changed entry.
 - `docs/audit-log/405-integration-drain-batch-5-decisions.md` — this file.
