@@ -3,7 +3,19 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 167 merged — slices 370 + 393 on main; 2 spillovers 395 + 396; no collision)
+**Last reconciled:** 2026-05-30 (batch 168 claim-stake — slice 395 → in-progress (N=1 solo) · web api import-site migration (slice 370 Phase 2))
+
+## Drift detected — 2026-05-30 (batch 168 claim-stake · slice 395 solo)
+
+Single-slice batch (N=1). 395 run solo because its wide `@/lib/api` import-path churn touches `web/e2e` (board-pack-export-e2e.spec.ts imports `@/lib/api`), which the other ready slice 387 also needs — pairing would conflict.
+
+- **395** (web api import-site migration) — Web · 1d · slice 370 Phase 2 (dep #370 merged). Migrates all `@/lib/api` barrel imports to the per-domain `@/lib/api/<domain>` paths across web/, plus the slice-328 M-3 `SESSION_COOKIE` rename. Unblocks 396 (barrel retire) on merge.
+
+Open-questions check: CLEAN. Zero migrations. Deferred: 387 (next batch — pairs poorly with 395's web/e2e churn), 368 (cosign/solo), 390 (decompose).
+
+| Row | Transition              | Evidence                                                                               |
+| --- | ----------------------- | -------------------------------------------------------------------------------------- |
+| 395 | `ready` → `in-progress` | batch 168 claim-stake · branch `web/395-api-import-site-migration` · slice 370 Phase 2 |
 
 ## Drift detected — 2026-05-30 (parallel batch 167 merged)
 
