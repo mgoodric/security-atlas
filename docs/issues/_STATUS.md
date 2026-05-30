@@ -3,7 +3,23 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-29 (batch 164 merged — slices 345 + 351 + 369 on main; 5 spillovers filed 387-391; spillover-number collision resolved in this reconcile)
+**Last reconciled:** 2026-05-29 (batch 165 claim-stake — slices 349 + 389 + 391 → in-progress · contract-test eval + multi-tenant RLS-leak spec + duphelper CI wiring · disjoint trees: docs · testissuejwt+web/e2e · ci.yml+cmd/scripts)
+
+## Drift detected — 2026-05-29 (batch 165 claim-stake · slices 349 + 389 + 391)
+
+Three-slice continuous-loop batch from the post-batch-164 ready set:
+
+- **349** (contract-test-tier evaluation + pilot) — Quality · 2-3d · JUDGMENT · evaluates whether to adopt consumer-driven contract testing; produces a recommendation doc (+ pilot if warranted). Docs-only surface.
+- **389** (multi-tenant JWT harness + real-RLS cross-tenant-leak spec) — Quality/e2e + Auth · 1-2d · slice 351 spillover. Extends `internal/api/testissuejwt` to mint multi-tenant JWTs and adds the real-Postgres-RLS cross-tenant-leak e2e spec 351 honestly deferred. Advances the v1 binary tenant-isolation criterion.
+- **391** (wire duphelper-lint into CI) — Infra · 0.25d · slice 369 spillover. Adds the `duphelper-lint` analyzer (built in 369) as a CI hard-failure step in ci.yml; owns ci.yml this batch.
+
+Conflict surface: disjoint — docs (349) vs internal/api/testissuejwt+web/e2e (389) vs ci.yml+cmd/scripts/duphelper-lint (391). Shared touch-points limited to CHANGELOG (append-safe). Zero migrations. 368 (cosign, 5d, external-binary) deferred again — flagged for a focused solo run. Open-questions check: CLEAN.
+
+| Row | Transition              | Evidence                                                                                          |
+| --- | ----------------------- | ------------------------------------------------------------------------------------------------- |
+| 349 | `ready` → `in-progress` | batch 165 claim-stake · branch `quality/349-contract-test-tier-evaluation`                        |
+| 389 | `ready` → `in-progress` | batch 165 claim-stake · branch `quality/389-multi-tenant-jwt-rls-leak-spec` · slice 351 spillover |
+| 391 | `ready` → `in-progress` | batch 165 claim-stake · branch `infra/391-duphelper-lint-ci-wiring` · slice 369 spillover         |
 
 ## Drift detected — 2026-05-29 (parallel batch 164 merged + 5 spillovers + collision fix)
 
