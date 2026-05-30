@@ -60,7 +60,10 @@ const perFileThresholds: Record<string, FileThresholds> =
 export default defineConfig({
   resolve: {
     // Mirror the `@/*` path alias from tsconfig.json so test files can
-    // `import { apiBaseURL } from "@/lib/api"` like production code does.
+    // `import { apiBaseURL } from "@/lib/api/base"` like production code
+    // does (slice 370 split the api god-file into per-domain modules;
+    // slice 395 migrated all import sites to the `@/lib/api/<domain>`
+    // paths, so nothing imports the bare `@/lib/api` barrel anymore).
     alias: {
       "@": resolve(dirname, "."),
     },
