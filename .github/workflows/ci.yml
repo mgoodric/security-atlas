@@ -523,6 +523,16 @@ jobs:
       - name: Go · errleak (slice 367 CWE-209 guard)
         run: go run ./cmd/scripts/errleak-lint ./internal/api/...
 
+      # Slice 369 — H-1 helper-consolidation regression guard. Rejects new
+      # package-local writeJSON / writeError / writeServerErr free-function
+      # declarations in internal/api/* (mirror of the slice-367 errleak
+      # analyzer). The analyzer lives at cmd/scripts/duphelper-lint and is
+      # invoked as a plain `go run` so it runs on the same setup-go cache as
+      # the steps above. A hit exits 3 and fails the CI check. Wired here per
+      # slice 391 (slice 369 AC-4 deferred to avoid a batch-164 ci.yml collision).
+      - name: Go · duphelper (slice 369 H-1 guard)
+        run: go run ./cmd/scripts/duphelper-lint ./internal/api/...
+
   lint-go-stub:
     name: Go · lint
     needs: changes
