@@ -341,6 +341,11 @@ jobs:
         # and the load-bearing "enrolment is the move" pattern):
         # see docs/ci/integration-job-history.md.
         run: |
+          # Slice 393 (Q-8): bookend the suite with a wall-clock measurement
+          # so the clean-main watermark step below can RECORD the job's own
+          # elapsed time rather than re-running the suite a second time.
+          atlas_wallclock_start="$(date +%s)"
+          echo "ATLAS_WALLCLOCK_START=${atlas_wallclock_start}" >> "$GITHUB_ENV"
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
             -coverprofile=coverage.txt \
@@ -437,6 +442,32 @@ jobs:
           name: go-merged-coverage
           path: merged-coverage.txt
           if-no-files-found: warn
+      # ================================================================
+      # Slice 393 (Q-8) — integration wall-clock watermark, clean-main only.
+      #
+      # RECORDER, not a gate (P0-393-3 / slice 353 D6). On a clean main
+      # push only, feed the integration job's own measured duration
+      # (bookended in the "Run integration tests" step above) into
+      # scripts/measure-integration-wallclock.sh in RECORD mode
+      # (WALLCLOCK_SECONDS set ⇒ no second suite run). The script appends
+      # to docs/integration-wallclock.tsv and warns — does NOT fail —
+      # when the duration crosses the 20-min Phase-A/B-split trigger.
+      #
+      # Gated to clean main (event push + ref main) so the watermark is a
+      # single authoritative series, not one row per PR re-run. Reaching
+      # this step at all means every prior step (incl. the coverage gate)
+      # passed, so the sample is a clean-suite measurement.
+      #
+      # Local repro: WALLCLOCK_SECONDS=900 bash scripts/measure-integration-wallclock.sh
+      #   self-test: bash scripts/measure-integration-wallclock_test.sh
+      # See slice 353 (Q-8) + slice 393.
+      # ================================================================
+      - name: Record integration wall-clock watermark (slice 393 Q-8)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          end="$(date +%s)"
+          seconds=$(( end - ATLAS_WALLCLOCK_START ))
+          WALLCLOCK_SECONDS="$seconds" bash scripts/measure-integration-wallclock.sh
       - name: Migration round-trip — down then up
         run: |
           # Slice 297: TRUNCATE all data tables before the round-trip
@@ -2385,3 +2416,160 @@ jobs:
 
       - name: Run audit-integration-enrolment.sh
         run: bash scripts/audit-integration-enrolment.sh
+
+  # ====================================================================
+  # Slice 393 (Q-5) — coverage-exclude justification lint (HARD FAIL).
+  #
+  # Wires scripts/check-coverage-excludes.sh (shipped by slice 353) into
+  # CI as a blocking meta-lint check. Asserts the documentation invariant
+  # that every prefix in `excludes` of cmd/scripts/coverage-thresholds.json
+  # carries a non-empty `$exclude_justifications` entry, and that no
+  # orphan justification exists (excludes ⊆ justifications ⊆ excludes).
+  #
+  # Why BLOCKING (matches actions-pin-check / openapi-drift-check /
+  # integration-enrolment-check; differs from the informational pattern
+  # of slices 069/089/109/120/127): the `excludes` list is the path of
+  # least resistance for landing a slice without writing tests (slice 333
+  # finding Q-5). An unjustified exclude must be un-mergeable — the same
+  # structural stance as slice 345's integration-enrolment guard.
+  #
+  # Why no stub-twin (slice 061 convention): the script is fast (sub-
+  # second, pure jq, no network), reads a tracked JSON file that any PR
+  # might edit (incl. docs-only edits to the justifications map), and
+  # SHOULD run unconditionally. Mirrors actions-pin-check stub-omission.
+  #
+  # Local repro: `bash scripts/check-coverage-excludes.sh`
+  #   self-test: `bash scripts/check-coverage-excludes_test.sh`
+  # See slice 353 (Q-5) + slice 393.
+  # ====================================================================
+  coverage-excludes-check:
+    name: coverage-excludes-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Run check-coverage-excludes self-test
+        run: bash scripts/check-coverage-excludes_test.sh
+
+      - name: Run check-coverage-excludes.sh
+        run: bash scripts/check-coverage-excludes.sh
+
+  # ====================================================================
+  # Slice 393 (Q-6) — assertion-density advisory (INFORMATIONAL).
+  #
+  # Wires scripts/assertion-density.sh (shipped by slice 353) into CI as
+  # an informational, NON-blocking check. The script counts assertion
+  # calls per Go test file and warns where the density is below threshold
+  # (a cheap mutation-testing proxy, slice 333 finding Q-6). It is
+  # advisory by design — exit 0 even with warnings (slice 353 D7,
+  # anti-criterion P0-393-2).
+  #
+  # Why informational (not required): the density heuristic has known
+  # noise (table-driven tests, golden-file comparisons that assert via
+  # one helper call). Promoting to required would force contributors to
+  # justify every flagged file — the wrong ergonomic for a hygiene
+  # signal. Mirrors the slice 120 phantom-deps / slice 089 npm-audit
+  # informational-job pattern: continue-on-error + a sticky PR comment.
+  #
+  # Local repro: `bash scripts/assertion-density.sh`
+  #   self-test: `bash scripts/assertion-density_test.sh`
+  # See slice 353 (Q-6) + slice 393.
+  # ====================================================================
+  assertion-density:
+    name: QA · assertion density
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Run assertion-density self-test
+        run: bash scripts/assertion-density_test.sh
+
+      - name: Run assertion-density.sh
+        id: density
+        run: |
+          # Advisory by design: the script always exits 0 (warnings go to
+          # stderr). Capture both streams for the sticky PR comment.
+          set +e
+          bash scripts/assertion-density.sh > density.txt 2> density.warn
+          rc=$?
+          set -e
+          # Count below-threshold files from the JSON view (deterministic).
+          below=$(DENSITY_FORMAT=json bash scripts/assertion-density.sh \
+            | jq -r '.below_threshold')
+          echo "below=$below" >> "$GITHUB_OUTPUT"
+          echo "assertion-density below-threshold file(s): $below"
+          cat density.txt
+          cat density.warn || true
+          exit "$rc"
+
+      - name: Build comment body
+        run: |
+          {
+            echo "<!-- atlas-assertion-density-marker -->"
+            echo "## QA · assertion density (slice 353 Q-6)"
+            echo
+            below="${{ steps.density.outputs.below }}"
+            if [ "$below" -eq 0 ]; then
+              echo "Every scanned Go test file meets the assertion-density threshold "
+              echo "(1 assertion per 20 LOC)."
+            else
+              echo "$below test file(s) fall below the assertion-density threshold "
+              echo "(fewer than 1 assertion per 20 LOC). Low density often means a test "
+              echo "exercises code for coverage without asserting on the result:"
+              echo
+              echo '```'
+              cat density.warn
+              echo '```'
+            fi
+            echo
+            echo "---"
+            echo "_Advisory only — this does NOT block the merge (slice 353 D7). Reproduce locally: \`bash scripts/assertion-density.sh\`. Slice 393 · ${{ github.run_id }}._"
+          } > density-comment.md
+
+      - name: Post or update sticky PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          existing=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.body | startswith("<!-- atlas-assertion-density-marker -->")) | .id' \
+            | head -1)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/${existing}" \
+              -f body="$(cat density-comment.md)" >/dev/null
+            echo "Updated existing sticky comment id=$existing"
+          else
+            gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" --body-file density-comment.md
+            echo "Posted new sticky comment"
+          fi
+
+      - name: Upload assertion-density report as artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: assertion-density-report
+          path: |
+            density.txt
+            density.warn
+            density-comment.md
+          if-no-files-found: warn
+
+  assertion-density-stub:
+    name: QA · assertion density
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Non-PR push OR docs-only change — assertion-density advisory skipped (slice 393)."
