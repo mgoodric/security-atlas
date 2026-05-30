@@ -413,6 +413,11 @@ jobs:
             ./internal/api/aggregationrules/... \
             ./internal/api/me/... \
             ./internal/api/decisions/... \
+            ./internal/api/board/... \
+            ./internal/api/calendar/... \
+            ./internal/api/policies/... \
+            ./internal/api/vendors/... \
+            ./internal/api/search/... \
             ./internal/api
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
