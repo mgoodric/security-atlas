@@ -35,6 +35,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/export"
 )
@@ -295,7 +296,7 @@ func TestHandler_ExportLimiter_HonorsOverride(t *testing.T) {
 
 func TestWriteError(t *testing.T) {
 	rr := httptest.NewRecorder()
-	writeError(rr, http.StatusBadRequest, "boom")
+	httpresp.WriteError(rr, http.StatusBadRequest, "boom")
 	res := rr.Result()
 	if res.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status: got %d, want 400", res.StatusCode)

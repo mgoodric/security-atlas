@@ -36,11 +36,24 @@ test-frontend:
     cd web && npm test --if-present
 
 # Run all linters (Go + frontend + Python)
-lint: lint-go lint-frontend lint-python
+lint: lint-go lint-errleak lint-duphelper lint-frontend lint-python
 
 # Lint Go (golangci-lint)
 lint-go:
     golangci-lint run ./...
+
+# Slice 367 — CWE-209 errleak check.
+# Rejects new code that reflects err.Error() into a 5xx JSON response body.
+# Background: docs/audits/327-...-report.md finding M-2.
+lint-errleak:
+    go run ./cmd/scripts/errleak-lint ./internal/api/...
+
+# Slice 369 — duplicate-helper check.
+# Rejects new package-local writeJSON/writeError/writeServerErr declarations
+# in internal/api/* that duplicate the shared httpresp/httperr helpers.
+# Background: docs/audits/328-code-review-comprehensive-report.md finding H-1.
+lint-duphelper:
+    go run ./cmd/scripts/duphelper-lint ./internal/api/...
 
 # Lint frontend (eslint)
 lint-frontend:
@@ -198,6 +211,32 @@ openapi-drift-check:
 # (atlas_migrate is the canonical choice).
 audit-rls:
     ./scripts/audit-rls.sh
+
+# Assert every Go package carrying a `//go:build integration` build tag is
+# enrolled in the integration job's explicit package list in
+# .github/workflows/ci.yml. Fails (naming the missing package) when a
+# tagged package is neither listed nor on the slice-345 KNOWN_UNENROLLED
+# allowlist. Slice 334 framework-audit finding I-1; slice 345.
+audit-integration-enrolment:
+    ./scripts/audit-integration-enrolment.sh
+
+# Assert every prefix in coverage-thresholds.json `excludes` carries a written
+# `$exclude_justifications` entry (and no orphan justifications exist). Slice 333
+# QA-audit finding Q-5; slice 353. Self-test: scripts/check-coverage-excludes_test.sh
+check-coverage-excludes:
+    bash scripts/check-coverage-excludes.sh
+
+# Count assertions per Go test file and warn where assertion density is below
+# threshold (cheap mutation-testing proxy). Slice 333 Q-6; slice 353. ADVISORY
+# only — never fails. Self-test: scripts/assertion-density_test.sh
+assertion-density:
+    bash scripts/assertion-density.sh
+
+# Record the integration job's wall-clock to a watermark file and warn when it
+# crosses the 20-min Phase-A/B-split trigger. Slice 333 Q-8; slice 353.
+# Self-test: scripts/measure-integration-wallclock_test.sh
+measure-integration-wallclock:
+    bash scripts/measure-integration-wallclock.sh
 
 # Import an SCF catalog JSON release into Postgres. DATABASE_URL must point
 # at a role with INSERT on scf_anchors (atlas_migrate by default).

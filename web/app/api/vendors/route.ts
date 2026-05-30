@@ -7,7 +7,7 @@ import {
   listVendors,
   VendorListFilter,
   VendorWrite,
-} from "@/lib/api";
+} from "@/lib/api/vendors";
 
 // Server-side proxy. Bearer cookie -> upstream Authorization header. The
 // list filter is forwarded; the create body is forwarded verbatim.

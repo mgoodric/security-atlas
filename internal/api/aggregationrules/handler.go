@@ -22,7 +22,6 @@
 package aggregationrules
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -32,6 +31,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -97,30 +98,31 @@ func ruleWireFrom(sr aggrule.StoredRule) ruleWire {
 // the full list of offending fields.
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
 	format, ok := formatFromContentType(r.Header.Get("Content-Type"))
 	if !ok {
-		writeError(w, http.StatusUnsupportedMediaType,
+		httpresp.WriteError(w, http.StatusUnsupportedMediaType,
 			"Content-Type must be application/json or application/yaml")
+
 		return
 	}
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxRuleBodyBytes+1))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "could not read request body")
+		httpresp.WriteError(w, http.StatusBadRequest, "could not read request body")
 		return
 	}
 	if len(body) > maxRuleBodyBytes {
-		writeError(w, http.StatusRequestEntityTooLarge, "rule document too large")
+		httpresp.WriteError(w, http.StatusRequestEntityTooLarge, "rule document too large")
 		return
 	}
 
 	rule, err := aggrule.ParseRule(body, format)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if verr := rule.Validate(); verr != nil {
@@ -135,59 +137,59 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		case errors.As(err, &ve):
 			writeValidationError(w, err)
 		case errors.Is(err, aggrule.ErrDuplicateRuleID):
-			writeError(w, http.StatusConflict, err.Error())
+			httpresp.WriteError(w, http.StatusConflict, err.Error())
 		default:
-			writeServerErr(w, "create aggregation rule", err)
+			httperr.WriteInternal(w, r, "create aggregation rule", err)
 		}
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"rule": ruleWireFrom(created)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"rule": ruleWireFrom(created)})
 }
 
 // List handles GET /v1/aggregation-rules. Optional ?status= filter.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	statusFilter := r.URL.Query().Get("status")
 	if statusFilter != "" && statusFilter != "staged" && statusFilter != "active" && statusFilter != "inactive" {
-		writeError(w, http.StatusBadRequest, "status filter must be one of staged, active, inactive")
+		httpresp.WriteError(w, http.StatusBadRequest, "status filter must be one of staged, active, inactive")
 		return
 	}
 	rules, err := h.store.List(r.Context(), statusFilter)
 	if err != nil {
-		writeServerErr(w, "list aggregation rules", err)
+		httperr.WriteInternal(w, r, "list aggregation rules", err)
 		return
 	}
 	out := make([]ruleWire, len(rules))
 	for i, sr := range rules {
 		out[i] = ruleWireFrom(sr)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rules": out, "count": len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"rules": out, "count": len(out)})
 }
 
 // Get handles GET /v1/aggregation-rules/{id}.
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	sr, err := h.store.Get(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, aggrule.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "aggregation rule not found")
+			httpresp.WriteError(w, http.StatusNotFound, "aggregation rule not found")
 			return
 		}
-		writeServerErr(w, "get aggregation rule", err)
+		httperr.WriteInternal(w, r, "get aggregation rule", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rule": ruleWireFrom(sr)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"rule": ruleWireFrom(sr)})
 }
 
 // Activate handles PATCH /v1/aggregation-rules/{id}/activate — the HITL gate.
@@ -206,12 +208,12 @@ func (h *Handler) Deactivate(w http.ResponseWriter, r *http.Request) {
 // store's lifecycle method, map sentinels to status codes.
 func (h *Handler) transition(w http.ResponseWriter, r *http.Request, activate bool) {
 	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	actor := actorFrom(r)
@@ -225,19 +227,19 @@ func (h *Handler) transition(w http.ResponseWriter, r *http.Request, activate bo
 	if err != nil {
 		switch {
 		case errors.Is(err, aggrule.ErrNotFound):
-			writeError(w, http.StatusNotFound, "aggregation rule not found")
+			httpresp.WriteError(w, http.StatusNotFound, "aggregation rule not found")
 		case errors.Is(err, aggrule.ErrWrongState):
-			writeError(w, http.StatusConflict, err.Error())
+			httpresp.WriteError(w, http.StatusConflict, err.Error())
 		default:
 			op := "activate aggregation rule"
 			if !activate {
 				op = "deactivate aggregation rule"
 			}
-			writeServerErr(w, op, err)
+			httperr.WriteInternal(w, r, op, err)
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rule": ruleWireFrom(sr)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"rule": ruleWireFrom(sr)})
 }
 
 // ----- helpers -----
@@ -268,33 +270,18 @@ func actorFrom(r *http.Request) string {
 	return "system"
 }
 
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
 // writeValidationError renders a *aggrule.ValidationError as a 400 with the
 // full field-level error list, so the caller sees exactly which fields are
 // wrong. Falls back to a flat error for any other error type.
 func writeValidationError(w http.ResponseWriter, err error) {
 	var ve *aggrule.ValidationError
 	if errors.As(err, &ve) {
-		writeJSON(w, http.StatusBadRequest, map[string]any{
+		httpresp.WriteJSON(w, http.StatusBadRequest, map[string]any{
 			"error":  "rule validation failed",
 			"fields": ve.Errors,
 		})
+
 		return
 	}
-	writeError(w, http.StatusBadRequest, err.Error())
-}
-
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
+	httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 }

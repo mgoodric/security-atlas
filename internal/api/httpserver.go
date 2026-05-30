@@ -14,6 +14,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/adminauditlog"
 	"github.com/mgoodric/security-atlas/internal/api/adminauditperiods"
+	"github.com/mgoodric/security-atlas/internal/api/adminauthzbundle"
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
 	"github.com/mgoodric/security-atlas/internal/api/admindemo"
 	"github.com/mgoodric/security-atlas/internal/api/adminsso"
@@ -51,6 +52,7 @@ import (
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	policyacksapi "github.com/mgoodric/security-atlas/internal/api/policyacks"
 	questionnairesapi "github.com/mgoodric/security-atlas/internal/api/questionnaires"
+	"github.com/mgoodric/security-atlas/internal/api/requestidmw"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
@@ -122,6 +124,15 @@ func (s *Server) httpHandler() http.Handler {
 	// (MEDIUM-HIGH finding); see docs/audits/2026-Q2-security-audit.md and
 	// internal/api/securityheaders/middleware.go.
 	root.Use(securityheaders.Middleware)
+	// Slice 367: request-ID middleware sits AFTER securityheaders (so
+	// security headers still apply to every response) but BEFORE
+	// corsMiddleware and the JWT chain so every downstream handler
+	// (including the auth-failure paths) sees a stable request ID.
+	// The helper in internal/api/httperr consumes this ID to correlate
+	// the client's generic-5xx response with the slog log line that
+	// carries the full err.Error(). See docs/audits/327-... finding M-2
+	// and docs/audit-log/367-error-detail-leakage-audit-decisions.md.
+	root.Use(requestidmw.Middleware)
 	root.Use(corsMiddleware)
 	// Slice 190 + 197 + 326: JWT validation middleware is the SOLE
 	// auth middleware on `/v1/*`. The slice 191 `legacyBearerDeprecation`
@@ -923,6 +934,21 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/admin/super-admins", superAdminsH.List)
 	root.Post("/v1/admin/super-admins", superAdminsH.Grant)
 	root.Delete("/v1/admin/super-admins/{user_id}", superAdminsH.Demote)
+
+	// Slice 378: authz bundle hot-reload. super_admin-gated; reloads
+	// the embedded policies/authz/*.rego bundle without a process
+	// restart. The atomic.Pointer-backed Engine swap (slice 378 AC-1
+	// + AC-2) means in-flight Decide calls during a reload see
+	// either the old query or the new one — never a partial state.
+	// The matrix validator runs against the CANDIDATE query BEFORE
+	// the swap (slice 378 AC-3); matrix failure leaves the engine
+	// serving the prior bundle. Closes slice 332 F-OPA-2 (High).
+	// When the engine is not yet attached (unit-server harness), the
+	// handler returns 503 to every request.
+	if s.authzEngine != nil {
+		authzBundleH := adminauthzbundle.New(s.dbPool, s.authzEngine)
+		root.Post("/v1/admin/authz-bundle/reload", authzBundleH.Reload)
+	}
 
 	// Slice 143: create-tenant flow. super_admin-gated; the handler
 	// reads jwtmw.FromContext().SuperAdmin; the OPA super_admin.rego

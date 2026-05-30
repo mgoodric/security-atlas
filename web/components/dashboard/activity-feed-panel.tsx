@@ -17,7 +17,7 @@
 // `?source=` filter is the path to wire them — out of scope here.
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
-import type { ActivityEvent, ActivityFeedResponse } from "@/lib/api";
+import type { ActivityEvent, ActivityFeedResponse } from "@/lib/api/dashboard";
 
 const FILTER_CHIPS = ["All", "Evidence", "Controls", "Approvals"];
 

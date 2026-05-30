@@ -11,6 +11,8 @@
 //   * fetch throws       -> 502 { error: "upstream fetch failed: ..." }
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { mockNextServer } from "../../../../lib/test-utils/next-mocks";
+import { TEST_BEARER_VALUE } from "../../../../lib/test-utils/test-tokens";
 
 const cookieStore = new Map<string, string>();
 
@@ -21,23 +23,7 @@ vi.mock("next/headers", () => ({
   }),
 }));
 
-vi.mock("next/server", () => {
-  class NextResponse extends Response {
-    static json(
-      body: unknown,
-      init?: { status?: number; headers?: Record<string, string> },
-    ): NextResponse {
-      return new NextResponse(JSON.stringify(body), {
-        status: init?.status ?? 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...(init?.headers ?? {}),
-        },
-      });
-    }
-  }
-  return { NextResponse };
-});
+vi.mock("next/server", () => mockNextServer());
 
 import { SESSION_COOKIE } from "@/lib/auth";
 import { POST } from "./route";
@@ -59,7 +45,7 @@ describe("POST /api/install/mark-first-signin", () => {
   });
 
   test("forwards 200 with body from upstream", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-value");
+    cookieStore.set(SESSION_COOKIE, TEST_BEARER_VALUE);
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ marked: true, file_deleted: true }), {
         status: 200,
@@ -76,7 +62,7 @@ describe("POST /api/install/mark-first-signin", () => {
   });
 
   test("idempotent re-call passes marked=false through", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-value");
+    cookieStore.set(SESSION_COOKIE, TEST_BEARER_VALUE);
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ marked: false, file_deleted: false }), {
         status: 200,
@@ -104,7 +90,7 @@ describe("POST /api/install/mark-first-signin", () => {
   });
 
   test("translates upstream 503 to 502 with error message", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-value");
+    cookieStore.set(SESSION_COOKIE, TEST_BEARER_VALUE);
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response("", { status: 503 }),
     );
@@ -115,7 +101,7 @@ describe("POST /api/install/mark-first-signin", () => {
   });
 
   test("translates upstream 500 to 502 with error message", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-value");
+    cookieStore.set(SESSION_COOKIE, TEST_BEARER_VALUE);
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response("", { status: 500 }),
     );
@@ -126,7 +112,7 @@ describe("POST /api/install/mark-first-signin", () => {
   });
 
   test("translates fetch throw to 502", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-value");
+    cookieStore.set(SESSION_COOKIE, TEST_BEARER_VALUE);
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
       new Error("network down"),
     );

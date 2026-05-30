@@ -79,6 +79,8 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -151,12 +153,12 @@ func (h *Handler) ExportVendors(w http.ResponseWriter, r *http.Request) {
 
 	cred, ok := authctx.CredentialFromContext(ctx)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return
 	}
 	tenantID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "invalid tenant in credential")
+		httpresp.WriteError(w, http.StatusInternalServerError, "invalid tenant in credential")
 		return
 	}
 	userIdentifier := cred.UserID
@@ -171,7 +173,7 @@ func (h *Handler) ExportVendors(w http.ResponseWriter, r *http.Request) {
 			Result: "denied:bad_request",
 			Reason: parseErr.Error(),
 		})
-		writeError(w, http.StatusBadRequest, parseErr.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, parseErr.Error())
 		return
 	}
 
@@ -183,7 +185,7 @@ func (h *Handler) ExportVendors(w http.ResponseWriter, r *http.Request) {
 			Result: "denied:forbidden",
 			Reason: "caller lacks admin|auditor|grc_engineer role",
 		})
-		writeError(w, http.StatusForbidden, "admin, auditor, or grc_engineer role required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin, auditor, or grc_engineer role required")
 		return
 	}
 
@@ -218,7 +220,7 @@ func (h *Handler) ExportVendors(w http.ResponseWriter, r *http.Request) {
 			Result: "denied:bad_format",
 			Reason: err.Error(),
 		})
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -233,7 +235,7 @@ func (h *Handler) ExportVendors(w http.ResponseWriter, r *http.Request) {
 			Result: "error:db",
 			Reason: err.Error(),
 		})
-		writeError(w, http.StatusInternalServerError, "list vendors: "+err.Error())
+		httperr.WriteInternal(w, r, "list vendors", err)
 		return
 	}
 
@@ -244,9 +246,10 @@ func (h *Handler) ExportVendors(w http.ResponseWriter, r *http.Request) {
 			Reason:   fmt.Sprintf("rowCap=%d", defaultExportRowCap),
 			RowCount: len(vendors),
 		})
-		writeError(w, http.StatusRequestEntityTooLarge,
+		httpresp.WriteError(w, http.StatusRequestEntityTooLarge,
 			fmt.Sprintf("export would exceed row cap of %d vendors; "+
 				"narrow the request scope and retry", defaultExportRowCap))
+
 		return
 	}
 
@@ -502,12 +505,6 @@ func joinUUIDs(ids []uuid.UUID) string {
 }
 
 // ===== HTTP helpers =====
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
 
 type countingWriter struct {
 	w io.Writer

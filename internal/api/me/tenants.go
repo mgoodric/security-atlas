@@ -34,6 +34,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 )
 
@@ -98,7 +100,7 @@ type listTenantsResponse struct {
 func (h *TenantsHandler) ListTenants(w http.ResponseWriter, r *http.Request) {
 	claims := jwtmw.FromContext(r.Context())
 	if claims == nil {
-		writeError(w, http.StatusUnauthorized, "no jwt context")
+		httpresp.WriteError(w, http.StatusUnauthorized, "no jwt context")
 		return
 	}
 
@@ -107,13 +109,13 @@ func (h *TenantsHandler) ListTenants(w http.ResponseWriter, r *http.Request) {
 	// Empty available_tenants → empty list. Honest output; frontend
 	// hides the switcher chrome per canvas §11 #13.
 	if len(claims.AvailableTenants) == 0 {
-		writeJSON(w, http.StatusOK, out)
+		httpresp.WriteJSON(w, http.StatusOK, out)
 		return
 	}
 
 	names, err := h.loadTenantNames(r.Context(), claims.AvailableTenants)
 	if err != nil {
-		writeServerErr(w, "list tenants", err)
+		httperr.WriteInternal(w, r, "list tenants", err)
 		return
 	}
 
@@ -134,7 +136,7 @@ func (h *TenantsHandler) ListTenants(w http.ResponseWriter, r *http.Request) {
 			Current: t == claims.CurrentTenantID,
 		})
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpresp.WriteJSON(w, http.StatusOK, out)
 }
 
 // loadTenantNames batch-fetches tenant names by id from the BYPASSRLS

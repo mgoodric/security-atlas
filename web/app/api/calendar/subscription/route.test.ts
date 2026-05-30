@@ -10,24 +10,10 @@
 // Test fixtures use neutral strings only — NO vendor token prefixes.
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { mockNextServer } from "../../../../lib/test-utils/next-mocks";
+import { TEST_BEARER_094 } from "../../../../lib/test-utils/test-tokens";
 
-vi.mock("next/server", () => {
-  class NextResponse extends Response {
-    static json(
-      body: unknown,
-      init?: { status?: number; headers?: Record<string, string> },
-    ): NextResponse {
-      return new NextResponse(JSON.stringify(body), {
-        status: init?.status ?? 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...(init?.headers ?? {}),
-        },
-      });
-    }
-  }
-  return { NextResponse };
-});
+vi.mock("next/server", () => mockNextServer());
 
 const mockCookieGet = vi.fn();
 vi.mock("next/headers", () => ({
@@ -56,7 +42,7 @@ describe("POST /api/calendar/subscription", () => {
   });
 
   test("forwards POST to upstream and returns 201 with URL", async () => {
-    mockCookieGet.mockReturnValue({ value: "test-bearer-094" });
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_094 });
 
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
@@ -79,6 +65,6 @@ describe("POST /api/calendar/subscription", () => {
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     expect(init?.method).toBe("POST");
     const headers = init?.headers as Record<string, string> | undefined;
-    expect(headers?.Authorization).toBe("Bearer test-bearer-094");
+    expect(headers?.Authorization).toBe(`Bearer ${TEST_BEARER_094}`);
   });
 });

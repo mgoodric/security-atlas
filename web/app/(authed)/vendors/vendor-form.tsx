@@ -6,7 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Vendor, VendorWrite } from "@/lib/api";
+import { Vendor, VendorWrite } from "@/lib/api/vendors";
 
 // Slice-024 vendor create/edit form. Intentionally simple — the AC says
 // "simple form", not "full TPRM workflow". Phase 2 adds richer affordances

@@ -30,7 +30,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -43,6 +42,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -98,7 +99,7 @@ type downloadResponse struct {
 func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok || cred.TenantID == "" {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
@@ -110,16 +111,16 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(MaxMultipartMemory); err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", artifact.MaxUploadBytes))
+			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", artifact.MaxUploadBytes))
 			return
 		}
-		writeError(w, http.StatusBadRequest, "invalid multipart body: "+err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid multipart body: "+err.Error())
 		return
 	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "missing `file` form part")
+		httpresp.WriteError(w, http.StatusBadRequest, "missing `file` form part")
 		return
 	}
 	defer func() { _ = file.Close() }()
@@ -132,18 +133,18 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", artifact.MaxUploadBytes))
+			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", artifact.MaxUploadBytes))
 			return
 		}
-		writeError(w, http.StatusBadRequest, "read body: "+err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, "read body: "+err.Error())
 		return
 	}
 	if int64(len(body)) > artifact.MaxUploadBytes {
-		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", artifact.MaxUploadBytes))
+		httpresp.WriteError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", artifact.MaxUploadBytes))
 		return
 	}
 	if len(body) == 0 {
-		writeError(w, http.StatusBadRequest, "empty file")
+		httpresp.WriteError(w, http.StatusBadRequest, "empty file")
 		return
 	}
 
@@ -157,7 +158,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
@@ -169,7 +170,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		Body:        body,
 	})
 	if err != nil {
-		h.writeStoreErr(w, "put artifact", err)
+		h.writeStoreErr(w, r, "put artifact", err)
 		return
 	}
 
@@ -180,7 +181,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Atlas-Audit-Warning", "log-upload-failed")
 	}
 
-	writeJSON(w, http.StatusCreated, uploadResponse{Artifact: h.toWire(art)})
+	httpresp.WriteJSON(w, http.StatusCreated, uploadResponse{Artifact: h.toWire(art)})
 }
 
 // Get handles GET /v1/artifacts/{id}.
@@ -195,19 +196,19 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok || cred.TenantID == "" {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
@@ -215,7 +216,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	if v := strings.TrimSpace(r.URL.Query().Get("ttl")); v != "" {
 		secs, perr := strconv.Atoi(v)
 		if perr != nil || secs < 0 {
-			writeError(w, http.StatusBadRequest, "ttl must be a non-negative integer (seconds)")
+			httpresp.WriteError(w, http.StatusBadRequest, "ttl must be a non-negative integer (seconds)")
 			return
 		}
 		ttl = time.Duration(secs) * time.Second
@@ -223,7 +224,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 
 	pre, err := h.store.Presign(ctx, id, ttl)
 	if err != nil {
-		h.writeStoreErr(w, "presign artifact", err)
+		h.writeStoreErr(w, r, "presign artifact", err)
 		return
 	}
 
@@ -232,12 +233,13 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Atlas-Audit-Warning", "log-download-failed")
 	}
 
-	writeJSON(w, http.StatusOK, downloadResponse{
+	httpresp.WriteJSON(w, http.StatusOK, downloadResponse{
 		Artifact:   h.toWire(pre.Artifact),
 		URL:        pre.URL,
 		ExpiresAt:  pre.ExpiresAt,
 		TTLSeconds: pre.TTLSeconds,
 	})
+
 }
 
 // ----- helpers -----
@@ -265,29 +267,19 @@ func (h *Handler) toWire(a artifact.Artifact) artifactWire {
 	}
 }
 
-func (h *Handler) writeStoreErr(w http.ResponseWriter, op string, err error) {
+func (h *Handler) writeStoreErr(w http.ResponseWriter, r *http.Request, op string, err error) {
 	switch {
 	case errors.Is(err, artifact.ErrNotFound):
 		// Important: 404, NOT 403. Avoids existence-disclosure to
 		// adjacent tenants (anti-criterion ISC-A1).
-		writeError(w, http.StatusNotFound, "artifact not found")
+		httpresp.WriteError(w, http.StatusNotFound, "artifact not found")
 	case errors.Is(err, artifact.ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, artifact.ErrOversized):
-		writeError(w, http.StatusRequestEntityTooLarge, err.Error())
+		httpresp.WriteError(w, http.StatusRequestEntityTooLarge, err.Error())
 	case errors.Is(err, artifact.ErrHashMismatch):
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 	default:
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": op + ": " + err.Error()})
+		httperr.WriteInternal(w, r, op, err)
 	}
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
 }

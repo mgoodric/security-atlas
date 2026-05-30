@@ -28,6 +28,7 @@
 // fixtures. The token below is a neutral test-* string.
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { TEST_BEARER_FIXTURE } from "./lib/test-utils/test-tokens";
 
 // Mock next/server with a minimal shape sufficient for proxy.ts. The
 // real NextResponse class isn't importable outside a Next runtime; the
@@ -167,7 +168,7 @@ describe("proxy (Next.js 16 request interceptor)", () => {
     const res = proxy(
       makeRequest({
         pathname: "/dashboard",
-        cookies: { atlas_jwt: "test-bearer-fixture" },
+        cookies: { atlas_jwt: TEST_BEARER_FIXTURE },
       }),
     );
     expect(res.kind).toBe("next");
@@ -236,7 +237,7 @@ describe("proxy (Next.js 16 request interceptor)", () => {
     const res = proxy(
       makeRequest({
         pathname: "/dashboard",
-        cookies: { atlas_jwt: "test-bearer-fixture" },
+        cookies: { atlas_jwt: TEST_BEARER_FIXTURE },
       }),
     );
     expect(res.kind).toBe("next");
@@ -308,7 +309,7 @@ describe("proxy (Next.js 16 request interceptor)", () => {
     const res = proxy(
       makeRequest({
         pathname: "/dashboard",
-        cookies: { atlas_jwt: "test-bearer-fixture" },
+        cookies: { atlas_jwt: TEST_BEARER_FIXTURE },
       }),
     );
     expect(res.kind).toBe("next");

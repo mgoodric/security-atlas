@@ -58,9 +58,34 @@ const COOKIE_SENTINEL = "test-cookie-sentinel-do-not-log-abcdef";
 const RUN_AGAINST_PROD_BUILD = !!process.env.ATLAS_PROD_BUILD;
 
 test.describe("BFF cookie forwarding in production-build standalone", () => {
+  // Slice 387 — the standalone CI harness now EXISTS (the
+  // `Frontend · Playwright e2e (prod-build standalone)` job builds the
+  // `output: "standalone"` bundle, boots `node
+  // .next/standalone/web/server.js`, and sets ATLAS_PROD_BUILD=1). When
+  // slice 387 first ran this spec against that server, two body
+  // assumptions were exposed as dev-server-shaped (they had never run
+  // before — the guard had never been satisfied):
+  //   (1) "dashboard panel BFF returns JSON" asserts the browser fires
+  //       `/api/dashboard/` BFF fetches. Under the PRODUCTION build the
+  //       dashboard panels are server-rendered (RSC), so zero client-side
+  //       BFF calls fire — the page renders fully authenticated (auth
+  //       works; this is NOT the slice-146 cookie regression). The
+  //       `bffResponses.length > 0` assertion is therefore false for the
+  //       prod build and must be re-shaped (e.g. assert the panel content
+  //       resolved, not that a client BFF call occurred).
+  //   (2) "session cookie sentinel …" calls `context.addCookies` with
+  //       `domain: new URL(authedPage.url()).hostname` BEFORE any
+  //       navigation, so `authedPage.url()` is `about:blank` and the
+  //       hostname is empty → Playwright rejects the cookie.
+  // Fixing the body is out of slice 387's scope (which forbids touching
+  // spec bodies) and is filed as slice 399
+  // (docs/issues/399-bff-cookie-prod-build-spec-body-fix.md). Until 399
+  // lands, the slice-387 CI leg runs ONLY the logo spec and holds this
+  // one back; the guard below is retained unchanged. Runnable locally per
+  // the invocation block above (it will surface the two issues described).
   test.skip(
     !RUN_AGAINST_PROD_BUILD,
-    "ATLAS_PROD_BUILD not set — quarantined behind slice 082 (no seed harness for the standalone server yet)",
+    "ATLAS_PROD_BUILD not set — runs under the prod-build standalone server (slice 387 CI leg or locally with ATLAS_PROD_BUILD=1); skipped against the dev server to avoid green-washing the standalone-only path. Body re-shape tracked in slice 399.",
   );
 
   authed(

@@ -66,6 +66,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
@@ -181,7 +183,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return queryRows.Err()
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list super_admins: "+err.Error())
+		httperr.WriteInternal(w, r, "list super_admins", err)
 		return
 	}
 
@@ -195,7 +197,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			Email:       rr.Email,
 		})
 	}
-	writeJSON(w, http.StatusOK, listResponse{Items: items})
+	httpresp.WriteJSON(w, http.StatusOK, listResponse{Items: items})
 }
 
 // Grant handles POST /v1/admin/super-admins.
@@ -210,12 +212,12 @@ func (h *Handler) Grant(w http.ResponseWriter, r *http.Request) {
 
 	var req grantRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16*1024)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	targetID, err := uuid.Parse(strings.TrimSpace(req.UserID))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "user_id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "user_id must be a UUID")
 		return
 	}
 
@@ -224,12 +226,12 @@ func (h *Handler) Grant(w http.ResponseWriter, r *http.Request) {
 		// The super_admin gate guarantees a JWT context with a real
 		// subject — falling through here indicates a programmer error
 		// (missing test-mode subject, broken middleware chain).
-		writeError(w, http.StatusInternalServerError, "actor user_id not on context")
+		httpresp.WriteError(w, http.StatusInternalServerError, "actor user_id not on context")
 		return
 	}
 	actorTenantID, terr := actorTenantFromContext(r.Context())
 	if terr != nil {
-		writeError(w, http.StatusInternalServerError, terr.Error())
+		httperr.WriteInternal(w, r, "adminsuperadmins", terr)
 		return
 	}
 
@@ -324,7 +326,7 @@ func (h *Handler) Grant(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "grant super_admin: "+err.Error())
+		httperr.WriteInternal(w, r, "grant super_admin", err)
 		return
 	}
 
@@ -349,7 +351,7 @@ func (h *Handler) Grant(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, grantedRow)
+	httpresp.WriteJSON(w, http.StatusOK, grantedRow)
 }
 
 // Demote handles DELETE /v1/admin/super-admins/{user_id}.
@@ -372,18 +374,18 @@ func (h *Handler) Demote(w http.ResponseWriter, r *http.Request) {
 
 	targetID, err := uuid.Parse(strings.TrimSpace(chi.URLParam(r, "user_id")))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "user_id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "user_id must be a UUID")
 		return
 	}
 
 	actorID := actorFromContext(r.Context())
 	if actorID == uuid.Nil {
-		writeError(w, http.StatusInternalServerError, "actor user_id not on context")
+		httpresp.WriteError(w, http.StatusInternalServerError, "actor user_id not on context")
 		return
 	}
 	actorTenantID, terr := actorTenantFromContext(r.Context())
 	if terr != nil {
-		writeError(w, http.StatusInternalServerError, terr.Error())
+		httperr.WriteInternal(w, r, "adminsuperadmins", terr)
 		return
 	}
 
@@ -481,15 +483,15 @@ func (h *Handler) Demote(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "demote super_admin: "+err.Error())
+		httperr.WriteInternal(w, r, "demote super_admin", err)
 		return
 	}
 	if res.notFound {
-		writeError(w, http.StatusNotFound, "super_admin not found")
+		httpresp.WriteError(w, http.StatusNotFound, "super_admin not found")
 		return
 	}
 	if res.lastStanding {
-		writeError(w, http.StatusConflict, "Cannot demote the last super_admin")
+		httpresp.WriteError(w, http.StatusConflict, "Cannot demote the last super_admin")
 		return
 	}
 
@@ -546,7 +548,7 @@ func requireSuperAdmin(w http.ResponseWriter, r *http.Request) bool {
 	if claims != nil && claims.SuperAdmin {
 		return true
 	}
-	writeError(w, http.StatusForbidden, "super_admin required")
+	httpresp.WriteError(w, http.StatusForbidden, "super_admin required")
 	return false
 }
 
@@ -587,16 +589,4 @@ func mustMarshal(v any) []byte {
 		panic(fmt.Sprintf("adminsuperadmins: json marshal: %v", err))
 	}
 	return b
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
 }

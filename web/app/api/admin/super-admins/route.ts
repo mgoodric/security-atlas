@@ -9,7 +9,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
-import { grantSuperAdmin, listSuperAdmins } from "@/lib/api";
+import { grantSuperAdmin, listSuperAdmins } from "@/lib/api/admin";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 export async function GET() {

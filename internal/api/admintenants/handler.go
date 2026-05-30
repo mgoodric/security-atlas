@@ -79,6 +79,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
@@ -237,7 +239,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.authPool == nil {
-		writeError(w, http.StatusServiceUnavailable, "tenant management unavailable: no auth pool")
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "tenant management unavailable: no auth pool")
 		return
 	}
 
@@ -247,7 +249,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		ORDER BY created_at ASC, id ASC
 	`)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list tenants: "+err.Error())
+		httperr.WriteInternal(w, r, "list tenants", err)
 		return
 	}
 	defer rows.Close()
@@ -263,7 +265,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			createdByRaw *uuid.UUID
 		)
 		if err := rows.Scan(&id, &name, &slug, &isBootstrap, &createdAt, &createdByRaw); err != nil {
-			writeError(w, http.StatusInternalServerError, "scan tenant: "+err.Error())
+			httperr.WriteInternal(w, r, "scan tenant", err)
 			return
 		}
 		var createdByStr *string
@@ -281,11 +283,11 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, "iterate tenants: "+err.Error())
+		httperr.WriteInternal(w, r, "iterate tenants", err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, listResponse{Items: items})
+	httpresp.WriteJSON(w, http.StatusOK, listResponse{Items: items})
 }
 
 // Create handles POST /v1/admin/tenants.
@@ -310,39 +312,39 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.authPool == nil {
-		writeError(w, http.StatusServiceUnavailable, "tenant management unavailable: no auth pool")
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "tenant management unavailable: no auth pool")
 		return
 	}
 
 	var req createRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16*1024)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
 	// Validate name. Trim whitespace; reject empty; cap length.
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	if len(name) > nameMaxLen {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("name exceeds %d-byte cap", nameMaxLen))
+		httpresp.WriteError(w, http.StatusBadRequest, fmt.Sprintf("name exceeds %d-byte cap", nameMaxLen))
 		return
 	}
 
 	// Validate slug. Trim whitespace; require non-empty; require regex match.
 	slug := strings.TrimSpace(req.Slug)
 	if slug == "" {
-		writeError(w, http.StatusBadRequest, "slug is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "slug is required")
 		return
 	}
 	if len(slug) > slugMaxLen {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("slug exceeds %d-byte cap", slugMaxLen))
+		httpresp.WriteError(w, http.StatusBadRequest, fmt.Sprintf("slug exceeds %d-byte cap", slugMaxLen))
 		return
 	}
 	if !slugPattern.MatchString(slug) {
-		writeError(w, http.StatusBadRequest, "slug must match ^[a-z0-9][a-z0-9-]{0,62}$")
+		httpresp.WriteError(w, http.StatusBadRequest, "slug must match ^[a-z0-9][a-z0-9-]{0,62}$")
 		return
 	}
 
@@ -352,19 +354,19 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		joinsAs = creatorJoinsAsNone
 	}
 	if joinsAs != creatorJoinsAsAdmin && joinsAs != creatorJoinsAsNone {
-		writeError(w, http.StatusBadRequest, "creator_joins_as must be 'admin' or 'none'")
+		httpresp.WriteError(w, http.StatusBadRequest, "creator_joins_as must be 'admin' or 'none'")
 		return
 	}
 
 	// Resolve actor identity.
 	actorID := actorFromContext(r.Context())
 	if actorID == uuid.Nil {
-		writeError(w, http.StatusInternalServerError, "actor user_id not on context")
+		httpresp.WriteError(w, http.StatusInternalServerError, "actor user_id not on context")
 		return
 	}
 	actorTenantID, terr := actorTenantFromContext(r.Context())
 	if terr != nil {
-		writeError(w, http.StatusInternalServerError, terr.Error())
+		httperr.WriteInternal(w, r, "admin tenants", terr)
 		return
 	}
 
@@ -387,13 +389,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			actorID,
 		).Scan(&actorIdpIssuer, &actorIdpSubject, &actorEmail, &actorDisplayName)
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusInternalServerError,
+			httpresp.WriteError(w, http.StatusInternalServerError,
 				"actor users row not found; cannot join new tenant as admin")
+
 			return
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError,
-				"read actor identity: "+err.Error())
+			httperr.WriteInternal(w, r, "read actor identity", err)
 			return
 		}
 	}
@@ -409,7 +411,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	)
 	tx, err := h.authPool.BeginTx(r.Context(), pgx.TxOptions{})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "begin tx: "+err.Error())
+		httperr.WriteInternal(w, r, "begin tx", err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -432,7 +434,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.Exec(r.Context(),
 		`SELECT pg_advisory_xact_lock($1)`, actorLockKey,
 	); err != nil {
-		writeError(w, http.StatusInternalServerError, "acquire actor lock: "+err.Error())
+		httperr.WriteInternal(w, r, "acquire actor lock", err)
 		return
 	}
 
@@ -446,7 +448,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		 WHERE actor_user_id = $1 AND action = $2 AND occurred_at > $3`,
 		actorID, auditActionCreate, rateCutoff,
 	).Scan(&rateCount); err != nil {
-		writeError(w, http.StatusInternalServerError, "rate check: "+err.Error())
+		httperr.WriteInternal(w, r, "rate check", err)
 		return
 	}
 	if rateCount >= h.limit {
@@ -460,8 +462,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		// Fall through to the error response below (don't commit).
 		_ = tx.Rollback(r.Context())
 		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(rateLimitWindow.Seconds())))
-		writeError(w, http.StatusTooManyRequests,
+		httpresp.WriteError(w, http.StatusTooManyRequests,
 			fmt.Sprintf("rate limit exceeded: max %d tenants per super_admin per 24h", h.limit))
+
 		return
 	}
 
@@ -477,7 +480,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			uniqueViolation = true
 			uniqueColumn = pgErr.ConstraintName
 		} else {
-			writeError(w, http.StatusInternalServerError, "insert tenant: "+err.Error())
+			httperr.WriteInternal(w, r, "insert tenant", err)
 			return
 		}
 	}
@@ -486,11 +489,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		_ = tx.Rollback(r.Context())
 		switch uniqueColumn {
 		case "idx_tenants_slug_unique":
-			writeError(w, http.StatusConflict, "slug already in use")
+			httpresp.WriteError(w, http.StatusConflict, "slug already in use")
 		case "idx_tenants_lower_name":
-			writeError(w, http.StatusConflict, "name already in use (case-insensitive)")
+			httpresp.WriteError(w, http.StatusConflict, "name already in use (case-insensitive)")
 		default:
-			writeError(w, http.StatusConflict, "tenant conflict on unique constraint: "+uniqueColumn)
+			httpresp.WriteError(w, http.StatusConflict, "tenant conflict on unique constraint: "+uniqueColumn)
 		}
 		return
 	}
@@ -508,7 +511,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		dimensionID, tenantID, defaultDimensionName,
 		`["prod", "staging", "dev"]`,
 	); err != nil {
-		writeError(w, http.StatusInternalServerError, "insert scope_dimension: "+err.Error())
+		httperr.WriteInternal(w, r, "insert scope_dimension", err)
 		return
 	}
 
@@ -528,7 +531,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		cellID, tenantID, defaultScopeCellLabel,
 		`{"environment": "prod"}`, dimensionsHash,
 	); err != nil {
-		writeError(w, http.StatusInternalServerError, "insert scope_cell: "+err.Error())
+		httperr.WriteInternal(w, r, "insert scope_cell", err)
 		return
 	}
 
@@ -541,7 +544,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			newUserID, tenantID, actorEmail, actorDisplayName,
 			actorIdpIssuer, actorIdpSubject,
 		); err != nil {
-			writeError(w, http.StatusInternalServerError, "insert creator users row: "+err.Error())
+			httperr.WriteInternal(w, r, "insert creator users row", err)
 			return
 		}
 		if _, err := tx.Exec(r.Context(),
@@ -549,7 +552,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			 VALUES ($1, $2, 'admin', $3)`,
 			tenantID, newUserID.String(), adminRoleGrantedBy,
 		); err != nil {
-			writeError(w, http.StatusInternalServerError, "insert creator user_roles row: "+err.Error())
+			httperr.WriteInternal(w, r, "insert creator user_roles row", err)
 			return
 		}
 		creatorAdminUserID = &newUserID
@@ -572,7 +575,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		actorTenantID,
 		payload,
 	); err != nil {
-		writeError(w, http.StatusInternalServerError, "insert super_admin_audit_log: "+err.Error())
+		httperr.WriteInternal(w, r, "insert super_admin_audit_log", err)
 		return
 	}
 
@@ -590,13 +593,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		 VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, 'core')`,
 		actorTenantID, actorID, auditActionCreate, beforeBlob, afterBlob,
 	); err != nil {
-		writeError(w, http.StatusInternalServerError, "insert me_audit_log: "+err.Error())
+		httperr.WriteInternal(w, r, "insert me_audit_log", err)
 		return
 	}
 
 	// Commit.
 	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "commit: "+err.Error())
+		httperr.WriteInternal(w, r, "commit tx", err)
 		return
 	}
 
@@ -635,7 +638,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		s := creatorAdminUserID.String()
 		resp.CreatorAdminUserID = &s
 	}
-	writeJSON(w, http.StatusOK, resp)
+	httpresp.WriteJSON(w, http.StatusOK, resp)
 }
 
 // --- helpers ---
@@ -647,7 +650,7 @@ func requireSuperAdmin(w http.ResponseWriter, r *http.Request) bool {
 	if claims != nil && claims.SuperAdmin {
 		return true
 	}
-	writeError(w, http.StatusForbidden, "super_admin required")
+	httpresp.WriteError(w, http.StatusForbidden, "super_admin required")
 	return false
 }
 
@@ -712,16 +715,4 @@ func actorAdvisoryKey(actorID uuid.UUID) int64 {
 	// Mask the actor component into the low 48 bits to leave the
 	// prefix intact.
 	return slice143Prefix | (actorComponent & 0x0000ffffffffffff)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
 }

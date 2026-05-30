@@ -6,7 +6,7 @@
 //
 // Constitutional commitment: no React, no DOM. Pure data → strings.
 
-import type { AuditPeriod } from "@/lib/api";
+import type { AuditPeriod } from "@/lib/api/audit-periods";
 
 /**
  * Threshold (in days) for the "amber dot" in-progress cue per AC-6.

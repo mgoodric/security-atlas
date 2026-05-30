@@ -28,6 +28,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/oscal"
 )
 
@@ -89,14 +90,14 @@ type exportResponse struct {
 func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	periodID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "audit period id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "audit period id must be a UUID")
 		return
 	}
 
 	var req exportRequest
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
 	}
@@ -151,28 +152,25 @@ func writeExportError(w http.ResponseWriter, err error) {
 	case errors.Is(err, oscal.ErrPeriodNotFrozen):
 		// Constitutional invariant 10: a non-frozen period cannot be
 		// exported. 409 Conflict — the resource is in the wrong state.
-		writeError(w, http.StatusConflict,
+		httpresp.WriteError(w, http.StatusConflict,
 			"audit period is not frozen; freeze it before exporting (invariant 10)")
+
 	case errors.Is(err, oscal.ErrPeriodNotFound):
-		writeError(w, http.StatusNotFound, "audit period not found")
+		httpresp.WriteError(w, http.StatusNotFound, "audit period not found")
 	case errors.Is(err, oscal.ErrBridgeUnavailable):
-		writeError(w, http.StatusBadGateway, "oscal-bridge service unavailable")
+		httpresp.WriteError(w, http.StatusBadGateway, "oscal-bridge service unavailable")
 	case errors.Is(err, oscal.ErrRoundTripFailed):
 		// AC-6/AC-7: the bundle failed compliance-trestle round-trip and
 		// was NOT finalized.
-		writeError(w, http.StatusUnprocessableEntity,
+		httpresp.WriteError(w, http.StatusUnprocessableEntity,
 			"compliance-trestle round-trip validation failed; no bundle was produced")
+
 	case errors.Is(err, oscal.ErrSigningFailed):
 		// AC-5: signing failed and no unsigned bundle was produced.
-		writeError(w, http.StatusInternalServerError,
+		httpresp.WriteError(w, http.StatusInternalServerError,
 			"bundle signing failed; no bundle was produced")
-	default:
-		writeError(w, http.StatusInternalServerError, "oscal export failed")
-	}
-}
 
-func writeError(w http.ResponseWriter, status int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+	default:
+		httpresp.WriteError(w, http.StatusInternalServerError, "oscal export failed")
+	}
 }

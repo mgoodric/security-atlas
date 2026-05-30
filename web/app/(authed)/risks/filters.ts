@@ -20,7 +20,7 @@
 // that exist on `riskWire` (slice 019 + slice 067 additions) are
 // referenced — no invented columns.
 
-import type { Risk } from "@/lib/api";
+import type { Risk } from "@/lib/api/risks";
 
 /**
  * The "all values" sentinel. Used as the default filter value on every

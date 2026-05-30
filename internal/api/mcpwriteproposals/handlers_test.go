@@ -47,6 +47,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -370,7 +371,7 @@ func TestWriteCreateErr_UnknownTool(t *testing.T) {
 	t.Parallel()
 	h := New(nil)
 	w := httptest.NewRecorder()
-	h.writeCreateErr(w, writeproposals.ErrUnknownTool)
+	h.writeCreateErr(w, httptest.NewRequest(http.MethodGet, "/", nil), writeproposals.ErrUnknownTool)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
 	}
@@ -380,7 +381,7 @@ func TestWriteCreateErr_InvalidInput(t *testing.T) {
 	t.Parallel()
 	h := New(nil)
 	w := httptest.NewRecorder()
-	h.writeCreateErr(w, writeproposals.ErrInvalidInput)
+	h.writeCreateErr(w, httptest.NewRequest(http.MethodGet, "/", nil), writeproposals.ErrInvalidInput)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
 	}
@@ -390,7 +391,7 @@ func TestWriteCreateErr_PendingCapExceeded(t *testing.T) {
 	t.Parallel()
 	h := New(nil)
 	w := httptest.NewRecorder()
-	h.writeCreateErr(w, writeproposals.ErrPendingCapExceeded)
+	h.writeCreateErr(w, httptest.NewRequest(http.MethodGet, "/", nil), writeproposals.ErrPendingCapExceeded)
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("status = %d, want 429", w.Code)
 	}
@@ -403,7 +404,7 @@ func TestWriteCreateErr_Fallthrough500(t *testing.T) {
 	t.Parallel()
 	h := New(nil)
 	w := httptest.NewRecorder()
-	h.writeCreateErr(w, errors.New("unexpected"))
+	h.writeCreateErr(w, httptest.NewRequest(http.MethodGet, "/", nil), errors.New("unexpected"))
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", w.Code)
 	}
@@ -415,7 +416,7 @@ func TestWriteTransitionErr_NotFound(t *testing.T) {
 	t.Parallel()
 	h := New(nil)
 	w := httptest.NewRecorder()
-	h.writeTransitionErr(w, writeproposals.ErrNotFound)
+	h.writeTransitionErr(w, httptest.NewRequest(http.MethodGet, "/", nil), writeproposals.ErrNotFound)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", w.Code)
 	}
@@ -425,7 +426,7 @@ func TestWriteTransitionErr_WrongState(t *testing.T) {
 	t.Parallel()
 	h := New(nil)
 	w := httptest.NewRecorder()
-	h.writeTransitionErr(w, writeproposals.ErrWrongState)
+	h.writeTransitionErr(w, httptest.NewRequest(http.MethodGet, "/", nil), writeproposals.ErrWrongState)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", w.Code)
 	}
@@ -435,7 +436,7 @@ func TestWriteTransitionErr_UnknownTool(t *testing.T) {
 	t.Parallel()
 	h := New(nil)
 	w := httptest.NewRecorder()
-	h.writeTransitionErr(w, writeproposals.ErrUnknownTool)
+	h.writeTransitionErr(w, httptest.NewRequest(http.MethodGet, "/", nil), writeproposals.ErrUnknownTool)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
 	}
@@ -445,7 +446,7 @@ func TestWriteTransitionErr_Fallthrough500(t *testing.T) {
 	t.Parallel()
 	h := New(nil)
 	w := httptest.NewRecorder()
-	h.writeTransitionErr(w, errors.New("unexpected"))
+	h.writeTransitionErr(w, httptest.NewRequest(http.MethodGet, "/", nil), errors.New("unexpected"))
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", w.Code)
 	}
@@ -453,17 +454,28 @@ func TestWriteTransitionErr_Fallthrough500(t *testing.T) {
 
 // ----- writeServerErr: direct exercise -----
 
-func TestWriteServerErr_Wraps500WithOp(t *testing.T) {
+// TestWriteServerErr_GenericInternalError — slice 367 rewires
+// writeServerErr to delegate to httperr.WriteInternal which emits a
+// generic "internal error" body + a request_id, NEVER the raw err.Error().
+// CWE-209 closure.
+func TestWriteServerErr_GenericInternalError(t *testing.T) {
 	t.Parallel()
 	w := httptest.NewRecorder()
-	writeServerErr(w, "list proposals", errors.New("db down"))
+	r := httptest.NewRequest(http.MethodGet, "/v1/whatever", nil)
+	httperr.WriteInternal(w, r, "list proposals", errors.New("db down"))
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), "list proposals") {
-		t.Fatalf("body = %s, want op-prefix", w.Body.String())
+	if strings.Contains(w.Body.String(), "db down") {
+		t.Fatalf("slice 367 regression: body leaked raw err: %s", w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "db down") {
-		t.Fatalf("body = %s, want wrapped err", w.Body.String())
+	if strings.Contains(w.Body.String(), "list proposals") {
+		t.Fatalf("slice 367 regression: body leaked op label: %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "internal error") {
+		t.Fatalf("body = %s, want generic message", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "request_id") {
+		t.Fatalf("body = %s, want request_id field", w.Body.String())
 	}
 }

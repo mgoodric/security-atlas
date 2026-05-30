@@ -68,51 +68,32 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: false,
-    // Slice 092: proxy.test.ts lives at the web root because Next.js 16
-    // requires `proxy.ts` (the renamed middleware) to sit at the
-    // workspace root, alongside next.config.ts. The test mirrors that
-    // placement so it stays colocated with its subject.
-    include: [
-      "lib/**/*.test.ts",
-      "app/api/**/*.test.ts",
-      // Route-group directory `(authed)` has literal parens that glob
-      // engines treat as group syntax — escape with brackets so vitest
-      // walks into it. The escaped pattern matches a directory named
-      // exactly `(authed)`.
-      "app/[(]authed[)]/**/*.test.ts",
-      // Slice 130: the /audit-log layout exports its route-guard
-      // predicate as pure logic. Covered without a route-group wrapper,
-      // so no escape is needed.
-      "app/audit-log/**/*.test.ts",
-      "proxy.test.ts",
-      // Slice 208: next-config.test.ts lives at the web root because
-      // next.config.ts must sit at the workspace root (Next.js
-      // convention). Same colocation precedent as proxy.test.ts above.
-      "next-config.test.ts",
-      // Slice 132: the README-screenshot capture pipeline's safety
-      // gate (assertCaptureSafe + isLoopbackOrPrivate) is the
-      // load-bearing information-disclosure mitigation per the slice
-      // 132 threat model. The test file exercises 13 branches of the
-      // gate so a refactor cannot widen the admit set silently — a
-      // public-IP slip would publish real customer data to the public
-      // README permanently.
-      "scripts/**/*.test.ts",
-      // Slice 178: the UI honesty audit harness's pure-logic modules
-      // (mockup-diff categorization + read-only guardrail detection +
-      // manifest validator) are covered here as node-env vitest. The
-      // Playwright spec at `e2e-audit/ui-honesty.spec.ts` is excluded
-      // from vitest (`exclude: e2e-audit/**/*.spec.ts` below) and runs
-      // via the `Frontend · UI honesty (advisory)` job instead.
-      "e2e-audit/lib/**/*.test.ts",
-      // Slice 183: pure-logic helpers that two or more components
-      // share are colocated under `components/<area>/` (the helper
-      // can't live in app/(authed)/<route>/ because it must be
-      // importable by sibling components). The include is intentionally
-      // narrow — only `.test.ts` (no `.test.tsx`), matching the
-      // node-env / no-JSX precedent — so the JSX view modules are
-      // never accidentally entered by the unit runner.
-      "components/**/*.test.ts",
-    ],
+    // Slice 348 V-2: collapsed include to a generic `**/*.test.ts`
+    // glob. vitest walks directories regardless of literal-paren
+    // naming, so the prior escape-bracket entry for `app/(authed)/`
+    // is no longer needed. New colocated test directories
+    // (lib/**, app/api/**, app/(authed)/**, app/audit-log/**,
+    // scripts/**, e2e-audit/lib/**, components/**, plus
+    // proxy.test.ts and next-config.test.ts at workspace root)
+    // are auto-included by the directory walk. The exclude block
+    // below keeps Playwright spec files (`e2e/**`,
+    // `e2e-audit/**/*.spec.ts`) and build artifacts out of the
+    // vitest runner — those run via the `playwright test` runner.
+    //
+    // Discipline preserved from the prior explicit list:
+    //   * No JSX in vitest — slice 069 P0-A3. The narrow `**/*.test.ts`
+    //     pattern (NOT `.test.tsx`) keeps JSX view modules out of the
+    //     node-env runner.
+    //   * Workspace root tests (proxy.test.ts, next-config.test.ts)
+    //     are covered by the generic glob.
+    //   * `scripts/**` README-screenshot safety-gate tests (slice
+    //     132 information-disclosure mitigation) covered.
+    //   * `e2e-audit/lib/**` UI-honesty pure-logic modules covered;
+    //     `e2e-audit/**/*.spec.ts` excluded so the Playwright spec
+    //     for that harness runs via the dedicated job.
+    //   * `components/**` shared helpers (slice 183) covered; `.tsx`
+    //     view modules are not matched.
+    include: ["**/*.test.ts"],
     exclude: [
       "**/node_modules/**",
       "**/.next/**",

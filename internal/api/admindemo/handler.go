@@ -17,6 +17,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/demoseed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -145,7 +147,7 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
 	}
-	writeJSON(w, http.StatusOK, statusResponse{Enabled: h.isEnabled()})
+	httpresp.WriteJSON(w, http.StatusOK, statusResponse{Enabled: h.isEnabled()})
 }
 
 // Seed handles POST /v1/admin/demo/seed.
@@ -171,22 +173,22 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.isEnabled() {
-		writeError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
 		return
 	}
 	if !h.limiter.allow(clientIP(r), h.clock()) {
 		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(rateLimitWindow.Seconds())))
-		writeError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
+		httpresp.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
 		return
 	}
 	if h.authPool == nil {
-		writeError(w, http.StatusServiceUnavailable, "demo seed not available: no auth pool")
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not available: no auth pool")
 		return
 	}
 
 	actorID, actorTenantID, err := h.resolveActor(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "resolve actor: "+err.Error())
+		httperr.WriteInternal(w, r, "resolve actor", err)
 		return
 	}
 
@@ -203,7 +205,7 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		"status": "invoked",
 	}
 	if err := h.writeAuditRows(r.Context(), auditActionSeed, actorID, actorTenantID, auditPayload); err != nil {
-		writeError(w, http.StatusInternalServerError, "audit write failed; seed not invoked: "+err.Error())
+		httperr.WriteInternal(w, r, "audit write failed; seed not invoked", err)
 		return
 	}
 
@@ -211,7 +213,7 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 	// a re-click on an already-seeded tenant returns Idempotent=true.
 	seeder, err := demoseed.NewSeeder(h.authPool, demoseed.DefaultScale)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "build seeder: "+err.Error())
+		httperr.WriteInternal(w, r, "build seeder", err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
@@ -222,11 +224,11 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		ActorTenantID: actorTenantID,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "seed failed: "+err.Error())
+		httperr.WriteInternal(w, r, "seed failed", err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, seedResponse{
+	httpresp.WriteJSON(w, http.StatusOK, seedResponse{
 		TenantID:     res.TenantID.String(),
 		TenantSlug:   res.TenantSlug,
 		Controls:     res.Controls,
@@ -236,6 +238,7 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		Samples:      res.Samples,
 		Idempotent:   res.Idempotent,
 	})
+
 }
 
 // Teardown handles POST /v1/admin/demo/teardown.
@@ -247,22 +250,22 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.isEnabled() {
-		writeError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
 		return
 	}
 	if !h.limiter.allow(clientIP(r), h.clock()) {
 		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(rateLimitWindow.Seconds())))
-		writeError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
+		httpresp.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
 		return
 	}
 	if h.authPool == nil {
-		writeError(w, http.StatusServiceUnavailable, "demo seed not available: no auth pool")
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not available: no auth pool")
 		return
 	}
 
 	actorID, actorTenantID, err := h.resolveActor(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "resolve actor: "+err.Error())
+		httperr.WriteInternal(w, r, "resolve actor", err)
 		return
 	}
 
@@ -272,26 +275,27 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 		"status": "invoked",
 	}
 	if err := h.writeAuditRows(r.Context(), auditActionTeardown, actorID, actorTenantID, auditPayload); err != nil {
-		writeError(w, http.StatusInternalServerError, "audit write failed; teardown not invoked: "+err.Error())
+		httperr.WriteInternal(w, r, "audit write failed; teardown not invoked", err)
 		return
 	}
 
 	seeder, err := demoseed.NewSeeder(h.authPool, demoseed.DefaultScale)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "build seeder: "+err.Error())
+		httperr.WriteInternal(w, r, "build seeder", err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 	if err := seeder.Teardown(ctx, demoTenantSlug, actorID, actorTenantID); err != nil {
-		writeError(w, http.StatusInternalServerError, "teardown failed: "+err.Error())
+		httperr.WriteInternal(w, r, "teardown failed", err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, teardownResponse{
+	httpresp.WriteJSON(w, http.StatusOK, teardownResponse{
 		TenantSlug: demoTenantSlug,
 		Status:     "deleted",
 	})
+
 }
 
 // requireAdmin enforces the admin role. Defense in depth: the OPA
@@ -311,7 +315,7 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return false
 	}
 	if cred.IsAdmin {
@@ -322,24 +326,38 @@ func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 			return true
 		}
 	}
-	writeError(w, http.StatusForbidden, "admin role required")
+	httpresp.WriteError(w, http.StatusForbidden, "admin role required")
 	return false
 }
 
 // resolveActor reads actor user_id + actor tenant_id from the
 // request context. Both are required for audit-log row tagging.
+// subjectUserID strips the "user:" prefix the auth substrate places on
+// JWT subjects (Subject = "user:<uuid>"). A bare UUID with no prefix is
+// returned unchanged, so this is safe for both the JWT path and any
+// legacy bare-UUID credential.
+func subjectUserID(s string) string {
+	return strings.TrimPrefix(s, "user:")
+}
+
 func (h *Handler) resolveActor(ctx context.Context) (uuid.UUID, uuid.UUID, error) {
 	var actorID uuid.UUID
 	if claims := jwtmw.FromContext(ctx); claims != nil {
-		if u, err := uuid.Parse(claims.Subject); err == nil {
+		// The atlas JWT Subject is "user:<uuid>" (auth-substrate-v2
+		// convention — see internal/api/auth/http.go and
+		// internal/api/oauth/pkce.go). Strip the prefix before parsing;
+		// a bare UUID (no prefix) survives TrimPrefix unchanged.
+		if u, err := uuid.Parse(subjectUserID(claims.Subject)); err == nil {
 			actorID = u
 		}
 	}
 	if actorID == uuid.Nil {
 		// Legacy bearer path — try the credstore credential's UserID.
+		// jwtmw also populates this with the "user:<uuid>" Subject, so
+		// strip the prefix here too.
 		cred, _ := authctx.CredentialFromContext(ctx)
 		if cred.UserID != "" {
-			if u, err := uuid.Parse(cred.UserID); err == nil {
+			if u, err := uuid.Parse(subjectUserID(cred.UserID)); err == nil {
 				actorID = u
 			}
 		}
@@ -474,15 +492,3 @@ func (l *ipBucketLimiter) allow(ip string, now time.Time) bool {
 }
 
 // --- helpers ---
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}

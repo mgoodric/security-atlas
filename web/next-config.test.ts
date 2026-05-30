@@ -99,7 +99,10 @@ describe("next.config rewrites (slice 208)", () => {
 
     const mod = await import("./next.config");
     const config = mod.default;
-    const rules = await config.rewrites!();
+    const rules = (await config.rewrites!()) as Array<{
+      source: string;
+      destination: string;
+    }>;
 
     expect(rules[0]).toEqual({
       source: "/v1/:path*",

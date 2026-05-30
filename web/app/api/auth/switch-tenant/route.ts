@@ -29,7 +29,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { apiBaseURL } from "@/lib/api";
+import { apiBaseURL } from "@/lib/api/base";
 import {
   ATLAS_JWT_COOKIE,
   ATLAS_JWT_COOKIE_LIFETIME_SECONDS,

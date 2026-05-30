@@ -9,7 +9,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { getCalendarEvents } from "@/lib/api";
+import { getCalendarEvents } from "@/lib/api/calendar";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 export async function GET(request: Request) {

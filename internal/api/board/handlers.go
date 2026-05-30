@@ -32,6 +32,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	board "github.com/mgoodric/security-atlas/internal/board"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -87,35 +89,35 @@ type generateRequest struct {
 func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	var req generateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "request body must be JSON with a period_end field")
+		httpresp.WriteError(w, http.StatusBadRequest, "request body must be JSON with a period_end field")
 		return
 	}
 	if strings.TrimSpace(req.PeriodEnd) == "" {
-		writeError(w, http.StatusBadRequest, "period_end is required (YYYY-MM-DD)")
+		httpresp.WriteError(w, http.StatusBadRequest, "period_end is required (YYYY-MM-DD)")
 		return
 	}
 	// Validate the date shape up front so a malformed value is a clean 400
 	// rather than reaching the Generator.
 	if _, err := time.Parse("2006-01-02", req.PeriodEnd); err != nil {
-		writeError(w, http.StatusBadRequest, "period_end must be a YYYY-MM-DD date")
+		httpresp.WriteError(w, http.StatusBadRequest, "period_end must be a YYYY-MM-DD date")
 		return
 	}
 
 	stored, err := h.gen.Generate(ctx, req.PeriodEnd)
 	if err != nil {
 		if errors.Is(err, board.ErrBadPeriodEnd) {
-			writeError(w, http.StatusBadRequest, "period_end must be a YYYY-MM-DD date")
+			httpresp.WriteError(w, http.StatusBadRequest, "period_end must be a YYYY-MM-DD date")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "board", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, briefWireFromStored(stored))
+	httpresp.WriteJSON(w, http.StatusCreated, briefWireFromStored(stored))
 }
 
 // Get handles GET /v1/board-briefs/{id} (AC-5).
@@ -130,7 +132,7 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, chi.URLParam(r, "id"))
@@ -140,13 +142,13 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	stored, err := h.store.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, board.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "board brief not found")
+			httpresp.WriteError(w, http.StatusNotFound, "board brief not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "board", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, briefWireFromStored(stored))
+	httpresp.WriteJSON(w, http.StatusOK, briefWireFromStored(stored))
 }
 
 // List handles GET /v1/board-briefs — every brief for the tenant, newest
@@ -154,19 +156,19 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	stored, err := h.store.List(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "board", err)
 		return
 	}
 	wires := make([]briefWire, 0, len(stored))
 	for _, sb := range stored {
 		wires = append(wires, briefWireFromStored(sb))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"briefs": wires})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"briefs": wires})
 }
 
 // Markdown handles GET /v1/board-briefs/{id}.md (AC-4).
@@ -176,7 +178,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Markdown(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, chi.URLParam(r, "id"))
@@ -186,10 +188,10 @@ func (h *Handler) Markdown(w http.ResponseWriter, r *http.Request) {
 	stored, err := h.store.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, board.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "board brief not found")
+			httpresp.WriteError(w, http.StatusNotFound, "board brief not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "board", err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
@@ -211,7 +213,7 @@ func (h *Handler) Markdown(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) PDF(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, chi.URLParam(r, "id"))
@@ -221,10 +223,10 @@ func (h *Handler) PDF(w http.ResponseWriter, r *http.Request) {
 	stored, err := h.store.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, board.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "board brief not found")
+			httpresp.WriteError(w, http.StatusNotFound, "board brief not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "board", err)
 		return
 	}
 
@@ -233,11 +235,12 @@ func (h *Handler) PDF(w http.ResponseWriter, r *http.Request) {
 	pdfBytes, err := board.RenderPDF(renderCtx, stored)
 	if err != nil {
 		if errors.Is(err, board.ErrChromeUnavailable) {
-			writeError(w, http.StatusServiceUnavailable,
+			httpresp.WriteError(w, http.StatusServiceUnavailable,
 				"PDF rendering unavailable: chrome browser not found")
+
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "board", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/pdf")
@@ -277,18 +280,8 @@ func briefWireFromStored(sb board.StoredBrief) briefWire {
 func parseID(w http.ResponseWriter, raw string) (uuid.UUID, bool) {
 	id, err := uuid.Parse(raw)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "board brief id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "board brief id must be a UUID")
 		return uuid.UUID{}, false
 	}
 	return id, true
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
 }

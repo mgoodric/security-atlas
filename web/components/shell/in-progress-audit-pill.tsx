@@ -35,7 +35,7 @@ import {
   fetchAuditPeriods,
   type AuditPeriod,
   type AuditPeriodsListResponse,
-} from "@/lib/api";
+} from "@/lib/api/audit-periods";
 
 /**
  * The literal status the period must carry to qualify for the pill.
@@ -92,7 +92,7 @@ export function InProgressAuditPill() {
       aria-label={`${pick.name} in progress`}
     >
       <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
-      <span className="text-xs font-medium text-amber-800 dark:text-amber-300">
+      <span className="text-xs font-medium text-amber-800 dark:text-amber-200">
         {pick.name} in progress
       </span>
     </div>

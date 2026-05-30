@@ -23,7 +23,6 @@ package calendar
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -32,6 +31,8 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -157,25 +158,25 @@ type subscribeResponse struct {
 func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
 	from, to, err := parseWindow(r, h.nowFn())
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	typeFilter, err := normalizeTypeFilter(r.URL.Query().Get("types"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	rows, err := h.store.ListEvents(ctx, from, to, h.nowFn(), typeFilter, int32(truncateThreshold+1))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "calendar", err)
 		return
 	}
 
@@ -204,7 +205,7 @@ func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
 		resp.NextFrom = &nf
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	httpresp.WriteJSON(w, http.StatusOK, resp)
 }
 
 // Subscribe handles POST /v1/calendar/subscription (AC-8 mint path).
@@ -225,11 +226,11 @@ func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "credential context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "credential context missing")
 		return
 	}
 	if cred.TenantID == "" {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
@@ -240,14 +241,15 @@ func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 		subscriptionTTL,
 	)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("issue calendar token: %v", err))
+		httpresp.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("issue calendar token: %v", err))
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, subscribeResponse{
+	httpresp.WriteJSON(w, http.StatusCreated, subscribeResponse{
 		URL:       h.urlGen(plaintext),
 		ExpiresAt: h.nowFn().Add(subscriptionTTL).Format(time.RFC3339),
 	})
+
 }
 
 // ICS handles GET /v1/calendar.ics (AC-6 / AC-7 / AC-8).
@@ -263,16 +265,16 @@ func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ICS(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" {
-		writeError(w, http.StatusUnauthorized, "calendar token required")
+		httpresp.WriteError(w, http.StatusUnauthorized, "calendar token required")
 		return
 	}
 	cred, err := h.creds.Authenticate(token)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "invalid calendar token")
+		httpresp.WriteError(w, http.StatusUnauthorized, "invalid calendar token")
 		return
 	}
 	if !hasCalendarScope(cred) {
-		writeError(w, http.StatusForbidden, "token not scoped for calendar access")
+		httpresp.WriteError(w, http.StatusForbidden, "token not scoped for calendar access")
 		return
 	}
 
@@ -282,24 +284,24 @@ func (h *Handler) ICS(w http.ResponseWriter, r *http.Request) {
 	// can't carry cookies.
 	ctx, terr := tenancy.WithTenant(r.Context(), cred.TenantID)
 	if terr != nil {
-		writeError(w, http.StatusInternalServerError, terr.Error())
+		httperr.WriteInternal(w, r, "calendar", terr)
 		return
 	}
 
 	from, to, err := parseWindow(r.WithContext(ctx), h.nowFn())
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	typeFilter, err := normalizeTypeFilter(r.URL.Query().Get("types"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	rows, err := h.store.ListEvents(ctx, from, to, h.nowFn(), typeFilter, int32(truncateThreshold+1))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "calendar", err)
 		return
 	}
 	if len(rows) > truncateThreshold {
@@ -321,16 +323,6 @@ func tenantContext(r *http.Request) (context.Context, bool) {
 		return nil, false
 	}
 	return r.Context(), true
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
 }
 
 func hasCalendarScope(c credstore.Credential) bool {

@@ -58,6 +58,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -117,12 +119,12 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 		// before reaching here). No meta-audit is possible because
 		// we have no tenant id; the upstream layer already logged
 		// the 401 via the request log.
-		writeError(w, http.StatusUnauthorized, "missing credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return
 	}
 	tenantID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "invalid tenant in credential")
+		httpresp.WriteError(w, http.StatusInternalServerError, "invalid tenant in credential")
 		return
 	}
 	userIdentifier := cred.UserID
@@ -147,7 +149,7 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 			Reason:         parseErr.Error(),
 			IncludePayload: includePayloadPtr(includePayload),
 		})
-		writeError(w, http.StatusBadRequest, parseErr.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, parseErr.Error())
 		return
 	}
 
@@ -163,7 +165,7 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 			Result: "error:role_probe", Reason: err.Error(),
 			IncludePayload: includePayloadPtr(includePayload),
 		})
-		writeError(w, http.StatusInternalServerError, "role probe: "+err.Error())
+		httperr.WriteInternal(w, r, "role probe", err)
 		return
 	}
 	if !allowed {
@@ -173,7 +175,7 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 			Reason:         "caller lacks admin|auditor|grc_engineer role",
 			IncludePayload: includePayloadPtr(includePayload),
 		})
-		writeError(w, http.StatusForbidden, "admin, auditor, or grc_engineer role required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin, auditor, or grc_engineer role required")
 		return
 	}
 
@@ -233,7 +235,7 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 			Format: string(format), Result: "denied:bad_format", Reason: err.Error(),
 			IncludePayload: includePayloadPtr(includePayload),
 		})
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -365,7 +367,7 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 			IncludePayload: includePayloadPtr(includePayload),
 		})
 		if statusToSend == 0 {
-			writeError(w, http.StatusInternalServerError, "export: "+queryErr)
+			httpresp.WriteError(w, http.StatusInternalServerError, "export: "+queryErr)
 		}
 		// If statusToSend was already set we already started the
 		// response; there's nothing more to write.
@@ -385,9 +387,10 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 		// 413 body: actionable narrow-the-filter guidance. The
 		// caller knows the cap and can re-issue with a tighter
 		// `from` / `to` / `kind` / `actor` filter.
-		writeError(w, http.StatusRequestEntityTooLarge,
+		httpresp.WriteError(w, http.StatusRequestEntityTooLarge,
 			fmt.Sprintf("export would exceed row cap of %d; narrow the request filter "+
 				"(from/to window, kind=, actor=) and retry", rowCap))
+
 		return
 	}
 

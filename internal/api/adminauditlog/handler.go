@@ -54,6 +54,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -117,7 +119,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	tenantID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "invalid tenant in credential")
+		httpresp.WriteError(w, http.StatusInternalServerError, "invalid tenant in credential")
 		return
 	}
 
@@ -141,7 +143,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if s := q.Get("since"); s != "" {
 		t, perr := time.Parse(time.RFC3339, s)
 		if perr != nil {
-			writeError(w, http.StatusBadRequest, "invalid since: "+perr.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, "invalid since: "+perr.Error())
 			return
 		}
 		params.Since = pgtype.Timestamptz{Time: t, Valid: true}
@@ -149,7 +151,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if s := q.Get("until"); s != "" {
 		t, perr := time.Parse(time.RFC3339, s)
 		if perr != nil {
-			writeError(w, http.StatusBadRequest, "invalid until: "+perr.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, "invalid until: "+perr.Error())
 			return
 		}
 		params.Until = pgtype.Timestamptz{Time: t, Valid: true}
@@ -157,12 +159,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if c := q.Get("cursor"); c != "" {
 		payload, perr := decodeCursor(c)
 		if perr != nil {
-			writeError(w, http.StatusBadRequest, "invalid cursor: "+perr.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, "invalid cursor: "+perr.Error())
 			return
 		}
 		t, terr := time.Parse(time.RFC3339Nano, payload.TS)
 		if terr != nil {
-			writeError(w, http.StatusBadRequest, "invalid cursor ts: "+terr.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, "invalid cursor ts: "+terr.Error())
 			return
 		}
 		params.CursorTs = pgtype.Timestamptz{Time: t, Valid: true}
@@ -177,7 +179,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return qErr
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list audit log: "+err.Error())
+		httperr.WriteInternal(w, r, "list audit log", err)
 		return
 	}
 
@@ -203,7 +205,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			Summary:      json.RawMessage(row.Summary),
 		})
 	}
-	writeJSON(w, http.StatusOK, ListResponse{Rows: out, NextCursor: nextCursor})
+	httpresp.WriteJSON(w, http.StatusOK, ListResponse{Rows: out, NextCursor: nextCursor})
 }
 
 // --- helpers ---
@@ -244,24 +246,12 @@ func decodeCursor(c string) (cursorPayload, error) {
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return false
 	}
 	if !cred.IsAdmin {
-		writeError(w, http.StatusForbidden, "admin credential required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return false
 	}
 	return true
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
 }

@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth";
-import { apiBaseURL } from "@/lib/api";
+import { apiBaseURL } from "@/lib/api/base";
 
 // Slice 011 — server-side proxy for POST /v1/artifacts:upload (slice 036).
 // The browser posts a multipart form; we forward the form body unchanged

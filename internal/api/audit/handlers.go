@@ -25,6 +25,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -96,26 +98,26 @@ type annotationWire struct {
 func (h *Handler) CreatePopulation(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
 	var req createPopulationReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	controlID, err := uuid.Parse(req.ControlID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "control_id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "control_id must be a UUID")
 		return
 	}
 	if req.TimeWindowStart.IsZero() || req.TimeWindowEnd.IsZero() {
-		writeError(w, http.StatusBadRequest, "time_window_start and time_window_end are required")
+		httpresp.WriteError(w, http.StatusBadRequest, "time_window_start and time_window_end are required")
 		return
 	}
 	if req.TimeWindowStart.After(req.TimeWindowEnd) {
-		writeError(w, http.StatusBadRequest, "time_window_start must be <= time_window_end")
+		httpresp.WriteError(w, http.StatusBadRequest, "time_window_start must be <= time_window_end")
 		return
 	}
 
@@ -127,64 +129,65 @@ func (h *Handler) CreatePopulation(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:       cred,
 	})
 	if err != nil {
-		writeServerErr(w, "create population", err)
+		httperr.WriteInternal(w, r, "create population", err)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{
 		"population": populationWireFrom(pop),
-		"row_count":  pop.RowCount, // explicit echo per AC-1 contract
+		"row_count":  pop.RowCount,
 	})
+
 }
 
 // GetPopulation handles GET /v1/populations/{id}.
 func (h *Handler) GetPopulation(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	pop, err := h.store.GetPopulation(ctx, id)
 	if err != nil {
 		if errors.Is(err, audit.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "population not found")
+			httpresp.WriteError(w, http.StatusNotFound, "population not found")
 			return
 		}
-		writeServerErr(w, "get population", err)
+		httperr.WriteInternal(w, r, "get population", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"population": populationWireFrom(pop)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"population": populationWireFrom(pop)})
 }
 
 // DrawSample handles POST /v1/samples (AC-2).
 func (h *Handler) DrawSample(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
 	var req drawSampleReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	popID, err := uuid.Parse(req.PopulationID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "population_id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "population_id must be a UUID")
 		return
 	}
 	if req.N <= 0 {
-		writeError(w, http.StatusBadRequest, "n must be a positive integer")
+		httpresp.WriteError(w, http.StatusBadRequest, "n must be a positive integer")
 		return
 	}
 	if req.Seed == "" {
-		writeError(w, http.StatusBadRequest, "seed must be a non-empty string")
+		httpresp.WriteError(w, http.StatusBadRequest, "seed must be a non-empty string")
 		return
 	}
 
@@ -197,69 +200,70 @@ func (h *Handler) DrawSample(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, audit.ErrNotFound):
-			writeError(w, http.StatusNotFound, "population not found")
+			httpresp.WriteError(w, http.StatusNotFound, "population not found")
 		case errors.Is(err, audit.ErrEmptyPopulation):
-			writeError(w, http.StatusBadRequest, "population is empty")
+			httpresp.WriteError(w, http.StatusBadRequest, "population is empty")
 		default:
-			writeServerErr(w, "draw sample", err)
+			httperr.WriteInternal(w, r, "draw sample", err)
 		}
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{
 		"sample": sampleWireFrom(sample),
 	})
+
 }
 
 // GetSample handles GET /v1/samples/{id}.
 func (h *Handler) GetSample(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	sample, err := h.store.GetSample(ctx, id)
 	if err != nil {
 		if errors.Is(err, audit.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "sample not found")
+			httpresp.WriteError(w, http.StatusNotFound, "sample not found")
 			return
 		}
-		writeServerErr(w, "get sample", err)
+		httperr.WriteInternal(w, r, "get sample", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sample": sampleWireFrom(sample)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"sample": sampleWireFrom(sample)})
 }
 
 // Annotate handles POST /v1/samples/{id}/annotations (AC-4).
 func (h *Handler) Annotate(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	sampleID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "sample id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "sample id must be a UUID")
 		return
 	}
 
 	var req annotateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	recID, err := uuid.Parse(req.EvidenceRecordID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "evidence_record_id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "evidence_record_id must be a UUID")
 		return
 	}
 	if _, ok := audit.AnnotationResults[req.Result]; !ok {
-		writeError(w, http.StatusBadRequest, "result must be one of: passed, failed, not-applicable")
+		httpresp.WriteError(w, http.StatusBadRequest, "result must be one of: passed, failed, not-applicable")
 		return
 	}
 
@@ -273,43 +277,44 @@ func (h *Handler) Annotate(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, audit.ErrNotFound):
-			writeError(w, http.StatusNotFound, "sample not found")
+			httpresp.WriteError(w, http.StatusNotFound, "sample not found")
 		case errors.Is(err, audit.ErrInvalidAnnotation):
-			writeError(w, http.StatusBadRequest, "invalid annotation result")
+			httpresp.WriteError(w, http.StatusBadRequest, "invalid annotation result")
 		default:
-			writeServerErr(w, "annotate sample", err)
+			httperr.WriteInternal(w, r, "annotate sample", err)
 		}
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{"annotation": annotationWireFrom(ann)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"annotation": annotationWireFrom(ann)})
 }
 
 // ListAnnotations handles GET /v1/samples/{id}/annotations.
 func (h *Handler) ListAnnotations(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	sampleID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "sample id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "sample id must be a UUID")
 		return
 	}
 	anns, err := h.store.ListAnnotations(ctx, sampleID)
 	if err != nil {
-		writeServerErr(w, "list annotations", err)
+		httperr.WriteInternal(w, r, "list annotations", err)
 		return
 	}
 	out := make([]annotationWire, len(anns))
 	for i, a := range anns {
 		out[i] = annotationWireFrom(a)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"annotations": out,
 		"count":       len(out),
 	})
+
 }
 
 // ----- helpers -----
@@ -377,20 +382,4 @@ func annotationWireFrom(a audit.Annotation) annotationWire {
 		AnnotatedAt:      a.AnnotatedAt,
 		Notes:            a.Notes,
 	}
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
 }

@@ -12,6 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/userprefs"
 )
 
@@ -43,25 +45,25 @@ type preferencesWire map[string]map[string]bool
 func (h *PreferencesHandler) GetPreferences(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	userUUID, err := uuid.Parse(cred.UserID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "no preferences for this credential")
+		httpresp.WriteError(w, http.StatusNotFound, "no preferences for this credential")
 		return
 	}
 	tenantUUID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context invalid")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context invalid")
 		return
 	}
 	out, err := h.prefs.Get(ctx, tenantUUID, userUUID)
 	if err != nil {
-		writeServerErr(w, "get preferences", err)
+		httperr.WriteInternal(w, r, "get preferences", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"preferences": preferencesWire(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"preferences": preferencesWire(out)})
 }
 
 // PatchPreferences handles PATCH /v1/me/preferences. Accepts a partial matrix;
@@ -70,72 +72,72 @@ func (h *PreferencesHandler) GetPreferences(w http.ResponseWriter, r *http.Reque
 func (h *PreferencesHandler) PatchPreferences(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	userUUID, err := uuid.Parse(cred.UserID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "no preferences for this credential")
+		httpresp.WriteError(w, http.StatusNotFound, "no preferences for this credential")
 		return
 	}
 	tenantUUID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context invalid")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context invalid")
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8*1024))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "request body too large or unreadable")
+		httpresp.WriteError(w, http.StatusBadRequest, "request body too large or unreadable")
 		return
 	}
 	if len(body) == 0 {
-		writeError(w, http.StatusBadRequest, "empty body")
+		httpresp.WriteError(w, http.StatusBadRequest, "empty body")
 		return
 	}
 	// Accept the matrix either as a bare object (preferences map at top level) or
 	// wrapped under {"preferences": ...}. The wrapped shape mirrors the GET response.
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	var matrix userprefs.Preferences
 	if inner, ok := raw["preferences"]; ok {
 		if err := json.Unmarshal(inner, &matrix); err != nil {
-			writeError(w, http.StatusBadRequest, "preferences must be an object")
+			httpresp.WriteError(w, http.StatusBadRequest, "preferences must be an object")
 			return
 		}
 	} else {
 		if err := json.Unmarshal(body, &matrix); err != nil {
-			writeError(w, http.StatusBadRequest, "body must be a preferences matrix")
+			httpresp.WriteError(w, http.StatusBadRequest, "body must be a preferences matrix")
 			return
 		}
 	}
 	if len(matrix) == 0 {
-		writeError(w, http.StatusBadRequest, "preferences body must contain at least one event")
+		httpresp.WriteError(w, http.StatusBadRequest, "preferences body must contain at least one event")
 		return
 	}
 	// Snapshot prior state for audit-log diff (before-image).
 	before, err := h.prefs.Get(ctx, tenantUUID, userUUID)
 	if err != nil {
-		writeServerErr(w, "load preferences before patch", err)
+		httperr.WriteInternal(w, r, "load preferences before patch", err)
 		return
 	}
 	if err := h.prefs.Upsert(ctx, tenantUUID, userUUID, matrix); err != nil {
 		if errors.Is(err, userprefs.ErrUnknownEvent) {
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if errors.Is(err, userprefs.ErrUnknownChannel) {
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		writeServerErr(w, "upsert preferences", err)
+		httperr.WriteInternal(w, r, "upsert preferences", err)
 		return
 	}
 	after, err := h.prefs.Get(ctx, tenantUUID, userUUID)
 	if err != nil {
-		writeServerErr(w, "load preferences after patch", err)
+		httperr.WriteInternal(w, r, "load preferences after patch", err)
 		return
 	}
 	// Audit-log: only the cells the patch touched.
@@ -153,7 +155,7 @@ func (h *PreferencesHandler) PatchPreferences(w http.ResponseWriter, r *http.Req
 		ah := &ProfileHandler{pool: h.pool}
 		_ = ah.writeAuditLog(ctx, tenantUUID, userUUID, "preferences.update", auditBefore, auditAfter)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"preferences": preferencesWire(after)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"preferences": preferencesWire(after)})
 }
 
 func mapsEqual(a, b map[string]any) bool {

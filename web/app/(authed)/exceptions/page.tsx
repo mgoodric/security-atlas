@@ -52,7 +52,7 @@ import {
   fetchExceptionsList,
   type Exception,
   type ExceptionsListResponse,
-} from "@/lib/api";
+} from "@/lib/api/exceptions";
 import {
   EXCEPTIONS_EXPORT_FORMATS,
   EXCEPTIONS_EXPORT_FORMAT_LABELS,

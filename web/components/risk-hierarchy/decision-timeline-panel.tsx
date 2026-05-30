@@ -32,7 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
-import type { Decision } from "@/lib/api";
+import type { Decision } from "@/lib/api/risk-hierarchy";
 import { cn } from "@/lib/utils";
 
 // The Decision Log status vocabulary (canvas §6.7).

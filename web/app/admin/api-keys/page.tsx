@@ -45,7 +45,7 @@ import {
   AdminCredentialIssueResponse,
   AdminCredentialListResponse,
   AdminCredentialRotateResponse,
-} from "@/lib/api";
+} from "@/lib/api/admin";
 
 async function fetchCreds(): Promise<AdminCredential[]> {
   const res = await fetch(`/api/admin/credentials`);
@@ -161,6 +161,7 @@ export default function APIKeysPage() {
       <IssueForm
         onSubmit={(body) => issueMut.mutate(body)}
         submitting={issueMut.isPending}
+        error={issueMut.error ? (issueMut.error as Error).message : null}
       />
 
       <Card>
@@ -327,14 +328,22 @@ function FreshSecretCallout({
 function IssueForm({
   onSubmit,
   submitting,
+  error,
 }: {
   onSubmit: (body: AdminCredentialIssueRequest) => void;
   submitting: boolean;
+  error: string | null;
 }) {
   const [scopePredicate, setScopePredicate] = useState("");
   const [allowedKinds, setAllowedKinds] = useState("");
   const [ttlDays, setTtlDays] = useState(90);
   const [isAdmin, setIsAdmin] = useState(false);
+
+  // Slice 363 — form-error association. errorId points every input
+  // (via aria-describedby) at the Alert when it's mounted; undefined
+  // when the alert is absent so React strips the attribute cleanly.
+  // See `web/components/ui/checkbox.tsx` for the convention.
+  const errorId = error ? "issue-credential-error" : undefined;
 
   function submit() {
     const kinds = allowedKinds
@@ -367,6 +376,7 @@ function IssueForm({
               value={scopePredicate}
               onChange={(e) => setScopePredicate(e.target.value)}
               placeholder='{"connector":"aws"}'
+              aria-describedby={errorId}
             />
           </Field>
           <Field label="Allowed kinds (comma-separated)">
@@ -374,6 +384,7 @@ function IssueForm({
               value={allowedKinds}
               onChange={(e) => setAllowedKinds(e.target.value)}
               placeholder="aws.s3.encryption.v1, aws.iam.user.v1"
+              aria-describedby={errorId}
             />
           </Field>
           <Field label="TTL (days)">
@@ -383,6 +394,7 @@ function IssueForm({
               max={3650}
               value={ttlDays}
               onChange={(e) => setTtlDays(Number(e.target.value))}
+              aria-describedby={errorId}
             />
           </Field>
           <Field label="Admin credential">
@@ -392,6 +404,7 @@ function IssueForm({
                 checked={isAdmin}
                 onChange={(e) => setIsAdmin(e.target.checked)}
                 className="h-4 w-4"
+                aria-describedby={errorId}
               />
               Grant admin privileges on this credential
             </label>
@@ -400,6 +413,18 @@ function IssueForm({
         <Button onClick={submit} disabled={submitting}>
           {submitting ? "Issuing…" : "Issue credential"}
         </Button>
+        {error ? (
+          <Alert
+            variant="destructive"
+            id="issue-credential-error"
+            aria-live="polite"
+          >
+            <AlertTitle>Issue failed</AlertTitle>
+            <AlertDescription data-testid="issue-credential-error">
+              {error}
+            </AlertDescription>
+          </Alert>
+        ) : null}
       </CardContent>
     </Card>
   );

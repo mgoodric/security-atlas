@@ -1,0 +1,16 @@
+{
+  "_comment": "Slice 349 contract-test-tier PILOT golden. Recorded by the PROVIDER side (internal/api/install_state_contract_test.go) from the real Go handler at internal/api/install_state.go. Regenerate with `go test ./internal/api/ -run TestContract_InstallState -update`. The CONSUMER side (web/lib/contracts/install-state.contract.test.ts) asserts the Next.js BFF's assumptions against these recorded bodies.",
+  "endpoint": "GET /v1/install-state",
+  "variants": {
+    "fresh_install_with_tenant": {
+      "first_install": true,
+      "tenant_id": "11111111-1111-4111-8111-111111111111"
+    },
+    "fresh_install_without_tenant": {
+      "first_install": true
+    },
+    "post_first_install": {
+      "first_install": false
+    }
+  }
+}

@@ -51,6 +51,8 @@ security-atlas follows coordinated disclosure:
 - A GitHub Security Advisory is published with a CVE identifier (requested via GitHub) for issues with assigned-CVE-worthy impact.
 - Credit is given in the advisory to the reporter unless they request anonymity.
 
+See [`docs/governance/incident-response.md`](docs/governance/incident-response.md) for the response workflow that intake feeds into — severity tiering, containment / eradication / recovery procedures, per-tier playbooks, and the post-incident review template.
+
 ## Scope
 
 In scope:

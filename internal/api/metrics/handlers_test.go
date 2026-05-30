@@ -42,6 +42,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -649,12 +650,18 @@ func TestTargetWireFromRow_AllFieldsPresent(t *testing.T) {
 	}
 }
 
-// ---- writeJSON + writeError ----
+// ---- httpresp.WriteJSON + httpresp.WriteError ----
+//
+// Slice 369 — AC-5 contract lock. These two tests previously asserted the
+// metrics package's local writeJSON/writeError helpers; after the slice 369
+// consolidation they assert the shared internal/api/httpresp helpers
+// directly, pinning the 2xx/4xx wire shape (status code, Content-Type, and
+// the {"error": msg} envelope) that every migrated handler now emits.
 
 func TestWriteJSON_SetsStatusAndContentType(t *testing.T) {
 	t.Parallel()
 	rr := httptest.NewRecorder()
-	writeJSON(rr, http.StatusAccepted, map[string]string{"hello": "world"})
+	httpresp.WriteJSON(rr, http.StatusAccepted, map[string]string{"hello": "world"})
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("expected 202; got %d", rr.Code)
 	}
@@ -673,7 +680,7 @@ func TestWriteJSON_SetsStatusAndContentType(t *testing.T) {
 func TestWriteError_RendersErrorEnvelope(t *testing.T) {
 	t.Parallel()
 	rr := httptest.NewRecorder()
-	writeError(rr, http.StatusTeapot, "bad coffee")
+	httpresp.WriteError(rr, http.StatusTeapot, "bad coffee")
 	if rr.Code != http.StatusTeapot {
 		t.Fatalf("expected 418; got %d", rr.Code)
 	}

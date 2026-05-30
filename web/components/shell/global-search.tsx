@@ -6,6 +6,22 @@
 // supersedes spillover slice 272. Mockup reference:
 // `Plans/mockups/controls.html` lines 43-47.
 //
+// Slice 361 — WCAG 4.1.2 Name/Role/Value combobox ARIA wiring layered
+// on top of the slice 223 surface. The input is now wired as a
+// `role="combobox"` (with `aria-haspopup="listbox"`, `aria-expanded`,
+// `aria-controls`, `aria-activedescendant`); the popover carries a
+// stable `id="global-search-listbox"`; each row carries a stable
+// `id="global-search-option-{type}-{id}"`; and a visually-hidden
+// `aria-live="polite"` region announces the result count whenever it
+// updates. ARIA + ids only — no visual / interaction change.
+//
+// Path 1 (Link-keep, see docs/audit-log/361-... D1) was chosen over
+// Path 2 (replace `<Link>` with `<li role="option">` + click handler):
+// preserves the native cmd-click / right-click semantics of `<Link>`,
+// honors P0-361-1 (no interaction shape change), and WAI-ARIA does not
+// forbid `role="option"` on a focusable interactive descendant in a
+// one-shot popover usage.
+//
 // Backend: slice 268's unified `GET /v1/search` endpoint (merged on
 // main at d9d8e69b). Wire shape:
 //
@@ -117,6 +133,48 @@ export function isShortcutTrigger(e: {
   ctrlKey: boolean;
 }): boolean {
   return e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey);
+}
+
+/**
+ * LISTBOX_ID is the stable id the input's `aria-controls` resolves to
+ * and the popover's `id` attribute. Constant because there is only one
+ * global search in the shell at any time. Exported for spec coverage.
+ */
+export const LISTBOX_ID = "global-search-listbox";
+
+/**
+ * optionIdFor returns the stable DOM id for a result row, used both as
+ * each option's `id` and as the input's `aria-activedescendant` when
+ * that row is the active highlight. The id encodes the row type so the
+ * three groups can never collide on the same upstream id. Exported for
+ * unit coverage.
+ *
+ * Slice 361 (WCAG 4.1.2): the combobox-listbox pattern requires every
+ * option to carry a stable id so `aria-activedescendant` on the input
+ * can name the currently-highlighted row programmatically.
+ */
+export function optionIdFor(
+  type: "controls" | "risks" | "evidence",
+  id: string,
+): string {
+  return `global-search-option-${type}-${id}`;
+}
+
+/**
+ * resultCountAnnouncement returns the text a screen reader will hear
+ * when results update. Used inside the visually-hidden
+ * `aria-live="polite"` region. Singular vs plural matters for SR voice
+ * naturalness. Exported for unit coverage.
+ *
+ * The "No results" branch is only emitted when the user has actually
+ * typed enough to trigger a search (the popover is open); the caller
+ * is responsible for not rendering the region when the popover is
+ * closed, otherwise an SR would hear "No results" on every page load.
+ */
+export function resultCountAnnouncement(count: number): string {
+  if (count === 0) return "No results";
+  if (count === 1) return "1 result";
+  return `${count} results`;
 }
 
 export function GlobalSearch() {
@@ -285,6 +343,15 @@ export function GlobalSearch() {
 
   const showPopover = open && query.trim().length >= 2;
 
+  // Slice 361 — derive the active option's stable DOM id for
+  // `aria-activedescendant`. Empty string when no row is active so the
+  // input renders the attribute as absent (React drops empty string for
+  // aria-activedescendant). Computed unconditionally so the input
+  // attribute stays stable across renders.
+  const activeHit = flatHits[activeIndex];
+  const activeOptionId =
+    showPopover && activeHit ? optionIdFor(activeHit.type, activeHit.id) : "";
+
   return (
     <div ref={containerRef} data-testid="global-search" className="relative">
       <div className="relative">
@@ -302,6 +369,12 @@ export function GlobalSearch() {
           onKeyDown={onKeyDown}
           data-testid="global-search-input"
           aria-label="Global search"
+          role="combobox"
+          aria-haspopup="listbox"
+          aria-expanded={showPopover}
+          aria-controls={LISTBOX_ID}
+          aria-activedescendant={activeOptionId || undefined}
+          aria-autocomplete="list"
           className="pl-8 pr-12 py-1.5 w-64 text-sm bg-muted/40 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:bg-background"
         />
         <kbd
@@ -311,9 +384,30 @@ export function GlobalSearch() {
           ⌘K
         </kbd>
       </div>
+      {/*
+        Slice 361 — visually-hidden aria-live=polite region announcing
+        the result count whenever it updates. Only mounted when the
+        popover is open + not in the loading flash; otherwise an SR
+        would hear "No results" on every page load. The region is
+        OUTSIDE the popover so SR users hear the count without having
+        to focus into the listbox. WCAG 4.1.3 Status Messages.
+      */}
+      {showPopover && !loading ? (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          data-testid="global-search-live-region"
+          className="sr-only"
+        >
+          {resultCountAnnouncement(flatHits.length)}
+        </div>
+      ) : null}
       {showPopover ? (
         <div
+          id={LISTBOX_ID}
           role="listbox"
+          aria-label="Search results"
           data-testid="global-search-popover"
           className="absolute right-0 top-full mt-1 w-96 max-h-96 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg z-50"
         >
@@ -388,9 +482,13 @@ function ResultGroup({
         {rows.map((hit, idx) => {
           const flatIdx = flatIndexFor(idx);
           const isActive = flatIdx === activeIndex;
+          // Slice 361 — stable id so the input's
+          // `aria-activedescendant` can name this row when active.
+          const optionId = optionIdFor(type, hit.id);
           return (
             <li key={hit.id}>
               <Link
+                id={optionId}
                 href={hrefForHit(hit)}
                 onClick={onRowClick}
                 data-testid={`global-search-row-${type}`}

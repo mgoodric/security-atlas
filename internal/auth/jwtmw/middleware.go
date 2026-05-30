@@ -101,7 +101,16 @@ type Options struct {
 	CookieName string
 
 	// Now is the clock; tests inject a pinned clock. Defaults to
-	// time.Now.
+	// time.Now().UTC() (slice 371 — aligned with the established
+	// clock-injection pattern in internal/board, internal/drift,
+	// internal/evidence/ingest, internal/api/admintenants). The shape
+	// here is `func() int64` (Unix seconds) rather than
+	// `func() time.Time` to match the tokensign + jwt validator
+	// signatures it ultimately feeds — converting at the call site
+	// would push the same int64 ↔ time.Time hop into every caller for
+	// zero gain. Decision recorded at
+	// docs/audit-log/371-auth-clock-injection-substrate-decisions.md
+	// (D3).
 	Now func() int64
 }
 
@@ -109,7 +118,7 @@ type Options struct {
 // request on a valid OAuth-AS-issued JWT.
 //
 // signer + revoked + opts must be non-nil at production wiring. The
-// constructor accepts nil opts.Now (defaults to time.Now). The
+// constructor accepts nil opts.Now (defaults to time.Now().UTC()). The
 // constructor does NOT panic — failures surface as runtime 500s so
 // a misconfigured deployment doesn't crash the binary at startup;
 // the unit-test surface verifies the failure mode.
@@ -293,9 +302,20 @@ func write401(w http.ResponseWriter) {
 // nowTime adapts the int64 Unix-seconds clock the Options carries
 // (matches the tokensign + jwt packages' clock shape) to the
 // time.Time the slice 187 validator expects.
+//
+// Slice 371: the fallback when Options.Now is nil now returns
+// time.Now().UTC() — aligning this package's clock fallback with the
+// established `func() time.Time { return time.Now().UTC() }` shape used
+// across internal/board, internal/evidence/ingest, internal/drift, and
+// internal/api/admintenants. Pure-refactor — JWT exp/nbf claims are
+// Unix-seconds integers, so the UTC normalization is a no-op for the
+// validator's int64 comparison, but it makes the package consistent with
+// the rest of the codebase and removes the last raw `time.Now()` (modulo
+// fsstore.go:236 which is for directory naming, not security-critical
+// TTL math, and is explicitly excluded from slice 371's sweep).
 func nowTime(now func() int64) (t time.Time) {
 	if now == nil {
-		return time.Now()
+		return time.Now().UTC()
 	}
-	return time.Unix(now(), 0)
+	return time.Unix(now(), 0).UTC()
 }

@@ -17,6 +17,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
 )
 
@@ -90,23 +92,23 @@ func last4OfSessionID(id string) string {
 func (h *SessionsHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	userUUID, err := uuid.Parse(cred.UserID)
 	if err != nil {
 		// No real users row → no sessions surface.
-		writeJSON(w, http.StatusOK, map[string]any{"sessions": []sessionWire{}, "count": 0})
+		httpresp.WriteJSON(w, http.StatusOK, map[string]any{"sessions": []sessionWire{}, "count": 0})
 		return
 	}
 	tenantUUID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context invalid")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context invalid")
 		return
 	}
 	rows, err := h.sessions.ListForUser(ctx, tenantUUID, userUUID)
 	if err != nil {
-		writeServerErr(w, "list sessions", err)
+		httperr.WriteInternal(w, r, "list sessions", err)
 		return
 	}
 	currentID := currentSessionIDFromRequest(r)
@@ -114,10 +116,11 @@ func (h *SessionsHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 	for i, s := range rows {
 		out[i] = sessionWireFrom(s, currentID)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"sessions": out,
 		"count":    len(out),
 	})
+
 }
 
 // RevokeSession handles DELETE /v1/me/sessions/{id}. Returns 204 on success, 404
@@ -125,31 +128,31 @@ func (h *SessionsHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 func (h *SessionsHandler) RevokeSession(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id := chi.URLParam(r, "id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "session id required")
+		httpresp.WriteError(w, http.StatusBadRequest, "session id required")
 		return
 	}
 	userUUID, err := uuid.Parse(cred.UserID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "session not found")
+		httpresp.WriteError(w, http.StatusNotFound, "session not found")
 		return
 	}
 	tenantUUID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context invalid")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context invalid")
 		return
 	}
 	updated, err := h.sessions.RevokeForUser(ctx, tenantUUID, userUUID, id)
 	if err != nil {
-		writeServerErr(w, "revoke session", err)
+		httperr.WriteInternal(w, r, "revoke session", err)
 		return
 	}
 	if !updated {
-		writeError(w, http.StatusNotFound, "session not found")
+		httpresp.WriteError(w, http.StatusNotFound, "session not found")
 		return
 	}
 	auditBefore := map[string]any{"session_id": id, "revoked": false}
@@ -165,23 +168,23 @@ func (h *SessionsHandler) RevokeSession(w http.ResponseWriter, r *http.Request) 
 func (h *SessionsHandler) RevokeOtherSessions(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	userUUID, err := uuid.Parse(cred.UserID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "no sessions for this credential")
+		httpresp.WriteError(w, http.StatusNotFound, "no sessions for this credential")
 		return
 	}
 	tenantUUID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context invalid")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context invalid")
 		return
 	}
 	currentID := currentSessionIDFromRequest(r)
 	n, err := h.sessions.RevokeOthersForUser(ctx, tenantUUID, userUUID, currentID)
 	if err != nil {
-		writeServerErr(w, "revoke other sessions", err)
+		httperr.WriteInternal(w, r, "revoke other sessions", err)
 		return
 	}
 	if n > 0 {
@@ -190,7 +193,7 @@ func (h *SessionsHandler) RevokeOtherSessions(w http.ResponseWriter, r *http.Req
 		ah := &ProfileHandler{pool: h.pool}
 		_ = ah.writeAuditLog(ctx, tenantUUID, userUUID, "session.revoke", auditBefore, auditAfter)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"revoked_count": n})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"revoked_count": n})
 }
 
 // currentSessionIDFromRequest reads the slice 034 atlas_session cookie if present.

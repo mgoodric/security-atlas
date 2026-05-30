@@ -10,7 +10,7 @@
 import Link from "next/link";
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
-import type { DriftReport } from "@/lib/api";
+import type { DriftReport } from "@/lib/api/dashboard";
 
 export function RecentDriftPanel({
   report,

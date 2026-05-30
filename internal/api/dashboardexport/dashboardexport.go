@@ -108,6 +108,8 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -201,7 +203,7 @@ func (h *Handler) ExportDashboard(w http.ResponseWriter, r *http.Request) {
 	// query-string state.
 	cred, ok := authctx.CredentialFromContext(ctx)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		// Cannot record meta-audit without a tenant id; the upstream
 		// bearer-auth middleware would normally have rejected this
 		// before we ever see the request.
@@ -209,7 +211,7 @@ func (h *Handler) ExportDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	tenantID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "invalid tenant in credential")
+		httpresp.WriteError(w, http.StatusInternalServerError, "invalid tenant in credential")
 		return
 	}
 	userIdentifier := cred.UserID
@@ -224,7 +226,7 @@ func (h *Handler) ExportDashboard(w http.ResponseWriter, r *http.Request) {
 			Result: "denied:bad_request",
 			Reason: formatErr.Error(),
 		})
-		writeError(w, http.StatusBadRequest, formatErr.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, formatErr.Error())
 		return
 	}
 
@@ -234,7 +236,7 @@ func (h *Handler) ExportDashboard(w http.ResponseWriter, r *http.Request) {
 			Result: "denied:forbidden",
 			Reason: "role does not grant dashboard/export access",
 		})
-		writeError(w, http.StatusForbidden, "role does not grant dashboard/export access")
+		httpresp.WriteError(w, http.StatusForbidden, "role does not grant dashboard/export access")
 		return
 	}
 
@@ -249,8 +251,7 @@ func (h *Handler) ExportDashboard(w http.ResponseWriter, r *http.Request) {
 			Result: "error:snapshot",
 			Reason: snapErr.Error(),
 		})
-		writeError(w, http.StatusInternalServerError,
-			"compose dashboard snapshot: "+snapErr.Error())
+		httperr.WriteInternal(w, r, "compose dashboard snapshot", snapErr)
 		return
 	}
 
@@ -439,8 +440,3 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 // writeError emits a small JSON error envelope. Local to this
 // package (the slice 137/175 controls package uses an equivalent
 // helper; we avoid a cross-package dependency for one call site).
-func writeError(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}

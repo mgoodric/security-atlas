@@ -50,6 +50,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -107,7 +109,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	tenantID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "invalid tenant in credential")
+		httpresp.WriteError(w, http.StatusInternalServerError, "invalid tenant in credential")
 		return
 	}
 
@@ -125,12 +127,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if c := r.URL.Query().Get("cursor"); c != "" {
 		raw, derr := base64.URLEncoding.DecodeString(c)
 		if derr != nil {
-			writeError(w, http.StatusBadRequest, "invalid cursor")
+			httpresp.WriteError(w, http.StatusBadRequest, "invalid cursor")
 			return
 		}
 		parsed, perr := uuid.Parse(string(raw))
 		if perr != nil {
-			writeError(w, http.StatusBadRequest, "invalid cursor payload")
+			httpresp.WriteError(w, http.StatusBadRequest, "invalid cursor payload")
 			return
 		}
 		cursorAfter = pgtype.UUID{Bytes: parsed, Valid: true}
@@ -148,7 +150,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return qErr
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list users: "+err.Error())
+		httperr.WriteInternal(w, r, "list users", err)
 		return
 	}
 
@@ -163,7 +165,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		items = append(items, userResponseFromListRow(row))
 	}
 
-	writeJSON(w, http.StatusOK, ListResponse{Items: items, NextCursor: nextCursor})
+	httpresp.WriteJSON(w, http.StatusOK, ListResponse{Items: items, NextCursor: nextCursor})
 }
 
 // Get handles GET /v1/admin/users/{id}.
@@ -174,12 +176,12 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	tenantID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "invalid tenant in credential")
+		httpresp.WriteError(w, http.StatusInternalServerError, "invalid tenant in credential")
 		return
 	}
 	userID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid user id")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid user id")
 		return
 	}
 
@@ -194,14 +196,14 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "user not found")
+			httpresp.WriteError(w, http.StatusNotFound, "user not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "get user: "+err.Error())
+		httperr.WriteInternal(w, r, "get user", err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, userResponseFromGetRow(row))
+	httpresp.WriteJSON(w, http.StatusOK, userResponseFromGetRow(row))
 }
 
 // PatchRoles handles PATCH /v1/admin/users/{id}/roles.
@@ -217,18 +219,18 @@ func (h *Handler) PatchRoles(w http.ResponseWriter, r *http.Request) {
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	tenantID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "invalid tenant in credential")
+		httpresp.WriteError(w, http.StatusInternalServerError, "invalid tenant in credential")
 		return
 	}
 	targetID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid user id")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid user id")
 		return
 	}
 
 	var req PatchRolesRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16*1024)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
@@ -237,7 +239,7 @@ func (h *Handler) PatchRoles(w http.ResponseWriter, r *http.Request) {
 	for _, role := range req.Roles {
 		role = strings.TrimSpace(role)
 		if !authz.IsCanonical(authz.Role(role)) {
-			writeError(w, http.StatusBadRequest, "unknown role: "+role)
+			httpresp.WriteError(w, http.StatusBadRequest, "unknown role: "+role)
 			return
 		}
 		seen[role] = struct{}{}
@@ -253,7 +255,7 @@ func (h *Handler) PatchRoles(w http.ResponseWriter, r *http.Request) {
 	// the auth layer). When the target equals the caller and admin is
 	// being dropped, require explicit confirmation.
 	if cred.UserID == targetID.String() && !hasAdmin && !req.ConfirmSelfDemotion {
-		writeError(w, http.StatusBadRequest, "self-demotion from admin requires confirm_self_demotion=true")
+		httpresp.WriteError(w, http.StatusBadRequest, "self-demotion from admin requires confirm_self_demotion=true")
 		return
 	}
 
@@ -285,7 +287,7 @@ func (h *Handler) PatchRoles(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "patch roles: "+err.Error())
+		httperr.WriteInternal(w, r, "patch roles", err)
 		return
 	}
 
@@ -301,13 +303,13 @@ func (h *Handler) PatchRoles(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "user not found after role update")
+			httpresp.WriteError(w, http.StatusNotFound, "user not found after role update")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "refetch user: "+err.Error())
+		httperr.WriteInternal(w, r, "refetch user", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, userResponseFromGetRow(row))
+	httpresp.WriteJSON(w, http.StatusOK, userResponseFromGetRow(row))
 }
 
 // --- helpers ---
@@ -378,24 +380,12 @@ func uuidFromPgtype(u pgtype.UUID) uuid.UUID {
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return false
 	}
 	if !cred.IsAdmin {
-		writeError(w, http.StatusForbidden, "admin credential required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return false
 	}
 	return true
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
 }

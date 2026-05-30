@@ -41,12 +41,21 @@ var ErrUnknownKey = errors.New("apikeystore: unknown key")
 
 // Store persists api_keys via sqlc + pgx, hashing bearer tokens with the
 // supplied bearer.Hasher (HMAC-SHA256 keyed with BEARER_HASH_KEY).
+//
+// Slice 371: the `clock` field is the injection point for the wall-clock
+// source used by every TTL/expiry/rotation-grace computation. Production
+// wiring leaves it at its default — a `func() time.Time` closure that
+// returns `time.Now().UTC()`. Tests override via WithClock so rotation-
+// grace boundary assertions are deterministic. Mirrors the established
+// pattern in internal/board, internal/evidence/ingest, internal/drift, and
+// internal/api/admintenants (positive baselines).
 type Store struct {
 	pool          *pgxpool.Pool
 	authPool      *pgxpool.Pool
 	hasher        *bearer.Hasher
 	rotationGrace time.Duration
 	prefix        string
+	clock         func() time.Time
 }
 
 // NewStore constructs a Store. `pool` is the RLS-enforced application pool
@@ -55,7 +64,8 @@ type Store struct {
 // because the request hasn't resolved its tenant yet). If authPool is nil
 // it falls back to pool — fine for tests that pre-set the tenant context.
 // `hasher` carries the server's BEARER_HASH_KEY. rotationGrace defaults to
-// 7 days when zero.
+// 7 days when zero. The clock defaults to `time.Now().UTC()` and is
+// overridable via WithClock for deterministic tests (slice 371).
 func NewStore(pool, authPool *pgxpool.Pool, hasher *bearer.Hasher, rotationGrace time.Duration) *Store {
 	if rotationGrace == 0 {
 		rotationGrace = 7 * 24 * time.Hour
@@ -69,6 +79,7 @@ func NewStore(pool, authPool *pgxpool.Pool, hasher *bearer.Hasher, rotationGrace
 		hasher:        hasher,
 		rotationGrace: rotationGrace,
 		prefix:        bearer.PrefixProd,
+		clock:         func() time.Time { return time.Now().UTC() },
 	}
 }
 
@@ -76,6 +87,17 @@ func NewStore(pool, authPool *pgxpool.Pool, hasher *bearer.Hasher, rotationGrace
 // Tests set bearer.PrefixTest to keep generated tokens out of secret-scanner
 // flag patterns.
 func (s *Store) SetPrefix(p string) { s.prefix = p }
+
+// WithClock overrides the wall-clock source. Test-only — production wiring
+// leaves the default in place. Returns the Store for chain construction,
+// mirroring internal/api/admintenants/handler.go:185.
+func (s *Store) WithClock(fn func() time.Time) *Store {
+	if fn == nil {
+		return s
+	}
+	s.clock = fn
+	return s
+}
 
 // IssueInput captures the optional knobs at Issue time. Zero values are valid:
 // no scope predicate, no kind restriction, no TTL, no admin/approver flag.
@@ -162,7 +184,7 @@ func (s *Store) Rotate(ctx context.Context, tenantID string, predecessorID uuid.
 		return credstore.Credential{}, "", time.Time{}, err
 	}
 
-	retiresAt := time.Now().UTC().Add(s.rotationGrace)
+	retiresAt := s.clock().Add(s.rotationGrace)
 	if err := q.SetAPIKeyRetiresAt(ctx, dbx.SetAPIKeyRetiresAtParams{
 		TenantID:  tIDU,
 		ID:        pred.ID,
@@ -248,7 +270,7 @@ func (s *Store) Authenticate(ctx context.Context, token string) (credstore.Crede
 		}
 		return credstore.Credential{}, err
 	}
-	now := time.Now().UTC()
+	now := s.clock()
 	if row.RevokedAt.Valid {
 		return credstore.Credential{}, ErrUnknownKey
 	}
@@ -290,7 +312,7 @@ func (s *Store) insert(ctx context.Context, q *dbx.Queries, tenantID, plain stri
 	}
 	var expiresAt pgtype.Timestamptz
 	if in.TTL > 0 {
-		expiresAt = pgtype.Timestamptz{Time: time.Now().UTC().Add(in.TTL), Valid: true}
+		expiresAt = pgtype.Timestamptz{Time: s.clock().Add(in.TTL), Valid: true}
 	}
 	var rotPg pgtype.UUID
 	if rotatedFrom != uuid.Nil {

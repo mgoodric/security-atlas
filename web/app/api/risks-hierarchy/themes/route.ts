@@ -1,4 +1,4 @@
-import { getRiskThemes } from "@/lib/api";
+import { getRiskThemes } from "@/lib/api/risk-hierarchy";
 import { hierarchyProxy } from "../proxy";
 
 // Slice 056 — server-side proxy for GET /v1/themes (slice 053 theme

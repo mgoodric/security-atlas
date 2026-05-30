@@ -19,7 +19,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { listPolicies } from "@/lib/api";
+import { listPolicies } from "@/lib/api/policies";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 export async function GET(): Promise<Response> {

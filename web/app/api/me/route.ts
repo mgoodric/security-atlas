@@ -8,7 +8,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { apiBaseURL } from "@/lib/api";
+import { apiBaseURL } from "@/lib/api/base";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 export async function GET(): Promise<Response> {

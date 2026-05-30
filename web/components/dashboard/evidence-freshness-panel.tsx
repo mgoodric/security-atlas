@@ -8,7 +8,7 @@
 // count. Fully bound — no gap.
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
-import type { FreshnessReport } from "@/lib/api";
+import type { FreshnessReport } from "@/lib/api/dashboard";
 
 function freshFraction(fresh: number, total: number): number {
   if (total <= 0) return 0;

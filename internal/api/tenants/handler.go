@@ -40,6 +40,8 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
@@ -112,7 +114,7 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 
@@ -123,18 +125,18 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 	// is the load-bearing second leg.
 	callerTenantStr, terr := tenancy.TenantFromContext(ctx)
 	if terr != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	callerTenantID, perr := uuid.Parse(callerTenantStr)
 	if perr != nil {
-		writeError(w, http.StatusInternalServerError, "invalid tenant in context")
+		httpresp.WriteError(w, http.StatusInternalServerError, "invalid tenant in context")
 		return
 	}
 	if callerTenantID != id {
 		// Same 403 body shape for "doesn't exist" and "no access"
 		// to avoid the membership-enumeration timing leak.
-		writeError(w, http.StatusForbidden, "tenant not accessible")
+		httpresp.WriteError(w, http.StatusForbidden, "tenant not accessible")
 		return
 	}
 
@@ -143,22 +145,22 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 	// path). Either grants rename authority on the caller's CURRENT
 	// tenant.
 	if !h.callerCanRename(ctx) {
-		writeError(w, http.StatusForbidden, "admin or super_admin required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin or super_admin required")
 		return
 	}
 
 	var req patchTenantRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Name == nil {
-		writeError(w, http.StatusBadRequest, "name is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	normalized, verr := normalizeName(*req.Name)
 	if verr != nil {
-		writeError(w, http.StatusBadRequest, verr.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, verr.Error())
 		return
 	}
 
@@ -216,13 +218,13 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, errDuplicateName):
-			writeError(w, http.StatusConflict, "another tenant already uses this name")
+			httpresp.WriteError(w, http.StatusConflict, "another tenant already uses this name")
 		case errors.Is(err, errTenantNotFound):
 			// Same 404-shaped body — RLS would also have swallowed
 			// the row; the explicit check is for clarity.
-			writeError(w, http.StatusNotFound, "tenant not found")
+			httpresp.WriteError(w, http.StatusNotFound, "tenant not found")
 		default:
-			writeError(w, http.StatusInternalServerError, "rename tenant: "+err.Error())
+			httperr.WriteInternal(w, r, "rename tenant", err)
 		}
 		return
 	}
@@ -245,7 +247,7 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 		PayloadJSON:   sinkPayload,
 	})
 
-	writeJSON(w, http.StatusOK, map[string]any{"tenant": after})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"tenant": after})
 }
 
 // callerCanRename returns true when the request was issued by a
@@ -365,14 +367,4 @@ func tenantFromRow(r dbx.Tenant) tenantWire {
 
 func pgtypeUUID(u uuid.UUID) pgtype.UUID {
 	return pgtype.UUID{Bytes: u, Valid: true}
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
 }

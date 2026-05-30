@@ -1,4 +1,4 @@
-import { getActivity } from "@/lib/api";
+import { getActivity } from "@/lib/api/dashboard";
 import { dashboardProxy } from "../proxy";
 
 // Slice 147 — server-side proxy for GET /v1/activity

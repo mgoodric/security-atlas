@@ -9,6 +9,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 )
 
 // HTTPHandler exposes the slice-014 routes:
@@ -47,45 +49,45 @@ func (h *HTTPHandler) Routes() chi.Router {
 func (h *HTTPHandler) ListHTTP(w http.ResponseWriter, r *http.Request) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		httpresp.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 		return
 	}
 	limit, offset := h.pagination(r)
 	rows, err := h.svc.List(r.Context(), cred.TenantID, limit, offset)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list: " + err.Error()})
+		httperr.WriteInternal(w, r, "list", err)
 		return
 	}
 	out := make([]map[string]any, len(rows))
 	for i, r := range rows {
 		out[i] = wireListItem(r)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"schemas": out})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"schemas": out})
 }
 
 // GetHTTP — AC-2: return the full JSON Schema body for (kind, semver).
 func (h *HTTPHandler) GetHTTP(w http.ResponseWriter, r *http.Request) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		httpresp.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 		return
 	}
 	kind := chi.URLParam(r, "kind")
 	semver := chi.URLParam(r, "semver")
 	if kind == "" || semver == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "kind and semver are required"})
+		httpresp.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "kind and semver are required"})
 		return
 	}
 	row, err := h.svc.Get(r.Context(), cred.TenantID, kind, semver)
 	if err != nil {
 		if errors.Is(err, ErrUnknownKind) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "schema not found"})
+			httpresp.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "schema not found"})
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "get: " + err.Error()})
+		httperr.WriteInternal(w, r, "get", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"schema": wireFullItem(row)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"schema": wireFullItem(row)})
 }
 
 // registerRequest is the wire shape for POST /v1/schemas.
@@ -102,22 +104,22 @@ type registerRequest struct {
 func (h *HTTPHandler) RegisterHTTP(w http.ResponseWriter, r *http.Request) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		httpresp.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 		return
 	}
 	if !cred.IsAdmin {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin credential required"})
+		httpresp.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "admin credential required"})
 		return
 	}
 	var body registerRequest
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "decode: " + err.Error()})
+		httpresp.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "decode: " + err.Error()})
 		return
 	}
 	if len(body.Schema) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "schema body is required"})
+		httpresp.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "schema body is required"})
 		return
 	}
 	out, err := h.svc.Register(r.Context(), RegisterRequest{
@@ -134,17 +136,17 @@ func (h *HTTPHandler) RegisterHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrAnonymous):
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+			httpresp.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
 		case errors.Is(err, ErrUnauthorized):
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+			httpresp.WriteJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 		case errors.Is(err, ErrEmptyOwner):
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			httpresp.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		case errors.Is(err, ErrSemverConflict):
-			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			httpresp.WriteJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		default:
 			// Treat catch-all input failures (parseable semver, JSON Schema,
 			// uuid, missing kind) as 400 — they reflect bad client input.
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			httpresp.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
 		return
 	}
@@ -152,7 +154,7 @@ func (h *HTTPHandler) RegisterHTTP(w http.ResponseWriter, r *http.Request) {
 	// the very next push validation.
 	h.svc.InvalidateTenant(cred.TenantID)
 
-	writeJSON(w, http.StatusCreated, map[string]any{"schema": wireFullItem(out)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"schema": wireFullItem(out)})
 }
 
 func (h *HTTPHandler) pagination(r *http.Request) (int32, int32) {
@@ -215,10 +217,4 @@ func defaultAnchors(a []string) []string {
 		return []string{}
 	}
 	return a
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
 }

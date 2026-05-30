@@ -1,4 +1,4 @@
-import { getEvidenceFreshness } from "@/lib/api";
+import { getEvidenceFreshness } from "@/lib/api/dashboard";
 import { dashboardProxy } from "../proxy";
 
 // Slice 040 — server-side proxy for GET /v1/evidence/freshness

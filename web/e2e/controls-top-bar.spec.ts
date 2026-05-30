@@ -182,6 +182,96 @@ test.describe("topbar header chrome (slice 223)", () => {
     await expect(page.getByTestId("global-search-popover")).not.toBeVisible();
   });
 
+  test("slice 361 — combobox ARIA wiring flips on type + ArrowDown updates aria-activedescendant + live region announces count", async ({
+    authedPage: page,
+  }) => {
+    // Slice 361 (closes slice 331 A11Y-3, severity High): the input
+    // must carry the WAI-ARIA 1.2 combobox-listbox pattern so screen
+    // readers can announce result availability + active row + count
+    // programmatically. This spec pins the four runtime invariants:
+    //
+    //   (1) input carries role=combobox + aria-haspopup=listbox + the
+    //       static aria-controls = "global-search-listbox" id;
+    //   (2) aria-expanded flips false → true when the popover opens;
+    //   (3) ArrowDown updates aria-activedescendant to the next row's
+    //       stable id (global-search-option-{type}-{id});
+    //   (4) a sr-only aria-live=polite region announces the count.
+    await page.route("**/api/search**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          hits: [
+            {
+              id: "00000000-0000-0000-0000-000000000001",
+              type: "controls",
+              title: "Encryption at rest",
+              snippet: "Encryption at rest — prod object stores",
+              relevance_score: 1.0,
+            },
+            {
+              id: "00000000-0000-0000-0000-000000000002",
+              type: "risks",
+              title: "Data exfiltration",
+              snippet: "Data exfiltration via misconfigured IAM",
+              relevance_score: 0.75,
+            },
+          ],
+          count: 2,
+          partial_types: [],
+        }),
+      });
+    });
+
+    await page.goto("/controls");
+    const input = page.getByTestId("global-search-input");
+    await expect(input).toBeVisible();
+
+    // (1) Static combobox attributes — present on first render.
+    await expect(input).toHaveAttribute("role", "combobox");
+    await expect(input).toHaveAttribute("aria-haspopup", "listbox");
+    await expect(input).toHaveAttribute(
+      "aria-controls",
+      "global-search-listbox",
+    );
+    // (2) Baseline: collapsed before the user types.
+    await expect(input).toHaveAttribute("aria-expanded", "false");
+
+    await input.click();
+    await input.fill("iam");
+
+    // Popover is open + the listbox carries the stable id the input
+    // names via aria-controls.
+    const popover = page.getByTestId("global-search-popover");
+    await expect(popover).toBeVisible();
+    await expect(popover).toHaveAttribute("id", "global-search-listbox");
+
+    // (2) expanded flips true after type → popover open.
+    await expect(input).toHaveAttribute("aria-expanded", "true");
+
+    // (3) ArrowDown updates aria-activedescendant from the first row
+    //     (controls hit, id 00000000-0000-0000-0000-000000000001) to
+    //     the next flat hit (risks hit, id …002).
+    await expect(input).toHaveAttribute(
+      "aria-activedescendant",
+      "global-search-option-controls-00000000-0000-0000-0000-000000000001",
+    );
+    await input.press("ArrowDown");
+    await expect(input).toHaveAttribute(
+      "aria-activedescendant",
+      "global-search-option-risks-00000000-0000-0000-0000-000000000002",
+    );
+
+    // (4) sr-only aria-live region announces the count.
+    const live = page.getByTestId("global-search-live-region");
+    await expect(live).toHaveAttribute("aria-live", "polite");
+    await expect(live).toHaveText("2 results");
+
+    // Sanity: collapse on Escape resets aria-expanded back to false.
+    await input.press("Escape");
+    await expect(input).toHaveAttribute("aria-expanded", "false");
+  });
+
   test("P0-223-1: search BFF forwards via /api/search (no per-primitive endpoints)", async ({
     authedPage: page,
   }) => {

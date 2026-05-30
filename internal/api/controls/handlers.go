@@ -17,6 +17,8 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -96,11 +98,11 @@ type uploadResp struct {
 func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "authentication required")
+		httpresp.WriteError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
 	if !cred.IsAdmin && !isMachineActor(cred) {
-		writeError(w, http.StatusForbidden, "admin credential required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return
 	}
 
@@ -112,20 +114,20 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 	// cred.TenantID. Confirm; bail if absent (would mean misconfig).
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		writeError(w, http.StatusInternalServerError, "tenant context: "+err.Error())
+		httperr.WriteInternal(w, r, "tenant context", err)
 		return
 	}
 
 	bundle, err := h.readBundle(r)
 	if err != nil {
 		// Map parser errors to 4xx; everything else is 500.
-		writeBundleError(w, err)
+		writeBundleError(w, r, err)
 		return
 	}
 
 	// Slice-017 applicability_expr validator (AC-5).
 	if err := bundle.ValidateApplicabilityExpr(); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -133,7 +135,7 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 	// unknown evidence_kind is a missing-dep parse failure too).
 	if h.registry != nil {
 		if err := bundle.ValidateEvidenceKinds(ctx, h.registry); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -144,9 +146,9 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, control.ErrSCFAnchorUnknown):
 			// Canvas invariant 7 — refuse to persist a control without an
 			// anchor. 404 communicates "the thing you referenced isn't there".
-			writeError(w, http.StatusNotFound, err.Error())
+			httpresp.WriteError(w, http.StatusNotFound, err.Error())
 		default:
-			writeError(w, http.StatusInternalServerError, "persist: "+err.Error())
+			httperr.WriteInternal(w, r, "persist", err)
 		}
 		return
 	}
@@ -168,7 +170,7 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 	if result.SupersededID != (uuid.UUID{}) {
 		resp.SupersededID = result.SupersededID.String()
 	}
-	writeJSON(w, status, resp)
+	httpresp.WriteJSON(w, status, resp)
 }
 
 // readBundle parses the request body into a *control.Bundle. Two shapes are
@@ -254,26 +256,16 @@ func parseInline(rawYAML []byte) (*control.Bundle, error) {
 
 // writeBundleError maps a *control.ErrBundleMalformed (or wrapped) to a 400.
 // Unknown errors fall through to a 500.
-func writeBundleError(w http.ResponseWriter, err error) {
+func writeBundleError(w http.ResponseWriter, r *http.Request, err error) {
 	var m control.ErrBundleMalformed
 	if errors.As(err, &m) {
-		writeError(w, http.StatusBadRequest, m.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, m.Error())
 		return
 	}
 	var ue control.ErrUnknownEvidenceKind
 	if errors.As(err, &ue) {
-		writeError(w, http.StatusBadRequest, ue.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, ue.Error())
 		return
 	}
-	writeError(w, http.StatusInternalServerError, "internal: "+err.Error())
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
+	httperr.WriteInternal(w, r, "internal", err)
 }

@@ -1,24 +1,10 @@
 // Slice 263 — vitest coverage for POST /api/questionnaires/[id]/export-pdf.
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { mockNextServer } from "../../../../../lib/test-utils/next-mocks";
+import { TEST_BEARER_263 } from "../../../../../lib/test-utils/test-tokens";
 
-vi.mock("next/server", () => {
-  class NextResponse extends Response {
-    static json(
-      body: unknown,
-      init?: { status?: number; headers?: Record<string, string> },
-    ): NextResponse {
-      return new NextResponse(JSON.stringify(body), {
-        status: init?.status ?? 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...(init?.headers ?? {}),
-        },
-      });
-    }
-  }
-  return { NextResponse };
-});
+vi.mock("next/server", () => mockNextServer());
 
 const mockCookieGet = vi.fn();
 
@@ -53,7 +39,7 @@ describe("POST /api/questionnaires/[id]/export-pdf", () => {
   });
 
   test("forwards bearer + preserves application/pdf content-type", async () => {
-    mockCookieGet.mockReturnValue({ value: "test-bearer-263" });
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
     const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]); // "%PDF"
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(pdfBytes.buffer, {
@@ -71,7 +57,7 @@ describe("POST /api/questionnaires/[id]/export-pdf", () => {
   });
 
   test("propagates upstream 503 chrome unavailable", async () => {
-    mockCookieGet.mockReturnValue({ value: "test-bearer-263" });
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "PDF export disabled" }), {
         status: 503,

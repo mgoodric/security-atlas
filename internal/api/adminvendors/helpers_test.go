@@ -35,6 +35,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/vendor"
 )
@@ -328,7 +329,7 @@ func TestNewWithClock_InstallsClock(t *testing.T) {
 
 func TestWriteError(t *testing.T) {
 	rr := httptest.NewRecorder()
-	writeError(rr, http.StatusForbidden, "denied")
+	httpresp.WriteError(rr, http.StatusForbidden, "denied")
 	res := rr.Result()
 	if res.StatusCode != http.StatusForbidden {
 		t.Fatalf("status: got %d, want 403", res.StatusCode)

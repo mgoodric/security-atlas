@@ -23,6 +23,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -108,20 +110,20 @@ type riskWire struct {
 func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Title == "" {
-		writeError(w, http.StatusBadRequest, "title is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "title is required")
 		return
 	}
 	if req.Category == "" {
-		writeError(w, http.StatusBadRequest, "category is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "category is required")
 		return
 	}
 	methodology := dbx.RiskMethodology(req.Methodology)
@@ -134,12 +136,12 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 	}
 	linkedIDs, err := parseUUIDs(req.LinkedControlIDs)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "linked_control_ids: "+err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, "linked_control_ids: "+err.Error())
 		return
 	}
 	acceptedUntil, err := parseDatePtr(req.AcceptedUntil)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "accepted_until must be YYYY-MM-DD")
+		httpresp.WriteError(w, http.StatusBadRequest, "accepted_until must be YYYY-MM-DD")
 		return
 	}
 
@@ -164,13 +166,13 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, risk.ErrInvalidMethodology),
 			errors.Is(err, risk.ErrInherentScoreInvalid),
 			risk.IsTreatmentValidation(err):
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
-			writeServerErr(w, "create risk", err)
+			httperr.WriteInternal(w, r, "create risk", err)
 		}
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"risk": riskWireFrom(created)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"risk": riskWireFrom(created)})
 }
 
 // ListRisks handles GET /v1/risks (AC-6).
@@ -195,12 +197,12 @@ func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	sortOrder, err := risk.ParseListSort(r.URL.Query().Get("sort"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	filter := risk.ListFilter{
@@ -215,21 +217,21 @@ func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("org_unit"); raw != "" {
 		ouID, perr := uuid.Parse(raw)
 		if perr != nil {
-			writeError(w, http.StatusBadRequest, "org_unit must be a UUID")
+			httpresp.WriteError(w, http.StatusBadRequest, "org_unit must be a UUID")
 			return
 		}
 		filter.OrgUnitID = &ouID
 	}
 	risks, err := h.store.List(ctx, filter)
 	if err != nil {
-		writeServerErr(w, "list risks", err)
+		httperr.WriteInternal(w, r, "list risks", err)
 		return
 	}
 	out := make([]riskWire, len(risks))
 	for i, rk := range risks {
 		out[i] = riskWireFrom(rk)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"risks": out, "count": len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"risks": out, "count": len(out)})
 }
 
 // ThemeHeatmap handles GET /v1/risks/theme-heatmap (slice 067, AC-3) —
@@ -253,12 +255,12 @@ func (h *Handler) ThemeHeatmap(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	cells, err := h.store.ThemeOrgUnitHeatmap(ctx)
 	if err != nil {
-		writeServerErr(w, "theme heatmap", err)
+		httperr.WriteInternal(w, r, "theme heatmap", err)
 		return
 	}
 	type cellWire struct {
@@ -278,28 +280,28 @@ func (h *Handler) ThemeHeatmap(w http.ResponseWriter, r *http.Request) {
 			AggregateSeverity: c.AggregateSeverity,
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"cells": out, "count": len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"cells": out, "count": len(out)})
 }
 
 // GetRisk handles GET /v1/risks/{id}.
 func (h *Handler) GetRisk(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	rk, err := h.store.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, risk.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "risk not found")
+			httpresp.WriteError(w, http.StatusNotFound, "risk not found")
 			return
 		}
-		writeServerErr(w, "get risk", err)
+		httperr.WriteInternal(w, r, "get risk", err)
 		return
 	}
 	body := map[string]any{"risk": riskWireFrom(rk)}
@@ -310,32 +312,32 @@ func (h *Handler) GetRisk(w http.ResponseWriter, r *http.Request) {
 	if h.deriver != nil {
 		res, derr := h.deriver.Derive(ctx, id, false)
 		if derr != nil {
-			writeServerErr(w, "derive residual", derr)
+			httperr.WriteInternal(w, r, "derive residual", derr)
 			return
 		}
 		body["residual"] = residualWireFrom(res)
 	}
-	writeJSON(w, http.StatusOK, body)
+	httpresp.WriteJSON(w, http.StatusOK, body)
 }
 
 // DeleteRisk handles DELETE /v1/risks/{id}.
 func (h *Handler) DeleteRisk(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	if err := h.store.Delete(ctx, id); err != nil {
 		if errors.Is(err, risk.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "risk not found")
+			httpresp.WriteError(w, http.StatusNotFound, "risk not found")
 			return
 		}
-		writeServerErr(w, "delete risk", err)
+		httperr.WriteInternal(w, r, "delete risk", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -347,12 +349,12 @@ func (h *Handler) DeleteRisk(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Heatmap(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	cells, err := h.store.Heatmap(ctx)
 	if err != nil {
-		writeServerErr(w, "heatmap", err)
+		httperr.WriteInternal(w, r, "heatmap", err)
 		return
 	}
 	// Dense 5x5 view — likelihood rows (1..5), impact cols (1..5).
@@ -383,11 +385,12 @@ func (h *Handler) Heatmap(w http.ResponseWriter, r *http.Request) {
 		}
 		sparse = append(sparse, cellOut{Likelihood: c.Likelihood, Impact: c.Impact, Count: c.Count})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"cells": sparse,
 		"grid":  denseRows,
 		"shape": "5x5",
 	})
+
 }
 
 // ----- helpers -----
@@ -499,20 +502,4 @@ func parseDatePtr(s *string) (*time.Time, error) {
 		return nil, err
 	}
 	return &t, nil
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
 }

@@ -49,6 +49,31 @@ test.describe("dashboard view", () => {
     seedFromFixture("dashboard");
   });
 
+  // Slice 380: the dashboard now prefetches all six panels server-side
+  // (`Promise.all` in dashboard-prefetch.ts) and ships them via
+  // HydrationBoundary, so on a cold load the client fires no
+  // `/api/dashboard/*` request. Every test in THIS file, however,
+  // asserts the CLIENT-side binding contract: that the panel's BFF
+  // route is hit, or that a Playwright `page.route(...)` browser-side
+  // mock shapes the panel (the slice-229 subtitle empty/error states +
+  // the AC-7 degrade-independently test). Those browser-side mocks
+  // cannot intercept the SSR prefetch. We therefore set the test-only
+  // `e2e_no_prefetch` cookie (honored only under ATLAS_TEST_MODE=1, per
+  // dashboard-prefetch.ts `serverPrefetchBypassed`) so the layout skips
+  // the SSR prefetch and the page uses its pure client-side `useQuery`
+  // path -- exactly the surface these tests exercise. The SSR fan-out
+  // itself is covered by the sibling
+  // `dashboard-server-component.spec.ts`. See decisions log D6.
+  test.beforeEach(async ({ authedPage: page, baseURL }) => {
+    await page.context().addCookies([
+      {
+        name: "e2e_no_prefetch",
+        value: "1",
+        url: baseURL ?? "http://localhost:3000",
+      },
+    ]);
+  });
+
   test("AC-1: /dashboard renders the full program dashboard layout", async ({
     authedPage: page,
   }) => {
@@ -396,5 +421,36 @@ test.describe("dashboard view", () => {
     await expect(dashboard).not.toContainText(
       "The home screen for the security program",
     );
+  });
+
+  // ----- Slice 359 — a11y skip-link in the authed layout -----
+  //
+  // Closes slice 331 audit finding A11Y-1 (Critical). The authed
+  // layout renders a visually-hidden skip-link as its first focusable
+  // element; tabbing once from page load focuses it; pressing Enter
+  // moves focus into `<main id="main-content" tabIndex={-1}>`. WCAG
+  // SC 2.4.1 Bypass Blocks (Level A) + SC 2.4.7 Focus Visible.
+
+  test("AC-1/2/3/4 (slice 359): skip-link is the first focusable element and moves focus to <main> on activation", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/dashboard");
+
+    // AC-2: a single Tab from page load focuses the skip-link.
+    await page.keyboard.press("Tab");
+    const skipLink = page.locator('a[href="#main-content"]');
+    await expect(skipLink).toBeFocused();
+
+    // AC-3: when focused, the skip-link is no longer visually hidden
+    // (the `focus:not-sr-only` utility makes it visible). Playwright's
+    // `toBeVisible()` excludes `sr-only`-style off-screen elements, so
+    // a focused skip-link being `visible` is the focus-visible signal.
+    await expect(skipLink).toBeVisible();
+
+    // AC-2 (continued): activating the link with Enter moves focus
+    // to the `<main>` content region.
+    await page.keyboard.press("Enter");
+    const main = page.locator("main#main-content");
+    await expect(main).toBeFocused();
   });
 });

@@ -74,11 +74,39 @@ const testModeEnvVar = "ATLAS_TEST_MODE"
 //     both IsAdmin AND IsApprover on the credential — the typical
 //     Playwright spec needs admin-gated routes (settings, dashboards,
 //     admin-bootstrap).
+//
+// Slice 389 — multi-tenant extension (JUDGMENT, see
+// docs/audit-log/389-multi-tenant-jwt-rls-leak-spec-decisions.md):
+//
+//   - AvailableTenants: optional. When omitted/empty the minted JWT is
+//     single-tenant (`atlas:available_tenants[] = [TenantID]`), exactly
+//     as slice 201 shipped — strictly backward compatible. When
+//     supplied, the minted JWT carries that set verbatim, enabling the
+//     RFC 8693 token-exchange tenant-switch flow (slice 188/192) and
+//     the multi-tenant `<TenantSwitcher>` chrome (slice 192). TenantID
+//     MUST appear in the set (the current tenant is always a member of
+//     available tenants — enforced by jwt.Validate's tenant-scope
+//     invariant); the handler rejects a violation with 400 rather than
+//     mint a token jwt.Validate would later refuse.
+//   - RolesByTenant: optional. Per-tenant role lists for the
+//     multi-tenant case. Keyed by tenant UUID string. When supplied it
+//     is the authoritative role map; the top-level Roles field then
+//     applies only as the fallback for any tenant absent from the map.
+//     When omitted, every tenant in the set inherits the (possibly
+//     defaulted) top-level Roles list.
+//
+// This extension does NOT widen the production attack surface: the
+// endpoint is still gated by ATLAS_TEST_MODE at both mount time
+// (httpserver.go) and request time (below), and still signs through the
+// single `s.jwtSigner` (P0-201-4). A production binary never mounts the
+// route; a misconfigured one still 404s per-request.
 type issueTestJWTRequest struct {
-	TenantID   string   `json:"tenant_id"`
-	UserID     string   `json:"user_id,omitempty"`
-	Roles      []string `json:"roles,omitempty"`
-	SuperAdmin *bool    `json:"super_admin,omitempty"`
+	TenantID         string              `json:"tenant_id"`
+	UserID           string              `json:"user_id,omitempty"`
+	Roles            []string            `json:"roles,omitempty"`
+	SuperAdmin       *bool               `json:"super_admin,omitempty"`
+	AvailableTenants []string            `json:"available_tenants,omitempty"`
+	RolesByTenant    map[string][]string `json:"roles_by_tenant,omitempty"`
 }
 
 // issueTestJWTResponse is the JSON body returned on success. The
@@ -137,6 +165,44 @@ func (s *Server) handleIssueTestJWT(w http.ResponseWriter, r *http.Request) {
 		superAdmin = *body.SuperAdmin
 	}
 
+	// Slice 389 — resolve the available-tenants set + per-tenant role
+	// map. When `available_tenants` is omitted the JWT stays
+	// single-tenant (the slice 201 shape, byte-identical). When
+	// supplied the JWT spans the given set; the current tenant MUST be
+	// a member (jwt.Validate's tenant-scope invariant) — we reject a
+	// violation up front rather than mint a token the validator refuses.
+	available := []uuid.UUID{tenant}
+	rolesByTenant := map[uuid.UUID][]string{tenant: roles}
+	if len(body.AvailableTenants) > 0 {
+		parsed := make([]uuid.UUID, 0, len(body.AvailableTenants))
+		roleMap := make(map[uuid.UUID][]string, len(body.AvailableTenants))
+		seenCurrent := false
+		for _, raw := range body.AvailableTenants {
+			id, perr := uuid.Parse(raw)
+			if perr != nil {
+				http.Error(w, `{"error":"available_tenants entries must be UUIDs"}`, http.StatusBadRequest)
+				return
+			}
+			if id == tenant {
+				seenCurrent = true
+			}
+			parsed = append(parsed, id)
+			// Per-tenant roles: prefer the explicit map entry, else the
+			// (possibly defaulted) top-level Roles list.
+			if perTenant, ok := body.RolesByTenant[raw]; ok && perTenant != nil {
+				roleMap[id] = perTenant
+			} else {
+				roleMap[id] = roles
+			}
+		}
+		if !seenCurrent {
+			http.Error(w, `{"error":"tenant_id must be a member of available_tenants"}`, http.StatusBadRequest)
+			return
+		}
+		available = parsed
+		rolesByTenant = roleMap
+	}
+
 	// Build claims. The shape mirrors testjwt.AdminFor / OwnerFor —
 	// the per-tenant role list goes under Roles[tenant], the SuperAdmin
 	// flag drives IsAdmin + IsApprover at jwtmw bridge time, and the
@@ -152,8 +218,8 @@ func (s *Server) handleIssueTestJWT(w http.ResponseWriter, r *http.Request) {
 			ExpiresAt: now.Add(testjwt.DefaultExpiry).Unix(),
 		},
 		CurrentTenantID:  tenant,
-		AvailableTenants: []uuid.UUID{tenant},
-		Roles:            map[uuid.UUID][]string{tenant: roles},
+		AvailableTenants: available,
+		Roles:            rolesByTenant,
 		SuperAdmin:       superAdmin,
 	}
 

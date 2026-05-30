@@ -54,7 +54,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { SuperAdminRow } from "@/lib/api";
+import type { SuperAdminRow } from "@/lib/api/admin";
 
 type SuperAdminListResponse = { items: SuperAdminRow[]; error?: string };
 
@@ -152,6 +152,16 @@ export default function SuperAdminsPage() {
     },
   });
 
+  // Slice 363 — form-error association. The Alert mounts conditionally
+  // on submit failure; inputs point aria-describedby at the Alert's
+  // stable id WHEN it's mounted (undefined otherwise — React strips the
+  // attribute). See `web/components/ui/checkbox.tsx` for the convention.
+  // The demote dialog Alert (`id="demote-error"`) also carries the
+  // stable id + aria-live="polite" so the live region announces the
+  // error; the dialog has no input to point aria-describedby at, so
+  // the id exists for the live-region linkage only.
+  const grantErrorId = grantError ? "grant-super-admin-error" : undefined;
+
   return (
     <div className="space-y-6" data-testid="super-admins-page">
       <div>
@@ -210,6 +220,7 @@ export default function SuperAdminsPage() {
                 onChange={(e) => setGrantUserID(e.target.value)}
                 spellCheck={false}
                 autoComplete="off"
+                aria-describedby={grantErrorId}
               />
             </div>
             <Button
@@ -221,7 +232,12 @@ export default function SuperAdminsPage() {
             </Button>
           </form>
           {grantError ? (
-            <Alert variant="destructive" className="mt-4">
+            <Alert
+              variant="destructive"
+              className="mt-4"
+              id="grant-super-admin-error"
+              aria-live="polite"
+            >
               <AlertTitle>Grant failed</AlertTitle>
               <AlertDescription data-testid="grant-error">
                 {grantError}
@@ -344,7 +360,7 @@ export default function SuperAdminsPage() {
               </div>
             ) : null}
             {demoteError ? (
-              <Alert variant="destructive">
+              <Alert variant="destructive" id="demote-error" aria-live="polite">
                 <AlertTitle>Demote failed</AlertTitle>
                 <AlertDescription data-testid="demote-error">
                   {demoteError}

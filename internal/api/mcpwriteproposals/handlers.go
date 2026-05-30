@@ -38,6 +38,8 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -117,20 +119,20 @@ func proposalWireFrom(p writeproposals.Proposal) proposalWire {
 func (h *Handler) CreateProposal(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if !writeproposals.AllowedTools[req.ToolName] {
-		writeError(w, http.StatusBadRequest, "unknown tool_name")
+		httpresp.WriteError(w, http.StatusBadRequest, "unknown tool_name")
 		return
 	}
 	if req.AIModelName == "" || req.AIModelVersion == "" {
-		writeError(w, http.StatusBadRequest, "ai_model_name and ai_model_version are required")
+		httpresp.WriteError(w, http.StatusBadRequest, "ai_model_name and ai_model_version are required")
 		return
 	}
 	created, err := h.store.Create(ctx, writeproposals.CreateInput{
@@ -141,17 +143,17 @@ func (h *Handler) CreateProposal(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:      cred.ID,
 	})
 	if err != nil {
-		h.writeCreateErr(w, err)
+		h.writeCreateErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"proposal": proposalWireFrom(created)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"proposal": proposalWireFrom(created)})
 }
 
 // ListProposals handles GET /v1/mcp/write-proposals.
 func (h *Handler) ListProposals(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	filter := writeproposals.ListFilter{
@@ -160,78 +162,78 @@ func (h *Handler) ListProposals(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.store.List(ctx, filter)
 	if err != nil {
-		writeServerErr(w, "list proposals", err)
+		httperr.WriteInternal(w, r, "list proposals", err)
 		return
 	}
 	out := make([]proposalWire, len(rows))
 	for i, p := range rows {
 		out[i] = proposalWireFrom(p)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"proposals": out, "count": len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"proposals": out, "count": len(out)})
 }
 
 // GetProposal handles GET /v1/mcp/write-proposals/{id}.
 func (h *Handler) GetProposal(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	p, err := h.store.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, writeproposals.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "proposal not found")
+			httpresp.WriteError(w, http.StatusNotFound, "proposal not found")
 			return
 		}
-		writeServerErr(w, "get proposal", err)
+		httperr.WriteInternal(w, r, "get proposal", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"proposal": proposalWireFrom(p)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"proposal": proposalWireFrom(p)})
 }
 
 // ConfirmProposal handles POST /v1/mcp/write-proposals/{id}/confirm.
 func (h *Handler) ConfirmProposal(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !cred.IsApprover && !cred.IsAdmin {
-		writeError(w, http.StatusForbidden, "approver role required")
+		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	confirmed, err := h.store.Confirm(ctx, id, cred.ID)
 	if err != nil {
-		h.writeTransitionErr(w, err)
+		h.writeTransitionErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"proposal": proposalWireFrom(confirmed)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"proposal": proposalWireFrom(confirmed)})
 }
 
 // RejectProposal handles POST /v1/mcp/write-proposals/{id}/reject.
 func (h *Handler) RejectProposal(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !cred.IsApprover && !cred.IsAdmin {
-		writeError(w, http.StatusForbidden, "approver role required")
+		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	var req rejectReq
@@ -240,36 +242,36 @@ func (h *Handler) RejectProposal(w http.ResponseWriter, r *http.Request) {
 	}
 	rejected, err := h.store.Reject(ctx, id, req.Reason)
 	if err != nil {
-		h.writeTransitionErr(w, err)
+		h.writeTransitionErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"proposal": proposalWireFrom(rejected)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"proposal": proposalWireFrom(rejected)})
 }
 
 // ----- helpers -----
 
-func (h *Handler) writeCreateErr(w http.ResponseWriter, err error) {
+func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, writeproposals.ErrUnknownTool),
 		errors.Is(err, writeproposals.ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, writeproposals.ErrPendingCapExceeded):
-		writeError(w, http.StatusTooManyRequests, "pending proposal cap exceeded; approve or reject existing proposals before filing more")
+		httpresp.WriteError(w, http.StatusTooManyRequests, "pending proposal cap exceeded; approve or reject existing proposals before filing more")
 	default:
-		writeServerErr(w, "create proposal", err)
+		httperr.WriteInternal(w, r, "create proposal", err)
 	}
 }
 
-func (h *Handler) writeTransitionErr(w http.ResponseWriter, err error) {
+func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, writeproposals.ErrNotFound):
-		writeError(w, http.StatusNotFound, "proposal not found")
+		httpresp.WriteError(w, http.StatusNotFound, "proposal not found")
 	case errors.Is(err, writeproposals.ErrWrongState):
-		writeError(w, http.StatusConflict, "proposal not in ai_proposed state")
+		httpresp.WriteError(w, http.StatusConflict, "proposal not in ai_proposed state")
 	case errors.Is(err, writeproposals.ErrUnknownTool):
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 	default:
-		writeServerErr(w, "transition", err)
+		httperr.WriteInternal(w, r, "transition", err)
 	}
 }
 
@@ -282,20 +284,4 @@ func (h *Handler) tenantCredContext(r *http.Request) (context.Context, credstore
 		return nil, credstore.Credential{}, false
 	}
 	return r.Context(), cred, true
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
 }

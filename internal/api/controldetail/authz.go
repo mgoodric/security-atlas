@@ -23,6 +23,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 )
 
 // hasControlRead reports whether the credential carries an explicit
@@ -56,7 +57,7 @@ func hasControlRead(c credstore.Credential) bool {
 func requireControlRead(w http.ResponseWriter, r *http.Request) bool {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok || !hasControlRead(cred) {
-		writeError(w, http.StatusForbidden, "role does not grant control-read access")
+		httpresp.WriteError(w, http.StatusForbidden, "role does not grant control-read access")
 		return false
 	}
 	return true

@@ -14,7 +14,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { listScopeCells } from "@/lib/api";
+import { listScopeCells } from "@/lib/api/controls-list";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 export async function GET(): Promise<Response> {

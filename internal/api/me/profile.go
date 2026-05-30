@@ -18,6 +18,8 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
@@ -103,21 +105,21 @@ type patchProfileRequest struct {
 func (h *ProfileHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	wire, err := h.buildProfile(ctx, cred)
 	if err != nil {
-		writeServerErr(w, "get profile", err)
+		httperr.WriteInternal(w, r, "get profile", err)
 		return
 	}
 	roles, rerr := h.resolveRoles(ctx, cred)
 	if rerr != nil {
-		writeServerErr(w, "resolve roles", rerr)
+		httperr.WriteInternal(w, r, "resolve roles", rerr)
 		return
 	}
 	wire.Roles = roles
-	writeJSON(w, http.StatusOK, wire)
+	httpresp.WriteJSON(w, http.StatusOK, wire)
 }
 
 // PatchMe handles PATCH /v1/me. Accepts display_name + time_zone (both optional);
@@ -126,36 +128,36 @@ func (h *ProfileHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	userUUID, err := uuid.Parse(cred.UserID)
 	if err != nil {
 		// API-key / bootstrap credentials with no users row cannot PATCH a
 		// profile they don't have. Honest 404.
-		writeError(w, http.StatusNotFound, "no profile for this credential")
+		httpresp.WriteError(w, http.StatusNotFound, "no profile for this credential")
 		return
 	}
 	tenantUUID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context invalid")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context invalid")
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8*1024))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "request body too large or unreadable")
+		httpresp.WriteError(w, http.StatusBadRequest, "request body too large or unreadable")
 		return
 	}
 	var req patchProfileRequest
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
 	}
 	if req.TimeZone != nil && *req.TimeZone != "" {
 		if _, err := time.LoadLocation(*req.TimeZone); err != nil {
-			writeError(w, http.StatusBadRequest, "time_zone must be a valid IANA timezone (e.g. America/Los_Angeles)")
+			httpresp.WriteError(w, http.StatusBadRequest, "time_zone must be a valid IANA timezone (e.g. America/Los_Angeles)")
 			return
 		}
 	}
@@ -163,10 +165,10 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	current, err := h.users.GetByID(ctx, tenantUUID, userUUID)
 	if err != nil {
 		if errors.Is(err, users.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "user not found")
+			httpresp.WriteError(w, http.StatusNotFound, "user not found")
 			return
 		}
-		writeServerErr(w, "load profile", err)
+		httperr.WriteInternal(w, r, "load profile", err)
 		return
 	}
 	newDisplay := current.DisplayName
@@ -182,11 +184,11 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 		wire := profileWireFrom(current, cred)
 		roles, rerr := h.resolveRoles(ctx, cred)
 		if rerr != nil {
-			writeServerErr(w, "resolve roles", rerr)
+			httperr.WriteInternal(w, r, "resolve roles", rerr)
 			return
 		}
 		wire.Roles = roles
-		writeJSON(w, http.StatusOK, wire)
+		httpresp.WriteJSON(w, http.StatusOK, wire)
 		return
 	}
 	updated, err := h.users.UpdateProfile(ctx, users.UpdateProfileInput{
@@ -196,7 +198,7 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 		TimeZone:    newTZ,
 	})
 	if err != nil {
-		writeServerErr(w, "update profile", err)
+		httperr.WriteInternal(w, r, "update profile", err)
 		return
 	}
 	// Audit-log entry. Failure here is logged but NOT fatal to the PATCH — the
@@ -210,11 +212,11 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	wire := profileWireFrom(updated, cred)
 	roles, rerr := h.resolveRoles(ctx, cred)
 	if rerr != nil {
-		writeServerErr(w, "resolve roles", rerr)
+		httperr.WriteInternal(w, r, "resolve roles", rerr)
 		return
 	}
 	wire.Roles = roles
-	writeJSON(w, http.StatusOK, wire)
+	httpresp.WriteJSON(w, http.StatusOK, wire)
 }
 
 // resolveRoles fetches the caller's canonical user_roles list via the shared

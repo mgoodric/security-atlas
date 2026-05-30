@@ -1,0 +1,30 @@
+{
+  "_comment": "Slice 392 contract-test-tier ROLLOUT golden. Recorded by the PROVIDER side (internal/api/me/profile_contract_test.go) from the real Go handler at internal/api/me/profile.go (ProfileHandler.GetMe) on the no-DB synthetic-profile path. Regenerate with `go test ./internal/api/me/ -run TestContract_Me -update`. The CONSUMER side (web/lib/contracts/me.contract.test.ts) asserts the Next.js BFF (web/app/api/me/route.ts) against these recorded bodies.",
+  "endpoint": "GET /v1/me",
+  "variants": {
+    "synthetic_admin": {
+      "display_name": "API key ad01",
+      "email": "",
+      "idp_subject": "",
+      "is_admin": true,
+      "owner_roles": null,
+      "roles": [],
+      "tenant_id": "22222222-2222-4222-8222-222222222222",
+      "tenant_role": "admin",
+      "time_zone": null,
+      "user_id": "key_admin"
+    },
+    "synthetic_non_admin": {
+      "display_name": "API key vw02",
+      "email": "",
+      "idp_subject": "",
+      "is_admin": false,
+      "owner_roles": ["control_owner"],
+      "roles": [],
+      "tenant_id": "22222222-2222-4222-8222-222222222222",
+      "tenant_role": "user",
+      "time_zone": null,
+      "user_id": "key_viewer"
+    }
+  }
+}

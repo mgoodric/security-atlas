@@ -299,220 +299,53 @@ jobs:
         run: ./scripts/audit-rls.sh
       - name: Run integration tests
         # `-p 1` serializes test packages so multiple binaries do not
-        # race on the shared Postgres test database. The db,
-        # schemaregistry, and evidence/ingest packages share rows in
-        # evidence_kind_schemas and evidence_records; running them
-        # concurrently surfaces duplicate-key + missing-relation errors
-        # that disappear under serial execution. Local reproducer:
+        # race on shared PLATFORM-LAYER rows in the test database.
+        # The concrete colliding tables are:
+        #
+        #   * evidence_kind_schemas — schema-registry seed rows
+        #     INSERTed by both schemaregistry and evidence/ingest
+        #     test setup; (kind, version) primary key races on
+        #     concurrent ON CONFLICT DO NOTHING.
+        #   * scf_anchors — slice 006 seed rows that downstream
+        #     packages INSERT additional anchors on top of;
+        #     cross-binary ordering is non-deterministic.
+        #   * evidence_records — append-only ledger writes whose
+        #     (tenant_id, kind, idempotency_key) unique index
+        #     enforces the slice 003 ingestion contract; multiple
+        #     binaries hitting the same triple collide.
+        #
+        # IMPORTANT: `-p 1` is NOT about RLS. The RLS pattern
+        # (internal/tenancy/apply.go: SET LOCAL app.current_tenant)
+        # is transaction-scoped, so two parallel binaries each in
+        # their own BEGIN ... ROLLBACK with their own tenant GUC
+        # cannot leak across. The colliding rows above live at the
+        # platform / shared-seed / append-only-ledger layer, NOT in
+        # tenant-scoped tables — that's the actual reason -p 1 is
+        # load-bearing. See the "-p 1 rationale review" section of
+        # docs/audits/334-test-framework-review.md for the full
+        # analysis.
+        #
+        # Future relaxation path (v3, NOT now): split this job into
+        # a Phase A (serial, -p 1) over the shared-seed packages
+        # (db, schemaregistry, evidence/ingest, catalog) and a
+        # Phase B (parallel, -p N) over the tenant-scoped packages
+        # (controls, risks, evidence/records post-seed, policies,
+        # audit, vendor). Only worth doing once integration-job
+        # wall-clock becomes a merge-velocity problem.
+        #
+        # Local reproducer:
         #   go test -tags=integration -race -p 1 ./internal/...
         #
-        # Slice 279: extended to include internal/frameworkscope,
-        # internal/risk, and internal/risk/aggrule — these had
-        # integration_test.go files but were never enrolled in the
-        # CI integration job, so their coverage was unit-only. Adding
-        # them moves frameworkscope from 21.8% → 77.8% merged, risk
-        # from 36.1% → 73.4% merged, and risk/aggrule from 19.1% →
-        # 74.6% merged (no new tests required).
-        #
-        # Slice 287: extended to include internal/vendor for the same
-        # reason — the package shipped an integration_test.go in slice
-        # 024 but was never enrolled here. Adding it (with new Get +
-        # Delete + RLS-isolation tests + a unit suite for the pure-Go
-        # helpers) moves internal/vendor from 10.1% → 87.2% merged.
-        #
-        # Slice 284: same pattern for internal/scope — it had a complete
-        # integration_test.go suite (slice 017) that was never enrolled
-        # in CI, so the merged audit measured 35.3%. Enrolling lifts
-        # internal/scope to 87.6% merged. Three pre-existing test
-        # inserts gained a `bundle_id` column (NOT-NULL column added by
-        # a later slice; the integration suite had silently bit-rotted
-        # while it was out of CI).
-        #
-        # Slice 297: extended to include internal/policy/... — the slice
-        # added a new seed_integration_test.go covering the DB-touching
-        # Seed() + SQLAnchorResolver.Resolve() paths in
-        # internal/policy/seed (the parent internal/policy also ships an
-        # integration_test.go from slice 022, which was previously
-        # exercised only outside the CI gate). Enrolling the entire
-        # ./internal/policy/... tree lifts internal/policy/seed from
-        # 33.3% → 89.5% merged.
-        #
-        # Slice 283: extended to include internal/board — the slice
-        # added a new integration_test.go covering the slice-031 board
-        # brief Store + Generator and the slice-032 quarterly pack
-        # PackStore + PackGenerator (Insert / Get / List / UpdateSection /
-        # Publish / ListFailingEvaluations) against a real Postgres so
-        # RLS, append-only ledger enforcement, and the draft-only mutation
-        # gate are exercised end-to-end. Enrolling the package lifts
-        # internal/board from 23.7% → 81.6% merged.
-        #
-        # Slice 290: extended to include internal/api/controldetail —
-        # the package shipped a 932-line integration_test.go in slice
-        # 064 but was never enrolled in the CI integration job, so the
-        # merged audit measured 29.3%. Enrolling it (alongside the new
-        # helpers_test.go this slice adds for the pure-Go split / cursor
-        # / wire-conversion helpers) lifts internal/api/controldetail to
-        # 92.7% merged.
-        #
-        # Slice 288: extended to include internal/audit/walkthrough —
-        # the package shipped a 571-line integration_test.go in slice
-        # 027 but was never enrolled in the CI integration job, so the
-        # merged audit measured 6.0%. Enrolling it (alongside the new
-        # export_test.go this slice adds for the pure-Go PDF HTML +
-        # markdown rendering helpers) lifts internal/audit/walkthrough
-        # to 79.9% merged. Only ./internal/audit/walkthrough/... is
-        # added — NOT the ./internal/audit/... umbrella — so adjacent
-        # walkthrough-unrelated audit subpackages (auditor/, notes/,
-        # period/, etc.) are not picked up by this slice's enrollment.
-        #
-        # Slice 295: extended to include internal/metrics/scheduler —
-        # the slice adds a new integration_test.go covering SweepOnce's
-        # success branches (per-tenant transaction lifecycle, evaluator
-        # try/log/continue, InsertMetricObservation through the RLS-bound
-        # app role) and Run's inline-sweep + ctx.Done path. The unit
-        # tests cover New / Run cancellation / encodeDimensions /
-        # discardWriter / SweepReport / SweepOnce's list-tenants-error
-        # wrap. Together they move internal/metrics/scheduler from
-        # 0.0% → 78.4% merged.
-        #
-        # Slice 293: extended to include internal/api/metrics — the
-        # slice adds a new integration_test.go covering the post-auth
-        # DB-touching branches (ListCatalog level/category filters,
-        # GetCatalog parents/children, GetCascade default-level +
-        # truncation header, CreateInput happy + wrong-strategy 409 +
-        # not-found 404, ListObservations through the manual-input
-        # replicate trigger, Target upsert insert→update flow + every
-        # accepted direction). The unit tests cover the pre-DB branches
-        # (auth + admin + URL-param + JSON body + direction + UUID
-        # parsing) and every pure helper (numericPtr, numericString,
-        # numericStringMaybe, uuidString, the four wire mappers,
-        # writeJSON, writeError). Together they move internal/api/metrics
-        # from 0.4% → 87.3% merged.
-        #
-        # Slice 294: extended to include internal/metrics/eval — the
-        # slice adds a new integration_test.go covering each starter
-        # evaluator's Compute() against real Postgres (empty + populated
-        # branches for the 6 evaluators that work in v1, plus the
-        # wrapped-error branch for audit_readiness_score and
-        # policy_attestation_rate — both reference v1 schema columns/
-        # tables that don't exist yet). The unit tests already cover
-        # Name() + the registry methods. Together they move
-        # internal/metrics/eval from 33.0% → 78.4% merged.
-        #
-        # Slice 310: extended to include internal/api/soc2import — the
-        # package shipped a 287-line integration_test.go in slice 007 but
-        # was never enrolled in the CI integration job, so the merged
-        # audit measured the same 25.2% as the unit-only run (the
-        # integration tests against real Postgres exercise Import +
-        # importIntoTx — every requirement / edge / idempotency / source
-        # _attribution / STRM-distribution branch — but none of that
-        # contributed to coverage). Enrolling it (alongside the new
-        # helpers_test.go this slice adds for the pure-Go helpers
-        # uuidFromString / uuidString / parseDate / edgeContentEqual and
-        # the Import BeginTx-error branch via a stub pgxBeginner) lifts
-        # internal/api/soc2import to 77.4% merged. Same playbook as
-        # slices 290 / 291 / 293 — enrolment is the load-bearing move.
-        #
-        # Slice 315: extended to include the four auth-substrate-v2
-        # small packages (oauthclient + oauthcode + revocation +
-        # userprefs) flagged by the round-3 audit
-        # (docs/coverage-audit-2026-05-round-3.md). Each was <100 stmts
-        # and below 70% merged because none was enrolled in the
-        # integration job. New integration_test.go suites added for
-        # oauthclient, oauthcode, and userprefs (revocation already
-        # shipped a comprehensive one in slice 190). Same playbook as
-        # slices 290 / 297 / 310 — enrolment is the load-bearing move.
-        #
-        # Slice 317: extended to include the two MCP write-proposals
-        # packages (internal/api/mcpwriteproposals + internal/mcp/
-        # writeproposals) flagged by the round-3 audit. Both already
-        # shipped comprehensive integration_test.go suites (HTTP handler
-        # + store layer driving HITL approval flow against real Postgres
-        # + RLS + the schema-level ai_assist invariant CHECK) but
-        # neither was enrolled in the CI integration job. New unit
-        # helpers_test.go + appliers_test.go + handlers_test.go added
-        # for the pure-Go pre-DB validation branches (writeCreateErr /
-        # writeTransitionErr / writeServerErr, the four applier parse +
-        # required-field branches, stateToEvidenceResult + the
-        # nullableString/Subject helpers, plus the Create/Confirm
-        # pre-tx rejections). Together with enrolment they lift
-        # internal/mcp/writeproposals from 1.8% → 77.5% merged and
-        # internal/api/mcpwriteproposals from 0.9% → 84.3% merged. Same
-        # playbook as slices 290 / 297 / 310 / 315 — enrolment is the
-        # load-bearing move.
-        #
-        # Slice 319: extended to include internal/questionnaire — the
-        # questionnaire engine (Excel parser + AnswerLibrary RLS lookup
-        # + PDF render helpers + Store CRUD over four tables). Was at
-        # 26.5% merged because none of its Store paths had an
-        # in-package integration_test.go (the existing
-        # internal/api/questionnaires integration tests exercise the
-        # Store transitively but the coverage attributes to the HTTP
-        # handler package, not the engine). The new in-package
-        # integration_test.go drives Store CRUD + the RLS isolation
-        # invariant directly. Together with the new pdf_test.go
-        # (pure-Go renderer helpers) + store_helpers_test.go
-        # (conversion helpers) the engine moves from 26.5% → 79.3%
-        # merged. Same playbook as slices 290 / 297 / 310 / 315 —
-        # enrolment is the load-bearing move.
-        #
-        # Slice 313: extended to include the five admin HTTP handler
-        # packages (adminauditperiods + adminsuperadmins + admintenants
-        # + adminvendors + tenants) flagged by the round-3 audit. Each
-        # had a comprehensive integration_test.go shipped by its parent
-        # slice (139 / 142 / 143 / 139 / 144 respectively) that was
-        # never enrolled in the integration job, so the merged audit
-        # measured 0.5-7.7% per package. Enrolling them (plus new
-        # helpers_test.go suites for adminauditperiods + adminvendors
-        # + admintenants covering pure-Go pre-DB branches: format
-        # parsing, role gating, column projection, email masking,
-        # writeError, exportLimiter, advisory-key derivation) lifts
-        # each package above the AC-2 70% merged-coverage floor. Same
-        # playbook as slices 290 / 297 / 310 / 315.
-        #
-        # Slice 318: extended to include the three audit-log family
-        # packages (internal/audit umbrella + internal/audit/sink +
-        # internal/audit/unifiedlog) flagged by the round-3 audit. The
-        # umbrella shipped a 660-line integration_test.go in slice 026
-        # but was never enrolled, leaving merged coverage at 0.4%; the
-        # sink package shipped a 330-line integration_test.go in slice
-        # 126 covering AC-7 (100-record happy path) + AC-8 (10001-record
-        # backpressure fallback) but the package was also unenrolled,
-        # leaving merged at 67.3% (unit-only); the unifiedlog package
-        # had no in-package integration test at all. A new unifiedlog
-        # integration_test.go (this slice) drives Query against real
-        # Postgres + RLS for the canonical-shape, tenant-isolation,
-        # kind-filter, empty-range, and actor-filter branches.
-        # Together with helpers_test.go (umbrella pure-Go predicate
-        # canonicalization + validation guards) and helpers_test.go
-        # (sink Default reader + Shutdown ctx-cancel + no-op discard
-        # paths) and joinkinds_test.go (unifiedlog CSV serializer +
-        # AllKinds order contract), enrolment lifts the three packages
-        # above the AC-1 70% merged-coverage floor. Same playbook as
-        # slices 290 / 297 / 310 / 315.
-        #
-        # Slice 320: extended to include internal/demoseed — the slice
-        # 205 demo dataset seeder. The package shipped a 341-line
-        # integration_test.go (slice 205) that drove TestApply_Happy /
-        # _Idempotent / _RefusesPopulated / _CrossTenantIsolation /
-        # _Scale / _RejectsInvalidSlug against real Postgres but was
-        # never enrolled in the CI integration job, so the merged audit
-        # measured 4.4% (unit-only — only the password generator + names
-        # constants were exercised). Enrolling it (alongside new
-        # helpers_test.go for the pure-Go writer helpers — withTenant /
-        # currentTenantOf / nullableUUID / nonZeroOrSelf /
-        # nonZeroOrTenant / periodStatus / frozenHashOrNil /
-        # frozenByOrNil / sha256Of / capitalize / kindToConnector /
-        # riskScoreJSON / fictionalUserEmail / buildEvidencePayload
-        # default branch + seeder_test.go for NewSeeder / WithClock /
-        # validateSlug / pgIsUndefinedTable / applyScale /
-        # hashCanonicalJSON / hexString) lifts internal/demoseed from
-        # 4.4% → 83.1% merged. Same playbook as slices 290 / 297 / 310
-        # / 315 — enrolment is the load-bearing move, with unit-tests
-        # paying off the pure-Go branches the integration test cannot
-        # reach (error-path constructors, sentinel-error detection,
-        # scale-clamp edge cases).
+        # Slice-by-slice enrolment history for the package list below
+        # (which packages were added when, before% → after% deltas,
+        # and the load-bearing "enrolment is the move" pattern):
+        # see docs/ci/integration-job-history.md.
         run: |
+          # Slice 393 (Q-8): bookend the suite with a wall-clock measurement
+          # so the clean-main watermark step below can RECORD the job's own
+          # elapsed time rather than re-running the suite a second time.
+          atlas_wallclock_start="$(date +%s)"
+          echo "ATLAS_WALLCLOCK_START=${atlas_wallclock_start}" >> "$GITHUB_ENV"
           go test -tags=integration -race -p 1 -v \
             -covermode=atomic \
             -coverprofile=coverage.txt \
@@ -609,6 +442,32 @@ jobs:
           name: go-merged-coverage
           path: merged-coverage.txt
           if-no-files-found: warn
+      # ================================================================
+      # Slice 393 (Q-8) — integration wall-clock watermark, clean-main only.
+      #
+      # RECORDER, not a gate (P0-393-3 / slice 353 D6). On a clean main
+      # push only, feed the integration job's own measured duration
+      # (bookended in the "Run integration tests" step above) into
+      # scripts/measure-integration-wallclock.sh in RECORD mode
+      # (WALLCLOCK_SECONDS set ⇒ no second suite run). The script appends
+      # to docs/integration-wallclock.tsv and warns — does NOT fail —
+      # when the duration crosses the 20-min Phase-A/B-split trigger.
+      #
+      # Gated to clean main (event push + ref main) so the watermark is a
+      # single authoritative series, not one row per PR re-run. Reaching
+      # this step at all means every prior step (incl. the coverage gate)
+      # passed, so the sample is a clean-suite measurement.
+      #
+      # Local repro: WALLCLOCK_SECONDS=900 bash scripts/measure-integration-wallclock.sh
+      #   self-test: bash scripts/measure-integration-wallclock_test.sh
+      # See slice 353 (Q-8) + slice 393.
+      # ================================================================
+      - name: Record integration wall-clock watermark (slice 393 Q-8)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          end="$(date +%s)"
+          seconds=$(( end - ATLAS_WALLCLOCK_START ))
+          WALLCLOCK_SECONDS="$seconds" bash scripts/measure-integration-wallclock.sh
       - name: Migration round-trip — down then up
         run: |
           # Slice 297: TRUNCATE all data tables before the round-trip
@@ -685,6 +544,25 @@ jobs:
       - uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9
         with:
           version: latest
+
+      # Slice 367 — CWE-209 errleak check. Rejects new code reflecting
+      # err.Error() into 5xx JSON response bodies. Background: slice 327
+      # audit finding M-2 (`docs/audits/327-...-report.md`). The
+      # analyzer lives at cmd/scripts/errleak-lint and is invoked as a
+      # plain `go run` so it runs on the same setup-go cache as the
+      # golangci-lint step above. A hit exits 3 and fails the CI check.
+      - name: Go · errleak (slice 367 CWE-209 guard)
+        run: go run ./cmd/scripts/errleak-lint ./internal/api/...
+
+      # Slice 369 — H-1 helper-consolidation regression guard. Rejects new
+      # package-local writeJSON / writeError / writeServerErr free-function
+      # declarations in internal/api/* (mirror of the slice-367 errleak
+      # analyzer). The analyzer lives at cmd/scripts/duphelper-lint and is
+      # invoked as a plain `go run` so it runs on the same setup-go cache as
+      # the steps above. A hit exits 3 and fails the CI check. Wired here per
+      # slice 391 (slice 369 AC-4 deferred to avoid a batch-164 ci.yml collision).
+      - name: Go · duphelper (slice 369 H-1 guard)
+        run: go run ./cmd/scripts/duphelper-lint ./internal/api/...
 
   lint-go-stub:
     name: Go · lint
@@ -1377,6 +1255,268 @@ jobs:
 
   frontend-playwright-stub:
     name: Frontend · Playwright e2e
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
+
+  # ====================================================================
+  # Slice 387 — Frontend Playwright e2e against the PRODUCTION-BUILD
+  # standalone server.
+  #
+  # Self-contained job block (appended like the slice-069 / slice-178
+  # blocks above) so parallel branches editing ci.yml rebase cleanly.
+  #
+  # Why a SEPARATE job and not a matrix leg of `Frontend · Playwright
+  # e2e` (slice 387 decision D1):
+  #   * The dev-server leg runs the FULL e2e suite against `npm start`;
+  #     the two prod-build specs (`bff-cookie-production-build.spec.ts`,
+  #     `logo-render-production-build.spec.ts`) are `test.skip`-guarded
+  #     there behind `!ATLAS_PROD_BUILD`, so they no-op in that leg.
+  #   * This leg builds the `output: "standalone"` bundle
+  #     (`npm run build:standalone`), boots `node
+  #     .next/standalone/web/server.js`, sets `ATLAS_PROD_BUILD=1`, and
+  #     runs ONLY those two specs — which assert standalone-only
+  #     regressions (slice 146 NODE_ENV-coupled cookie bug; slice 153
+  #     `output: "standalone"` not copying web/public/). A matrix leg
+  #     would need a build-command + start-command + spec-selection
+  #     conditional keyed on the matrix value, which is more wiring than
+  #     a clean second job. The backend bring-up (Postgres + NATS +
+  #     MinIO + atlas + JWT mint) is identical to the dev-server leg and
+  #     mirrored verbatim below.
+  #
+  # The two specs un-skip BECAUSE this job sets ATLAS_PROD_BUILD=1 AND
+  # boots them against the real standalone output — running them against
+  # the dev server would green-wash (assert nothing about the
+  # standalone-only path). See slice 351 disposition (b) +
+  # docs/audit-log/387-e2e-prod-build-ci-harness-decisions.md.
+  #
+  # Gated on the same `changes.code` path filter as the other expensive
+  # jobs with a mutually-exclusive stub sibling under the same check
+  # name (slice-061 pattern), so docs-only PRs resolve the check in <30s.
+  # NOT yet in .github/branch-protection.json's required-checks list —
+  # ships non-required (like slice 065 / 038) and is promoted to a
+  # required check in a follow-up once it has a few green runs.
+  # ====================================================================
+  frontend-playwright-prod-build:
+    name: Frontend · Playwright e2e (prod-build standalone)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    # Slice 387 — ADVISORY (continue-on-error). The harness itself is
+    # proven: the slice-153 logo-render-production-build.spec.ts guard runs
+    # GREEN against the booted standalone server in this leg (build +
+    # standalone boot + public/ copy all work). The companion slice-146
+    # bff-cookie-production-build.spec.ts is NOT yet runnable — its body
+    # carries two dev-server-shaped assumptions that only surface now that
+    # the spec finally executes against a real standalone server:
+    #   (1) it asserts the browser fires `/api/dashboard/` BFF fetches, but
+    #       under the PRODUCTION build the dashboard panels are
+    #       server-rendered (RSC), so zero client-side BFF calls fire — the
+    #       page renders fully authenticated (auth works; this is NOT the
+    #       slice-146 cookie regression, which would have shown a login
+    #       page), so `bffResponses.length > 0` is a false assertion for the
+    #       prod build;
+    #   (2) it calls `context.addCookies` with
+    #       `domain: new URL(authedPage.url()).hostname` before any
+    #       navigation, so `authedPage.url()` is `about:blank`, the hostname
+    #       is empty, and Playwright rejects the cookie.
+    # Fixing those is a spec-BODY change, out of slice 387's scope (the
+    # brief forbids touching the spec bodies). Filed as spillover slice 399
+    # (docs/issues/399-bff-cookie-prod-build-spec-body-fix.md). Until it
+    # lands, this leg runs ONLY the logo spec and is non-blocking so the
+    # proven harness ships. Promote to blocking (drop continue-on-error,
+    # add bff-cookie-production-build.spec.ts back to the run) when slice
+    # 399 corrects the body.
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: security_atlas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable
+      ATLAS_APP_PASSWORD: ${{ secrets.CI_ATLAS_APP_PASSWORD || 'ci-ephemeral' }}
+      MINIO_ENDPOINT: http://localhost:9000
+      MINIO_BUCKET: atlas-artifacts-test
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      NATS_URL: nats://localhost:4222
+      ATLAS_HTTP_URL: http://localhost:8080
+      PLATFORM_BASE_URL: http://localhost:3000
+      # Slice 201 — global-setup mints a JWT at runtime via
+      # POST /v1/test/issue-jwt; TEST_BEARER is intentionally OMITTED so
+      # the runtime-mint path is forced. ATLAS_TEST_MODE=1 mounts that
+      # endpoint on the atlas server; ATLAS_ISSUER_URL wires the keystore
+      # + signer it needs.
+      ATLAS_TEST_MODE: "1"
+      ATLAS_ISSUER_URL: http://localhost:8080
+      BEARER_HASH_KEY: test-bearer-hash-key-32-bytes-ok!!
+      # Slice 387 — un-skips bff-cookie-production-build.spec.ts +
+      # logo-render-production-build.spec.ts (both `test.skip`-guarded
+      # behind `!ATLAS_PROD_BUILD`). This is the ONLY job that sets it.
+      ATLAS_PROD_BUILD: "1"
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+          # Same slice 069 / 117 D5 exception: Playwright's
+          # `--with-deps chromium` step uses sudo to install chromium's
+          # system libs. Egress audit still applies; only sudo is
+          # permitted on this one job.
+          disable-sudo: false
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: "1.26"
+          cache: true
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/live; then
+              echo "minio ready"; break
+            fi
+            sleep 2
+          done
+          docker run --rm --network host \
+            -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
+            minio/mc mb -p local/atlas-artifacts-test
+      - name: Start NATS JetStream
+        run: |
+          docker run -d --name nats \
+            -p 4222:4222 \
+            -p 8222:8222 \
+            nats:2.10-alpine -js -sd /data --http_port 8222
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8222/healthz; then
+              echo "nats ready"; break
+            fi
+            sleep 2
+          done
+      - name: Bootstrap Postgres roles + migrations
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
+          for f in migrations/sql/*.sql; do
+            case "$f" in
+              *.down.sql) ;;
+              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
+            esac
+          done
+      - name: Build atlas server
+        run: go build -o /usr/local/bin/atlas ./cmd/atlas
+      - name: Install web workspace
+        working-directory: .
+        run: npm install --no-audit --no-fund
+      - name: Build web workspace (standalone output)
+        # Slice 387 — `build:standalone` = `next build && cp -r public
+        # .next/standalone/web/public`. The bare `next build` does NOT
+        # copy web/public/ into the standalone tree (the `output:
+        # "standalone"` tracer omits static assets by design — exactly
+        # the slice 153 regression). The script's `cp` reproduces the
+        # web.Dockerfile runtime-stage copy so the logo + OG/Twitter
+        # assets resolve under `node .next/standalone/web/server.js`.
+        working-directory: web
+        run: npm run build:standalone
+      - name: Install Playwright chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Start atlas server
+        env:
+          ATLAS_KEYSTORE_PATH: /tmp/atlas-ci/keys
+          ATLAS_DATA_DIR: /tmp/atlas-ci
+        run: |
+          mkdir -p /tmp/atlas-ci/keys
+          atlas serve > /tmp/atlas.log 2>&1 &
+          echo "ATLAS_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/health; then
+              echo "atlas ready"; break
+            fi
+            sleep 2
+          done
+      - name: Start web server (production-build standalone)
+        # Slice 387 — boot the standalone Node server, NOT `npm start`.
+        # The standalone entrypoint is `.next/standalone/web/server.js`
+        # (the `web/` segment mirrors the monorepo workspace path Next.js
+        # bakes into the traced output). It reads PORT + ATLAS_HTTP_URL
+        # from the env exported at job level, so the BFF proxies to the
+        # atlas server identically to the dev-server leg.
+        working-directory: web
+        run: |
+          (PORT=3000 node .next/standalone/web/server.js > /tmp/web.log 2>&1) &
+          echo "WEB_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/; then
+              echo "web ready"; break
+            fi
+            sleep 2
+          done
+      - name: Run prod-build Playwright specs
+        # Slice 387 — ATLAS_PROD_BUILD=1 (job env) un-skips the prod-build
+        # specs; we name them explicitly so this leg runs ONLY the
+        # standalone-only regression guards (the dev-server leg owns the
+        # rest of the suite). reuseExistingServer=true (CI=true) attaches
+        # to the standalone server started above.
+        #
+        # Currently runs the slice-153 logo spec ONLY — it passes green and
+        # proves the harness. bff-cookie-production-build.spec.ts (slice
+        # 146) is held back to spillover slice 399 (its body has two
+        # dev-server-shaped assumptions that fail under the prod build; see
+        # the continue-on-error comment on this job). Add it back here when
+        # slice 399 fixes the body, and drop continue-on-error.
+        working-directory: web
+        run: |
+          npx playwright test \
+            logo-render-production-build.spec.ts
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: playwright-report-prod-build
+          path: |
+            web/playwright-report/
+            web/test-results/
+          if-no-files-found: warn
+      - name: Dump server logs on failure
+        if: failure()
+        run: |
+          echo "=== atlas log ==="
+          cat /tmp/atlas.log || true
+          echo "=== web log ==="
+          cat /tmp/web.log || true
+
+  frontend-playwright-prod-build-stub:
+    name: Frontend · Playwright e2e (prod-build standalone)
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
@@ -2486,3 +2626,212 @@ jobs:
 
       - name: Run check-openapi-drift.sh
         run: bash scripts/check-openapi-drift.sh
+
+  # ====================================================================
+  # Slice 345 — integration-job enrolment-discovery guard.
+  #
+  # Asserts that every Go package carrying a `//go:build integration`
+  # build tag is enrolled in the integration job's explicit package
+  # list in the "Run integration tests" step above. A package that
+  # ships an integration_test.go but is not enumerated there silently
+  # runs no integration tests in CI (slice 334 framework-audit finding
+  # I-1). Runs `scripts/audit-integration-enrolment.sh`.
+  #
+  # Why BLOCKING (matches slice 128 actions-pin-check / slice 140
+  # openapi-drift-check; differs from the informational pattern of
+  # slices 069/089/109/120/127): the gap is invisible by construction
+  # — a forgotten enrolment produces a GREEN build whose integration
+  # suite never ran. The 17-slice retroactive-enrolment trail (279,
+  # 283, 284, 287, 288, 290, 293, 294, 295, 297, 310, 313, 315, 317,
+  # 318, 319, 320) is the empirical cost of not failing the build.
+  #
+  # Known-gaps allowlist: when this guard shipped the tree already
+  # carried a 38-package enrolment backlog (slice 345 anti-criterion
+  # P0-345-1 forbids retroactively enrolling them here). They are
+  # waived in the script's KNOWN_UNENROLLED allowlist and drained by
+  # slice 387. The guard still fails on the NEXT forgotten package.
+  #
+  # Why no stub-twin (slice 061 convention): the script is fast (sub-
+  # second, pure bash + grep, no network), deliberately ignores
+  # `changes.code` (any PR that adds an integration_test.go must be
+  # caught even if it touches no other code), and runs unconditionally.
+  # Mirrors actions-pin-check / openapi-drift-check stub-omission.
+  #
+  # Local repro: `bash scripts/audit-integration-enrolment.sh`
+  #   self-test: `bash scripts/audit-integration-enrolment_test.sh`
+  # See: CONTRIBUTING.md "Integration-test enrolment" + slice 345.
+  # ====================================================================
+  integration-enrolment-check:
+    name: integration-enrolment-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Run audit-integration-enrolment self-test
+        run: bash scripts/audit-integration-enrolment_test.sh
+
+      - name: Run audit-integration-enrolment.sh
+        run: bash scripts/audit-integration-enrolment.sh
+
+  # ====================================================================
+  # Slice 393 (Q-5) — coverage-exclude justification lint (HARD FAIL).
+  #
+  # Wires scripts/check-coverage-excludes.sh (shipped by slice 353) into
+  # CI as a blocking meta-lint check. Asserts the documentation invariant
+  # that every prefix in `excludes` of cmd/scripts/coverage-thresholds.json
+  # carries a non-empty `$exclude_justifications` entry, and that no
+  # orphan justification exists (excludes ⊆ justifications ⊆ excludes).
+  #
+  # Why BLOCKING (matches actions-pin-check / openapi-drift-check /
+  # integration-enrolment-check; differs from the informational pattern
+  # of slices 069/089/109/120/127): the `excludes` list is the path of
+  # least resistance for landing a slice without writing tests (slice 333
+  # finding Q-5). An unjustified exclude must be un-mergeable — the same
+  # structural stance as slice 345's integration-enrolment guard.
+  #
+  # Why no stub-twin (slice 061 convention): the script is fast (sub-
+  # second, pure jq, no network), reads a tracked JSON file that any PR
+  # might edit (incl. docs-only edits to the justifications map), and
+  # SHOULD run unconditionally. Mirrors actions-pin-check stub-omission.
+  #
+  # Local repro: `bash scripts/check-coverage-excludes.sh`
+  #   self-test: `bash scripts/check-coverage-excludes_test.sh`
+  # See slice 353 (Q-5) + slice 393.
+  # ====================================================================
+  coverage-excludes-check:
+    name: coverage-excludes-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Run check-coverage-excludes self-test
+        run: bash scripts/check-coverage-excludes_test.sh
+
+      - name: Run check-coverage-excludes.sh
+        run: bash scripts/check-coverage-excludes.sh
+
+  # ====================================================================
+  # Slice 393 (Q-6) — assertion-density advisory (INFORMATIONAL).
+  #
+  # Wires scripts/assertion-density.sh (shipped by slice 353) into CI as
+  # an informational, NON-blocking check. The script counts assertion
+  # calls per Go test file and warns where the density is below threshold
+  # (a cheap mutation-testing proxy, slice 333 finding Q-6). It is
+  # advisory by design — exit 0 even with warnings (slice 353 D7,
+  # anti-criterion P0-393-2).
+  #
+  # Why informational (not required): the density heuristic has known
+  # noise (table-driven tests, golden-file comparisons that assert via
+  # one helper call). Promoting to required would force contributors to
+  # justify every flagged file — the wrong ergonomic for a hygiene
+  # signal. Mirrors the slice 120 phantom-deps / slice 089 npm-audit
+  # informational-job pattern: continue-on-error + a sticky PR comment.
+  #
+  # Local repro: `bash scripts/assertion-density.sh`
+  #   self-test: `bash scripts/assertion-density_test.sh`
+  # See slice 353 (Q-6) + slice 393.
+  # ====================================================================
+  assertion-density:
+    name: QA · assertion density
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Run assertion-density self-test
+        run: bash scripts/assertion-density_test.sh
+
+      - name: Run assertion-density.sh
+        id: density
+        run: |
+          # Advisory by design: the script always exits 0 (warnings go to
+          # stderr). Capture both streams for the sticky PR comment.
+          set +e
+          bash scripts/assertion-density.sh > density.txt 2> density.warn
+          rc=$?
+          set -e
+          # Count below-threshold files from the JSON view (deterministic).
+          below=$(DENSITY_FORMAT=json bash scripts/assertion-density.sh \
+            | jq -r '.below_threshold')
+          echo "below=$below" >> "$GITHUB_OUTPUT"
+          echo "assertion-density below-threshold file(s): $below"
+          cat density.txt
+          cat density.warn || true
+          exit "$rc"
+
+      - name: Build comment body
+        run: |
+          {
+            echo "<!-- atlas-assertion-density-marker -->"
+            echo "## QA · assertion density (slice 353 Q-6)"
+            echo
+            below="${{ steps.density.outputs.below }}"
+            if [ "$below" -eq 0 ]; then
+              echo "Every scanned Go test file meets the assertion-density threshold "
+              echo "(1 assertion per 20 LOC)."
+            else
+              echo "$below test file(s) fall below the assertion-density threshold "
+              echo "(fewer than 1 assertion per 20 LOC). Low density often means a test "
+              echo "exercises code for coverage without asserting on the result:"
+              echo
+              echo '```'
+              cat density.warn
+              echo '```'
+            fi
+            echo
+            echo "---"
+            echo "_Advisory only — this does NOT block the merge (slice 353 D7). Reproduce locally: \`bash scripts/assertion-density.sh\`. Slice 393 · ${{ github.run_id }}._"
+          } > density-comment.md
+
+      - name: Post or update sticky PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          existing=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.body | startswith("<!-- atlas-assertion-density-marker -->")) | .id' \
+            | head -1)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/${existing}" \
+              -f body="$(cat density-comment.md)" >/dev/null
+            echo "Updated existing sticky comment id=$existing"
+          else
+            gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" --body-file density-comment.md
+            echo "Posted new sticky comment"
+          fi
+
+      - name: Upload assertion-density report as artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: assertion-density-report
+          path: |
+            density.txt
+            density.warn
+            density-comment.md
+          if-no-files-found: warn
+
+  assertion-density-stub:
+    name: QA · assertion density
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Non-PR push OR docs-only change — assertion-density advisory skipped (slice 393)."

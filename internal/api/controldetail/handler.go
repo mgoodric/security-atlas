@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -103,7 +105,7 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, ok := tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
@@ -117,7 +119,7 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 	if raw := q.Get("control_id"); raw != "" {
 		parsed, err := uuid.Parse(raw)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "control_id must be a uuid")
+			httpresp.WriteError(w, http.StatusBadRequest, "control_id must be a uuid")
 			return
 		}
 		controlID = parsed
@@ -128,7 +130,7 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 	// Validated BEFORE the SQL round-trip so a typo is a clean 400.
 	resultFilter := q.Get("result")
 	if !isValidResult(resultFilter) {
-		writeError(w, http.StatusBadRequest, "result must be one of: pass, fail, na, inconclusive")
+		httpresp.WriteError(w, http.StatusBadRequest, "result must be one of: pass, fail, na, inconclusive")
 		return
 	}
 
@@ -141,7 +143,7 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 	if raw := q.Get("scope_cell_id"); raw != "" {
 		parsed, err := uuid.Parse(raw)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "scope_cell_id must be a uuid")
+			httpresp.WriteError(w, http.StatusBadRequest, "scope_cell_id must be a uuid")
 			return
 		}
 		scopeCellID = parsed
@@ -150,22 +152,22 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	since, err := parseRFC3339(q.Get("since"), now.Add(-defaultWindow))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "since "+errBadTime.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, "since "+errBadTime.Error())
 		return
 	}
 	until, err := parseRFC3339(q.Get("until"), now)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "until "+errBadTime.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, "until "+errBadTime.Error())
 		return
 	}
 	cursor, err := decodeCursor(q.Get("cursor"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	pageRows, err := parseLimit(q.Get("limit"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -181,7 +183,7 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 	// list read alone.
 	total, err := h.store.CountEvidenceForTenant(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "controldetail", err)
 		return
 	}
 
@@ -199,7 +201,7 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 			pageRows:        pageRows,
 		})
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			httperr.WriteInternal(w, r, "controldetail", err)
 			return
 		}
 		page, next := splitEvidenceListPage(rows, pageRows)
@@ -207,13 +209,14 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 		for i, rec := range page {
 			out[i] = evidenceWireFromListRow(rec)
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
+		httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 			"control_id":  "",
 			"evidence":    out,
 			"count":       len(out),
 			"total":       total,
 			"next_cursor": next,
 		})
+
 		return
 	}
 
@@ -225,7 +228,7 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 		pageRows: pageRows,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "controldetail", err)
 		return
 	}
 
@@ -234,13 +237,14 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 	for i, rec := range page {
 		out[i] = evidenceWireFrom(rec)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"control_id":  controlID.String(),
 		"evidence":    out,
 		"count":       len(out),
 		"total":       total,
 		"next_cursor": next,
 	})
+
 }
 
 // ===== AC-2: GET /v1/controls/{id}/policies =====
@@ -255,7 +259,7 @@ func (h *Handler) Policies(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.store.PoliciesForControl(ctx, controlID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "controldetail", err)
 		return
 	}
 	out := make([]policyWire, len(rows))
@@ -267,11 +271,12 @@ func (h *Handler) Policies(w http.ResponseWriter, r *http.Request) {
 			Status:   p.Status,
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"control_id": controlID.String(),
 		"policies":   out,
 		"count":      len(out),
 	})
+
 }
 
 // ===== AC-3: GET /v1/controls/{id}/risks =====
@@ -287,7 +292,7 @@ func (h *Handler) Risks(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.store.RisksForControl(ctx, controlID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "controldetail", err)
 		return
 	}
 	out := make([]riskWire, len(rows))
@@ -300,11 +305,12 @@ func (h *Handler) Risks(w http.ResponseWriter, r *http.Request) {
 			LinkWeight:    numericToFloat(rk.DesignScore),
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"control_id": controlID.String(),
 		"risks":      out,
 		"count":      len(out),
 	})
+
 }
 
 // ===== AC-4: GET /v1/controls/{id}/history =====
@@ -321,12 +327,12 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 
 	cursor, err := decodeCursor(r.URL.Query().Get("cursor"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	pageRows, err := parseLimit(r.URL.Query().Get("limit"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -335,7 +341,7 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 		pageRows: pageRows,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteInternal(w, r, "controldetail", err)
 		return
 	}
 
@@ -350,12 +356,13 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 			EvidenceCount:   int(ev.EvidenceCountInWindow),
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"control_id":  controlID.String(),
 		"history":     out,
 		"count":       len(out),
 		"next_cursor": next,
 	})
+
 }
 
 // ===== page-splitting =====
@@ -452,25 +459,15 @@ func guardAndResolvePathControl(w http.ResponseWriter, r *http.Request) (context
 	}
 	ctx, ok := tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return nil, uuid.Nil, false
 	}
 	controlID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "control id must be a uuid")
+		httpresp.WriteError(w, http.StatusBadRequest, "control id must be a uuid")
 		return nil, uuid.Nil, false
 	}
 	return ctx, controlID, true
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
 }
 
 // pgUUID wraps a uuid.UUID as a pgtype.UUID for sqlc param structs.

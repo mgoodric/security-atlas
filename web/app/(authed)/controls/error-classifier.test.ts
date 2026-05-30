@@ -8,7 +8,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import { APIError } from "@/lib/api";
+import { APIError } from "@/lib/api/base";
 
 import { classifyControlDetailError } from "./error-classifier";
 

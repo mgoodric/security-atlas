@@ -15,7 +15,10 @@
 // signal) and the WORST `freshness_status` (the weakest link) so a
 // single stale cell is never hidden behind a fresh average.
 
-import type { ControlStateResponse, ControlStateEntry } from "@/lib/api";
+import type {
+  ControlStateResponse,
+  ControlStateEntry,
+} from "@/lib/api/control-detail";
 
 // Severity ladder, most-degraded first. An unrecognized status sorts as
 // most-degraded (rank -1) so a status the UI doesn't know about is never

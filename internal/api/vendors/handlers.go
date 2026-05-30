@@ -26,6 +26,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 	"github.com/mgoodric/security-atlas/internal/vendor"
 )
@@ -107,20 +109,20 @@ type burndownWire struct {
 func (h *Handler) CreateVendor(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	in, herr := decodeWrite(r)
 	if herr != nil {
-		writeError(w, herr.status, herr.msg)
+		httpresp.WriteError(w, herr.status, herr.msg)
 		return
 	}
 	v, err := h.store.Create(ctx, in)
 	if err != nil {
-		h.writeStoreErr(w, "create vendor", err)
+		h.writeStoreErr(w, r, "create vendor", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"vendor": h.toWire(v)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"vendor": h.toWire(v)})
 }
 
 // ListVendors handles GET /v1/vendors. Query params:
@@ -131,14 +133,14 @@ func (h *Handler) CreateVendor(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListVendors(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	f := vendor.ListFilter{}
 	if c := strings.TrimSpace(r.URL.Query().Get("criticality")); c != "" {
 		crit := vendor.Criticality(c)
 		if !crit.Valid() {
-			writeError(w, http.StatusBadRequest, "criticality must be low|medium|high")
+			httpresp.WriteError(w, http.StatusBadRequest, "criticality must be low|medium|high")
 			return
 		}
 		f.Criticality = &crit
@@ -148,7 +150,7 @@ func (h *Handler) ListVendors(w http.ResponseWriter, r *http.Request) {
 		if v := strings.TrimSpace(r.URL.Query().Get("as_of")); v != "" {
 			t, err := time.Parse("2006-01-02", v)
 			if err != nil {
-				writeError(w, http.StatusBadRequest, "as_of must be YYYY-MM-DD")
+				httpresp.WriteError(w, http.StatusBadRequest, "as_of must be YYYY-MM-DD")
 				return
 			}
 			f.Cutoff = t
@@ -158,34 +160,34 @@ func (h *Handler) ListVendors(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.store.List(ctx, f)
 	if err != nil {
-		h.writeStoreErr(w, "list vendors", err)
+		h.writeStoreErr(w, r, "list vendors", err)
 		return
 	}
 	out := make([]vendorWire, 0, len(rows))
 	for _, v := range rows {
 		out = append(out, h.toWire(v))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"vendors": out})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"vendors": out})
 }
 
 // GetVendor handles GET /v1/vendors/{id}.
 func (h *Handler) GetVendor(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	v, err := h.store.Get(ctx, id)
 	if err != nil {
-		h.writeStoreErr(w, "get vendor", err)
+		h.writeStoreErr(w, r, "get vendor", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"vendor": h.toWire(v)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"vendor": h.toWire(v)})
 }
 
 // UpdateVendor handles PATCH /v1/vendors/{id}. Replace semantics; see package
@@ -193,41 +195,41 @@ func (h *Handler) GetVendor(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateVendor(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	in, herr := decodeWrite(r)
 	if herr != nil {
-		writeError(w, herr.status, herr.msg)
+		httpresp.WriteError(w, herr.status, herr.msg)
 		return
 	}
 	v, err := h.store.Update(ctx, id, in)
 	if err != nil {
-		h.writeStoreErr(w, "update vendor", err)
+		h.writeStoreErr(w, r, "update vendor", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"vendor": h.toWire(v)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"vendor": h.toWire(v)})
 }
 
 // DeleteVendor handles DELETE /v1/vendors/{id}.
 func (h *Handler) DeleteVendor(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	if err := h.store.Delete(ctx, id); err != nil {
-		h.writeStoreErr(w, "delete vendor", err)
+		h.writeStoreErr(w, r, "delete vendor", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -237,14 +239,14 @@ func (h *Handler) DeleteVendor(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Burndown(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	var crit *vendor.Criticality
 	if c := strings.TrimSpace(r.URL.Query().Get("criticality")); c != "" {
 		v := vendor.Criticality(c)
 		if !v.Valid() {
-			writeError(w, http.StatusBadRequest, "criticality must be low|medium|high")
+			httpresp.WriteError(w, http.StatusBadRequest, "criticality must be low|medium|high")
 			return
 		}
 		crit = &v
@@ -253,14 +255,14 @@ func (h *Handler) Burndown(w http.ResponseWriter, r *http.Request) {
 	if v := strings.TrimSpace(r.URL.Query().Get("as_of")); v != "" {
 		t, err := time.Parse("2006-01-02", v)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "as_of must be YYYY-MM-DD")
+			httpresp.WriteError(w, http.StatusBadRequest, "as_of must be YYYY-MM-DD")
 			return
 		}
 		asOf = t
 	}
 	bd, err := h.store.Burndown(ctx, asOf, crit)
 	if err != nil {
-		h.writeStoreErr(w, "burndown", err)
+		h.writeStoreErr(w, r, "burndown", err)
 		return
 	}
 	out := burndownWire{
@@ -281,7 +283,7 @@ func (h *Handler) Burndown(w http.ResponseWriter, r *http.Request) {
 			OnTimeFraction: b.OnTimeFraction,
 		})
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpresp.WriteJSON(w, http.StatusOK, out)
 }
 
 // ----- helpers -----
@@ -389,25 +391,15 @@ func (h *Handler) tenantContext(r *http.Request) (context.Context, bool) {
 	return r.Context(), true
 }
 
-func (h *Handler) writeStoreErr(w http.ResponseWriter, op string, err error) {
+func (h *Handler) writeStoreErr(w http.ResponseWriter, r *http.Request, op string, err error) {
 	switch {
 	case errors.Is(err, vendor.ErrVendorNotFound):
-		writeError(w, http.StatusNotFound, "vendor not found")
+		httpresp.WriteError(w, http.StatusNotFound, "vendor not found")
 	case errors.Is(err, vendor.ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, vendor.ErrDuplicateDomain):
-		writeError(w, http.StatusConflict, "a vendor with this domain already exists")
+		httpresp.WriteError(w, http.StatusConflict, "a vendor with this domain already exists")
 	default:
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": op + ": " + err.Error()})
+		httperr.WriteInternal(w, r, op, err)
 	}
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
 }

@@ -44,9 +44,22 @@ import { test, expect } from "@playwright/test";
 const RUN_AGAINST_PROD_BUILD = !!process.env.ATLAS_PROD_BUILD;
 
 test.describe("logo + public assets render in production-build standalone", () => {
+  // Slice 387 — the CI harness now EXISTS. The
+  // `Frontend · Playwright e2e (prod-build standalone)` job in
+  // .github/workflows/ci.yml runs `npm run build:standalone` (which
+  // copies web/public/ into the standalone tree — exactly the slice 153
+  // fix), boots `node .next/standalone/web/server.js`, and runs this
+  // spec with ATLAS_PROD_BUILD=1 — so the slice-153
+  // standalone-public-assets regression is gated on every PR.
+  //
+  // The guard is retained (NOT removed) because it scopes this spec to
+  // the standalone leg: the dev-server leg does not set ATLAS_PROD_BUILD,
+  // so this spec stays skipped there rather than green-washing against
+  // `npm start` (slice 351 disposition (b)). Runnable locally per the
+  // invocation block above.
   test.skip(
     !RUN_AGAINST_PROD_BUILD,
-    "ATLAS_PROD_BUILD not set — quarantined behind slice 082 (no seed harness for the standalone server yet)",
+    "ATLAS_PROD_BUILD not set — runs in the prod-build standalone CI leg (slice 387) or locally with ATLAS_PROD_BUILD=1; skipped against the dev server to avoid green-washing the standalone-only path",
   );
 
   test("/logo-light.svg returns 200 + image/svg+xml", async ({ page }) => {

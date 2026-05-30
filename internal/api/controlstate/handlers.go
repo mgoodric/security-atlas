@@ -13,13 +13,14 @@ package controlstate
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -79,12 +80,12 @@ func stateWireFrom(s eval.State) stateWire {
 func (h *Handler) State(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	controlID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "control id must be a uuid")
+		httpresp.WriteError(w, http.StatusBadRequest, "control id must be a uuid")
 		return
 	}
 
@@ -93,7 +94,7 @@ func (h *Handler) State(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("as-of"); raw != "" {
 		ts, perr := time.Parse(time.RFC3339, raw)
 		if perr != nil {
-			writeError(w, http.StatusBadRequest, "as-of must be an RFC3339 timestamp")
+			httpresp.WriteError(w, http.StatusBadRequest, "as-of must be an RFC3339 timestamp")
 			return
 		}
 		asOf = ts.UTC()
@@ -101,7 +102,7 @@ func (h *Handler) State(w http.ResponseWriter, r *http.Request) {
 
 	states, err := h.engine.ControlState(ctx, controlID, scopePredicate, asOf)
 	if err != nil {
-		writeStateErr(w, err)
+		writeStateErr(w, r, err)
 		return
 	}
 
@@ -109,11 +110,12 @@ func (h *Handler) State(w http.ResponseWriter, r *http.Request) {
 	for i, s := range states {
 		out[i] = stateWireFrom(s)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"control_id": controlID.String(),
 		"states":     out,
 		"count":      len(out),
 	})
+
 }
 
 // effectivenessWire is the AC-6 response shape.
@@ -132,21 +134,21 @@ type effectivenessWire struct {
 func (h *Handler) Effectiveness(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	controlID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "control id must be a uuid")
+		httpresp.WriteError(w, http.StatusBadRequest, "control id must be a uuid")
 		return
 	}
 
 	eff, err := h.engine.Effectiveness(ctx, controlID)
 	if err != nil {
-		writeStateErr(w, err)
+		writeStateErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, effectivenessWire{
+	httpresp.WriteJSON(w, http.StatusOK, effectivenessWire{
 		ControlID:   eff.ControlID.String(),
 		PassRate:    eff.PassRate,
 		PassCount:   eff.PassCount,
@@ -154,6 +156,7 @@ func (h *Handler) Effectiveness(w http.ResponseWriter, r *http.Request) {
 		WindowStart: eff.WindowStart.UTC().Format(time.RFC3339Nano),
 		WindowEnd:   eff.WindowEnd.UTC().Format(time.RFC3339Nano),
 	})
+
 }
 
 // ----- helpers -----
@@ -171,23 +174,13 @@ func tenantContext(r *http.Request) (context.Context, bool) {
 // writeStateErr maps an engine error to an HTTP status. ErrControlNotFound /
 // pgx.ErrNoRows → 404; a malformed scope predicate → 400; everything else →
 // 500.
-func writeStateErr(w http.ResponseWriter, err error) {
+func writeStateErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case eval.IsNotFound(err):
-		writeError(w, http.StatusNotFound, "control not found")
+		httpresp.WriteError(w, http.StatusNotFound, "control not found")
 	case eval.IsBadScopePredicate(err):
-		writeError(w, http.StatusBadRequest, "scope predicate is malformed: "+err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, "scope predicate is malformed: "+err.Error())
 	default:
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		httperr.WriteInternal(w, r, "controlstate", err)
 	}
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
 }

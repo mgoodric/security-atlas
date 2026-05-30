@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth";
-import { getControlEffectiveScope } from "@/lib/api";
+import { getControlEffectiveScope } from "@/lib/api/control-detail";
 
 // Slice 041 — server-side proxy for
 // GET /v1/controls/{id}/effective-scope?framework_version=<UUID>

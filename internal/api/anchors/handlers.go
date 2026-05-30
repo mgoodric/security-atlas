@@ -8,7 +8,6 @@ package anchors
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -22,6 +21,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/catalog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -117,7 +118,7 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 	if fvID := r.URL.Query().Get("framework_version_id"); fvID != "" {
 		uid, err := uuid.Parse(fvID)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "framework_version_id must be a UUID")
+			httpresp.WriteError(w, http.StatusBadRequest, "framework_version_id must be a UUID")
 			return
 		}
 		if withState {
@@ -133,10 +134,10 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 				return inner
 			})
 			if err != nil {
-				writeServerErr(w, "list anchors for version (with state)", err)
+				httperr.WriteInternal(w, r, "list anchors for version (with state)", err)
 				return
 			}
-			writeJSON(w, http.StatusOK, map[string]any{"anchors": forVersionRowsToStateWire(rows)})
+			httpresp.WriteJSON(w, http.StatusOK, map[string]any{"anchors": forVersionRowsToStateWire(rows)})
 			return
 		}
 		rows, err := h.q.ListSCFAnchorsForVersion(ctx, dbx.ListSCFAnchorsForVersionParams{
@@ -145,10 +146,10 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 			Offset:             offset,
 		})
 		if err != nil {
-			writeServerErr(w, "list anchors for version", err)
+			httperr.WriteInternal(w, r, "list anchors for version", err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"anchors": rowsToWire(rows)})
+		httpresp.WriteJSON(w, http.StatusOK, map[string]any{"anchors": rowsToWire(rows)})
 		return
 	}
 
@@ -164,10 +165,10 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 			return inner
 		})
 		if err != nil {
-			writeServerErr(w, "list anchors latest (with state)", err)
+			httperr.WriteInternal(w, r, "list anchors latest (with state)", err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"anchors": latestRowsToStateWire(rows)})
+		httpresp.WriteJSON(w, http.StatusOK, map[string]any{"anchors": latestRowsToStateWire(rows)})
 		return
 	}
 
@@ -176,10 +177,10 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 		Offset: offset,
 	})
 	if err != nil {
-		writeServerErr(w, "list anchors latest", err)
+		httperr.WriteInternal(w, r, "list anchors latest", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"anchors": rowsToWire(rows)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"anchors": rowsToWire(rows)})
 }
 
 // inTenantTx opens a tx on the pool, sets the `app.current_tenant` GUC
@@ -225,7 +226,7 @@ func (h *Handler) scopeCell(w http.ResponseWriter, r *http.Request) (pgtype.UUID
 	}
 	uid, err := uuid.Parse(v)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "scope must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "scope must be a UUID")
 		return pgtype.UUID{}, false
 	}
 	return pgtype.UUID{Bytes: uid, Valid: true}, true
@@ -254,21 +255,21 @@ func (h *Handler) getAnchor(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	anchor, ok, err := h.lookupAnchor(r.Context(), id)
 	if err != nil {
-		writeServerErr(w, "lookup anchor", err)
+		httperr.WriteInternal(w, r, "lookup anchor", err)
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "anchor not found")
+		httpresp.WriteError(w, http.StatusNotFound, "anchor not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"anchor": anchor})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"anchor": anchor})
 }
 
 // listFrameworks returns the framework catalog (global only).
 func (h *Handler) listFrameworks(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.q.ListFrameworks(r.Context())
 	if err != nil {
-		writeServerErr(w, "list frameworks", err)
+		httperr.WriteInternal(w, r, "list frameworks", err)
 		return
 	}
 	out := make([]frameworkWire, 0, len(rows))
@@ -281,7 +282,7 @@ func (h *Handler) listFrameworks(w http.ResponseWriter, r *http.Request) {
 			LatestVersionID: uuidStr(f.LatestVersionID),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"frameworks": out})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"frameworks": out})
 }
 
 // listSCFVersions returns every SCF framework_version for the slice's
@@ -289,7 +290,7 @@ func (h *Handler) listFrameworks(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listSCFVersions(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.q.ListFrameworkVersionsBySlug(r.Context(), "scf")
 	if err != nil {
-		writeServerErr(w, "list scf versions", err)
+		httperr.WriteInternal(w, r, "list scf versions", err)
 		return
 	}
 	out := make([]frameworkVersionWire, 0, len(rows))
@@ -301,7 +302,7 @@ func (h *Handler) listSCFVersions(w http.ResponseWriter, r *http.Request) {
 			EffectiveFrom: dateStr(v.EffectiveFrom),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"versions": out})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"versions": out})
 }
 
 // anchorsForRequirement returns one framework_requirements row plus every
@@ -320,17 +321,17 @@ func (h *Handler) anchorsForRequirement(w http.ResponseWriter, r *http.Request) 
 	id := chi.URLParam(r, "id")
 	req, ok, err := h.lookupRequirement(r.Context(), id)
 	if err != nil {
-		writeServerErr(w, "lookup requirement", err)
+		httperr.WriteInternal(w, r, "lookup requirement", err)
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "requirement not found")
+		httpresp.WriteError(w, http.StatusNotFound, "requirement not found")
 		return
 	}
 
 	rows, err := h.q.ListFwToScfEdgesForRequirement(r.Context(), req.ID)
 	if err != nil {
-		writeServerErr(w, "list edges for requirement", err)
+		httperr.WriteInternal(w, r, "list edges for requirement", err)
 		return
 	}
 	out := make([]requirementEdgeWire, 0, len(rows))
@@ -347,7 +348,7 @@ func (h *Handler) anchorsForRequirement(w http.ResponseWriter, r *http.Request) 
 			Rationale:         row.Rationale,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"requirement": requirementWire{
 			ID:    uuidStr(req.ID),
 			Code:  req.Code,
@@ -356,6 +357,7 @@ func (h *Handler) anchorsForRequirement(w http.ResponseWriter, r *http.Request) 
 		},
 		"anchors": out,
 	})
+
 }
 
 // lookupRequirement resolves the {id} path segment to a framework_requirement
@@ -704,19 +706,3 @@ func dateStr(d pgtype.Date) string {
 }
 
 // ---- helpers ----
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
-}

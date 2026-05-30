@@ -20,6 +20,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -61,60 +63,60 @@ type cellWire struct {
 func (h *Handler) CreateCell(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	var req createCellReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if len(req.Dimensions) == 0 {
-		writeError(w, http.StatusBadRequest, "dimensions must be non-empty")
+		httpresp.WriteError(w, http.StatusBadRequest, "dimensions must be non-empty")
 		return
 	}
 	cell, err := h.store.CreateCell(ctx, req.Label, req.Dimensions)
 	if err != nil {
 		switch {
 		case errors.Is(err, scope.ErrCellExists):
-			writeError(w, http.StatusConflict, "cell with these dimensions already exists")
+			httpresp.WriteError(w, http.StatusConflict, "cell with these dimensions already exists")
 		case errors.Is(err, scope.ErrInvalidDimension):
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
-			writeServerErr(w, "create cell", err)
+			httperr.WriteInternal(w, r, "create cell", err)
 		}
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"cell": cellWireFrom(cell)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"cell": cellWireFrom(cell)})
 }
 
 func (h *Handler) ListCells(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	cells, err := h.store.ListCells(ctx)
 	if err != nil {
-		writeServerErr(w, "list cells", err)
+		httperr.WriteInternal(w, r, "list cells", err)
 		return
 	}
 	out := make([]cellWire, len(cells))
 	for i, c := range cells {
 		out[i] = cellWireFrom(c)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"cells": out})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"cells": out})
 }
 
 func (h *Handler) ListDimensions(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	dims, err := h.store.ListDimensions(ctx)
 	if err != nil {
-		writeServerErr(w, "list dimensions", err)
+		httperr.WriteInternal(w, r, "list dimensions", err)
 		return
 	}
 	type dimWire struct {
@@ -134,35 +136,36 @@ func (h *Handler) ListDimensions(w http.ResponseWriter, r *http.Request) {
 			IsBuiltin:     d.IsBuiltin,
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"dimensions": out})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"dimensions": out})
 }
 
 func (h *Handler) ControlApplicability(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	idStr := chi.URLParam(r, "id")
 	controlID, err := uuid.Parse(idStr)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "control id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "control id must be a UUID")
 		return
 	}
 	cells, err := h.store.ControlApplicability(ctx, controlID)
 	if err != nil {
-		writeServerErr(w, "control applicability", err)
+		httperr.WriteInternal(w, r, "control applicability", err)
 		return
 	}
 	out := make([]cellWire, len(cells))
 	for i, c := range cells {
 		out[i] = cellWireFrom(c)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"control_id":       controlID.String(),
 		"applicable":       out,
 		"applicable_count": len(out),
 	})
+
 }
 
 func (h *Handler) tenantContext(r *http.Request) (context.Context, bool) {
@@ -184,19 +187,3 @@ func cellWireFrom(c scope.Cell) cellWire {
 }
 
 // ---- helpers ----
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
-}

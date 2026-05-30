@@ -30,6 +30,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -239,7 +240,7 @@ func TestActorAdvisoryKey_DistinctActorsDistinctKeys(t *testing.T) {
 
 func TestWriteError(t *testing.T) {
 	rr := httptest.NewRecorder()
-	writeError(rr, http.StatusConflict, "duplicate")
+	httpresp.WriteError(rr, http.StatusConflict, "duplicate")
 	res := rr.Result()
 	if res.StatusCode != http.StatusConflict {
 		t.Fatalf("status: got %d", res.StatusCode)
@@ -258,7 +259,7 @@ func TestWriteError(t *testing.T) {
 
 func TestWriteJSON(t *testing.T) {
 	rr := httptest.NewRecorder()
-	writeJSON(rr, http.StatusCreated, map[string]any{"id": "x"})
+	httpresp.WriteJSON(rr, http.StatusCreated, map[string]any{"id": "x"})
 	res := rr.Result()
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("status: got %d", res.StatusCode)

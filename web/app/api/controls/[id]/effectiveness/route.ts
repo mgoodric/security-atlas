@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth";
-import { getControlEffectiveness } from "@/lib/api";
+import { getControlEffectiveness } from "@/lib/api/control-detail";
 
 // Slice 041 — server-side proxy for GET /v1/controls/{id}/effectiveness
 // (slice 012 control state evaluation). Drives the effectiveness KPI

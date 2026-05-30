@@ -26,6 +26,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -66,21 +68,21 @@ type createReq struct {
 // Create handles POST /v1/org_units.
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	parentID, err := parseUUIDPtr(req.ParentID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "parent_id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "parent_id must be a UUID")
 		return
 	}
 	in := risk.OrgUnitInput{
@@ -93,35 +95,35 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, risk.ErrInvalidLevel):
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, risk.ErrNotFound):
 			// parent_id pointed to a missing (or cross-tenant) unit.
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
-			writeServerErr(w, "create org_unit", err)
+			httperr.WriteInternal(w, r, "create org_unit", err)
 		}
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"org_unit": wireFrom(out)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"org_unit": wireFrom(out)})
 }
 
 // Get handles GET /v1/org_units/{id}.
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	out, err := h.store.GetOrgUnit(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, risk.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "org_unit not found")
+			httpresp.WriteError(w, http.StatusNotFound, "org_unit not found")
 			return
 		}
-		writeServerErr(w, "get org_unit", err)
+		httperr.WriteInternal(w, r, "get org_unit", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"org_unit": wireFrom(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"org_unit": wireFrom(out)})
 }
 
 // List handles GET /v1/org_units.
@@ -140,12 +142,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	rows, err := h.store.ListOrgUnits(r.Context())
 	if err != nil {
-		writeServerErr(w, "list org_units", err)
+		httperr.WriteInternal(w, r, "list org_units", err)
 		return
 	}
 	out := make([]wire, len(rows))
@@ -159,7 +161,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("include_risk_counts") == "true" {
 		counts, cerr := h.store.RiskCountsByOrgUnit(r.Context())
 		if cerr != nil {
-			writeServerErr(w, "risk counts by org_unit", cerr)
+			httperr.WriteInternal(w, r, "risk counts by org_unit", cerr)
 			return
 		}
 		// Index the one-query result by org_unit id, then attach to each
@@ -183,24 +185,24 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"org_units": out, "count": len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"org_units": out, "count": len(out)})
 }
 
 // Patch handles PATCH /v1/org_units/{id}.
 func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	parentID, err := parseUUIDPtr(req.ParentID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "parent_id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "parent_id must be a UUID")
 		return
 	}
 	in := risk.OrgUnitInput{
@@ -213,32 +215,32 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, risk.ErrCycleDetected):
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, risk.ErrInvalidLevel):
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, risk.ErrNotFound):
-			writeError(w, http.StatusNotFound, err.Error())
+			httpresp.WriteError(w, http.StatusNotFound, err.Error())
 		default:
-			writeServerErr(w, "update org_unit", err)
+			httperr.WriteInternal(w, r, "update org_unit", err)
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"org_unit": wireFrom(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"org_unit": wireFrom(out)})
 }
 
 // Delete handles DELETE /v1/org_units/{id}.
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	if err := h.store.DeleteOrgUnit(r.Context(), id); err != nil {
 		if errors.Is(err, risk.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "org_unit not found")
+			httpresp.WriteError(w, http.StatusNotFound, "org_unit not found")
 			return
 		}
-		writeServerErr(w, "delete org_unit", err)
+		httperr.WriteInternal(w, r, "delete org_unit", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -272,20 +274,4 @@ func parseUUIDPtr(s *string) (*uuid.UUID, error) {
 		return nil, err
 	}
 	return &id, nil
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
 }

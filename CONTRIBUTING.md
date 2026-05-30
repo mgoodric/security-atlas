@@ -443,6 +443,74 @@ resolve the check in seconds. If you add a new spec, read
 is worse than no required-check, so run `npm run test:e2e` locally before
 pushing.
 
+### Go test-package convention
+
+Go tests in this repo follow a two-tier convention surfaced by slice
+348 U-5 (sourced from the slice 334 framework audit):
+
+- **Unit tests use the internal test package: `package <pkg>`.** They
+  live in `*_test.go` files (no build tag) and have direct access to
+  package-private identifiers — `freshnessMaxAge`, `computeResult`,
+  `buildBriefHTML`, etc. Internal access is the default for pure-logic
+  unit tests because the audit shape is the function's actual
+  behavior, not the exported surface.
+- **Integration tests use the external test package: `package
+<pkg>_test`.** They live in `*_integration_test.go` files behind
+  the `//go:build integration` build tag and import the package under
+  test through its public API (and through `export_test.go` seams for
+  carefully-named primitives like
+  `oauth.ExportComputePKCEChallengeS256`). External-package shape
+  forces integration tests to exercise the same surface a real caller
+  uses, which is what we want when the test binds against real
+  Postgres / NATS / MinIO.
+
+If you need an internal symbol from an integration test, add an
+`export_test.go` (same-package file, capitalized re-export) rather
+than relaxing the integration test to the internal package — the
+seam is intentional and discoverable.
+
+Pure-unit tests should also call `t.Parallel()` unless they touch
+package-level mutable state (none in this repo today). The
+convention is by-default-parallel; opt out only with an inline
+comment naming the shared state.
+
+### Integration-test enrolment
+
+**Ship an `integration_test.go`, also enrol it.** The Go integration
+job (`Go · integration (Postgres RLS)`) enrols packages by **explicit
+listing** — a curated set of `./internal/<pkg>/...` entries in the
+"Run integration tests" `go test` invocation in
+`.github/workflows/ci.yml`. A package that ships a `_test.go` file
+carrying `//go:build integration` but is **not** in that list silently
+runs **no** integration tests in CI: its coverage is unit-only and any
+RLS / real-services bug its integration suite would catch goes
+unnoticed. The cost is the 17-slice retroactive-enrolment trail
+(slices 279, 283, 284, 287, 288, 290, 293, 294, 295, 297, 310, 313,
+315, 317, 318, 319, 320) — each one enrolled a package whose
+integration test had shipped earlier and been forgotten.
+
+The `integration-enrolment-check` CI job (slice 345) makes this
+structural: it runs `scripts/audit-integration-enrolment.sh`, which
+fails the build when a package carries the build tag but is neither in
+the `ci.yml` list nor on the script's documented `KNOWN_UNENROLLED`
+allowlist. **When you add a new `integration_test.go`, add the matching
+`./internal/<pkg>/...` line to the integration job in the same PR.**
+
+The `KNOWN_UNENROLLED` allowlist records the 38-package enrolment
+backlog that existed when the guard shipped (catalogued by slice 348,
+drained by slice 390). It is a **ratchet — it only ever shrinks**; each
+enrolment PR removes its package from the allowlist as it adds it to the
+`ci.yml` list. Adding a new entry to the allowlist is a code smell that
+needs explicit justification in the PR.
+
+Local repro:
+
+```
+bash scripts/audit-integration-enrolment.sh        # audit the tree
+bash scripts/audit-integration-enrolment_test.sh   # self-test
+just audit-integration-enrolment                   # via the task surface
+```
+
 ## Empty-set robustness
 
 Every `GET /v1/*` list or aggregate endpoint MUST return `200 OK` with a

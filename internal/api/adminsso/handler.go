@@ -55,6 +55,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -161,7 +163,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	tenantID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "invalid tenant in credential")
+		httpresp.WriteError(w, http.StatusInternalServerError, "invalid tenant in credential")
 		return
 	}
 
@@ -176,10 +178,10 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "no SSO config")
+			httpresp.WriteError(w, http.StatusNotFound, "no SSO config")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "fetch sso: "+err.Error())
+		httperr.WriteInternal(w, r, "fetch sso", err)
 		return
 	}
 
@@ -193,7 +195,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:           row.CreatedAt.Time,
 		UpdatedAt:           row.UpdatedAt.Time,
 	}
-	writeJSON(w, http.StatusOK, resp)
+	httpresp.WriteJSON(w, http.StatusOK, resp)
 }
 
 // Patch handles PATCH /v1/admin/sso. Admin-only. Upserts the primary
@@ -205,21 +207,21 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	tenantID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "invalid tenant in credential")
+		httpresp.WriteError(w, http.StatusInternalServerError, "invalid tenant in credential")
 		return
 	}
 
 	var req PatchRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16*1024)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if strings.TrimSpace(req.IssuerURL) == "" {
-		writeError(w, http.StatusBadRequest, "issuer_url is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "issuer_url is required")
 		return
 	}
 	if strings.TrimSpace(req.ClientID) == "" {
-		writeError(w, http.StatusBadRequest, "client_id is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "client_id is required")
 		return
 	}
 
@@ -242,11 +244,11 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		return gErr
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "check existing: "+err.Error())
+		httperr.WriteInternal(w, r, "check existing", err)
 		return
 	}
 	if !exists && req.ClientSecret == "" {
-		writeError(w, http.StatusBadRequest, "client_secret is required on first config")
+		httpresp.WriteError(w, http.StatusBadRequest, "client_secret is required on first config")
 		return
 	}
 
@@ -280,7 +282,7 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		return qErr
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "upsert sso: "+err.Error())
+		httperr.WriteInternal(w, r, "upsert sso", err)
 		return
 	}
 
@@ -294,7 +296,7 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:           row.CreatedAt.Time,
 		UpdatedAt:           row.UpdatedAt.Time,
 	}
-	writeJSON(w, http.StatusOK, resp)
+	httpresp.WriteJSON(w, http.StatusOK, resp)
 }
 
 // Preflight handles POST /v1/admin/sso/preflight. Admin-only. Fetches the
@@ -306,33 +308,33 @@ func (h *Handler) Preflight(w http.ResponseWriter, r *http.Request) {
 
 	var req PreflightRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4*1024)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if strings.TrimSpace(req.IssuerURL) == "" {
-		writeError(w, http.StatusBadRequest, "issuer_url is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "issuer_url is required")
 		return
 	}
 
 	// Parse + validate URL.
 	parsed, err := url.Parse(strings.TrimRight(req.IssuerURL, "/"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid issuer_url: "+err.Error())
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid issuer_url: "+err.Error())
 		return
 	}
 	if !h.preflightOpts.AllowPrivateIPs && parsed.Scheme != "https" {
-		writeError(w, http.StatusBadRequest, "issuer_url must be https")
+		httpresp.WriteError(w, http.StatusBadRequest, "issuer_url must be https")
 		return
 	}
 	if parsed.Host == "" {
-		writeError(w, http.StatusBadRequest, "issuer_url missing host")
+		httpresp.WriteError(w, http.StatusBadRequest, "issuer_url missing host")
 		return
 	}
 
 	// SSRF guard: resolve host and reject loopback / RFC1918.
 	if !h.preflightOpts.AllowPrivateIPs {
 		if err := h.guardSSRF(r.Context(), parsed.Host); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -344,7 +346,7 @@ func (h *Handler) Preflight(w http.ResponseWriter, r *http.Request) {
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, discURL, nil)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "build request: "+err.Error())
+		httperr.WriteInternal(w, r, "build request", err)
 		return
 	}
 	client := h.preflightOpts.HTTPClient
@@ -353,33 +355,33 @@ func (h *Handler) Preflight(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "discovery fetch failed: "+err.Error())
+		httperr.WriteStatus(w, r, http.StatusBadGateway, "discovery fetch failed", err)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("discovery returned %d", resp.StatusCode))
+		httpresp.WriteError(w, http.StatusBadGateway, fmt.Sprintf("discovery returned %d", resp.StatusCode))
 		return
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, h.preflightOpts.MaxBodyBytes+1))
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "read body: "+err.Error())
+		httperr.WriteStatus(w, r, http.StatusBadGateway, "read body", err)
 		return
 	}
 	if int64(len(body)) > h.preflightOpts.MaxBodyBytes {
-		writeError(w, http.StatusBadGateway, "discovery body exceeds size cap")
+		httpresp.WriteError(w, http.StatusBadGateway, "discovery body exceeds size cap")
 		return
 	}
 
 	var parsedDoc PreflightResponse
 	if err := json.Unmarshal(body, &parsedDoc); err != nil {
-		writeError(w, http.StatusBadGateway, "discovery body not JSON: "+err.Error())
+		httperr.WriteStatus(w, r, http.StatusBadGateway, "discovery body not JSON", err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, parsedDoc)
+	httpresp.WriteJSON(w, http.StatusOK, parsedDoc)
 }
 
 // --- helpers ---
@@ -513,26 +515,14 @@ func isUnsafeIP(ip net.IP) bool {
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return false
 	}
 	if !cred.IsAdmin {
-		writeError(w, http.StatusForbidden, "admin credential required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return false
 	}
 	return true
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
 }
 
 func uuidToPgtype(id uuid.UUID) pgtype.UUID {

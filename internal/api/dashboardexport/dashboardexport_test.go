@@ -682,9 +682,20 @@ func TestSlice269_ExportDashboard_SourceErrReturns500(t *testing.T) {
 	if rec.Code != 500 {
 		t.Fatalf("status = %d; want 500", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "compose dashboard snapshot") {
-		t.Errorf("body = %q; want substring %q",
-			rec.Body.String(), "compose dashboard snapshot")
+	// Slice 367: the 5xx body is now the generic
+	// {"error":"internal error","request_id":"<uuid>"} shape. The
+	// op-label "compose dashboard snapshot" lives in the slog log line,
+	// not the client body. Assert the generic shape + that the original
+	// "panel boom" detail is NOT leaked.
+	body := rec.Body.String()
+	if !strings.Contains(body, `"error":"internal error"`) {
+		t.Errorf("body = %q; want generic internal-error shape", body)
+	}
+	if !strings.Contains(body, `"request_id":`) {
+		t.Errorf("body = %q; want request_id field", body)
+	}
+	if strings.Contains(body, "panel boom") {
+		t.Errorf("slice 367 regression: body leaked raw err: %q", body)
 	}
 }
 

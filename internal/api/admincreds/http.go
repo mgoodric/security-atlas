@@ -20,6 +20,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -75,11 +77,11 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 	}
 	var req IssueRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.TenantID != "" {
-		writeError(w, http.StatusBadRequest, "tenant_id is not accepted; tenant is derived from the calling credential")
+		httpresp.WriteError(w, http.StatusBadRequest, "tenant_id is not accepted; tenant is derived from the calling credential")
 		return
 	}
 	// requireAdmin returning true guarantees the credential is in context.
@@ -93,7 +95,7 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 		OwnerRoles:     req.OwnerRoles,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "issue failed: "+err.Error())
+		httperr.WriteInternal(w, r, "issue failed", err)
 		return
 	}
 	resp := IssueResponse{
@@ -141,14 +143,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Query().Get("tenant_id") != "" {
-		writeError(w, http.StatusBadRequest, "tenant_id query parameter is not accepted; tenant is derived from the calling credential")
+		httpresp.WriteError(w, http.StatusBadRequest, "tenant_id query parameter is not accepted; tenant is derived from the calling credential")
 		return
 	}
 	// requireAdmin returning true guarantees the credential is in context.
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	creds, err := h.store.List(r.Context(), cred.TenantID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list failed: "+err.Error())
+		httperr.WriteInternal(w, r, "list failed", err)
 		return
 	}
 	items := make([]ListItem, 0, len(creds))
@@ -193,23 +195,23 @@ func (h *Handler) Rotate(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	uid, err := parseCredID(id)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid credential id")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid credential id")
 		return
 	}
 	// Slice 033: tenancy.Middleware already set app.current_tenant from
 	// cred.TenantID. Confirm; bail if absent (would mean misconfig).
 	ctx := r.Context()
 	if _, terr := tenancy.TenantFromContext(ctx); terr != nil {
-		writeError(w, http.StatusBadRequest, "invalid tenant in credential")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid tenant in credential")
 		return
 	}
 	successor, plain, predExp, err := h.store.Rotate(ctx, cred.TenantID, uid)
 	if err != nil {
 		if errors.Is(err, apikeystore.ErrUnknownKey) {
-			writeError(w, http.StatusNotFound, "unknown credential id")
+			httpresp.WriteError(w, http.StatusNotFound, "unknown credential id")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "rotate failed: "+err.Error())
+		httperr.WriteInternal(w, r, "rotate failed", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -230,22 +232,22 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	uid, err := parseCredID(id)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid credential id")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid credential id")
 		return
 	}
 	// Slice 033: tenancy.Middleware already set app.current_tenant from
 	// cred.TenantID. Confirm; bail if absent (would mean misconfig).
 	ctx := r.Context()
 	if _, terr := tenancy.TenantFromContext(ctx); terr != nil {
-		writeError(w, http.StatusBadRequest, "invalid tenant in credential")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid tenant in credential")
 		return
 	}
 	if err := h.store.Revoke(ctx, cred.TenantID, uid); err != nil {
 		if errors.Is(err, apikeystore.ErrUnknownKey) {
-			writeError(w, http.StatusNotFound, "unknown credential id")
+			httpresp.WriteError(w, http.StatusNotFound, "unknown credential id")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "revoke failed: "+err.Error())
+		httperr.WriteInternal(w, r, "revoke failed", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -256,11 +258,11 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return false
 	}
 	if !cred.IsAdmin {
-		writeError(w, http.StatusForbidden, "admin credential required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return false
 	}
 	return true
@@ -269,10 +271,4 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 func parseCredID(s string) (uuid.UUID, error) {
 	s = strings.TrimPrefix(s, "key_")
 	return uuid.Parse(s)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }

@@ -34,6 +34,8 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -83,34 +85,34 @@ type controlStateObservationWire struct {
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !canWrite(cred) {
-		writeError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
 		return
 	}
 
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	fwID, err := uuid.Parse(req.FrameworkVersionID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "framework_version_id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "framework_version_id must be a UUID")
 		return
 	}
 	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "name must be non-empty")
+		httpresp.WriteError(w, http.StatusBadRequest, "name must be non-empty")
 		return
 	}
 	if req.PeriodStart.IsZero() || req.PeriodEnd.IsZero() {
-		writeError(w, http.StatusBadRequest, "period_start and period_end are required")
+		httpresp.WriteError(w, http.StatusBadRequest, "period_start and period_end are required")
 		return
 	}
 	if req.PeriodStart.After(req.PeriodEnd) {
-		writeError(w, http.StatusBadRequest, "period_start must be <= period_end")
+		httpresp.WriteError(w, http.StatusBadRequest, "period_start must be <= period_end")
 		return
 	}
 
@@ -122,124 +124,126 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:          cred.ID,
 	})
 	if err != nil {
-		writeServerErr(w, "create audit period", err)
+		httperr.WriteInternal(w, r, "create audit period", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{
 		"audit_period": periodWireFrom(p),
 	})
+
 }
 
 // Get handles GET /v1/audit-periods/{id}.
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	p, err := h.store.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, period.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "audit period not found")
+			httpresp.WriteError(w, http.StatusNotFound, "audit period not found")
 			return
 		}
-		writeServerErr(w, "get audit period", err)
+		httperr.WriteInternal(w, r, "get audit period", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"audit_period": periodWireFrom(p)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"audit_period": periodWireFrom(p)})
 }
 
 // List handles GET /v1/audit-periods.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	ps, err := h.store.List(ctx)
 	if err != nil {
-		writeServerErr(w, "list audit periods", err)
+		httperr.WriteInternal(w, r, "list audit periods", err)
 		return
 	}
 	out := make([]periodWire, len(ps))
 	for i, p := range ps {
 		out[i] = periodWireFrom(p)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"audit_periods": out,
 		"count":         len(out),
 	})
+
 }
 
 // Freeze handles POST /v1/audit-periods/{id}/freeze. (AC-2 + AC-6)
 func (h *Handler) Freeze(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !canWrite(cred) {
-		writeError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	p, err := h.store.Freeze(ctx, id, cred.ID, time.Now().UTC())
 	if err != nil {
 		switch {
 		case errors.Is(err, period.ErrNotFound):
-			writeError(w, http.StatusNotFound, "audit period not found")
+			httpresp.WriteError(w, http.StatusNotFound, "audit period not found")
 		case errors.Is(err, period.ErrAlreadyFrozen):
-			writeError(w, http.StatusConflict, "audit period is already frozen")
+			httpresp.WriteError(w, http.StatusConflict, "audit period is already frozen")
 		default:
-			writeServerErr(w, "freeze audit period", err)
+			httperr.WriteInternal(w, r, "freeze audit period", err)
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"audit_period": periodWireFrom(p)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"audit_period": periodWireFrom(p)})
 }
 
 // ControlState handles GET /v1/audit-periods/{id}/control-state?control=<UUID>. (AC-3)
 func (h *Handler) ControlState(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !canWrite(cred) {
-		writeError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	ctrlIDRaw := r.URL.Query().Get("control")
 	if ctrlIDRaw == "" {
-		writeError(w, http.StatusBadRequest, "control query parameter is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "control query parameter is required")
 		return
 	}
 	ctrlID, err := uuid.Parse(ctrlIDRaw)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "control must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "control must be a UUID")
 		return
 	}
 	obs, err := h.store.ControlState(ctx, id, ctrlID)
 	if err != nil {
 		if errors.Is(err, period.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "audit period not found")
+			httpresp.WriteError(w, http.StatusNotFound, "audit period not found")
 			return
 		}
-		writeServerErr(w, "control-state", err)
+		httperr.WriteInternal(w, r, "control-state", err)
 		return
 	}
 	out := make([]controlStateObservationWire, len(obs))
@@ -251,48 +255,50 @@ func (h *Handler) ControlState(w http.ResponseWriter, r *http.Request) {
 			Hash:             o.Hash,
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"audit_period_id": id.String(),
 		"control_id":      ctrlID.String(),
 		"observations":    out,
 		"count":           len(out),
 	})
+
 }
 
 // AttachPopulation handles POST /v1/audit-periods/{id}/populations/{popID}. (AC-4)
 func (h *Handler) AttachPopulation(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.authnContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "tenant context missing")
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	if !canWrite(cred) {
-		writeError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
 	popID, err := uuid.Parse(chi.URLParam(r, "popID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "popID must be a UUID")
+		httpresp.WriteError(w, http.StatusBadRequest, "popID must be a UUID")
 		return
 	}
 	if err := h.store.AttachPopulation(ctx, id, popID, cred.ID); err != nil {
 		if errors.Is(err, period.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "audit period not found")
+			httpresp.WriteError(w, http.StatusNotFound, "audit period not found")
 			return
 		}
-		writeServerErr(w, "attach population", err)
+		httperr.WriteInternal(w, r, "attach population", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"audit_period_id": id.String(),
 		"population_id":   popID.String(),
 		"attached":        true,
 	})
+
 }
 
 // ----- helpers -----
@@ -346,20 +352,4 @@ func periodWireFrom(p period.Period) periodWire {
 	}
 	w.FrozenBy = p.FrozenBy
 	return w
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": op + ": " + err.Error(),
-	})
 }

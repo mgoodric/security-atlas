@@ -25,6 +25,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 )
 
@@ -61,7 +63,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Store.List logs and falls back internally; reaching here is
 		// the rare class (tenant-context error etc.).
-		writeError(w, http.StatusInternalServerError, "list failed: "+err.Error())
+		httperr.WriteInternal(w, r, "list failed", err)
 		return
 	}
 	items := make([]ListItem, 0, len(flags))
@@ -105,13 +107,13 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	key := chi.URLParam(r, "key")
 	if key == "" {
-		writeError(w, http.StatusBadRequest, "flag key is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "flag key is required")
 		return
 	}
 
 	var req PatchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
@@ -124,13 +126,13 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, featureflag.ErrNotFound):
-			writeError(w, http.StatusNotFound, "unknown flag key")
+			httpresp.WriteError(w, http.StatusNotFound, "unknown flag key")
 		case errors.Is(err, featureflag.ErrSpineForbidden):
-			writeError(w, http.StatusBadRequest, "spine-forbidden flag cannot be toggled")
+			httpresp.WriteError(w, http.StatusBadRequest, "spine-forbidden flag cannot be toggled")
 		case errors.Is(err, featureflag.ErrEmptyActor):
-			writeError(w, http.StatusBadRequest, "actor identity missing")
+			httpresp.WriteError(w, http.StatusBadRequest, "actor identity missing")
 		default:
-			writeError(w, http.StatusInternalServerError, "toggle failed: "+err.Error())
+			httperr.WriteInternal(w, r, "toggle failed", err)
 		}
 		return
 	}
@@ -148,18 +150,12 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing credential")
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return false
 	}
 	if !cred.IsAdmin {
-		writeError(w, http.StatusForbidden, "admin credential required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return false
 	}
 	return true
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }

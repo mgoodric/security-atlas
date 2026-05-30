@@ -29,7 +29,6 @@ package policyacks
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -43,6 +42,8 @@ import (
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -115,10 +116,6 @@ type rateResponse struct {
 	WindowSeconds int64    `json:"window_seconds"`
 }
 
-type errorBody struct {
-	Error string `json:"error"`
-}
-
 // ----- handlers -----
 
 // MyAcknowledgments serves GET /v1/me/acknowledgments.
@@ -135,24 +132,25 @@ type errorBody struct {
 func (h *Handler) MyAcknowledgments(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "authentication required")
+		httpresp.WriteError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
 	if !isUUIDUser(cred.UserID) {
-		writeJSON(w, http.StatusOK, pendingResponse{
+		httpresp.WriteJSON(w, http.StatusOK, pendingResponse{
 			Pending:       []pendingItem{},
 			Count:         0,
 			WindowSeconds: int64(policy.AcknowledgmentFreshness / time.Second),
 		})
+
 		return
 	}
 	pending, err := h.store.PendingForUser(ctx, ackCallerFromCred(cred))
 	if err != nil {
 		if errors.Is(err, policy.ErrAckMissingUser) {
-			writeError(w, http.StatusUnauthorized, "credential carries no user id")
+			httpresp.WriteError(w, http.StatusUnauthorized, "credential carries no user id")
 			return
 		}
-		writeServerErr(w, "list pending acks", err)
+		httperr.WriteInternal(w, r, "list pending acks", err)
 		return
 	}
 	out := pendingResponse{
@@ -178,7 +176,7 @@ func (h *Handler) MyAcknowledgments(w http.ResponseWriter, r *http.Request) {
 		out.Pending = append(out.Pending, item)
 	}
 	out.Count = len(out.Pending)
-	writeJSON(w, http.StatusOK, out)
+	httpresp.WriteJSON(w, http.StatusOK, out)
 }
 
 // Acknowledge serves POST /v1/policies/{id}/acknowledge.
@@ -200,20 +198,20 @@ func (h *Handler) MyAcknowledgments(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Acknowledge(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "authentication required")
+		httpresp.WriteError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
 	if cred.UserID == "" {
-		writeError(w, http.StatusUnauthorized, "credential carries no user id")
+		httpresp.WriteError(w, http.StatusUnauthorized, "credential carries no user id")
 		return
 	}
 	policyID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "policy id must be a uuid")
+		httpresp.WriteError(w, http.StatusBadRequest, "policy id must be a uuid")
 		return
 	}
 	if h.ingester == nil {
-		writeError(w, http.StatusServiceUnavailable, "evidence ingest service not configured")
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "evidence ingest service not configured")
 		return
 	}
 	ack, rerr := h.store.Record(ctx, policy.RecordInput{
@@ -221,7 +219,7 @@ func (h *Handler) Acknowledge(w http.ResponseWriter, r *http.Request) {
 		Caller:   ackCallerFromCred(cred),
 	})
 	if rerr != nil {
-		h.writeRecordError(w, rerr)
+		h.writeRecordError(w, r, rerr)
 		return
 	}
 	// Build the evidence payload.
@@ -280,32 +278,33 @@ func (h *Handler) Acknowledge(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) AcknowledgmentRate(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "authentication required")
+		httpresp.WriteError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
 	policyID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "policy id must be a uuid")
+		httpresp.WriteError(w, http.StatusBadRequest, "policy id must be a uuid")
 		return
 	}
 	rate, rerr := h.store.Rate(ctx, policyID)
 	if rerr != nil {
 		switch {
 		case errors.Is(rerr, policy.ErrNotFound):
-			writeError(w, http.StatusNotFound, "policy not found")
+			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
 		case errors.Is(rerr, policy.ErrAckPolicyNotPublished):
-			writeError(w, http.StatusConflict, "policy is not in published state")
+			httpresp.WriteError(w, http.StatusConflict, "policy is not in published state")
 		default:
-			writeServerErr(w, "compute rate", rerr)
+			httperr.WriteInternal(w, r, "compute rate", rerr)
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, rateResponse{
+	httpresp.WriteJSON(w, http.StatusOK, rateResponse{
 		Numerator:     rate.Numerator,
 		Denominator:   rate.Denominator,
 		Percent:       rate.Percent,
 		WindowSeconds: rate.WindowSeconds,
 	})
+
 }
 
 // ----- helpers -----
@@ -333,23 +332,23 @@ func (h *Handler) writeAckResp(w http.ResponseWriter, ack policy.Ack, emissionOK
 	if ack.Deduplicated {
 		status = http.StatusOK
 	}
-	writeJSON(w, status, resp)
+	httpresp.WriteJSON(w, status, resp)
 }
 
-func (h *Handler) writeRecordError(w http.ResponseWriter, err error) {
+func (h *Handler) writeRecordError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, policy.ErrNotFound):
-		writeError(w, http.StatusNotFound, "policy not found")
+		httpresp.WriteError(w, http.StatusNotFound, "policy not found")
 	case errors.Is(err, policy.ErrAckPolicyNotPublished):
-		writeError(w, http.StatusConflict, "policy is not in published state")
+		httpresp.WriteError(w, http.StatusConflict, "policy is not in published state")
 	case errors.Is(err, policy.ErrAckNotRequired):
-		writeError(w, http.StatusForbidden, "caller's roles do not intersect the policy's acknowledgment_required_roles")
+		httpresp.WriteError(w, http.StatusForbidden, "caller's roles do not intersect the policy's acknowledgment_required_roles")
 	case errors.Is(err, policy.ErrAckMissingUser):
-		writeError(w, http.StatusUnauthorized, "credential carries no user id")
+		httpresp.WriteError(w, http.StatusUnauthorized, "credential carries no user id")
 	case errors.Is(err, policy.ErrAckMissingPolicyID):
-		writeError(w, http.StatusBadRequest, "policy id is required")
+		httpresp.WriteError(w, http.StatusBadRequest, "policy id is required")
 	default:
-		writeServerErr(w, "record acknowledgment", err)
+		httperr.WriteInternal(w, r, "record acknowledgment", err)
 	}
 }
 
@@ -383,20 +382,4 @@ func ackCallerFromCred(c credstore.Credential) policy.AckCaller {
 		OwnerRoles: append([]string(nil), c.OwnerRoles...),
 		IsAdmin:    c.IsAdmin,
 	}
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, errorBody{Error: msg})
-}
-
-func writeServerErr(w http.ResponseWriter, op string, err error) {
-	writeJSON(w, http.StatusInternalServerError, errorBody{
-		Error: op + ": " + err.Error(),
-	})
 }
