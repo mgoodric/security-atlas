@@ -3,7 +3,27 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 168 claim-stake — slice 395 → in-progress (N=1 solo) · web api import-site migration (slice 370 Phase 2))
+**Last reconciled:** 2026-05-30 (batch 168 merged — slice 395 on main; 2 spillovers 397 + 398; 396 unblocked)
+
+## Drift detected — 2026-05-30 (parallel batch 168 merged · slice 395 solo)
+
+- **395** web api import-site migration → merged at `5f1e2169` via #892 (slice 370 Phase 2). 177 `@/lib/api` import sites migrated to per-domain `@/lib/api/<domain>` modules (codemod derived from the 219 export symbols). Barrel preserved (396 retires it). Full `next build` green (106/106 pages). SESSION_COOKIE rename deferred → spillover 397 (atomic rename would touch golden-tier `web/lib/contracts/`, out of brief). CLEAN.
+
+**Spillovers filed (no collision — solo slice):**
+
+- **397** (SESSION_COOKIE → ATLAS_JWT_COOKIE symbol rename) — slice 328 M-3; touches golden-tier contracts, so needs deliberate handling. Status `ready`.
+- **398** (pre-existing `tsc --noEmit` errors in web test files) — **latent-issue finding:** 395 discovered `tsc --noEmit` is ALREADY red on `main` (15 errors in 3 untouched web test files, e.g. `web/scripts/capture-readme-screenshots.test.ts`); verified via stash-diff that 395 introduced zero. CI does NOT run bare `tsc` over `web/scripts/` so this slipped — analogous to the slice-345 38-pkg integration gap. Status `ready`. **Maintainer attention recommended.**
+
+**Now-unblocked:** 396 (web api barrel retire — Phase 3 of 370) flips `not-ready` → `ready` (dep #395 now merged).
+
+**POOL STATUS:** clean ready pool after this batch = 387 (e2e prod-build CI harness), 396 (barrel retire — newly unblocked), 397 (cookie rename — golden-tier, deliberate), 398 (tsc fixes). Special-handling: 368 (cosign/solo), 390 (decompose). The 370 web-refactor lineage (Phase 1→2→3: 370→395→396) is one slice from complete.
+
+| Row | Transition               | Evidence                                                                                                       |
+| --- | ------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| 395 | `in-progress` → `merged` | merged at `5f1e2169` via #892 (177 sites; spillovers 397/398)                                                  |
+| 396 | `not-ready` → `ready`    | dep #395 merged — barrel retire (slice 370 Phase 3) now pickable                                               |
+| 397 | (new row) → `ready`      | spec `397-session-cookie-symbol-rename.md` · slice 328 M-3 / 395 spillover · golden-tier touch                 |
+| 398 | (new row) → `ready`      | spec `398-web-tsc-noemit-pre-existing-test-type-errors.md` · 395 spillover · pre-existing tsc breakage on main |
 
 ## Drift detected — 2026-05-30 (batch 168 claim-stake · slice 395 solo)
 
