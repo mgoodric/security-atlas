@@ -58,22 +58,25 @@ const COOKIE_SENTINEL = "test-cookie-sentinel-do-not-log-abcdef";
 const RUN_AGAINST_PROD_BUILD = !!process.env.ATLAS_PROD_BUILD;
 
 test.describe("BFF cookie forwarding in production-build standalone", () => {
-  // Slice 351 (AC-4, disposition (b) — re-quarantine with justification
-  // + spillover). This guard is NOT vestigial: the spec asserts a
-  // regression (slice 146's NODE_ENV-coupled cookie bug) that ONLY
-  // manifests under the Next.js production-build standalone server
-  // (`node .next/standalone/web/server.js`). CI's Playwright job points
-  // baseURL at the `npm start` dev server, and there is NO CI job that
-  // brings up the standalone server (`grep ATLAS_PROD_BUILD .github/` is
-  // empty). Forcing this green against the dev server would assert
-  // nothing about the standalone-only path — green-washing. The real
-  // fix is a CI harness that provisions the standalone server; that is
-  // filed as slice 387 (e2e-prod-build-standalone-ci-harness). Until
-  // then this stays quarantined behind ATLAS_PROD_BUILD, runnable
-  // locally per the invocation block above.
+  // Slice 387 — the CI harness now EXISTS. The
+  // `Frontend · Playwright e2e (prod-build standalone)` job in
+  // .github/workflows/ci.yml builds the `output: "standalone"` bundle
+  // (`npm run build:standalone`), boots `node
+  // .next/standalone/web/server.js`, and runs this spec with
+  // ATLAS_PROD_BUILD=1 — so the guard below is now SATISFIED in CI and
+  // this regression (slice 146's NODE_ENV-coupled cookie bug) is gated
+  // on every PR that touches code.
+  //
+  // The guard is retained (NOT removed) precisely because it is the
+  // mechanism that scopes this spec to the standalone leg: the
+  // dev-server leg (`Frontend · Playwright e2e`) does NOT set
+  // ATLAS_PROD_BUILD, so this spec stays skipped there. Forcing it
+  // green against the `npm start` dev server would assert nothing about
+  // the standalone-only path — green-washing (slice 351 disposition
+  // (b)). Runnable locally per the invocation block above.
   test.skip(
     !RUN_AGAINST_PROD_BUILD,
-    "ATLAS_PROD_BUILD not set — quarantined behind slice 387 (no CI harness for the production-build standalone server yet); runnable locally with ATLAS_PROD_BUILD=1",
+    "ATLAS_PROD_BUILD not set — runs in the prod-build standalone CI leg (slice 387) or locally with ATLAS_PROD_BUILD=1; skipped against the dev server to avoid green-washing the standalone-only path",
   );
 
   authed(

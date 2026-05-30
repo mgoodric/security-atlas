@@ -44,19 +44,22 @@ import { test, expect } from "@playwright/test";
 const RUN_AGAINST_PROD_BUILD = !!process.env.ATLAS_PROD_BUILD;
 
 test.describe("logo + public assets render in production-build standalone", () => {
-  // Slice 351 (AC-4, disposition (b) — re-quarantine with justification
-  // + spillover). Same real harness gap as
-  // bff-cookie-production-build.spec.ts: this asserts the slice-153
-  // standalone-public-assets regression that ONLY manifests under the
-  // production-build standalone server (the `output: "standalone"`
-  // tracer does not copy web/public/). CI runs against `npm start`, and
-  // no CI job provisions the standalone server. Re-quarantined rather
-  // than green-washed against the dev server. Shared spillover: slice
-  // 387 (one standalone-server CI harness unblocks both prod-build
-  // specs). Runnable locally per the invocation block above.
+  // Slice 387 — the CI harness now EXISTS. The
+  // `Frontend · Playwright e2e (prod-build standalone)` job in
+  // .github/workflows/ci.yml runs `npm run build:standalone` (which
+  // copies web/public/ into the standalone tree — exactly the slice 153
+  // fix), boots `node .next/standalone/web/server.js`, and runs this
+  // spec with ATLAS_PROD_BUILD=1 — so the slice-153
+  // standalone-public-assets regression is gated on every PR.
+  //
+  // The guard is retained (NOT removed) because it scopes this spec to
+  // the standalone leg: the dev-server leg does not set ATLAS_PROD_BUILD,
+  // so this spec stays skipped there rather than green-washing against
+  // `npm start` (slice 351 disposition (b)). Runnable locally per the
+  // invocation block above.
   test.skip(
     !RUN_AGAINST_PROD_BUILD,
-    "ATLAS_PROD_BUILD not set — quarantined behind slice 387 (no CI harness for the production-build standalone server yet); runnable locally with ATLAS_PROD_BUILD=1",
+    "ATLAS_PROD_BUILD not set — runs in the prod-build standalone CI leg (slice 387) or locally with ATLAS_PROD_BUILD=1; skipped against the dev server to avoid green-washing the standalone-only path",
   );
 
   test("/logo-light.svg returns 200 + image/svg+xml", async ({ page }) => {
