@@ -3,7 +3,22 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 173 claim-stake — slice 401 → in-progress (N=1 solo) · integration-enrolment drain batch 1)
+**Last reconciled:** 2026-05-30 (batch 173 merged — slice 401 on main; integration-drain batch 1 done; 402 unblocked)
+
+## Drift detected — 2026-05-30 (parallel batch 173 merged · slice 401 solo)
+
+- **401** integration-enrolment drain batch 1 → merged at `112801ce` via #912. Enrolled `internal/auth/oidc`, `internal/auth/jwtmw`, `internal/auth/users`, `internal/audit/period` in CI's integration job; all 4 GREEN on first run (nothing silently broken this batch — unlike slice 314's device-flow bug; these suites were already correct). `KNOWN_UNENROLLED` 37→33. Coverage (slice-396-aware): oidc floor 67, period floor 70 (real own-coverage); users kept on excludes (transitive-load phantom, not real own coverage); jwtmw already floored 82. No spillover.
+
+Backlog-drain progress: of slice 390's original 38 unenrolled packages, **5 now drained** (oauth via 314 + these 4); **33 remain** across drain batches 402-408.
+
+**Now-unblocked:** 402 (drain batch 2 — admin-creds surface) flips `not-ready` → `ready` (dep #401 merged).
+
+**POOL STATUS:** loop-ready = 402 (drain batch 2), 409 (dashboard contract-tier / 394-unblock, JUDGMENT). Maintainer-gated: 400 (cosign spike, NO-AUTO-MERGE). Sequential: 403-408 (each gated on prior). Blocked: 394 (on 409).
+
+| Row | Transition               | Evidence                                                                      |
+| --- | ------------------------ | ----------------------------------------------------------------------------- |
+| 401 | `in-progress` → `merged` | merged at `112801ce` via #912 (4 pkgs enrolled green; KNOWN_UNENROLLED 37→33) |
+| 402 | `not-ready` → `ready`    | dep #401 merged — drain batch 2 (admin-creds surface) now pickable            |
 
 ## Drift detected — 2026-05-30 (batch 173 claim-stake · slice 401 solo)
 
