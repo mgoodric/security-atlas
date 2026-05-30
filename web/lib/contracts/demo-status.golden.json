@@ -1,0 +1,12 @@
+{
+  "_comment": "Slice 392 contract-test-tier ROLLOUT golden. Recorded by the PROVIDER side (internal/api/admindemo/status_contract_test.go) from the real Go handler at internal/api/admindemo/handler.go (Handler.Status). Regenerate with `go test ./internal/api/admindemo/ -run TestContract_DemoStatus -update`. The CONSUMER side (web/lib/contracts/demo-status.contract.test.ts) asserts the Next.js BFF (web/app/api/admin/demo/status/route.ts) against these recorded bodies.",
+  "endpoint": "GET /v1/admin/demo/status",
+  "variants": {
+    "disabled": {
+      "enabled": false
+    },
+    "enabled": {
+      "enabled": true
+    }
+  }
+}
