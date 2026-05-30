@@ -3,7 +3,19 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 171 merged — slice 399 on main; no spillover; continuous-batch loop reaches clean terminus)
+**Last reconciled:** 2026-05-30 (batch 172 claim-stake — slice 314 → in-progress (N=1 solo) · oauth coverage lift to 70%)
+
+## Drift detected — 2026-05-30 (batch 172 claim-stake · slice 314 solo)
+
+Continuous-batch loop resumed after the post-terminus backlog grooming (396 merged; 368→400 spike + 390→401-408 drain batches + 409 dashboard-contract-tier filed via #906/#907).
+
+- **314** (coverage lift `internal/api/oauth` → 70%+) — Quality · 3-5d · AFK. The OAuth AS endpoint family (921 statements, slice 187 — token/authorize/introspect/revoke/well-known/device across RFC 9068/8693/7636/8628/7009/7662) at 15.7% merged coverage. Ships: enrol `internal/api/oauth` in ci.yml's integration job (not yet present) + substantive unit tests per RFC-area + a coverage-thresholds floor.
+
+Run SOLO (N=1): 314 step 1 enrols oauth + edits ci.yml's integration list, which COLLIDES with slice 401 (drain batch 1, also enrols oauth) — sequence, never co-batch. 400 excluded (NO-AUTO-MERGE decision gate); 409 excluded (JUDGMENT DB-seam fork). OQ CLEAN; zero migrations.
+
+| Row | Transition              | Evidence                                                                                       |
+| --- | ----------------------- | ---------------------------------------------------------------------------------------------- |
+| 314 | `ready` → `in-progress` | batch 172 claim-stake · branch `quality/314-oauth-coverage` · slice 312 round-3 coverage audit |
 
 ## Drift detected — 2026-05-30 (parallel batch 171 merged · slice 399 solo — LOOP TERMINUS)
 
