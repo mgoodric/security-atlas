@@ -3,7 +3,17 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 174 merged — slice 402 on main; drain batch 2 done + a REAL audit-export bug fixed; 403 unblocked)
+**Last reconciled:** 2026-05-30 (batch 175 claim-stake — slice 403 → in-progress (N=1 solo) · integration-enrolment drain batch 3)
+
+## Drift detected — 2026-05-30 (batch 175 claim-stake · slice 403 solo)
+
+- **403** (integration-enrolment drain batch 3, slice 390) — infra · AFK. Enrols admin-users/aggregation/api-root — `internal/api/adminusers`, `internal/api/aggregationrules`, `internal/api`, `internal/api/me`, `internal/api/decisions` (5 pkgs) — in ci.yml's integration job. Per package: enrol → run suite → FIX whatever silently broke (no skip/delete; unambiguous one-liner → fix in-place like 402, real design work → spillover+skip-that-test-only) → shrink `KNOWN_UNENROLLED` 28→23 → lift coverage excludes (real floor vs transitive-load phantom per 396/401/402).
+
+Run SOLO (N=1): drain batches surface unpredictable test breakage (314 + 402 each found a real bug). `internal/api` (api-root) is a large package — its suite may be heavier. 409 (dashboard contract-tier, JUDGMENT) deferred to next iteration. 400 = maintainer cosign gate. OQ CLEAN; zero migrations.
+
+| Row | Transition              | Evidence                                                                                       |
+| --- | ----------------------- | ---------------------------------------------------------------------------------------------- |
+| 403 | `ready` → `in-progress` | batch 175 claim-stake · branch `infra/403-integration-drain-batch-3` · slice 390 drain batch 3 |
 
 ## Drift detected — 2026-05-30 (parallel batch 174 merged · slice 402 solo)
 
