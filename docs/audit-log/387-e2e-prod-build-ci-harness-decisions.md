@@ -105,6 +105,45 @@ Same slice 069 / 117 D5 exception as the dev-server Playwright leg:
 chromium's system libs. Egress audit still applies; only sudo is permitted
 on this one job.
 
+## D9 — cookie spec held to spillover 399; job ships ADVISORY + logo-only
+
+The first CI run of the new job (run 26673862768) surfaced that the
+harness works end-to-end — all 16 build/boot steps green, the standalone
+server up, and the slice-153 `logo-render-production-build.spec.ts`
+PASSES — but the slice-146 `bff-cookie-production-build.spec.ts` FAILS on
+two **spec-body** issues that had never executed before (the guard had
+never been satisfied until this slice built the harness):
+
+1. `dashboard panel BFF returns JSON` asserts the browser fires
+   `/api/dashboard/` BFF calls (`bffResponses.length > 0`). Under the
+   PRODUCTION build the dashboard panels are server-rendered (RSC), so
+   zero client-side BFF calls fire — received 0. The failure-run page
+   snapshot shows a fully-authenticated dashboard (Sign-out button, "API
+   key" identity, full nav, "Program" heading), so auth carries through:
+   this is NOT the slice-146 cookie regression (that would render a login
+   page). The assertion is dev-server-shaped and false for the prod build.
+2. `session cookie sentinel …` calls `context.addCookies` with
+   `domain: new URL(authedPage.url()).hostname` BEFORE any navigation, so
+   `authedPage.url()` is `about:blank` → empty hostname → Playwright
+   rejects the cookie.
+
+Both are spec-BODY fixes, which slice 387's brief explicitly forbids
+("DOES NOT modify the two spec bodies"). The correct, non-green-washing
+resolution: the new job ships **ADVISORY** (`continue-on-error: true`)
+and runs **only the logo spec** (which passes and proves the harness +
+gates the slice-153 regression); the cookie spec is held to spillover
+**slice 399** (`docs/issues/399-bff-cookie-prod-build-spec-body-fix.md`),
+which re-shapes its two assertions, adds it back to the job's Playwright
+invocation, and drops `continue-on-error` so the leg becomes blocking.
+This honors disposition (b) — we do NOT force the cookie spec green
+against a shape it cannot satisfy.
+
+The unrelated `Go · integration` failure in the same run
+(`TestRun_FiresInlineSweepAndExitsOnCancel`,
+`internal/metrics/scheduler`) is the known scheduler-integration flake
+(slice 346/352 history — passes on rerun); slice 387 touches zero Go and
+did not cause it.
+
 ## D8 — actionlint cleanliness
 
 The repo's pre-commit actionlint hook runs with `-shellcheck ""` (slice 158
