@@ -3,7 +3,17 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 172 merged — slice 314 on main; oauth coverage 15.7%→74.7%; surfaced+fixed a 5-slice-old device-flow test bug)
+**Last reconciled:** 2026-05-30 (batch 173 claim-stake — slice 401 → in-progress (N=1 solo) · integration-enrolment drain batch 1)
+
+## Drift detected — 2026-05-30 (batch 173 claim-stake · slice 401 solo)
+
+- **401** (integration-enrolment drain batch 1, slice 390) — infra · AFK. Enrols the 4 remaining security-critical packages — `internal/auth/oidc`, `internal/auth/jwtmw`, `internal/auth/users`, `internal/audit/period` — in ci.yml's integration job (oauth was already drained by slice 314). Per package: enrol → run suite → FIX whatever silently broke (no skip/delete; spillover a real product bug) → shrink `KNOWN_UNENROLLED` → lift coverage excludes.
+
+Run SOLO (N=1): 401 is inherently lumpy — slice 314 proved enrolling a never-run suite surfaces real latent bugs (it found a 5-slice-old device-flow bug), so its blast radius is unpredictable; not worth a parallel slot. 409 (dashboard contract-tier, JUDGMENT DB-seam fork) deferred to next iteration. 400 is the maintainer cosign gate (NO-AUTO-MERGE). OQ CLEAN; zero migrations.
+
+| Row | Transition              | Evidence                                                                                       |
+| --- | ----------------------- | ---------------------------------------------------------------------------------------------- |
+| 401 | `ready` → `in-progress` | batch 173 claim-stake · branch `infra/401-integration-drain-batch-1` · slice 390 drain batch 1 |
 
 ## Drift detected — 2026-05-30 (parallel batch 172 merged · slice 314 solo)
 
