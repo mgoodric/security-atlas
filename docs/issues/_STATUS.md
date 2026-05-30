@@ -3,7 +3,19 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 169 merged — slices 387 + 398 on main; 1 spillover 399; no collision)
+**Last reconciled:** 2026-05-30 (batch 170 claim-stake — slice 397 → in-progress (N=1 solo) · SESSION_COOKIE→ATLAS_JWT_COOKIE rename (slice 328 M-3))
+
+## Drift detected — 2026-05-30 (batch 170 claim-stake · slice 397 solo)
+
+Single-slice batch (N=1). 397 run solo — cookie-coupled with 399 (don't co-batch) and golden-tier-sensitive. Note: 396 (barrel retire) is NOT yet pickable — its doc Status is `blocked` and `web/vitest.config.ts` still imports `@/lib/api` (a remaining barrel importer to migrate before deletion).
+
+- **397** (SESSION_COOKIE→ATLAS_JWT_COOKIE symbol rename) — Web · slice 328 M-3 / 395 spillover. Renames the cookie constant across web + golden-tier `web/lib/contracts/`; keep the slice-349/392 contract goldens valid.
+
+OQ check: CLEAN. Zero migrations. Deferred: 399 (cookie spec — sequences after 397), 396 (doc-blocked + barrel importer remains), 368 (cosign/solo), 390 (decompose).
+
+| Row | Transition              | Evidence                                                                       |
+| --- | ----------------------- | ------------------------------------------------------------------------------ |
+| 397 | `ready` → `in-progress` | batch 170 claim-stake · branch `web/397-session-cookie-rename` · slice 328 M-3 |
 
 ## Drift detected — 2026-05-30 (parallel batch 169 merged)
 
