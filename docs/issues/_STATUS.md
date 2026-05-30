@@ -3,7 +3,19 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 170 claim-stake — slice 397 → in-progress (N=1 solo) · SESSION_COOKIE→ATLAS_JWT_COOKIE rename (slice 328 M-3))
+**Last reconciled:** 2026-05-30 (batch 170 merged — slice 397 on main; no spillover)
+
+## Drift detected — 2026-05-30 (parallel batch 170 merged · slice 397 solo)
+
+- **397** SESSION_COOKIE→ATLAS_JWT_COOKIE symbol rename → merged at `de51303c` via #899 (closes slice 328 M-3 / slice 395 spillover). 354 occurrences renamed across 127 files via a word-boundary codemod that provably left the distinct `OIDC_SESSION_COOKIE` untouched (38 occurrences intact); cookie wire value unchanged (`atlas_jwt`); golden-tier slice-349/392 contracts validated. No spillover. CLEAN after one rerun of the known `internal/metrics/scheduler` flake (web-only change, not a Go regression — 6th occurrence of that flake this session).
+
+**POOL STATUS:** remaining ready pool = 399 (bff-cookie prod-build spec body fix — now the cookie symbol is renamed, this re-shapes the spec + makes the prod-build CI leg blocking). Blocked/not-pickable: 396 (web api barrel retire — doc Status `blocked`; `web/vitest.config.ts` still imports `@/lib/api` — that last barrel importer must migrate before deletion). Special-handling (NOT auto-batch): 368 (cosign/solo), 390 (38-pkg integration drain/decompose). After 399, the continuous-batch pool is down to special-handling slices + the 396 blocker.
+
+Recurring infra note: `internal/metrics/scheduler TestRun_FiresInlineSweepAndExitsOnCancel` (observations=0) flaked ~6× this session (rerun-clears each time) — worth a real fix slice (timing-dependent inline-sweep assertion).
+
+| Row | Transition               | Evidence                                                   |
+| --- | ------------------------ | ---------------------------------------------------------- |
+| 397 | `in-progress` → `merged` | merged at `de51303c` via #899 (354 renames; 1 flake rerun) |
 
 ## Drift detected — 2026-05-30 (batch 170 claim-stake · slice 397 solo)
 
