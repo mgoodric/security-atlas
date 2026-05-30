@@ -3,7 +3,23 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 166 merged — slices 353 + 388 + 392 on main; 2 spillovers 393 + 394; one 393-collision resolved)
+**Last reconciled:** 2026-05-30 (batch 167 claim-stake — slices 370 + 393 → in-progress (N=2) · web/lib api-client split + QA-tactical CI wiring · disjoint trees: web/ · ci.yml+justfile)
+
+## Drift detected — 2026-05-30 (batch 167 claim-stake · slices 370 + 393)
+
+Two-slice continuous-loop batch (N=2 — pool thinning; see note). Disjoint:
+
+- **370** (web/lib/api.ts 2901-LOC split) — Web · 3d · closes slice 328 H-2. Splits the 219-export god-file into per-domain files under `web/lib/api/` + updates import sites across web/; manages slice-347 per-file vitest floors for the new files.
+- **393** (wire QA-tactical scripts into CI) — Infra · 0.5d · closes slice 353 spillover. Adds the slice-353 scripts (coverage-exclude parity lint hard-fail, assertion-density advisory, integration wall-clock watermark) as ci.yml steps + justfile targets.
+
+Conflict surface: disjoint — web/ (370) vs ci.yml+justfile (393). Shared touch-points limited to CHANGELOG (append-safe). Zero migrations. Open-questions check: CLEAN.
+
+**Pool-thinning note:** clean bounded ready pool nearly drained. After this batch the remaining ready pool is 368 (cosign — needs SOLO run), 387 (prod-build CI harness — ci.yml+web/e2e), 390 (38-pkg integration drain — needs decomposition). These are flagged for deliberate/maintainer handling; the continuous-batch loop will likely terminate via GUARD-1-style exit or E-3 escalation next iteration unless new ready slices file.
+
+| Row | Transition              | Evidence                                                                               |
+| --- | ----------------------- | -------------------------------------------------------------------------------------- |
+| 370 | `ready` → `in-progress` | batch 167 claim-stake · branch `web/370-api-client-split` · slice 328 H-2              |
+| 393 | `ready` → `in-progress` | batch 167 claim-stake · branch `infra/393-qa-tactical-ci-wiring` · slice 353 spillover |
 
 ## Drift detected — 2026-05-30 (parallel batch 166 merged + 2 spillovers)
 
