@@ -298,6 +298,19 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 		}
 		clampedParams := params.queryParams
 		clampedParams.To = effectiveTo
+		// Slice 270 / slice 402: the export endpoint is admit-gated to
+		// exactly {admin, auditor, grc_engineer} (the callerAllowedUnified
+		// gate above) — the same set as the slice-124 unified list, which
+		// sets CallerIsPrivileged=true unconditionally (unified.go). Every
+		// caller that reaches this query is privileged, so the export must
+		// render the full privileged view: feature_flag rows and ALL me
+		// rows, not just the caller's own. Without this the forensic export
+		// silently omitted feature_flag + cross-actor me rows (the default
+		// zero-value CallerIsPrivileged=false enabled the slice-270
+		// row-visibility predicate meant for the non-privileged
+		// /v1/activity/unified endpoint). Surfaced by the never-CI-run
+		// slice-135 export integration suite during slice 402 enrolment.
+		clampedParams.CallerIsPrivileged = true
 		// Ask for (rowCap + 1) rows so we can detect "exceeds cap"
 		// without an extra round-trip.
 		clampedParams.Limit = rowCap + 1

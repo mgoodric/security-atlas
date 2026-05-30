@@ -80,11 +80,6 @@ CI_YML="${AUDIT_ENROL_CI_YML:-$REPO_ROOT/.github/workflows/ci.yml}"
 # --------------------------------------------------------------------
 read -r -d '' KNOWN_UNENROLLED <<'WAIVED' || true
 internal/api
-internal/api/adminauditlog
-internal/api/adminauthzbundle
-internal/api/admincreds
-internal/api/admindemo
-internal/api/adminsso
 internal/api/adminusers
 internal/api/aggregationrules
 internal/api/board
