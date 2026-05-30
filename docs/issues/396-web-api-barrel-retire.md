@@ -3,7 +3,15 @@
 **Cluster:** Web
 **Estimate:** 0.5d
 **Type:** AFK
-**Status:** `blocked`
+**Status:** `ready`
+
+> **Unblocked 2026-05-30.** Dep #395 (Phase 2) is merged and the
+> precondition is verified: `grep -rnE "['\"]@/lib/api['\"]" web/` (excluding
+> the per-domain `@/lib/api/<domain>` paths) returns ZERO hits — no module
+> imports the bare barrel anymore. The sole remaining match was a stale
+> illustrative comment in `web/vitest.config.ts:63`, corrected in the same
+> change that flipped this status. Slice 396 may now proceed to delete the
+> barrel.
 
 ## Narrative
 
@@ -38,9 +46,8 @@ not a permanent layer (slice 370 P0-370-3).
 ## Dependencies
 
 - **#370** (Phase 1) — merged.
-- **#395** (Phase 2 import-site migration) — must merge first; this slice
-  is `blocked` until then (deleting the barrel before the last importer
-  moves would break the build).
+- **#395** (Phase 2 import-site migration) — merged (`5f1e2169`). The last
+  bare-`@/lib/api` importer is gone; this slice is no longer blocked.
 
 ## Anti-criteria (P0 — block merge)
 
