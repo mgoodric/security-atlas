@@ -11,7 +11,7 @@
 //     buffering. A 100-MB XLSX export should never materialise in
 //     the BFF's memory (slice 135 P0-A7).
 //
-//   - Bearer auth: the same `SESSION_COOKIE` (post-slice-206:
+//   - Bearer auth: the same `ATLAS_JWT_COOKIE` (post-slice-206:
 //     `atlas_jwt`) the slice-125 unified-read BFF uses. Slice 110
 //     P0-A2 narrow-scope rule — `atlas_session` cookie is NOT
 //     forwarded; the audit-log export endpoint authenticates on the
@@ -30,7 +30,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 // Headers the BFF forwards to the browser from the upstream response.
 // Content-Type + Content-Disposition are load-bearing (the browser
@@ -45,7 +45,7 @@ const PASSTHROUGH_HEADERS = [
 
 export async function GET(request: Request): Promise<Response> {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

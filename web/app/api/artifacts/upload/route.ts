@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { apiBaseURL } from "@/lib/api/base";
 
 // Slice 011 — server-side proxy for POST /v1/artifacts:upload (slice 036).
@@ -18,7 +18,7 @@ const MAX_ATTESTATION_ARTIFACT_BYTES = 10 * 1024 * 1024;
 
 export async function POST(req: NextRequest) {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

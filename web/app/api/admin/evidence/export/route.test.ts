@@ -17,7 +17,7 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/server", () => mockNextServer());
 
-import { SESSION_COOKIE, OIDC_SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE, OIDC_SESSION_COOKIE } from "@/lib/auth";
 import { GET } from "./route";
 
 function makeReq(query: string): Request {
@@ -39,7 +39,7 @@ describe("GET /api/admin/evidence/export", () => {
   });
 
   test("forwards bearer + query string verbatim and streams body without payload column", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     // Slice 138 P0-A-Ledger-1: payload column must NOT appear.
     const csvBody =
       "id,control_id,scope_id,evidence_query_id,observed_at,ingested_at,result,freshness_class,content_hash,payload_uri,valid_until,created_at\n" +
@@ -80,7 +80,7 @@ describe("GET /api/admin/evidence/export", () => {
   });
 
   test("passes through 400 from backend (bad format)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "unsupported format" }), {
         status: 400,
@@ -91,7 +91,7 @@ describe("GET /api/admin/evidence/export", () => {
   });
 
   test("passes through 403 from backend (no eligible role)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "forbidden" }), {
         status: 403,
@@ -102,7 +102,7 @@ describe("GET /api/admin/evidence/export", () => {
   });
 
   test("passes through 429 from backend (concurrency cap)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "cap reached" }), {
         status: 429,
@@ -113,7 +113,7 @@ describe("GET /api/admin/evidence/export", () => {
   });
 
   test("ignores atlas_session cookie when present (slice 110 P0-A2)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     cookieStore.set(OIDC_SESSION_COOKIE, "test-atlas-session-id");
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response("ok", {

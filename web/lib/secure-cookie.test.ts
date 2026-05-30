@@ -10,7 +10,7 @@
 // self-hosted operators (Unraid, docker-compose without TLS, local
 // production-build smoke runs) that serve the app over plain HTTP.
 // Browsers refuse to send `Secure` cookies over HTTP, so the cookie
-// never came back to the BFF, `web/proxy.ts` saw no `SESSION_COOKIE`,
+// never came back to the BFF, `web/proxy.ts` saw no `ATLAS_JWT_COOKIE`,
 // redirected `/api/dashboard/**` (and every other BFF path) to
 // `/login`, and the browser fetch parsed the resulting HTML as JSON —
 // the "Unexpected token '<'" symptom captured in

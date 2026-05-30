@@ -14,7 +14,7 @@
 //
 // Slice 249 extends this layout to also serve as the SSR-prefetch
 // surface. The layout:
-//   1. Reads the `atlas_jwt` cookie server-side (auth.SESSION_COOKIE).
+//   1. Reads the `atlas_jwt` cookie server-side (auth.ATLAS_JWT_COOKIE).
 //   2. Fetches upstream `GET /v1/me` with that bearer (the same
 //      upstream the BFF /api/admin/me route uses).
 //   3. Projects the upstream JSON onto SessionMe via
@@ -68,7 +68,7 @@ import { cookies } from "next/headers";
 import type { Metadata } from "next";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { getQueryClient } from "@/lib/queryClient";
 
 import {
@@ -93,7 +93,7 @@ export const metadata: Metadata = {
  */
 async function fetchSessionMeServerSide(): Promise<SessionMe> {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     // P0-249-3: no JWT -> non-admin variant. Do NOT fabricate a
     // role-claim from any client-side hint.

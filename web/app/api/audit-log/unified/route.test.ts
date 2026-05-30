@@ -3,7 +3,7 @@
 // AC-7. The BFF is a narrow forwarder over the slice-124
 // `GET /v1/admin/audit-log/unified` endpoint. Behavior under test:
 //
-//   * No `SESSION_COOKIE` (post-slice-206: `atlas_jwt`) cookie -> 401 { error }.
+//   * No `ATLAS_JWT_COOKIE` (post-slice-206: `atlas_jwt`) cookie -> 401 { error }.
 //   * Bearer present, params present -> upstream fetch carries
 //     `Authorization: Bearer <bearer>` and the full query string.
 //   * Backend 400 (missing from/to or malformed) -> pass-through unchanged.
@@ -28,7 +28,7 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/server", () => mockNextServer());
 
-import { SESSION_COOKIE, OIDC_SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE, OIDC_SESSION_COOKIE } from "@/lib/auth";
 import { GET } from "./route";
 
 function makeReq(query: string): Request {
@@ -52,7 +52,7 @@ describe("GET /api/audit-log/unified", () => {
   });
 
   test("forwards bearer + query string verbatim on happy path", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -100,7 +100,7 @@ describe("GET /api/audit-log/unified", () => {
   });
 
   test("passes through 400 from backend when window is invalid", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -120,7 +120,7 @@ describe("GET /api/audit-log/unified", () => {
   });
 
   test("passes through 400 from backend when from/to are missing", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({ error: "from query parameter is required (RFC3339)" }),
@@ -137,7 +137,7 @@ describe("GET /api/audit-log/unified", () => {
   });
 
   test("passes through 403 from backend (non-admin caller)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -156,7 +156,7 @@ describe("GET /api/audit-log/unified", () => {
   });
 
   test("ignores atlas_session cookie when present (slice 110 P0-A2)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     cookieStore.set(OIDC_SESSION_COOKIE, "test-atlas-session-id");
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ entries: [], next_cursor: "" }), {

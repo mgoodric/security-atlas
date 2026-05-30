@@ -2,7 +2,7 @@
 //
 // Behavior under test:
 //
-//   * No `SESSION_COOKIE` (post-slice-206: `atlas_jwt`) cookie -> 401 { error }
+//   * No `ATLAS_JWT_COOKIE` (post-slice-206: `atlas_jwt`) cookie -> 401 { error }
 //   * Bearer present, `atlas_session` present -> upstream fetch carries
 //     BOTH `Authorization: Bearer <bearer>` AND
 //     `Cookie: atlas_session=<value>` headers.
@@ -26,7 +26,7 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/server", () => mockNextServer());
 
-import { SESSION_COOKIE, OIDC_SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE, OIDC_SESSION_COOKIE } from "@/lib/auth";
 import { GET, DELETE } from "./route";
 
 describe("GET /api/me/sessions", () => {
@@ -44,7 +44,7 @@ describe("GET /api/me/sessions", () => {
   });
 
   test("forwards both bearer and atlas_session cookie when both present", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     cookieStore.set(OIDC_SESSION_COOKIE, "test-atlas-session-id");
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
@@ -62,7 +62,7 @@ describe("GET /api/me/sessions", () => {
   });
 
   test("omits Cookie header when atlas_session cookie is absent", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -76,7 +76,7 @@ describe("GET /api/me/sessions", () => {
   });
 
   test("drops malformed atlas_session cookie (header injection guard)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     // Contains semicolon — should be silently dropped, no Cookie header forwarded.
     cookieStore.set(OIDC_SESSION_COOKIE, "evil;injection=1");
     const fetchSpy = vi
@@ -104,7 +104,7 @@ describe("DELETE /api/me/sessions (revoke all-others)", () => {
   });
 
   test("forwards both bearer and atlas_session cookie when both present", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     cookieStore.set(OIDC_SESSION_COOKIE, "test-atlas-session-id");
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
@@ -121,7 +121,7 @@ describe("DELETE /api/me/sessions (revoke all-others)", () => {
   });
 
   test("omits Cookie header when atlas_session cookie is absent", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(

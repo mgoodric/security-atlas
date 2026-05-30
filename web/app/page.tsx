@@ -9,7 +9,7 @@
 // Design constraints (slice 091 P0-A1..A4):
 //   * Server component only — no client-side flash of unstyled content.
 //   * Two destinations only — no third "/onboarding" branch.
-//   * Reads the existing `SESSION_COOKIE` from `@/lib/auth`. Does NOT
+//   * Reads the existing `ATLAS_JWT_COOKIE` from `@/lib/auth`. Does NOT
 //     modify cookie name, expiry, or middleware order.
 //   * No rendered content. Future marketing or tenant-picker UI ships
 //     as its own slice.
@@ -17,9 +17,9 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 export default async function Home() {
-  const session = (await cookies()).get(SESSION_COOKIE)?.value;
+  const session = (await cookies()).get(ATLAS_JWT_COOKIE)?.value;
   redirect(session ? "/dashboard" : "/login?from=/");
 }

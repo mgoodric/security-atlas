@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { submitAttestation, AttestSubmitRequest } from "@/lib/api/attest";
 
 // Slice 011 — server-side proxy for POST /v1/controls/{id}/attestations.
@@ -13,7 +13,7 @@ export async function POST(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

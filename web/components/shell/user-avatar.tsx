@@ -24,7 +24,7 @@
 import { cookies, headers } from "next/headers";
 
 import { deriveDisplayName, deriveInitials } from "@/lib/display-name";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 interface MeBody {
   display_name?: unknown;
@@ -41,13 +41,13 @@ interface MeBody {
 async function fetchMe(): Promise<MeBody | null> {
   try {
     const jar = await cookies();
-    const bearer = jar.get(SESSION_COOKIE)?.value;
+    const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
     if (!bearer) return null;
     const h = await headers();
     const host = h.get("host") ?? "localhost:3000";
     const proto = h.get("x-forwarded-proto") ?? "http";
     const res = await fetch(`${proto}://${host}/api/me`, {
-      headers: { Cookie: `${SESSION_COOKIE}=${bearer}` },
+      headers: { Cookie: `${ATLAS_JWT_COOKIE}=${bearer}` },
       cache: "no-store",
     });
     if (!res.ok) return null;

@@ -115,7 +115,7 @@ async function mintMultiTenantJWT(): Promise<string> {
 // `atlas_jwt` session cookie on the page's context. Mirrors the auth
 // fixture's mode-1 path but with OUR bearer (the shared fixture injects
 // the demo single-tenant bearer, which has no second tenant to switch
-// into). Uses the same cookie name both the risks BFF (SESSION_COOKIE)
+// into). Uses the same cookie name both the risks BFF (ATLAS_JWT_COOKIE)
 // and the switch BFF (ATLAS_JWT_COOKIE) read — they are both `atlas_jwt`.
 async function injectBearer(page: Page, bearer: string): Promise<void> {
   const url = new URL(process.env.PLATFORM_BASE_URL ?? "http://localhost:3000");

@@ -28,7 +28,7 @@
 
 import { test as base, expect, type Page } from "@playwright/test";
 
-import { SESSION_COOKIE } from "../lib/auth";
+import { ATLAS_JWT_COOKIE } from "../lib/auth";
 
 // Slice 082 — re-export seeded-entity accessors so specs reference
 // rows by symbolic name (e.g. `seeded.controlId`) rather than embedded
@@ -85,7 +85,7 @@ export const test = base.extend<Fixtures>({
       const url = new URL(baseURL ?? "http://localhost:3000");
       await page.context().addCookies([
         {
-          name: SESSION_COOKIE,
+          name: ATLAS_JWT_COOKIE,
           value: bearer,
           domain: url.hostname,
           path: "/",

@@ -8,7 +8,7 @@
 // parallel `Promise.all` fan-out.
 //
 // What it does:
-//   1. Reads the `atlas_jwt` cookie server-side (auth.SESSION_COOKIE).
+//   1. Reads the `atlas_jwt` cookie server-side (auth.ATLAS_JWT_COOKIE).
 //   2. Fans out all six dashboard panels' upstream fetches in parallel
 //      (prefetchDashboard -> Promise.all) into a per-request QueryClient,
 //      under the EXACT keys the page's six `useQuery` hooks register.
@@ -56,7 +56,7 @@
 import { HydrationBoundary, dehydrate } from "@tanstack/react-query";
 import { cookies } from "next/headers";
 
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { getQueryClient } from "@/lib/queryClient";
 
 import {
@@ -75,7 +75,7 @@ export default async function DashboardLayout({
   const queryClient = getQueryClient();
 
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
 
   // Slice 380 e2e seam: the pre-existing dashboard.spec.ts intercepts
   // panel data via Playwright `page.route(...)` -- a BROWSER-side mock

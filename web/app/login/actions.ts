@@ -4,7 +4,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { safeRedirectTarget } from "@/lib/safe-redirect";
 import { shouldUseSecureCookie } from "@/lib/secure-cookie";
 
@@ -57,7 +57,7 @@ export async function signIn(formData: FormData): Promise<void> {
   // panels rendered "Unexpected token '<'". See web/lib/secure-cookie.ts +
   // docs/runbooks/bff-cookie-forwarding.md.
   const reqHeaders = await headers();
-  jar.set(SESSION_COOKIE, token, {
+  jar.set(ATLAS_JWT_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
     secure: shouldUseSecureCookie(reqHeaders),
@@ -84,12 +84,12 @@ export async function signIn(formData: FormData): Promise<void> {
 
 export async function signOut(): Promise<void> {
   const jar = await cookies();
-  jar.delete(SESSION_COOKIE);
+  jar.delete(ATLAS_JWT_COOKIE);
   redirect("/login");
 }
 
 // signInLocal — slice 209. POSTs (tenant_id, email, password) to
-// /auth/local/login and stores the response token in SESSION_COOKIE —
+// /auth/local/login and stores the response token in ATLAS_JWT_COOKIE —
 // the same cookie the OAuth callback finalize endpoint writes (slice 189).
 // 401 redirects with "invalid credentials" (no oracle — same message
 // regardless of email-exists vs password-mismatched).
@@ -165,7 +165,7 @@ export async function signInLocal(formData: FormData): Promise<void> {
 
   const jar = await cookies();
   const reqHeaders = await headers();
-  jar.set(SESSION_COOKIE, body.token, {
+  jar.set(ATLAS_JWT_COOKIE, body.token, {
     httpOnly: true,
     sameSite: "lax",
     secure: shouldUseSecureCookie(reqHeaders),

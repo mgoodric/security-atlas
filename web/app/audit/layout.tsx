@@ -25,7 +25,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { TopBar } from "@/components/shell/topbar";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 export default async function AuditLayout({
   children,
@@ -33,7 +33,7 @@ export default async function AuditLayout({
   children: React.ReactNode;
 }) {
   const jar = await cookies();
-  if (!jar.get(SESSION_COOKIE)?.value) {
+  if (!jar.get(ATLAS_JWT_COOKIE)?.value) {
     redirect("/login?from=/audit");
   }
   return (

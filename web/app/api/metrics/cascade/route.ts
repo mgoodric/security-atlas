@@ -8,11 +8,11 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { getCascade } from "@/lib/api/metrics";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 export async function GET(request: Request) {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

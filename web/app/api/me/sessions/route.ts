@@ -7,12 +7,12 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { OIDC_SESSION_COOKIE, SESSION_COOKIE } from "@/lib/auth";
+import { OIDC_SESSION_COOKIE, ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { buildSessionsForwardHeaders } from "./_headers";
 
 export async function GET(): Promise<Response> {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
@@ -26,7 +26,7 @@ export async function GET(): Promise<Response> {
 
 export async function DELETE(): Promise<Response> {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

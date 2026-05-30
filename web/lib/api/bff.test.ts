@@ -30,7 +30,7 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/server", () => mockNextServer());
 
-import { SESSION_COOKIE } from "../auth";
+import { ATLAS_JWT_COOKIE } from "../auth";
 import { forwardJSON } from "./bff";
 
 describe("forwardJSON", () => {
@@ -52,7 +52,7 @@ describe("forwardJSON", () => {
   });
 
   test("forwards Authorization: Bearer <cookie> to upstream on GET", async () => {
-    cookieStore.set(SESSION_COOKIE, TEST_BEARER_TOKEN);
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_TOKEN);
 
     let capturedURL = "";
     let capturedInit: RequestInit | undefined;
@@ -82,7 +82,7 @@ describe("forwardJSON", () => {
   });
 
   test("passes upstream non-2xx status through verbatim", async () => {
-    cookieStore.set(SESSION_COOKIE, TEST_BEARER_TOKEN);
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_TOKEN);
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response('{"error":"forbidden"}', {
         status: 403,
@@ -97,7 +97,7 @@ describe("forwardJSON", () => {
   });
 
   test("sends POST with Content-Type and serialized body when jsonBody set", async () => {
-    cookieStore.set(SESSION_COOKIE, TEST_BEARER_TOKEN);
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_TOKEN);
 
     let capturedInit: RequestInit | undefined;
     vi.spyOn(globalThis, "fetch").mockImplementation(

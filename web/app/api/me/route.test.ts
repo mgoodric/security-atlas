@@ -20,7 +20,7 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/server", () => mockNextServer());
 
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { GET, PATCH } from "./route";
 
 describe("GET /api/me", () => {
@@ -38,7 +38,7 @@ describe("GET /api/me", () => {
   });
 
   test("passes upstream 200 body through", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response('{"user_id":"u1","display_name":"Alice"}', { status: 200 }),
     );
@@ -49,7 +49,7 @@ describe("GET /api/me", () => {
   });
 
   test("passes upstream 401 through", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response('{"error":"invalid bearer"}', { status: 401 }),
     );
@@ -75,7 +75,7 @@ describe("PATCH /api/me", () => {
   });
 
   test("forwards body verbatim and passes upstream 400 through", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer");
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response('{"error":"time_zone must be a valid IANA timezone"}', {
         status: 400,

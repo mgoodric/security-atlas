@@ -7,19 +7,20 @@
 // The cookie is httpOnly + sameSite=lax; secure when the request transport
 // is HTTPS (see `lib/secure-cookie.ts`).
 //
-// The constant NAME stays `SESSION_COOKIE` so the 30+ import sites that
-// already reference it compile unchanged — only the value changes. A
-// follow-on cleanup slice may rename the symbol to `ATLAS_JWT_COOKIE` once
-// the migration is settled, but for the v1.14.0 hot-fix we minimise
-// blast radius.
+// **slice 397** completes the cleanup deferred at slice 206: the constant
+// was originally named `SESSION_COOKIE` (a misleading name flagged by the
+// slice 328 audit as finding M-3, since it resolves to the JWT cookie
+// `atlas_jwt`, not a generic session). It is now `ATLAS_JWT_COOKIE`. This
+// was a pure symbol rename — the cookie value (`atlas_jwt`) and all wire
+// behavior are unchanged.
 //
 // Operator note: existing browser sessions hold a `sa_session_token` cookie
 // that is now ignored. Users will be redirected to `/login` once; the OAuth
 // flow will set `atlas_jwt` and the loop resolves.
-export const SESSION_COOKIE = "atlas_jwt";
+export const ATLAS_JWT_COOKIE = "atlas_jwt";
 
 // OIDC_SESSION_COOKIE is the slice 034 session-id cookie set by the OIDC
-// login callback. Distinct from SESSION_COOKIE (the api_keys bearer).
+// login callback. Distinct from ATLAS_JWT_COOKIE (the api_keys bearer).
 //
 // SCOPE — this cookie value is forwarded by the BFF to the platform ONLY
 // on the /api/me/sessions* routes (slice 110). Do NOT forward it on any

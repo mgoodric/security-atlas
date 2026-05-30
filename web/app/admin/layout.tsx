@@ -29,7 +29,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 async function isAdmin(bearer: string): Promise<boolean> {
   // Use the BFF self-introspection endpoint so the call resolves whether
@@ -40,7 +40,7 @@ async function isAdmin(bearer: string): Promise<boolean> {
   const host = h.get("host") ?? "localhost:3000";
   const proto = h.get("x-forwarded-proto") ?? "http";
   const res = await fetch(`${proto}://${host}/api/admin/me`, {
-    headers: { Cookie: `${SESSION_COOKIE}=${bearer}` },
+    headers: { Cookie: `${ATLAS_JWT_COOKIE}=${bearer}` },
     cache: "no-store",
   });
   if (!res.ok) return false;
@@ -57,7 +57,7 @@ async function isDemoSeedEnabled(bearer: string): Promise<boolean> {
     const host = h.get("host") ?? "localhost:3000";
     const proto = h.get("x-forwarded-proto") ?? "http";
     const res = await fetch(`${proto}://${host}/api/admin/demo/status`, {
-      headers: { Cookie: `${SESSION_COOKIE}=${bearer}` },
+      headers: { Cookie: `${ATLAS_JWT_COOKIE}=${bearer}` },
       cache: "no-store",
     });
     if (!res.ok) return false;
@@ -74,7 +74,7 @@ export default async function AdminLayout({
   children: React.ReactNode;
 }) {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     redirect("/login?from=/admin");
   }

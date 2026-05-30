@@ -303,7 +303,7 @@ describe("proxy (Next.js 16 request interceptor)", () => {
     expect(res.kind).toBe("redirect");
   });
 
-  // ---- Slice 206: the SESSION_COOKIE constant now resolves to
+  // ---- Slice 206: the ATLAS_JWT_COOKIE constant now resolves to
   //      `atlas_jwt`. The cookie-presence path uses the new name.
   test("authenticated user with atlas_jwt cookie passes through", () => {
     const res = proxy(

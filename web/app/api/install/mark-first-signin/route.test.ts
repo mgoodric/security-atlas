@@ -25,7 +25,7 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/server", () => mockNextServer());
 
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { POST } from "./route";
 
 describe("POST /api/install/mark-first-signin", () => {
@@ -45,7 +45,7 @@ describe("POST /api/install/mark-first-signin", () => {
   });
 
   test("forwards 200 with body from upstream", async () => {
-    cookieStore.set(SESSION_COOKIE, TEST_BEARER_VALUE);
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_VALUE);
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ marked: true, file_deleted: true }), {
         status: 200,
@@ -62,7 +62,7 @@ describe("POST /api/install/mark-first-signin", () => {
   });
 
   test("idempotent re-call passes marked=false through", async () => {
-    cookieStore.set(SESSION_COOKIE, TEST_BEARER_VALUE);
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_VALUE);
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ marked: false, file_deleted: false }), {
         status: 200,
@@ -79,7 +79,7 @@ describe("POST /api/install/mark-first-signin", () => {
   });
 
   test("translates upstream 401 to 401", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-expired-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-expired-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response("", { status: 401 }),
     );
@@ -90,7 +90,7 @@ describe("POST /api/install/mark-first-signin", () => {
   });
 
   test("translates upstream 503 to 502 with error message", async () => {
-    cookieStore.set(SESSION_COOKIE, TEST_BEARER_VALUE);
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_VALUE);
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response("", { status: 503 }),
     );
@@ -101,7 +101,7 @@ describe("POST /api/install/mark-first-signin", () => {
   });
 
   test("translates upstream 500 to 502 with error message", async () => {
-    cookieStore.set(SESSION_COOKIE, TEST_BEARER_VALUE);
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_VALUE);
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response("", { status: 500 }),
     );
@@ -112,7 +112,7 @@ describe("POST /api/install/mark-first-signin", () => {
   });
 
   test("translates fetch throw to 502", async () => {
-    cookieStore.set(SESSION_COOKIE, TEST_BEARER_VALUE);
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_VALUE);
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
       new Error("network down"),
     );

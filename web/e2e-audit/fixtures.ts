@@ -11,7 +11,7 @@
 
 import { test as base, expect, type Page } from "@playwright/test";
 
-import { SESSION_COOKIE } from "../lib/auth";
+import { ATLAS_JWT_COOKIE } from "../lib/auth";
 
 import { makeReadOnly } from "./lib/make-read-only";
 // Re-use the slice-082 seeded entity IDs for `:id` substitution.
@@ -31,7 +31,7 @@ export const test = base.extend<Fixtures>({
       const url = new URL(baseURL ?? "http://localhost:3000");
       await page.context().addCookies([
         {
-          name: SESSION_COOKIE,
+          name: ATLAS_JWT_COOKIE,
           value: bearer,
           domain: url.hostname,
           path: "/",

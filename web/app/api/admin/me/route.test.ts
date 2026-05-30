@@ -36,7 +36,7 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/server", () => mockNextServer());
 
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { GET } from "./route";
 
 describe("GET /api/admin/me", () => {
@@ -57,7 +57,7 @@ describe("GET /api/admin/me", () => {
   });
 
   test("slice 130 D6 case 1: upstream 200 { is_admin: true, roles: [admin, auditor] } flows through", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-admin-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-admin-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -81,7 +81,7 @@ describe("GET /api/admin/me", () => {
   });
 
   test("slice 130 D6 case 2: upstream 200 { is_admin: false, roles: [auditor] } — non-admin auditor flows through", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-auditor-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-auditor-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -105,7 +105,7 @@ describe("GET /api/admin/me", () => {
   });
 
   test("slice 130 D6 case 3: upstream 200 with no `roles` field defaults roles to [] (P0-A3 fail-closed)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-legacy-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-legacy-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -128,7 +128,7 @@ describe("GET /api/admin/me", () => {
   });
 
   test("upstream 200 with non-JSON body degrades closed to { is_admin: false, roles: [] }", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response("not-json", { status: 200 }),
     );
@@ -141,7 +141,7 @@ describe("GET /api/admin/me", () => {
   });
 
   test("upstream 200 with roles containing non-string entries filters them out", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -162,7 +162,7 @@ describe("GET /api/admin/me", () => {
   });
 
   test("returns 200 { is_admin: false, roles: [] } when upstream returns 403", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-viewer-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-viewer-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response('{"error":"forbidden"}', { status: 403 }),
     );
@@ -175,7 +175,7 @@ describe("GET /api/admin/me", () => {
   });
 
   test("returns 401 { is_admin: false, roles: [] } when upstream returns 401", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-expired-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-expired-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response("", { status: 401 }),
     );
@@ -188,7 +188,7 @@ describe("GET /api/admin/me", () => {
   });
 
   test("returns 502 { is_admin: false, roles: [], error } on unexpected upstream status", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response("", { status: 500 }),
     );
@@ -206,7 +206,7 @@ describe("GET /api/admin/me", () => {
   });
 
   test("BFF upstream URL is /v1/me (slice 130 D2 — not /v1/admin/credentials)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer");
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ is_admin: false, roles: [] }), {
         status: 200,
@@ -221,7 +221,7 @@ describe("GET /api/admin/me", () => {
   });
 
   test("BFF forwards bearer-only (P0-A1 — never atlas_session)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer");
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ is_admin: false, roles: [] }), {
         status: 200,

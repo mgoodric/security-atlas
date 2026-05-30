@@ -24,7 +24,7 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/server", () => mockNextServer());
 
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { GET, POST } from "./route";
 
 function makeRequest(body: unknown): { json: () => Promise<unknown> } {
@@ -48,7 +48,7 @@ describe("GET /api/admin/tenants", () => {
   });
 
   test("returns 200 with items list when upstream succeeds", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-super-admin-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-super-admin-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -85,7 +85,7 @@ describe("GET /api/admin/tenants", () => {
   });
 
   test("upstream 5xx error propagates with same status", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-super-admin-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-super-admin-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "database down" }), {
         status: 500,
@@ -120,7 +120,7 @@ describe("POST /api/admin/tenants", () => {
   });
 
   test("returns 400 when name is empty", async () => {
-    cookieStore.set(SESSION_COOKIE, "bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "bearer");
     const res = await POST(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       makeRequest({ name: "", slug: "valid-slug" }) as any,
@@ -131,7 +131,7 @@ describe("POST /api/admin/tenants", () => {
   });
 
   test("returns 400 when slug is empty", async () => {
-    cookieStore.set(SESSION_COOKIE, "bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "bearer");
     const res = await POST(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       makeRequest({ name: "Acme", slug: "" }) as any,
@@ -142,7 +142,7 @@ describe("POST /api/admin/tenants", () => {
   });
 
   test("returns 400 when slug fails regex (uppercase)", async () => {
-    cookieStore.set(SESSION_COOKIE, "bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "bearer");
     const res = await POST(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       makeRequest({ name: "Acme", slug: "INVALID" }) as any,
@@ -153,7 +153,7 @@ describe("POST /api/admin/tenants", () => {
   });
 
   test("returns 400 when slug fails regex (leading hyphen)", async () => {
-    cookieStore.set(SESSION_COOKIE, "bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "bearer");
     const res = await POST(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       makeRequest({ name: "Acme", slug: "-bad" }) as any,
@@ -162,7 +162,7 @@ describe("POST /api/admin/tenants", () => {
   });
 
   test("returns 400 when creator_joins_as is not 'admin' or 'none'", async () => {
-    cookieStore.set(SESSION_COOKIE, "bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "bearer");
     const res = await POST(
       makeRequest({
         name: "Acme",
@@ -177,7 +177,7 @@ describe("POST /api/admin/tenants", () => {
   });
 
   test("happy path: POSTs to upstream + returns 200", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-super-admin-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-super-admin-bearer");
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -219,7 +219,7 @@ describe("POST /api/admin/tenants", () => {
   });
 
   test("upstream 409 (duplicate slug) propagates status + message", async () => {
-    cookieStore.set(SESSION_COOKIE, "bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "slug already in use" }), {
         status: 409,
@@ -234,7 +234,7 @@ describe("POST /api/admin/tenants", () => {
   });
 
   test("upstream 429 (rate-limited) propagates status + message", async () => {
-    cookieStore.set(SESSION_COOKIE, "bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({

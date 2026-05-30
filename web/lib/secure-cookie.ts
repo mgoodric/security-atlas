@@ -5,13 +5,13 @@
 //
 //   Before slice 146 the `signIn` server action used
 //   `secure: process.env.NODE_ENV === "production"` when calling
-//   `cookies().set(SESSION_COOKIE, ...)`. That set the `Secure`
+//   `cookies().set(ATLAS_JWT_COOKIE, ...)`. That set the `Secure`
 //   attribute on every production-build deployment — INCLUDING the
 //   many self-hosted operators (Unraid, docker-compose without TLS,
 //   `node .next/standalone/server.js` smoke runs) that serve the app
 //   over plain HTTP. Browsers refuse to send `Secure` cookies over
 //   HTTP, so the cookie never came back to the BFF. `web/proxy.ts`
-//   then saw no `SESSION_COOKIE` on `/api/dashboard/**` (and every
+//   then saw no `ATLAS_JWT_COOKIE` on `/api/dashboard/**` (and every
 //   other BFF path), redirected to `/login`, and the browser's BFF
 //   fetch followed the redirect and tried to JSON.parse the login
 //   HTML — the "Could not load this panel · Unexpected token '<'"

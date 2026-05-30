@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { transitionFrameworkScope } from "@/lib/api/framework-scopes";
 
 // Slice 018 — PATCH /v1/framework-scopes/{id}/{submit|approve|activate}.
@@ -15,7 +15,7 @@ export async function PATCH(
   ctx: { params: Promise<{ id: string; transition: string }> },
 ) {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

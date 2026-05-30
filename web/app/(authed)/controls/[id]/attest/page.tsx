@@ -8,7 +8,7 @@ import {
   getAttestForm,
   type AttestForm as AttestFormShape,
 } from "@/lib/api/attest";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 // Slice 011 — server component that fetches the control's attestation
 // form metadata from the platform, then renders the client form
@@ -22,7 +22,7 @@ export default async function AttestPage({
 }) {
   const { id } = await params;
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) redirect(`/login?from=/controls/${id}/attest`);
 
   let form: AttestFormShape;
