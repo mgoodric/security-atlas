@@ -3,7 +3,24 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 169 claim-stake — slices 387 + 398 → in-progress (N=2) · e2e prod-build CI harness + web tsc-noemit fixes · disjoint: ci.yml+web/e2e · web/scripts+web/lib-tests)
+**Last reconciled:** 2026-05-30 (batch 169 merged — slices 387 + 398 on main; 1 spillover 399; no collision)
+
+## Drift detected — 2026-05-30 (parallel batch 169 merged)
+
+Both batch-169 slices merged to main.
+
+- **387** e2e prod-build standalone CI harness → merged at `a497e20e` via #896 (closes slice 351 spillover). New `frontend-playwright-prod-build` CI job builds + boots the Next.js `output:"standalone"` server and runs the logo-render prod-build spec (slice-153 regression now gated every PR). The bff-cookie spec surfaced dev-server-shaped assumptions under the prod build (NOT a product regression — auth carries through, panels are server-rendered) → job shipped advisory+logo-only, cookie spec body fix → spillover 399.
+- **398** fix pre-existing tsc --noEmit errors in web test files → merged at `5c36c52c` via #895 (closes slice 395 spillover). All 15 latent type errors fixed properly (no paper-overs); `cd web && npx tsc --noEmit` now clean. Closes the latent-breakage finding 395 surfaced.
+
+Process note: no collision (only 387 filed a spillover, 399); 398 self-healed the tsc gap the loop itself surfaced in batch 168.
+
+**POOL STATUS:** remaining ready pool = 396 (web api barrel retire — Phase 3 of 370, completes the lineage), 397 (SESSION_COOKIE rename — golden-tier deliberate), 399 (bff-cookie prod-build spec body fix — dep #387 merged). Special-handling: 368 (cosign/solo), 390 (38-pkg drain/decompose). 396/397/399 are all web → mind mutual conflict.
+
+| Row | Transition               | Evidence                                                                                                                                 |
+| --- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| 387 | `in-progress` → `merged` | merged at `a497e20e` via #896 (prod-build CI harness; spillover 399)                                                                     |
+| 398 | `in-progress` → `merged` | merged at `5c36c52c` via #895 (tsc --noEmit clean)                                                                                       |
+| 399 | (new row) → `ready`      | spec `399-bff-cookie-prod-build-spec-body-fix.md` · slice 387 spillover (dep #387) · re-shape cookie spec + make prod-build job blocking |
 
 ## Drift detected — 2026-05-30 (batch 169 claim-stake · slices 387 + 398)
 
