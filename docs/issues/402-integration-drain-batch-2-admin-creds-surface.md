@@ -3,14 +3,16 @@
 **Cluster:** infra
 **Estimate:** 0.5-1d
 **Type:** AFK
-**Status:** `not-ready`
+**Status:** `ready`
 **Parent:** 390 (drain the 38-package integration-enrolment backlog)
+
+> **Unblocked 2026-05-30** — dep #401 (drain batch 1) merged at `112801ce`.
 
 ## Narrative
 
 Drain batch 2 of slice 390. Enrols the next group of packages carrying `//go:build integration` tests that have never run in CI (slice 345 catalog). Same procedure as batch 1 (slice 401); see 390 for full context.
 
-`not-ready` until slice 401 (the prior drain batch) merges — batches run in sequence so each PR's CI stays green and the failure-rate learned from earlier batches informs the later ones.
+Was `not-ready` until slice 401 (the prior drain batch) merged — batches run in sequence so each PR's CI stays green and the failure-rate learned from earlier batches informs the later ones. 401 is now merged, so this batch is `ready`.
 
 ## Packages in this batch (5)
 
