@@ -390,6 +390,7 @@ jobs:
             ./internal/auth/oauthcode/... \
             ./internal/auth/revocation/... \
             ./internal/auth/userprefs/... \
+            ./internal/api/oauth/... \
             ./internal/api/mcpwriteproposals/... \
             ./internal/mcp/writeproposals/... \
             ./internal/questionnaire/... \
