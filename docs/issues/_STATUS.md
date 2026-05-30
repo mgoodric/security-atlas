@@ -3,7 +3,25 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 171 claim-stake — slice 399 → in-progress (N=1 solo) · bff-cookie prod-build spec body fix (slice 387 spillover))
+**Last reconciled:** 2026-05-30 (batch 171 merged — slice 399 on main; no spillover; continuous-batch loop reaches clean terminus)
+
+## Drift detected — 2026-05-30 (parallel batch 171 merged · slice 399 solo — LOOP TERMINUS)
+
+- **399** bff-cookie prod-build spec body fix → merged at `560e1738` via #902 (closes slice 387 spillover). Re-shaped the slice-146 cookie spec's two assertions to be RSC-aware (asserts the real regression: auth cookie survives the standalone round-trip + no JSON-parse-HTML error, instead of the false dev-server client-BFF-call count); fixed the about:blank addCookies domain; **dropped `continue-on-error` so the `frontend-playwright-prod-build` CI leg now BLOCKS merges**. No spillover. CLEAN.
+
+**CONTINUOUS-BATCH LOOP — CLEAN TERMINUS.** The clean, bounded, conflict-safe ready pool is now drained. Remaining ready/near-ready slices all require deliberate maintainer handling and are NOT suitable for unattended auto-batch:
+
+- **396** (web api barrel retire — Phase 3 of slice 370): slice DOC Status is `blocked`. `web/vitest.config.ts` still imports `@/lib/api`. To unblock: migrate that one importer off the barrel + flip the 396 doc to ready (a small deliberate slice), THEN 396 can delete `web/lib/api.ts` + the eslint max-lines exception.
+- **368** (OSCAL cosign signing, 5d): external cosign binary + Sigstore/Fulcio/Rekor integration. Needs a focused SOLO run; deferred batches 162-171.
+- **390** (38-package integration-enrolment backlog drain): own doc estimates "6-10 sub-slices"; enabling dormant integration suites risks surfacing latent failures. Needs decomposition.
+
+**Recurring infra item for a real fix (not a slice yet):** `internal/metrics/scheduler TestRun_FiresInlineSweepAndExitsOnCancel` (observations=0) flaked ~6× across this session; rerun-clears every time; a timing-robust rewrite of that inline-sweep assertion would remove the recurring merge-queue friction.
+
+The next /loop iteration is expected to ESCALATE E-3 (only special-handling slices remain) — that is the intended success terminus, not a failure.
+
+| Row | Transition               | Evidence                                                       |
+| --- | ------------------------ | -------------------------------------------------------------- |
+| 399 | `in-progress` → `merged` | merged at `560e1738` via #902 (prod-build CI leg now blocking) |
 
 ## Drift detected — 2026-05-30 (batch 171 claim-stake · slice 399 solo)
 
