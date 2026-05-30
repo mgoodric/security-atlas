@@ -101,23 +101,26 @@ func wipeTenantControls(t *testing.T) {
 	t.Helper()
 	pool := openPool(t, adminDSN(t))
 	defer pool.Close()
-	// FK order: clear the children that FK-reference controls BEFORE
-	// deleting controls, else the global DELETE hits
-	// evidence_records_tenant_id_control_id_fkey (and the
-	// control_evaluations FK). This package does not itself write
-	// evidence_records, but under CI's serial `-p 1` run the prior
-	// package (internal/demoseed) leaves evidence_records rows under the
-	// shared tenant — so the global wipe must clear them first.
-	// (Slice 405: this latent FK-wipe-ordering bug was hidden because the
-	// package never ran in CI alongside demoseed.)
-	for _, q := range []string{
-		`DELETE FROM evidence_records`,
-		`DELETE FROM control_evaluations`,
-		`DELETE FROM controls`,
-	} {
-		if _, err := pool.Exec(context.Background(), q); err != nil {
-			t.Fatalf("wipe (%s): %v", q, err)
-		}
+	// TRUNCATE ... CASCADE rather than enumerate-and-DELETE: many tables
+	// FK-reference controls with ON DELETE RESTRICT — directly
+	// (evidence_records, control_evaluations, walkthroughs, exceptions,
+	// risk_register, freshness_drift, audit_samples, …) and transitively
+	// (sample_evidence → evidence_records → controls). Under CI's serial
+	// `-p 1` run a prior package (internal/demoseed and the audit-sample
+	// suites) leaves rows in those tables under the shared canonical
+	// tenant, so a DELETE FROM controls (or any fixed enumeration of
+	// children) hits a RESTRICT FK and the whole suite fails. CASCADE
+	// truncates the full transitive dependent set atomically, ignoring
+	// RESTRICT; it does NOT touch scf_anchors or tenants (controls
+	// references those, not the reverse — verified). Mirrors the repo
+	// precedent at internal/evidence/ingest/integration_test.go and
+	// internal/platform/status_integration_test.go. (Slice 405: the FK
+	// chain is deeper than evidence_records — latent because the package
+	// never ran in CI alongside the packages that seed sample_evidence /
+	// evidence_records under the shared tenant.)
+	if _, err := pool.Exec(context.Background(),
+		`TRUNCATE controls RESTART IDENTITY CASCADE`); err != nil {
+		t.Fatalf("wipe controls (TRUNCATE CASCADE): %v", err)
 	}
 }
 
@@ -783,32 +786,29 @@ func soc2017FrameworkVersionID(t *testing.T) uuid.UUID {
 }
 
 // wipeTenantState clears the per-tenant working set that slice 256
-// tests rely on: evidence_records, evaluations, framework_scopes,
-// controls, scope_cells. Catalog rows (scf_anchors / framework_versions
-// / etc.) stay intact. FK order: the children that FK-reference controls
-// (evidence_records, control_evaluations) are deleted BEFORE controls,
-// else the global DELETE hits evidence_records_tenant_id_control_id_fkey
-// under CI's serial `-p 1` run (the prior package internal/demoseed
-// leaves evidence_records rows under the shared tenant). scope_cells is
-// cleared last so the in-scope test's seeded cell does not leak into the
-// out-of-scope / no-data tests within the same run (control_evaluations
-// FK-references scope_cells ON DELETE CASCADE and is already cleared
-// above). (Slice 405: latent FK-wipe-ordering bug hidden because the
-// package never ran in CI alongside demoseed.)
+// tests rely on. Catalog rows (scf_anchors / framework_versions / etc.)
+// stay intact. TRUNCATE ... CASCADE rather than an enumerated DELETE
+// loop: truncating `controls` CASCADEs to the full transitive dependent
+// set (control_evaluations, evidence_records, sample_evidence,
+// walkthroughs, exceptions, risk_register, …) atomically, ignoring the
+// ON DELETE RESTRICT FKs that a fixed child enumeration would trip over
+// when a prior package in CI's serial `-p 1` run leaves rows under the
+// shared tenant. `framework_scopes` and `scope_cells` are NOT
+// control-dependents (controls does not reference them), so they are
+// listed explicitly. scope_cells is included so the in-scope test's
+// seeded cell does not leak into the out-of-scope / no-data tests within
+// a run. CASCADE does not touch scf_anchors / tenants (controls
+// references those — verified). (Slice 405: the FK chain is deeper than
+// evidence_records — sample_evidence → evidence_records → controls, all
+// RESTRICT — so TRUNCATE CASCADE is the robust fix, matching the repo
+// precedent in internal/evidence/ingest + internal/platform/status.)
 func wipeTenantState(t *testing.T) {
 	t.Helper()
 	pool := openPool(t, adminDSN(t))
 	defer pool.Close()
-	for _, q := range []string{
-		`DELETE FROM evidence_records`,
-		`DELETE FROM control_evaluations`,
-		`DELETE FROM framework_scopes`,
-		`DELETE FROM controls`,
-		`DELETE FROM scope_cells`,
-	} {
-		if _, err := pool.Exec(context.Background(), q); err != nil {
-			t.Fatalf("wipe (%s): %v", q, err)
-		}
+	if _, err := pool.Exec(context.Background(),
+		`TRUNCATE controls, framework_scopes, scope_cells RESTART IDENTITY CASCADE`); err != nil {
+		t.Fatalf("wipe tenant state (TRUNCATE CASCADE): %v", err)
 	}
 }
 

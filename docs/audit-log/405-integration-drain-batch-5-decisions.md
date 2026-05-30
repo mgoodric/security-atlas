@@ -111,7 +111,7 @@ run. Full `ucfcoverage` suite green after the fix (18 sub-tests, zero SKIP,
 zero FAIL); the sibling tests still pass because their null expectations hold
 regardless of cell presence.
 
-## `internal/api/ucfcoverage` — SECOND find: FK-wipe-ordering test-isolation bug (CI-only)
+## `internal/api/ucfcoverage` — SECOND find: FK-wipe test-isolation bug (CI-only), fixed with TRUNCATE CASCADE
 
 After the PR's first push, CI run `26697205353` failed the ENTIRE
 `internal/api/ucfcoverage` suite (all 14 top-level tests), each with:
@@ -123,48 +123,68 @@ constraint "evidence_records_tenant_id_control_id_fkey" on table "evidence_recor
 
 This is a textbook slice-390-thesis hit — a latent test-isolation bug that was
 invisible while the package ran only in isolation and surfaced the moment it
-ran in CI's serial `-p 1` job alongside its neighbours.
+ran in CI's serial `-p 1` job alongside its neighbours. The integration job
+runs `-p 1` serially and `./internal/demoseed/...` (plus the audit-sample
+suites) run before `ucfcoverage`, leaving rows under the SAME canonical
+`tenantA` (`11111111-…`) that FK-reference controls. The package's own
+un-tenant-restricted global `DELETE FROM controls` then 23503-faults.
 
-**Root cause (test-harness ordering, NOT a product bug).** Both wipe helpers
-issued an un-tenant-restricted global `DELETE FROM controls` WITHOUT first
-clearing the children that FK-reference `controls`. The
-`evidence_records_tenant_id_control_id_fkey` constraint is `ON DELETE RESTRICT`
-(not CASCADE), so a single referencing `evidence_records` row makes the
-`controls` delete fail. In CI the integration job runs `-p 1` serially and
-`./internal/demoseed/...` runs immediately before `ucfcoverage`, leaving
-`evidence_records` rows that reference controls under the shared tenant. The
-package's own wipe then 23503-faults. The stale comment at the old
-`wipeTenantControls` (lines 104-107) literally predicted this: "If a future
-slice writes evidence here, this helper will need to clear that table first."
-The contaminating writer turned out to be a _neighbouring_ package, not this
-one — exactly the cross-package coupling the never-run state hid.
+**Root cause (test-harness, NOT a product bug).** The wipe helpers deleted the
+`controls` parent without clearing its FK dependents. The relevant FKs are
+`ON DELETE RESTRICT` (not CASCADE), so a single referencing row blocks the
+delete. The FK closure of `controls` is deep and wide.
 
-**Why a test fix, not a product change, and no coverage-floor change.** The FK
-is correct product behaviour (you cannot delete a control while evidence
-references it). The defect is purely that the test's cleanup deleted parents
-before children. The fix mirrors the pattern the other enrolled packages
-already use (e.g. `controlstate`'s `state_integration_test.go` deletes
-`control_evaluations` + `evidence_records` before `controls`). The `70` floor
-for `ucfcoverage` is unchanged.
+**First attempt (enumerate-children) was the WRONG strategy.** The initial fix
+added explicit child deletes (`evidence_records`, `control_evaluations`) before
+`controls`. CI then advanced the error exactly ONE level deeper:
 
-**Fix.** In `wipeTenantControls`, replaced the single `DELETE FROM controls`
-with an ordered loop `evidence_records → control_evaluations → controls`
-(children before parent), kept the global un-tenant-restricted form (the
-cross-tenant tests need both tenants cleared), and updated the stale comment.
-In `wipeTenantState`, inserted `DELETE FROM evidence_records` at the head of
-the loop (before `control_evaluations`), giving the FK-safe order
-`evidence_records → control_evaluations → framework_scopes → controls →
-scope_cells`.
+```
+wipe (DELETE FROM evidence_records): ERROR: update or delete on table "evidence_records"
+violates foreign key constraint "sample_evidence_evidence_fk" on table "sample_evidence" (SQLSTATE 23503)
+```
 
-**Verification (reproduced the CI condition, did not just re-run in isolation).**
-Against a fresh harness, seeded a contaminating `evidence_records` row
-referencing a control under the shared tenant, then ran the _buggy_ (pre-fix)
-suite with `-count=1`: reproduced the exact 23503 FK error across every test
-(matching the CI log). Restored the fix and re-ran against the SAME
-contaminated DB: 18/18 sub-tests PASS, zero FAIL, no FK error. Also ran the
-faithful CI ordering `go test -tags=integration -p 1 -count=1
-./internal/demoseed/... ./internal/api/ucfcoverage/...` together with a
-contaminating row present — both packages green.
+The FK chain is `sample_evidence → evidence_records → controls`, all RESTRICT.
+Introspecting `migrations/` shows MANY tables FK-reference controls directly or
+transitively with RESTRICT (`evidence_records`, `audit_samples` /
+`sample_evidence`, `walkthroughs`, `exceptions`, `risk_register`,
+`freshness_drift`, …). Enumerating children is whack-a-mole: each missed level
+costs a ~13-minute CI round and may still miss the next. Tenant-scoping the
+wipe does not help either — the contamination is under the same `tenantA`.
+
+**Robust fix — TRUNCATE … CASCADE (established repo precedent, not novel).**
+`TRUNCATE controls … CASCADE` truncates the entire transitive dependent set
+atomically, ignoring RESTRICT, in one statement. It does NOT touch `scf_anchors`
+or `tenants` (controls REFERENCES those — child→parent — so they are not
+dependents; verified by grepping the migration FKs). This mirrors the existing
+pattern at `internal/evidence/ingest/integration_test.go:116`,
+`internal/evidence/streambuf/integration_test.go:110`, and
+`internal/platform/status_integration_test.go:253` (all `TRUNCATE … CASCADE`
+via the admin pool, which owns the tables — privilege is fine).
+
+- `wipeTenantControls`: `TRUNCATE controls RESTART IDENTITY CASCADE` (kept the
+  global, un-tenant-restricted form — cross-tenant tests need both tenants
+  cleared; CASCADE handles the full dependent closure).
+- `wipeTenantState`: `TRUNCATE controls, framework_scopes, scope_cells RESTART
+IDENTITY CASCADE` — `controls` CASCADE clears `control_evaluations` +
+  `evidence_records` + their children; `framework_scopes` and `scope_cells` are
+  NOT control-dependents, so they are listed explicitly (the latter so the
+  in-scope test's seeded cell does not leak into the out-of-scope / no-data
+  tests within a run).
+
+No product change; the RESTRICT FKs are correct product behaviour (a control
+cannot be deleted while evidence references it). The `70` floor for
+`ucfcoverage` is unchanged.
+
+**Verification (reproduced the DEEPER CI condition, not just isolation).**
+Against a fresh harness, ran `internal/demoseed` first, then seeded the full
+contaminating chain under `tenantA`: an `evidence_records` row referencing a
+control PLUS a `population → sample → sample_evidence` chain pinning that
+evidence record (i.e. the exact `sample_evidence → evidence_records → controls`
+RESTRICT closure CI hit). Ran the FIXED suite with
+`go test -tags=integration -p 1 -count=1 ./internal/demoseed/...
+./internal/api/ucfcoverage/...`: both packages GREEN, zero FAIL, no FK error.
+Confirmed the TRUNCATE CASCADE actually cleared the contamination —
+`evidence_records` 1→0 and `sample_evidence` 1→0 after the run.
 
 ## `internal/api/emptyset` — zero-statement package, KEEP on excludes
 
@@ -210,12 +230,15 @@ the dominant contributor — is unaffected.)
   `seedScopeCell` helper, seeded one scope cell in
   `TestControlCoverage_Slice256_InScopeRowReturnsNumeric`, and added
   `scope_cells` to `wipeTenantState` cleanup (stale-test fix).
-- `internal/api/ucfcoverage/integration_test.go` (find 2, CI-only) — reordered
-  both wipe helpers to delete the FK children (`evidence_records`,
-  `control_evaluations`) before `controls`, fixing the
-  `evidence_records_tenant_id_control_id_fkey` (23503) failure that surfaced
-  when the package ran in CI's serial `-p 1` job after `internal/demoseed`.
-  Updated the stale `wipeTenantControls` comment.
+- `internal/api/ucfcoverage/integration_test.go` (find 2, CI-only) — replaced
+  both wipe helpers' enumerated `DELETE`s with `TRUNCATE … CASCADE`
+  (`wipeTenantControls`: `TRUNCATE controls RESTART IDENTITY CASCADE`;
+  `wipeTenantState`: `TRUNCATE controls, framework_scopes, scope_cells RESTART
+IDENTITY CASCADE`), fixing the RESTRICT-FK 23503 failures whose chain
+  (`sample_evidence → evidence_records → controls`) is deeper than a fixed
+  child enumeration handles. Mirrors the repo's existing TRUNCATE-CASCADE
+  precedent. Surfaced when the package ran in CI's serial `-p 1` job after
+  packages that seed evidence/sample rows under the shared tenant.
 
 ## Product fix
 
@@ -272,7 +295,8 @@ justified, no orphans).
   (zero-statement); `questionnaires` was never gated and gains its first floor.
 - `internal/api/ucfcoverage/integration_test.go` — find 1: `seedScopeCell`
   helper + in-scope-test seed + `wipeTenantState` scope_cells cleanup; find 2:
-  reordered both wipe helpers to clear `evidence_records` + `control_evaluations`
-  before `controls` (FK-ordering test-isolation fix) + updated stale comment.
+  replaced both wipe helpers with `TRUNCATE … CASCADE` (robust over the deep
+  RESTRICT FK closure `sample_evidence → evidence_records → controls`),
+  matching repo precedent.
 - `CHANGELOG.md` — Unreleased › Changed entry.
 - `docs/audit-log/405-integration-drain-batch-5-decisions.md` — this file.
