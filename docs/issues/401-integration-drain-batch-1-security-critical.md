@@ -15,10 +15,15 @@ integration tests have never run in CI. Per 390's stated priority
 (constitutional invariant #10 + security surface), this batch enrols the
 **security-critical** packages first.
 
-## Packages in this batch (5)
+## Packages in this batch (4 — `internal/api/oauth` already enrolled by slice 314)
+
+> **Update 2026-05-30:** `internal/api/oauth` was enrolled + drained by slice
+> 314 (#909 — it also lifted oauth coverage to 74.7% and fixed a latent
+> device-flow test bug surfaced by the never-run suite). It is already in the
+> ci.yml integration list and removed from `KNOWN_UNENROLLED`, so it is
+> DROPPED from this batch. This batch now enrols the remaining 4.
 
 ```
-internal/api/oauth        # 28 integration test functions, unrun (largest)
 internal/auth/oidc        # 3 nonce integration tests (slice 365 family)
 internal/auth/jwtmw       # JWT middleware
 internal/auth/users       # user/identity store
@@ -43,21 +48,21 @@ For EACH package in this batch:
 4. If the package also sits on `cmd/scripts/coverage-thresholds.json`
    `excludes`, lift it off with a per-package floor (slice 348 track 2).
 
-## COORDINATION NOTE (read before starting)
+## COORDINATION NOTE (RESOLVED 2026-05-30)
 
-`internal/api/oauth` is ALSO the subject of slice **314** (coverage lift to
-70%), whose step 1 is "enrol oauth in the integration job." Whichever of
-314/401 lands first does the oauth enrolment; the other rebases and drops
-the duplicate. Do NOT run 314 and 401 in the same parallel batch — they
-both edit ci.yml's integration list + touch oauth. Sequence them.
+`internal/api/oauth` was the subject of slice **314** (coverage lift to
+74.7%), which landed FIRST (#909) and did the oauth enrolment +
+`KNOWN_UNENROLLED` removal. This batch therefore DROPS oauth and enrols the
+remaining 4 packages. No further coordination needed.
 
 ## Acceptance criteria
 
-- [ ] **AC-1.** All 5 packages enrolled in the integration job in ci.yml.
+- [ ] **AC-1.** All 4 packages (oidc/jwtmw/users/period) enrolled in the
+      integration job in ci.yml. (oauth already enrolled by slice 314.)
 - [ ] **AC-2.** Each package's integration suite is GREEN in CI (no test left
       silently broken; fixes are real, not skips/deletes).
-- [ ] **AC-3.** All 5 removed from `KNOWN_UNENROLLED`; the allowlist shrinks
-      by exactly these 5.
+- [ ] **AC-3.** All 4 removed from `KNOWN_UNENROLLED`; the allowlist shrinks
+      by exactly these 4.
 - [ ] **AC-4.** Any package also on coverage `excludes` lifted to a per-file
       floor.
 - [ ] **AC-5.** `pre-commit run --all-files` + CI green.
