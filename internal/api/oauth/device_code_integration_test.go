@@ -74,7 +74,7 @@ func TestIntegrationDeviceFlow_EndToEnd(t *testing.T) {
 	// Step 1: initiate.
 	authForm := url.Values{}
 	authForm.Set("client_id", clientRow.ClientID)
-	authResp, authBody := postForm(t, srv.URL+"/oauth/device_authorization", authForm)
+	authResp, authBody := postFormTo(t, srv.URL+oauth.PathDeviceAuthorization, authForm)
 	if authResp.StatusCode != http.StatusOK {
 		t.Fatalf("device_authorization status = %d, body=%s", authResp.StatusCode, string(authBody))
 	}
@@ -97,7 +97,7 @@ func TestIntegrationDeviceFlow_EndToEnd(t *testing.T) {
 	pollForm.Set("grant_type", oauth.GrantTypeDeviceCode)
 	pollForm.Set("client_id", clientRow.ClientID)
 	pollForm.Set("device_code", auth.DeviceCode)
-	pollResp1, pollBody1 := postForm(t, srv.URL+"/oauth/token", pollForm)
+	pollResp1, pollBody1 := postForm(t, srv.URL, pollForm)
 	if pollResp1.StatusCode != http.StatusBadRequest {
 		t.Fatalf("pending poll status = %d (body %s), want 400", pollResp1.StatusCode, string(pollBody1))
 	}
@@ -129,7 +129,7 @@ func TestIntegrationDeviceFlow_EndToEnd(t *testing.T) {
 	time.Sleep(6 * time.Second)
 
 	// Step 4: poll for redemption.
-	pollResp2, pollBody2 := postForm(t, srv.URL+"/oauth/token", pollForm)
+	pollResp2, pollBody2 := postForm(t, srv.URL, pollForm)
 	if pollResp2.StatusCode != http.StatusOK {
 		t.Fatalf("approved poll status = %d (body %s), want 200", pollResp2.StatusCode, string(pollBody2))
 	}
@@ -144,7 +144,7 @@ func TestIntegrationDeviceFlow_EndToEnd(t *testing.T) {
 	// Step 5: replay - same device_code can NOT be redeemed again
 	// (P0-191-8). Wait for slow_down window again.
 	time.Sleep(6 * time.Second)
-	pollResp3, pollBody3 := postForm(t, srv.URL+"/oauth/token", pollForm)
+	pollResp3, pollBody3 := postForm(t, srv.URL, pollForm)
 	if pollResp3.StatusCode != http.StatusBadRequest {
 		t.Fatalf("replay status = %d (body %s), want 400", pollResp3.StatusCode, string(pollBody3))
 	}
@@ -193,7 +193,7 @@ func TestIntegrationDeviceFlow_SlowDown(t *testing.T) {
 
 	authForm := url.Values{}
 	authForm.Set("client_id", clientRow.ClientID)
-	_, authBody := postForm(t, srv.URL+"/oauth/device_authorization", authForm)
+	_, authBody := postFormTo(t, srv.URL+oauth.PathDeviceAuthorization, authForm)
 	var auth deviceAuthorizationResp
 	if err := json.Unmarshal(authBody, &auth); err != nil {
 		t.Fatalf("parse auth: %v", err)
@@ -205,13 +205,13 @@ func TestIntegrationDeviceFlow_SlowDown(t *testing.T) {
 	pollForm.Set("device_code", auth.DeviceCode)
 
 	// First poll: returns authorization_pending (allowed by tracker).
-	r1, _ := postForm(t, srv.URL+"/oauth/token", pollForm)
+	r1, _ := postForm(t, srv.URL, pollForm)
 	if r1.StatusCode != http.StatusBadRequest {
 		t.Fatalf("first poll status = %d, want 400", r1.StatusCode)
 	}
 
 	// Second poll immediately: should trip slow_down (429).
-	r2, body2 := postForm(t, srv.URL+"/oauth/token", pollForm)
+	r2, body2 := postForm(t, srv.URL, pollForm)
 	if r2.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("rapid poll status = %d, want 429 (body %s)", r2.StatusCode, string(body2))
 	}
@@ -225,6 +225,31 @@ func TestIntegrationDeviceFlow_SlowDown(t *testing.T) {
 	if retryAfter := r2.Header.Get("Retry-After"); retryAfter != "5" {
 		t.Errorf("Retry-After = %q, want 5", retryAfter)
 	}
+}
+
+// postFormTo posts a form to an EXPLICIT full URL. Unlike postForm
+// (which always targets the `/oauth/token` path), this helper lets the
+// device-flow tests hit `/oauth/device_authorization` directly. Slice
+// 314: the device integration tests previously misused postForm — they
+// passed `srv.URL+"/oauth/device_authorization"` as the base, which
+// postForm then suffixed with `/oauth/token`, yielding a 404. Because
+// the package was never enrolled in the CI integration job, the latent
+// test bug went undetected until slice 314's enrolment surfaced it.
+func postFormTo(t *testing.T, fullURL string, form url.Values) (*http.Response, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, fullURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	buf := make([]byte, 8192)
+	n, _ := resp.Body.Read(buf)
+	return resp, buf[:n]
 }
 
 // Helper response shapes — local to the integration test.

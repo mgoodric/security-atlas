@@ -93,7 +93,6 @@ internal/api/decisions
 internal/api/emptyset
 internal/api/freshnessdrift
 internal/api/me
-internal/api/oauth
 internal/api/policies
 internal/api/questionnaires
 internal/api/search
