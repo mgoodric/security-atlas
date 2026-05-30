@@ -58,42 +58,53 @@ const COOKIE_SENTINEL = "test-cookie-sentinel-do-not-log-abcdef";
 const RUN_AGAINST_PROD_BUILD = !!process.env.ATLAS_PROD_BUILD;
 
 test.describe("BFF cookie forwarding in production-build standalone", () => {
-  // Slice 387 — the standalone CI harness now EXISTS (the
-  // `Frontend · Playwright e2e (prod-build standalone)` job builds the
-  // `output: "standalone"` bundle, boots `node
-  // .next/standalone/web/server.js`, and sets ATLAS_PROD_BUILD=1). When
-  // slice 387 first ran this spec against that server, two body
-  // assumptions were exposed as dev-server-shaped (they had never run
-  // before — the guard had never been satisfied):
-  //   (1) "dashboard panel BFF returns JSON" asserts the browser fires
-  //       `/api/dashboard/` BFF fetches. Under the PRODUCTION build the
-  //       dashboard panels are server-rendered (RSC), so zero client-side
-  //       BFF calls fire — the page renders fully authenticated (auth
-  //       works; this is NOT the slice-146 cookie regression). The
-  //       `bffResponses.length > 0` assertion is therefore false for the
-  //       prod build and must be re-shaped (e.g. assert the panel content
-  //       resolved, not that a client BFF call occurred).
-  //   (2) "session cookie sentinel …" calls `context.addCookies` with
-  //       `domain: new URL(authedPage.url()).hostname` BEFORE any
-  //       navigation, so `authedPage.url()` is `about:blank` and the
-  //       hostname is empty → Playwright rejects the cookie.
-  // Fixing the body is out of slice 387's scope (which forbids touching
-  // spec bodies) and is filed as slice 399
-  // (docs/issues/399-bff-cookie-prod-build-spec-body-fix.md). Until 399
-  // lands, the slice-387 CI leg runs ONLY the logo spec and holds this
-  // one back; the guard below is retained unchanged. Runnable locally per
-  // the invocation block above (it will surface the two issues described).
+  // Slice 399 — re-shaped the two assertions so they validate the
+  // slice-146 NODE_ENV cookie behavior under the prod-build standalone
+  // server (slice 387's `Frontend · Playwright e2e (prod-build
+  // standalone)` job: build:standalone → `node
+  // .next/standalone/web/server.js` → ATLAS_PROD_BUILD=1). Slice 387's
+  // first real run of this spec exposed two dev-server-shaped assumptions
+  // (they had never executed — the guard had never been satisfied until
+  // 387 built the harness); 387 was forbidden from touching spec bodies
+  // and filed the fix as slice 399. The re-shape, per slice 399's
+  // decisions log:
+  //   (1) Assertion 1 no longer asserts a client-side `/api/dashboard/`
+  //       BFF-call COUNT (`bffResponses.length > 0`). Under the PRODUCTION
+  //       build the dashboard panels are server-rendered (RSC fetches the
+  //       data server-side during SSR), so zero client-side BFF calls
+  //       fire. The slice-146 regression (cookie dropped on the BFF
+  //       round-trip → proxy redirect to /login → JSON.parse of login HTML
+  //       → "Unexpected token '<'") is now guarded RSC-aware: the page
+  //       must render AUTHENTICATED (topbar "Sign out" present — proves the
+  //       cookie survived the standalone-transport round-trip) AND the
+  //       JSON-parse-HTML signature ("Unexpected token '<'") + the panel
+  //       error Alert must be ABSENT. The content-type guard is retained
+  //       but conditional: any `/api/dashboard/` response that IS observed
+  //       must be application/json (no-ops when none fire).
+  //   (2) Assertion 2's `context.addCookies` now derives the cookie domain
+  //       from the Playwright `baseURL` (the served origin), not from
+  //       `authedPage.url()` (which is `about:blank` before navigation →
+  //       empty hostname → Playwright rejects the cookie). Same pattern
+  //       fixtures.ts already uses for the bearer cookie.
+  // The `test.skip(!ATLAS_PROD_BUILD)` guard is retained (387 D3): it
+  // scopes the spec to the standalone leg and prevents green-washing
+  // against the dev server. Runnable locally per the invocation block
+  // above.
   test.skip(
     !RUN_AGAINST_PROD_BUILD,
-    "ATLAS_PROD_BUILD not set — runs under the prod-build standalone server (slice 387 CI leg or locally with ATLAS_PROD_BUILD=1); skipped against the dev server to avoid green-washing the standalone-only path. Body re-shape tracked in slice 399.",
+    "ATLAS_PROD_BUILD not set — runs under the prod-build standalone server (slice 387 CI leg or locally with ATLAS_PROD_BUILD=1); skipped against the dev server to avoid green-washing the standalone-only path.",
   );
 
   authed(
-    "dashboard panel BFF returns JSON, not the login HTML",
+    "dashboard renders authenticated (cookie survives), not the login HTML",
     async ({ authedPage }) => {
       // The fixture (web/e2e/fixtures.ts) has already injected the
-      // session cookie. Visit the dashboard so the React-Query panels
-      // fire their browser-side fetches against /api/dashboard/**.
+      // session cookie against the baseURL origin. Under the prod build
+      // the dashboard panels are server-rendered (RSC), so the data is
+      // fetched server-side during SSR — the browser fires zero (or few)
+      // client-side `/api/dashboard/` calls. We still capture any that DO
+      // fire so the JSON-not-HTML content-type guard executes when a
+      // browser-side BFF fetch exists; we do NOT require that one occurs.
       const bffResponses: Array<{ url: string; contentType: string }> = [];
       authedPage.on("response", (response) => {
         const url = response.url();
@@ -107,11 +118,36 @@ test.describe("BFF cookie forwarding in production-build standalone", () => {
 
       await authedPage.goto("/dashboard", { waitUntil: "networkidle" });
 
-      // Every BFF response we observed must be JSON. An HTML
-      // content-type is the exact regression signature — the
-      // proxy.ts redirected to /login and the browser fetch
-      // followed the redirect to the login HTML.
-      expect(bffResponses.length).toBeGreaterThan(0);
+      // (1) Authenticated render. If the slice-146 regression recurred,
+      // the cookie would drop on the BFF round-trip under the standalone
+      // server's plain-HTTP transport, the RSC fetch would fail auth, and
+      // the standalone server would render the login page. The topbar
+      // "Sign out" control is server-rendered only for an authenticated
+      // session (web/components/shell/topbar.tsx), so its presence proves
+      // the cookie survived the round-trip — the property slice 146 fixed.
+      await expect(
+        authedPage.getByRole("button", { name: "Sign out" }),
+      ).toBeVisible();
+
+      // (2) Regression signature absent. The classic slice-146 failure is
+      // a panel JSON.parse of login HTML throwing "Unexpected token '<'",
+      // surfaced in the panel error Alert ("Could not load this panel").
+      // Assert that signature does not appear, and that no dashboard panel
+      // is in its error state. Scoped to the regression signature, not a
+      // blanket "no panel ever errors" — a thin seed producing an
+      // unrelated panel error would not carry the HTML-parse string.
+      await expect(authedPage.getByText("Unexpected token '<'")).toHaveCount(0);
+      await expect(authedPage.locator('[data-testid$="-error"]')).toHaveCount(
+        0,
+      );
+
+      // (3) Content-type guard, conditional. Any `/api/dashboard/`
+      // response the browser DID observe must be application/json — an
+      // HTML content-type is the exact regression signature (proxy.ts
+      // redirected to /login and the fetch followed to login HTML). When
+      // the prod build fires zero client-side calls this loop is a clean
+      // no-op; it still guards the JSON-not-HTML property wherever a
+      // browser-side BFF fetch exists.
       for (const r of bffResponses) {
         expect
           .soft(r.contentType, `${r.url} returned non-JSON`)
@@ -122,14 +158,23 @@ test.describe("BFF cookie forwarding in production-build standalone", () => {
 
   authed(
     "session cookie sentinel never appears in browser-observable surfaces",
-    async ({ authedPage, context }) => {
+    async ({ authedPage, context, baseURL }) => {
       // Replace the fixture's cookie with one carrying our sentinel
       // value so we can prove the sentinel does not surface in any
       // log/response/console message during the dashboard render.
       // The sentinel is a neutral test string (P0-COOKIE-5); no
       // vendor-prefixed token prefix.
+      //
+      // Slice 399 — the cookie domain is derived from the Playwright
+      // `baseURL` (the served origin), NOT from `authedPage.url()`. Before
+      // any navigation `authedPage.url()` is `about:blank`, whose parsed
+      // hostname is empty, so Playwright rejects the cookie ("Cookie
+      // should have a url or a domain/path pair"). `baseURL` is always the
+      // real served origin, so the cookie is set against a valid domain
+      // regardless of navigation order — the same pattern fixtures.ts uses
+      // for the bearer cookie.
       await context.clearCookies();
-      const base = new URL(authedPage.url() || "http://localhost:3000");
+      const base = new URL(baseURL ?? "http://localhost:3000");
       await context.addCookies([
         {
           name: ATLAS_JWT_COOKIE,
