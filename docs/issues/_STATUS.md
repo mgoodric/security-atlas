@@ -3,7 +3,23 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 168 merged — slice 395 on main; 2 spillovers 397 + 398; 396 unblocked)
+**Last reconciled:** 2026-05-30 (batch 169 claim-stake — slices 387 + 398 → in-progress (N=2) · e2e prod-build CI harness + web tsc-noemit fixes · disjoint: ci.yml+web/e2e · web/scripts+web/lib-tests)
+
+## Drift detected — 2026-05-30 (batch 169 claim-stake · slices 387 + 398)
+
+Two-slice batch from the post-batch-168 ready set (all-web pool; picked the two clearly-isolated ones):
+
+- **387** (e2e prod-build standalone CI harness) — Quality/e2e · 1-2d · slice 351 spillover. Adds a CI job booting the Next.js production-build standalone server so the two re-quarantined prod-build specs (bff-cookie, logo-render) can run; ci.yml + package.json + web/e2e.
+- **398** (fix pre-existing tsc --noEmit errors in web test files) — Quality · 1h · slice 395 spillover. Fixes the 15 latent `tsc --noEmit` errors in untouched web test files (web/scripts + web/lib) that 395 surfaced.
+
+Conflict surface: disjoint — ci.yml+package.json+web/e2e (387) vs web/scripts+web/lib-test-files (398). Shared touch-points limited to CHANGELOG (append-safe). Zero migrations. OQ CLEAN.
+
+Deferred: 396 (barrel retire — sequenced after 387 since 387 may add a barrel importer), 397 (SESSION_COOKIE rename — golden-tier-sensitive, deliberate), 368 (cosign/solo), 390 (decompose).
+
+| Row | Transition              | Evidence                                                                                     |
+| --- | ----------------------- | -------------------------------------------------------------------------------------------- |
+| 387 | `ready` → `in-progress` | batch 169 claim-stake · branch `quality/387-e2e-prod-build-ci-harness` · slice 351 spillover |
+| 398 | `ready` → `in-progress` | batch 169 claim-stake · branch `quality/398-web-tsc-noemit-fixes` · slice 395 spillover      |
 
 ## Drift detected — 2026-05-30 (parallel batch 168 merged · slice 395 solo)
 
