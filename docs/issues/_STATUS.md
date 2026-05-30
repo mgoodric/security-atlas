@@ -3,7 +3,17 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 173 merged — slice 401 on main; integration-drain batch 1 done; 402 unblocked)
+**Last reconciled:** 2026-05-30 (batch 174 claim-stake — slice 402 → in-progress (N=1 solo) · integration-enrolment drain batch 2)
+
+## Drift detected — 2026-05-30 (batch 174 claim-stake · slice 402 solo)
+
+- **402** (integration-enrolment drain batch 2, slice 390) — infra · AFK. Enrols the admin-creds surface — `internal/api/adminauditlog`, `internal/api/adminauthzbundle`, `internal/api/admincreds`, `internal/api/admindemo`, `internal/api/adminsso` (5 pkgs) — in ci.yml's integration job. Per package: enrol → run suite → FIX whatever silently broke (no skip/delete; spillover a real product bug) → shrink `KNOWN_UNENROLLED` 33→28 → lift coverage excludes (distinguish real floor from transitive-load phantom per slice 396/401).
+
+Run SOLO (N=1): drain batches surface unpredictable test breakage (314 found a 5-slice-old bug; 401 found none — variance is real). 409 (dashboard contract-tier, JUDGMENT DB-seam fork) deferred to next iteration. 400 is the maintainer cosign gate. OQ CLEAN; zero migrations.
+
+| Row | Transition              | Evidence                                                                                       |
+| --- | ----------------------- | ---------------------------------------------------------------------------------------------- |
+| 402 | `ready` → `in-progress` | batch 174 claim-stake · branch `infra/402-integration-drain-batch-2` · slice 390 drain batch 2 |
 
 ## Drift detected — 2026-05-30 (parallel batch 173 merged · slice 401 solo)
 
