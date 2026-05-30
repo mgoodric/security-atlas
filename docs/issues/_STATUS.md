@@ -3,7 +3,25 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 166 claim-stake — slices 353 + 388 + 392 → in-progress · QA tactical bundle + board-pack e2e + contract-test rollout · disjoint trees: docs+dbx · web/e2e · provider-recorders+web/lib/contracts)
+**Last reconciled:** 2026-05-30 (batch 166 merged — slices 353 + 388 + 392 on main; 2 spillovers 393 + 394; one 393-collision resolved)
+
+## Drift detected — 2026-05-30 (parallel batch 166 merged + 2 spillovers)
+
+All three batch-166 slices merged to main.
+
+- **388** board-pack export end-to-end e2e → merged at `259454e5` via #883 (closes slice 351 spillover). Deterministic spec (3/3 under --repeat-each); two reusable patterns captured (target="\_blank" downloads via context.waitForEvent; popup mocks via context.route).
+- **392** contract-test-tier rollout → merged at `7d817d5c` via #884 (closes slice 349 spillover). Golden-file tier extended to `/v1/version`, `/v1/me`, `/v1/admin/demo/status`; `/v1/metrics` deferred (no interface seam → would break ADR-0007 zero-new-gate). Spillover 394 (e2e mocks load from goldens).
+- **353** QA strategy tactical round 1 → merged at `31a0ed58` via #885 (closes slice 333 bundle). 9 findings across 5 sub-themes: CLAUDE.md test-tier + detection-tier conventions, coverage-exclude justifications + parity lint, assertion-density advisory, integration wall-clock recorder, fix-forward-rate metric, ADR-0008 (demoseed convergence) + ADR-0009 (ui-honesty promotion). CI wiring of the three new scripts deferred to spillover 393 (mirrors 369→391).
+
+**Spillover-number collision resolved:** both 392 and 353 filed slice 393. Final: 393 = `393-qa-tactical-ci-wiring.md` (353; heavier-referenced — kept), 394 = `394-e2e-mocks-load-from-contract-goldens.md` (392; renamed, self-refs fixed). No code-ref impact.
+
+| Row | Transition               | Evidence                                                                                                      |
+| --- | ------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| 353 | `in-progress` → `merged` | merged at `31a0ed58` via #885 (ADR-0008/0009; spillover 393)                                                  |
+| 388 | `in-progress` → `merged` | merged at `259454e5` via #883                                                                                 |
+| 392 | `in-progress` → `merged` | merged at `7d817d5c` via #884 (spillover 394)                                                                 |
+| 393 | (new row) → `ready`      | spec `393-qa-tactical-ci-wiring.md` · slice 353 spillover · wire 3 QA scripts into ci.yml (dep #353)          |
+| 394 | (new row) → `not-ready`  | spec `394-e2e-mocks-load-from-contract-goldens.md` · slice 392 spillover · blocked on broader golden coverage |
 
 ## Drift detected — 2026-05-30 (batch 166 claim-stake · slices 353 + 388 + 392)
 
