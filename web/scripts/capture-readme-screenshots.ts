@@ -142,7 +142,12 @@ function log(msg: string): void {
 // information-disclosure posture. A capture run that aborts is cheap
 // to retry; a screenshot of a real tenant in the public README is
 // permanent and unrecoverable.
-export function assertCaptureSafe(env: NodeJS.ProcessEnv = process.env): void {
+export function assertCaptureSafe(
+  // Accepts a partial environment: the gate only reads `ATLAS_DEMO_SEED`
+  // and `ATLAS_HTTP_URL`, so callers (and tests) may pass a subset. The
+  // `process.env` default (a full `NodeJS.ProcessEnv`) remains assignable.
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): void {
   // Gate 1 — `ATLAS_DEMO_SEED=1` operator affirmation. The literal "1"
   // is intentional. We do NOT accept "true" / "yes" / "on" because
   // ambiguity creates false-positive bypass paths via a typo.
