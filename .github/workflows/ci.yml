@@ -408,7 +408,12 @@ jobs:
             ./internal/api/adminauthzbundle/... \
             ./internal/api/admincreds/... \
             ./internal/api/admindemo/... \
-            ./internal/api/adminsso/...
+            ./internal/api/adminsso/... \
+            ./internal/api/adminusers/... \
+            ./internal/api/aggregationrules/... \
+            ./internal/api/me/... \
+            ./internal/api/decisions/... \
+            ./internal/api
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:

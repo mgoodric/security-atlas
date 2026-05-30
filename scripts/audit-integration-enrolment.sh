@@ -79,15 +79,10 @@ CI_YML="${AUDIT_ENROL_CI_YML:-$REPO_ROOT/.github/workflows/ci.yml}"
 # category (c) TEST_PRESENT).
 # --------------------------------------------------------------------
 read -r -d '' KNOWN_UNENROLLED <<'WAIVED' || true
-internal/api
-internal/api/adminusers
-internal/api/aggregationrules
 internal/api/board
 internal/api/calendar
-internal/api/decisions
 internal/api/emptyset
 internal/api/freshnessdrift
-internal/api/me
 internal/api/policies
 internal/api/questionnaires
 internal/api/search
