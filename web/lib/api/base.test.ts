@@ -1,4 +1,7 @@
-// Slice 069 — vitest seed coverage for lib/api.ts URL resolution.
+// Slice 069 — vitest seed coverage for lib/api/base.ts URL resolution.
+// (Slice 370 split the api god-file into per-domain modules; slice 396
+// retired the `lib/api.ts` barrel, so this test imports `apiBaseURL`
+// from `./base` directly — its real home — instead of the old barrel.)
 //
 // The function under test (`apiBaseURL`) picks the right HTTP base URL
 // per execution context:
@@ -13,7 +16,7 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { apiBaseURL } from "./api";
+import { apiBaseURL } from "./base";
 
 describe("apiBaseURL — server context (typeof window === undefined)", () => {
   // The test runtime is `node` (see vitest.config.ts) → `window` is

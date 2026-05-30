@@ -3,15 +3,15 @@
 **Cluster:** Web
 **Estimate:** 0.5d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `in-review`
 
-> **Unblocked 2026-05-30.** Dep #395 (Phase 2) is merged and the
-> precondition is verified: `grep -rnE "['\"]@/lib/api['\"]" web/` (excluding
-> the per-domain `@/lib/api/<domain>` paths) returns ZERO hits — no module
-> imports the bare barrel anymore. The sole remaining match was a stale
-> illustrative comment in `web/vitest.config.ts:63`, corrected in the same
-> change that flipped this status. Slice 396 may now proceed to delete the
-> barrel.
+> **Implemented 2026-05-30.** Barrel `web/lib/api.ts` deleted; the
+> `apiBaseURL` test moved to `web/lib/api/base.test.ts` (imports `./base`);
+> coverage thresholds reconciled (removed the `lib/api.ts` floor + four
+> phantom artifact floors — see decisions log D2). All gates green: tsc, lint,
+> 1204 vitest, `next build` (106/106). Completes the slice-370 lineage
+> (370 → 395 → 396). Decisions log:
+> `docs/audit-log/396-web-api-barrel-retire-decisions.md`.
 
 ## Narrative
 
@@ -37,11 +37,12 @@ not a permanent layer (slice 370 P0-370-3).
 
 ## Acceptance criteria
 
-- [ ] **AC-1.** `web/lib/api.ts` deleted; no broken imports.
-- [ ] **AC-2.** `tsc --noEmit`, `npm run lint`, `npm run test`, Playwright
-      e2e all pass.
-- [ ] **AC-3.** Coverage thresholds reconciled (barrel floor removed; no
-      aggregate regression).
+- [x] **AC-1.** `web/lib/api.ts` deleted; no broken imports (`next build` 106/106).
+- [x] **AC-2.** `tsc --noEmit`, `npm run lint`, `npm run test` (1204/1204),
+      `next build` all pass locally; Playwright e2e runs in CI.
+- [x] **AC-3.** Coverage thresholds reconciled (barrel floor removed; 4 phantom
+      artifact floors removed per P0-347-3 — see decisions log D2; no
+      real-coverage regression).
 
 ## Dependencies
 
