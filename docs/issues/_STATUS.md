@@ -3,7 +3,25 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 167 claim-stake — slices 370 + 393 → in-progress (N=2) · web/lib api-client split + QA-tactical CI wiring · disjoint trees: web/ · ci.yml+justfile)
+**Last reconciled:** 2026-05-30 (batch 167 merged — slices 370 + 393 on main; 2 spillovers 395 + 396; no collision)
+
+## Drift detected — 2026-05-30 (parallel batch 167 merged)
+
+Both batch-167 slices merged to main.
+
+- **370** web/lib/api.ts split → merged at `8954d33c` via #889 (closes slice 328 H-2). Phase 1: 2901-LOC / 219-export god-file split into 17 per-domain modules + `_shared.ts` behind a backward-compat barrel (`export *` from `lib/api.ts`) — ZERO import-site churn (all 176 sites keep working), 219→219 export surface preserved, `max-lines:600` eslint rule added to prevent re-accretion, coverage floors re-seeded. Full `next build` green. Phase 2 (import-site migration + SESSION_COOKIE rename) → spillover 395; Phase 3 (barrel retire) → spillover 396.
+- **393** wire QA-tactical scripts into CI → merged at `9aa2452f` via #888 (closes slice 353 spillover). Q-5 coverage-excludes parity hard-fail job, Q-6 assertion-density advisory, Q-8 clean-main wall-clock watermark recorder.
+
+Process note: no collision this batch (only 370 filed spillovers 395/396); both slices merged CLEAN, no flake/coverage trips.
+
+**POOL STATUS — continuous-batch loop near terminus.** After batch 167 the ready pool is down to special-handling slices only: 368 (OSCAL cosign, 5d, external cosign binary + Sigstore — needs a SOLO run), 387 (e2e prod-build standalone CI harness — ci.yml + web/e2e), 390 (38-package integration-enrolment backlog drain — needs decomposition; enabling dormant suites risks surfacing latent failures), 394 (e2e-mocks-from-goldens — not-ready/blocked), 395 (web api import-site migration — ready), 396 (barrel retire — blocked on 395). The clean, bounded, conflict-safe continuous-batch work is drained; remaining ready slices either need deliberate/solo handling (368/390) or are themselves follow-ons (387/395). Recommend the maintainer triage 368/390 directly.
+
+| Row | Transition               | Evidence                                                                   |
+| --- | ------------------------ | -------------------------------------------------------------------------- |
+| 370 | `in-progress` → `merged` | merged at `8954d33c` via #889 (barrel split; spillovers 395/396)           |
+| 393 | `in-progress` → `merged` | merged at `9aa2452f` via #888                                              |
+| 395 | (new row) → `ready`      | spec `395-web-api-import-site-migration.md` · slice 370 Phase 2 (dep #370) |
+| 396 | (new row) → `not-ready`  | spec `396-web-api-barrel-retire.md` · slice 370 Phase 3 (blocked on #395)  |
 
 ## Drift detected — 2026-05-30 (batch 167 claim-stake · slices 370 + 393)
 
