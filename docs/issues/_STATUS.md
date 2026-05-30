@@ -3,7 +3,17 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 176 merged — slice 404 on main; drain 20/38; 405 unblocked)
+**Last reconciled:** 2026-05-30 (batch 177 claim-stake — slice 405 → in-progress (N=1 solo) · integration-enrolment drain batch 5)
+
+## Drift detected — 2026-05-30 (batch 177 claim-stake · slice 405 solo)
+
+- **405** (integration-enrolment drain batch 5, slice 390) — infra · AFK. Enrols api domain handlers B — `internal/api/questionnaires`, `internal/api/ucfcoverage`, `internal/api/emptyset`, `internal/api/freshnessdrift`, `internal/audit/notes` (5 pkgs) — in ci.yml's integration job (per-leaf form). Per package: enrol → run suite → FIX whatever broke (no skip/delete; one-liner product bug → fix in-place per 402, real design work → spillover+skip-that-test) → shrink `KNOWN_UNENROLLED` 18→13 → lift coverage excludes (real floor vs phantom per 396/401-404).
+
+Run SOLO (N=1): drain batches surface unpredictable breakage (314+402 found real bugs; 401/403/404 clean). 409 (dashboard contract-tier, JUDGMENT) deferred. 400 = maintainer cosign gate. OQ CLEAN; zero migrations.
+
+| Row | Transition              | Evidence                                                                                       |
+| --- | ----------------------- | ---------------------------------------------------------------------------------------------- |
+| 405 | `ready` → `in-progress` | batch 177 claim-stake · branch `infra/405-integration-drain-batch-5` · slice 390 drain batch 5 |
 
 ## Drift detected — 2026-05-30 (parallel batch 176 merged · slice 404 solo)
 
