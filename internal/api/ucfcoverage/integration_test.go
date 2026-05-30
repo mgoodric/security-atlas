@@ -730,6 +730,28 @@ func seedEvaluation(t *testing.T, tenant string, controlID uuid.UUID, result str
 	}
 }
 
+// seedScopeCell inserts one scope_cells row for the tenant so that a
+// control with the legacy match-all applicability_expr ("") resolves to a
+// non-empty applicability universe. Slice 256's in-scope coverage test
+// needs at least one cell in the universe; without it the intersection in
+// frameworkscope.EffectiveScope is empty and every row renders n/a. Uses
+// the admin pool so RLS does not block setup.
+func seedScopeCell(t *testing.T, tenant string) {
+	t.Helper()
+	pool := openPool(t, adminDSN(t))
+	defer pool.Close()
+	const dims = `{"env":"prod"}`
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO scope_cells (id, tenant_id, label, dimensions, dimensions_hash)
+		 VALUES ($1, $2, 'slice256-inscope', $3::jsonb,
+		         encode(digest($3::text, 'sha256'), 'hex'))
+		 ON CONFLICT DO NOTHING`,
+		uuid.New(), tenant, dims,
+	); err != nil {
+		t.Fatalf("seed scope_cell: %v", err)
+	}
+}
+
 // firstFrameworkVersionID returns the framework_version_id of the first
 // SOC 2 row in the catalog. Slice 256's coverage tests need a known fv
 // to activate a framework_scope against.
@@ -750,8 +772,12 @@ func soc2017FrameworkVersionID(t *testing.T) uuid.UUID {
 }
 
 // wipeTenantState clears the per-tenant working set that slice 256
-// tests rely on: controls, evaluations, framework_scopes. Catalog rows
-// (scf_anchors / framework_versions / etc.) stay intact.
+// tests rely on: controls, evaluations, framework_scopes, scope_cells.
+// Catalog rows (scf_anchors / framework_versions / etc.) stay intact.
+// scope_cells is cleared so the in-scope test's seeded cell does not leak
+// into the out-of-scope / no-data tests within the same run (deleted last
+// because control_evaluations FK-references it ON DELETE CASCADE — and
+// evaluations are already cleared above).
 func wipeTenantState(t *testing.T) {
 	t.Helper()
 	pool := openPool(t, adminDSN(t))
@@ -760,6 +786,7 @@ func wipeTenantState(t *testing.T) {
 		`DELETE FROM control_evaluations`,
 		`DELETE FROM framework_scopes`,
 		`DELETE FROM controls`,
+		`DELETE FROM scope_cells`,
 	} {
 		if _, err := pool.Exec(context.Background(), q); err != nil {
 			t.Fatalf("wipe (%s): %v", q, err)
@@ -779,6 +806,16 @@ func TestControlCoverage_Slice256_InScopeRowReturnsNumeric(t *testing.T) {
 	cid := seedControl(t, tenantA, "IAC-06", "test-mfa-256-inscope", "MFA Enforcement (256-inscope)")
 	soc2FVID := soc2017FrameworkVersionID(t)
 	seedActivatedFrameworkScope(t, tenantA, soc2FVID, "SOC 2 — Test Activated")
+
+	// The control's applicability_expr is the legacy match-all (""), which
+	// scope.ControlApplicability resolves against the tenant's scope-cell
+	// universe. With zero cells the universe is empty, the intersection is
+	// empty, and the row renders out-of-scope (coverage null) — the correct
+	// product behaviour, but not what THIS test exercises. Seed one cell so
+	// the match-all applicability has a non-empty universe and the row is
+	// genuinely in scope. (Slice 405: this seed was missing, so the test
+	// silently relied on a stray scope_cells row and never ran in CI.)
+	seedScopeCell(t, tenantA)
 
 	now := time.Now().UTC()
 	seedEvaluation(t, tenantA, cid, "pass", now.Add(-1*time.Hour))

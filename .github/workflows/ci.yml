@@ -418,6 +418,11 @@ jobs:
             ./internal/api/policies/... \
             ./internal/api/vendors/... \
             ./internal/api/search/... \
+            ./internal/api/questionnaires/... \
+            ./internal/api/ucfcoverage/... \
+            ./internal/api/emptyset/... \
+            ./internal/api/freshnessdrift/... \
+            ./internal/audit/notes/... \
             ./internal/api
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
