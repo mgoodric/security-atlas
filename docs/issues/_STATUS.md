@@ -3,7 +3,25 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 165 merged — slices 349 + 389 + 391 on main; 1 spillover 392; no collision this batch)
+**Last reconciled:** 2026-05-30 (batch 166 claim-stake — slices 353 + 388 + 392 → in-progress · QA tactical bundle + board-pack e2e + contract-test rollout · disjoint trees: docs+dbx · web/e2e · provider-recorders+web/lib/contracts)
+
+## Drift detected — 2026-05-30 (batch 166 claim-stake · slices 353 + 388 + 392)
+
+Three-slice continuous-loop batch from the post-batch-165 ready set (bounded picks; big slices deferred — see note):
+
+- **353** (QA strategy tactical round 1) — Quality · 2-3d · slice 333 multi-finding bundle. Docs + `internal/db/dbx`.
+- **388** (board-pack export end-to-end e2e) — Quality/e2e · 1d · slice 351 spillover. `web/e2e` only.
+- **392** (contract-test-tier rollout) — Quality · 1-2d · slice 349 spillover. Extends the golden-file contract tier (ADR-0007) to more BFF↔platform endpoints; `internal/api` provider recorders + `web/lib/contracts`.
+
+Conflict surface: disjoint — docs+dbx (353) vs web/e2e (388) vs provider-recorders+web/lib/contracts (392). Only 392 may touch ci.yml (sole toucher). Shared touch-points limited to CHANGELOG (append-safe). Zero migrations. Open-questions check: CLEAN.
+
+**Deferred — need deliberate handling (maintainer attention):** 368 (OSCAL cosign, 5d, external cosign binary + Sigstore — solo run, deferred batches 162-166); 390 (38-package integration-enrolment backlog drain — its own doc estimates "6-10 sub-slices" and enabling dormant suites risks surfacing latent failures; needs decomposition); 370 (web/lib/api.ts 2901-LOC split — wide web churn; next big-slice candidate). The continuous-batch ready pool is thinning to these special-handling slices.
+
+| Row | Transition              | Evidence                                                                                      |
+| --- | ----------------------- | --------------------------------------------------------------------------------------------- |
+| 353 | `ready` → `in-progress` | batch 166 claim-stake · branch `quality/353-qa-strategy-tactical-round-1`                     |
+| 388 | `ready` → `in-progress` | batch 166 claim-stake · branch `quality/388-e2e-board-pack-export` · slice 351 spillover      |
+| 392 | `ready` → `in-progress` | batch 166 claim-stake · branch `quality/392-contract-test-tier-rollout` · slice 349 spillover |
 
 ## Drift detected — 2026-05-30 (parallel batch 165 merged)
 
