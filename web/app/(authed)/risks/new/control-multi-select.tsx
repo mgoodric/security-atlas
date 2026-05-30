@@ -30,7 +30,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
-import { fetchTenantControlsList, TenantControl } from "@/lib/api";
+import {
+  fetchTenantControlsList,
+  TenantControl,
+} from "@/lib/api/controls-list";
 
 type Props = {
   selectedIds: string[];

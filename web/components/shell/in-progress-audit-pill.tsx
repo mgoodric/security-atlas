@@ -35,7 +35,7 @@ import {
   fetchAuditPeriods,
   type AuditPeriod,
   type AuditPeriodsListResponse,
-} from "@/lib/api";
+} from "@/lib/api/audit-periods";
 
 /**
  * The literal status the period must carry to qualify for the pill.

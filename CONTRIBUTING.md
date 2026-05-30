@@ -498,7 +498,7 @@ allowlist. **When you add a new `integration_test.go`, add the matching
 
 The `KNOWN_UNENROLLED` allowlist records the 38-package enrolment
 backlog that existed when the guard shipped (catalogued by slice 348,
-drained by slice 387). It is a **ratchet — it only ever shrinks**; each
+drained by slice 390). It is a **ratchet — it only ever shrinks**; each
 enrolment PR removes its package from the allowlist as it adds it to the
 `ci.yml` list. Adding a new entry to the allowlist is a code smell that
 needs explicit justification in the PR.

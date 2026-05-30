@@ -22,7 +22,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { apiBaseURL } from "@/lib/api";
+import { apiBaseURL } from "@/lib/api/base";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 // Headers forwarded from upstream response to browser. Content-Type +

@@ -33,7 +33,7 @@
 // Pure function; vitest-covered in `credential-bearer.test.ts`. No JSX,
 // no fetch, no React import; safe to import from anywhere.
 
-import type { MeProfile } from "@/lib/api";
+import type { MeProfile } from "@/lib/api/me";
 
 /**
  * The Profile-shape inputs the detector needs. Pick<>'d so callers can

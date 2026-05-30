@@ -41,14 +41,14 @@ import {
   DecisionTimelinePanel,
   type TimelineFilters,
 } from "@/components/risk-hierarchy/decision-timeline-panel";
+import { APIError } from "@/lib/api/base";
 import {
-  APIError,
   fetchHierarchyAggregationRules,
   fetchHierarchyDecisions,
   fetchHierarchyOrgUnits,
   fetchHierarchyOverdueDecisions,
   fetchHierarchyThemes,
-} from "@/lib/api";
+} from "@/lib/api/risk-hierarchy";
 
 // ----- URL <-> filter-state codec -----
 

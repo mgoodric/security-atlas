@@ -14,7 +14,7 @@ import {
   createAdminTenant,
   listAdminTenants,
   type CreateTenantRequest,
-} from "@/lib/api";
+} from "@/lib/api/admin";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 export async function GET() {

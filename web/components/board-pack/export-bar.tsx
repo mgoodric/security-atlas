@@ -15,7 +15,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { boardPackMarkdownURL, boardPackPdfURL } from "@/lib/api";
+import { boardPackMarkdownURL, boardPackPdfURL } from "@/lib/api/board";
 import { cn } from "@/lib/utils";
 import { PackBreadcrumb } from "./pack-breadcrumb";
 

@@ -3,7 +3,198 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-29 (batch 164 claim-stake — slices 345 + 351 + 369 → in-progress · CI integration-enrolment discovery + e2e flow-gap fill + httpresp helper consolidation · disjoint trees: .github/workflows · web/e2e · internal/api)
+**Last reconciled:** 2026-05-30 (batch 169 merged — slices 387 + 398 on main; 1 spillover 399; no collision)
+
+## Drift detected — 2026-05-30 (parallel batch 169 merged)
+
+Both batch-169 slices merged to main.
+
+- **387** e2e prod-build standalone CI harness → merged at `a497e20e` via #896 (closes slice 351 spillover). New `frontend-playwright-prod-build` CI job builds + boots the Next.js `output:"standalone"` server and runs the logo-render prod-build spec (slice-153 regression now gated every PR). The bff-cookie spec surfaced dev-server-shaped assumptions under the prod build (NOT a product regression — auth carries through, panels are server-rendered) → job shipped advisory+logo-only, cookie spec body fix → spillover 399.
+- **398** fix pre-existing tsc --noEmit errors in web test files → merged at `5c36c52c` via #895 (closes slice 395 spillover). All 15 latent type errors fixed properly (no paper-overs); `cd web && npx tsc --noEmit` now clean. Closes the latent-breakage finding 395 surfaced.
+
+Process note: no collision (only 387 filed a spillover, 399); 398 self-healed the tsc gap the loop itself surfaced in batch 168.
+
+**POOL STATUS:** remaining ready pool = 396 (web api barrel retire — Phase 3 of 370, completes the lineage), 397 (SESSION_COOKIE rename — golden-tier deliberate), 399 (bff-cookie prod-build spec body fix — dep #387 merged). Special-handling: 368 (cosign/solo), 390 (38-pkg drain/decompose). 396/397/399 are all web → mind mutual conflict.
+
+| Row | Transition               | Evidence                                                                                                                                 |
+| --- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| 387 | `in-progress` → `merged` | merged at `a497e20e` via #896 (prod-build CI harness; spillover 399)                                                                     |
+| 398 | `in-progress` → `merged` | merged at `5c36c52c` via #895 (tsc --noEmit clean)                                                                                       |
+| 399 | (new row) → `ready`      | spec `399-bff-cookie-prod-build-spec-body-fix.md` · slice 387 spillover (dep #387) · re-shape cookie spec + make prod-build job blocking |
+
+## Drift detected — 2026-05-30 (batch 169 claim-stake · slices 387 + 398)
+
+Two-slice batch from the post-batch-168 ready set (all-web pool; picked the two clearly-isolated ones):
+
+- **387** (e2e prod-build standalone CI harness) — Quality/e2e · 1-2d · slice 351 spillover. Adds a CI job booting the Next.js production-build standalone server so the two re-quarantined prod-build specs (bff-cookie, logo-render) can run; ci.yml + package.json + web/e2e.
+- **398** (fix pre-existing tsc --noEmit errors in web test files) — Quality · 1h · slice 395 spillover. Fixes the 15 latent `tsc --noEmit` errors in untouched web test files (web/scripts + web/lib) that 395 surfaced.
+
+Conflict surface: disjoint — ci.yml+package.json+web/e2e (387) vs web/scripts+web/lib-test-files (398). Shared touch-points limited to CHANGELOG (append-safe). Zero migrations. OQ CLEAN.
+
+Deferred: 396 (barrel retire — sequenced after 387 since 387 may add a barrel importer), 397 (SESSION_COOKIE rename — golden-tier-sensitive, deliberate), 368 (cosign/solo), 390 (decompose).
+
+| Row | Transition              | Evidence                                                                                     |
+| --- | ----------------------- | -------------------------------------------------------------------------------------------- |
+| 387 | `ready` → `in-progress` | batch 169 claim-stake · branch `quality/387-e2e-prod-build-ci-harness` · slice 351 spillover |
+| 398 | `ready` → `in-progress` | batch 169 claim-stake · branch `quality/398-web-tsc-noemit-fixes` · slice 395 spillover      |
+
+## Drift detected — 2026-05-30 (parallel batch 168 merged · slice 395 solo)
+
+- **395** web api import-site migration → merged at `5f1e2169` via #892 (slice 370 Phase 2). 177 `@/lib/api` import sites migrated to per-domain `@/lib/api/<domain>` modules (codemod derived from the 219 export symbols). Barrel preserved (396 retires it). Full `next build` green (106/106 pages). SESSION_COOKIE rename deferred → spillover 397 (atomic rename would touch golden-tier `web/lib/contracts/`, out of brief). CLEAN.
+
+**Spillovers filed (no collision — solo slice):**
+
+- **397** (SESSION_COOKIE → ATLAS_JWT_COOKIE symbol rename) — slice 328 M-3; touches golden-tier contracts, so needs deliberate handling. Status `ready`.
+- **398** (pre-existing `tsc --noEmit` errors in web test files) — **latent-issue finding:** 395 discovered `tsc --noEmit` is ALREADY red on `main` (15 errors in 3 untouched web test files, e.g. `web/scripts/capture-readme-screenshots.test.ts`); verified via stash-diff that 395 introduced zero. CI does NOT run bare `tsc` over `web/scripts/` so this slipped — analogous to the slice-345 38-pkg integration gap. Status `ready`. **Maintainer attention recommended.**
+
+**Now-unblocked:** 396 (web api barrel retire — Phase 3 of 370) flips `not-ready` → `ready` (dep #395 now merged).
+
+**POOL STATUS:** clean ready pool after this batch = 387 (e2e prod-build CI harness), 396 (barrel retire — newly unblocked), 397 (cookie rename — golden-tier, deliberate), 398 (tsc fixes). Special-handling: 368 (cosign/solo), 390 (decompose). The 370 web-refactor lineage (Phase 1→2→3: 370→395→396) is one slice from complete.
+
+| Row | Transition               | Evidence                                                                                                       |
+| --- | ------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| 395 | `in-progress` → `merged` | merged at `5f1e2169` via #892 (177 sites; spillovers 397/398)                                                  |
+| 396 | `not-ready` → `ready`    | dep #395 merged — barrel retire (slice 370 Phase 3) now pickable                                               |
+| 397 | (new row) → `ready`      | spec `397-session-cookie-symbol-rename.md` · slice 328 M-3 / 395 spillover · golden-tier touch                 |
+| 398 | (new row) → `ready`      | spec `398-web-tsc-noemit-pre-existing-test-type-errors.md` · 395 spillover · pre-existing tsc breakage on main |
+
+## Drift detected — 2026-05-30 (batch 168 claim-stake · slice 395 solo)
+
+Single-slice batch (N=1). 395 run solo because its wide `@/lib/api` import-path churn touches `web/e2e` (board-pack-export-e2e.spec.ts imports `@/lib/api`), which the other ready slice 387 also needs — pairing would conflict.
+
+- **395** (web api import-site migration) — Web · 1d · slice 370 Phase 2 (dep #370 merged). Migrates all `@/lib/api` barrel imports to the per-domain `@/lib/api/<domain>` paths across web/, plus the slice-328 M-3 `SESSION_COOKIE` rename. Unblocks 396 (barrel retire) on merge.
+
+Open-questions check: CLEAN. Zero migrations. Deferred: 387 (next batch — pairs poorly with 395's web/e2e churn), 368 (cosign/solo), 390 (decompose).
+
+| Row | Transition              | Evidence                                                                               |
+| --- | ----------------------- | -------------------------------------------------------------------------------------- |
+| 395 | `ready` → `in-progress` | batch 168 claim-stake · branch `web/395-api-import-site-migration` · slice 370 Phase 2 |
+
+## Drift detected — 2026-05-30 (parallel batch 167 merged)
+
+Both batch-167 slices merged to main.
+
+- **370** web/lib/api.ts split → merged at `8954d33c` via #889 (closes slice 328 H-2). Phase 1: 2901-LOC / 219-export god-file split into 17 per-domain modules + `_shared.ts` behind a backward-compat barrel (`export *` from `lib/api.ts`) — ZERO import-site churn (all 176 sites keep working), 219→219 export surface preserved, `max-lines:600` eslint rule added to prevent re-accretion, coverage floors re-seeded. Full `next build` green. Phase 2 (import-site migration + SESSION_COOKIE rename) → spillover 395; Phase 3 (barrel retire) → spillover 396.
+- **393** wire QA-tactical scripts into CI → merged at `9aa2452f` via #888 (closes slice 353 spillover). Q-5 coverage-excludes parity hard-fail job, Q-6 assertion-density advisory, Q-8 clean-main wall-clock watermark recorder.
+
+Process note: no collision this batch (only 370 filed spillovers 395/396); both slices merged CLEAN, no flake/coverage trips.
+
+**POOL STATUS — continuous-batch loop near terminus.** After batch 167 the ready pool is down to special-handling slices only: 368 (OSCAL cosign, 5d, external cosign binary + Sigstore — needs a SOLO run), 387 (e2e prod-build standalone CI harness — ci.yml + web/e2e), 390 (38-package integration-enrolment backlog drain — needs decomposition; enabling dormant suites risks surfacing latent failures), 394 (e2e-mocks-from-goldens — not-ready/blocked), 395 (web api import-site migration — ready), 396 (barrel retire — blocked on 395). The clean, bounded, conflict-safe continuous-batch work is drained; remaining ready slices either need deliberate/solo handling (368/390) or are themselves follow-ons (387/395). Recommend the maintainer triage 368/390 directly.
+
+| Row | Transition               | Evidence                                                                   |
+| --- | ------------------------ | -------------------------------------------------------------------------- |
+| 370 | `in-progress` → `merged` | merged at `8954d33c` via #889 (barrel split; spillovers 395/396)           |
+| 393 | `in-progress` → `merged` | merged at `9aa2452f` via #888                                              |
+| 395 | (new row) → `ready`      | spec `395-web-api-import-site-migration.md` · slice 370 Phase 2 (dep #370) |
+| 396 | (new row) → `not-ready`  | spec `396-web-api-barrel-retire.md` · slice 370 Phase 3 (blocked on #395)  |
+
+## Drift detected — 2026-05-30 (batch 167 claim-stake · slices 370 + 393)
+
+Two-slice continuous-loop batch (N=2 — pool thinning; see note). Disjoint:
+
+- **370** (web/lib/api.ts 2901-LOC split) — Web · 3d · closes slice 328 H-2. Splits the 219-export god-file into per-domain files under `web/lib/api/` + updates import sites across web/; manages slice-347 per-file vitest floors for the new files.
+- **393** (wire QA-tactical scripts into CI) — Infra · 0.5d · closes slice 353 spillover. Adds the slice-353 scripts (coverage-exclude parity lint hard-fail, assertion-density advisory, integration wall-clock watermark) as ci.yml steps + justfile targets.
+
+Conflict surface: disjoint — web/ (370) vs ci.yml+justfile (393). Shared touch-points limited to CHANGELOG (append-safe). Zero migrations. Open-questions check: CLEAN.
+
+**Pool-thinning note:** clean bounded ready pool nearly drained. After this batch the remaining ready pool is 368 (cosign — needs SOLO run), 387 (prod-build CI harness — ci.yml+web/e2e), 390 (38-pkg integration drain — needs decomposition). These are flagged for deliberate/maintainer handling; the continuous-batch loop will likely terminate via GUARD-1-style exit or E-3 escalation next iteration unless new ready slices file.
+
+| Row | Transition              | Evidence                                                                               |
+| --- | ----------------------- | -------------------------------------------------------------------------------------- |
+| 370 | `ready` → `in-progress` | batch 167 claim-stake · branch `web/370-api-client-split` · slice 328 H-2              |
+| 393 | `ready` → `in-progress` | batch 167 claim-stake · branch `infra/393-qa-tactical-ci-wiring` · slice 353 spillover |
+
+## Drift detected — 2026-05-30 (parallel batch 166 merged + 2 spillovers)
+
+All three batch-166 slices merged to main.
+
+- **388** board-pack export end-to-end e2e → merged at `259454e5` via #883 (closes slice 351 spillover). Deterministic spec (3/3 under --repeat-each); two reusable patterns captured (target="\_blank" downloads via context.waitForEvent; popup mocks via context.route).
+- **392** contract-test-tier rollout → merged at `7d817d5c` via #884 (closes slice 349 spillover). Golden-file tier extended to `/v1/version`, `/v1/me`, `/v1/admin/demo/status`; `/v1/metrics` deferred (no interface seam → would break ADR-0007 zero-new-gate). Spillover 394 (e2e mocks load from goldens).
+- **353** QA strategy tactical round 1 → merged at `31a0ed58` via #885 (closes slice 333 bundle). 9 findings across 5 sub-themes: CLAUDE.md test-tier + detection-tier conventions, coverage-exclude justifications + parity lint, assertion-density advisory, integration wall-clock recorder, fix-forward-rate metric, ADR-0008 (demoseed convergence) + ADR-0009 (ui-honesty promotion). CI wiring of the three new scripts deferred to spillover 393 (mirrors 369→391).
+
+**Spillover-number collision resolved:** both 392 and 353 filed slice 393. Final: 393 = `393-qa-tactical-ci-wiring.md` (353; heavier-referenced — kept), 394 = `394-e2e-mocks-load-from-contract-goldens.md` (392; renamed, self-refs fixed). No code-ref impact.
+
+| Row | Transition               | Evidence                                                                                                      |
+| --- | ------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| 353 | `in-progress` → `merged` | merged at `31a0ed58` via #885 (ADR-0008/0009; spillover 393)                                                  |
+| 388 | `in-progress` → `merged` | merged at `259454e5` via #883                                                                                 |
+| 392 | `in-progress` → `merged` | merged at `7d817d5c` via #884 (spillover 394)                                                                 |
+| 393 | (new row) → `ready`      | spec `393-qa-tactical-ci-wiring.md` · slice 353 spillover · wire 3 QA scripts into ci.yml (dep #353)          |
+| 394 | (new row) → `not-ready`  | spec `394-e2e-mocks-load-from-contract-goldens.md` · slice 392 spillover · blocked on broader golden coverage |
+
+## Drift detected — 2026-05-30 (batch 166 claim-stake · slices 353 + 388 + 392)
+
+Three-slice continuous-loop batch from the post-batch-165 ready set (bounded picks; big slices deferred — see note):
+
+- **353** (QA strategy tactical round 1) — Quality · 2-3d · slice 333 multi-finding bundle. Docs + `internal/db/dbx`.
+- **388** (board-pack export end-to-end e2e) — Quality/e2e · 1d · slice 351 spillover. `web/e2e` only.
+- **392** (contract-test-tier rollout) — Quality · 1-2d · slice 349 spillover. Extends the golden-file contract tier (ADR-0007) to more BFF↔platform endpoints; `internal/api` provider recorders + `web/lib/contracts`.
+
+Conflict surface: disjoint — docs+dbx (353) vs web/e2e (388) vs provider-recorders+web/lib/contracts (392). Only 392 may touch ci.yml (sole toucher). Shared touch-points limited to CHANGELOG (append-safe). Zero migrations. Open-questions check: CLEAN.
+
+**Deferred — need deliberate handling (maintainer attention):** 368 (OSCAL cosign, 5d, external cosign binary + Sigstore — solo run, deferred batches 162-166); 390 (38-package integration-enrolment backlog drain — its own doc estimates "6-10 sub-slices" and enabling dormant suites risks surfacing latent failures; needs decomposition); 370 (web/lib/api.ts 2901-LOC split — wide web churn; next big-slice candidate). The continuous-batch ready pool is thinning to these special-handling slices.
+
+| Row | Transition              | Evidence                                                                                      |
+| --- | ----------------------- | --------------------------------------------------------------------------------------------- |
+| 353 | `ready` → `in-progress` | batch 166 claim-stake · branch `quality/353-qa-strategy-tactical-round-1`                     |
+| 388 | `ready` → `in-progress` | batch 166 claim-stake · branch `quality/388-e2e-board-pack-export` · slice 351 spillover      |
+| 392 | `ready` → `in-progress` | batch 166 claim-stake · branch `quality/392-contract-test-tier-rollout` · slice 349 spillover |
+
+## Drift detected — 2026-05-30 (parallel batch 165 merged)
+
+All three batch-165 slices merged to main.
+
+- **349** contract-test-tier evaluation + golden-file pilot → merged at `30c501ad` via #879. **ADOPT** (ADR-0007): golden-file contract tier (provider Go recorder → shared golden → consumer vitest assert), zero new tooling/CI/gate. Pilot for `GET /v1/install-state` (slice-210 bug history); drift sensitivity proven empirically. Broad rollout → spillover 392.
+- **389** multi-tenant JWT harness + real-RLS cross-tenant-leak spec → merged at `a5d274a9` via #880 (closes slice 351 spillover). Extended `internal/api/testissuejwt` to mint multi-tenant JWTs (ATLAS_TEST_MODE gate kept airtight); new e2e spec asserts tenant-A rows are invisible under tenant-B through REAL Postgres RLS. Key insight: super_admin clears OPA authz but does NOT bypass RLS (tenant GUC drives visibility). Advances the v1 binary tenant-isolation criterion. CLEAN.
+- **391** wire duphelper-lint into CI → merged at `b324adcd` via #878 (closes slice 369 spillover). `Go · duphelper` hard-failure step in the `lint-go` job; closes slice 369 AC-4.
+
+Process note: no spillover-number collision this batch (only 349 filed one → 392); scheduler flake did not recur; all three merged without rerun (389 even CLEAN, no codecov dip).
+
+| Row | Transition               | Evidence                                                                                                              |
+| --- | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| 349 | `in-progress` → `merged` | merged at `30c501ad` via #879 (ADR-0007; spillover 392)                                                               |
+| 389 | `in-progress` → `merged` | merged at `a5d274a9` via #880 (real-RLS multi-tenant spec)                                                            |
+| 391 | `in-progress` → `merged` | merged at `b324adcd` via #878 (duphelper CI guard)                                                                    |
+| 392 | (new row) → `ready`      | spec `392-contract-test-tier-rollout.md` · slice 349 spillover · broad golden-file contract rollout (dep #349 merged) |
+
+## Drift detected — 2026-05-29 (batch 165 claim-stake · slices 349 + 389 + 391)
+
+Three-slice continuous-loop batch from the post-batch-164 ready set:
+
+- **349** (contract-test-tier evaluation + pilot) — Quality · 2-3d · JUDGMENT · evaluates whether to adopt consumer-driven contract testing; produces a recommendation doc (+ pilot if warranted). Docs-only surface.
+- **389** (multi-tenant JWT harness + real-RLS cross-tenant-leak spec) — Quality/e2e + Auth · 1-2d · slice 351 spillover. Extends `internal/api/testissuejwt` to mint multi-tenant JWTs and adds the real-Postgres-RLS cross-tenant-leak e2e spec 351 honestly deferred. Advances the v1 binary tenant-isolation criterion.
+- **391** (wire duphelper-lint into CI) — Infra · 0.25d · slice 369 spillover. Adds the `duphelper-lint` analyzer (built in 369) as a CI hard-failure step in ci.yml; owns ci.yml this batch.
+
+Conflict surface: disjoint — docs (349) vs internal/api/testissuejwt+web/e2e (389) vs ci.yml+cmd/scripts/duphelper-lint (391). Shared touch-points limited to CHANGELOG (append-safe). Zero migrations. 368 (cosign, 5d, external-binary) deferred again — flagged for a focused solo run. Open-questions check: CLEAN.
+
+| Row | Transition              | Evidence                                                                                          |
+| --- | ----------------------- | ------------------------------------------------------------------------------------------------- |
+| 349 | `ready` → `in-progress` | batch 165 claim-stake · branch `quality/349-contract-test-tier-evaluation`                        |
+| 389 | `ready` → `in-progress` | batch 165 claim-stake · branch `quality/389-multi-tenant-jwt-rls-leak-spec` · slice 351 spillover |
+| 391 | `ready` → `in-progress` | batch 165 claim-stake · branch `infra/391-duphelper-lint-ci-wiring` · slice 369 spillover         |
+
+## Drift detected — 2026-05-29 (parallel batch 164 merged + 5 spillovers + collision fix)
+
+All three batch-164 slices merged to main.
+
+- **345** CI integration-job enrolment-discovery guard → merged at `10230d18` via #873 (closes slice 334 I-1). Building the guard surfaced a **38-package integration-test enrolment backlog** (packages with `//go:build integration` that never run in CI — incl. `internal/api/oauth` 28 test funcs, `internal/exception` 22); recorded in a monotonic-shrink `KNOWN_UNENROLLED` allowlist, drain tracked as slice 390.
+- **351** e2e critical multi-tenant flow gap fill → merged at `b95383ed` via #875 (closes slice 333 Q-9). Added tenant-switch + evidence-push specs; un-skipped 4 quarantined specs (fixed stale bodies); re-quarantined 2 prod-build specs with justification (spillover 387); deferred the real-RLS cross-tenant assertion to spillover 389 (test harness mints single-tenant JWTs only — honestly named, not faked).
+- **369** consolidate writeJSON/writeError → `internal/api/httpresp` → merged at `99ad0a9b` via #874, **UNSTABLE-codecov-only** (closes slice 328 H-1). 103 helpers / 1131 call sites consolidated; writeServerErr adapters retired (closes slice 367 §D2); duphelper-lint analyzer added (CI wiring deferred to spillover 391). Required one fix-on-branch: the refactor dipped `internal/api/authzmw` below its 69% coverage floor (removing fully-covered helpers from a sub-100% package lowers the %) — restored to 75.9% with a real `IsCredentialPresent` test (floor not lowered).
+
+**Spillover-number collision resolved:** all three Engineers raced and computed "next = 387". Final unique assignment: 351 kept **387** (e2e-prod-build-standalone-ci-harness), **388** (e2e-board-pack-export), **389** (e2e-multi-tenant-jwt-real-rls-leak); 345's drain renumbered to **390** (integration-enrolment-backlog-drain); 369's CI-wiring renumbered to **391** (duphelper-lint-ci-wiring). All internal cross-refs (decisions logs, CHANGELOG, script comments, CONTRIBUTING) updated; 351's code-spec refs left intact.
+
+Process note: recurring scheduler flake (`TestRun_FiresInlineSweepAndExitsOnCancel`) did not recur this batch; codecov/patch advisory red on 369 (refactor adds new httpresp/analyzer lines).
+
+| Row | Transition               | Evidence                                                                                                              |
+| --- | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| 345 | `in-progress` → `merged` | merged at `10230d18` via #873 (surfaced 38-pkg backlog → slice 390)                                                   |
+| 351 | `in-progress` → `merged` | merged at `b95383ed` via #875 (spillovers 387/388/389)                                                                |
+| 369 | `in-progress` → `merged` | merged at `99ad0a9b` via #874 (UNSTABLE-codecov; authzmw floor fix; spillover 391)                                    |
+| 387 | (new row) → `ready`      | spec `387-e2e-prod-build-standalone-ci-harness.md` · slice 351 spillover · web/e2e+CI                                 |
+| 388 | (new row) → `ready`      | spec `388-e2e-board-pack-export-end-to-end.md` · slice 351 spillover (P1) · web/e2e                                   |
+| 389 | (new row) → `ready`      | spec `389-e2e-multi-tenant-jwt-real-rls-leak-spec.md` · slice 351 spillover · test-JWT harness + real-RLS leak spec   |
+| 390 | (new row) → `ready`      | spec `390-integration-enrolment-backlog-drain.md` · slice 345 spillover · drain 38-pkg integration backlog            |
+| 391 | (new row) → `ready`      | spec `391-duphelper-lint-ci-wiring.md` · slice 369 spillover · wire duphelper-lint as CI hard-fail (after 345 ci.yml) |
 
 ## Drift detected — 2026-05-29 (batch 164 claim-stake · slices 345 + 351 + 369)
 

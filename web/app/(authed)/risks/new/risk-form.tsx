@@ -33,7 +33,7 @@ import { useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { RiskCreateInput } from "@/lib/api";
+import { RiskCreateInput } from "@/lib/api/risks";
 
 import { ControlMultiSelect } from "./control-multi-select";
 import { FieldErrors, hasErrors, validateRiskForm } from "./validate";

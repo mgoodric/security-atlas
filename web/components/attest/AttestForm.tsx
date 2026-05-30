@@ -22,7 +22,7 @@ import {
   AttestForm as AttestFormShape,
   AttestSubmitRequest,
   AttestSubmitResponse,
-} from "@/lib/api";
+} from "@/lib/api/attest";
 
 type FormProperty = {
   name: string;

@@ -2,7 +2,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import type { Exception } from "@/lib/api";
+import type { Exception } from "@/lib/api/exceptions";
 
 import {
   ALL,

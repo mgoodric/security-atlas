@@ -1,4 +1,4 @@
-import { getFrameworkPosture } from "@/lib/api";
+import { getFrameworkPosture } from "@/lib/api/dashboard";
 import { dashboardProxy } from "../proxy";
 
 // Slice 147 — server-side proxy for GET /v1/frameworks/posture

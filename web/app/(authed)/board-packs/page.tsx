@@ -24,12 +24,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  APIError,
-  BoardPack,
-  generateBoardPack,
-  listBoardPacks,
-} from "@/lib/api";
+import { APIError } from "@/lib/api/base";
+import { BoardPack, generateBoardPack, listBoardPacks } from "@/lib/api/board";
 
 // Slice 032 — quarterly board pack list + generate.
 //

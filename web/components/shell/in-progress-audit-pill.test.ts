@@ -17,7 +17,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import type { AuditPeriod } from "@/lib/api";
+import type { AuditPeriod } from "@/lib/api/audit-periods";
 
 import { pickMostRecentInProgress } from "./in-progress-audit-pill";
 

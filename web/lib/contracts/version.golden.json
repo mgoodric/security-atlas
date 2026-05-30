@@ -1,0 +1,18 @@
+{
+  "_comment": "Slice 392 contract-test-tier ROLLOUT golden. Recorded by the PROVIDER side (internal/api/version_contract_test.go) from the real Go handler at internal/api/version.go (VersionHandler). Regenerate with `go test ./internal/api/ -run TestContract_Version -update`. The CONSUMER side (web/lib/contracts/version.contract.test.ts) asserts the Next.js BFF (web/app/api/version/route.ts) against these recorded bodies.",
+  "endpoint": "GET /v1/version",
+  "variants": {
+    "dev_build": {
+      "build_time": "",
+      "commit": "",
+      "go_version": "go1.26.1",
+      "version": "dev"
+    },
+    "release": {
+      "build_time": "2026-05-15T15:00:00Z",
+      "commit": "abc1234",
+      "go_version": "go1.26.1",
+      "version": "v1.5.0"
+    }
+  }
+}

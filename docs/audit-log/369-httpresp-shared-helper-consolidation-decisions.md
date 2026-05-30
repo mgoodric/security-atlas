@@ -89,10 +89,10 @@ surface. Path scoping is enforced by the invocation target
 
 The batch-164 directive reserves `ci.yml` for slice 345 this batch to avoid a
 merge collision, and explicitly instructs: "If you'd add a no-duplicate-writeJSON
-CI lint guard, DEFER it to a follow-up spillover slice." Filed as slice **387**
-(`docs/issues/387-duphelper-lint-ci-wiring.md`). AC-4's "wired into CI as hard
+CI lint guard, DEFER it to a follow-up spillover slice." Filed as slice **391**
+(`docs/issues/391-duphelper-lint-ci-wiring.md`). AC-4's "wired into CI as hard
 failure" is therefore PARTIALLY met in this PR: the analyzer exists, is tested,
-and is wired into the local `just lint` target; the CI step lands in slice 387.
+and is wired into the local `just lint` target; the CI step lands in slice 391.
 The local guard + the empty-result state mean a regression is caught by
 `just lint` today; CI enforcement follows in the spillover.
 

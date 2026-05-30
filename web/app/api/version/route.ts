@@ -14,7 +14,7 @@
 
 import { NextResponse } from "next/server";
 
-import { apiBaseURL } from "@/lib/api";
+import { apiBaseURL } from "@/lib/api/base";
 
 export async function GET() {
   try {

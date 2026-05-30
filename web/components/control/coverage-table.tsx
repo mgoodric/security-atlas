@@ -42,7 +42,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import type { CoverageRequirement } from "@/lib/api";
+import type { CoverageRequirement } from "@/lib/api/control-detail";
 import { strmStyle } from "@/components/control/strm";
 import {
   coverageBarPercent,

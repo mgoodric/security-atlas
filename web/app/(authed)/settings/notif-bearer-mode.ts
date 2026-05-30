@@ -37,7 +37,7 @@
 // No JSX, no fetch, no React import; safe to import from both the
 // page and the test.
 
-import type { MeProfile } from "@/lib/api";
+import type { MeProfile } from "@/lib/api/me";
 
 import { isCredentialBearer } from "./credential-bearer";
 

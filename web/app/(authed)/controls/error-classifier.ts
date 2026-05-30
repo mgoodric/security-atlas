@@ -29,7 +29,7 @@
 // No vendor-prefixed tokens in tests (slice 098 / slice 141 P0-SCOPE-5
 // pattern).
 
-import { APIError } from "@/lib/api";
+import { APIError } from "@/lib/api/base";
 
 export type ControlDetailErrorClass = "notfound" | "unauthorized" | "other";
 

@@ -8,7 +8,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
-import { patchFeatureFlag } from "@/lib/api";
+import { patchFeatureFlag } from "@/lib/api/admin";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 export async function PATCH(

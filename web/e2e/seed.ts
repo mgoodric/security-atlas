@@ -64,6 +64,12 @@ export const DEMO_USER_ID = "44444444-4444-4444-4444-444444440001";
 // left segment to render. The /v1/me/tenants handler joins the
 // JWT's available_tenants[] claim against the slice-144 tenants
 // table; the d3a0 UUID has no bootstrap row by default in CI.
+//
+// Slice 389 added "tenant-switch" — seeds two canonical `tenants`
+// identity rows (A + B) so the slice-192 GET /v1/me/tenants name
+// enrichment resolves, plus a known risk in tenant A only. The
+// real-RLS cross-tenant-leak spec (tenant-switch-rls.spec.ts) asserts
+// the tenant-A risk is invisible from tenant B through PostgreSQL RLS.
 export type FixtureName =
   | "dashboard"
   | "control-detail"
@@ -73,7 +79,8 @@ export type FixtureName =
   | "audit-log"
   | "settings"
   | "audits-header"
-  | "controls-top-bar";
+  | "controls-top-bar"
+  | "tenant-switch";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

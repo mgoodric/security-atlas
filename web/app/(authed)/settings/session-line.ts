@@ -20,7 +20,7 @@
 //   - city without country: "San Francisco"
 //   - none present:      ""   (caller renders nothing)
 
-import type { MeSession } from "@/lib/api";
+import type { MeSession } from "@/lib/api/me";
 
 /** Truncate a User-Agent string to a UI-safe length. Browsers send UAs that
  *  can be 200+ chars; the row UI has limited horizontal space. The full UA

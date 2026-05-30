@@ -12,7 +12,7 @@
 
 import { cookies } from "next/headers";
 
-import { apiBaseURL } from "@/lib/api";
+import { apiBaseURL } from "@/lib/api/base";
 import { SESSION_COOKIE } from "@/lib/auth";
 import type { AuditPeriod } from "@/lib/api/audit";
 

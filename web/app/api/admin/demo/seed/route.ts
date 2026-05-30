@@ -15,7 +15,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { postAdminDemoSeed } from "@/lib/api";
+import { postAdminDemoSeed } from "@/lib/api/admin";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 export async function POST() {

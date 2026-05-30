@@ -9,7 +9,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import type { Anchor } from "@/lib/api";
+import type { Anchor } from "@/lib/api/anchors";
 
 import {
   ALL,

@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth";
-import { getControlHistory } from "@/lib/api";
+import { getControlHistory } from "@/lib/api/control-detail";
 
 // Slice 253 — server-side proxy for GET /v1/controls/{id}/history
 // (slice 064 control-detail handler — History). Renders the right-rail

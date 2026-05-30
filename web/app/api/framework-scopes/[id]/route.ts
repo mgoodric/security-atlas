@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth";
-import { patchFrameworkScopePredicate } from "@/lib/api";
+import { patchFrameworkScopePredicate } from "@/lib/api/framework-scopes";
 
 // Slice 018 — PATCH /v1/framework-scopes/{id} (edit predicate). The
 // upstream trigger may bounce state back to draft; we forward

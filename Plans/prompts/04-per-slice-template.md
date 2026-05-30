@@ -71,11 +71,20 @@ Every slice carries a `**Type:**` in its frontmatter. There are two values:
 
 ### What a JUDGMENT slice does instead of a sign-off gate
 
-A `JUDGMENT` slice writes a **decisions log** at `docs/audit-log/<NNN>-<slug>-decisions.md` (not a `-review.md` sign-off table). The decisions log has three sections:
+A `JUDGMENT` slice writes a **decisions log** at `docs/audit-log/<NNN>-<slug>-decisions.md` (not a `-review.md` sign-off table). The decisions log has three sections plus a one-line detection-tier header:
 
 1. **Decisions made** — each subjective call, the options considered, the chosen path, and the rationale (pattern-matched to existing slices / canvas / domain norms wherever possible).
 2. **Revisit once in use** — an explicit, specific list of what the maintainer should re-evaluate once the product is running against real data / real auditors / real users. This is the iteration backlog. Be concrete: "re-check CC6.7's at-rest-only scoping once a TLS-config evidence_kind exists" beats "review the control kit."
 3. **Confidence** — for each decision, a one-word confidence (`high` / `medium` / `low`). `low`-confidence decisions are the top of the revisit list.
+
+**Detection-tier classification (slice 353 / Q-13).** Add two fields near the top of the decisions log capturing where any bug found DURING the slice was caught, and where it SHOULD have been caught:
+
+```
+- detection_tier_actual: <unit | integration | playwright | contract | manual_review | production | none>
+- detection_tier_target: <unit | integration | playwright | contract | manual_review | production | none>
+```
+
+Use `none` for both when no bug surfaced during the slice (the common case for a clean docs/feature slice). When a bug IS caught — e.g. a sqlc-regen miss caught by CI integration, an RLS gap caught in review — record where it landed (`actual`) and the cheapest tier that should have caught it (`target`). Aggregated quarterly, a recurring `target=unit, actual=production` is a coverage-tier gap; `target=integration, actual=manual_review` (i.e. fix-forward) is an integration-enrolment gap (Q-7). The cost is one line; the payoff is the aggregate detection-tier signal the project lacks today (slice 333 Theme 3). See `CLAUDE.md` "Defect detection-tier classification".
 
 The decisions log is committed as part of the slice. It does NOT block merge. It is the durable record that makes post-deployment iteration tractable.
 

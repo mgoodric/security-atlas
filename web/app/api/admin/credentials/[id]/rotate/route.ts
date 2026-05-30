@@ -8,7 +8,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { rotateAdminCredential } from "@/lib/api";
+import { rotateAdminCredential } from "@/lib/api/admin";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 export async function POST(

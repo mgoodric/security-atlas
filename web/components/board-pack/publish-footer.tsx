@@ -23,7 +23,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { APIError, BoardPack, publishBoardPack } from "@/lib/api";
+import { APIError } from "@/lib/api/base";
+import { BoardPack, publishBoardPack } from "@/lib/api/board";
 
 type PublishFooterProps = {
   packID: string;

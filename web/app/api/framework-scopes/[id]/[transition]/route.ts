@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth";
-import { transitionFrameworkScope } from "@/lib/api";
+import { transitionFrameworkScope } from "@/lib/api/framework-scopes";
 
 // Slice 018 — PATCH /v1/framework-scopes/{id}/{submit|approve|activate}.
 // Transition name comes from the path segment; we whitelist the allowed

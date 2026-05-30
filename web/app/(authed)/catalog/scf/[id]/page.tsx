@@ -23,7 +23,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { APIError, type AnchorDetail } from "@/lib/api";
+import { type AnchorDetail } from "@/lib/api/anchors";
+import { APIError } from "@/lib/api/base";
 
 export default function SCFAnchorDetailPage() {
   const router = useRouter();

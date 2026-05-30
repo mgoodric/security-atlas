@@ -21,7 +21,7 @@ import {
   AdminCredentialIssueRequest,
   issueAdminCredential,
   listAdminCredentials,
-} from "@/lib/api";
+} from "@/lib/api/admin";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 export async function GET() {

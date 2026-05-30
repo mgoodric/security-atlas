@@ -60,7 +60,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { CreateTenantResponse, TenantRow } from "@/lib/api";
+import type { CreateTenantResponse, TenantRow } from "@/lib/api/admin";
 
 type TenantListResponse = { items: TenantRow[]; error?: string };
 

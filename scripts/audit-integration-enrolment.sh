@@ -31,10 +31,10 @@
 # 38-package enrolment backlog — packages tagged for integration whose
 # tests have never run in CI. Slice 345's anti-criterion P0-345-1
 # forbids retroactively enrolling them here (that is separate enrolment
-# work — slice 387). To make the guard pass on the current tree while
+# work — slice 390). To make the guard pass on the current tree while
 # still catching the *next* forgotten package, the 38 are recorded in
 # KNOWN_UNENROLLED below as a documented, dated waiver. The list is a
-# RATCHET: it must only ever shrink. Draining it is slice 387's job —
+# RATCHET: it must only ever shrink. Draining it is slice 390's job —
 # each enrolment PR removes its package from BOTH the ci.yml list (adds)
 # and this allowlist (removes). A package that is neither enrolled nor
 # waived fails the guard. Adding a new entry to KNOWN_UNENROLLED is a
@@ -71,7 +71,7 @@ CI_YML="${AUDIT_ENROL_CI_YML:-$REPO_ROOT/.github/workflows/ci.yml}"
 # --------------------------------------------------------------------
 # Known-gaps allowlist. One package path per line, relative to the repo
 # root, exactly as it would appear in the ci.yml list MINUS the trailing
-# `/...`. RATCHET: shrink only. Drain via slice 387.
+# `/...`. RATCHET: shrink only. Drain via slice 390.
 #
 # Provenance: the 38 packages tagged `//go:build integration` but absent
 # from the ci.yml integration list as of 2026-05-29. Catalogued
@@ -248,5 +248,5 @@ fi
 tagged_n="$(wc -l < "$tagged_tmp" | tr -d ' ')"
 listed_n="$(wc -l < "$listed_tmp" | tr -d ' ')"
 waived_n="$(wc -l < "$waived_tmp" | tr -d ' ')"
-echo "audit-integration-enrolment: OK — ${tagged_n} tagged package(s); ${listed_n} enrolled; ${waived_n} on the slice-345 known-gaps allowlist (drain: slice 387)."
+echo "audit-integration-enrolment: OK — ${tagged_n} tagged package(s); ${listed_n} enrolled; ${waived_n} on the slice-345 known-gaps allowlist (drain: slice 390)."
 exit 0

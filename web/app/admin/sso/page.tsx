@@ -31,7 +31,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { AdminSSOConfig } from "@/lib/api";
+import type { AdminSSOConfig } from "@/lib/api/admin";
 
 type Preflight =
   | { state: "idle" }
