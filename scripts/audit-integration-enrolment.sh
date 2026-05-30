@@ -99,12 +99,8 @@ internal/api/search
 internal/api/ucfcoverage
 internal/api/vendors
 internal/audit/notes
-internal/audit/period
 internal/auth
-internal/auth/jwtmw
 internal/auth/keystore/fsstore
-internal/auth/oidc
-internal/auth/users
 internal/catalog/metrics
 internal/drift
 internal/exception
