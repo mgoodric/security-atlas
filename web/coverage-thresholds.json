@@ -3,8 +3,8 @@
   "$methodology": "Floors are derived from a measured `npm run test:coverage` run on the slice 347 baseline. Each floor is set at `max(0, floor(measured - 2pp))` — the floor RATCHETS the current actual minus a 2-pp noise band, never reaches above it (slice 069 P0-A4 mirror via P0-347-3).",
   "$how_to_raise": "Raise a per-file floor in a follow-up slice that (a) writes the additional tests to actually hit the new bar, (b) lifts the number here in the same PR. Do NOT raise floors in a slice that does not also write the tests. The ratchet contract is monotonic ↑ — never lower a floor (P0-347-1).",
   "$how_to_extend": "When a new test file lands and brings new measured coverage on a previously-uncovered module, add a row here in the same PR. Default floor is `floor(measured - 2pp)`. 0% files are intentionally omitted — they have no floor signal until a first test brings non-zero coverage; the omission is documented and not a regression.",
-  "$omitted_zero_pct_count": 71,
-  "$omitted_zero_pct_rationale": "71 files in the coverage `include` set measured 0/0/0/0 at slice 347 baseline (no tests reach them yet). They are intentionally omitted from the threshold map — the ratchet starts at truth, not aspiration (P0-347-3). When a future slice adds the first test for one of these files, it lifts the file into the map with floor = floor(measured - 2pp). Until then, they contribute no enforcement signal, which is the correct shape for a monotonic ratchet.",
+  "$omitted_zero_pct_count": 74,
+  "$omitted_zero_pct_rationale": "74 files in the coverage `include` set measured 0% statements (no tests reach their executable bodies yet). They are intentionally omitted from the threshold map — the ratchet starts at truth, not aspiration (P0-347-3). When a future slice adds the first test for one of these files, it lifts the file into the map with floor = floor(measured - 2pp). Until then, they contribute no enforcement signal, which is the correct shape for a monotonic ratchet. Slice 370 note: the api.ts god-file split (slice 328 H-2) replaced the single `lib/api.ts` floor with per-domain floors; the four split-out modules that measured 0% statements (attest.ts, framework-scopes.ts, me.ts, vendors.ts) are omitted under this same rationale — their coverage lived under the god-file's 16% aggregate, which carried no per-function signal. The barrel `lib/api.ts` is now fully exercised by re-export resolution (floor 98).",
   "$schema_version": 1,
   "thresholds": {
     "app/(authed)/audits/filters.ts": {
@@ -518,10 +518,100 @@
       "lines": 98
     },
     "lib/api.ts": {
-      "statements": 16,
-      "branches": 88,
-      "functions": 15,
-      "lines": 16
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/api/_shared.ts": {
+      "statements": 48,
+      "branches": 98,
+      "functions": 48,
+      "lines": 48
+    },
+    "lib/api/admin.ts": {
+      "statements": 15,
+      "branches": 70,
+      "functions": 16,
+      "lines": 15
+    },
+    "lib/api/anchors.ts": {
+      "statements": 40,
+      "branches": 98,
+      "functions": 31,
+      "lines": 40
+    },
+    "lib/api/audit-periods.ts": {
+      "statements": 5,
+      "branches": 98,
+      "functions": 0,
+      "lines": 5
+    },
+    "lib/api/base.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/api/board.ts": {
+      "statements": 17,
+      "branches": 98,
+      "functions": 0,
+      "lines": 17
+    },
+    "lib/api/calendar.ts": {
+      "statements": 52,
+      "branches": 86,
+      "functions": 48,
+      "lines": 52
+    },
+    "lib/api/control-detail.ts": {
+      "statements": 28,
+      "branches": 98,
+      "functions": 19,
+      "lines": 28
+    },
+    "lib/api/controls-list.ts": {
+      "statements": 11,
+      "branches": 64,
+      "functions": 18,
+      "lines": 11
+    },
+    "lib/api/dashboard.ts": {
+      "statements": 42,
+      "branches": 98,
+      "functions": 28,
+      "lines": 42
+    },
+    "lib/api/evidence.ts": {
+      "statements": 1,
+      "branches": 98,
+      "functions": 0,
+      "lines": 1
+    },
+    "lib/api/exceptions.ts": {
+      "statements": 2,
+      "branches": 98,
+      "functions": 0,
+      "lines": 2
+    },
+    "lib/api/policies.ts": {
+      "statements": 29,
+      "branches": 98,
+      "functions": 48,
+      "lines": 29
+    },
+    "lib/api/risk-hierarchy.ts": {
+      "statements": 8,
+      "branches": 98,
+      "functions": 0,
+      "lines": 8
+    },
+    "lib/api/risks.ts": {
+      "statements": 11,
+      "branches": 98,
+      "functions": 31,
+      "lines": 11
     },
     "lib/api/anchors-export.ts": {
       "statements": 98,
