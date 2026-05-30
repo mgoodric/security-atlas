@@ -3,7 +3,19 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 170 merged — slice 397 on main; no spillover)
+**Last reconciled:** 2026-05-30 (batch 171 claim-stake — slice 399 → in-progress (N=1 solo) · bff-cookie prod-build spec body fix (slice 387 spillover))
+
+## Drift detected — 2026-05-30 (batch 171 claim-stake · slice 399 solo)
+
+Single-slice batch (N=1) — likely the last clean continuous-batch pick before the loop's natural terminus.
+
+- **399** (bff-cookie prod-build spec body fix) — Quality/e2e · slice 387 spillover (dep #387 + #397 merged). Re-shapes the slice-146 cookie spec's two assertions (RSC-aware BFF assertion + about:blank addCookies domain) for the prod-build standalone server, re-includes it in the `frontend-playwright-prod-build` CI job, and drops `continue-on-error` to make that leg blocking. Uses the ATLAS_JWT_COOKIE constant (slice 397).
+
+OQ check: CLEAN. Zero migrations. Remaining after 399: 396 (barrel retire — still blocked on vitest.config.ts barrel importer), 368 (cosign/solo), 390 (38-pkg drain/decompose) — all special-handling. The continuous-batch loop reaches its clean terminus after this slice.
+
+| Row | Transition              | Evidence                                                                                          |
+| --- | ----------------------- | ------------------------------------------------------------------------------------------------- |
+| 399 | `ready` → `in-progress` | batch 171 claim-stake · branch `quality/399-bff-cookie-prod-build-spec-fix` · slice 387 spillover |
 
 ## Drift detected — 2026-05-30 (parallel batch 170 merged · slice 397 solo)
 
