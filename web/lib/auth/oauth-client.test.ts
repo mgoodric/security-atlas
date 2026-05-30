@@ -119,13 +119,14 @@ describe("initLoginFlow + completeLoginFlow sessionStorage discipline", () => {
     globalThis.sessionStorage = sessionStore;
     // @ts-expect-error stub
     globalThis.localStorage = localStore;
-    // @ts-expect-error stub
     globalThis.window = {
-      location: { assign: assignSpy, origin: "https://atlas.example.test" },
-    };
+      location: {
+        assign: assignSpy,
+        origin: "https://atlas.example.test",
+      } as unknown as Location,
+    } as Window & typeof globalThis;
     // btoa is in node 20+; ensure it's present
     if (typeof globalThis.btoa === "undefined") {
-      // @ts-expect-error stub
       globalThis.btoa = (s: string) =>
         Buffer.from(s, "binary").toString("base64");
     }
