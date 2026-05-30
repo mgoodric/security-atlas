@@ -35,7 +35,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { APIError, FrameworkScope, FrameworkScopeState } from "@/lib/api";
+import { APIError } from "@/lib/api/base";
+import {
+  FrameworkScope,
+  FrameworkScopeState,
+} from "@/lib/api/framework-scopes";
 
 type ListResp = { framework_scopes: FrameworkScope[] };
 

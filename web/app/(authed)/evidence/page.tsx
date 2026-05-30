@@ -59,15 +59,19 @@ import {
 } from "@/components/ui/dialog";
 import {
   fetchAuditPeriods,
-  fetchControlsList,
-  fetchEvidenceList,
-  fetchScopeCells,
   type AuditPeriodsListResponse,
+} from "@/lib/api/audit-periods";
+import {
+  fetchControlsList,
+  fetchScopeCells,
   type ControlsListResponse,
+  type ScopeCellsListResponse,
+} from "@/lib/api/controls-list";
+import {
+  fetchEvidenceList,
   type EvidenceListResponse,
   type EvidenceRecord,
-  type ScopeCellsListResponse,
-} from "@/lib/api";
+} from "@/lib/api/evidence";
 
 import {
   ALL,

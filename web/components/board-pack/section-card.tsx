@@ -20,14 +20,14 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { APIError } from "@/lib/api/base";
 import {
-  APIError,
   approveBoardPackSection,
   BoardPack,
   BoardPackSection,
   BoardPackSectionInputs,
   updateBoardPackSection,
-} from "@/lib/api";
+} from "@/lib/api/board";
 import { cn } from "@/lib/utils";
 
 import { HumanAuthoredBadge, TemplatedBadge } from "./templated-badge";

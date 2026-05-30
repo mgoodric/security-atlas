@@ -23,7 +23,7 @@
 import { cookies } from "next/headers";
 import { type NextRequest, NextResponse } from "next/server";
 
-import { listAnchorsWithState } from "@/lib/api";
+import { listAnchorsWithState } from "@/lib/api/anchors";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 export async function GET(req: NextRequest): Promise<Response> {

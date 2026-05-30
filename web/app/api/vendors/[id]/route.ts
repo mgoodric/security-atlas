@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth";
-import { getVendor, updateVendor, VendorWrite } from "@/lib/api";
+import { getVendor, updateVendor, VendorWrite } from "@/lib/api/vendors";
 
 export async function GET(
   _req: NextRequest,

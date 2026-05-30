@@ -5,7 +5,8 @@
 // slice 105) so the bearer cookie stays httpOnly. The BFF forwards to
 // the slice-019 `POST /v1/risks` backend write path unchanged.
 
-import { APIError, Risk, RiskCreateInput } from "@/lib/api";
+import { APIError } from "@/lib/api/base";
+import { Risk, RiskCreateInput } from "@/lib/api/risks";
 
 export async function createRiskFromCookieSession(
   body: RiskCreateInput,

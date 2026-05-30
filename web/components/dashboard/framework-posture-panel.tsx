@@ -14,7 +14,10 @@
 // See `docs/audit-log/147-dashboard-placeholders-decisions.md` D1+D2.
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
-import type { FrameworkPostureReport, FrameworkPostureRow } from "@/lib/api";
+import type {
+  FrameworkPostureReport,
+  FrameworkPostureRow,
+} from "@/lib/api/dashboard";
 
 // trendBadgeClass colours the trend arrow: green for growth, destructive
 // for regression, muted for flat. The +/- prefix is rendered in the

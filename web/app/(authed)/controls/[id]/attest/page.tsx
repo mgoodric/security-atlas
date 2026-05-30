@@ -4,7 +4,10 @@ import { redirect } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AttestForm } from "@/components/attest/AttestForm";
-import { getAttestForm, type AttestForm as AttestFormShape } from "@/lib/api";
+import {
+  getAttestForm,
+  type AttestForm as AttestFormShape,
+} from "@/lib/api/attest";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 // Slice 011 — server component that fetches the control's attestation

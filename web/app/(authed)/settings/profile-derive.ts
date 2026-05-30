@@ -15,7 +15,7 @@
 // No JSX, no fetch, no localStorage; this file is safe to import from
 // both the page and the test.
 
-import type { MeProfile } from "@/lib/api";
+import type { MeProfile } from "@/lib/api/me";
 
 /**
  * IANA time zones offered in the Profile section's time-zone picker.

@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth";
-import { getControlState } from "@/lib/api";
+import { getControlState } from "@/lib/api/control-detail";
 
 // Slice 041 — server-side proxy for GET /v1/controls/{id}/state
 // (slice 012 control state evaluation). Drives the freshness clock:

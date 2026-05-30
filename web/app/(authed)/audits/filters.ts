@@ -7,7 +7,7 @@
 // Constitutional commitment: this module knows nothing about React,
 // useSearchParams, or the BFF. It is data-in, data-out.
 
-import type { AuditPeriod } from "@/lib/api";
+import type { AuditPeriod } from "@/lib/api/audit-periods";
 
 /**
  * "All values" sentinel. Default value for every filter pill; selecting

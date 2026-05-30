@@ -7,7 +7,7 @@ import {
   FrameworkScopeState,
   createFrameworkScope,
   listFrameworkScopes,
-} from "@/lib/api";
+} from "@/lib/api/framework-scopes";
 
 // Slice 018 — list + create framework scopes. Same cookie-bearer
 // pattern as /api/vendors/route.ts.

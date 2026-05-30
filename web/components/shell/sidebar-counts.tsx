@@ -48,11 +48,13 @@ import { useQuery } from "@tanstack/react-query";
 
 import {
   fetchControlsList,
-  fetchRisksList,
   type ControlsListResponse,
+} from "@/lib/api/controls-list";
+import {
+  fetchRisksList,
   type Risk,
   type RisksListResponse,
-} from "@/lib/api";
+} from "@/lib/api/risks";
 
 /**
  * The slice-100 `filters.ts` defines severity bands on the 5x5 scalar

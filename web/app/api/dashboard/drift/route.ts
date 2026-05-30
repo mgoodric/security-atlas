@@ -1,4 +1,4 @@
-import { getControlDrift } from "@/lib/api";
+import { getControlDrift } from "@/lib/api/dashboard";
 import { dashboardProxy } from "../proxy";
 
 // Slice 040 — server-side proxy for GET /v1/controls/drift?since=7d

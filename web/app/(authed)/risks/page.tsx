@@ -69,13 +69,12 @@ import {
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
+import { fetchHierarchyOrgUnits, type OrgUnit } from "@/lib/api/risk-hierarchy";
 import {
-  fetchHierarchyOrgUnits,
   fetchRisksList,
-  type OrgUnit,
   type Risk,
   type RisksListResponse,
-} from "@/lib/api";
+} from "@/lib/api/risks";
 import {
   RISK_EXPORT_FORMATS,
   RISK_EXPORT_FORMAT_LABELS,

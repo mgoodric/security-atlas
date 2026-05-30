@@ -1,4 +1,4 @@
-import { getOrgUnits } from "@/lib/api";
+import { getOrgUnits } from "@/lib/api/risk-hierarchy";
 import { hierarchyProxy } from "../proxy";
 
 // Slice 056 — server-side proxy for GET /v1/org_units (slice 053 org

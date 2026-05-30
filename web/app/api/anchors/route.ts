@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth";
-import { listAnchors } from "@/lib/api";
+import { listAnchors } from "@/lib/api/anchors";
 
 // Server-side proxy that injects the cookie's bearer token into the
 // upstream call so the client never sees the token.

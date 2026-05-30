@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth";
-import { getAttestForm } from "@/lib/api";
+import { getAttestForm } from "@/lib/api/attest";
 
 // Slice 011 — server-side proxy for GET /v1/controls/{id}/attest-form.
 // Reads the bearer cookie and forwards as Authorization on the upstream

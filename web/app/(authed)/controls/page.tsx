@@ -57,13 +57,13 @@ import {
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
+import { type AnchorWithState } from "@/lib/api/anchors";
 import {
   fetchControlsList,
   fetchScopeCells,
-  type AnchorWithState,
   type ControlsListResponse,
   type ScopeCellsListResponse,
-} from "@/lib/api";
+} from "@/lib/api/controls-list";
 import {
   CONTROLS_EXPORT_FORMATS,
   CONTROLS_EXPORT_FORMAT_LABELS,

@@ -48,7 +48,7 @@ import {
   getFrameworkPosture,
   getMitigateRisks,
   getUpcoming,
-} from "@/lib/api";
+} from "@/lib/api/dashboard";
 
 // DASHBOARD_QUERY_KEYS mirrors the queryKeys the page's six `useQuery`
 // hooks register under (page.tsx lines ~54-77). The HydrationBoundary

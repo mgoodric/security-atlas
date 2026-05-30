@@ -23,7 +23,8 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
-import { apiBaseURL, listRisks } from "@/lib/api";
+import { apiBaseURL } from "@/lib/api/base";
+import { listRisks } from "@/lib/api/risks";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 export async function GET(): Promise<Response> {

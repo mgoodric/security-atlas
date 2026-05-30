@@ -1,4 +1,4 @@
-import { getAggregationRules } from "@/lib/api";
+import { getAggregationRules } from "@/lib/api/risk-hierarchy";
 import { hierarchyProxy } from "../proxy";
 
 // Slice 056 — server-side proxy for GET /v1/aggregation-rules (slice

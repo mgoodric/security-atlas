@@ -7,7 +7,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import type { Policy, PolicyAckRate } from "@/lib/api";
+import type { Policy, PolicyAckRate } from "@/lib/api/policies";
 
 import {
   ACK_STATUS_GE_95,

@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { CalendarEvent } from "@/lib/api";
+import type { CalendarEvent } from "@/lib/api/calendar";
 
 import { linkFor } from "./link-for";
 

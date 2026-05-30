@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { MeProfile } from "@/lib/api";
+import type { MeProfile } from "@/lib/api/me";
 
 import {
   CREDENTIAL_BEARER_BANNER_BODY,

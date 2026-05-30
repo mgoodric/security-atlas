@@ -13,7 +13,7 @@ import { FirstInstallCard } from "@/components/first-install-card";
 import { ThemeAwareLogo } from "@/components/shell/theme-aware-logo";
 
 import { signIn, signInLocal } from "./actions";
-import { apiBaseURL } from "@/lib/api";
+import { apiBaseURL } from "@/lib/api/base";
 
 type SearchParams = Promise<{ from?: string; error?: string }>;
 

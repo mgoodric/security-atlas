@@ -7,7 +7,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import type { Policy } from "@/lib/api";
+import type { Policy } from "@/lib/api/policies";
 
 import { statusCountsLabel, TALLY_STATUS_ORDER } from "./header-counts";
 

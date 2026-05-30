@@ -35,7 +35,7 @@
 // slices that ship those pages flip the static branch back to a link
 // branch HERE (one place to edit, both views update).
 
-import type { CalendarEvent } from "@/lib/api";
+import type { CalendarEvent } from "@/lib/api/calendar";
 
 export type LinkForResult =
   | { kind: "link"; href: string }

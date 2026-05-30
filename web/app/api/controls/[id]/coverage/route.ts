@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth";
-import { getControlCoverage } from "@/lib/api";
+import { getControlCoverage } from "@/lib/api/control-detail";
 
 // Slice 041 — server-side proxy for GET /v1/controls/{id}/coverage
 // (slice 008 UCF graph traversal). Reads the httpOnly bearer cookie and

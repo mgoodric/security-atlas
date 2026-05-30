@@ -17,7 +17,7 @@ import Link from "next/link";
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
 import { Badge } from "@/components/ui/badge";
-import type { DashboardRisk } from "@/lib/api";
+import type { DashboardRisk } from "@/lib/api/dashboard";
 
 function treatmentVariant(
   treatment: string,

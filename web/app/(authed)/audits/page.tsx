@@ -65,7 +65,7 @@ import {
   fetchAuditPeriods,
   type AuditPeriod,
   type AuditPeriodsListResponse,
-} from "@/lib/api";
+} from "@/lib/api/audit-periods";
 
 import {
   ALL,

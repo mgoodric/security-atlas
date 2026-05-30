@@ -14,7 +14,10 @@
 // draws a requirement-to-requirement edge. Anti-criterion P0-2:
 // out-of-scope requirements are rendered dashed/greyed, never hidden.
 
-import type { ControlCoverage, CoverageRequirement } from "@/lib/api";
+import type {
+  ControlCoverage,
+  CoverageRequirement,
+} from "@/lib/api/control-detail";
 import { strmStyle } from "@/components/control/strm";
 
 const VIEW_W = 800;

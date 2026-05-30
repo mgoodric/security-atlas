@@ -30,7 +30,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { apiBaseURL } from "@/lib/api";
+import { apiBaseURL } from "@/lib/api/base";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 // Headers the BFF forwards to the browser from the upstream response.

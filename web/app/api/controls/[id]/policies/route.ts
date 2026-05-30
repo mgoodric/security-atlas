@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth";
-import { getControlPolicies } from "@/lib/api";
+import { getControlPolicies } from "@/lib/api/control-detail";
 
 // Slice 253 — server-side proxy for GET /v1/controls/{id}/policies
 // (slice 064 control-detail handler — Policies). Renders the right-rail

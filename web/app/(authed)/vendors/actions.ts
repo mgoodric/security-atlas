@@ -2,7 +2,8 @@
 // the Next.js route handlers so the bearer cookie stays httpOnly on the
 // browser — same pattern as /api/anchors.
 
-import { APIError, Vendor, VendorWrite } from "@/lib/api";
+import { APIError } from "@/lib/api/base";
+import { Vendor, VendorWrite } from "@/lib/api/vendors";
 
 export async function createVendorFromCookieSession(
   body: VendorWrite,

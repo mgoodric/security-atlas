@@ -37,7 +37,7 @@
 // the mockup at `Plans/mockups/policies.html` line 111 verbatim and to
 // stay consistent with the slice 215 audits tally on the same shell.
 
-import type { Policy } from "@/lib/api";
+import type { Policy } from "@/lib/api/policies";
 
 /**
  * Canonical status order for the policies header tally. Mirrors the

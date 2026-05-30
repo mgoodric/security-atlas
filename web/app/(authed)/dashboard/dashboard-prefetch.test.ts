@@ -29,7 +29,7 @@ import {
 // reliable way to intercept those bindings (a `vi.spyOn` on a namespace
 // import is not consistently rebound under the ESM live-binding
 // semantics). Each fn is a `vi.fn()` the tests program per-case.
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/api/dashboard", () => ({
   getControlDrift: vi.fn(),
   getEvidenceFreshness: vi.fn(),
   getMitigateRisks: vi.fn(),
@@ -39,7 +39,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 // Import the mocked module AFTER vi.mock so `api.*` are the vi.fn()s.
-import * as api from "@/lib/api";
+import * as api from "@/lib/api/dashboard";
 
 const mocked = api as unknown as Record<string, ReturnType<typeof vi.fn>>;
 

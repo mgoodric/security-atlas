@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import type { AuditPeriod } from "@/lib/api";
+import type { AuditPeriod } from "@/lib/api/audit-periods";
 
 import {
   IN_PROGRESS_URGENT_DAYS,

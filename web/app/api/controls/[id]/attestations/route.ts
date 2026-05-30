@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth";
-import { submitAttestation, AttestSubmitRequest } from "@/lib/api";
+import { submitAttestation, AttestSubmitRequest } from "@/lib/api/attest";
 
 // Slice 011 — server-side proxy for POST /v1/controls/{id}/attestations.
 // The body shape is forwarded verbatim so the upstream's schema

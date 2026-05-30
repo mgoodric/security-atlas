@@ -40,7 +40,11 @@ import {
   MissingEndpointPanel,
   type PanelState,
 } from "@/components/dashboard/panel-card";
-import type { AggregationRule, OrgUnit, RiskTheme } from "@/lib/api";
+import type {
+  AggregationRule,
+  OrgUnit,
+  RiskTheme,
+} from "@/lib/api/risk-hierarchy";
 
 const MISSING_HEATMAP_ENDPOINT = "GET /v1/risks/theme-heatmap";
 

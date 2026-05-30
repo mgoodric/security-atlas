@@ -54,7 +54,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { SuperAdminRow } from "@/lib/api";
+import type { SuperAdminRow } from "@/lib/api/admin";
 
 type SuperAdminListResponse = { items: SuperAdminRow[]; error?: string };
 

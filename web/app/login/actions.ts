@@ -3,7 +3,7 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { apiBaseURL } from "@/lib/api";
+import { apiBaseURL } from "@/lib/api/base";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { safeRedirectTarget } from "@/lib/safe-redirect";
 import { shouldUseSecureCookie } from "@/lib/secure-cookie";

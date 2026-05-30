@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth";
-import { getVendorBurndown, VendorListFilter } from "@/lib/api";
+import { getVendorBurndown, VendorListFilter } from "@/lib/api/vendors";
 
 export async function GET(req: NextRequest) {
   const jar = await cookies();
