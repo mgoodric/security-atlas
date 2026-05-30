@@ -3,7 +3,27 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 174 claim-stake — slice 402 → in-progress (N=1 solo) · integration-enrolment drain batch 2)
+**Last reconciled:** 2026-05-30 (batch 174 merged — slice 402 on main; drain batch 2 done + a REAL audit-export bug fixed; 403 unblocked)
+
+## Drift detected — 2026-05-30 (parallel batch 174 merged · slice 402 solo)
+
+- **402** integration-enrolment drain batch 2 → merged at `cf2fb8a1` via #915 (UNSTABLE-codecov; advisory only — new export.go line covered by the integration suite, all required checks green). Enrolled the admin-creds surface (adminauditlog/adminauthzbundle/admincreds/admindemo/adminsso) in CI's integration job; all 5 green. `KNOWN_UNENROLLED` 33→28. Real coverage floors set (68/83/62/62/63 — no phantoms; the zero-unit-test packages have merged==integration own-suite).
+
+  **TWO BUGS SURFACED by the never-run suites (slice 390 thesis validated hard):**
+
+  1. **SECURITY/AUDIT-INTEGRITY (product bug, fixed in-place):** the slice-135 audit-log EXPORT handler (`internal/api/adminauditlog/export.go`) called the aggregator without `CallerIsPrivileged`, defaulting to `false` → it **silently omitted ALL `feature_flag` audit rows and every cross-actor `me` row from forensic exports**. Fixed with a one-line `CallerIsPrivileged = true` mirroring the admit-gate's privileged set ({admin,auditor,grc_engineer}, same as `unified.go:161`). Forensic exports were quietly incomplete on a compliance-critical surface — worth maintainer awareness.
+  2. **Stale test:** `admincreds` integration test router was missing `tenancymw.Middleware` (latent since slice 033's tenancy contract) → order-dependent false-green; fixed by adding the middleware to mirror production.
+
+Backlog-drain progress: **10 of 38** packages drained (oauth/oidc/jwtmw/users/period + these 5); 28 remain across batches 403-408.
+
+**Now-unblocked:** 403 (drain batch 3 — admin-users + aggregation + api-root) flips `not-ready` → `ready` (dep #402 merged).
+
+**POOL STATUS:** loop-ready = 403 (drain batch 3), 409 (dashboard contract-tier / 394-unblock, JUDGMENT). Maintainer-gated: 400 (cosign spike). Sequential: 404-408. Blocked: 394 (on 409).
+
+| Row | Transition               | Evidence                                                                                                                             |
+| --- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 402 | `in-progress` → `merged` | merged at `cf2fb8a1` via #915 (5 pkgs; KNOWN_UNENROLLED 33→28; fixed forensic-export CallerIsPrivileged bug + admincreds stale test) |
+| 403 | `not-ready` → `ready`    | dep #402 merged — drain batch 3 now pickable                                                                                         |
 
 ## Drift detected — 2026-05-30 (batch 174 claim-stake · slice 402 solo)
 
