@@ -2,7 +2,7 @@
 //
 // Coverage matrix mirrors the slice 137 `/api/controls/export` tests:
 //
-//   * No `SESSION_COOKIE` (post-slice-206: `atlas_jwt`) cookie -> 401 { error }.
+//   * No `ATLAS_JWT_COOKIE` (post-slice-206: `atlas_jwt`) cookie -> 401 { error }.
 //   * Bearer present, query string forwarded verbatim to the upstream
 //     /v1/controls/history/export path; bearer attached as
 //     Authorization: Bearer ...
@@ -29,7 +29,7 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/server", () => mockNextServer());
 
-import { SESSION_COOKIE, OIDC_SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE, OIDC_SESSION_COOKIE } from "@/lib/auth";
 import { GET } from "./route";
 
 function makeReq(query: string): Request {
@@ -51,7 +51,7 @@ describe("GET /api/controls/history/export", () => {
   });
 
   test("forwards bearer + query string verbatim on happy path", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     const csvBody =
       "id,bundle_id,version,title,...,superseded_by,superseded_at\n" +
       "11111111-1111-1111-1111-111111111111,bundle-x,2,test,...,,\n";
@@ -92,7 +92,7 @@ describe("GET /api/controls/history/export", () => {
   });
 
   test("passes through 400 from backend (unsupported format)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -109,7 +109,7 @@ describe("GET /api/controls/history/export", () => {
   });
 
   test("passes through 403 from backend (no eligible role)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -126,7 +126,7 @@ describe("GET /api/controls/history/export", () => {
   });
 
   test("passes through 429 + Retry-After header from backend (concurrency cap)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -153,7 +153,7 @@ describe("GET /api/controls/history/export", () => {
   });
 
   test("ignores atlas_session cookie when present (slice 110 P0-A2)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     cookieStore.set(OIDC_SESSION_COOKIE, "test-atlas-session-id");
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response("ok", {

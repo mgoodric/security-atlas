@@ -33,7 +33,7 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 // AUDIT_LOG_ROLES — the canonical set of roles permitted to reach
 // /audit-log. MUST match `internal/db/queries/unified_audit_log_role.sql`
@@ -79,7 +79,7 @@ async function fetchAdminMe(bearer: string): Promise<{
   const host = h.get("host") ?? "localhost:3000";
   const proto = h.get("x-forwarded-proto") ?? "http";
   const res = await fetch(`${proto}://${host}/api/admin/me`, {
-    headers: { Cookie: `${SESSION_COOKIE}=${bearer}` },
+    headers: { Cookie: `${ATLAS_JWT_COOKIE}=${bearer}` },
     cache: "no-store",
   });
   if (!res.ok) return {};
@@ -92,7 +92,7 @@ export default async function AuditLogLayout({
   children: React.ReactNode;
 }) {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     redirect("/login?from=/audit-log");
   }

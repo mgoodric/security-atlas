@@ -42,7 +42,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 type AdminMeBody = {
   is_admin: boolean;
@@ -56,7 +56,7 @@ function emptyBody(): AdminMeBody {
 
 export async function GET() {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json(emptyBody(), { status: 401 });
   }

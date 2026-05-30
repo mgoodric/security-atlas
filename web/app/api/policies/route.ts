@@ -20,11 +20,11 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { listPolicies } from "@/lib/api/policies";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 export async function GET(): Promise<Response> {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

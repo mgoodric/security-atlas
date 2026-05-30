@@ -8,7 +8,7 @@
 //   - Streaming forward: `upstream.body` (a ReadableStream) is piped
 //     directly into NextResponse with NO buffering. Even a 50K-row
 //     XLSX must not materialise in BFF memory.
-//   - Bearer auth: same `SESSION_COOKIE` (post-slice-206: `atlas_jwt`)
+//   - Bearer auth: same `ATLAS_JWT_COOKIE` (post-slice-206: `atlas_jwt`)
 //     the slice-110 admin BFFs use. The `atlas_session` cookie is
 //     NEVER forwarded (slice 110 P0-A2 narrow-scope rule).
 //   - Header passthrough: Content-Type + Content-Disposition +
@@ -23,7 +23,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 // Headers forwarded from upstream response to browser. Content-Type +
 // Content-Disposition are load-bearing for the file-save dialog;
@@ -37,7 +37,7 @@ const PASSTHROUGH_HEADERS = [
 
 export async function GET(request: Request): Promise<Response> {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

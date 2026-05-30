@@ -51,7 +51,7 @@
 
 import { test } from "@playwright/test";
 
-import { SESSION_COOKIE } from "../lib/auth";
+import { ATLAS_JWT_COOKIE } from "../lib/auth";
 import { test as authed, expect } from "./fixtures";
 
 const COOKIE_SENTINEL = "test-cookie-sentinel-do-not-log-abcdef";
@@ -132,7 +132,7 @@ test.describe("BFF cookie forwarding in production-build standalone", () => {
       const base = new URL(authedPage.url() || "http://localhost:3000");
       await context.addCookies([
         {
-          name: SESSION_COOKIE,
+          name: ATLAS_JWT_COOKIE,
           value: COOKIE_SENTINEL,
           domain: base.hostname,
           path: "/",

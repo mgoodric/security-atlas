@@ -25,7 +25,7 @@
 
 import { expect, test } from "@playwright/test";
 
-import { SESSION_COOKIE } from "../lib/auth";
+import { ATLAS_JWT_COOKIE } from "../lib/auth";
 
 test.describe("root-route redirect (slice 091)", () => {
   test("unauthenticated GET / returns 307 to /login?from=/", async ({
@@ -55,7 +55,7 @@ test.describe("root-route redirect (slice 091)", () => {
     const context = await browser.newContext();
     await context.addCookies([
       {
-        name: SESSION_COOKIE,
+        name: ATLAS_JWT_COOKIE,
         value: "test-session-fixture-091",
         domain: url.hostname,
         path: "/",

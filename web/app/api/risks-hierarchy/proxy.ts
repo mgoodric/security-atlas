@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 // Slice 056 — shared forwarding helper for the hierarchical risk
 // dashboard BFF routes. Each route reads the httpOnly bearer cookie,
@@ -15,7 +15,7 @@ export async function hierarchyProxy<T>(
   load: (bearer: string) => Promise<T>,
 ): Promise<NextResponse> {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

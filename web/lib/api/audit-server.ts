@@ -13,7 +13,7 @@
 import { cookies } from "next/headers";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import type { AuditPeriod } from "@/lib/api/audit";
 
 export type PeriodResolution =
@@ -24,7 +24,7 @@ export type PeriodResolution =
 
 export async function resolveAuditPeriod(): Promise<PeriodResolution> {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) return { kind: "unauthenticated" };
 
   const res = await fetch(`${apiBaseURL()}/v1/me/audit-period`, {

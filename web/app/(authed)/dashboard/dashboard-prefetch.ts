@@ -29,7 +29,7 @@
 //     so the dehydrated cache is wire-compatible with the page's
 //     `useQuery`.
 //   - It does NOT bypass the bearer-cookie read (P0-3). The layout reads
-//     `SESSION_COOKIE` server-side and the upstream fns set the
+//     `ATLAS_JWT_COOKIE` server-side and the upstream fns set the
 //     Authorization header from it (same as the BFF proxy).
 //   - It does NOT cache the server-fetched data (P0-2). `apiFetch` sets
 //     `cache: "no-store"` (slice 380 hardening) so the upstream answer

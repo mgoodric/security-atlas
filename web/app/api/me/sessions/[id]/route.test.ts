@@ -22,7 +22,7 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/server", () => mockNextServer());
 
-import { SESSION_COOKIE, OIDC_SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE, OIDC_SESSION_COOKIE } from "@/lib/auth";
 import { DELETE } from "./route";
 
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
@@ -43,7 +43,7 @@ describe("DELETE /api/me/sessions/{id}", () => {
   });
 
   test("forwards both bearer and atlas_session cookie when both present", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     cookieStore.set(OIDC_SESSION_COOKIE, "test-atlas-session-id");
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
@@ -63,7 +63,7 @@ describe("DELETE /api/me/sessions/{id}", () => {
   });
 
   test("omits Cookie header when atlas_session cookie is absent", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(null, { status: 204 }));

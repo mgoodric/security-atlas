@@ -30,7 +30,7 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/server", () => mockNextServer());
 
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 import { GET } from "../../app/api/admin/demo/status/route";
 
@@ -66,7 +66,7 @@ describe("contract: GET /api/admin/demo/status <-> atlas GET /v1/admin/demo/stat
 
   for (const variantName of Object.keys(golden.variants)) {
     test(`BFF passes provider variant "${variantName}" through verbatim`, async () => {
-      cookieStore.set(SESSION_COOKIE, "test-bearer");
+      cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer");
       const providerBody = golden.variants[variantName];
       vi.spyOn(globalThis, "fetch").mockImplementation(
         async () =>

@@ -29,7 +29,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 // FORWARD_PARAMS are the query keys the BFF is willing to forward to
 // upstream. Anything else (e.g. `tenant_id`, `debug`) is dropped so a
@@ -51,7 +51,7 @@ const FORWARD_PARAMS = [
 
 export async function GET(req: Request): Promise<Response> {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

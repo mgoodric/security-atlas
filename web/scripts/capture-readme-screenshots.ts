@@ -107,11 +107,11 @@ const OUT_DIR = resolve(REPO_ROOT, "docs/images");
 const STUB_PORT = 8787;
 const NEXT_PORT = 3300; // avoid colliding with the dev convention :3000
 const DEMO_BEARER = "demo-bearer-readme-capture";
-// Must match `SESSION_COOKIE` in web/lib/auth.ts. Hard-coded here
+// Must match `ATLAS_JWT_COOKIE` in web/lib/auth.ts. Hard-coded here
 // (rather than imported) because esbuild bundles this script in
 // isolation from the Next module-resolution context. Slice 206
 // migrated the value from `sa_session_token` to `atlas_jwt`.
-const SESSION_COOKIE = "atlas_jwt";
+const ATLAS_JWT_COOKIE = "atlas_jwt";
 
 const CAPTURE_TARGETS = [
   { name: "hero-dashboard", path: "/dashboard" },
@@ -275,7 +275,7 @@ async function injectSessionCookie(
   const url = new URL(baseURL);
   await context.addCookies([
     {
-      name: SESSION_COOKIE,
+      name: ATLAS_JWT_COOKIE,
       value: DEMO_BEARER,
       domain: url.hostname,
       path: "/",

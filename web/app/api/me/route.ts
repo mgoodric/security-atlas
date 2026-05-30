@@ -1,6 +1,6 @@
 // Slice 108 — BFF proxy for /v1/me (GET + PATCH).
 //
-// Forwards the SESSION_COOKIE bearer to the upstream platform; the bearer never
+// Forwards the ATLAS_JWT_COOKIE bearer to the upstream platform; the bearer never
 // reaches the browser. PATCH passes the body through verbatim. Per slice 108
 // P0-A3 the BFF does NOT roundtrip the IdP — the upstream's GET /v1/me is the
 // single source of profile truth.
@@ -9,11 +9,11 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 export async function GET(): Promise<Response> {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
@@ -26,7 +26,7 @@ export async function GET(): Promise<Response> {
 
 export async function PATCH(req: Request): Promise<Response> {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

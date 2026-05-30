@@ -33,7 +33,7 @@ authed.describe("Next.js rewrites — /v1/* (slice 208 AC-4)", () => {
     "authenticated /v1/me returns 200 JSON via the rewrite",
     async ({ authedPage }) => {
       // page.request shares the BrowserContext cookie jar, so the
-      // SESSION_COOKIE the fixture set is sent on this request. The
+      // ATLAS_JWT_COOKIE the fixture set is sent on this request. The
       // rewrite forwards the cookie to atlas; jwtmw shape-checks the
       // JWT; the /v1/me handler returns the user shape.
       const res = await authedPage.request.get("/v1/me", {

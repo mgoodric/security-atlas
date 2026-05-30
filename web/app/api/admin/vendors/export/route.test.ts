@@ -2,7 +2,7 @@
 //
 // Sibling of the audit-periods BFF test. Same matrix:
 //
-//   * No `SESSION_COOKIE` (post-slice-206: `atlas_jwt`) cookie  -> 401 { error }
+//   * No `ATLAS_JWT_COOKIE` (post-slice-206: `atlas_jwt`) cookie  -> 401 { error }
 //   * Bearer present                 -> happy path: stream body + headers
 //   * Backend 400 / 403 / 413 / 429  -> JSON error body + status passthrough
 //   * Slice 110 P0-A2: atlas_session cookie MUST NOT be forwarded
@@ -28,7 +28,7 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/server", () => mockNextServer());
 
-import { SESSION_COOKIE, OIDC_SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE, OIDC_SESSION_COOKIE } from "@/lib/auth";
 import { GET } from "./route";
 
 function makeReq(query: string): Request {
@@ -50,7 +50,7 @@ describe("GET /api/admin/vendors/export", () => {
   });
 
   test("forwards bearer + query string verbatim on happy path", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     // Slice 139 D1: owner_user_masked column. Un-masked owner_user
     // must NOT appear in the canonical header.
     const csvBody =
@@ -89,7 +89,7 @@ describe("GET /api/admin/vendors/export", () => {
   });
 
   test("passes through 400 from backend (bad format)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -103,7 +103,7 @@ describe("GET /api/admin/vendors/export", () => {
   });
 
   test("passes through 403 from backend (no eligible role)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -117,7 +117,7 @@ describe("GET /api/admin/vendors/export", () => {
   });
 
   test("passes through 429 from backend (concurrency cap)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -139,7 +139,7 @@ describe("GET /api/admin/vendors/export", () => {
   });
 
   test("ignores atlas_session cookie when present (slice 110 P0-A2)", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-bearer-token");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     cookieStore.set(OIDC_SESSION_COOKIE, "test-atlas-session-id");
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response("ok", {

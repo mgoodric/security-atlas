@@ -25,13 +25,13 @@
 // global-setup process env.
 //
 // Cookie story: the Playwright fixture in `web/e2e/fixtures.ts` reads
-// `TEST_BEARER` and sets it as the `SESSION_COOKIE` value (slice 206
+// `TEST_BEARER` and sets it as the `ATLAS_JWT_COOKIE` value (slice 206
 // migrated the constant's value from `sa_session_token` to `atlas_jwt`
 // so it matches the OAuth callback's cookie writer). The Next.js BFF
 // (`web/lib/api/bff.ts`) reads that cookie from the jar and forwards
 // it as `Authorization: Bearer <value>` to the atlas Go server, where
 // the slice 190 jwtmw middleware shape-checks for the `eyJ` JWT
-// prefix. So the fixture continues to work as-is — the SESSION_COOKIE
+// prefix. So the fixture continues to work as-is — the ATLAS_JWT_COOKIE
 // import keeps resolving to whatever value `web/lib/auth.ts` declares.
 //
 // Hard rule (P0-201-3): the JWT is never persisted, never logged,

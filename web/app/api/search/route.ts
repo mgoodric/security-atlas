@@ -1,7 +1,7 @@
 // Slice 223 — BFF proxy for `/v1/search` (the slice 268 unified search
 // endpoint).
 //
-// Forwards the SESSION_COOKIE bearer to the upstream platform; the
+// Forwards the ATLAS_JWT_COOKIE bearer to the upstream platform; the
 // bearer never reaches the browser. Mirrors the slice 102 audits BFF
 // shape (`web/app/api/audits/route.ts`) so the BFF surface stays
 // predictable across reads.
@@ -37,11 +37,11 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 export async function GET(req: NextRequest): Promise<Response> {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

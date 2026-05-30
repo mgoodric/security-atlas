@@ -8,7 +8,7 @@ import {
   RisksCountBadge,
 } from "@/components/shell/sidebar-counts";
 import { shouldShowAdminEntry } from "@/lib/admin-nav";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 // Canonical order per Plans/canvas/12-ui-fill-in-design-decisions.md §1:
@@ -107,13 +107,13 @@ async function fetchAdminMe(): Promise<{
   // the predicate returns false (hide the Admin entry).
   try {
     const jar = await cookies();
-    const bearer = jar.get(SESSION_COOKIE)?.value;
+    const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
     if (!bearer) return {};
     const h = await headers();
     const host = h.get("host") ?? "localhost:3000";
     const proto = h.get("x-forwarded-proto") ?? "http";
     const res = await fetch(`${proto}://${host}/api/admin/me`, {
-      headers: { Cookie: `${SESSION_COOKIE}=${bearer}` },
+      headers: { Cookie: `${ATLAS_JWT_COOKIE}=${bearer}` },
       cache: "no-store",
     });
     if (!res.ok) return {};

@@ -5,7 +5,7 @@ import { MobileSidebar } from "@/components/shell/mobile-sidebar";
 import { Sidebar, getAuthedNav } from "@/components/shell/sidebar";
 import { TopBar } from "@/components/shell/topbar";
 import { VersionFooter } from "@/components/version-footer";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 export default async function AuthedLayout({
   children,
@@ -13,7 +13,7 @@ export default async function AuthedLayout({
   children: React.ReactNode;
 }) {
   const jar = await cookies();
-  if (!jar.get(SESSION_COOKIE)?.value) {
+  if (!jar.get(ATLAS_JWT_COOKIE)?.value) {
     redirect("/login");
   }
 

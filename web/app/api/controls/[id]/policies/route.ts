@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { getControlPolicies } from "@/lib/api/control-detail";
 
 // Slice 253 — server-side proxy for GET /v1/controls/{id}/policies
@@ -20,7 +20,7 @@ export async function GET(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const jar = await cookies();
-  const bearer = jar.get(SESSION_COOKIE)?.value;
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

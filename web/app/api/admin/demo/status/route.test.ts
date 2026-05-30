@@ -23,7 +23,7 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/server", () => mockNextServer());
 
-import { SESSION_COOKIE } from "@/lib/auth";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { GET } from "./route";
 
 describe("GET /api/admin/demo/status", () => {
@@ -41,7 +41,7 @@ describe("GET /api/admin/demo/status", () => {
   });
 
   test("returns 200 with enabled=true when upstream reports gate set", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-admin-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-admin-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ enabled: true }), {
         status: 200,
@@ -56,7 +56,7 @@ describe("GET /api/admin/demo/status", () => {
   });
 
   test("returns 200 with enabled=false when upstream reports gate unset", async () => {
-    cookieStore.set(SESSION_COOKIE, "test-admin-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-admin-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ enabled: false }), {
         status: 200,
@@ -71,7 +71,7 @@ describe("GET /api/admin/demo/status", () => {
   });
 
   test("upstream 403 propagates with same status", async () => {
-    cookieStore.set(SESSION_COOKIE, "non-admin-bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "non-admin-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "admin role required" }), {
         status: 403,
@@ -87,7 +87,7 @@ describe("GET /api/admin/demo/status", () => {
   });
 
   test("upstream 5xx propagates with same status", async () => {
-    cookieStore.set(SESSION_COOKIE, "bearer");
+    cookieStore.set(ATLAS_JWT_COOKIE, "bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "platform unavailable" }), {
         status: 500,
