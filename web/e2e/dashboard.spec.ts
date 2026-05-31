@@ -42,6 +42,8 @@
 
 import { seedFromFixture } from "./seed";
 
+import { fulfillFromGolden } from "./test-utils/fulfill-from-golden";
+
 import { expect, test } from "./fixtures";
 
 test.describe("dashboard view", () => {
@@ -328,27 +330,23 @@ test.describe("dashboard view", () => {
   test("AC-2 (slice 229): subtitle renders 'evidence freshness {pct}% within window' from the freshness endpoint", async ({
     authedPage: page,
   }) => {
-    // Mock the BFF to a deterministic 87% (100 - 13/100 stale) so the
-    // visible copy is predictable regardless of seed-fixture drift.
-    await page.route("**/api/dashboard/freshness", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          bucket: "class",
+    // Slice 394: load the freshness body from the recorded golden, then
+    // OVERRIDE the numbers to a deterministic 87% (100 - 13/100 stale) so
+    // the visible copy is predictable regardless of seed-fixture drift.
+    // The golden supplies the recorded shape (`bucket: "class"`, the array
+    // contract); the override pins only the numbers the assertion reads —
+    // the AC-3 populated-with-override escape hatch (decisions log D3).
+    await page.route("**/api/dashboard/freshness", (route) =>
+      fulfillFromGolden(route, "freshness", "populated", {
+        override: {
           buckets: [
-            {
-              freshness_class: "monthly",
-              total: 100,
-              fresh: 87,
-              stale: 13,
-            },
+            { freshness_class: "monthly", total: 100, fresh: 87, stale: 13 },
           ],
           total: 100,
           total_stale: 13,
-        }),
-      });
-    });
+        },
+      }),
+    );
     await page.goto("/dashboard");
     const subtitle = page.getByTestId("dashboard-header-subtitle");
     await expect(subtitle).toBeVisible();
@@ -368,18 +366,12 @@ test.describe("dashboard view", () => {
   test("AC-5 (slice 229): subtitle renders 'No evidence ingested yet' when total === 0", async ({
     authedPage: page,
   }) => {
-    await page.route("**/api/dashboard/freshness", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          bucket: "class",
-          buckets: [],
-          total: 0,
-          total_stale: 0,
-        }),
-      });
-    });
+    // Slice 394: the empty-set body IS a recorded golden variant
+    // (`freshness:empty` — the array-vs-null contract 409 D3 pins). Load
+    // it instead of hand-writing `{buckets: [], total: 0}`.
+    await page.route("**/api/dashboard/freshness", (route) =>
+      fulfillFromGolden(route, "freshness", "empty"),
+    );
     await page.goto("/dashboard");
     const subtitle = page.getByTestId("dashboard-header-subtitle");
     await expect(subtitle).toBeVisible();
@@ -391,18 +383,10 @@ test.describe("dashboard view", () => {
   }) => {
     // Anti-criterion: when total === 0 we MUST NOT show "100%" or
     // "100% fresh" anywhere in the subtitle region.
-    await page.route("**/api/dashboard/freshness", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          bucket: "class",
-          buckets: [],
-          total: 0,
-          total_stale: 0,
-        }),
-      });
-    });
+    // Slice 394: same recorded empty-set golden as the AC-5 case above.
+    await page.route("**/api/dashboard/freshness", (route) =>
+      fulfillFromGolden(route, "freshness", "empty"),
+    );
     await page.goto("/dashboard");
     const subtitle = page.getByTestId("dashboard-header-subtitle");
     await expect(subtitle).toBeVisible();

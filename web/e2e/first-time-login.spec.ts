@@ -28,20 +28,27 @@
 // Hard rule (P0-A9 inherited from slice 069's fixtures): no
 // vendor-prefixed tokens in test strings. The mocked install-state body
 // is metadata only — no token plaintext ever appears here.
+//
+// Slice 394 — the two happy-path install-state mocks now load their body
+// from the recorded contract golden (`web/lib/contracts/install-state.golden.json`)
+// via `fulfillFromGolden`, so the e2e mock cannot drift from the
+// provider's recorded `{first_install}` wire shape (slice 334 P-1 / ADR-0007).
+// The third test (the 503 fallback) is the AC-3 escape hatch: there is no
+// recorded body for an error, so it stays a hand-written `status: 503`
+// fulfill — see `fulfill-from-golden.ts` + decisions log D3.
 
 import { expect, test } from "@playwright/test";
+
+import { fulfillFromGolden } from "./test-utils/fulfill-from-golden";
 
 test.describe("first-time login UX", () => {
   test("renders the first-install guidance when /v1/install-state reports fresh", async ({
     page,
   }) => {
-    await page.route("**/api/install-state", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ first_install: true }),
-      });
-    });
+    await page.route("**/api/install-state", (route) =>
+      // Golden variant: a fresh install (no tenant yet). `first_install: true`.
+      fulfillFromGolden(route, "install-state", "fresh_install_without_tenant"),
+    );
 
     await page.goto("/login");
 
@@ -61,13 +68,10 @@ test.describe("first-time login UX", () => {
   test("hides the first-install guidance when /v1/install-state reports not-fresh", async ({
     page,
   }) => {
-    await page.route("**/api/install-state", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ first_install: false }),
-      });
-    });
+    await page.route("**/api/install-state", (route) =>
+      // Golden variant: a completed first install. `first_install: false`.
+      fulfillFromGolden(route, "install-state", "post_first_install"),
+    );
 
     await page.goto("/login");
 
@@ -82,6 +86,12 @@ test.describe("first-time login UX", () => {
     // P0-A5: a metadata failure must NOT block the production sign-in
     // path. The login page renders the existing copy verbatim and the
     // guidance card is absent.
+    //
+    // Slice 394 AC-3 escape hatch: there is no recorded golden body for an
+    // error response (the goldens are 200-shape happy-path bodies), so an
+    // error variant stays a hand-written `route.fulfill` with the status
+    // under test. This is the documented, intentional non-golden path —
+    // see `fulfill-from-golden.ts` header + decisions log D3.
     await page.route("**/api/install-state", async (route) => {
       await route.fulfill({ status: 503, body: "" });
     });

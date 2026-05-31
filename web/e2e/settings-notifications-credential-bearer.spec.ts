@@ -32,6 +32,8 @@
 // existing settings.spec.ts coverage stays the source of truth for the
 // happy path.
 
+import { fulfillFromGolden } from "./test-utils/fulfill-from-golden";
+
 import { expect, test } from "./fixtures";
 
 import {
@@ -39,22 +41,17 @@ import {
   CREDENTIAL_BEARER_BANNER_TITLE,
 } from "../app/(authed)/settings/notif-bearer-mode";
 
-// Synthetic-profile shape returned by /v1/me for credential bearers.
-// Mirrors `internal/api/me/profile.go:269-282`.
-const SYNTHETIC_CREDENTIAL_PROFILE = {
-  // The credential's own user_id (typically NIL UUID for bootstrap; a
-  // synthetic non-UUID string for API-key with no users row backing).
-  // The exact value is not load-bearing for the UI test.
-  user_id: "00000000-0000-0000-0000-000000000000",
-  tenant_id: "00000000-0000-0000-0000-000000000001",
+// Slice 394: the synthetic-credential `/v1/me` body loads from the recorded
+// contract golden (`me.golden.json` variant `synthetic_admin`) so the e2e
+// mock cannot drift from the real handler's profile wire shape (slice 334
+// P-1 / ADR-0007). Only `display_name` is overridden — this spec asserts
+// the credential render-mode signal, not the owner-role list, and the
+// golden's `owner_roles: null` is a valid credential shape; but to keep
+// this spec byte-identical to its prior behavior we pin `owner_roles: []`
+// (its original value) via the AC-3 override escape hatch (decisions log D3).
+const ME_OVERRIDE = {
   display_name: "API key 1f3a",
-  email: "",
-  idp_subject: "",
-  tenant_role: "admin",
-  time_zone: null,
-  is_admin: true,
   owner_roles: [],
-  roles: [],
 };
 
 test.describe("/settings Notifications section -- credential bearer", () => {
@@ -74,10 +71,8 @@ test.describe("/settings Notifications section -- credential bearer", () => {
         await route.fallback();
         return;
       }
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(SYNTHETIC_CREDENTIAL_PROFILE),
+      await fulfillFromGolden(route, "me", "synthetic_admin", {
+        override: ME_OVERRIDE,
       });
     });
 
