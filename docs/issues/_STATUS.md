@@ -3,7 +3,13 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 177 reconcile — slice 405 merged at `600d39ff` · integration-enrolment drain 25/38 · 406 unblocked)
+**Last reconciled:** 2026-05-30 (batch 178 claim-stake — slice 406 → in-progress (N=1 solo) · integration-enrolment drain batch 6 · auth substrate + keystore)
+
+## Drift detected — 2026-05-30 (batch 178 claim-stake · slice 406 solo)
+
+- **406** (integration-enrolment drain batch 6, slice 390) — infra · AFK. Enrols auth substrate + keystore — `internal/auth`, `internal/auth/keystore/fsstore`, `internal/mcp`, `internal/observability/otel` (4 pkgs) — in ci.yml's integration job. Per package: enrol → run suite → FIX whatever broke (no skip/delete; one-liner product bug → fix in-place per 402; deeper FK-wipe chain → TRUNCATE CASCADE per 405; real design work → spillover+skip-that-test) → shrink `KNOWN_UNENROLLED` 13→9 → lift coverage excludes (real floor vs phantom per 396/401-405).
+
+Run SOLO (N=1): drain batches surface unpredictable breakage (314+402+405 found real bugs; 401/403/404 clean). 409 (dashboard contract-tier, JUDGMENT) deferred. 400 = maintainer cosign gate. OQ CLEAN; zero migrations. Chain continues 406 → 407 → 408.
 
 ## Reconcile — 2026-05-30 (batch 177 · slice 405 merged)
 
