@@ -3,13 +3,14 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 180 claim-stake — slice 408 → in-progress (N=1 solo) · integration-enrolment drain batch 8 · FINAL · catalog/oscal/policy/risk tail)
+**Last reconciled:** 2026-05-30 (batch 180 reconcile — slice 408 merged at `bb2ce517` · integration-enrolment drain 38/38 · **slice 390 CLOSED**)
 
-## Drift detected — 2026-05-30 (batch 180 claim-stake · slice 408 solo)
+## Reconcile — 2026-05-30 (batch 180 · slice 408 merged · slice 390 drain COMPLETE)
 
-- **408** (integration-enrolment drain batch 8, slice 390) — infra · AFK. FINAL drain batch — enrols `internal/catalog/metrics`, `internal/oscal`, `internal/policy/pdf`, `internal/policy/seed`, `internal/risk/aggrule` (5 pkgs) — in ci.yml's integration job. Merging it shrinks `KNOWN_UNENROLLED` 5→0 and CLOSES slice 390. Per package: enrol (match KNOWN_UNENROLLED form) → run suite (per-pkg + combined serial w/ demoseed neighbour) → FIX whatever broke (no skip/delete; one-liner product bug → fix in-place per 402; deeper FK-wipe chain → TRUNCATE CASCADE per 405; stale test → fix per 406; real design work → spillover+skip-that-test) → shrink `KNOWN_UNENROLLED` 5→0 → lift coverage excludes (real floor vs phantom per 396/401-407). NOTE: catalog/metrics = slice-386 NULL-bug surface; oscal = compliance-trestle bridge — watch for real finds.
+- **408** (integration-enrolment drain batch 8, slice 390) — infra · AFK — **MERGED** at `bb2ce517` (#933). FINAL drain batch — enrolled `internal/catalog/metrics`, `internal/oscal`, `internal/policy/pdf`, `internal/policy/seed`, `internal/risk/aggrule` (5 pkgs); `KNOWN_UNENROLLED` 5→0 (allowlist now EMPTY; guard self-test green on empty case). **Real find (fixed in-place):** the `internal/policy/` excludes prefix in `coverage-thresholds.json` silently shadowed every `internal/policy/*` floor in `cmd/scripts/coverage-gate` — `policy/seed:87` was dead config; new `policy/pdf:68` would have been too. Removed the blanket exclude, added honest `internal/policy:35` root floor, un-shadowing the subpackage floors (all now enforced + passing in the merged profile). `oscal`'s frozen-bundle export test self-skips when the optional Python compliance-trestle bridge is absent (pre-existing, identical local+CI). Coverage floors: catalog/metrics 76, oscal 69, policy/pdf 68, policy 35, policy/seed 87, risk/aggrule 72.
+- **390** (integration-enrolment backlog drain — parent) — **MERGED/CLOSED**: all 38 `//go:build integration` packages now run in CI; `KNOWN_UNENROLLED` empty. 8 batches (314 + 401-408). Real finds: 314 (device-flow 404), 402 (adminauditlog forensic-export product bug + stale tenancy test), 405 (ucfcoverage FK-wipe → TRUNCATE CASCADE), 406 (stale OIDC nonce-ordering test), 408 (coverage-exclude-shadow gate bug); benign: 401/403/404/407. The structural gap — integration suites that never ran in CI — is closed.
 
-Run SOLO (N=1): drain batches surface unpredictable breakage (314+402+405+406 found real bugs/stale tests). 409 (dashboard contract-tier, JUDGMENT) becomes primary pick after 390 closes. 400 = maintainer cosign gate. OQ CLEAN; zero migrations.
+Drain progress: **38/38** — slice 390 done. Loop-ready picks now: **409** (dashboard contract-tier, JUDGMENT — unblocks 394). 400 = maintainer cosign gate (NO-AUTO-MERGE, do NOT auto-pick). OQ CLEAN; zero migrations this batch.
 
 ## Reconcile — 2026-05-30 (batch 179 · slice 407 merged)
 

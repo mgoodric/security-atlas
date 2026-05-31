@@ -3,7 +3,9 @@
 **Cluster:** infra
 **Estimate:** 2-3d (likely 6-10 sub-slices)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (CLOSED 2026-05-30 — all 8 drain batches merged; `KNOWN_UNENROLLED` empty, 38/38 packages enrolled)
+
+> **Closed 2026-05-30.** Drained across 8 batches: 314 + 401-408. All 38 `//go:build integration` packages now run in CI; the slice-345 `KNOWN_UNENROLLED` allowlist is empty. Real finds surfaced: 314 (device-flow 404), 402 (adminauditlog forensic-export product bug + stale tenancy test), 405 (ucfcoverage FK-wipe → TRUNCATE CASCADE), 406 (stale OIDC nonce-ordering test), 408 (coverage-exclude-shadow gate bug). Benign batches: 401/403/404/407.
 
 ## Narrative
 
