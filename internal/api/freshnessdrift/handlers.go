@@ -13,6 +13,7 @@
 package freshnessdrift
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -25,15 +26,41 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-// Handler bundles the slice-016 read routes over the freshness + drift Stores.
-type Handler struct {
-	freshness *freshness.Store
-	drift     *drift.Store
+// freshnessLister + driftReporter are the handler's read seams (slice
+// 409). The handler depends on these unexported interfaces, not the
+// concrete *freshness.Store / *drift.Store, so the contract-tier recorder
+// (handler_contract_test.go) can drive the real wire-shape transformation
+// with fixed-row stubs on the plain `go test ./...` unit surface — no
+// Postgres pool (ADR-0007 / P0-409-1). The production Stores satisfy them
+// verbatim; the seams stay internal and New(*Store, *Store) is unchanged
+// (P0-409-2).
+type freshnessLister interface {
+	List(ctx context.Context) ([]freshness.ControlFreshness, error)
 }
 
-// New constructs a Handler.
+type driftReporter interface {
+	Report(ctx context.Context, since time.Duration) (drift.DriftReport, error)
+}
+
+// Handler bundles the slice-016 read routes over the freshness + drift Stores.
+type Handler struct {
+	freshness freshnessLister
+	drift     driftReporter
+}
+
+// New constructs a Handler. The parameter types are the concrete *Stores
+// (public API unchanged, slice 409 P0-409-2); internally they are held
+// behind the unexported read seams.
 func New(freshnessStore *freshness.Store, driftStore *drift.Store) *Handler {
 	return &Handler{freshness: freshnessStore, drift: driftStore}
+}
+
+// newHandlerWithReaders constructs a Handler over arbitrary read seams. It
+// exists only for the slice-409 contract recorder, which injects
+// fixed-row stubs so the wire shape records with no Postgres pool. It is
+// unexported — not part of the package's public surface.
+func newHandlerWithReaders(f freshnessLister, d driftReporter) *Handler {
+	return &Handler{freshness: f, drift: d}
 }
 
 // defaultDriftWindow is the ?since= default — 7 days, matching the dashboard

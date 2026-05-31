@@ -1,0 +1,26 @@
+{
+  "_comment": "Slice 409 contract-tier golden. PROVIDER: internal/api/freshnessdrift/handler_contract_test.go (Drift, real handler over an injected fixed-row driftReporter stub — Option A seam, no Postgres). Regenerate: `go test ./internal/api/freshnessdrift/ -run TestContract_Drift -update`. CONSUMER: web/lib/contracts/drift.contract.test.ts asserts the BFF at web/app/api/dashboard/drift/route.ts.",
+  "endpoint": "GET /v1/controls/drift",
+  "variants": {
+    "empty": {
+      "delta": 0,
+      "flipped_out": [],
+      "flipped_out_count": 0,
+      "since": "2026-05-08",
+      "through": "2026-05-15"
+    },
+    "populated": {
+      "delta": -1,
+      "flipped_out": [
+        {
+          "control_id": "33333333-3333-4333-8333-333333333333",
+          "current_result": "fail",
+          "last_passing": "2026-05-12"
+        }
+      ],
+      "flipped_out_count": 1,
+      "since": "2026-05-08",
+      "through": "2026-05-15"
+    }
+  }
+}
