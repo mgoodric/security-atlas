@@ -3,13 +3,18 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 183 claim-stake — slice 410 → in-progress (N=1 solo) · contract-tier risks panel · FINAL auto-pickable slice)
+**Last reconciled:** 2026-05-30 (batch 183 reconcile — slice 410 merged at `ec3718fd` · contract-tier rollout complete · loop at terminus)
 
-## Drift detected — 2026-05-30 (batch 183 claim-stake · slice 410 solo)
+## Reconcile — 2026-05-30 (batch 183 · slice 410 merged · LOOP TERMINUS)
 
-- **410** (contract-tier: dashboard top-risks panel `GET /v1/risks`, parent 409) — Quality · JUDGMENT. Records a contract golden for the risks panel via a narrow **list-only** unexported read seam on the risks `Handler` (Option A, but just the `List` method the `ListRisks` path uses — not the full ~7-method `*risk.Store`; `New(*risk.Store)` unchanged, P0-409-2). Provider recorder on the Go-unit surface (reusing the 392/409 shared helper) records the `riskWire` envelope; **transform-aware** consumer assert (`web/lib/contracts/risks.contract.test.ts`) — the dashboard/risks BFF unwraps `body.risks` and re-wraps `{risks, count}`, so the assert checks the BFF output matches `{risks: golden.risks, count: golden.risks.length}`, NOT `toEqual(golden)`. ADR-0007 (no new gate, unit surface); drift sensitivity proven. P0s mirror 409.
+- **410** (contract-tier: dashboard top-risks panel `GET /v1/risks`, parent 409) — Quality · JUDGMENT — **MERGED** at `ec3718fd` (#942). Recorded the risks-panel golden via a narrow unexported `riskLister` list-only seam (`List(ctx, risk.ListFilter)` only — not the full `*risk.Store`; `New(*risk.Store)` unchanged, P0-409-2). Recorder on the Go-unit surface (no DB/integration tag, P0-409-1) reusing the shared helper; needed both a tenant AND a program-read credential to reach the happy path. Golden captures populated+empty `{risks, count}` envelopes (opaque score blobs, linked_control_ids, nullable dates). Transform-aware consumer assert (`web/lib/contracts/risks.contract.test.ts`) mirrors the BFF unwrap/re-wrap. Drift proven (rename `treatment`→`treatment_kind` → both halves red → restored). Risks-pkg unit coverage 4.5%→13.8%. Closes the slice-409 D1 deferral.
 
-Run SOLO (N=1): JUDGMENT slice. FINAL auto-pickable slice — after 410 merges, only 411 (blocked-on-appetite) + 400 (maintainer cosign gate, NO-AUTO-MERGE) remain, so the next iteration's GUARD-1 fires / E-3 escalates: the loop reaches its designed terminus. OQ CLEAN; zero migrations.
+**LOOP TERMINUS.** No auto-pickable slices remain. The continuous-batch loop has drained its entire `ready` backlog. Remaining slices require maintainer action:
+
+- **411** (contract-tier: controls-detail + audit-workspace) — `blocked` on appetite (v2 follow-on; the 7+-method seam is not yet justified). Maintainer un-blocks when the appetite exists.
+- **400** (cosign signing spike) — `ready` but NO-AUTO-MERGE maintainer gate (a decision/spike the loop must not auto-merge).
+
+Contract-tier arc COMPLETE: 349 (pilot) → 392 (rollout, 4 endpoints) → 409 (5 dashboard panels) → 394 (e2e fulfillFromGolden) → 410 (risks panel). slice 390 integration-enrolment drain COMPLETE (38/38). OQ CLEAN; zero migrations this batch.
 
 ## Reconcile — 2026-05-30 (batch 182 · slice 394 merged)
 
