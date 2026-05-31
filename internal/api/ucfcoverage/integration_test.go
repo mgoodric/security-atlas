@@ -101,12 +101,26 @@ func wipeTenantControls(t *testing.T) {
 	t.Helper()
 	pool := openPool(t, adminDSN(t))
 	defer pool.Close()
-	// CASCADE order: any FK from evidence_records (slice 002+) into
-	// controls must already be cleared; the test suite never creates
-	// those. If a future slice writes evidence here, this helper will
-	// need to clear that table first.
-	if _, err := pool.Exec(context.Background(), `DELETE FROM controls`); err != nil {
-		t.Fatalf("wipe controls: %v", err)
+	// TRUNCATE ... CASCADE rather than enumerate-and-DELETE: many tables
+	// FK-reference controls with ON DELETE RESTRICT — directly
+	// (evidence_records, control_evaluations, walkthroughs, exceptions,
+	// risk_register, freshness_drift, audit_samples, …) and transitively
+	// (sample_evidence → evidence_records → controls). Under CI's serial
+	// `-p 1` run a prior package (internal/demoseed and the audit-sample
+	// suites) leaves rows in those tables under the shared canonical
+	// tenant, so a DELETE FROM controls (or any fixed enumeration of
+	// children) hits a RESTRICT FK and the whole suite fails. CASCADE
+	// truncates the full transitive dependent set atomically, ignoring
+	// RESTRICT; it does NOT touch scf_anchors or tenants (controls
+	// references those, not the reverse — verified). Mirrors the repo
+	// precedent at internal/evidence/ingest/integration_test.go and
+	// internal/platform/status_integration_test.go. (Slice 405: the FK
+	// chain is deeper than evidence_records — latent because the package
+	// never ran in CI alongside the packages that seed sample_evidence /
+	// evidence_records under the shared tenant.)
+	if _, err := pool.Exec(context.Background(),
+		`TRUNCATE controls RESTART IDENTITY CASCADE`); err != nil {
+		t.Fatalf("wipe controls (TRUNCATE CASCADE): %v", err)
 	}
 }
 
@@ -730,6 +744,28 @@ func seedEvaluation(t *testing.T, tenant string, controlID uuid.UUID, result str
 	}
 }
 
+// seedScopeCell inserts one scope_cells row for the tenant so that a
+// control with the legacy match-all applicability_expr ("") resolves to a
+// non-empty applicability universe. Slice 256's in-scope coverage test
+// needs at least one cell in the universe; without it the intersection in
+// frameworkscope.EffectiveScope is empty and every row renders n/a. Uses
+// the admin pool so RLS does not block setup.
+func seedScopeCell(t *testing.T, tenant string) {
+	t.Helper()
+	pool := openPool(t, adminDSN(t))
+	defer pool.Close()
+	const dims = `{"env":"prod"}`
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO scope_cells (id, tenant_id, label, dimensions, dimensions_hash)
+		 VALUES ($1, $2, 'slice256-inscope', $3::jsonb,
+		         encode(digest($3::text, 'sha256'), 'hex'))
+		 ON CONFLICT DO NOTHING`,
+		uuid.New(), tenant, dims,
+	); err != nil {
+		t.Fatalf("seed scope_cell: %v", err)
+	}
+}
+
 // firstFrameworkVersionID returns the framework_version_id of the first
 // SOC 2 row in the catalog. Slice 256's coverage tests need a known fv
 // to activate a framework_scope against.
@@ -750,20 +786,29 @@ func soc2017FrameworkVersionID(t *testing.T) uuid.UUID {
 }
 
 // wipeTenantState clears the per-tenant working set that slice 256
-// tests rely on: controls, evaluations, framework_scopes. Catalog rows
-// (scf_anchors / framework_versions / etc.) stay intact.
+// tests rely on. Catalog rows (scf_anchors / framework_versions / etc.)
+// stay intact. TRUNCATE ... CASCADE rather than an enumerated DELETE
+// loop: truncating `controls` CASCADEs to the full transitive dependent
+// set (control_evaluations, evidence_records, sample_evidence,
+// walkthroughs, exceptions, risk_register, …) atomically, ignoring the
+// ON DELETE RESTRICT FKs that a fixed child enumeration would trip over
+// when a prior package in CI's serial `-p 1` run leaves rows under the
+// shared tenant. `framework_scopes` and `scope_cells` are NOT
+// control-dependents (controls does not reference them), so they are
+// listed explicitly. scope_cells is included so the in-scope test's
+// seeded cell does not leak into the out-of-scope / no-data tests within
+// a run. CASCADE does not touch scf_anchors / tenants (controls
+// references those — verified). (Slice 405: the FK chain is deeper than
+// evidence_records — sample_evidence → evidence_records → controls, all
+// RESTRICT — so TRUNCATE CASCADE is the robust fix, matching the repo
+// precedent in internal/evidence/ingest + internal/platform/status.)
 func wipeTenantState(t *testing.T) {
 	t.Helper()
 	pool := openPool(t, adminDSN(t))
 	defer pool.Close()
-	for _, q := range []string{
-		`DELETE FROM control_evaluations`,
-		`DELETE FROM framework_scopes`,
-		`DELETE FROM controls`,
-	} {
-		if _, err := pool.Exec(context.Background(), q); err != nil {
-			t.Fatalf("wipe (%s): %v", q, err)
-		}
+	if _, err := pool.Exec(context.Background(),
+		`TRUNCATE controls, framework_scopes, scope_cells RESTART IDENTITY CASCADE`); err != nil {
+		t.Fatalf("wipe tenant state (TRUNCATE CASCADE): %v", err)
 	}
 }
 
@@ -779,6 +824,16 @@ func TestControlCoverage_Slice256_InScopeRowReturnsNumeric(t *testing.T) {
 	cid := seedControl(t, tenantA, "IAC-06", "test-mfa-256-inscope", "MFA Enforcement (256-inscope)")
 	soc2FVID := soc2017FrameworkVersionID(t)
 	seedActivatedFrameworkScope(t, tenantA, soc2FVID, "SOC 2 — Test Activated")
+
+	// The control's applicability_expr is the legacy match-all (""), which
+	// scope.ControlApplicability resolves against the tenant's scope-cell
+	// universe. With zero cells the universe is empty, the intersection is
+	// empty, and the row renders out-of-scope (coverage null) — the correct
+	// product behaviour, but not what THIS test exercises. Seed one cell so
+	// the match-all applicability has a non-empty universe and the row is
+	// genuinely in scope. (Slice 405: this seed was missing, so the test
+	// silently relied on a stray scope_cells row and never ran in CI.)
+	seedScopeCell(t, tenantA)
 
 	now := time.Now().UTC()
 	seedEvaluation(t, tenantA, cid, "pass", now.Add(-1*time.Hour))
