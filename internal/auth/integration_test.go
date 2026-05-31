@@ -311,6 +311,14 @@ func TestOIDC_CallbackStateMismatchRejected(t *testing.T) {
 	r.AddCookie(&http.Cookie{Name: oidc.StateCookie, Value: "FIXED_STATE"})
 	r.AddCookie(&http.Cookie{Name: oidc.VerifierCookie, Value: "fixed-verifier"})
 	r.AddCookie(&http.Cookie{Name: oidc.IdpCookie, Value: "default"})
+	// Slice 365 added the NonceCookie presence check (ID-token replay
+	// guard) BEFORE the state-mismatch check in HandleCallback. A
+	// legitimate flow always sets it in BeginLogin, so the CSRF (state)
+	// guard is only reached once the nonce cookie is present. Supply a
+	// non-empty nonce so this test exercises the STATE-mismatch path it
+	// is named for, not the nonce-presence path. (Mirrors the canonical
+	// slice-365 ErrStateMismatch test in oidc_nonce_integration_test.go.)
+	r.AddCookie(&http.Cookie{Name: oidc.NonceCookie, Value: "fixed-nonce"})
 
 	_, err := auth.HandleCallback(context.Background(), r, uuid.New())
 	if !errors.Is(err, oidc.ErrStateMismatch) {
