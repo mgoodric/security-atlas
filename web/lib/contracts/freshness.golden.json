@@ -1,0 +1,31 @@
+{
+  "_comment": "Slice 409 contract-tier golden. PROVIDER: internal/api/freshnessdrift/handler_contract_test.go (Freshness, real handler over an injected fixed-row freshnessLister stub — Option A seam, no Postgres). Regenerate: `go test ./internal/api/freshnessdrift/ -run TestContract_Freshness -update`. CONSUMER: web/lib/contracts/freshness.contract.test.ts asserts the BFF at web/app/api/dashboard/freshness/route.ts.",
+  "endpoint": "GET /v1/evidence/freshness",
+  "variants": {
+    "empty": {
+      "bucket": "class",
+      "buckets": [],
+      "total": 0,
+      "total_stale": 0
+    },
+    "populated": {
+      "bucket": "class",
+      "buckets": [
+        {
+          "fresh": 1,
+          "freshness_class": "quarterly",
+          "stale": 0,
+          "total": 1
+        },
+        {
+          "fresh": 0,
+          "freshness_class": "unclassified",
+          "stale": 1,
+          "total": 1
+        }
+      ],
+      "total": 2,
+      "total_stale": 1
+    }
+  }
+}

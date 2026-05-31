@@ -20,14 +20,36 @@ import (
 // coverage now minus coverage as it stood this far back.
 const trendWindow = 90 * 24 * time.Hour
 
+// reader is the dashboard handler's read seam (slice 409). The handler
+// depends on this unexported interface, not the concrete *Store, so the
+// contract-tier recorder (handler_contract_test.go) can drive the real
+// wire-shape transformation with a fixed-row stub on the plain
+// `go test ./...` unit surface — no Postgres pool, honoring ADR-0007's
+// "recorders ride the unit surface" constraint. The production *Store
+// satisfies it verbatim; this interface stays internal (P0-409-2 — the
+// handler's public API is unchanged: New still takes a *Store).
+type reader interface {
+	FrameworkPosture(ctx context.Context, trendCutoff pgtype.Timestamptz) ([]dbx.FrameworkPostureRow, error)
+	ActivityFeed(ctx context.Context, cursor keyset, pageRows int32) ([]dbx.ListEvidenceActivityRow, error)
+	UpcomingItems(ctx context.Context, categoryFilter string, cursor keyset, pageRows int32) ([]dbx.ListUpcomingItemsRow, error)
+}
+
 // Handler bundles the slice-066 dashboard read routes over a single Store.
 // Every route is a pure read; the Handler holds no write surface.
 type Handler struct {
-	store *Store
+	store reader
 }
 
-// New constructs a Handler over the application pgx pool.
+// New constructs a Handler over the application pgx pool. The parameter
+// type is the concrete *Store (public API unchanged, slice 409 P0-409-2);
+// internally it is held behind the unexported reader seam.
 func New(store *Store) *Handler { return &Handler{store: store} }
+
+// newHandlerWithReader constructs a Handler over an arbitrary reader. It
+// exists only for the slice-409 contract recorder, which injects a
+// fixed-row stub so the wire shape records with no Postgres pool. It is
+// unexported — not part of the package's public surface.
+func newHandlerWithReader(r reader) *Handler { return &Handler{store: r} }
 
 // ===== wire shapes =====
 //

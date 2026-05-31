@@ -3,7 +3,7 @@
 **Cluster:** Quality
 **Estimate:** 1-2d
 **Type:** JUDGMENT
-**Status:** `blocked` (on broader golden coverage — see Dependencies)
+**Status:** `ready` (unblocked by #409 — the dashboard-panel goldens landed; see Dependencies)
 
 ## Narrative
 
@@ -66,17 +66,24 @@ follow-on.
 
 - **#392** (contract-tier rollout) — establishes the multi-endpoint
   goldens this helper would read.
-- **Broader golden coverage** — this slice is `blocked` until the golden
-  tier spans the high-traffic dashboard routes the e2e suite actually
-  traverses (the panels under `web/app/api/dashboard/**`, controls,
-  risks, audit). Filing more contract-tier rollout slices for those
-  routes is the unblocking precondition; doing this work against only 4
-  goldens is premature (D5 reason 1).
-- **#409** (contract-tier rollout: dashboard + high-traffic e2e routes) —
-  the concrete unblocker filed 2026-05-30. It records the dashboard/
-  controls/risks/audit goldens (resolving the ADR-0007 DB-seam constraint
-  per-endpoint) and flips THIS slice to `ready` once coverage is
-  sufficient. 394 stays `blocked` until #409 lands.
+- **Broader golden coverage** — RESOLVED for the dashboard view by #409
+  (merged 2026-05-30). The golden tier now spans the high-traffic
+  dashboard-panel routes the e2e suite traverses: `/v1/frameworks/posture`,
+  `/v1/activity`, `/v1/upcoming`, `/v1/evidence/freshness`,
+  `/v1/controls/drift` (all via #409, Option-A read seams) plus `/v1/me`,
+  `/v1/version`, `/v1/install-state`, `/v1/admin/demo/status` (from #392).
+  That is 9 endpoints, and every dashboard route the e2e suite mocks now
+  has a golden — so a `fulfillFromGolden` helper for the dashboard view is
+  no longer premature (D5 reason 1 cleared; see
+  `docs/audit-log/409-contract-tier-rollout-dashboard-decisions.md` D5).
+  The still-hand-mocked routes (`/v1/risks`, `/v1/controls/*`, `/v1/board`,
+  `/v1/policies`) are exactly the per-test-variation escape-hatch case AC-3
+  anticipates and do NOT block building the helper for the golden-backed
+  routes; their goldens are tracked as #410 (risks) + #411 (controls/audit).
+- **#409** (contract-tier rollout: dashboard routes) — the concrete
+  unblocker, **merged 2026-05-30**. It recorded the dashboard-panel
+  goldens (resolving the ADR-0007 DB-seam constraint per-endpoint via
+  unexported read seams) and flipped THIS slice `blocked` → `ready`.
 
 ## Cross-references
 

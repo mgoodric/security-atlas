@@ -1,0 +1,35 @@
+{
+  "_comment": "Slice 409 contract-tier golden. PROVIDER: internal/api/dashboard/handler_contract_test.go (Activity, real handler over an injected fixed-row reader stub — Option A seam, no Postgres). Regenerate: `go test ./internal/api/dashboard/ -run TestContract_Activity -update`. CONSUMER: web/lib/contracts/activity.contract.test.ts asserts the BFF at web/app/api/dashboard/activity/route.ts.",
+  "endpoint": "GET /v1/activity",
+  "variants": {
+    "empty": {
+      "activity": [],
+      "count": 0,
+      "next_cursor": ""
+    },
+    "populated": {
+      "activity": [
+        {
+          "actor": "connector:aws",
+          "event_type": "evidence.ingested",
+          "resource_id": "22222222-2222-4222-8222-222222222222",
+          "resource_type": "evidence",
+          "summary": {
+            "kind": "sast.scan_result.v1"
+          },
+          "ts": "2026-05-15T15:04:05Z"
+        },
+        {
+          "actor": "user:contract",
+          "event_type": "evidence.ingested",
+          "resource_id": "22222222-2222-4222-8222-222222222222",
+          "resource_type": "evidence",
+          "summary": null,
+          "ts": "2026-05-15T14:00:00Z"
+        }
+      ],
+      "count": 2,
+      "next_cursor": ""
+    }
+  }
+}

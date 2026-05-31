@@ -1,0 +1,31 @@
+{
+  "_comment": "Slice 409 contract-tier golden. PROVIDER: internal/api/dashboard/handler_contract_test.go (Upcoming, real handler over an injected fixed-row reader stub — Option A seam, no Postgres). Regenerate: `go test ./internal/api/dashboard/ -run TestContract_Upcoming -update`. CONSUMER: web/lib/contracts/upcoming.contract.test.ts asserts the BFF at web/app/api/dashboard/upcoming/route.ts.",
+  "endpoint": "GET /v1/upcoming",
+  "variants": {
+    "empty": {
+      "count": 0,
+      "next_cursor": "",
+      "upcoming": []
+    },
+    "populated": {
+      "count": 2,
+      "next_cursor": "",
+      "upcoming": [
+        {
+          "category": "exception",
+          "due_date": "2026-06-01T00:00:00Z",
+          "resource_id": "22222222-2222-4222-8222-222222222222",
+          "resource_type": "exception",
+          "title": "Exception EX-409 expires"
+        },
+        {
+          "category": "policy_ack",
+          "due_date": "2026-06-10T00:00:00Z",
+          "resource_id": "22222222-2222-4222-8222-222222222222",
+          "resource_type": "policy",
+          "title": "Acceptable Use Policy acknowledgement due"
+        }
+      ]
+    }
+  }
+}
