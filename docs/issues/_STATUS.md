@@ -3,7 +3,13 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 180 reconcile — slice 408 merged at `bb2ce517` · integration-enrolment drain 38/38 · **slice 390 CLOSED**)
+**Last reconciled:** 2026-05-30 (batch 181 claim-stake — slice 409 → in-progress (N=1 solo) · contract-tier rollout for dashboard routes · unblocks 394)
+
+## Drift detected — 2026-05-30 (batch 181 claim-stake · slice 409 solo)
+
+- **409** (contract-tier rollout: dashboard + high-traffic e2e routes, parent 392) — Quality · JUDGMENT. Records per-endpoint contract goldens (`web/lib/contracts/`) for the dashboard panel routes (activity, drift, freshness, framework-posture, risks, upcoming) + controls/risks/audit where reachable, each with a provider recorder + consumer vitest assert. THE design call: per-endpoint DB-seam strategy A (inject query-interface seam, ADR-0007-faithful) / B (no-DB construction trick per 392's `me` recorder) / C (record reachable subset, defer rest with rationale) — Engineer picks per endpoint + records in `docs/audit-log/409-...-decisions.md`. P0: NO recorder on the Go integration surface (breaks ADR-0007 unit-surface intent); add a seam, use a no-DB path, or defer. Unblocks 394 (e2e mocks load from goldens) — Engineer reassesses 394's doc Dependencies per AC-5.
+
+Run SOLO (N=1): JUDGMENT slice, real per-endpoint design fork. First non-drain pick since slice 390 closed. Touches internal/api + web/lib/contracts + web vitest → fuller frontend CI surface. 400 = maintainer cosign gate (do NOT pick). OQ CLEAN (A/B/C fork is delegated JUDGMENT, not an open question); zero migrations.
 
 ## Reconcile — 2026-05-30 (batch 180 · slice 408 merged · slice 390 drain COMPLETE)
 
