@@ -3,7 +3,7 @@
 **Cluster:** Infra
 **Estimate:** 2-3d
 **Type:** AFK
-**Status:** ready
+**Status:** `merged` (`425845b0`, #253 — "Playwright e2e seed-data harness + un-quarantine"; stale `ready` doc-status corrected 2026-05-30)
 
 ## Narrative
 
