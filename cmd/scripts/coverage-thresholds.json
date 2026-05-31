@@ -188,6 +188,8 @@
     "internal/observability/otel": 92,
     "internal/oscal": 69,
     "internal/platform": 76,
+    "internal/policy": 35,
+    "internal/policy/pdf": 68,
     "internal/policy/seed": 87,
     "internal/questionnaire": 77,
     "internal/risk": 77,
@@ -238,8 +240,6 @@
     "internal/db/dbx/",
     "internal/evidence/ingest/",
     "internal/evidence/streambuf/",
-    "internal/policy/",
-    "internal/policy/pdf/",
     "internal/proto/"
   ],
   "$exclude_justifications_comment": "Slice 353 (Q-5 from slice 333's QA audit). Every prefix in `excludes` MUST have a matching key here with a written justification. Enforced by scripts/check-coverage-excludes.sh (self-tested by scripts/check-coverage-excludes_test.sh). This is the structural fix for Theme 2 of the audit (opt-in lists bit-rot): an exclude can no longer be added silently. Quarterly maintainer review: walk each entry, re-justify in place OR file a slice to retire the exclude (write the tests + remove the entry + re-floor in the same PR per the slice 069 monotonic-ratchet contract). The `$`-prefix keeps this block invisible to coverage-gate's JSON struct (unknown fields ignored).",
@@ -282,8 +282,6 @@
     "internal/db/dbx/": "sqlc-generated type-safe query code \u2014 no hand-written logic to cover; the SQL it wraps is exercised by each consuming package's integration suite.",
     "internal/evidence/ingest/": "HTTP handler / RLS-touching package integration-tested against real Postgres (+NATS/MinIO) via its integration_test.go; opts out of a hard per-package unit floor (slice 069 exclude policy).",
     "internal/evidence/streambuf/": "HTTP handler / RLS-touching package integration-tested against real Postgres (+NATS/MinIO) via its integration_test.go; opts out of a hard per-package unit floor (slice 069 exclude policy).",
-    "internal/policy/": "HTTP handler / RLS-touching package integration-tested against real Postgres (+NATS/MinIO) via its integration_test.go; opts out of a hard per-package unit floor (slice 069 exclude policy).",
-    "internal/policy/pdf/": "HTTP handler / RLS-touching package integration-tested against real Postgres (+NATS/MinIO) via its integration_test.go; opts out of a hard per-package unit floor (slice 069 exclude policy).",
     "internal/proto/": "protoc-generated gRPC stubs \u2014 no hand-written logic to cover."
   }
 }

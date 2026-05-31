@@ -78,12 +78,14 @@ CI_YML="${AUDIT_ENROL_CI_YML:-$REPO_ROOT/.github/workflows/ci.yml}"
 # independently by slice 348 (docs/audits/348-coverage-excludes-audit.md,
 # category (c) TEST_PRESENT).
 # --------------------------------------------------------------------
+# DRAINED EMPTY by slice 408 (drain batch 8 — the final batch; closes slice
+# 390). Every package that once carried a `//go:build integration` tag but was
+# absent from the ci.yml integration list is now enrolled. The ratchet reached
+# zero: the allowlist is intentionally empty. The guard below handles the empty
+# case (zero waived packages) and reports "0 on the slice-345 known-gaps
+# allowlist". Re-adding any entry here is a code smell requiring explicit PR
+# justification (see the header).
 read -r -d '' KNOWN_UNENROLLED <<'WAIVED' || true
-internal/catalog/metrics
-internal/oscal
-internal/policy/pdf
-internal/policy/seed
-internal/risk/aggrule
 WAIVED
 
 if [[ ! -d "$GREP_ROOT" ]]; then
