@@ -2608,6 +2608,125 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   Production compose unchanged. Both `bundled` and `external`
   matrix modes use the staged shape.
 
+## [1.17.0](https://github.com/mgoodric/security-atlas/compare/v1.16.0...v1.17.0) (2026-05-31)
+
+
+### Features
+
+* **263:** UI honesty — questionnaire frontend (Stages A + C) ([#629](https://github.com/mgoodric/security-atlas/issues/629)) ([d8d6995](https://github.com/mgoodric/security-atlas/commit/d8d6995c613a0e2726ade01690ca9651c509916c))
+* **a11y:** slice 359 — skip-link to &lt;main&gt; in authed layout (WCAG 2.4.1) ([#798](https://github.com/mgoodric/security-atlas/issues/798)) ([28975bd](https://github.com/mgoodric/security-atlas/commit/28975bd51710f54afa1ee0f39634c9756fa128ca))
+* **a11y:** slice 361 — global-search combobox ARIA wiring (WCAG 4.1.2) ([#804](https://github.com/mgoodric/security-atlas/issues/804)) ([be9ef10](https://github.com/mgoodric/security-atlas/commit/be9ef102d00f08db006583c9dd3ee20ef52a6420))
+* **a11y:** slice 363 — admin form Checkbox primitive + error-association pattern (WCAG 2.4.7+3.3.1+3.3.2) ([#807](https://github.com/mgoodric/security-atlas/issues/807)) ([4da5ed9](https://github.com/mgoodric/security-atlas/commit/4da5ed9efb2872aab423ca9e758aac91d5694ef6))
+* **admin:** slice 278 — demo-seed UI button (edge-only via ATLAS_ENABLE_DEMO_SEED) ([#652](https://github.com/mgoodric/security-atlas/issues/652)) ([ed08f0d](https://github.com/mgoodric/security-atlas/commit/ed08f0dde27550a3290d2f121862f5a044be1a10))
+* **auth:** slice 365 — OIDC ID-token nonce generation + validation (closes slice 327 H-1) ([#814](https://github.com/mgoodric/security-atlas/issues/814)) ([ed24c6e](https://github.com/mgoodric/security-atlas/commit/ed24c6ecea8560776e7c1d509bf2aa44627602af))
+* **auth:** slice 366 — JWT signing key rotation end-to-end (closes slice 327 M-1) ([#863](https://github.com/mgoodric/security-atlas/issues/863)) ([405a375](https://github.com/mgoodric/security-atlas/commit/405a375fb5083a75c9908213a227c763949b201d))
+* **authz:** slice 378 — hot-reload authz bundle without server restart (closes slice 332 F-OPA-2) ([#851](https://github.com/mgoodric/security-atlas/issues/851)) ([32134ed](https://github.com/mgoodric/security-atlas/commit/32134ed7f52acf7b80933c4fdbf49d00fcea4912))
+* **frontend:** add vitest coverage ratchet (slice 347) ([#773](https://github.com/mgoodric/security-atlas/issues/773)) ([c9f035f](https://github.com/mgoodric/security-atlas/commit/c9f035fc2008af4c8db0e3259d82517a91a594a2))
+* **quality:** enhanced statement-coverage tier for security-critical packages (slice 350) ([#779](https://github.com/mgoodric/security-atlas/issues/779)) ([1674e4b](https://github.com/mgoodric/security-atlas/commit/1674e4b5792eaf20bd0182c1a8d765876a507107))
+* **quality:** slice 352 — flake-budget formalization + dashboard ([#791](https://github.com/mgoodric/security-atlas/issues/791)) ([621ddef](https://github.com/mgoodric/security-atlas/commit/621ddef33ac4057e19f483080855a39079c3b3af))
+* **web:** slice 277 — mobile-responsive baseline (viewport meta + sidebar drawer + audit) ([#646](https://github.com/mgoodric/security-atlas/issues/646)) ([2e88588](https://github.com/mgoodric/security-atlas/commit/2e88588992530237e9ed0cf58a0da954233771f0))
+* **web:** slice 281 — mobile list-table card-stack collapse (/controls + /risks + /evidence) ([#661](https://github.com/mgoodric/security-atlas/issues/661)) ([16222d6](https://github.com/mgoodric/security-atlas/commit/16222d6ccdab93de2375085a8fc9496916dbd847))
+
+
+### Bug Fixes
+
+* **a11y:** slice 360 — light-mode muted-foreground contrast lift (WCAG 1.4.3) ([#869](https://github.com/mgoodric/security-atlas/issues/869)) ([7671991](https://github.com/mgoodric/security-atlas/commit/7671991b80b2403324efdd47fee474f610d03ca7))
+* **a11y:** slice 362 — audit pill dark-mode contrast lift (WCAG 1.4.3) ([#801](https://github.com/mgoodric/security-atlas/issues/801)) ([44e9a01](https://github.com/mgoodric/security-atlas/commit/44e9a0149f8449ef29a795d7b2d593ffd987dbd5))
+* **admin-demo:** slice 322 — visible click feedback on /admin/demo ([#719](https://github.com/mgoodric/security-atlas/issues/719)) ([7e4732a](https://github.com/mgoodric/security-atlas/commit/7e4732a374869bc6cf28b991b5da7fd246630a77))
+* **admin-demo:** use .first() on AC-4 multi-locator (strict-mode fix) ([#728](https://github.com/mgoodric/security-atlas/issues/728)) ([0f0cb65](https://github.com/mgoodric/security-atlas/commit/0f0cb65cd9e66b8099795d9ddd0c7fb95cef60c6))
+* **api:** slice 367 — generic 5xx error responses + lint rule (closes slice 327 M-2) ([#817](https://github.com/mgoodric/security-atlas/issues/817)) ([87777f1](https://github.com/mgoodric/security-atlas/commit/87777f194728b0eaf0d97d60a32e6a055f693c23))
+* **auth:** slice 385 — demo-seed 500 on "user:" JWT subject prefix ([#864](https://github.com/mgoodric/security-atlas/issues/864)) ([549f0a8](https://github.com/mgoodric/security-atlas/commit/549f0a80dc5b13129d996e188a8c9c64da5dbb63))
+* **e2e:** slice 276 — control-detail-tabs e2e deep-fix (mock schema-conformance) ([#647](https://github.com/mgoodric/security-atlas/issues/647)) ([b1abf63](https://github.com/mgoodric/security-atlas/commit/b1abf63bf22f656b3d0af78014b506094ec12f00))
+* **metrics:** slice 386 — metrics_catalog seed aborted on empty source_slices ([#865](https://github.com/mgoodric/security-atlas/issues/865)) ([cac076a](https://github.com/mgoodric/security-atlas/commit/cac076a313c0b75dea8a461a995c38f2d6255a4c))
+* **pdf:** apply chromedp WSURLReadTimeout(60s) fan-out to 4 sibling renderers (slice 341) ([#761](https://github.com/mgoodric/security-atlas/issues/761)) ([36434fe](https://github.com/mgoodric/security-atlas/commit/36434fe56f8d3beb30f06e4bd3ef3bdd670ff7a8))
+* **policy/pdf:** quarantine TestRender_ProducesRealPDF chromedp flake + file slice 340 ([#755](https://github.com/mgoodric/security-atlas/issues/755)) ([c7d40de](https://github.com/mgoodric/security-atlas/commit/c7d40dec6e2c9c5edd07ec33b99caa8d9efcec3a))
+* **policy/pdf:** re-enable chromedp PDF render integration test (slice 340) ([#758](https://github.com/mgoodric/security-atlas/issues/758)) ([dd6f09d](https://github.com/mgoodric/security-atlas/commit/dd6f09d61b1551d6f481ffcc257ba8d98b73bde4))
+* **web:** slice 398 — fix pre-existing tsc --noEmit errors in web test files (slice 395 spillover) ([#895](https://github.com/mgoodric/security-atlas/issues/895)) ([5c36c52](https://github.com/mgoodric/security-atlas/commit/5c36c52c21e3a36c1e43aa0e0be8d1b62a7e3f8a))
+
+
+### Performance
+
+* **eval:** slice 377 — cache rego.PreparedEvalQuery (closes slice 332 F-OPA-1) ([#848](https://github.com/mgoodric/security-atlas/issues/848)) ([3237e07](https://github.com/mgoodric/security-atlas/commit/3237e077bbea09d3e526744f38c7ea8cd979ad3d))
+* **ingest:** slice 379 — single marshal on redaction path (closes slice 332 F-ING-1) ([#859](https://github.com/mgoodric/security-atlas/issues/859)) ([f2bfc5d](https://github.com/mgoodric/security-atlas/commit/f2bfc5d00a9f0489f9baa1b516e73fddabb33fa4))
+* slice 381 — perf cleanup round 1 (slice 332 Low-finding bundle) ([#870](https://github.com/mgoodric/security-atlas/issues/870)) ([9145cd5](https://github.com/mgoodric/security-atlas/commit/9145cd5a1a36ba0d30cf7945e50674bcc8c881e0))
+* **web:** slice 380 — dashboard Server Component fan-out (closes slice 332 F-BFF-2) ([#862](https://github.com/mgoodric/security-atlas/issues/862)) ([8e353f1](https://github.com/mgoodric/security-atlas/commit/8e353f1496e228ff6786c03de8cc7843fe89aff6))
+
+
+### Dependencies
+
+* **deps:** bump golang.org/x/crypto from 0.51.0 to 0.52.0 ([f3ea1fc](https://github.com/mgoodric/security-atlas/commit/f3ea1fcb6182fc0726f7b26e294a1eebc4868d65))
+
+
+### Documentation
+
+* **audit:** slice 327 — security audit findings + spillover ([#811](https://github.com/mgoodric/security-atlas/issues/811)) ([17b7359](https://github.com/mgoodric/security-atlas/commit/17b73591d823a43c0c71b240611f40e414cc0c86))
+* **audit:** slice 328 — code review findings + spillover ([#821](https://github.com/mgoodric/security-atlas/issues/821)) ([3b81923](https://github.com/mgoodric/security-atlas/commit/3b81923c02e3747286cdbeb31c40cfe7aa5f1e1c))
+* **audit:** slice 329 — compliance meta-audit findings + spillover ([#827](https://github.com/mgoodric/security-atlas/issues/827)) ([bc3f3f2](https://github.com/mgoodric/security-atlas/commit/bc3f3f2772fe845a0e17e2a7cea86b542eaaf2f2))
+* **audit:** slice 332 — performance audit findings + spillover ([#845](https://github.com/mgoodric/security-atlas/issues/845)) ([e13b58e](https://github.com/mgoodric/security-atlas/commit/e13b58e8ba7255b5d8ac03a346f420d29fd02e75))
+* **audits:** slice 331 — a11y WCAG 2.1 AA audit report ([#785](https://github.com/mgoodric/security-atlas/issues/785)) ([6bb54ea](https://github.com/mgoodric/security-atlas/commit/6bb54ea65dd7845af48fd1da293afbab7a21181b))
+* **audits:** slice 333 — QA strategy gap analysis report ([#776](https://github.com/mgoodric/security-atlas/issues/776)) ([b68f589](https://github.com/mgoodric/security-atlas/commit/b68f589cd6f82c73caa7423ac635324a9401b311))
+* **audits:** slice 334 test framework review report + spillover filings ([#770](https://github.com/mgoodric/security-atlas/issues/770)) ([37052f0](https://github.com/mgoodric/security-atlas/commit/37052f085177a36a799b494aa56235515e962a69))
+* **audits:** slice 337 AI-writing tone audit report + spillover filings ([#764](https://github.com/mgoodric/security-atlas/issues/764)) ([c27db8a](https://github.com/mgoodric/security-atlas/commit/c27db8a4b07920bbc785f543a1ba5d41482b795e))
+* **auth:** slice 325 — OAuth grants landing map ([#746](https://github.com/mgoodric/security-atlas/issues/746)) ([a9f705b](https://github.com/mgoodric/security-atlas/commit/a9f705bfb79fcf05749bf32d3a7056df39ff3b7b))
+* **canvas:** slice 342 — vision tone rewrite (banned phrase + em-dash saturation) ([#861](https://github.com/mgoodric/security-atlas/issues/861)) ([a85499b](https://github.com/mgoodric/security-atlas/commit/a85499bd8f553175554d7ae27eaa3344f763ec66))
+* **evidence-sdk:** align with push-only wire reality + watchlist ([#324](https://github.com/mgoodric/security-atlas/issues/324)) ([#752](https://github.com/mgoodric/security-atlas/issues/752)) ([2be00bb](https://github.com/mgoodric/security-atlas/commit/2be00bb9dabc0c6da284a62972ed2c3ff89f93af))
+* **governance:** slice 372 — incident response plan (closes slice 329 H-1) ([#830](https://github.com/mgoodric/security-atlas/issues/830)) ([38de636](https://github.com/mgoodric/security-atlas/commit/38de63634317278fa10bcef317e17f5685d65a23))
+* **governance:** slice 373 — business continuity / disaster recovery plan (closes slice 329 H-2) ([#833](https://github.com/mgoodric/security-atlas/issues/833)) ([a84da08](https://github.com/mgoodric/security-atlas/commit/a84da085fd47110f4c83d816cbfdaf433a893308))
+* **governance:** slice 374 — GitHub access review cadence (closes slice 329 H-3) ([#836](https://github.com/mgoodric/security-atlas/issues/836)) ([257853e](https://github.com/mgoodric/security-atlas/commit/257853ea8f3b6a342e9bfb895debd6edaa57b482))
+* **governance:** slice 375 — data retention + disposal policy (closes slice 329 H-4) ([#839](https://github.com/mgoodric/security-atlas/issues/839)) ([20e1b2a](https://github.com/mgoodric/security-atlas/commit/20e1b2ab122d4d3110076d86e8b638c41ee5a529))
+* **governance:** slice 376 — project asset inventory (closes slice 329 H-5) ([#842](https://github.com/mgoodric/security-atlas/issues/842)) ([c925807](https://github.com/mgoodric/security-atlas/commit/c9258075c9fe15489eb3d64eb9afa010f14b1b7b))
+* **issues:** add slice 324 — Evidence SDK docs alignment ([#729](https://github.com/mgoodric/security-atlas/issues/729)) ([1a3feac](https://github.com/mgoodric/security-atlas/commit/1a3feacd8a5b34588e00c71f94735047829a6605))
+* **issues:** add slice 325 — OAuth grants landing map ([#730](https://github.com/mgoodric/security-atlas/issues/730)) ([d1e8971](https://github.com/mgoodric/security-atlas/commit/d1e89717f63af6346043cb9f905a5bff501d899e))
+* **issues:** add slice 326 — Legacy bearer 410-Gone responder retirement ([#731](https://github.com/mgoodric/security-atlas/issues/731)) ([3d2571e](https://github.com/mgoodric/security-atlas/commit/3d2571e82a99c277d75fdaecd7055f5d259e791d))
+* **issues:** add slice 327 — security audit via voltagent-qa-sec:security-auditor ([#732](https://github.com/mgoodric/security-atlas/issues/732)) ([c551b16](https://github.com/mgoodric/security-atlas/commit/c551b16db39aa161d052d78011d1bc7f83741081))
+* **issues:** add slice 328 — code review via voltagent-qa-sec:code-reviewer ([#733](https://github.com/mgoodric/security-atlas/issues/733)) ([9da1ca7](https://github.com/mgoodric/security-atlas/commit/9da1ca70982f8b4af0620b1f4dfb4441b80b9522))
+* **issues:** add slice 329 — compliance meta-audit via voltagent-qa-sec:compliance-auditor ([#734](https://github.com/mgoodric/security-atlas/issues/734)) ([b74688e](https://github.com/mgoodric/security-atlas/commit/b74688e07109140e72236414be27b50326dec5b9))
+* **issues:** add slice 330 — privacy audit (GDPR + CCPA) via voltagent-qa-sec:gdpr-ccpa-compliance ([#735](https://github.com/mgoodric/security-atlas/issues/735)) ([18cd7a0](https://github.com/mgoodric/security-atlas/commit/18cd7a01d6246317621b257da083bec993caf06e))
+* **issues:** add slice 331 — accessibility audit (WCAG 2.1 AA) via voltagent-qa-sec:accessibility-tester ([#736](https://github.com/mgoodric/security-atlas/issues/736)) ([8497659](https://github.com/mgoodric/security-atlas/commit/84976598a30e4a5fdbfc96c06183ee0a37fbf742))
+* **issues:** add slice 332 — performance audit via voltagent-qa-sec:performance-engineer ([#737](https://github.com/mgoodric/security-atlas/issues/737)) ([811e799](https://github.com/mgoodric/security-atlas/commit/811e7997fa637e61353745802392b60f65391388))
+* **issues:** add slice 333 — QA strategy gap analysis via voltagent-qa-sec:qa-expert ([#738](https://github.com/mgoodric/security-atlas/issues/738)) ([f2387c2](https://github.com/mgoodric/security-atlas/commit/f2387c2d3367819621f1c1c894dee3e0d02eb1b1))
+* **issues:** add slice 334 — test framework review via voltagent-qa-sec:test-automator ([#739](https://github.com/mgoodric/security-atlas/issues/739)) ([bf3861a](https://github.com/mgoodric/security-atlas/commit/bf3861a89ead4b7d32dc4bf34ef2784cc50896a2))
+* **issues:** add slice 335 — chaos experiment design via voltagent-qa-sec:chaos-engineer ([#740](https://github.com/mgoodric/security-atlas/issues/740)) ([24c8ce3](https://github.com/mgoodric/security-atlas/commit/24c8ce321ee1e242be8bce02aa7208a505fa819e))
+* **issues:** add slice 336 — UX flow validation via voltagent-qa-sec:ui-ux-tester ([#741](https://github.com/mgoodric/security-atlas/issues/741)) ([c9448ee](https://github.com/mgoodric/security-atlas/commit/c9448eeb207ea6d539f8944a33c9a7ba83045845))
+* **issues:** add slice 337 — AI-writing tone audit via voltagent-qa-sec:ai-writing-auditor ([#742](https://github.com/mgoodric/security-atlas/issues/742)) ([734effb](https://github.com/mgoodric/security-atlas/commit/734effb92be52358ce3909736be1de3e10665fb4))
+* **issues:** add slice 338 — pentest against atlas-edge.home.gmoney.sh via voltagent-qa-sec:penetration-tester ([#743](https://github.com/mgoodric/security-atlas/issues/743)) ([5d692ed](https://github.com/mgoodric/security-atlas/commit/5d692edc79cdcaefedfe71575f33166b5255eefb))
+* **issues:** add slice 364 — strip atlas Prometheus namespace from OTel Collector ([#795](https://github.com/mgoodric/security-atlas/issues/795)) ([2b3cdcd](https://github.com/mgoodric/security-atlas/commit/2b3cdcdfdd561be320ab67a84d541988bb32dd89))
+* **issues:** add slice 382 — STATUS row convention enforcement (orchestrator-only edits + CI lint guard) ([#853](https://github.com/mgoodric/security-atlas/issues/853)) ([3d2f64a](https://github.com/mgoodric/security-atlas/commit/3d2f64a18826692b1c404ea8ed5bf2e21eeaaf9d))
+* **issues:** add slice 383 — pre-push go mod tidy drift check ([#854](https://github.com/mgoodric/security-atlas/issues/854)) ([5a1343c](https://github.com/mgoodric/security-atlas/commit/5a1343cfcd8652aa53bed9ede8461c45440b0df9))
+* **issues:** add slice 384 — ActionPlan primitive (schema + CRUD + linkage) ([#856](https://github.com/mgoodric/security-atlas/issues/856)) ([e8cbf90](https://github.com/mgoodric/security-atlas/commit/e8cbf9007e654140468a3dad14b4a28f0c9a52b2))
+* **issues:** break down slices 368 + 390 into loopable sub-slices ([#906](https://github.com/mgoodric/security-atlas/issues/906)) ([dbb44c5](https://github.com/mgoodric/security-atlas/commit/dbb44c52502d2c4f402f86add025cf8278fba5fe))
+* **issues:** file round-2 coverage slices 306-311 ([#701](https://github.com/mgoodric/security-atlas/issues/701)) ([7bc1af5](https://github.com/mgoodric/security-atlas/commit/7bc1af534c1efbaba65561f3e6d831baf7f3f076))
+* **issues:** file slice 312 — round-3 coverage audit + lift ([#712](https://github.com/mgoodric/security-atlas/issues/712)) ([1dd6301](https://github.com/mgoodric/security-atlas/commit/1dd6301ddd5b28bd3a27b8f94eff9304ea7d7d38))
+* **issues:** file slice 322 — /admin/demo button click no feedback ([#715](https://github.com/mgoodric/security-atlas/issues/715)) ([3c87633](https://github.com/mgoodric/security-atlas/commit/3c876338291c4bc19c2d136550f06a3c9ef19dc2))
+* **issues:** file slice 323 — README refresh (current release + screenshots) ([#720](https://github.com/mgoodric/security-atlas/issues/720)) ([90ab804](https://github.com/mgoodric/security-atlas/commit/90ab80468ce478a2b6ec79d2382ba2ddb3237b30))
+* **issues:** file slice 339 — OpenAPI spec drift for 12 OAuth endpoints ([#749](https://github.com/mgoodric/security-atlas/issues/749)) ([e25ea63](https://github.com/mgoodric/security-atlas/commit/e25ea632f4a3930bd8ee7bce941862bbb1c99baf))
+* **issues:** slice 263 grilled rewrite + _STATUS housekeeping (277/278) ([#625](https://github.com/mgoodric/security-atlas/issues/625)) ([2f850df](https://github.com/mgoodric/security-atlas/commit/2f850df77e3a6b3e21396a80793971004cb4fccd))
+* **issues:** slice 277 — mobile-responsive baseline ([#623](https://github.com/mgoodric/security-atlas/issues/623)) ([3a859cd](https://github.com/mgoodric/security-atlas/commit/3a859cdf32918aa1d814ae601716e41708404fc3))
+* **issues:** slice 278 — demo-seed UI button (edge-only) ([#624](https://github.com/mgoodric/security-atlas/issues/624)) ([08a6b6f](https://github.com/mgoodric/security-atlas/commit/08a6b6fe8873a46607023d7a9c3cbe2c579308a8))
+* **issues:** slice 279 — coverage audit + 5-package targeted lift ([#626](https://github.com/mgoodric/security-atlas/issues/626)) ([9974098](https://github.com/mgoodric/security-atlas/commit/99740980c1060ec164ccf6f8571b55bf2db9cafa))
+* **issues:** slice 280 — remove bearer-paste card from /login ([#642](https://github.com/mgoodric/security-atlas/issues/642)) ([8bb1f20](https://github.com/mgoodric/security-atlas/commit/8bb1f202ff3cecf4e73dfbd764628539ee6833e2))
+* **issues:** spec slice 409 — contract-tier rollout for dashboard routes (unblocks 394) ([#907](https://github.com/mgoodric/security-atlas/issues/907)) ([0c0b740](https://github.com/mgoodric/security-atlas/commit/0c0b7407323b27a88e54f2411095b41ef91ee84e))
+* **qa:** slice 349 — contract-test-tier evaluation + recommendation ([#879](https://github.com/mgoodric/security-atlas/issues/879)) ([30c501a](https://github.com/mgoodric/security-atlas/commit/30c501ad87829b7853c333b0d07df267dbcd2bfd))
+* **quality:** chaos experiment design (slice 335) ([#782](https://github.com/mgoodric/security-atlas/issues/782)) ([a85a186](https://github.com/mgoodric/security-atlas/commit/a85a186e9c94b7b0cfc91ea7004d991a1ded5e3c))
+* slice 343 tone polish round 1 (low-density bundle from slice 337 audit) ([#767](https://github.com/mgoodric/security-atlas/issues/767)) ([87d7288](https://github.com/mgoodric/security-atlas/commit/87d728892ef793a813f84f8d58e4982dbd6e060a))
+* slice 344 — CLAUDE.md tone-discipline expansion (closes slice 337 spillover) ([#868](https://github.com/mgoodric/security-atlas/issues/868)) ([7e01429](https://github.com/mgoodric/security-atlas/commit/7e0142998310824443c9020076289c37127f01c3))
+
+
+### CI / CD
+
+* **e2e:** slice 387 — production-build standalone CI harness for prod-build specs (closes slice 351 spillover) ([#896](https://github.com/mgoodric/security-atlas/issues/896)) ([a497e20](https://github.com/mgoodric/security-atlas/commit/a497e20e72765e3500d508e8b67177d33216ec7a))
+* slice 345 — integration-job enrolment-discovery guard (closes slice 334 I-1) ([#873](https://github.com/mgoodric/security-atlas/issues/873)) ([10230d1](https://github.com/mgoodric/security-atlas/commit/10230d18d4a94766c5235a07c7816e3f6de6a95e))
+* slice 391 — wire duphelper-lint as a CI hard-failure step (closes slice 369 spillover) ([#878](https://github.com/mgoodric/security-atlas/issues/878)) ([b324adc](https://github.com/mgoodric/security-atlas/commit/b324adcdd67eac20d1551c81dbb95b52bc73b0ce))
+* slice 393 — wire QA-tactical scripts into CI (closes slice 353 spillover) ([#888](https://github.com/mgoodric/security-atlas/issues/888)) ([9aa2452](https://github.com/mgoodric/security-atlas/commit/9aa2452ffd01e70968cb7b268edb95dd59f92d02))
+* slice 401 — integration-enrolment drain batch 1 (oidc/jwtmw/users/period) ([#912](https://github.com/mgoodric/security-atlas/issues/912)) ([112801c](https://github.com/mgoodric/security-atlas/commit/112801ce3ad384db3f1c756e210c9410392bfc9f))
+* slice 402 — integration-enrolment drain batch 2 (admin-creds surface) ([#915](https://github.com/mgoodric/security-atlas/issues/915)) ([cf2fb8a](https://github.com/mgoodric/security-atlas/commit/cf2fb8a17b6505175bd4794d8e4a33cb4b83b6e7))
+* slice 403 — integration-enrolment drain batch 3 (admin-users/aggregation/api-root) ([#918](https://github.com/mgoodric/security-atlas/issues/918)) ([afa262e](https://github.com/mgoodric/security-atlas/commit/afa262eafa26bb72c95784367083e09a078b93a2))
+* slice 404 — integration-enrolment drain batch 4 (api domain handlers A) ([#921](https://github.com/mgoodric/security-atlas/issues/921)) ([cbdbf50](https://github.com/mgoodric/security-atlas/commit/cbdbf50a44a41e98a1b03d9c5d4477f5ee69a04e))
+* slice 405 — integration-enrolment drain batch 5 (api domain handlers B) ([#924](https://github.com/mgoodric/security-atlas/issues/924)) ([600d39f](https://github.com/mgoodric/security-atlas/commit/600d39ffc10e6131eae9850b903dbf9cd1c19656))
+* slice 406 — integration-enrolment drain batch 6 (auth substrate + keystore) ([#927](https://github.com/mgoodric/security-atlas/issues/927)) ([6f7f716](https://github.com/mgoodric/security-atlas/commit/6f7f7163eb562e7d3a5a8e3f11164d8deb2ae384))
+* slice 407 — integration-enrolment drain batch 7 (freshness drift family) ([#930](https://github.com/mgoodric/security-atlas/issues/930)) ([bb71ab5](https://github.com/mgoodric/security-atlas/commit/bb71ab5194897729422076f827fc014dbe2410d8))
+* slice 408 — integration-enrolment drain batch 8 (catalog/oscal/policy/risk tail) — closes slice 390 ([#933](https://github.com/mgoodric/security-atlas/issues/933)) ([bb2ce51](https://github.com/mgoodric/security-atlas/commit/bb2ce5174f005c381038e524f4cf6e21ee0a91c8))
+
 ## [1.16.0](https://github.com/mgoodric/security-atlas/compare/v1.15.0...v1.16.0) (2026-05-24)
 
 
