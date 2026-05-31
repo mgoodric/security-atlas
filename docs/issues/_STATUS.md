@@ -3,13 +3,14 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 177 claim-stake — slice 405 → in-progress (N=1 solo) · integration-enrolment drain batch 5)
+**Last reconciled:** 2026-05-30 (batch 177 reconcile — slice 405 merged at `600d39ff` · integration-enrolment drain 25/38 · 406 unblocked)
 
-## Drift detected — 2026-05-30 (batch 177 claim-stake · slice 405 solo)
+## Reconcile — 2026-05-30 (batch 177 · slice 405 merged)
 
-- **405** (integration-enrolment drain batch 5, slice 390) — infra · AFK. Enrols api domain handlers B — `internal/api/questionnaires`, `internal/api/ucfcoverage`, `internal/api/emptyset`, `internal/api/freshnessdrift`, `internal/audit/notes` (5 pkgs) — in ci.yml's integration job (per-leaf form). Per package: enrol → run suite → FIX whatever broke (no skip/delete; one-liner product bug → fix in-place per 402, real design work → spillover+skip-that-test) → shrink `KNOWN_UNENROLLED` 18→13 → lift coverage excludes (real floor vs phantom per 396/401-404).
+- **405** (integration-enrolment drain batch 5, slice 390) — infra · AFK — **MERGED** at `600d39ff` (#924). Enrolled api domain handlers B — `internal/api/questionnaires`, `internal/api/ucfcoverage`, `internal/api/emptyset`, `internal/api/freshnessdrift`, `internal/audit/notes` (5 pkgs) — in ci.yml's integration job; shrank `KNOWN_UNENROLLED` 18→13. Coverage floors lifted off excludes: questionnaires 54, ucfcoverage 70, freshnessdrift 81, audit/notes 83; emptyset kept on excludes (zero-statement pkg). **slice-390 thesis hit:** ucfcoverage carried a latent FK-wipe-ordering bug (global `DELETE FROM controls` without clearing the `sample_evidence → evidence_records → controls` RESTRICT chain) — invisible until the package ran in CI alongside `demoseed` under the shared tenant; fixed by switching both wipe helpers to `TRUNCATE ... CASCADE` (repo precedent: ingest/streambuf/platform-status). Test-harness only; no product change.
+- **406** (integration-enrolment drain batch 6 — auth substrate + keystore) — **UNBLOCKED** (405 merged): doc Status `not-ready` → `ready`. Next pick. Chain continues 406 → 407 → 408.
 
-Run SOLO (N=1): drain batches surface unpredictable breakage (314+402 found real bugs; 401/403/404 clean). 409 (dashboard contract-tier, JUDGMENT) deferred. 400 = maintainer cosign gate. OQ CLEAN; zero migrations.
+Drain progress: **25/38** packages enrolled; 13 remain on `KNOWN_UNENROLLED`. 409 (dashboard contract-tier, JUDGMENT) still a loop-ready pick (unblocks 394). 400 = maintainer cosign gate (NO-AUTO-MERGE). OQ CLEAN; zero migrations this batch.
 
 | Row | Transition              | Evidence                                                                                       |
 | --- | ----------------------- | ---------------------------------------------------------------------------------------------- |
