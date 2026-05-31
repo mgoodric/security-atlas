@@ -3,7 +3,7 @@
 **Cluster:** Quality
 **Estimate:** 2-3d (gated by the DB-seam decision below)
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (`85be428c`, #936 — 5 dashboard panels via Option A; 394 unblocked; risks/controls/audit deferred → #410/#411)
 **Parent:** 392 (contract-tier rollout) · unblocks 394 (e2e mocks load from goldens)
 
 ## Narrative
