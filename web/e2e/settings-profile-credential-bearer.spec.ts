@@ -39,6 +39,8 @@
 // P0-250-5: No regression on the 11/11 settings.spec.ts ACs. The new
 //           spec is a sibling file; settings.spec.ts is unaltered.
 
+import { fulfillFromGolden } from "./test-utils/fulfill-from-golden";
+
 import { expect, test } from "./fixtures";
 
 import {
@@ -46,20 +48,20 @@ import {
   PROFILE_CREDENTIAL_BANNER_TITLE,
 } from "../app/(authed)/settings/profile-bearer-display";
 
-// Synthetic-profile shape returned by /v1/me for credential bearers.
-// Mirrors `internal/api/me/profile.go:269-282`. The exact `user_id` and
-// `tenant_id` values are not load-bearing for the UI test.
-const SYNTHETIC_CREDENTIAL_PROFILE = {
-  user_id: "00000000-0000-0000-0000-000000000000",
-  tenant_id: "00000000-0000-0000-0000-000000000001",
+// Slice 394: the synthetic-credential `/v1/me` body now loads from the
+// recorded contract golden (`me.golden.json` variant `synthetic_admin`),
+// so the e2e mock cannot drift from the real handler's profile wire shape
+// (slice 334 P-1 / ADR-0007). The golden supplies the shape-complete base
+// (the always-present `roles: []`, `is_admin`, `tenant_role`, the empty
+// email/idp_subject the credential path emits, `time_zone: null`). Two
+// fields are OVERRIDDEN per this spec's load-bearing assertions (AC-3
+// override escape hatch — decisions log D3):
+//   * display_name — the visible test asserts the formatted credential
+//     label ends in "…1f3a"; the golden records "API key ad01".
+//   * owner_roles  — this spec exercised the admin owner-role path.
+const ME_OVERRIDE = {
   display_name: "API key 1f3a",
-  email: "",
-  idp_subject: "",
-  tenant_role: "admin",
-  time_zone: null,
-  is_admin: true,
   owner_roles: ["admin"],
-  roles: [],
 };
 
 test.describe("/settings Profile section -- credential bearer", () => {
@@ -79,10 +81,8 @@ test.describe("/settings Profile section -- credential bearer", () => {
         await route.fallback();
         return;
       }
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(SYNTHETIC_CREDENTIAL_PROFILE),
+      await fulfillFromGolden(route, "me", "synthetic_admin", {
+        override: ME_OVERRIDE,
       });
     });
 

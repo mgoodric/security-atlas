@@ -278,6 +278,38 @@ Two debugging heuristics for the next reader hit by this class of bug:
 
 See `docs/audit-log/276-control-detail-tabs-deep-fix-decisions.md` for the full diagnosis.
 
+## Golden-backed route mocks (slice 394)
+
+For the nine BFF↔atlas endpoints that have a recorded **contract golden** under `web/lib/contracts/*.golden.json` (slices 349/392 + 409), DO NOT hand-write a `route.fulfill` body. Load the recorded body via `fulfillFromGolden` (`web/e2e/test-utils/fulfill-from-golden.ts`) so the e2e mock cannot drift from the provider's recorded wire shape — the slice-334 P-1 / slice-276 mock-vs-reality drift this whole tier (ADR-0007) exists to catch.
+
+The nine golden-covered endpoints (`GoldenEndpoint` union in the helper): `me`, `version`, `install-state`, `demo-status`, `framework-posture`, `activity`, `upcoming`, `freshness`, `drift`.
+
+```ts
+import { fulfillFromGolden } from "./test-utils/fulfill-from-golden";
+
+// Happy path — serve the recorded body verbatim:
+await page.route("**/api/install-state", (route) =>
+  fulfillFromGolden(route, "install-state", "fresh_install_without_tenant"),
+);
+
+// Empty-set is a recorded variant — use it, don't hand-write `[]`:
+await page.route("**/api/dashboard/freshness", (route) =>
+  fulfillFromGolden(route, "freshness", "empty"),
+);
+```
+
+The caller still owns `page.route(pattern, …)`, the URL glob, and any method-guard (`route.request().method() !== "GET"` → `route.fallback()`). The helper owns only the `route.fulfill` of the recorded body.
+
+### The escape hatch (when the golden does not carry what you need)
+
+The goldens are happy-path 200 bodies with `populated` + `empty` variants. Three cases stay hand-written or use the override path:
+
+1. **Error states (4xx/5xx)** — there is no recorded body for an error, so keep a hand-written `route.fulfill({ status, body })` (or `route.abort()`). `first-time-login.spec.ts`'s 503-fallback test is the canonical example.
+2. **A populated body that needs one spec-specific value** — pass `options.override`. The golden stays the shape-complete base; only the named top-level keys change. The credential-bearer specs override `display_name` (the visible assertion reads the formatted credential label); the dashboard slice-229 subtitle test overrides the freshness numbers to a deterministic 87%. This keeps the spec from drifting on the **shape** while pinning the one value the assertion needs.
+3. **Routes with no golden** (`/v1/risks`, `/v1/controls/*`, `/v1/board`, `/v1/policies` — goldens tracked as #410 / #411) — hand-write as before; the typed `GoldenEndpoint` union mechanically prevents passing an uncovered endpoint to the helper. When a golden for one of these lands, record it, add the endpoint to the union, and migrate the mock.
+
+The helper's pure logic is unit-tested at `web/lib/contracts/fulfill-from-golden.test.ts` (vitest — it imports node `fs`, not a browser; the helper's only Playwright import is `import type { Route }`, erased at runtime). See `docs/audit-log/394-e2e-fulfill-from-golden-decisions.md` for the full design rationale.
+
 ## How to debug a failure via the trace viewer
 
 When CI fails, the Playwright job uploads `web/playwright-report/` and `web/test-results/` as a workflow artifact named `playwright-report`. Download it, then:
