@@ -3,7 +3,18 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 183 reconcile — slice 410 merged at `ec3718fd` · contract-tier rollout complete · loop at terminus)
+**Last reconciled:** 2026-05-30 (batch 184 reconcile — slice 082 stale-`ready` drift corrected → merged at `425845b0` (#253) · queue genuinely empty · LOOP TERMINATED)
+
+## Reconcile — 2026-05-30 (batch 184 · slice 082 status-drift correction · LOOP TERMINATED)
+
+- **082** (Playwright e2e seed-data harness) — Infra · AFK — was carrying a stale `**Status:** ready` doc marker, but its work **already landed long ago at `425845b0` (#253, "Playwright e2e seed-data harness + un-quarantine")**. Verified on main this iteration: `web/e2e/seed.ts` exports `seedFromFixture`; all 5 named specs (admin-bootstrap, audit-workspace, control-detail-empty, dashboard-server-component, risk-hierarchy) invoke it (AC-2 ✓); `.github/workflows/ci.yml:1117` carries the `# Slice 082 — un-quarantined` removal of slice-079's `continue-on-error` (premise ✓). The `ready` marker was a never-flipped doc-status drift (maintainer staffed it 2026-05-16 but the work had already merged). Flipped doc → `merged`. No code change — status-only correction.
+
+**LOOP TERMINATED — queue genuinely empty.** With 082 corrected, NO auto-pickable `ready`+deps-merged slices remain. The continuous-batch loop has drained its entire backlog. Remaining slices need maintainer action:
+
+- **411** (contract-tier: controls-detail + audit-workspace) — `blocked` on appetite (v2 follow-on).
+- **400** (cosign signing spike) — NO-AUTO-MERGE maintainer gate.
+
+Session arcs complete: contract-tier (349→392→409→394→410) · slice-390 integration-enrolment drain (38/38, 8 batches) · slice-082 status reconciliation. Next iteration's GUARD-1 fires cleanly.
 
 ## Reconcile — 2026-05-30 (batch 183 · slice 410 merged · LOOP TERMINUS)
 
