@@ -1,0 +1,125 @@
+// Slice 410 — contract-test-tier rollout to the dashboard top-risks panel
+// route (GET /v1/risks) served by this package (shared provider-side helper).
+//
+// This is the slice-392 / slice-409 shared-recorder helper copied into this
+// package because Go test files cannot cross a package boundary (the same
+// reason slice 392/409 gave for the sibling copies in internal/api/me,
+// internal/api/admindemo, internal/api/dashboard, internal/api/freshnessdrift).
+//
+// Pattern (ADR-0007 option 1, slice-410 list-only Option A seam):
+//
+//	provider test:  construct the real Handler over an injected fixed-row
+//	                list-only stub (no Postgres pool) -> drive the real
+//	                ListRisks handler -> canonicalize the body -> diff against
+//	                the committed golden under web/lib/contracts/risks.golden.json.
+//	consumer test:  read the same golden -> assert the BFF's TRANSFORM (unwrap
+//	                body.risks, re-wrap {risks, count}) holds against the
+//	                recorded upstream truth. The risks BFF is NOT a verbatim
+//	                passthrough (slice 410 spec / 409 D1), so the consumer
+//	                assert is transform-aware, not toEqual(golden).
+//
+// Regenerate the golden after an intentional shape change:
+//
+//	go test ./internal/api/risks/ -run TestContract -update
+//
+// Runs on the plain `go test ./...` unit surface (no DB): the ListRisks path
+// reads through the unexported list-only riskLister seam (handlers.go), which
+// the recorder satisfies with a fixed-row stub. That is what keeps the tier
+// zero-new-gate (ADR-0007 (d): rides the Go-unit surface, no fifth CI job;
+// slice 409 P0-409-1: no recorder on the integration surface).
+
+package risks
+
+import (
+	"bytes"
+	"encoding/json"
+	"flag"
+	"os"
+	"testing"
+)
+
+// contractUpdateFlag is registered lazily so it composes with whatever flag
+// set the surrounding `go test` invocation uses without a duplicate-flag
+// panic (mirrors slice 392/409's lazy lookup).
+var contractUpdateFlag = func() *bool {
+	if f := flag.Lookup("update"); f != nil {
+		if gv, ok := f.Value.(flag.Getter); ok {
+			if b, ok := gv.Get().(bool); ok {
+				return &b
+			}
+		}
+		return nil
+	}
+	return flag.Bool("update", false, "rewrite contract golden files")
+}()
+
+// contractGolden mirrors the committed golden JSON. The variant keys are
+// stable contract identifiers shared verbatim with the consumer test.
+type contractGolden struct {
+	Comment  string                     `json:"_comment"`
+	Endpoint string                     `json:"endpoint"`
+	Variants map[string]json.RawMessage `json:"variants"`
+}
+
+// canonicalizeJSON re-marshals a body through a generic value so the golden is
+// byte-stable regardless of struct/map field order.
+func canonicalizeJSON(t *testing.T, raw []byte) json.RawMessage {
+	t.Helper()
+	var generic any
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		t.Fatalf("canonicalize: decode body: %v; body=%q", err, raw)
+	}
+	out, err := json.Marshal(generic)
+	if err != nil {
+		t.Fatalf("canonicalize: re-marshal: %v", err)
+	}
+	return out
+}
+
+// assertContractGolden is the shared compare-or-update core.
+func assertContractGolden(t *testing.T, path, comment, endpoint string, recorded map[string]json.RawMessage) {
+	t.Helper()
+
+	if contractUpdateFlag != nil && *contractUpdateFlag {
+		out := contractGolden{Comment: comment, Endpoint: endpoint, Variants: recorded}
+		buf, err := json.MarshalIndent(out, "", "  ")
+		if err != nil {
+			t.Fatalf("marshal golden: %v", err)
+		}
+		buf = append(buf, '\n')
+		if err := os.WriteFile(path, buf, 0o644); err != nil {
+			t.Fatalf("write golden %s: %v", path, err)
+		}
+		t.Logf("updated contract golden at %s", path)
+		return
+	}
+
+	rawGolden, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read golden %s: %v (run with -update to regenerate)", path, err)
+	}
+	var golden contractGolden
+	if err := json.Unmarshal(rawGolden, &golden); err != nil {
+		t.Fatalf("parse golden %s: %v", path, err)
+	}
+	if golden.Endpoint != endpoint {
+		t.Errorf("golden endpoint = %q; recorder endpoint = %q (run -update)", golden.Endpoint, endpoint)
+	}
+	for name, gotBody := range recorded {
+		wantRaw, ok := golden.Variants[name]
+		if !ok {
+			t.Errorf("variant %q present in handler output but missing from golden; run -update", name)
+			continue
+		}
+		wantCanon := canonicalizeJSON(t, wantRaw)
+		if !bytes.Equal(gotBody, wantCanon) {
+			t.Errorf("variant %q wire shape drifted from golden:\n  handler: %s\n  golden:  %s\nrun `go test ./internal/api/risks/ -run TestContract -update` if the change is intentional",
+				name, gotBody, wantCanon)
+		}
+	}
+	for name := range golden.Variants {
+		if _, ok := recorded[name]; !ok {
+			t.Errorf("variant %q present in golden but missing from handler output; run -update", name)
+		}
+	}
+}

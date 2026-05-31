@@ -1,0 +1,64 @@
+{
+  "_comment": "Slice 410 contract-tier golden. PROVIDER: internal/api/risks/handler_contract_test.go (Risks, real ListRisks handler over an injected fixed-row list-only riskLister stub — Option A seam, no Postgres). Regenerate: `go test ./internal/api/risks/ -run TestContract_Risks -update`. CONSUMER: web/lib/contracts/risks.contract.test.ts asserts the BFF at web/app/api/dashboard/risks/route.ts — TRANSFORM-AWARE (the BFF unwraps body.risks and re-wraps {risks, count}; it is NOT a verbatim passthrough).",
+  "endpoint": "GET /v1/risks",
+  "variants": {
+    "empty": {
+      "count": 0,
+      "risks": []
+    },
+    "populated": {
+      "count": 2,
+      "risks": [
+        {
+          "accepted_until": "2026-12-31",
+          "accepter": "ciso",
+          "category": "technology",
+          "created_at": "2026-05-01T00:00:00Z",
+          "description": "A high-severity CVE in an internet-facing dependency.",
+          "id": "44444444-4444-4444-8444-444444444444",
+          "inherent_score": {
+            "impact": 5,
+            "likelihood": 4,
+            "severity": 20
+          },
+          "instrument_reference": "JIRA-410",
+          "linked_control_ids": [
+            "11111111-1111-4111-8111-111111111111",
+            "22222222-2222-4222-8222-222222222222"
+          ],
+          "methodology": "nist_800_30",
+          "residual_score": {
+            "impact": 4,
+            "likelihood": 2,
+            "severity": 8
+          },
+          "review_due_at": "2026-08-01T00:00:00Z",
+          "severity": 20,
+          "themes": [],
+          "title": "Unpatched perimeter dependency",
+          "treatment": "mitigate",
+          "treatment_owner": "security-eng",
+          "updated_at": "2026-05-12T00:00:00Z"
+        },
+        {
+          "accepter": "",
+          "category": "third_party",
+          "created_at": "2026-05-01T00:00:00Z",
+          "description": "",
+          "id": "44444444-4444-4444-8444-444444444444",
+          "inherent_score": {},
+          "instrument_reference": "",
+          "linked_control_ids": [],
+          "methodology": "nist_800_30",
+          "residual_score": {},
+          "severity": 0,
+          "themes": [],
+          "title": "Vendor SOC 2 report pending renewal",
+          "treatment": "mitigate",
+          "treatment_owner": "",
+          "updated_at": "2026-05-12T00:00:00Z"
+        }
+      ]
+    }
+  }
+}

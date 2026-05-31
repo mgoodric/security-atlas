@@ -30,20 +30,49 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
+// riskLister is the LIST-ONLY read seam the ListRisks (GET /v1/risks) path
+// reads through (slice 410). It carries JUST the one List method that
+// endpoint needs — deliberately narrow (slice 409 D1: a full read interface
+// over the wide risk.Store surface — Create/List/Get/Delete/Heatmap/
+// ThemeOrgUnitHeatmap/… — would be a ~7-method refactor a single golden does
+// not justify). The contract-tier recorder (handler_contract_test.go) injects
+// a fixed-row stub satisfying this seam so the GET /v1/risks wire shape
+// records on the plain `go test ./...` unit surface with no Postgres pool
+// (ADR-0007 / P0-409-1). The production *risk.Store satisfies it verbatim;
+// the seam is unexported and New(*risk.Store) is unchanged (P0-409-2). The
+// rest of the handler keeps using the concrete *risk.Store directly.
+type riskLister interface {
+	List(ctx context.Context, filter risk.ListFilter) ([]risk.Risk, error)
+}
+
 // Handler bundles the slice-019 routes over a single risk.Store. Slice 020
 // adds an optional ResidualDeriver — when set, GET /v1/risks/{id} returns the
 // derived residual + effectiveness breakdown and POST /v1/risks/{id}/controls
 // is served. When nil (a deployment without NATS/eval wired), the risk routes
 // still work and residual_score is whatever was last persisted.
+//
+// lister is the slice-410 list-only read seam the ListRisks path reads
+// through; New points it at store, so production behavior is identical. Every
+// other handler keeps using store directly.
 type Handler struct {
 	store   *risk.Store
 	deriver *risk.ResidualDeriver
+	lister  riskLister
 }
 
 // New constructs a Handler. The ResidualDeriver is attached separately via
 // WithDeriver so the slice-019/053 callers that pass only a Store keep
-// working unchanged.
-func New(store *risk.Store) *Handler { return &Handler{store: store} }
+// working unchanged. The slice-410 list-only seam (lister) is wired to the
+// same store — the public signature is unchanged (P0-409-2).
+func New(store *risk.Store) *Handler { return &Handler{store: store, lister: store} }
+
+// newHandlerWithLister constructs a Handler whose ListRisks path reads through
+// an arbitrary list-only seam. It exists ONLY for the slice-410 contract
+// recorder, which injects a fixed-row stub so the GET /v1/risks wire shape
+// records with no Postgres pool. Unexported — not part of the public surface.
+func newHandlerWithLister(lister riskLister) *Handler {
+	return &Handler{lister: lister}
+}
 
 // WithDeriver attaches the slice-020 ResidualDeriver and returns the handler
 // for chaining. httpserver.go calls this when the eval engine is available.
@@ -222,7 +251,7 @@ func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
 		}
 		filter.OrgUnitID = &ouID
 	}
-	risks, err := h.store.List(ctx, filter)
+	risks, err := h.lister.List(ctx, filter)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list risks", err)
 		return
