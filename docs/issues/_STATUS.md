@@ -3,13 +3,14 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 179 claim-stake — slice 407 → in-progress (N=1 solo) · integration-enrolment drain batch 7 · freshness drift family)
+**Last reconciled:** 2026-05-30 (batch 179 reconcile — slice 407 merged at `bb71ab51` · integration-enrolment drain 33/38 · 408 unblocked)
 
-## Drift detected — 2026-05-30 (batch 179 claim-stake · slice 407 solo)
+## Reconcile — 2026-05-30 (batch 179 · slice 407 merged)
 
-- **407** (integration-enrolment drain batch 7, slice 390) — infra · AFK. Enrols freshness drift family — `internal/drift`, `internal/freshness`, `internal/freshnessdrift`, `internal/exception` (4 pkgs) — in ci.yml's integration job. Per package: enrol (match KNOWN_UNENROLLED form) → run suite (per-pkg + combined serial w/ demoseed neighbour) → FIX whatever broke (no skip/delete; one-liner product bug → fix in-place per 402; deeper FK-wipe chain → TRUNCATE CASCADE per 405; stale test → fix per 406; real design work → spillover+skip-that-test) → shrink `KNOWN_UNENROLLED` 9→5 → lift coverage excludes (real floor vs phantom per 396/401-406).
+- **407** (integration-enrolment drain batch 7, slice 390) — infra · AFK — **MERGED** at `bb71ab51` (#930). Enrolled freshness drift family — `internal/drift`, `internal/freshness`, `internal/freshnessdrift`, `internal/exception` (4 pkgs, all `./internal/<pkg>/...`) — in ci.yml's integration job; shrank `KNOWN_UNENROLLED` 9→5. Coverage floors lifted off excludes: drift 84, freshness 83, exception 76, freshnessdrift 19 (own-low — real NATS-subscriber gap the suite deliberately doesn't drive; phantom-checked zero transitive, honest ratchet not a fabricated floor). **Benign batch:** all four suites passed unmodified; the slice-405 FK-wipe contamination class is structurally impossible here (every test uses a fresh random tenant + tenant-scoped cleanup, no global `DELETE FROM controls`) — confirmed via the combined serial run with `demoseed`.
+- **408** (integration-enrolment drain batch 8 — catalog/oscal/policy/risk tail) — **UNBLOCKED** (407 merged): doc Status `not-ready` → `ready`. FINAL drain batch (5 pkgs: catalog/metrics, oscal, policy/pdf, policy/seed, risk/aggrule) — closes slice 390 when merged.
 
-Run SOLO (N=1): drain batches surface unpredictable breakage (314+402+405+406 found real bugs/stale tests). 409 (dashboard contract-tier, JUDGMENT) deferred. 400 = maintainer cosign gate. OQ CLEAN; zero migrations. Chain continues 407 → 408.
+Drain progress: **33/38** packages enrolled; 5 remain on `KNOWN_UNENROLLED` (all in batch 408). 409 (dashboard contract-tier, JUDGMENT) still a loop-ready pick (unblocks 394). 400 = maintainer cosign gate (NO-AUTO-MERGE). OQ CLEAN; zero migrations this batch.
 
 ## Reconcile — 2026-05-30 (batch 178 · slice 406 merged)
 
