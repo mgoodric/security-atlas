@@ -3,13 +3,14 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 178 claim-stake — slice 406 → in-progress (N=1 solo) · integration-enrolment drain batch 6 · auth substrate + keystore)
+**Last reconciled:** 2026-05-30 (batch 178 reconcile — slice 406 merged at `6f7f7163` · integration-enrolment drain 29/38 · 407 unblocked)
 
-## Drift detected — 2026-05-30 (batch 178 claim-stake · slice 406 solo)
+## Reconcile — 2026-05-30 (batch 178 · slice 406 merged)
 
-- **406** (integration-enrolment drain batch 6, slice 390) — infra · AFK. Enrols auth substrate + keystore — `internal/auth`, `internal/auth/keystore/fsstore`, `internal/mcp`, `internal/observability/otel` (4 pkgs) — in ci.yml's integration job. Per package: enrol → run suite → FIX whatever broke (no skip/delete; one-liner product bug → fix in-place per 402; deeper FK-wipe chain → TRUNCATE CASCADE per 405; real design work → spillover+skip-that-test) → shrink `KNOWN_UNENROLLED` 13→9 → lift coverage excludes (real floor vs phantom per 396/401-405).
+- **406** (integration-enrolment drain batch 6, slice 390) — infra · AFK — **MERGED** at `6f7f7163` (#927). Enrolled auth substrate + keystore — `internal/auth` (bare root), `internal/auth/keystore/fsstore`, `internal/mcp`, `internal/observability/otel` (4 pkgs) — in ci.yml's integration job; shrank `KNOWN_UNENROLLED` 13→9. Coverage: `internal/auth` zero-statement (no floor, no excludes — cleaner than 405's emptyset); fsstore 74 / mcp 80 / otel 92 floors unchanged (already gated against the slice-279 merged `-coverpkg` profile). **slice-390 thesis hit (mild):** `internal/auth`'s `TestOIDC_CallbackStateMismatchRejected` was a stale test — slice 365 added a NonceCookie presence check ahead of the state-mismatch check in `HandleCallback`, so the pre-365 test (no cookie set) short-circuited at the nonce gate and asserted the wrong error; fixed with a one-line NonceCookie set (the slice-365 ordering is correct, locked by P0-365-1). Test-only; no product change. `internal/auth` enrolled as bare root (matches 403 api-root precedent) to avoid double-enrolling the separately-tracked oidc/jwtmw/users/oauth subpackages.
+- **407** (integration-enrolment drain batch 7 — freshness drift family) — **UNBLOCKED** (406 merged): doc Status `not-ready` → `ready`. Next pick. Chain continues 407 → 408.
 
-Run SOLO (N=1): drain batches surface unpredictable breakage (314+402+405 found real bugs; 401/403/404 clean). 409 (dashboard contract-tier, JUDGMENT) deferred. 400 = maintainer cosign gate. OQ CLEAN; zero migrations. Chain continues 406 → 407 → 408.
+Drain progress: **29/38** packages enrolled; 9 remain on `KNOWN_UNENROLLED`. 409 (dashboard contract-tier, JUDGMENT) still a loop-ready pick (unblocks 394). 400 = maintainer cosign gate (NO-AUTO-MERGE). OQ CLEAN; zero migrations this batch.
 
 ## Reconcile — 2026-05-30 (batch 177 · slice 405 merged)
 

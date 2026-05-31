@@ -3,7 +3,7 @@
 **Cluster:** infra
 **Estimate:** 0.5-1d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (`6f7f7163`, #927)
 **Parent:** 390 (drain the 38-package integration-enrolment backlog)
 
 > **Unblocked 2026-05-30** — dep #405 (drain batch 5) merged at `600d39ff`.
