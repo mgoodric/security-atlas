@@ -3,7 +3,13 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 181 reconcile — slice 409 merged at `85be428c` · 394 unblocked · spillovers 410/411 filed)
+**Last reconciled:** 2026-05-30 (batch 182 claim-stake — slice 394 → in-progress (N=1 solo) · e2e mocks load from contract goldens)
+
+## Drift detected — 2026-05-30 (batch 182 claim-stake · slice 394 solo)
+
+- **394** (teach `/e2e/` `route.fulfill` mocks to load from recorded contract goldens, parent 392) — Quality · JUDGMENT. Builds a `fulfillFromGolden(route, endpoint, variant)` Playwright helper (`web/e2e/` test-utils) that serves recorded `web/lib/contracts/*.golden.json` bodies via `route.fulfill`, with a documented hand-written-override escape hatch for error/pagination/empty variants. Migrates the e2e specs whose upstream routes HAVE goldens (the 9 endpoints from 392+409) to the helper; leaves still-hand-mocked routes (`/v1/risks`, `/v1/controls/*`, `/v1/board`, `/v1/policies`) on the escape hatch. Stays zero-new-gate (ADR-0007) — rides the existing Playwright surface.
+
+Run SOLO (N=1): JUDGMENT slice (helper shape + which specs migrate + escape-hatch design). Frontend-only (web/e2e + web/lib) → Playwright/vitest/lint CI surface; no ci.yml change expected. 410 (risks-panel golden) is the next pick after 394; 411 blocked, 400 maintainer-gate. OQ CLEAN; zero migrations. After 394+410 merge, loop reaches natural terminus.
 
 ## Reconcile — 2026-05-30 (batch 181 · slice 409 merged)
 
