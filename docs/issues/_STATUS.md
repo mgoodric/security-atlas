@@ -3,13 +3,15 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 182 claim-stake — slice 394 → in-progress (N=1 solo) · e2e mocks load from contract goldens)
+**Last reconciled:** 2026-05-30 (batch 182 reconcile — slice 394 merged at `8fd89bb4` · contract-tier e2e drift-proofing complete · 410 next)
 
-## Drift detected — 2026-05-30 (batch 182 claim-stake · slice 394 solo)
+## Reconcile — 2026-05-30 (batch 182 · slice 394 merged)
 
-- **394** (teach `/e2e/` `route.fulfill` mocks to load from recorded contract goldens, parent 392) — Quality · JUDGMENT. Builds a `fulfillFromGolden(route, endpoint, variant)` Playwright helper (`web/e2e/` test-utils) that serves recorded `web/lib/contracts/*.golden.json` bodies via `route.fulfill`, with a documented hand-written-override escape hatch for error/pagination/empty variants. Migrates the e2e specs whose upstream routes HAVE goldens (the 9 endpoints from 392+409) to the helper; leaves still-hand-mocked routes (`/v1/risks`, `/v1/controls/*`, `/v1/board`, `/v1/policies`) on the escape hatch. Stays zero-new-gate (ADR-0007) — rides the existing Playwright surface.
+- **394** (teach `/e2e/` `route.fulfill` mocks to load from recorded contract goldens, parent 392) — Quality · JUDGMENT — **MERGED** at `8fd89bb4` (#939). Built `fulfillFromGolden(route, endpoint, variant, {status?, override?})` at `web/e2e/test-utils/fulfill-from-golden.ts` (typed `GoldenEndpoint` union over the 9 covered routes; unknown variant throws). Migrated 4 specs (first-time-login install-state ×2 + 503 escape hatch, dashboard slice-229 freshness populated+override + empty ×2, both credential-bearer settings specs `/api/me` + override). Escape hatch documented (`web/e2e/README.md`) + tested (override deep-merge + hand-written 503); 8 helper self-tests on vitest (1237/1237). ADR-0007 honored: no ci.yml change, rides Playwright+vitest. Resolves slice 392's D5 deferral — the 9 golden-covered e2e routes can no longer drift from the provider's recorded truth. Surfaced + documented a local-vs-CI prod-build env quirk (local standalone ignores `e2e_no_prefetch`; A/B stash proved behavior-preserving — green in CI).
+- **410** (contract-tier: dashboard top-risks panel `GET /v1/risks`, spillover from 409) — `ready`, NEXT pick. Same Option-A injectable-seam pattern (409 decisions-log recipe). Records one more golden.
+- **411** (controls-detail + audit-workspace contract tier) — `blocked` on appetite (v2 follow-on). Do NOT auto-pick.
 
-Run SOLO (N=1): JUDGMENT slice (helper shape + which specs migrate + escape-hatch design). Frontend-only (web/e2e + web/lib) → Playwright/vitest/lint CI surface; no ci.yml change expected. 410 (risks-panel golden) is the next pick after 394; 411 blocked, 400 maintainer-gate. OQ CLEAN; zero migrations. After 394+410 merge, loop reaches natural terminus.
+Loop status: only **410** remains auto-pickable. After 410 merges, only 411 (blocked) + 400 (maintainer cosign gate, NO-AUTO-MERGE) remain → the loop reaches its natural terminus (GUARD-1 fires / E-3 escalates — expected, not an error). OQ CLEAN; zero migrations this batch.
 
 ## Reconcile — 2026-05-30 (batch 181 · slice 409 merged)
 

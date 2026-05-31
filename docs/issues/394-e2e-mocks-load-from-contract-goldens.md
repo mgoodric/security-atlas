@@ -3,7 +3,7 @@
 **Cluster:** Quality
 **Estimate:** 1-2d
 **Type:** JUDGMENT
-**Status:** `ready` (unblocked by #409 — the dashboard-panel goldens landed; see Dependencies)
+**Status:** `merged` (`8fd89bb4`, #939 — fulfillFromGolden helper + 4 specs migrated; resolves 392 D5)
 
 ## Narrative
 
