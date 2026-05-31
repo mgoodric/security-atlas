@@ -3,7 +3,7 @@
 **Cluster:** Quality
 **Estimate:** 1d
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (`ec3718fd`, #942 — list-only riskLister seam + transform-aware consumer assert)
 **Parent:** 409 (contract-tier dashboard rollout) · feeds 394 residual coverage
 
 ## Narrative
