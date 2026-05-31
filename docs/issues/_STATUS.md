@@ -3,7 +3,13 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 182 reconcile — slice 394 merged at `8fd89bb4` · contract-tier e2e drift-proofing complete · 410 next)
+**Last reconciled:** 2026-05-30 (batch 183 claim-stake — slice 410 → in-progress (N=1 solo) · contract-tier risks panel · FINAL auto-pickable slice)
+
+## Drift detected — 2026-05-30 (batch 183 claim-stake · slice 410 solo)
+
+- **410** (contract-tier: dashboard top-risks panel `GET /v1/risks`, parent 409) — Quality · JUDGMENT. Records a contract golden for the risks panel via a narrow **list-only** unexported read seam on the risks `Handler` (Option A, but just the `List` method the `ListRisks` path uses — not the full ~7-method `*risk.Store`; `New(*risk.Store)` unchanged, P0-409-2). Provider recorder on the Go-unit surface (reusing the 392/409 shared helper) records the `riskWire` envelope; **transform-aware** consumer assert (`web/lib/contracts/risks.contract.test.ts`) — the dashboard/risks BFF unwraps `body.risks` and re-wraps `{risks, count}`, so the assert checks the BFF output matches `{risks: golden.risks, count: golden.risks.length}`, NOT `toEqual(golden)`. ADR-0007 (no new gate, unit surface); drift sensitivity proven. P0s mirror 409.
+
+Run SOLO (N=1): JUDGMENT slice. FINAL auto-pickable slice — after 410 merges, only 411 (blocked-on-appetite) + 400 (maintainer cosign gate, NO-AUTO-MERGE) remain, so the next iteration's GUARD-1 fires / E-3 escalates: the loop reaches its designed terminus. OQ CLEAN; zero migrations.
 
 ## Reconcile — 2026-05-30 (batch 182 · slice 394 merged)
 
