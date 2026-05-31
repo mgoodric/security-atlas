@@ -3,7 +3,13 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 179 reconcile — slice 407 merged at `bb71ab51` · integration-enrolment drain 33/38 · 408 unblocked)
+**Last reconciled:** 2026-05-30 (batch 180 claim-stake — slice 408 → in-progress (N=1 solo) · integration-enrolment drain batch 8 · FINAL · catalog/oscal/policy/risk tail)
+
+## Drift detected — 2026-05-30 (batch 180 claim-stake · slice 408 solo)
+
+- **408** (integration-enrolment drain batch 8, slice 390) — infra · AFK. FINAL drain batch — enrols `internal/catalog/metrics`, `internal/oscal`, `internal/policy/pdf`, `internal/policy/seed`, `internal/risk/aggrule` (5 pkgs) — in ci.yml's integration job. Merging it shrinks `KNOWN_UNENROLLED` 5→0 and CLOSES slice 390. Per package: enrol (match KNOWN_UNENROLLED form) → run suite (per-pkg + combined serial w/ demoseed neighbour) → FIX whatever broke (no skip/delete; one-liner product bug → fix in-place per 402; deeper FK-wipe chain → TRUNCATE CASCADE per 405; stale test → fix per 406; real design work → spillover+skip-that-test) → shrink `KNOWN_UNENROLLED` 5→0 → lift coverage excludes (real floor vs phantom per 396/401-407). NOTE: catalog/metrics = slice-386 NULL-bug surface; oscal = compliance-trestle bridge — watch for real finds.
+
+Run SOLO (N=1): drain batches surface unpredictable breakage (314+402+405+406 found real bugs/stale tests). 409 (dashboard contract-tier, JUDGMENT) becomes primary pick after 390 closes. 400 = maintainer cosign gate. OQ CLEAN; zero migrations.
 
 ## Reconcile — 2026-05-30 (batch 179 · slice 407 merged)
 
