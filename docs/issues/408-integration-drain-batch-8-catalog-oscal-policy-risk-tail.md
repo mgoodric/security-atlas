@@ -3,7 +3,7 @@
 **Cluster:** infra
 **Estimate:** 0.5-1d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (`bb2ce517`, #933 — closes slice 390)
 **Parent:** 390 (drain the 38-package integration-enrolment backlog)
 
 > **Unblocked 2026-05-30** — dep #407 (drain batch 7) merged at `bb71ab51`. This is the FINAL drain batch; merging it closes slice 390 (KNOWN_UNENROLLED 5→0).
