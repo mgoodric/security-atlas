@@ -3,7 +3,7 @@
 **Cluster:** infra
 **Estimate:** 0.5-1d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** 390 (drain the 38-package integration-enrolment backlog)
 
 > **Unblocked 2026-05-30** — dep #402 (drain batch 2) merged at `cf2fb8a1`.

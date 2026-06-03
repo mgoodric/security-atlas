@@ -3,7 +3,7 @@
 **Cluster:** Quality / Testing
 **Estimate:** ~0.25d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** spillover from slice 211 retrospective. The full bootstrap → sign-in → authz-gated-endpoint path is the load-bearing contract the local-credential surface exists to serve, and slices 209 + 210 + 211 all shipped with this same class of bug — no test asserted that the path actually works end-to-end. This slice locks the regression with a CI guard.
 
 ## Narrative

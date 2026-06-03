@@ -3,7 +3,7 @@
 **Cluster:** Quality
 **Estimate:** 2-3d (3 packages share slice-290 enrollment pattern)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

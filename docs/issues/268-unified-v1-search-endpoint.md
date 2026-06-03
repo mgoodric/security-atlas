@@ -3,7 +3,7 @@
 **Cluster:** Backend (search / cross-domain query)
 **Estimate:** ~1d
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** spillover from slice 204 / precursor to slice 228 (dashboard global ⌘K search). Filed 2026-05-23 to unblock the not-ready spillover chain identified during the slice 204 audit-fleet aggregate. Slice 228 names this endpoint OR a UI-side fan-out as its prerequisite; this slice picks the endpoint shape so 228 + future cross-domain search surfaces have a single canonical target.
 
 ## Narrative

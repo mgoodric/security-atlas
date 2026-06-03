@@ -3,7 +3,7 @@
 **Cluster:** Quality / UI hygiene
 **Estimate:** 1.0d (cursor wiring + footer UI + Playwright assertion)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** #204 (UI parity audit fleet)
 
 ## Narrative

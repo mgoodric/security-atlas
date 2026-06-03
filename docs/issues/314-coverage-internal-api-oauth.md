@@ -3,7 +3,7 @@
 **Cluster:** Quality
 **Estimate:** 3-5d (921 statements; OAuth AS endpoint family; multi-RFC surface)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 
