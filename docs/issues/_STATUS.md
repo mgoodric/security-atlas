@@ -3,7 +3,16 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 184 reconcile — slice 082 stale-`ready` drift corrected → merged at `425845b0` (#253) · queue genuinely empty · LOOP TERMINATED)
+**Last reconciled:** 2026-06-03 (batch 185 claim-stake — maintainer-directed restart: slices 400 + 411 → in-progress (parallel))
+
+## Drift detected — 2026-06-03 (batch 185 claim-stake · maintainer-directed · 400 + 411)
+
+Loop restarted by maintainer direction (2026-06-03) after the batch-184 terminus. Two genuinely-outstanding slices authorized to build:
+
+- **400** (OSCAL signing cosign/Sigstore decision spike + ADR, parent 368) — Oscal · JUDGMENT (decision-only) — `ready` → **in-progress**. Authors `docs/adr/NNNN-oscal-cosign-signing.md`: value vs status-quo ed25519, the 3 modes (cosign-keyless / cosign-kms / embedded-ed25519), cost ledger (cosign binary + Fulcio/Rekor live deps + OIDC machine identity + ~5d build), cosign Apache-2.0 license-bundling check, and a confidence-rated ADOPT / ADOPT-DEFERRED / DON'T-ADOPT recommendation + per-deployment default. NO production code (P0-400-1). **Does NOT auto-merge (P0-400-2)** — the recommendation returns to the maintainer for the 368 go/no-go.
+- **411** (contract-tier rollout: controls-detail + audit-workspace routes, parent 409) — Quality · JUDGMENT — `blocked` → **in-progress** (maintainer cleared the appetite gate). Lands Option-A read seams + provider recorders + transform-aware consumer asserts for the highest-traffic controls-detail (`/v1/controls/*`) and audit-workspace (`/v1/audit/*`) routes the e2e suite traverses (the ones 394's fulfillFromGolden would otherwise hand-mock); drift-proof per endpoint; spillover the long tail (spec anticipates a controls/audit split). Zero-new-gate (ADR-0007).
+
+Conflict-safe (400 = docs/ADR + 368 doc; 411 = internal/api controls/audit + web/lib/contracts). Running in parallel. Also this session: dependabot triage (merge clean + rebase stale) + cosmetic cleanup (per-doc status reconcile + local worktree/branch prune).
 
 ## Reconcile — 2026-05-30 (batch 184 · slice 082 status-drift correction · LOOP TERMINATED)
 
