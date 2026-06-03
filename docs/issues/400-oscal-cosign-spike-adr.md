@@ -3,7 +3,7 @@
 **Cluster:** Oscal
 **Estimate:** 0.5-1d
 **Type:** JUDGMENT (decision-only)
-**Status:** `ready`
+**Status:** `in-progress` (batch 185, 2026-06-03 — maintainer-directed; decision-only ADR, returns for sign-off)
 **Parent:** 368 (OSCAL export bundle signing ed25519 → cosign)
 
 ## Narrative

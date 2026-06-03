@@ -3,7 +3,7 @@
 **Cluster:** Quality
 **Estimate:** 2-3d
 **Type:** JUDGMENT
-**Status:** `blocked` (on appetite — v2 quality follow-on; see Dependencies)
+**Status:** `in-progress` (batch 185, 2026-06-03 — maintainer cleared appetite gate)
 
 ## Narrative
 
