@@ -36,6 +36,23 @@ type Scheduler struct {
 	appPool      *pgxpool.Pool
 	registry     *eval.Registry
 	logger       *slog.Logger
+
+	// onInlineSweep, when non-nil, is invoked exactly once with the report
+	// and error from the immediate pre-tick sweep that Run fires on start.
+	// It exists so a test can assert on the inline sweep's RETURNED result
+	// rather than racing a wall-clock deadline against DB latency (the
+	// chronic-flake fix). It does NOT alter Run's external behavior: the
+	// production caller never sets it, the cron cadence is unchanged, and
+	// the inline sweep's error is still logged-and-dropped exactly as
+	// before. Set via setInlineSweepHook (in-package; test-only).
+	onInlineSweep func(SweepReport, error)
+}
+
+// setInlineSweepHook registers a one-shot callback fired after Run's
+// immediate pre-tick sweep completes. In-package only (no exported surface);
+// the integration test uses it to observe the inline sweep deterministically.
+func (s *Scheduler) setInlineSweepHook(fn func(SweepReport, error)) {
+	s.onInlineSweep = fn
 }
 
 // New constructs a Scheduler. migratorPool MUST be the migrator role
@@ -63,12 +80,30 @@ func (s *Scheduler) Run(ctx context.Context, interval time.Duration) error {
 	}
 	s.logger.Info("metrics scheduler starting", "interval", interval.String())
 
-	sweep := func() {
-		if _, err := s.SweepOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
+	sweep := func() SweepReport {
+		rep, err := s.SweepOnce(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
 			s.logger.Error("metrics scheduler sweep", "err", err.Error())
 		}
+		return rep
 	}
-	sweep()
+
+	// The first sweep fires inline so a fresh deploy doesn't wait a full
+	// interval for first signal. We surface its outcome through the
+	// (test-only) hook before entering the ticker loop. Re-run SweepOnce
+	// directly here (rather than reusing the closure) so the hook receives
+	// the unswallowed error; the production path's logging is preserved by
+	// the closure used for subsequent ticks.
+	if s.onInlineSweep != nil {
+		rep, err := s.SweepOnce(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			s.logger.Error("metrics scheduler sweep", "err", err.Error())
+		}
+		s.onInlineSweep(rep, err)
+	} else {
+		sweep()
+	}
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
