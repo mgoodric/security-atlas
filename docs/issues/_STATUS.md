@@ -3,7 +3,16 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-03 (batch 187 reconcile — slices 416 + 422 + 427 MERGED; spillover 456 filed; 38 backlog slices remain)
+**Last reconciled:** 2026-06-03 (batch 188 claim-stake — slices 423 + 429 + 433 + 437 → in-progress (parallel, conflict-safe))
+
+## Drift detected — 2026-06-03 (batch 188 claim-stake · 423 + 429 + 433 + 437)
+
+Second drain batch from the 415-455 analysis backlog. Conflict-safe (disjoint: web/e2e / READMEs / .gitignore / Plans+CLAUDE.md; only CHANGELOG shared).
+
+- **423** (OSCAL export e2e) — Quality · `ready` → **in-progress**. Playwright spec driving /audits → trigger OSCAL bundle export → assert download + Content-Type (mirrors slice 388 board-pack export; covers the slice-413 signed path).
+- **429** (connector + Go/TS SDK READMEs) — Docs · `ready` → **in-progress**. `connectors/aws/README.md` + `pkg/sdk-go/README.md` + `sdk/typescript/README.md` (the missing flagship surfaces).
+- **433** (gitignore `.understand-anything/`) — Infra · `ready` → **in-progress**. Add the 9.8MB local-analysis cache to root `.gitignore`.
+- **437** (archive `Plans/mockups/`) — Infra · `ready` → **in-progress**. `git mv` the iteration-1 HTML to `Plans/_archive/mockups/` + update the CLAUDE.md mockups note (kills the recurring false-drift source).
 
 ## Reconcile — 2026-06-03 (batch 187 · 416 + 422 + 427 merged)
 
