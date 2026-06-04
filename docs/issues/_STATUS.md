@@ -3,7 +3,19 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-04 (batch 191 reconcile — 462 + 417 + 431 MERGED; spillover 463 filed; ~25 backlog slices remain)
+**Last reconciled:** 2026-06-04 (batch 192 reconcile — 463 + 432 + 460 MERGED; spillovers 464 + 465 filed; ~22 backlog slices remain)
+
+## Reconcile — 2026-06-04 (batch 192 · 463 + 432 + 460 merged)
+
+Sixth drain batch — all three merged. Disjoint surfaces held (coverage-thresholds=463 · docs-site nav=432 · .env.example/compose=460); CHANGELOG resolved keep-all (463 needed a manual worktree resolve after GitHub's update-branch produced a bad auto-merge — force-with-lease'd the clean keep-all over it). All three engineers shipped clean first-pass.
+
+- **460** (template `NATS_URL` + compose-plumbed env vars in `.env.example`) — Infra · JUDGMENT — **MERGED** at `a528e279` (#999). The spec's "only NATS_URL is missing" premise was too narrow: a full audit of every server-read `os.Getenv`/`LookupEnv` found ~20 untemplated, of which 7 are genuinely compose-plumbed-but-untemplated (the real operator trap). Added those 7 + reconciled compose (`NATS_URL` → `${NATS_URL:-nats://nats:4222}`, byte-identical when unset) + 7 rows to slice-430's `configuration.md` to keep the config-drift guard green. Spillover **465** (`TRUST_FORWARDED_HEADERS` server-read but not compose-plumbed — a security-relevant plumb-and-template; de-collided from 464).
+- **432** (operator backup/restore + upgrade runbooks) — Docs · JUDGMENT — **MERGED** at `9537f74c` (#1001). New `docs-site/docs/backup-restore.md` + `upgrade.md` + an "Operations" nav section, grounded in the slice-373 BCP/DR plan + the shipped bundle. The restore drill was ACTUALLY RUN against a scratch `postgres:16-alpine` with the shipped roles + all 66 migrations: known evidence record survived hash-byte-identical, 237/237 RLS policies intact. Surfaced two honest grounding gaps (no `atlas evidence verify` verb ships; `SELF_HOSTING.md`'s `atlas migrate up` doesn't match the shipped binary) → spillover **464**.
+- **463** (`demoseed.Seeder.Teardown` leaves rows behind on a passing run) — Infra · JUDGMENT — **MERGED** at `03554f2d` (#1000). **The engineer corrected the parent's hypothesis via investigation:** there are NO FKs into `tenants` (RLS-enforced, invariant #6) and the `tenants` row IS deleted correctly on current main; the actual orphan is the tenant-scoped `frameworks` + `framework_versions` fallback pair `Apply` writes when the global SCF catalog is absent, which the teardown sweep omitted. Fix: delete the fallback pair `WHERE tenant_id = $1` (catalog rows are `tenant_id IS NULL`, never matched — AC-4 safe by construction). Per-entity contract resolved: tenant CREATE→DELETE; frameworks ADOPT-when-present / CREATE-fallback-when-absent → delete only the fallback. Seed→Teardown round-trip + idempotency tests added (RED→GREEN proven); demoseed coverage 83.1%→83.3%, floor 81 left unchanged (drift is noise). No spillover.
+
+Spillovers (de-collided — 432 + 460 both computed 464): **464** (`atlas evidence verify` CLI ledger-integrity-walk verb does not ship + `SELF_HOSTING.md` migrate-command drift · from 432 · `ready`) · **465** (`TRUST_FORWARDED_HEADERS` server-read but not plumbed through the self-host bundle — security-relevant · from 460 · `ready`).
+
+Backlog: ~22 analysis slices remain ready (418-420, 424-426, 434-436, 438-445, 448, 450, 452-453) + 456, 457, 458, 459, 464, 465. Decision-gates 446/455 + not-ready 447 stay out of the auto-loop; 449-OPA moot (1.17 merged via #953). The sharded integration job (slice 417) is working well — all batch-192 PRs that triggered it ran 4 parallel green legs.
 
 ## Drift detected — 2026-06-04 (batch 192 claim-stake · 463 + 432 + 460)
 
