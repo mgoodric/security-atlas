@@ -474,6 +474,47 @@ package-level mutable state (none in this repo today). The
 convention is by-default-parallel; opt out only with an inline
 comment naming the shared state.
 
+### Fuzzing
+
+Native Go `testing.F` fuzz targets harden the untrusted-input parsers —
+the surfaces that ingest operator- or auditor-supplied files, where a
+malformed-input panic is a denial-of-service on the ingest path (slice
+421). Each target asserts the parser returns a clean error or a
+deterministic value for every input and never panics; the targets never
+wrap the parser in `recover()` (a panic must surface as a fuzz failure).
+
+Targets and where they live (each seeded from the package's golden /
+synthetic fixtures):
+
+| Target            | Package                                | Parser                 |
+| ----------------- | -------------------------------------- | ---------------------- |
+| `FuzzReadBundle`  | `internal/oscal`                       | OSCAL bundle reader    |
+| `FuzzLoad`        | `internal/api/scfimport`               | SCF catalog importer   |
+| `FuzzParseSemver` | `internal/api/schemaregistry`          | schema-registry semver |
+| `FuzzParse`       | `connectors/manual/internal/manualcsv` | manual CSV importer    |
+| `FuzzParseExcel`  | `internal/questionnaire`               | questionnaire Excel    |
+
+Run one locally:
+
+```sh
+# Replay just the seed corpus (fast; this is what the Go-unit job does):
+go test -run=FuzzParseSemver ./internal/api/schemaregistry/
+# A bounded fuzz campaign (explores new inputs):
+go test -fuzz=FuzzParseSemver -fuzztime=30s ./internal/api/schemaregistry/
+```
+
+CI runs a **bounded** fuzz pass (`Go · fuzz (bounded)`, 20s per target) so
+regressions surface on PR without taxing wall-clock; deep campaigns are a
+maintainer/local activity. The job is path-filtered to Go changes (same
+`changes.outputs.code` gate + stub-twin as the other expensive jobs).
+
+**Crasher convention.** If a fuzz target finds a crasher, Go writes the
+minimizing input to `testdata/fuzz/Fuzz<Name>/` next to the test —
+**commit that corpus entry** (it becomes a permanent regression seed). The
+parser _fix_ is a separate spillover slice, not bolted onto the slice that
+found it (continuous-batch Amendment 2). Fuzz corpora carry only synthetic
+/ golden-derived bytes — never tenant data or vendor-prefixed test tokens.
+
 ### Integration-test enrolment
 
 **Ship an `integration_test.go`, also enrol it.** The Go integration
