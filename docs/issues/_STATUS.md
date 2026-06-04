@@ -3,7 +3,21 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-04 (batch 193 reconcile — 426 + 458 + 465 MERGED; spillover 466 filed; ~19 backlog slices remain)
+**Last reconciled:** 2026-06-04 (batch 194 reconcile — 438 + 448 + 459 MERGED; spillovers 467 + 468 + 469 filed; 447 unblocked; ~18 backlog slices remain)
+
+## Reconcile — 2026-06-04 (batch 194 · 438 + 448 + 459 merged)
+
+Eighth drain batch — all three merged. Disjoint surfaces held (coverage+shard=438 · web/app=448 · comments=459). All three engineers shipped clean first-pass. One advisory infra flake on the way (459's `Frontend · UI honesty` failed on a Docker Hub registry timeout — non-required, merged through).
+
+- **459** (sweep stale `Plans/mockups/` citations to archived path) — Infra · JUDGMENT — **MERGED** at `4833a7bd` (#1010). ~30 provenance comments across `internal/board` + `internal/catalog` + `web/components` (20) + `web/lib` + `web/e2e` repointed to `Plans/_archive/mockups/`. Correctly LEFT historical/dated records + a deliberately-invalid negative-test fixture untouched. Flagged ~23 `web/app/**` citations it couldn't reach (sibling 448's surface) → spillover **469**.
+- **448** (controls-list multi-select + saved filter-views) — Frontend · JUDGMENT — **MERGED** at `f3eb8bb4` (#1012). Shipped the self-contained ergonomics (multi-select + 200-cap + client-side localStorage saved-views, slice-103 `theme.ts` precedent). The engineer disproved the spec's premise: `controls.owner_role` is a read-only TEXT role with NO single-item owner-assign mutation to reuse, so bulk-assign ships as an honest future-state disclosure (slice-225 label-honesty; UI-honesty harness confirms it's not a dead button), and the server-backed backend (+ the prerequisite owner-assign surface + per-item authz-amplifier defense) → spillover **468**. 35 vitest + quarantined Playwright contract.
+- **438** (ISO 27001:2022 crosswalk loader — 2nd framework, proves UCF invariant #1) — Backend · JUDGMENT — **MERGED** at `af5aec7f` (#1011, UNSTABLE-codecov-only; all 4 integration legs + fan-in green). GENERALIZED the slice-007 loader IN PLACE (no rename → zero churn across the 4 shared CI surfaces; the lower-risk JUDGMENT call) via a generic `requirement_code` YAML key that still accepts legacy `tsc_code` (SOC2 imports byte-identical). Authored a curated 36-control ISO Annex A crosswalk (control identifiers + own descriptions + SCF-anchor mappings; no copyrighted ISO text, no bundled SCF data — licensing-clean). **Invariant #1 demonstrated:** the single `IAC-01` anchor row satisfies BOTH SOC 2 CC6.1 AND ISO A.5.15 through the graph (the load-bearing integration test). Merged coverage 80.2% (floor 75 holds). **Unblocks 447 (PCI DSS).** Full Annex A coverage → spillover **467**.
+
+Spillovers (de-collided — 438 + 448 both computed 467): **467** (ISO 27001 full Annex A coverage completion · from 438 · `ready`) · **468** (server-backed bulk-assign-owner + saved-views, needs a single-item owner-assign surface first · from 448 · `ready`) · **469** (sweep the ~23 `web/app/**` mockup citations 459 deferred · from 459 · `ready`).
+
+447 (PCI DSS v4.0 crosswalk) flips `not-ready` → **ready** — its dep 438 (generic loader) is now merged.
+
+Backlog: ~18 analysis slices remain ready (418-420, 424-425, 434-436, 439-445, 450, 452-453) + spillovers 456, 457, 464, 466, 467, 468, 469 + newly-ready 447. Decision-gates 446/455 stay out of the auto-loop; 449-OPA moot. 436 (god-file split) still deferred — needs a careful low-conflict slot (httpserver.go + dbx + web/lib). Two low-confidence ISO mappings (A.5.7→MON-08, A.8.11→DCH-01) flagged in 438's decisions log for post-merge maintainer review.
 
 ## Drift detected — 2026-06-04 (batch 194 claim-stake · 438 + 448 + 459)
 
