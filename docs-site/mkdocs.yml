@@ -103,6 +103,9 @@ nav:
       - Framework: primitives/framework.md
       - Policy: primitives/policy.md
   - Audit logs: audit-logs.md
+  - Operations:
+      - Backup and restore: backup-restore.md
+      - Upgrade: upgrade.md
   - CI hardening: ci-hardening.md
   - Connector authoring: connector-authoring.md
   - Walkthroughs:
