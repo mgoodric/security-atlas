@@ -5,6 +5,14 @@
 
 **Last reconciled:** 2026-06-04 (batch 190 reconcile — 461 + 428 + 451 MERGED; spillover 462 filed; ~28 backlog slices remain)
 
+## Drift detected — 2026-06-04 (batch 191 claim-stake · 462 + 417 + 431)
+
+Fifth drain batch from the 415-462 analysis backlog. Conflict-safe subset (ci.yml=417 only · docs-site nav=431 only · internal/api/admindemo test=462 only; shared surface = CHANGELOG only):
+
+- **462** (admindemo suite leaks a `demo` tenant on abort — self-cleanup fragility, same class as 461) — Infra · JUDGMENT — `ready` → **in-progress**. Branch `infra/462-admindemo-tenant-leak-cleanup`. Makes `internal/api/admindemo` test teardown idempotent/self-correcting so an aborted earlier test in a shared DB does not leave a `demo` tenant that poisons later packages. Does NOT touch ci.yml.
+- **417** (shard the `-p 1` integration job — Phase A serial / Phase B matrix) — Infra · JUDGMENT — `ready` → **in-progress**. Branch `infra/417-shard-integration-job`. Splits the slow serial `tests-integration` job across runners (each leg still `-p 1` internally; sharding is not `-p N`) to cut the merge-queue bottleneck. Owns `.github/workflows/ci.yml`.
+- **431** (external-IdP OIDC setup guide) — Docs · JUDGMENT — `ready` → **in-progress**. Branch `docs/431-oidc-setup-guide`. New `docs-site/docs/oidc-setup.md` documenting the SHIPPED per-tenant DB-backed `oidc_idp_configs` / `/admin/sso` path (NOT env-var IdP config — that surface does not exist); redirect-URI exact-match + secret-handling security notes; Okta/Entra/Keycloak per-IdP notes; mkdocs nav entry. Docs-only.
+
 ## Reconcile — 2026-06-04 (batch 190 · 461 + 428 + 451 merged)
 
 Fourth drain batch — all three merged. Disjoint conflict surfaces held (ci.yml=461 · docs/adr+mkdocs nav=428 · release.yml+.goreleaser=451); CHANGELOG resolved keep-all on each `update-branch`. Each PR re-ran the full required matrix on update-branch (up-to-date-before-merge); the slow serial `Go · integration` job was the wall-clock bottleneck each cycle.
