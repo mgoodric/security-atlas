@@ -52,11 +52,11 @@ The canvas is split into focused sections. Each is a single concept, ingestible 
 
 ## Mockups
 
-UI mockups under [`mockups/`](./mockups/) — open [`mockups/index.html`](./mockups/index.html) in a browser:
+Iteration-1 UI mockups are **archived** under [`_archive/mockups/`](./_archive/mockups/) — open [`_archive/mockups/index.html`](./_archive/mockups/index.html) in a browser:
 
 - Program dashboard · Control detail view (with the UCF graph rendered) · Board pack preview · Questionnaire response with AI-assist
 
-HTML + Tailwind via CDN, no build step. Iterating before committing to a frontend stack.
+HTML + Tailwind via CDN, no build step. These shaped the early UI; the production frontend now lives at `web/` and is canonical. Per-page mockup-vs-`web/` divergence is expected and is NOT fileable drift (slice 437) — see [`_archive/mockups/README.md`](./_archive/mockups/README.md).
 
 ---
 

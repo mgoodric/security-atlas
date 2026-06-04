@@ -3,7 +3,7 @@
   "$id": "https://schemas.security-atlas.io/ui-honesty-manifest/1.0.0.json",
   "x-slice": 178,
   "title": "UI honesty audit — mockup-spec manifest",
-  "description": "Data-only (no test logic embedded — P0-178-7) mapping of audited routes to (a) their source-of-truth mockup file under Plans/mockups/ and (b) the testid fingerprints the harness compares the live UI against.",
+  "description": "Data-only (no test logic embedded — P0-178-7) mapping of audited routes to (a) their source-of-truth mockup file under Plans/_archive/mockups/ (archived iteration-1 reference; web/ is canonical, per slice 437) and (b) the testid fingerprints the harness compares the live UI against.",
   "type": "array",
   "items": {
     "type": "object",
@@ -22,7 +22,7 @@
       },
       "mockupPath": {
         "type": ["string", "null"],
-        "description": "Relative path under Plans/mockups/ to the source-of-truth iteration-1 HTML mockup, OR null if the route post-dates the mockup set (e.g. /calendar). When non-null the file MUST exist on disk (CI validates via the schema check + a file-existence step).",
+        "description": "Relative path under Plans/_archive/mockups/ to the source-of-truth iteration-1 HTML mockup (archived per slice 437; web/ is canonical), OR null if the route post-dates the mockup set (e.g. /calendar). When non-null the file MUST exist on disk (CI validates via the schema check + a file-existence step).",
         "pattern": "^[a-z0-9][a-z0-9./_-]*\\.html$"
       },
       "expectedTestIds": {

@@ -69,7 +69,7 @@ describe("validateManifest", () => {
   });
 
   it("accepts a real mockup path", () => {
-    // dashboard.html does exist under Plans/mockups/. This branch is
+    // dashboard.html does exist under Plans/_archive/mockups/. This branch is
     // the inverse of the prior test; together they prove the
     // file-existence check runs.
     const result = validateManifest([

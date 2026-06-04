@@ -49,7 +49,7 @@ export type LiveFingerprint = {
 export type ManifestEntry = {
   route: string;
   /**
-   * Relative path under `Plans/mockups/` (e.g. `dashboard.html`). The
+   * Relative path under `Plans/_archive/mockups/` (e.g. `dashboard.html`). The
    * file MUST exist — the manifest's JSON Schema check catches missing
    * files (P0-178-11). `null` is permitted for routes without a backing
    * mockup (e.g. `/calendar`, which has no `calendar.html` mockup); for
@@ -139,8 +139,8 @@ export function diffRoute(
         subject: tid,
         mockupPath: manifest.mockupPath,
         suggestedAction:
-          `Update \`Plans/mockups/${manifest.mockupPath}\` to remove or annotate the stale element. ` +
-          "If the maintainer reconsiders shipping this feature, revert this manifest entry.",
+          `The mockup is the archived iteration-1 reference \`Plans/_archive/mockups/${manifest.mockupPath}\`; \`web/\` is canonical. ` +
+          "Per slice 437 this per-page divergence is expected and NOT fileable drift — annotate the archived mockup only if it helps future readers.",
       });
     }
   }

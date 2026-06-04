@@ -147,7 +147,7 @@ Before marking a page "done":
 ## What this doc is NOT
 
 - Not a styling guide (tokens, colors, spacing scale — those live in
-  `web/app/globals.css` and the mockups under `Plans/mockups/`).
+  `web/app/globals.css` and the archived mockups under `Plans/_archive/mockups/`).
 - Not an accessibility audit (a11y is its own discipline; this doc
   touches the responsive-specific a11y rules only — focus parity, table
   scroll affordance).

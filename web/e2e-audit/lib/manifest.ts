@@ -29,7 +29,11 @@ export function manifestPath(): string {
 }
 
 export function mockupsDir(): string {
-  return resolve(REPO_ROOT_FROM_WEB, "Plans", "mockups");
+  // Mockups archived out of the active tree by slice 437; `web/` is the
+  // canonical frontend and per-page mockup-vs-`web/` divergence is no
+  // longer fileable drift. The harness still resolves the (now archived)
+  // source-of-truth files for its SHIP-GAP / MOCKUP-STALE heuristics.
+  return resolve(REPO_ROOT_FROM_WEB, "Plans", "_archive", "mockups");
 }
 
 export type ManifestValidationError = {
