@@ -67,6 +67,24 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 GREP_ROOT="${AUDIT_ENROL_GREP_ROOT:-$REPO_ROOT/internal}"
 CI_YML="${AUDIT_ENROL_CI_YML:-$REPO_ROOT/.github/workflows/ci.yml}"
+# Slice 417: the integration job's package list moved out of ci.yml's
+# inline `go test` invocation into scripts/integration-shards.txt (the
+# sharded matrix reads it via scripts/run-integration-shard.sh). The
+# "listed set" below is now the UNION of ci.yml `./internal/...` tokens
+# AND the shard manifest's package args, so a package enrolled via the
+# manifest counts as listed. When the manifest is absent (older trees /
+# test fixtures) the union degrades to ci.yml-only — backward-compatible.
+#
+# In TEST MODE (either AUDIT_ENROL_* override set, see below) the manifest
+# is NOT defaulted to the real tree — the companion test harness points
+# at synthetic ci.yml fixtures and the real manifest's 89 packages would
+# pollute the fixture's listed set. The harness opts in to a fixture
+# manifest via AUDIT_ENROL_SHARD_MANIFEST when it wants one.
+if [[ -n "${AUDIT_ENROL_GREP_ROOT:-}" || -n "${AUDIT_ENROL_CI_YML:-}" ]]; then
+  SHARD_MANIFEST="${AUDIT_ENROL_SHARD_MANIFEST:-}"
+else
+  SHARD_MANIFEST="${AUDIT_ENROL_SHARD_MANIFEST:-$REPO_ROOT/scripts/integration-shards.txt}"
+fi
 
 # --------------------------------------------------------------------
 # Known-gaps allowlist. One package path per line, relative to the repo
@@ -137,21 +155,30 @@ done < "$tagged_tmp.files" | sort -u > "$tagged_tmp"
 rm -f "$tagged_tmp.files"
 
 # --------------------------------------------------------------------
-# 2. Listed set: the `./internal/<pkg>/...` entries enumerated in the
-#    "Run integration tests" `go test` invocation of ci.yml. We extract
-#    every `./internal/...` token, strip the leading `./` and trailing
-#    `/...`, and sort-unique. This is robust to line reordering and to
-#    the list growing; it keys purely on the token shape.
+# 2. Listed set: the `./internal/<pkg>/...` entries enrolled in the
+#    integration job. Slice 417 moved the package list out of ci.yml's
+#    inline `go test` invocation into scripts/integration-shards.txt
+#    (the sharded matrix reads it via run-integration-shard.sh), so the
+#    listed set is the UNION of the `./internal/...` tokens found in
+#    ci.yml AND in the shard manifest. We extract every `./internal/...`
+#    token from both sources, strip the leading `./` and trailing `/...`,
+#    and sort-unique. Robust to line reordering and to the list growing;
+#    keys purely on the token shape.
 # --------------------------------------------------------------------
 # `grep` exits 1 on zero matches; under `pipefail` that would abort the
 # script before the emptiness check below. Tolerate it so the explicit
 # "no package list" diagnostic (exit 2) wins.
-{ grep -oE '\./internal/[A-Za-z0-9_/]+(/\.\.\.)?' "$CI_YML" || true; } \
-  | sed -E 's|^\./||; s|/\.\.\.$||' \
+{
+  grep -oE '\./internal/[A-Za-z0-9_/]+(/\.\.\.)?' "$CI_YML" || true
+  if [[ -r "$SHARD_MANIFEST" ]]; then
+    grep -oE '\./internal/[A-Za-z0-9_/]+(/\.\.\.)?' "$SHARD_MANIFEST" || true
+  fi
+} | sed -E 's|^\./||; s|/\.\.\.$||' \
   | sort -u > "$listed_tmp"
 
 if [[ ! -s "$listed_tmp" ]]; then
-  echo "audit-integration-enrolment: found no ./internal/... package entries in $CI_YML" >&2
+  echo "audit-integration-enrolment: found no ./internal/... package entries in" >&2
+  echo "  $CI_YML or $SHARD_MANIFEST" >&2
   echo "  (expected the integration job's explicit package list)" >&2
   exit 2
 fi

@@ -251,6 +251,14 @@ audit-rls:
 audit-integration-enrolment:
     ./scripts/audit-integration-enrolment.sh
 
+# Assert the sharded integration matrix (scripts/integration-shards.txt) is
+# COMPLETE + DISJOINT + correctly pinned: the union of all legs == the
+# integration-tagged package set EXACTLY (no package dropped — T-1), no
+# package on two legs (T-2), and the SCF-catalog seed cluster pinned to
+# Leg A (P0-2). Slice 417. Self-test: scripts/check-integration-shard-coverage_test.sh
+check-integration-shard-coverage:
+    bash scripts/check-integration-shard-coverage.sh
+
 # Assert every prefix in coverage-thresholds.json `excludes` carries a written
 # `$exclude_justifications` entry (and no orphan justifications exist). Slice 333
 # QA-audit finding Q-5; slice 353. Self-test: scripts/check-coverage-excludes_test.sh
