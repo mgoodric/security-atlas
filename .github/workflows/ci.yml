@@ -638,6 +638,73 @@ jobs:
 
       - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
+  # Slice 421 — bounded native-fuzz pass over the untrusted-input parsers.
+  # Each target is fuzzed for a SHORT, capped -fuzztime so the harness can
+  # never DoS the runner (P0-421-2) and adds only a small, fixed wall-clock
+  # to PRs that touch code. This is a regression-catching pass, NOT a deep
+  # fuzz campaign (those are a maintainer/local activity). A crasher fails
+  # the job and the engine writes the minimizing entry to testdata/fuzz/
+  # (committed as a corpus seed; the fix is a spillover slice — AC-9).
+  fuzz:
+    name: Go · fuzz (bounded)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: Bounded fuzz pass (20s per target)
+        # FUZZTIME caps each target. Keep it tight: this is a regression
+        # gate, not a campaign. Targets run one package at a time because
+        # `go test -fuzz` accepts a single package per invocation.
+        env:
+          FUZZTIME: 20s
+        run: |
+          set -euo pipefail
+          run_fuzz() {
+            echo "::group::fuzz $2 ($1)"
+            go test -run='^$' -fuzz="^$2\$" -fuzztime="$FUZZTIME" "$1"
+            echo "::endgroup::"
+          }
+          run_fuzz ./internal/oscal/ FuzzReadBundle
+          run_fuzz ./internal/api/scfimport/ FuzzLoad
+          run_fuzz ./internal/api/schemaregistry/ FuzzParseSemver
+          run_fuzz ./connectors/manual/internal/manualcsv/ FuzzParse
+          run_fuzz ./internal/questionnaire/ FuzzParseExcel
+      - name: Upload any discovered crashers
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fuzz-crashers
+          path: "**/testdata/fuzz/**"
+          if-no-files-found: ignore
+
+  # Slice 421 stub: posts pass under the SAME check name (`Go · fuzz
+  # (bounded)`) when the PR touches no code. Mutually exclusive with `fuzz`
+  # above via inverted `if:` (mirrors the slice 061 stub-sibling pattern).
+  fuzz-stub:
+    name: Go · fuzz (bounded)
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
+
   proto:
     name: Proto · lint + generate diff
     needs: changes

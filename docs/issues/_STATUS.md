@@ -3,9 +3,15 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-04 (batch 188 reconcile — 423 + 429 + 433 + 437 MERGED; spillovers 457/458/459 filed; ~34 backlog slices remain)
+**Last reconciled:** 2026-06-04 (batch 189 claim-stake — slices 421 + 430 + 454 → in-progress (parallel, conflict-safe))
 
-## Reconcile — 2026-06-04 (batch 188 · 423 + 429 + 433 + 437 merged)
+## Drift detected — 2026-06-04 (batch 189 claim-stake · 421 + 430 + 454)
+
+Third drain batch (kept to 3 to limit the CHANGELOG cascade). Conflict-safe: 421 = internal/\* fuzz tests + ci.yml; 430 = docs-site; 454 = go.mod. One ci.yml / one docs-nav / one go.mod.
+
+- **421** (parser fuzz harnesses) — Quality · `ready` → **in-progress**. Go native `testing.F` fuzz targets for the untrusted-input parsers (OSCAL bundle / SCF import / semver / CSV / Excel) + a bounded CI fuzz pass; seed corpus from goldens.
+- **430** (config/env-var reference page) — Docs · `ready` → **in-progress**. `docs-site/docs/configuration.md` — the ~34 `.env.example` keys as one reference table with a drift guard.
+- **454** (go-otel observability group bump) — Infra · `ready` → **in-progress**. Bump the 13-module otel group; verify compile + traces emit; supersedes dependabot #951.
 
 Second drain batch — all four merged (CHANGELOG cascade across the 4 parallel PRs resolved keep-all-bullets at each merge).
 
