@@ -110,6 +110,8 @@ nav:
       - RLS tenant isolation: walkthroughs/rls-tenant-isolation.md
       - Schema registry seed + validate: walkthroughs/schema-registry-seed-and-validate.md
       - OSCAL SSP export: walkthroughs/oscal-ssp-export.md
+  - For auditors:
+      - Verify a signed OSCAL export: audit/verify-export.md
   - REST API reference: api/index.md
   - OAuth grants map: oauth-grants.md
   - Troubleshooting:
