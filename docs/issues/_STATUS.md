@@ -3,7 +3,19 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-04 (batch 192 reconcile — 463 + 432 + 460 MERGED; spillovers 464 + 465 filed; ~22 backlog slices remain)
+**Last reconciled:** 2026-06-04 (batch 193 reconcile — 426 + 458 + 465 MERGED; spillover 466 filed; ~19 backlog slices remain)
+
+## Reconcile — 2026-06-04 (batch 193 · 426 + 458 + 465 merged)
+
+Seventh drain batch — all three merged. Disjoint surfaces held (coverage-thresholds=426 · ci.yml=458 · deploy/+.env=465). Mid-batch the release-please bot auto-merged `7b7725a4 chore(main): release 1.17.0 (#630)` (expected bot drift, ff-pulled). 426's last leg hit an UNRELATED flake (`TestPDF_ReturnsPDFOrServiceUnavailable` in `internal/api/board`, 30s chromedp-render timeout in shard B2 — board is NOT in 426's changed files); reran the failed leg → green (load-induced, not a regression). All three engineers shipped clean first-pass.
+
+- **465** (`TRUST_FORWARDED_HEADERS` plumb-and-template) — Infra · JUDGMENT — **MERGED** at `7b54bec7` (#1004). Plumbed the security-sensitive var through compose + `.env.example` (default OFF; `${TRUST_FORWARDED_HEADERS:-}` → byte-identical when unset, proven via `docker compose config`) + slice-430 config-reference row with a client-IP-spoofing warning. Reading code (`clientip.go`) untouched. Spillover **466** (the `TRUSTED_PROXY_CIDRS` allowlist — structural fix for the boolean's spoofing foot-gun; orchestrator-filed from 465's decisions log).
+- **458** (pre-commit + CI guard against committing machine-local caches) — Infra · JUDGMENT — **MERGED** at `e3877b29` (#1005). `scripts/check-staged-cache-paths.sh` + 18-assertion test harness, wired as a `cache-path-guard` pre-commit hook AND a non-required CI job (directory-segment-anchored matching so it blocks `.understand-anything/` but not the slice-433 doc filenames that contain the string). No branch-protection change (job ships non-required; local hook covered by the required `pre-commit · all hooks`). Parent 433. AC-4 history-scrub decision recorded (deferred, sign-off-gated). No spillover.
+- **426** (coverage-lift round: decisions / policies / me / freshnessdrift / policy) — Quality · AFK — **MERGED** at `9dfb08b8` (#1006). 5 pure-Go `helpers_test.go` suites (slice-353 Q-2 convention) + 5 floor lifts in `coverage-thresholds.json` (each to `floor(measured−2pp)`: decisions 18→37, me 43→50, policies 39→49, freshnessdrift 19→24, policy 35→70). freshnessdrift documented under-lift (AC-6): `Scheduler.Run` fires an immediate SweepOnce with no nil-pool short-circuit, so Run/SweepOnce/RefreshSubscriber.Start are genuinely integration-only — recorded, not over-lifted. No spillover.
+
+Spillover (single): **466** (`TRUSTED_PROXY_CIDRS` allowlist — right-to-left XFF walk replacing the blunt boolean; touches `clientip.go` reading code 465 was scoped out of; security-relevant · from 465 · `ready`).
+
+Backlog: ~19 analysis slices remain ready (418-420, 424-425, 434-436, 438-445, 448, 450, 452-453) + spillovers 456, 457, 459, 464, 466. Decision-gates 446/455 + not-ready 447 stay out of the auto-loop; 449-OPA moot. NOTE: 438 (iso27001 crosswalk) deferred from b193 — it renames/generalizes `soc2import` (coverage floor 75 + shard-manifest enrolment), so a future batch must pick it as the SOLE coverage-thresholds + shard-manifest pick. The board PDF chromedp test is a confirmed flake-under-load class (b193 shard B2) — candidate for the flake-budget dashboard if it recurs.
 
 ## Drift detected — 2026-06-04 (batch 193 claim-stake · 426 + 458 + 465)
 
