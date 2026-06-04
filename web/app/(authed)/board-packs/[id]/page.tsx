@@ -37,7 +37,7 @@ import {
 // Slice 043 — quarterly board pack preview/export view.
 //
 // The detail page walks the FIXED section keys in canonical order and
-// composes a polished, mockup-faithful view (Plans/mockups/board-pack.html).
+// composes a polished, mockup-faithful view (Plans/_archive/mockups/board-pack.html).
 // For a DRAFT pack each section is editable + per-section approvable
 // (role-gated by the slice-060 is_admin probe — decision D3). Publish is
 // enabled only once every section is approved (slice 032 decision D6).

@@ -96,7 +96,7 @@ import {
 } from "./filters";
 
 // Slice 244 — six filter keys. Order mirrors the mockup
-// (Plans/mockups/risks.html lines 126-173) with one local deviation:
+// (Plans/_archive/mockups/risks.html lines 126-173) with one local deviation:
 // the slice-100 Severity pill is a net positive over the mockup and is
 // retained per anti-criterion P0-244-1. It sits between Org unit and
 // Owner so it neighbours the related risk-scoring controls without

@@ -2,7 +2,7 @@
 
 // Slice 040 — program dashboard view (`/dashboard`).
 //
-// Built per `Plans/mockups/dashboard.html`, ported via shadcn/ui
+// Built per `Plans/_archive/mockups/dashboard.html`, ported via shadcn/ui
 // primitives — NOT a verbatim HTML copy (anti-criterion P0-3). This is
 // the solo-security-leader persona's morning home screen.
 //
@@ -103,7 +103,7 @@ export default function DashboardPage() {
         copy ("The home screen for the security program …") was
         decoration that did not communicate which tenant the operator
         was viewing nor the aggregate freshness posture; the mockup
-        (`Plans/mockups/dashboard.html` lines 117-120) encodes the
+        (`Plans/_archive/mockups/dashboard.html` lines 117-120) encodes the
         right design intent (operator orientation in one line).
         Snapshot timestamp is OMITTED until the FreshnessReport wire
         shape exposes a `received_at` — see slice header comment in

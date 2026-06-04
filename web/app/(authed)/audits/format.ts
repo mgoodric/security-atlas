@@ -202,7 +202,7 @@ export function frozenMetaLabel(period: AuditPeriod): string {
  *     : null`).
  *
  * Separator is " · " (U+00B7 MIDDLE DOT with single spaces) to match
- * the mockup at `Plans/mockups/audits.html` line 111 verbatim.
+ * the mockup at `Plans/_archive/mockups/audits.html` line 111 verbatim.
  */
 export const TALLY_STATUS_ORDER: readonly string[] = [
   "in_progress",

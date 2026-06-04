@@ -2,7 +2,7 @@
 //
 // The /controls page formerly rendered a permanently-disabled "New
 // control" button at the top-right of the toolbar (`page.tsx` line 429
-// pre-slice-225). The mockup at `Plans/mockups/controls.html` (lines
+// pre-slice-225). The mockup at `Plans/_archive/mockups/controls.html` (lines
 // 121-124) positioned it as an enabled primary CTA, but the
 // create-control flow is a substantive feature (SCF anchor pick +
 // applicability_expr + framework satisfactions + optional policy
