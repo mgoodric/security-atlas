@@ -76,15 +76,24 @@ a deployment vulnerability, not a convenience.
       deployment is behind TLS, so session cookies carry the `Secure`
       flag. A `Secure` cookie over plain HTTP is silently dropped by
       browsers; the default `false` is for local HTTP only.
-    - **`TRUST_FORWARDED_HEADERS`** — when set to `1`, the server reads
-      the client IP for session rows from the `X-Forwarded-For` header
-      instead of the direct TCP peer. **Off by default** (shipped
-      commented out). `X-Forwarded-For` is a plain request header any
-      client can set, so enabling this without a trusted reverse proxy
-      that **overwrites** the inbound header is a **client-IP spoofing
-      vector** — forged IPs land on every session row and on any
-      IP-based rate-limit or audit decision. Set it **only** when atlas
-      sits behind a proxy you have configured to scrub the header.
+    - **`TRUSTED_PROXY_CIDRS`** — comma-separated CIDR allowlist of the
+      reverse-proxy address(es) atlas sits behind. The server walks
+      `X-Forwarded-For` **right-to-left**, accepting a hop only while the
+      connecting peer is inside one of these CIDRs and stopping at the
+      first untrusted hop (the real client). **Off by default** (shipped
+      commented out → no proxy trusted → direct TCP peer). A client that
+      is not behind one of these proxies **cannot** spoof its source IP by
+      forging the header. **SECURITY:** list only your own proxy
+      addresses; `0.0.0.0/0` trusts every connection and reopens the
+      spoofing vector.
+    - **`TRUST_FORWARDED_HEADERS`** — **deprecated** boolean predecessor
+      of `TRUSTED_PROXY_CIDRS`. When set to `1` (and `TRUSTED_PROXY_CIDRS`
+      is unset) it is mapped to **trust any proxy** (`0.0.0.0/0` + `::/0`)
+      for back-compat and the server logs a deprecation warning at boot.
+      `X-Forwarded-For` is a plain request header any client can set, so
+      trusting any proxy without a header-scrubbing reverse proxy in front
+      is a **client-IP spoofing vector**. **Off by default** (shipped
+      commented out). Prefer `TRUSTED_PROXY_CIDRS`.
 <!-- prettier-ignore-end -->
 
 ## Required
@@ -125,10 +134,11 @@ JetStream is the durable event substrate. Their host ports are in the
 
 ## Cookies and security
 
-| Variable                  | Default         | Required? | Scope  | Description                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ------------------------- | --------------- | --------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ATLAS_SECURE_COOKIES`    | `false`         | no        | server | Marks session cookies `Secure`. Set to `true` once the deployment is behind TLS. A `Secure` cookie over plain HTTP is silently dropped — the `false` default is for local HTTP only. See the [security-critical](#security-critical-variables) note.                                                                                                                                                                                |
-| `TRUST_FORWARDED_HEADERS` | _(unset → off)_ | no        | server | When set to `1`, the server captures the session-row client IP from the leftmost `X-Forwarded-For` entry (RFC 7239) instead of the direct TCP peer (`r.RemoteAddr`). Shipped commented out; **off by default**. Set it **only** behind a trusted reverse proxy that overwrites inbound `X-Forwarded-For` — otherwise it is a client-IP spoofing vector (slice 465). See the [security-critical](#security-critical-variables) note. |
+| Variable                  | Default         | Required? | Scope  | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------- | --------------- | --------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ATLAS_SECURE_COOKIES`    | `false`         | no        | server | Marks session cookies `Secure`. Set to `true` once the deployment is behind TLS. A `Secure` cookie over plain HTTP is silently dropped — the `false` default is for local HTTP only. See the [security-critical](#security-critical-variables) note.                                                                                                                                                                                                                                                                                                                                                                                         |
+| `TRUSTED_PROXY_CIDRS`     | _(unset → off)_ | no        | server | Comma-separated CIDR allowlist of the reverse proxy/proxies atlas sits behind (slice 466). The server walks `X-Forwarded-For` **right-to-left**, accepting a hop only while the connecting peer is inside one of these CIDRs, and stops at the first untrusted hop (the real client) — so a client not behind a listed proxy cannot spoof its source IP. Shipped commented out; **off by default** (no proxy trusted → direct TCP peer `r.RemoteAddr`, byte-identical to unset). **Security:** list only your own proxy addresses — `0.0.0.0/0` reopens the spoofing vector. See the [security-critical](#security-critical-variables) note. |
+| `TRUST_FORWARDED_HEADERS` | _(unset → off)_ | no        | server | **Deprecated** boolean predecessor of `TRUSTED_PROXY_CIDRS` (slice 465 → 466). When set to `1` and `TRUSTED_PROXY_CIDRS` is unset, it is mapped to **trust any proxy** (`0.0.0.0/0` + `::/0`) for back-compat and the server logs a deprecation warning at boot; `TRUSTED_PROXY_CIDRS` takes precedence when both are set. Shipped commented out; **off by default**. Trusting any proxy without a header-scrubbing reverse proxy in front is a client-IP spoofing vector — prefer `TRUSTED_PROXY_CIDRS`. See the [security-critical](#security-critical-variables) note.                                                                    |
 
 ## Observability
 

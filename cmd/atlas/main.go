@@ -71,6 +71,20 @@ func main() {
 		}
 	}
 
+	// Slice 466 (AC-1): parse TRUSTED_PROXY_CIDRS (or the deprecated
+	// TRUST_FORWARDED_HEADERS alias) into the validated trusted-proxy set
+	// BEFORE serving any request. A malformed CIDR fails loud here rather
+	// than silently per-request. Empty/unset ⇒ direct peer IP (fail-safe).
+	if deprecated, err := authapi.InitTrustedProxiesFromEnv(); err != nil {
+		fmt.Fprintf(os.Stderr, "atlas: trusted-proxy config: %v\n", err)
+		os.Exit(1)
+	} else if deprecated {
+		fmt.Fprintln(os.Stderr, "atlas: WARNING — TRUST_FORWARDED_HEADERS=1 is deprecated; "+
+			"it is mapped to TRUSTED_PROXY_CIDRS=0.0.0.0/0,::/0 (trust any proxy). "+
+			"Set TRUSTED_PROXY_CIDRS to the specific CIDR(s) your reverse proxy connects from "+
+			"and remove TRUST_FORWARDED_HEADERS. See deploy/docker/.env.example.")
+	}
+
 	grpcAddr := envOr("ATLAS_GRPC_ADDR", defaultGRPCAddr)
 	httpAddr := envOr("ATLAS_HTTP_ADDR", defaultHTTPAddr)
 	dbURL := os.Getenv("DATABASE_URL_APP")

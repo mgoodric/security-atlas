@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
@@ -425,32 +425,15 @@ func (h *Handler) writeAuditRows(ctx context.Context, action string, actorID, ac
 	return nil
 }
 
-// trustForwardedHeadersEnv mirrors the slice-162 auth-package posture:
-// only honor X-Forwarded-For when the operator has opted in. An
-// attacker on the admin network could otherwise spoof XFF to evade
-// the per-IP rate limiter. Default-deny respects RFC 7239 + OWASP
-// IP-spoofing guidance.
-const trustForwardedHeadersEnv = "TRUST_FORWARDED_HEADERS"
-
-// clientIP extracts the remote IP for rate-limit keying. By default
-// it uses RemoteAddr (port stripped); when TRUST_FORWARDED_HEADERS=1
-// the leftmost X-Forwarded-For entry is honored (RFC 7239 left-most-
-// is-client). Mirrors internal/api/auth/clientip.go's posture so the
-// two surfaces are uniform.
+// clientIP extracts the remote IP for rate-limit keying. It delegates to
+// internal/api/auth's trusted-proxy resolver (slice 466) so the two
+// IP-capture surfaces share ONE implementation: the X-Forwarded-For walk
+// is honored only for hops whose connecting peer is inside a configured
+// TRUSTED_PROXY_CIDRS entry, and an empty/unset allowlist yields the direct
+// TCP peer. This closes the spoofing vector where an attacker on the admin
+// network forged X-Forwarded-For to evade the per-IP rate limiter.
 func clientIP(r *http.Request) string {
-	if os.Getenv(trustForwardedHeadersEnv) == "1" {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			if comma := strings.Index(xff, ","); comma >= 0 {
-				return strings.TrimSpace(xff[:comma])
-			}
-			return strings.TrimSpace(xff)
-		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+	return authapi.ClientIP(r)
 }
 
 // --- in-memory per-IP token bucket ---

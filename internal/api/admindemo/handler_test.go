@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/uuid"
 
+	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
@@ -322,38 +323,65 @@ func TestStatus_NotRateLimited(t *testing.T) {
 	}
 }
 
-// --- clientIP edge cases ---
+// --- clientIP edge cases (slice 466: delegates to the auth-package
+//     TRUSTED_PROXY_CIDRS resolver) ---
 
-// X-Forwarded-For is HONORED when TRUST_FORWARDED_HEADERS=1.
-//
-// NOTE: t.Setenv serializes with other tests that depend on the env
-// var; this test is intentionally NOT t.Parallel().
-func TestClientIP_XFFHonoredWhenOptedIn(t *testing.T) {
-	t.Setenv(trustForwardedHeadersEnv, "1")
+// withTrustedProxiesEnv installs an allowlist via the auth-package resolver
+// for the duration of the test and restores the empty (trust-nobody) set on
+// cleanup. NOT t.Parallel-safe: the resolver is process-wide state.
+func withTrustedProxiesEnv(t *testing.T, cidrs string) {
+	t.Helper()
+	t.Setenv("TRUSTED_PROXY_CIDRS", cidrs)
+	t.Setenv("TRUST_FORWARDED_HEADERS", "")
+	if _, err := authapi.InitTrustedProxiesFromEnv(); err != nil {
+		t.Fatalf("init trusted proxies %q: %v", cidrs, err)
+	}
+	t.Cleanup(func() {
+		t.Setenv("TRUSTED_PROXY_CIDRS", "")
+		_, _ = authapi.InitTrustedProxiesFromEnv()
+	})
+}
+
+// X-Forwarded-For is HONORED when the connecting peer is a trusted proxy.
+func TestClientIP_XFFHonoredWhenPeerTrusted(t *testing.T) {
+	withTrustedProxiesEnv(t, "192.0.2.0/24")
 
 	r := httptest.NewRequest(http.MethodPost, "/v1/admin/demo/seed", nil)
-	r.RemoteAddr = "192.0.2.99:1"
-	r.Header.Set("X-Forwarded-For", "198.51.100.1, 192.0.2.99")
+	r.RemoteAddr = "192.0.2.99:1" // trusted proxy
+	r.Header.Set("X-Forwarded-For", "198.51.100.1")
 	if got := clientIP(r); got != "198.51.100.1" {
-		t.Fatalf("clientIP = %q; want 198.51.100.1", got)
+		t.Fatalf("clientIP = %q; want 198.51.100.1 (peer trusted → XFF honored)", got)
 	}
 }
 
-// X-Forwarded-For is IGNORED by default (defense against spoofing).
+// X-Forwarded-For is IGNORED when no allowlist is configured (spoof-safe).
 func TestClientIP_XFFIgnoredByDefault(t *testing.T) {
-	t.Parallel()
+	withTrustedProxiesEnv(t, "") // trust nobody
 
 	r := httptest.NewRequest(http.MethodPost, "/v1/admin/demo/seed", nil)
 	r.RemoteAddr = "192.0.2.99:1"
 	r.Header.Set("X-Forwarded-For", "198.51.100.1, 192.0.2.99")
 	if got := clientIP(r); got != "192.0.2.99" {
-		t.Fatalf("clientIP = %q; want 192.0.2.99 (XFF should be ignored without TRUST_FORWARDED_HEADERS=1)", got)
+		t.Fatalf("clientIP = %q; want 192.0.2.99 (XFF ignored, empty allowlist)", got)
+	}
+}
+
+// An UNTRUSTED direct peer forging XFF is rejected — the rate limiter keys
+// on the real connecting address, not the forged header.
+func TestClientIP_ForgedXFFFromUntrustedPeerRejected(t *testing.T) {
+	withTrustedProxiesEnv(t, "10.0.0.0/8") // peer 192.0.2.99 not in range
+
+	r := httptest.NewRequest(http.MethodPost, "/v1/admin/demo/seed", nil)
+	r.RemoteAddr = "192.0.2.99:1"
+	r.Header.Set("X-Forwarded-For", "198.51.100.1")
+	if got := clientIP(r); got != "192.0.2.99" {
+		t.Fatalf("clientIP = %q; want 192.0.2.99 (untrusted peer; forged XFF ignored)", got)
 	}
 }
 
 // RemoteAddr port suffix is stripped.
 func TestClientIP_StripsPort(t *testing.T) {
-	t.Parallel()
+	withTrustedProxiesEnv(t, "")
 
 	r := httptest.NewRequest(http.MethodPost, "/v1/admin/demo/seed", nil)
 	r.RemoteAddr = "192.0.2.99:1234"

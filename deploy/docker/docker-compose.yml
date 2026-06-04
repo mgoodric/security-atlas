@@ -341,6 +341,15 @@ services:
       # trusting it otherwise is a client-IP spoofing vector. See
       # .env.example for the full warning.
       TRUST_FORWARDED_HEADERS: ${TRUST_FORWARDED_HEADERS:-}
+      # Slice 466: trusted reverse-proxy allowlist (comma-separated CIDRs).
+      # The `:-` empty default means an unset variable maps to empty — the
+      # server then trusts NO proxy and records r.RemoteAddr exactly as
+      # today (byte-identical when unset). Supersedes the boolean above;
+      # the server walks X-Forwarded-For right-to-left, accepting a hop only
+      # while the connecting peer is inside one of these CIDRs. SECURITY:
+      # list only your own proxy addresses; 0.0.0.0/0 reopens the spoofing
+      # vector. See .env.example for the full warning.
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
       # Slice 036: artifact store wiring.
       ARTIFACTS_BUCKET: ${ARTIFACTS_BUCKET:-atlas-artifacts}
       ARTIFACTS_S3_ENDPOINT: http://minio:9000
