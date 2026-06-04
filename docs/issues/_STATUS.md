@@ -5,6 +5,14 @@
 
 **Last reconciled:** 2026-06-04 (batch 194 reconcile — 438 + 448 + 459 MERGED; spillovers 467 + 468 + 469 filed; 447 unblocked; ~18 backlog slices remain)
 
+## Drift detected — 2026-06-04 (batch 195 claim-stake · 447 + 466 + 469)
+
+Ninth drain batch from the 415-469 analysis backlog. Conflict-safe subset (coverage+shard=447 SOLE · auth/deploy=466 only · web/app comments=469 only; shared surface = CHANGELOG only). 447's dep 438 merged in b194, so it is ready (its own doc Status field is stale `not-ready` — a slice-434 per-doc-reconcile artifact; \_STATUS.md is authoritative).
+
+- **447** (PCI DSS v4.0 crosswalk — 3rd framework via the generalized loader) — Backend · JUDGMENT — `ready` → **in-progress**. Branch `feat/447-pci-dss-crosswalk`. Imports a curated PCI DSS v4.0 requirement subset via the slice-438 framework-agnostic crosswalk importer (requirement → SCF anchor only). The SOLE coverage-thresholds + shard-manifest pick this batch.
+- **466** (`TRUSTED_PROXY_CIDRS` allowlist — structural fix for X-Forwarded-For trust) — Infra/Security · JUDGMENT — `ready` → **in-progress**. Branch `feat/466-trusted-proxy-cidrs`. Adds CIDR-allowlist parsing + a right-to-left XFF walk in `internal/api/auth/clientip.go` (+ admindemo mirror), replacing the blunt slice-465 boolean (kept as back-compat); plumbs through deploy. internal/api/auth is coverage-excluded → no coverage-thresholds touch. Parent 465.
+- **469** (sweep `web/app/**` stale `Plans/mockups/` citations) — Infra · JUDGMENT — `ready` → **in-progress**. Branch `chore/469-web-app-mockup-sweep`. The ~23 web/app comment citations slice 459 deferred (now unblocked since 448 merged). Comment-only.
+
 ## Reconcile — 2026-06-04 (batch 194 · 438 + 448 + 459 merged)
 
 Eighth drain batch — all three merged. Disjoint surfaces held (coverage+shard=438 · web/app=448 · comments=459). All three engineers shipped clean first-pass. One advisory infra flake on the way (459's `Frontend · UI honesty` failed on a Docker Hub registry timeout — non-required, merged through).
