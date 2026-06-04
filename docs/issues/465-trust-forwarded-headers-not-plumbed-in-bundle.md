@@ -1,4 +1,4 @@
-# 464 — `TRUST_FORWARDED_HEADERS` is server-read but not plumbed through the self-host bundle
+# 465 — `TRUST_FORWARDED_HEADERS` is server-read but not plumbed through the self-host bundle
 
 **Cluster:** infra
 **Estimate:** S
