@@ -5,6 +5,14 @@
 
 **Last reconciled:** 2026-06-04 (batch 192 reconcile — 463 + 432 + 460 MERGED; spillovers 464 + 465 filed; ~22 backlog slices remain)
 
+## Drift detected — 2026-06-04 (batch 193 claim-stake · 426 + 458 + 465)
+
+Seventh drain batch from the 415-465 analysis backlog. Conflict-safe subset (coverage-thresholds.json=426 only · ci.yml=458 only · deploy/+.env=465 only; shared surface = CHANGELOG only). 438 (iso27001 crosswalk) DEFERRED this batch — it generalizes/renames `soc2import`, which has a coverage floor (75) + shard-manifest enrolment, so it would collide with 426; needs a careful slot.
+
+- **426** (targeted coverage-lift round: decisions / policies / me / freshnessdrift) — Quality · AFK — `ready` → **in-progress**. Branch `quality/426-coverage-round`. Adds pure-Go + integration coverage to `internal/api/{decisions,me,policies}` + `internal/{freshnessdrift,policy}` and lifts their floors in `cmd/scripts/coverage-thresholds.json` (monotonic ratchet, same PR).
+- **458** (pre-commit + CI guard against committing machine-local analysis caches) — Infra · JUDGMENT — `ready` → **in-progress**. Branch `infra/458-precommit-cache-guard`. Adds a `forbidden-paths`-style local pre-commit hook + a CI guard step (`.github/workflows/ci.yml`) that fails when a known machine-local cache dir (e.g. `.understand-anything/`) is staged. Parent: slice 433.
+- **465** (`TRUST_FORWARDED_HEADERS` plumb-and-template through the self-host bundle) — Infra · JUDGMENT — `ready` → **in-progress**. Branch `infra/465-trust-forwarded-headers-plumb`. The server already reads it (`internal/api/auth/clientip.go`); this plumbs it through `deploy/docker/docker-compose.yml` + `.env.example` + the slice-430 config reference, with the security note that it must only be enabled behind a trusted proxy. Parent: slice 460.
+
 ## Reconcile — 2026-06-04 (batch 192 · 463 + 432 + 460 merged)
 
 Sixth drain batch — all three merged. Disjoint surfaces held (coverage-thresholds=463 · docs-site nav=432 · .env.example/compose=460); CHANGELOG resolved keep-all (463 needed a manual worktree resolve after GitHub's update-branch produced a bad auto-merge — force-with-lease'd the clean keep-all over it). All three engineers shipped clean first-pass.
