@@ -43,7 +43,9 @@ import (
 // SentinelAnchor is the SCF code the completeness guard probes for. GOV-01
 // is the canonical sentinel because it is the anchor whose absence produced
 // the original slice 461 failure signature
-// (`soc2import: scf_anchor "GOV-01" not found`), and it is present in the
+// (`crosswalk: scf_anchor "GOV-01" not found` — the loader error prefix was
+// generalized from `soc2import:` to `crosswalk:` in slice 438), and it is
+// present in the
 // committed sample fixture (migrations/fixtures/scf-sample.json). If the
 // sample fixture is ever reshaped to drop GOV-01, IsCatalogComplete will
 // (correctly) report incomplete and force a reseed — so the worst failure

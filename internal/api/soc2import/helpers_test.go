@@ -231,7 +231,7 @@ func TestEdgeContentEqual_RationaleDiffers(t *testing.T) {
 
 // stubBeginner satisfies pgxBeginner without touching a real DB. It's the
 // cheapest way to assert Import's BeginTx-error branch wraps the cause
-// with the canonical "soc2import: begin tx" prefix.
+// with the canonical "crosswalk: begin tx" prefix.
 type stubBeginner struct {
 	err error
 }
@@ -250,8 +250,8 @@ func TestImport_BeginTxErrorIsWrapped(t *testing.T) {
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("error chain should wrap the sentinel; got %v", err)
 	}
-	if !strings.Contains(err.Error(), "soc2import: begin tx") {
-		t.Fatalf("error message should carry the 'soc2import: begin tx' prefix; got %q", err.Error())
+	if !strings.Contains(err.Error(), "crosswalk: begin tx") {
+		t.Fatalf("error message should carry the 'crosswalk: begin tx' prefix; got %q", err.Error())
 	}
 	// Report carries a map field so it isn't directly comparable; assert
 	// the load-bearing zero fields instead. On a BeginTx failure none of

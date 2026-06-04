@@ -20,7 +20,7 @@ func newCatalogCmd() *cobra.Command {
 		Short: "control catalog operations (SCF + crosswalk imports, listings)",
 	}
 	cmd.AddCommand(newCatalogImportSCFCmd())
-	cmd.AddCommand(newCatalogImportSOC2Cmd())
+	cmd.AddCommand(newCatalogImportCrosswalkCmd())
 	return cmd
 }
 
@@ -69,20 +69,28 @@ func newCatalogImportSCFCmd() *cobra.Command {
 	return cmd
 }
 
-// newCatalogImportSOC2Cmd wires `atlas-cli catalog import-soc2 <path>`.
-// The crosswalk YAML at <path> is loaded, validated, and applied against
-// the DB at --dsn (DATABASE_URL by default). Idempotent on re-runs.
+// newCatalogImportCrosswalkCmd wires `atlas-cli catalog import-crosswalk
+// <path>`. The framework-agnostic crosswalk YAML at <path> is loaded,
+// validated, and applied against the DB at --dsn (DATABASE_URL by default).
+// Idempotent on re-runs. The same command imports any framework's
+// requirement-to-SCF-anchor crosswalk (SOC 2, ISO 27001:2022, PCI DSS, …) —
+// the framework_slug/framework_version inside the YAML selects the target.
 //
-// Per slice 007's HITL gate, the agent-authored mapping file ships with
-// `source_attribution: community_draft` on every row — the orchestrator
-// spot-checks before merge; the importer is the same machinery once an
-// SCF-published crosswalk lands with `source_attribution: scf_official`.
-func newCatalogImportSOC2Cmd() *cobra.Command {
+// The legacy `import-soc2` name remains as an alias so existing operator
+// runbooks keep working after the slice-438 generalization.
+//
+// The agent-authored DRAFT mapping files ship with
+// `source_attribution: community_draft` on every row — the maintainer
+// spot-checks via the per-slice decisions log; the importer is the same
+// machinery once a publisher-official crosswalk lands with
+// `source_attribution: scf_official`.
+func newCatalogImportCrosswalkCmd() *cobra.Command {
 	var dsn string
 	cmd := &cobra.Command{
-		Use:   "import-soc2 <path>",
-		Short: "import a SOC 2 TSC crosswalk YAML into Postgres (slice 007)",
-		Args:  cobra.ExactArgs(1),
+		Use:     "import-crosswalk <path>",
+		Aliases: []string{"import-soc2"},
+		Short:   "import a framework→SCF crosswalk YAML into Postgres (SOC 2, ISO 27001, …)",
+		Args:    cobra.ExactArgs(1),
 		PreRunE: func(_ *cobra.Command, _ []string) error {
 			if dsn == "" {
 				dsn = os.Getenv("DATABASE_URL")

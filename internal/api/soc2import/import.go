@@ -50,7 +50,7 @@ type pgxBeginner interface {
 func Import(ctx context.Context, db pgxBeginner, cw *Crosswalk) (Report, error) {
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return Report{}, fmt.Errorf("soc2import: begin tx: %w", err)
+		return Report{}, fmt.Errorf("crosswalk: begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -59,7 +59,7 @@ func Import(ctx context.Context, db pgxBeginner, cw *Crosswalk) (Report, error) 
 		return Report{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return Report{}, fmt.Errorf("soc2import: commit: %w", err)
+		return Report{}, fmt.Errorf("crosswalk: commit: %w", err)
 	}
 	return report, nil
 }
@@ -78,7 +78,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		Description: "",
 	})
 	if err != nil {
-		return Report{}, fmt.Errorf("soc2import: upsert framework: %w", err)
+		return Report{}, fmt.Errorf("crosswalk: upsert framework: %w", err)
 	}
 
 	// 2. Decide if this is a new framework_version. Same demotion logic as
@@ -86,7 +86,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 	//    status='current' at a time.
 	versions, err := q.ListFrameworkVersionsBySlug(ctx, cw.FrameworkSlug)
 	if err != nil {
-		return Report{}, fmt.Errorf("soc2import: list versions: %w", err)
+		return Report{}, fmt.Errorf("crosswalk: list versions: %w", err)
 	}
 	isNew := true
 	for _, v := range versions {
@@ -97,7 +97,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 	}
 	if isNew {
 		if err := q.DemoteCurrentFrameworkVersions(ctx, framework.ID); err != nil {
-			return Report{}, fmt.Errorf("soc2import: demote current: %w", err)
+			return Report{}, fmt.Errorf("crosswalk: demote current: %w", err)
 		}
 	}
 
@@ -111,14 +111,14 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		Status:        dbx.FrameworkVersionStatusCurrent,
 	})
 	if err != nil {
-		return Report{}, fmt.Errorf("soc2import: upsert framework_version: %w", err)
+		return Report{}, fmt.Errorf("crosswalk: upsert framework_version: %w", err)
 	}
 
 	if err := q.SetLatestVersion(ctx, dbx.SetLatestVersionParams{
 		ID:              framework.ID,
 		LatestVersionID: pgtype.UUID{Bytes: version.ID.Bytes, Valid: true},
 	}); err != nil {
-		return Report{}, fmt.Errorf("soc2import: set latest version: %w", err)
+		return Report{}, fmt.Errorf("crosswalk: set latest version: %w", err)
 	}
 
 	report := Report{
@@ -130,7 +130,10 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		MappingsByAttribution: map[string]int{},
 	}
 
-	// 3. Upsert requirement rows. Track ids for the mapping pass.
+	// 3. Upsert requirement rows. Track ids for the mapping pass. The
+	//    requirement UUID seed is namespaced by (slug, version, code) so an
+	//    ISO `A.5.1` and a SOC 2 `CC5.1` derive distinct ids and never
+	//    collide (AC-3 / invariant #1 — no per-framework control rows).
 	reqIDByCode := make(map[string]pgtype.UUID, len(cw.Requirements))
 	for _, r := range cw.Requirements {
 		reqID := uuidFromString("req-" + cw.FrameworkSlug + "-" + cw.FrameworkVersion + "-" + r.Code)
@@ -153,7 +156,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				Title:              r.Title,
 				Body:               r.Body,
 			}); err != nil {
-				return Report{}, fmt.Errorf("soc2import: update requirement %s: %w", r.Code, err)
+				return Report{}, fmt.Errorf("crosswalk: update requirement %s: %w", r.Code, err)
 			}
 			report.RequirementsUpdated++
 		case errors.Is(lookupErr, pgx.ErrNoRows):
@@ -165,41 +168,44 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				Body:               r.Body,
 			})
 			if err != nil {
-				return Report{}, fmt.Errorf("soc2import: insert requirement %s: %w", r.Code, err)
+				return Report{}, fmt.Errorf("crosswalk: insert requirement %s: %w", r.Code, err)
 			}
 			reqIDByCode[r.Code] = row.ID
 			report.RequirementsCreated++
 		default:
-			return Report{}, fmt.Errorf("soc2import: lookup requirement %s: %w", r.Code, lookupErr)
+			return Report{}, fmt.Errorf("crosswalk: lookup requirement %s: %w", r.Code, lookupErr)
 		}
 	}
 
 	// 4. Keep framework_versions.requirement_count in sync.
 	count, err := q.CountFrameworkRequirementsForVersion(ctx, version.ID)
 	if err != nil {
-		return Report{}, fmt.Errorf("soc2import: count requirements: %w", err)
+		return Report{}, fmt.Errorf("crosswalk: count requirements: %w", err)
 	}
 	if err := q.UpdateFrameworkVersionRequirementCount(ctx, dbx.UpdateFrameworkVersionRequirementCountParams{
 		ID:               version.ID,
 		RequirementCount: int32(count),
 	}); err != nil {
-		return Report{}, fmt.Errorf("soc2import: update requirement_count: %w", err)
+		return Report{}, fmt.Errorf("crosswalk: update requirement_count: %w", err)
 	}
 
 	// 5. Upsert edges. Resolve scf_anchor strings to anchor IDs against
-	//    the current SCF version (slice 006). Unknown anchors are a hard
-	//    error — the operator should fix the YAML.
+	//    the current SCF version (slice 006). An edge whose scf_anchor does
+	//    not resolve to a real anchor is a hard, clear loader error — never
+	//    a panic and never a dangling edge (AC-2 / P0-438-4 / threat-model
+	//    T). Every edge is requirement -> SCF anchor; there is no
+	//    requirement -> requirement path (invariant #7 / P0-438-1).
 	for _, m := range cw.Mappings {
-		reqID, ok := reqIDByCode[m.TSCCode]
+		reqID, ok := reqIDByCode[m.RequirementCode]
 		if !ok {
-			return Report{}, fmt.Errorf("soc2import: mapping references unknown tsc_code %q after requirement pass", m.TSCCode)
+			return Report{}, fmt.Errorf("crosswalk: mapping references unknown requirement_code %q after requirement pass", m.RequirementCode)
 		}
 		anchor, err := q.GetSCFAnchorBySCFID(ctx, m.SCFAnchor)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return Report{}, fmt.Errorf("soc2import: scf_anchor %q not found — import the SCF catalog first (slice 006)", m.SCFAnchor)
+				return Report{}, fmt.Errorf("crosswalk: scf_anchor %q not found — import the SCF catalog first (slice 006)", m.SCFAnchor)
 			}
-			return Report{}, fmt.Errorf("soc2import: lookup scf_anchor %s: %w", m.SCFAnchor, err)
+			return Report{}, fmt.Errorf("crosswalk: lookup scf_anchor %s: %w", m.SCFAnchor, err)
 		}
 
 		attribution := m.SourceAttribution
@@ -210,7 +216,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		srcAttr := dbx.CrosswalkSourceAttribution(attribution)
 		report.MappingsByAttribution[attribution]++
 
-		edgeID := uuidFromString("edge-" + cw.FrameworkSlug + "-" + cw.FrameworkVersion + "-" + m.TSCCode + "-" + m.SCFAnchor)
+		edgeID := uuidFromString("edge-" + cw.FrameworkSlug + "-" + cw.FrameworkVersion + "-" + m.RequirementCode + "-" + m.SCFAnchor)
 
 		existing, lookupErr := q.GetFwToScfEdge(ctx, dbx.GetFwToScfEdgeParams{
 			FrameworkRequirementID: reqID,
@@ -229,7 +235,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				SourceAttribution: srcAttr,
 				Rationale:         m.Rationale,
 			}); err != nil {
-				return Report{}, fmt.Errorf("soc2import: update edge %s→%s: %w", m.TSCCode, m.SCFAnchor, err)
+				return Report{}, fmt.Errorf("crosswalk: update edge %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
 			}
 			report.EdgesUpdated++
 		case errors.Is(lookupErr, pgx.ErrNoRows):
@@ -242,11 +248,11 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				SourceAttribution:      srcAttr,
 				Rationale:              m.Rationale,
 			}); err != nil {
-				return Report{}, fmt.Errorf("soc2import: insert edge %s→%s: %w", m.TSCCode, m.SCFAnchor, err)
+				return Report{}, fmt.Errorf("crosswalk: insert edge %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
 			}
 			report.EdgesCreated++
 		default:
-			return Report{}, fmt.Errorf("soc2import: lookup edge %s→%s: %w", m.TSCCode, m.SCFAnchor, lookupErr)
+			return Report{}, fmt.Errorf("crosswalk: lookup edge %s->%s: %w", m.RequirementCode, m.SCFAnchor, lookupErr)
 		}
 	}
 
