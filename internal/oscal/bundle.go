@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Manifest is the bundle's manifest.json: it lists every member, records
@@ -132,4 +134,55 @@ func (b *Bundle) WriteBundle(dir string) (string, error) {
 		return "", fmt.Errorf("oscal: write manifest: %w", err)
 	}
 	return manifestPath, nil
+}
+
+// ReadBundle loads a written bundle back from dir: it parses manifest.json
+// and re-reads every member file so the verifier can recompute the digest
+// from the actual on-disk bytes. It is the inverse of WriteBundle and the
+// loader the CLI `verify` command uses.
+//
+// ReadBundle does NOT itself verify — it only reconstructs the in-memory
+// Bundle (including its recorded Signature, with whatever Mode the
+// manifest carries, or none for a pre-413 manifest). The caller then runs
+// VerifyBundle / VerifyBundleWithCosign.
+func ReadBundle(dir string) (*Bundle, error) {
+	manifestBytes, err := os.ReadFile(filepath.Join(dir, ManifestFilename)) //nolint:gosec // dir is an operator-supplied local path
+	if err != nil {
+		return nil, fmt.Errorf("oscal: read manifest: %w", err)
+	}
+	var man Manifest
+	if err := json.Unmarshal(manifestBytes, &man); err != nil {
+		return nil, fmt.Errorf("oscal: parse manifest: %w", err)
+	}
+	periodID, err := uuid.Parse(man.AuditPeriodID)
+	if err != nil {
+		return nil, fmt.Errorf("oscal: manifest audit_period_id is not a UUID: %w", err)
+	}
+	members := make([]BundleMember, 0, len(man.Members))
+	for _, mm := range man.Members {
+		if mm.Filename == ManifestFilename || mm.Filename == "" {
+			return nil, fmt.Errorf("oscal: invalid member filename %q in manifest", mm.Filename)
+		}
+		// Guard against path traversal in a hostile manifest: the member
+		// filename must be a bare basename, not an absolute or parent path.
+		if filepath.Base(mm.Filename) != mm.Filename {
+			return nil, fmt.Errorf("oscal: member filename %q must be a bare name (no path separators)", mm.Filename)
+		}
+		jsonBytes, err := os.ReadFile(filepath.Join(dir, mm.Filename)) //nolint:gosec // basename validated above
+		if err != nil {
+			return nil, fmt.Errorf("oscal: read member %s: %w", mm.Filename, err)
+		}
+		// Re-derive the member hash from the actual bytes (newMember), so a
+		// member-file tamper changes the digest and verification fails.
+		members = append(members, newMember(mm.Filename, mm.ModelType, jsonBytes))
+	}
+	return &Bundle{
+		AuditPeriodID: periodID,
+		FrozenAt:      man.FrozenAt,
+		OSCALVersion:  man.OSCALVersion,
+		GeneratedAt:   man.GeneratedAt,
+		RequestedBy:   man.RequestedBy,
+		Members:       members,
+		Signature:     man.Signature,
+	}, nil
 }
