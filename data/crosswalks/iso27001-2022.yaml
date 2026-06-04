@@ -1,0 +1,353 @@
+# ISO/IEC 27001:2022 Annex A → SCF crosswalk
+#
+# DRAFT — community_draft attribution. Authored by the agent for slice 438
+# (the FIRST second-framework slice — it proves UCF invariant #1: one SCF
+# anchor satisfies requirements from TWO frameworks at once). Every row is
+# an agent JUDGMENT call recorded in
+# docs/audit-log/438-iso27001-crosswalk-decisions.md.
+#
+# LICENSING POSTURE (deliberate — see decisions log):
+#   ISO/IEC 27001:2022 is a copyrighted standard. This file references only
+#   the Annex A control IDENTIFIERS (e.g. "A.5.15") and TITLES — both are
+#   factual references, not protected expression — and pairs each with an
+#   ORIGINAL agent-authored one-line description in `body`. It does NOT
+#   reproduce any verbatim text of the ISO standard. The SCF anchors are
+#   imported separately by the operator (slice 006); this file ships only
+#   the ISO→SCF edge data (P0-438-7).
+#
+# SCOPE DISCIPLINE (binding — slice 438 narrative):
+#   This is a CURATED high-signal subset (~36 controls), NOT full 93-control
+#   Annex A coverage. The subset deliberately covers (a) the SOC 2 overlap
+#   zone — so a shared SCF anchor demonstrates invariant #1 — and (b) a
+#   handful of ISO-unique controls (threat intelligence, ICT readiness,
+#   data masking) that SOC 2 does not name. Full Annex A completion is a
+#   follow-on slice.
+#
+# Source basis (methodology, not copied text):
+#   - ISO/IEC 27001:2022 Annex A control IDs + short titles (factual refs)
+#   - SCF anchor families published in the platform's slice-006 fixture
+#   - NIST IR 8477 STRM methodology (canvas §3.2; UCF_GRAPH_MODEL.md §4)
+#   - SCF's own published ISO 27001:2022 mapping informs the anchor choices;
+#     these rows are the agent's independent draft pending review.
+#
+# Strength scoring rubric (identical to the SOC 2 crosswalk for consistency):
+#   1.0      — STRM equal: source and target describe the same control concept
+#   0.9      — STRM equal with minor scope difference
+#   0.7-0.8  — subset_of: the SCF anchor fully covers the ISO control and is broader
+#   0.6-0.8  — intersects_with high overlap: most of the ISO concept is covered
+#   0.4-0.6  — intersects_with partial overlap: explicit gap remains (LOW CONFIDENCE)
+#   <=0.5    — flagged for spot-check priority in the decisions log
+
+schema_version: "1.0"
+framework_slug: "iso27001"
+framework_name: "ISO/IEC 27001:2022"
+framework_issuer: "ISO/IEC"
+framework_version: "2022"
+release_date: "2022-10-25"
+source_attribution: "community_draft"
+
+requirements:
+  # ===== A.5 Organizational controls =====
+  - code: A.5.1
+    title: "Policies for information security"
+    body: "Information security policy and topic-specific policies are defined, approved, published, communicated, and reviewed at planned intervals."
+  - code: A.5.2
+    title: "Information security roles and responsibilities"
+    body: "Information security roles and responsibilities are defined and allocated according to organizational needs."
+  - code: A.5.7
+    title: "Threat intelligence"
+    body: "Information relating to information security threats is collected and analyzed to produce threat intelligence."
+  - code: A.5.8
+    title: "Information security in project management"
+    body: "Information security is integrated into project management."
+  - code: A.5.9
+    title: "Inventory of information and other associated assets"
+    body: "An inventory of information and other associated assets, including owners, is developed and maintained."
+  - code: A.5.10
+    title: "Acceptable use of information and other associated assets"
+    body: "Rules for the acceptable use and handling of information and associated assets are identified, documented, and implemented."
+  - code: A.5.12
+    title: "Classification of information"
+    body: "Information is classified according to the organization's information security needs based on confidentiality, integrity, availability, and relevant requirements."
+  - code: A.5.15
+    title: "Access control"
+    body: "Rules to control physical and logical access to information and associated assets are established and implemented based on business and information security requirements."
+  - code: A.5.17
+    title: "Authentication information"
+    body: "Allocation and management of authentication information is controlled by a management process, including advising personnel on appropriate handling."
+  - code: A.5.18
+    title: "Access rights"
+    body: "Access rights to information and associated assets are provisioned, reviewed, modified, and removed in accordance with the access control policy."
+  - code: A.5.19
+    title: "Information security in supplier relationships"
+    body: "Processes and procedures are defined and implemented to manage the information security risks associated with the use of suppliers' products or services."
+  - code: A.5.22
+    title: "Monitoring, review and change management of supplier services"
+    body: "The organization regularly monitors, reviews, evaluates, and manages change in supplier information security practices and service delivery."
+  - code: A.5.23
+    title: "Information security for use of cloud services"
+    body: "Processes for acquisition, use, management, and exit from cloud services are established in accordance with information security requirements."
+  - code: A.5.24
+    title: "Information security incident management planning and preparation"
+    body: "The organization plans and prepares for managing information security incidents by defining, establishing, and communicating processes, roles, and responsibilities."
+  - code: A.5.26
+    title: "Response to information security incidents"
+    body: "Information security incidents are responded to in accordance with documented procedures."
+  - code: A.5.29
+    title: "Information security during disruption"
+    body: "The organization plans how to maintain information security at an appropriate level during disruption."
+  - code: A.5.30
+    title: "ICT readiness for business continuity"
+    body: "ICT readiness is planned, implemented, maintained, and tested based on business continuity objectives and ICT continuity requirements."
+  - code: A.5.31
+    title: "Legal, statutory, regulatory and contractual requirements"
+    body: "Legal, statutory, regulatory, and contractual requirements relevant to information security and the organization's approach to meeting them are identified, documented, and kept up to date."
+  - code: A.5.35
+    title: "Independent review of information security"
+    body: "The organization's approach to managing information security and its implementation is reviewed independently at planned intervals or when significant changes occur."
+
+  # ===== A.6 People controls =====
+  - code: A.6.3
+    title: "Information security awareness, education and training"
+    body: "Personnel and relevant interested parties receive appropriate information security awareness, education, and training and regular updates of policies relevant to their function."
+  - code: A.6.5
+    title: "Responsibilities after termination or change of employment"
+    body: "Information security responsibilities and duties that remain valid after termination or change of employment are defined, enforced, and communicated."
+
+  # ===== A.7 Physical controls =====
+  - code: A.7.2
+    title: "Physical entry"
+    body: "Secure areas are protected by appropriate entry controls and access points."
+  - code: A.7.10
+    title: "Storage media"
+    body: "Storage media are managed through their acquisition, use, transportation, and disposal in accordance with the classification scheme and handling requirements."
+
+  # ===== A.8 Technological controls =====
+  - code: A.8.2
+    title: "Privileged access rights"
+    body: "The allocation and use of privileged access rights are restricted and managed."
+  - code: A.8.5
+    title: "Secure authentication"
+    body: "Secure authentication technologies and procedures are implemented based on information access restrictions and the access control policy."
+  - code: A.8.7
+    title: "Protection against malware"
+    body: "Protection against malware is implemented and supported by appropriate user awareness."
+  - code: A.8.8
+    title: "Management of technical vulnerabilities"
+    body: "Information about technical vulnerabilities of information systems in use is obtained, the organization's exposure is evaluated, and appropriate measures are taken."
+  - code: A.8.9
+    title: "Configuration management"
+    body: "Configurations, including security configurations, of hardware, software, services, and networks are established, documented, implemented, monitored, and reviewed."
+  - code: A.8.11
+    title: "Data masking"
+    body: "Data masking is used in accordance with the access control policy and other related policies and business requirements, considering applicable legislation."
+  - code: A.8.13
+    title: "Information backup"
+    body: "Backup copies of information, software, and systems are maintained and regularly tested in accordance with the agreed backup policy."
+  - code: A.8.15
+    title: "Logging"
+    body: "Logs recording activities, exceptions, faults, and other relevant events are produced, stored, protected, and analyzed."
+  - code: A.8.16
+    title: "Monitoring activities"
+    body: "Networks, systems, and applications are monitored for anomalous behavior, and appropriate actions are taken to evaluate potential information security incidents."
+  - code: A.8.20
+    title: "Networks security"
+    body: "Networks and network devices are secured, managed, and controlled to protect information in systems and applications."
+  - code: A.8.24
+    title: "Use of cryptography"
+    body: "Rules for the effective use of cryptography, including cryptographic key management, are defined and implemented."
+  - code: A.8.25
+    title: "Secure development life cycle"
+    body: "Rules for the secure development of software and systems are established and applied."
+  - code: A.8.27
+    title: "Secure system architecture and engineering principles"
+    body: "Principles for engineering secure systems are established, documented, maintained, and applied to information system development activities."
+
+mappings:
+  # --- A.5 Organizational ---
+  - requirement_code: A.5.1
+    scf_anchor: GOV-01
+    relationship_type: equal
+    strength: 1.0
+    rationale: "ISO security policy framework maps directly to SCF Information Security Governance."
+  - requirement_code: A.5.2
+    scf_anchor: GOV-04
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Roles & responsibilities allocation aligns with SCF GOV-04."
+  - requirement_code: A.5.7
+    scf_anchor: MON-08
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Threat intelligence partially covered by Anomalous Behavior Detection; SCF has no dedicated threat-intel anchor in the sample catalog (LOW CONFIDENCE)."
+  - requirement_code: A.5.8
+    scf_anchor: SEA-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Security in project management overlaps with Secure Engineering Principles for project-phase security gates."
+  - requirement_code: A.5.9
+    scf_anchor: AST-09
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "Inventory of assets is a subset of SCF Asset Disposal/management family; AST-09 is the nearest sample anchor (asset lifecycle)."
+  - requirement_code: A.5.10
+    scf_anchor: DCH-01
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Acceptable use + handling of information maps to Data Classification & Handling."
+  - requirement_code: A.5.12
+    scf_anchor: DCH-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Information classification is the core of SCF Data Classification & Handling."
+  - requirement_code: A.5.15
+    scf_anchor: IAC-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "ISO access-control rules map to SCF Identification & Authentication Policy — the shared access-control anchor with SOC 2 CC6.1 (invariant #1 proof)."
+  - requirement_code: A.5.17
+    scf_anchor: IAC-01
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "Management of authentication information is a subset of the broader I&A policy anchor."
+  - requirement_code: A.5.18
+    scf_anchor: IAC-07
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Provision/review/remove access rights maps to SCF User Provisioning & Lifecycle — shared with SOC 2 CC6.2/CC6.3."
+  - requirement_code: A.5.19
+    scf_anchor: TPM-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Information security in supplier relationships maps to SCF Third-Party Management — shared with SOC 2 CC9.2."
+  - requirement_code: A.5.22
+    scf_anchor: TPM-04
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Monitoring/review of supplier services maps to SCF Third-Party Risk Assessments."
+  - requirement_code: A.5.23
+    scf_anchor: CLD-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Information security for cloud services maps to SCF Cloud Infrastructure Governance."
+  - requirement_code: A.5.24
+    scf_anchor: IRO-04
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Incident management planning & preparation maps to SCF Incident Response Plan — shared with SOC 2 CC7.3/CC7.4."
+  - requirement_code: A.5.26
+    scf_anchor: IRO-04
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "Response to incidents is a subset of the broader Incident Response Plan anchor."
+  - requirement_code: A.5.29
+    scf_anchor: BCD-02
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Information security during disruption overlaps with Business Continuity Plan — shared with SOC 2 A1.2."
+  - requirement_code: A.5.30
+    scf_anchor: BCD-02
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "ICT readiness for business continuity is a subset of the Business Continuity Plan anchor."
+  - requirement_code: A.5.31
+    scf_anchor: CPL-03
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Legal/regulatory/contractual requirements overlap with the Internal Audit/Compliance function anchor."
+  - requirement_code: A.5.35
+    scf_anchor: CPL-03
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Independent review of information security maps to SCF Internal Audit Function — shared with SOC 2 CC4.1."
+
+  # --- A.6 People ---
+  - requirement_code: A.6.3
+    scf_anchor: HRS-04
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Security awareness, education & training maps to SCF Security Awareness Training — shared with SOC 2 CC1.4."
+  - requirement_code: A.6.5
+    scf_anchor: HRS-09
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Responsibilities after termination maps to SCF Personnel Termination Process."
+
+  # --- A.7 Physical ---
+  - requirement_code: A.7.2
+    scf_anchor: PES-04
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Physical entry controls map to SCF Physical Access Control — shared with SOC 2 CC6.4."
+  - requirement_code: A.7.10
+    scf_anchor: AST-09
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Storage media handling/disposal overlaps with SCF Asset Disposal — shared with SOC 2 CC6.5."
+
+  # --- A.8 Technological ---
+  - requirement_code: A.8.2
+    scf_anchor: IAC-21
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Privileged access rights map to SCF Privileged Account Management."
+  - requirement_code: A.8.5
+    scf_anchor: IAC-06
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "Secure authentication (incl. MFA) is a subset/instance of the SCF Multi-Factor Authentication anchor — shared with SOC 2 CC6.1 MFA mapping."
+  - requirement_code: A.8.7
+    scf_anchor: END-07
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Protection against malware maps to SCF Malicious Code Protection — shared with SOC 2 CC6.8."
+  - requirement_code: A.8.8
+    scf_anchor: VPM-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Management of technical vulnerabilities maps to SCF Vulnerability & Patch Management Policy — shared with SOC 2 CC7.1."
+  - requirement_code: A.8.9
+    scf_anchor: CFG-04
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Configuration management maps to SCF Configuration Change Control — shared with SOC 2 CC8.1."
+  - requirement_code: A.8.11
+    scf_anchor: DCH-01
+    relationship_type: intersects_with
+    strength: 0.4
+    rationale: "Data masking is an ISO-distinct technique only loosely covered by Data Classification & Handling; SCF sample lacks a dedicated masking anchor (LOW CONFIDENCE)."
+  - requirement_code: A.8.13
+    scf_anchor: BCD-09
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Information backup maps to SCF Backups — shared with SOC 2 A1.2 backup mapping."
+  - requirement_code: A.8.15
+    scf_anchor: AAA-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Logging maps to SCF Auditing & Accountability — shared with SOC 2 CC7.2 logging."
+  - requirement_code: A.8.16
+    scf_anchor: MON-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Monitoring activities maps to SCF Continuous Monitoring — shared with SOC 2 CC7.2."
+  - requirement_code: A.8.20
+    scf_anchor: NET-04
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Networks security maps to SCF Boundary Protection — shared with SOC 2 CC6.6."
+  - requirement_code: A.8.24
+    scf_anchor: CRY-08
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Use of cryptography (incl. key management) overlaps with Encryption In Transit — shared with SOC 2 CC6.7; CRY-09 (key mgmt) is the broader companion."
+  - requirement_code: A.8.25
+    scf_anchor: SEA-05
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Secure development life cycle maps to SCF Secure Software Development — shared with SOC 2 CC8.1/PI mappings."
+  - requirement_code: A.8.27
+    scf_anchor: SEA-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Secure system architecture & engineering principles map to SCF Secure Engineering Principles — shared with SOC 2 CC8.1."
