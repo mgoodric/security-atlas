@@ -3,7 +3,19 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-04 (batch 189 reconcile — 421 + 430 + 454 MERGED; spillovers 460/461 filed; ~31 backlog slices remain)
+**Last reconciled:** 2026-06-04 (batch 190 reconcile — 461 + 428 + 451 MERGED; spillover 462 filed; ~28 backlog slices remain)
+
+## Reconcile — 2026-06-04 (batch 190 · 461 + 428 + 451 merged)
+
+Fourth drain batch — all three merged. Disjoint conflict surfaces held (ci.yml=461 · docs/adr+mkdocs nav=428 · release.yml+.goreleaser=451); CHANGELOG resolved keep-all on each `update-branch`. Each PR re-ran the full required matrix on update-branch (up-to-date-before-merge); the slow serial `Go · integration` job was the wall-clock bottleneck each cycle.
+
+- **428** (ADRs for the four load-bearing canvas invariants) — Docs · JUDGMENT — **MERGED** at `9c953dc4` (#989). Four `Accepted`-status ADRs: `0011` RLS tenancy (§5.4) · `0012` append-only evidence ledger + ingestion/eval split (§4.3) · `0013` UCF graph one-control-N-satisfactions (§3 + UCF_GRAPH_MODEL.md) · `0014` multidim scope + FrameworkScope intersection (§5.1-5.5, #4/#5 grouped per spec). Created the project's first docs-site ADR index page (`docs-site/docs/design/architecture-decision-records.md`) under "Design decisions" — repo-root `docs/adr/` is outside mkdocs `docs_dir`, so the house pattern links out via GitHub blob URLs. `mkdocs build --strict` green. No spillover (no canvas/code drift found).
+- **451** (SLSA provenance + per-artifact SBOM for releases) — Infra · JUDGMENT — **MERGED** at `750d0eca` (#990). GoReleaser `sboms:` (SPDX per-archive) + hard non-empty SBOM gate + `attest-build-provenance` over every release asset + `gh attestation verify` self-verify in `release.yml`; closes the binary/CLI/SDK-vs-container provenance asymmetry. **P0-451-5 held:** workflow-level `permissions:` stays `contents: read`; only new privilege `attestations: write` is job-scoped to the `goreleaser` job. Validated via local GoReleaser snapshot (10 SPDX SBOMs), `goreleaser check`, `actionlint`. No spillover.
+- **461** (integration-suite SCF-seed order-independence — the real GOV-01 bug) — Infra · JUDGMENT — **MERGED** at `4d0c4a41` (#991, UNSTABLE-codecov-only: shell guard scripts + test-only Go don't move patch coverage; all 11 required green). Root cause: the lazy-seed guard counted ALL anchor rows, so a prior package leaving the _current_ SCF version partial (missing `GOV-01`) read as "fully seeded" → reseed skipped → downstream `soc2import` failed `GOV-01 not found`. Fix: new test-only `internal/api/scfseed` helper probes catalog _completeness_ (sentinel `GOV-01` resolvable in current version via the importer's exact query) and reseeds fully when absent OR partial → consumers self-correct regardless of order. Proven: `go test -tags=integration -p 1 ./internal/api/...` (alphabetical, fresh DB) now EXIT=0 / 57 pkgs ok (was 18 `GOV-01 not found` FAILs). Also fixed a second-order `controls.scf_anchor_id ON DELETE RESTRICT` FK block (TRUNCATE controls CASCADE first). Added `scripts/check-integration-seed-order-independence.sh` guard + CI step. Spillover **462**.
+
+Spillover (single, no de-collision needed): **462** (`internal/api/admindemo` leaks a `demo` tenant when an earlier test in a shared DB aborts — a separate self-cleanup fragility, same class as 461; cites parent 461 · `ready`).
+
+Backlog: ~28 analysis slices remain ready (417-420, 424-426, 431-432, 434-445, 448, 450, 452-453) + 456, 457, 458, 459, 460, 462. Decision-gates 446/455 + not-ready 447 stay out of the auto-loop; 449-OPA moot (1.17 merged via #953).
 
 ## Drift detected — 2026-06-04 (batch 190 claim-stake · 461 + 428 + 451)
 
