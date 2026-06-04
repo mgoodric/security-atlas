@@ -3,7 +3,7 @@
 **Cluster:** Infra (CI hardening)
 **Estimate:** 0.5d (diagnosis-heavy; actual fix is likely 1-3 lines)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

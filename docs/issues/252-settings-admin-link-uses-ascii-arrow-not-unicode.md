@@ -3,7 +3,7 @@
 **Cluster:** Frontend
 **Estimate:** 0.05d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** #204 (per-page UI parity audit fleet) — settings audit. Slice 154 settings-only audit did not call out this specific glyph delta; it's surfaceable only by a side-by-side mockup-vs-live pixel/text compare.
 
 ## Narrative

@@ -3,7 +3,7 @@
 **Cluster:** Quality
 **Estimate:** 2-3d
 **Type:** JUDGMENT
-**Status:** `blocked` (on appetite — v2 quality follow-on; see Dependencies)
+**Status:** `merged` (`cfaa30a9`, #958 — 4 routes recorded; tail → spillover 412)
 
 ## Narrative
 

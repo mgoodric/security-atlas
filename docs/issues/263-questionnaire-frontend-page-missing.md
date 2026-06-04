@@ -3,7 +3,7 @@
 **Cluster:** Frontend
 **Estimate:** 3-5d
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** slice 204 (per-page UI parity audit) — finding category iv
 (MOCKUP-STALE) + category i (layout/chrome parity, by absence).
 **Grilled:** 2026-05-24 via `/idea-to-slice` against the slice 155
