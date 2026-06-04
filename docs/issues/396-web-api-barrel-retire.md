@@ -3,7 +3,7 @@
 **Cluster:** Web
 **Estimate:** 0.5d
 **Type:** AFK
-**Status:** `in-review`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 > **Implemented 2026-05-30.** Barrel `web/lib/api.ts` deleted; the
 > `apiBaseURL` test moved to `web/lib/api/base.test.ts` (imports `./base`);

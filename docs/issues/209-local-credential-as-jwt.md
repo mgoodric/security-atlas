@@ -3,7 +3,7 @@
 **Cluster:** Auth (backend + frontend)
 **Estimate:** ~1d
 **Type:** STANDARD
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** spillover surfaced 2026-05-22 during atlas-edge sign-in validation. Slice 197 removed the legacy bearer middleware (correct security move), but the only remaining unauthed entry points to atlas_jwt are (a) the OIDC callback flow and (b) `/v1/test/issue-jwt` (Playwright-only). Self-hosted operators who don't want to stand up an external IdP have NO working sign-in path. This slice closes that gap by promoting the existing `/auth/local/login` (which already verifies bcrypt-hashed credentials and creates a session) into a JWT issuer — atlas itself acts as the authorization server for non-SSO users.
 
 ## Narrative

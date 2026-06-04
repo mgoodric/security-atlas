@@ -3,7 +3,7 @@
 **Cluster:** Backend / Infra (AI integration surface)
 **Estimate:** 3-5d
 **Type:** JUDGMENT
-**Status:** `in-review` (HITL pattern picked 2026-05-20: **Pattern A** — see D1 below)
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

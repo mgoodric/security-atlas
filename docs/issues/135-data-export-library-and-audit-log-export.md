@@ -3,7 +3,7 @@
 **Cluster:** Backend / Frontend
 **Estimate:** 2-3d
 **Type:** JUDGMENT (XLSX library choice + filename convention; engineer records D1-D3 at pickup)
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

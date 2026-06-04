@@ -3,7 +3,7 @@
 **Cluster:** Quality / UI hygiene (frontend + small backend)
 **Estimate:** 1d (filter UI + URL plumbing) · +0.5d if the upstream join needs scope-cell filtering
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

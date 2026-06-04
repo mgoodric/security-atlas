@@ -3,7 +3,7 @@
 **Cluster:** Frontend (theme coupling) + Docs (asset refresh)
 **Estimate:** 0.5d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

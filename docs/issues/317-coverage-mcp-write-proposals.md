@@ -3,7 +3,7 @@
 **Cluster:** Quality
 **Estimate:** 2d (2 packages, one feature surface)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 
