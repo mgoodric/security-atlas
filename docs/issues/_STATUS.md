@@ -3,7 +3,15 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-03 (backlog registration — 41 analysis-driven slices 415-455 filed + registered; 2 flakes fixed direct)
+**Last reconciled:** 2026-06-03 (batch 187 claim-stake — slices 416 + 422 + 427 → in-progress (parallel, conflict-safe))
+
+## Drift detected — 2026-06-03 (batch 187 claim-stake · 416 + 422 + 427)
+
+First implementation batch from the 415-455 analysis backlog. Conflict-safe (disjoint files): 416 = ci.yml, 422 = internal/api/oauth + coverage-thresholds.json, 427 = docs-site.
+
+- **416** (pin golangci-lint version) — Infra · `ready` → **in-progress**. Drop `version: latest` on the required `Go · lint` check; pin explicitly.
+- **422** (lift internal/api/oauth coverage toward the 90% security-critical advisory) — Quality · `ready` → **in-progress**. Cover the RFC error branches (invalid_grant / revoked-code / denied tenant-switch / refused super_admin); lift the floor in-PR (monotonic ratchet).
+- **427** (auditor verify-export docs-site page) — Docs · `ready` → **in-progress**. Surface the oscal-signing `cosign verify-blob` flow into the published docs-site nav in auditor voice.
 
 ## Backlog registration — 2026-06-03 (41 slices 415-455 from comprehensive project analysis)
 
