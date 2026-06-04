@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -17,8 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/scfimport"
-	"github.com/mgoodric/security-atlas/internal/api/soc2import"
+	"github.com/mgoodric/security-atlas/internal/api/scfseed"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 )
 
@@ -45,49 +43,17 @@ func adminDSN(t *testing.T) string {
 func setupHTTPServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
 
-	// Wipe + import via admin pool. Slice 007 added fw_to_scf_edges +
-	// framework_requirements. We wipe only slice-007 + slice-006 owned
-	// rows; controls or other tenant-scoped data that other packages
-	// might leave behind is NOT in our cleanup scope (and would block
-	// scf_anchors deletes via FK from controls.scf_anchor_id under the
-	// full integration suite).
+	// Seed the SCF catalog + SOC 2 crosswalk via the shared slice 461
+	// helper. EnsureFullCatalog is order-independent: it probes the CURRENT
+	// SCF version for the sentinel anchor and does a full reseed when the
+	// catalog is absent OR partial, so a prior package's partial DELETE
+	// cannot leave us seeing "rows present" and skipping the reseed (the
+	// original slice 461 seed-order coupling). It also (re)imports the
+	// SOC 2 crosswalk the requirement-traversal route needs.
 	adminPool := openPoolDSN(t, adminDSN(t))
 	defer adminPool.Close()
-	for _, stmt := range []string{
-		"DELETE FROM fw_to_scf_edges",
-		"DELETE FROM framework_requirements",
-		"DELETE FROM framework_versions WHERE framework_id IN (SELECT id FROM frameworks WHERE slug = 'soc2' AND tenant_id IS NULL)",
-		"DELETE FROM frameworks WHERE slug = 'soc2' AND tenant_id IS NULL",
-	} {
-		if _, err := adminPool.Exec(context.Background(), stmt); err != nil {
-			t.Fatalf("cleanup %q: %v", stmt, err)
-		}
-	}
-	// SCF anchors: load idempotently — only wipe + reimport if zero rows.
-	// The slice-006 importer is content-equality-aware so re-importing a
-	// loaded catalog is a no-op anyway, but skipping when fully loaded
-	// keeps test runtime bounded under the full integration suite.
-	var anchorCount int
-	if err := adminPool.QueryRow(context.Background(), `SELECT count(*) FROM scf_anchors`).Scan(&anchorCount); err != nil {
-		t.Fatalf("count scf_anchors: %v", err)
-	}
-	if anchorCount == 0 {
-		cat, err := scfimport.Load("../../../migrations/fixtures/scf-sample.json")
-		if err != nil {
-			t.Fatalf("Load: %v", err)
-		}
-		if _, err := scfimport.Import(context.Background(), adminPool, cat); err != nil {
-			t.Fatalf("Import: %v", err)
-		}
-	}
-	// Slice 007: load the SOC 2 crosswalk so the requirement-traversal
-	// route has data to return.
-	cw, err := soc2import.Load(filepath.Join("..", "..", "..", "data", "crosswalks", "soc2-tsc-2017.yaml"))
-	if err != nil {
-		t.Fatalf("soc2import.Load: %v", err)
-	}
-	if _, err := soc2import.Import(context.Background(), adminPool, cw); err != nil {
-		t.Fatalf("soc2import.Import: %v", err)
+	if err := scfseed.EnsureFullCatalog(context.Background(), adminPool); err != nil {
+		t.Fatalf("scfseed.EnsureFullCatalog: %v", err)
 	}
 
 	// Boot the server with the app role.

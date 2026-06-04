@@ -365,6 +365,7 @@ jobs:
             ./internal/db/... \
             ./internal/api/scfimport/... \
             ./internal/api/anchors/... \
+            ./internal/api/scfseed/... \
             ./internal/api/schemaregistry/... \
             ./internal/evidence/ingest/... \
             ./internal/evidence/streambuf/... \
@@ -450,6 +451,16 @@ jobs:
             ./internal/policy/seed/... \
             ./internal/risk/aggrule/... \
             ./internal/api
+      # Slice 461: order-independence guard. The main run above uses CI's
+      # CURATED package order (scfimport/anchors first). This step re-runs
+      # the catalog-sensitive packages in a deliberately NON-curated
+      # (alphabetical) order against a freshly-truncated catalog and asserts
+      # green. It catches the reintroduction of an order-coupled SCF-seed
+      # guard — the silent-reorder fragility slice 461 closes — which the
+      # curated-order run alone would not surface. Reuses this job's Postgres
+      # + applied migrations; adds only a few seconds and no new infra.
+      - name: Assert SCF-seed order-independence (slice 461)
+        run: bash scripts/check-integration-seed-order-independence.sh
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
@@ -2795,6 +2806,12 @@ jobs:
 
       - name: Run audit-integration-enrolment.sh
         run: bash scripts/audit-integration-enrolment.sh
+
+      # Slice 461: offline self-test for the seed order-independence guard
+      # (exercises the env-misconfig exit-2 paths; the exit-0/1 paths run in
+      # the integration job, which has a live Postgres).
+      - name: Run check-integration-seed-order-independence self-test
+        run: bash scripts/check-integration-seed-order-independence_test.sh
 
   # ====================================================================
   # Slice 393 (Q-5) — coverage-exclude justification lint (HARD FAIL).

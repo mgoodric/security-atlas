@@ -46,7 +46,15 @@ func openPool(t *testing.T) *pgxpool.Pool {
 func truncateCatalog(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
+	// Slice 461: TRUNCATE controls CASCADE first. Under the full
+	// alphabetical wildcard run (`go test ./internal/api/...`) the
+	// internal/api/controls* packages run BEFORE scfimport and leave
+	// controls rows whose `scf_anchor_id` FK is `ON DELETE RESTRICT`,
+	// which blocks the `DELETE FROM scf_anchors` below. CI's curated
+	// order runs scfimport first so it never hit this, but the suite
+	// must be order-independent. Mirrors ucfcoverage's wipeTenantControls.
 	for _, stmt := range []string{
+		"TRUNCATE controls RESTART IDENTITY CASCADE",
 		"DELETE FROM fw_to_scf_edges",
 		"DELETE FROM framework_requirements",
 		"DELETE FROM scf_anchors",

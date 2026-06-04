@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/mgoodric/security-atlas/internal/api/scfimport"
+	"github.com/mgoodric/security-atlas/internal/api/scfseed"
 	"github.com/mgoodric/security-atlas/internal/api/soc2import"
 )
 
@@ -64,28 +64,19 @@ func resetCatalog(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
-// ensureSCFLoaded imports the SCF catalog ONLY if it isn't already
-// present. The full integration suite shares one DB across packages;
-// slice 006's tests may or may not have already loaded SCF by the time
-// we run. Idempotent re-import is cheap (slice-006 importer is
-// content-equality-aware) but skipping when fully loaded keeps test
-// runtime bounded.
+// ensureSCFLoaded ensures the CURRENT SCF framework version holds the full
+// sample catalog before each crosswalk-import test. It delegates to the
+// shared slice 461 helper, which is order-independent: a prior package that
+// left the SCF catalog PARTIAL (e.g. current version missing GOV-01) would
+// have tripped the old `if n > 0 { return }` guard into skipping the reseed,
+// and the crosswalk import under test would then fail resolving GOV-01. The
+// completeness-aware helper reseeds the SCF catalog when it is absent OR
+// partial. It deliberately does NOT import the SOC 2 crosswalk — that is the
+// unit under test here, so the test owns it via loadCrosswalk + Import.
 func ensureSCFLoaded(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	var n int
-	if err := pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM scf_anchors`).Scan(&n); err != nil {
-		t.Fatalf("count scf_anchors: %v", err)
-	}
-	if n > 0 {
-		return
-	}
-	cat, err := scfimport.Load(filepath.Join("..", "..", "..", "migrations", "fixtures", "scf-sample.json"))
-	if err != nil {
-		t.Fatalf("scfimport.Load: %v", err)
-	}
-	if _, err := scfimport.Import(context.Background(), pool, cat); err != nil {
-		t.Fatalf("scfimport.Import: %v", err)
+	if err := scfseed.EnsureSCFCatalog(context.Background(), pool); err != nil {
+		t.Fatalf("scfseed.EnsureSCFCatalog: %v", err)
 	}
 }
 

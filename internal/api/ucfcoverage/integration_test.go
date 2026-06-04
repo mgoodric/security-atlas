@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -17,8 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/scfimport"
-	"github.com/mgoodric/security-atlas/internal/api/soc2import"
+	"github.com/mgoodric/security-atlas/internal/api/scfseed"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 )
 
@@ -59,38 +57,18 @@ func openPool(t *testing.T, dsn string) *pgxpool.Pool {
 }
 
 // ensureCatalog seeds the global catalog tables (SCF anchors + SOC 2
-// crosswalk) idempotently via the admin pool. Re-running is a no-op.
+// crosswalk) via the shared slice 461 helper. EnsureFullCatalog is
+// order-independent and idempotent: it probes the CURRENT SCF version for
+// the sentinel anchor and does a full reseed when the catalog is absent OR
+// left partial by a prior package, then (re)imports the SOC 2 crosswalk.
+// This replaces the prior `if anchorCount == 0` / `if edgeCount == 0`
+// guards that mistook a partial-DELETE leftover for "already seeded."
 func ensureCatalog(t *testing.T) {
 	t.Helper()
 	pool := openPool(t, adminDSN(t))
 	defer pool.Close()
-
-	var anchorCount int
-	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM scf_anchors`).Scan(&anchorCount); err != nil {
-		t.Fatalf("count scf_anchors: %v", err)
-	}
-	if anchorCount == 0 {
-		cat, err := scfimport.Load(filepath.Join("..", "..", "..", "migrations", "fixtures", "scf-sample.json"))
-		if err != nil {
-			t.Fatalf("scfimport.Load: %v", err)
-		}
-		if _, err := scfimport.Import(context.Background(), pool, cat); err != nil {
-			t.Fatalf("scfimport.Import: %v", err)
-		}
-	}
-
-	var edgeCount int
-	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM fw_to_scf_edges`).Scan(&edgeCount); err != nil {
-		t.Fatalf("count fw_to_scf_edges: %v", err)
-	}
-	if edgeCount == 0 {
-		cw, err := soc2import.Load(filepath.Join("..", "..", "..", "data", "crosswalks", "soc2-tsc-2017.yaml"))
-		if err != nil {
-			t.Fatalf("soc2import.Load: %v", err)
-		}
-		if _, err := soc2import.Import(context.Background(), pool, cw); err != nil {
-			t.Fatalf("soc2import.Import: %v", err)
-		}
+	if err := scfseed.EnsureFullCatalog(context.Background(), pool); err != nil {
+		t.Fatalf("scfseed.EnsureFullCatalog: %v", err)
 	}
 }
 
