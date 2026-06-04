@@ -2742,6 +2742,56 @@ jobs:
         run: bash scripts/check-action-pins.sh
 
   # ====================================================================
+  # Slice 458 — machine-local-cache staging guard (defense in depth).
+  #
+  # Asserts that no TRACKED path matches a known per-machine cache shape
+  # (`.understand-anything/`, `.cache/`, `node_modules/`, `.DS_Store`, …).
+  # Runs `scripts/check-staged-cache-paths.sh --all-tracked`. The local
+  # pre-commit hook (`cache-path-guard` in .pre-commit-config.yaml) catches
+  # the cache at STAGING time; this CI job re-checks the whole tracked tree
+  # so a contributor who skipped local hooks and committed a cache anyway is
+  # still caught (AC-2 — defense in depth). Same script, two surfaces.
+  #
+  # Background: a 9.8M `.understand-anything/` cache was once swept into
+  # main by a broad `git add .` BEFORE its `.gitignore` rule landed
+  # (slice 433, commit a058b09a). `.gitignore` stops the forward accident
+  # only for untracked paths; this guard blocks the NEXT cache-dir of that
+  # footgun. The guard is anchored to directory SEGMENTS so it never fires
+  # on legitimately-tracked lookalikes (e.g. the slice-433 doc filenames
+  # `docs/issues/433-...understand-anything-cache.md`) — AC-3.
+  #
+  # Why no stub-twin (slice 061 convention): the script is fast (sub-
+  # second, pure bash + git, no network), deliberately ignores
+  # `changes.code` (any PR can sweep in a cache regardless of what else it
+  # touches), and runs unconditionally. Mirrors slice 128 actions-pin-check
+  # / slice 140 openapi-drift-check / slice 345 integration-enrolment-check.
+  #
+  # Required-check status: ships NON-REQUIRED this slice (NOT added to
+  # .github/branch-protection.json). Promote to a required check in a
+  # follow-up once it has a few green runs — see the slice 458 PR body's
+  # required-check analysis.
+  #
+  # Local repro: `bash scripts/check-staged-cache-paths.sh --all-tracked`
+  #   pre-commit:  `pre-commit run cache-path-guard --all-files`
+  #   self-test:   `bash scripts/check-staged-cache-paths_test.sh`
+  # See: docs/audit-log/458-precommit-cache-guard-decisions.md.
+  # ====================================================================
+  cache-path-guard:
+    name: cache-path-guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Run check-staged-cache-paths.sh against the tracked tree
+        run: bash scripts/check-staged-cache-paths.sh --all-tracked
+
+  # ====================================================================
   # Slice 140 — OpenAPI drift-detect guard.
   #
   # Asserts that the committed `docs/openapi.yaml` is in lockstep with:
