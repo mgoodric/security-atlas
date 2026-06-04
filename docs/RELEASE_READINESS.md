@@ -440,3 +440,102 @@ If step 1 is red, the most common failure modes (per the slice 080 post-mortem) 
 ### 11.3 If anything is wrong — DO NOT retroactively re-tag
 
 Slice 080's anti-criterion P0-A1 forbids retroactive re-tagging of a released-tag-of-record to "backfill" missing artifacts. The fix is always to land the workflow correction on `main` and let the next real release tag (which release-please will open automatically on the next push) be the first tag that ships clean. The historical tag retains its real `chore(main): release X.Y.Z` commit; the missing artifacts stay missing as a documented observation.
+
+## 12. Supply-chain verification — the diligence-facing guide
+
+> Added by slice 451. This section is written for an **external verifier** — a customer's security team, an auditor, or anyone diligencing a downloaded artifact — who has only the public release page and stock, open-source tooling (`cosign`, `gh`, `slsa-verifier`, `syft`). It requires **no atlas-internal context or tooling**. It is the one document that covers all three released supply-chain surfaces: containers, binaries/CLI/SDK, and OSCAL evidence bundles.
+
+Every security-atlas release artifact carries, at minimum:
+
+| Surface                     | Signed checksum (cosign)      | SLSA provenance (build identity)      | SBOM (components)                          |
+| --------------------------- | ----------------------------- | ------------------------------------- | ------------------------------------------ |
+| Container images (`vX.Y.Z`) | cosign signature on the image | `attest-build-provenance` (pushed)    | buildx `sbom: true` (SPDX, pushed)         |
+| Container images (`:edge`)  | **deliberately unsigned**¹    | `attest-build-provenance` (pushed)    | buildx `sbom: true` (SPDX, pushed)         |
+| Binary / CLI / SDK archives | cosign on `checksums.txt`²    | `attest-build-provenance` (slice 451) | per-archive `*.spdx.sbom.json` (slice 451) |
+| OSCAL evidence bundles      | cosign on the bundle³         | n/a (runtime artifact, not CI-built)  | n/a                                        |
+
+¹ Edge / `:main-<sha7>` images are unsigned by design — the keyless guarantee is bound to release-cut tag identity (slice 207 D1, re-confirmed slice 451). They still carry provenance + SBOM; verify those instead.
+² cosign signs the aggregate `checksums.txt`; the **per-artifact** integrity binding is the SLSA provenance (which attests each archive digest individually). Verify both.
+³ The OSCAL-bundle signing path is a distinct **runtime** surface (`internal/oscal/sign.go`, ADR-0010 row 2) — out of scope for the release pipeline; documented here only so a verifier has the full picture.
+
+Replace `vX.Y.Z` / `X.Y.Z` with the release you are verifying throughout.
+
+### 12.1 Containers
+
+```sh
+REPO=mgoodric/security-atlas
+IMAGE=ghcr.io/${REPO}            # or ghcr.io/${REPO}-cli / -web / -bootstrap
+TAG=vX.Y.Z
+
+# Resolve the image to its immutable digest.
+DIGEST=$(docker buildx imagetools inspect "${IMAGE}:${TAG}" \
+  --format '{{json .Manifest.Digest}}' | tr -d '"')
+
+# 1. Provenance — binds the image to THIS repo's container-publish workflow.
+gh attestation verify "oci://${IMAGE}@${DIGEST}" \
+  --repo "${REPO}" \
+  --cert-identity-regex "https://github.com/${REPO}/\.github/workflows/container-publish\.yml@.*" \
+  --cert-oidc-issuer https://token.actions.githubusercontent.com
+
+# 2. cosign signature (stable tags only; :edge is deliberately unsigned).
+cosign verify "${IMAGE}:${TAG}" \
+  --certificate-identity-regexp "https://github.com/${REPO}/\.github/workflows/.*" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# 3. SBOM (SPDX, attached to the image by buildx sbom: true).
+cosign download sbom "${IMAGE}@${DIGEST}" > image.spdx.json
+jq '.predicate.Data // .' image.spdx.json | head   # inspect components
+```
+
+### 12.2 Binaries / CLI / SDK archives
+
+```sh
+REPO=mgoodric/security-atlas
+TAG=vX.Y.Z
+VERSION="${TAG#v}"
+ASSET="security-atlas_${VERSION}_linux_amd64.tar.gz"   # any released archive
+
+TMP=$(mktemp -d) && cd "$TMP"
+
+# Download the archive, its SBOM, the checksums file + cosign bundle.
+base="https://github.com/${REPO}/releases/download/${TAG}"
+curl -fsSL -O "${base}/${ASSET}"
+curl -fsSL -O "${base}/${ASSET}.spdx.sbom.json"
+curl -fsSL -O "${base}/security-atlas_${VERSION}_checksums.txt"
+curl -fsSL -O "${base}/security-atlas_${VERSION}_checksums.txt.sigstore.json"
+
+# 1. cosign-verify the checksums file (Sigstore keyless; requires cosign v3.x).
+cosign verify-blob \
+  --certificate-identity-regexp "https://github.com/${REPO}/\.github/workflows/release\.yml@.*" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --bundle "security-atlas_${VERSION}_checksums.txt.sigstore.json" \
+  "security-atlas_${VERSION}_checksums.txt"
+
+# 2. Confirm the archive matches the signed checksum.
+sha256sum --ignore-missing -c "security-atlas_${VERSION}_checksums.txt"
+
+# 3. SLSA provenance — binds THIS archive's digest to the release workflow
+#    (per-artifact, not just the aggregate checksums file).
+gh attestation verify "${ASSET}" \
+  --repo "${REPO}" \
+  --cert-identity-regex "https://github.com/${REPO}/\.github/workflows/release\.yml@.*" \
+  --cert-oidc-issuer https://token.actions.githubusercontent.com
+
+#    (Equivalent with the dedicated SLSA tool, if you prefer it over gh:)
+# slsa-verifier verify-artifact "${ASSET}" \
+#   --provenance-path attestation.intoto.jsonl \
+#   --source-uri "github.com/${REPO}"
+
+# 4. Inspect the SBOM (valid SPDX, non-zero components — the release pipeline
+#    refuses to ship an empty one, but a verifier can confirm independently).
+jq '{spdxVersion, components: (.packages | length), tool: .creationInfo.creators}' \
+  "${ASSET}.spdx.sbom.json"
+
+cd - >/dev/null && rm -rf "$TMP"
+```
+
+The SDK artifacts (Go / Python / TypeScript) released through the same GoReleaser run are covered by the identical provenance + SBOM commands — substitute the SDK archive name for `${ASSET}`.
+
+### 12.3 OSCAL evidence bundles (runtime surface — pointer only)
+
+OSCAL export bundles are signed at **runtime** by the platform (`internal/oscal/sign.go`, ADR-0010 row 2), not by the release pipeline. They are cosign-signed with the same Sigstore keyless flow; an auditor who receives a bundle verifies it with `cosign verify-blob` against the deploying tenant's documented signing identity. That verification flow is owned by the OSCAL export feature and documented with the export; it is named here only so a verifier knows the third supply-chain surface exists and is covered. **This release-readiness section does not modify or own that path.**

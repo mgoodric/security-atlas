@@ -45,11 +45,20 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       # contents:write — to upload release assets.
-      # id-token:write — to mint the OIDC token cosign trades for a Fulcio cert.
+      # id-token:write — to mint the OIDC token cosign trades for a Fulcio cert
+      #   AND the token actions/attest-build-provenance trades for its Fulcio
+      #   cert (slice 451). Already present; the attestation step reuses it.
       # packages:write — reserved for future GHCR pushes; harmless if unused.
+      # attestations:write — to write the SLSA build-provenance attestation to
+      #   the repo's attestations store (slice 451). SCOPED HERE AT THE JOB
+      #   LEVEL ONLY (P0-451-5): the workflow-level `permissions:` block stays
+      #   `contents: read`. This is the only privilege this slice adds, and it
+      #   is confined to the single job that mints the attestation — a workflow
+      #   compromise cannot use it from any other job.
       contents: write
       id-token: write
       packages: write
+      attestations: write
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -105,13 +114,14 @@ jobs:
           cosign-release: "v3.0.6"
 
       - name: Install syft (SBOM)
-        # SBOM generation is best-effort; not gated by ship-gate but useful
-        # for downstream supply-chain consumers. GoReleaser auto-invokes it
-        # if present on PATH (current config does not declare sboms: yet —
-        # leaving syft installed so a follow-up slice can enable without
-        # changing the workflow).
+        # Slice 451 reconciled the former best-effort posture: the SBOM is now
+        # a published, diligence-relevant release artifact, so its toolchain is
+        # REQUIRED, not best-effort. `continue-on-error` is removed (AC-4 /
+        # P0-451-4) — if syft cannot be installed the release fails rather than
+        # silently shipping no SBOM. GoReleaser's `sboms:` block (.goreleaser.yaml)
+        # hard-invokes `syft` per archive; a missing syft would fail the
+        # GoReleaser step regardless, so failing fast here is the honest gate.
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
-        continue-on-error: true
 
       - name: Run GoReleaser (validates config then builds + signs + publishes)
         # goreleaser-action installs the CLI to PATH and invokes the requested
@@ -143,6 +153,90 @@ jobs:
           # ignores. Removed in slice 084 to avoid documenting intent
           # that the tool no longer honors.
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+
+      - name: Gate SBOMs (fail on empty / zero-component)
+        # AC-4 / P0-451-4: an empty or zero-component SBOM gives false
+        # supply-chain assurance, so it must FAIL the release rather than
+        # ship. GoReleaser emits one `*.spdx.sbom.json` per archive into
+        # dist/. This step asserts (a) at least one SBOM exists and (b) every
+        # SBOM is valid SPDX JSON with a non-zero `.packages` count. No
+        # `continue-on-error` — a violation is a hard release failure.
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          sboms=(dist/*.spdx.sbom.json)
+          if [ "${#sboms[@]}" -eq 0 ]; then
+            echo "::error::No SBOM artifacts found in dist/ — expected one *.spdx.sbom.json per archive."
+            exit 1
+          fi
+          fail=0
+          for sbom in "${sboms[@]}"; do
+            # `jq -e` exits non-zero if the file is not valid JSON.
+            count="$(jq -e '.packages | length' "$sbom")" || {
+              echo "::error::${sbom} is not valid SPDX JSON."
+              fail=1
+              continue
+            }
+            if [ "${count}" -lt 1 ]; then
+              echo "::error::${sbom} has zero components — empty SBOM, refusing to ship."
+              fail=1
+            else
+              echo "ok: ${sbom} has ${count} components"
+            fi
+          done
+          [ "${fail}" -eq 0 ] || { echo "::error::One or more SBOMs failed the non-empty gate."; exit 1; }
+          echo "All ${#sboms[@]} SBOMs passed the non-empty gate."
+
+      - name: Attest build provenance (SLSA) for release artifacts
+        # AC-2 / P0-451-2: bind EACH released artifact's digest (the binary
+        # archives, the cli-only archives, the checksums file, and the
+        # per-archive SBOMs) to this exact GitHub Actions workflow identity
+        # via SLSA build-provenance. `subject-path` globs every release asset
+        # so provenance covers each artifact digest individually — NOT only
+        # the aggregate checksums.txt. Mirrors container-publish.yml's proven
+        # attest-build-provenance pattern; pinned to the same SHA. The
+        # `attestations: write` + `id-token: write` this needs are scoped at
+        # the job level (see this job's `permissions:` block — P0-451-5).
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*_checksums.txt
+            dist/*.spdx.sbom.json
+
+      - name: Self-verify SLSA provenance (round-trip)
+        # AC-7 / AC-2 evidence, mirroring the existing "Self-verify signed
+        # checksums" step: prove the just-written provenance verifies against
+        # this workflow's OIDC identity before the release is considered good.
+        # Uses `gh attestation verify` (ships with the runner's gh CLI, no
+        # atlas-internal tooling) and asserts the builder/signer identity is
+        # THIS repo's release workflow. If verification breaks, the release is
+        # broken-on-arrival here rather than broken-in-the-wild.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # Pick a representative subject from each artifact class (one binary
+          # archive, the checksums file, one SBOM) — globs, not `ls` (SC2012).
+          subjects=()
+          for g in dist/*.tar.gz dist/*_checksums.txt dist/*.spdx.sbom.json; do
+            subjects+=("$g")
+            [ "${#subjects[@]}" -ge 4 ] && break
+          done
+          if [ "${#subjects[@]}" -eq 0 ]; then
+            echo "::error::No subjects to verify provenance against."
+            exit 1
+          fi
+          for subject in "${subjects[@]}"; do
+            echo "Verifying provenance for ${subject}"
+            gh attestation verify "${subject}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --cert-identity-regex "https://github.com/${GITHUB_REPOSITORY}/\.github/workflows/release\.yml@.*" \
+              --cert-oidc-issuer https://token.actions.githubusercontent.com
+            echo "provenance OK for ${subject}"
+          done
 
       - name: Self-verify signed checksums
         # Round-trip: download the just-published checksums + bundle from
