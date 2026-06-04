@@ -3,7 +3,7 @@
 **Cluster:** Oscal
 **Estimate:** 5d (re-scoped into 368a ~3d + 368b ~2d — see "Re-scoped by ADR-0010")
 **Type:** JUDGMENT
-**Status:** `blocked` (on ADR-0010 maintainer sign-off; see "Re-scoped by ADR-0010")
+**Status:** `in-progress` (tracking parent — ADR-0010 approved; split into 413 Phase 1 in-progress + 414 Phase 2 gated)
 **Gated by:** [ADR-0010](../adr/0010-oscal-cosign-signing.md) (slice 400 decision spike)
 
 ## Re-scoped by ADR-0010 (slice 400 decision spike)
