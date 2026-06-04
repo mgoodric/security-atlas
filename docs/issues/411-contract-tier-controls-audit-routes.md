@@ -3,7 +3,7 @@
 **Cluster:** Quality
 **Estimate:** 2-3d
 **Type:** JUDGMENT
-**Status:** `in-progress` (batch 185, 2026-06-03 — maintainer cleared appetite gate)
+**Status:** `merged` (`cfaa30a9`, #958 — 4 routes recorded; tail → spillover 412)
 
 ## Narrative
 

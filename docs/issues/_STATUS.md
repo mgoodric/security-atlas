@@ -3,7 +3,15 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-03 (batch 185 claim-stake — maintainer-directed restart: slices 400 + 411 → in-progress (parallel))
+**Last reconciled:** 2026-06-03 (batch 185 reconcile — slice 411 merged at `cfaa30a9`; slice 400 ADR open (#956) awaiting maintainer sign-off; spillover 412 filed)
+
+## Reconcile — 2026-06-03 (batch 185 · slice 411 merged · slice 400 ADR awaiting sign-off)
+
+- **411** (contract-tier rollout: controls-detail + audit-workspace routes, parent 409) — Quality · JUDGMENT — **MERGED** at `cfaa30a9` (#958). Recorded goldens for the highest-traffic 394-hand-mocked subset: `GET /v1/controls/{id}/policies`, `/risks`, `/history` (one 3-method unexported `controlDetailReader` seam) + `GET /v1/audit-periods` (1-method `periodLister` seam). All 4 BFFs verbatim passthrough → `toEqual(golden)`. Drift proven (control-risks `link_weight`→`weight`). Unit-surface recorders (no DB/integration tag, P0-409-1); `New(...)` unchanged (P0-409-2). vitest 1263 (20 new); auditperiods 0%→14%. Deferred the multi-package tail → spillover **412**.
+- **412** (contract-tier: controls/audit tail) — spillover from 411, `ready` (deps merged). Covers the remainder: controldetail coverage/effectiveness/state/attestations/evidence-window + audit populations/samples/walkthroughs/notes. Loop-ready pick.
+- **400** (OSCAL cosign signing decision spike + ADR, parent 368) — Oscal · JUDGMENT — **ADR authored, PR #956 OPEN, AWAITING MAINTAINER SIGN-OFF** (P0-400-2: does NOT auto-merge). ADR-0010 (`docs/adr/0010-oscal-cosign-signing.md`). Recommendation **ADOPT-DEFERRED, confidence HIGH**: keyless blocked on identity federation (atlas AS issuer not in public Fulcio trust root; air-gap can't reach Fulcio/Rekor); build `cosign-kms` + retain `embedded-ed25519` default first (368a ~3d), defer `cosign-keyless` (368b ~2d) gated on an OIDC-identity decision. cosign Apache-2.0 → license-clean to bundle. Re-scoped 368 (`ready`→`blocked` on ADR-0010 sign-off; split 368a/368b; SaaS default keyless→kms-at-GA). **368 doc status now reflects this.**
+
+Decision pending from maintainer: approve/reject ADR-0010's ADOPT-DEFERRED + the 368 phased re-scope (PR #956). Also in flight: dependabot triage (6 clean queued; 7 failing major-version bumps flagged) + completed cosmetic cleanup (per-doc status reconcile #957 · worktree/branch prune).
 
 ## Drift detected — 2026-06-03 (batch 185 claim-stake · maintainer-directed · 400 + 411)
 
