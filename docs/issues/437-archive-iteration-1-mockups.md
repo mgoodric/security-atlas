@@ -3,7 +3,7 @@
 **Cluster:** Infra
 **Estimate:** S
 **Type:** JUDGMENT
-**Status:** `ready` (no dependency)
+**Status:** `merged` (`7ce4cc6f`, #980 — archive mockups; comment-sweep→459)
 
 ## Narrative
 

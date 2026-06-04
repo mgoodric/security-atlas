@@ -3,7 +3,7 @@
 **Cluster:** Quality
 **Estimate:** 0.5d (S)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (`7298f546`, #981 — OSCAL export e2e; download-surface→457)
 **Priority:** P1
 
 ## Narrative

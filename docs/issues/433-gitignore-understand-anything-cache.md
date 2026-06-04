@@ -3,7 +3,7 @@
 **Cluster:** Infra
 **Estimate:** S
 **Type:** AFK
-**Status:** `ready` (no dependencies)
+**Status:** `merged` (`1508501c`, #978 — gitignore cache; already-in-history→458)
 
 ## Narrative
 

@@ -3,7 +3,7 @@
 **Cluster:** Docs
 **Estimate:** S
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (`74ca43be`, #979 — AWS/Go/TS SDK READMEs)
 
 ## Narrative
 
