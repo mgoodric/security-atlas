@@ -300,7 +300,13 @@ services:
       # assertion. The rate-limit envelope is per-client_id so other
       # OAuth clients are unaffected.
       ATLAS_OAUTH_TOKEN_RATE_PER_MIN: ${ATLAS_OAUTH_TOKEN_RATE_PER_MIN:-600}
-      NATS_URL: nats://nats:4222
+      # Slice 015 / slice 460: NATS JetStream evidence-ingest substrate.
+      # Defaults to the fixed in-compose-network address of the bundled
+      # `nats` service; an operator pointing at an EXTERNAL NATS cluster
+      # sets NATS_URL in .env (documented + commented in .env.example).
+      # The `:-` default preserves the prior hardcoded behavior exactly
+      # when the variable is unset, so the shipped bundle is unchanged.
+      NATS_URL: ${NATS_URL:-nats://nats:4222}
       # Slice 034: HMAC key for api_keys.token_hash. Refuse-to-boot if unset.
       BEARER_HASH_KEY: ${BEARER_HASH_KEY:?}
       # Slice 037: fixed-token admin credential for the bootstrap uploader.
