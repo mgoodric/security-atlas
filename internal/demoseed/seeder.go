@@ -428,6 +428,21 @@ func (s *Seeder) Teardown(ctx context.Context, slug string, actorUserID uuid.UUI
 		`DELETE FROM policies           WHERE tenant_id = $1`,
 		`DELETE FROM controls           WHERE tenant_id = $1`,
 		`DELETE FROM framework_scopes   WHERE tenant_id = $1`,
+		// Tenant-scoped demo framework rows: Apply writes a fallback
+		// `frameworks` + `framework_versions` pair ONLY when the global
+		// SCF catalog (tenant_id IS NULL) is absent (writers.go
+		// writeAuditPeriodsAndSamples). When the catalog IS present Apply
+		// adopts it and writes neither — so these deletes are 0-row no-ops
+		// in that case. The `WHERE tenant_id = $1` predicate can never
+		// match the global catalog rows (their tenant_id IS NULL), so the
+		// catalog is safe by construction (AC-4 / canvas invariant #6).
+		// framework_versions deletes BEFORE frameworks: framework_scopes +
+		// audit_periods (both ON DELETE RESTRICT into framework_versions)
+		// are already swept above; frameworks.latest_version_id is
+		// ON DELETE SET NULL so the version delete does not block on the
+		// parent (AC-3).
+		`DELETE FROM framework_versions WHERE tenant_id = $1`,
+		`DELETE FROM frameworks         WHERE tenant_id = $1`,
 		`DELETE FROM vendor_scope_cells WHERE tenant_id = $1`,
 		`DELETE FROM vendors            WHERE tenant_id = $1`,
 		`DELETE FROM board_briefs       WHERE tenant_id = $1`,
