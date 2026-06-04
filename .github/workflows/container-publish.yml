@@ -21,6 +21,17 @@ name: container-publish
 #      attestation + SBOM as stable; the only delta is the absence of
 #      the cosign signature.
 #
+#      Slice 451 RE-CONFIRMED this decision (AC-5): edge / main-<sha7>
+#      images stay deliberately UNSIGNED. cosign keyless signatures
+#      bind to a stable, human-meaningful identity (a release-cut tag);
+#      a per-merge `:main-<sha7>` image is a moving, non-promoted target
+#      whose trust anchor is its provenance attestation, not a signature.
+#      Signing every main-push image would dilute the meaning of "an
+#      atlas signature == a released artifact" without adding assurance
+#      a verifier can act on (the attestation already binds builder
+#      identity). Rationale recorded in
+#      docs/audit-log/451-slsa-provenance-sbom-decisions.md.
+#
 # The two channels share this one workflow (slice 207 D1 — see
 # `docs/audit-log/207-edge-deploy-channel-decisions.md`). The
 # docker/metadata-action tag rules below conditionalize on event type
