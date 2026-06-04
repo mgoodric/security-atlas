@@ -3,7 +3,7 @@
 **Cluster:** Oscal
 **Estimate:** ~3d
 **Type:** JUDGMENT
-**Status:** `in-progress` (batch 186, 2026-06-03 — maintainer approved ADR-0010 ADOPT-DEFERRED)
+**Status:** `merged` (`f777ff07`, #961 — cosign-kms + retained embedded; Mode dispatch + backward-compat + CLI + runbook)
 **Parent:** 368 (OSCAL export bundle signing ed25519 → cosign) · gated by [ADR-0010](../adr/0010-oscal-cosign-signing.md)
 
 ## Narrative
