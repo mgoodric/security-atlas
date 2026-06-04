@@ -36,6 +36,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/scfseed"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 )
 
@@ -51,27 +52,14 @@ func setupHTTPServerWithSrv(t *testing.T) (*httptest.Server, *api.Server, string
 
 	adminPool := openPoolDSN(t, adminDSN(t))
 	defer adminPool.Close()
-	for _, stmt := range []string{
-		"DELETE FROM fw_to_scf_edges",
-		"DELETE FROM framework_requirements",
-		"DELETE FROM framework_versions WHERE framework_id IN (SELECT id FROM frameworks WHERE slug = 'soc2' AND tenant_id IS NULL)",
-		"DELETE FROM frameworks WHERE slug = 'soc2' AND tenant_id IS NULL",
-	} {
-		if _, err := adminPool.Exec(context.Background(), stmt); err != nil {
-			t.Fatalf("cleanup %q: %v", stmt, err)
-		}
-	}
-	// SCF anchors: only wipe + reimport if the table is empty (mirrors
-	// the slice-006 harness pattern).
-	var anchorCount int
-	if err := adminPool.QueryRow(context.Background(), `SELECT count(*) FROM scf_anchors`).Scan(&anchorCount); err != nil {
-		t.Fatalf("count scf_anchors: %v", err)
-	}
-	if anchorCount == 0 {
-		// Re-use setupHTTPServer's importer path by delegating to it for
-		// the cold-start case. The hot path (table already loaded) skips
-		// the importer entirely and we keep the harness lean.
-		t.Skip("SCF anchors empty — run setupHTTPServer-backed test first to seed; slice 104 round-trip needs a populated catalog")
+	// Seed the SCF catalog + SOC 2 crosswalk via the shared slice 461
+	// helper. This replaces the prior `if anchorCount == 0 { t.Skip }`
+	// cold-start hack: EnsureFullCatalog is order-independent, so the
+	// slice 104 round-trip no longer depends on an earlier test having
+	// seeded the catalog first, and a partial-DELETE leftover triggers a
+	// full reseed instead of a stale-subset skip.
+	if err := scfseed.EnsureFullCatalog(context.Background(), adminPool); err != nil {
+		t.Fatalf("scfseed.EnsureFullCatalog: %v", err)
 	}
 
 	appPool := openPoolDSN(t, appDSN(t))
