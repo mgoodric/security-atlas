@@ -27,17 +27,74 @@ import (
 // flags "swap for cosign keyless + Fulcio transparency log" as a v3
 // revisit item.
 type Signature struct {
-	// Algorithm identifies the signing scheme. Always "ed25519" in v1.
+	// Mode records WHICH signing path produced this signature so a
+	// verifier knows which validation path to run (slice 413 / ADR-0010).
+	// It is `omitempty`: a manifest produced BEFORE this field existed
+	// has no `mode` key, and an absent/empty Mode dispatches to
+	// ModeEmbeddedEd25519 — the only mode that existed pre-413 — which is
+	// the backward-compatibility guarantee (P0-413-4). See ResolveMode /
+	// VerifyBundle.
+	Mode Mode `json:"mode,omitempty"`
+	// Algorithm identifies the signing scheme. "ed25519" for the embedded
+	// mode; "cosign-kms" for the cosign KMS mode (the concrete KMS key
+	// algorithm is opaque to atlas — cosign owns it).
 	Algorithm string `json:"algorithm"`
-	// PublicKey is the lowercase-hex ed25519 public key. A verifier uses
-	// it together with the bundle digest to check Signature.
-	PublicKey string `json:"public_key"`
+	// PublicKey is the lowercase-hex ed25519 public key for the embedded
+	// mode. For cosign-kms it is empty — the verifier supplies the KMS
+	// key reference (or an exported public key) out of band; the manifest
+	// records KeyRef instead.
+	PublicKey string `json:"public_key,omitempty"`
+	// KeyRef is the cosign KMS key reference (e.g. awskms:///alias/...)
+	// recorded for the cosign-kms mode so a verifier knows which key to
+	// pass to `cosign verify-blob --key`. Empty for the embedded mode.
+	KeyRef string `json:"key_ref,omitempty"`
 	// Digest is the lowercase-hex sha256 over the canonical concatenation
-	// of every bundle member's own sha256 (see SignBundle).
+	// of every bundle member's own sha256 (see SignBundle). It is the
+	// blob both modes sign over.
 	Digest string `json:"digest"`
-	// Signature is the lowercase-hex ed25519 signature over Digest's raw
-	// bytes.
+	// Signature is the signature over Digest. For the embedded mode it is
+	// the lowercase-hex ed25519 signature over Digest's raw bytes; for
+	// cosign-kms it is cosign's base64-encoded detached signature over
+	// the same digest blob.
 	Signature string `json:"signature"`
+}
+
+// Mode is the signing-mode discriminator recorded in the bundle manifest
+// (ADR-0010). The set is deliberately small and explicit; verification
+// dispatches on it. A new value (ModeCosignKeyless — slice 414 / 368b)
+// can be added without refactoring the dispatch.
+type Mode string
+
+const (
+	// ModeEmbeddedEd25519 is the in-process ed25519 detached-signature
+	// path (the original slice-030 implementation). It is hermetic — no
+	// external binary, no network — and is the air-gap default
+	// (P0-413-2). An absent/empty Mode in a manifest resolves to this,
+	// which is the backward-compat guarantee (P0-413-4).
+	ModeEmbeddedEd25519 Mode = "embedded-ed25519"
+	// ModeCosignKMS signs the bundle digest via `cosign sign-blob` with a
+	// cloud-KMS-held key (AWS KMS / GCP KMS / Azure Key Vault / Vault).
+	// Verifiable with stock `cosign verify-blob`. No Fulcio/Rekor/OIDC
+	// (Phase 1, P0-413-1).
+	ModeCosignKMS Mode = "cosign-kms"
+	// ModeCosignKeyless is RESERVED for slice 414 (368b): Fulcio + Rekor +
+	// OIDC keyless signing. It is declared here so the enum is extensible
+	// and the dispatch's default-reject branch is explicit, but Phase 1
+	// implements NO keyless code path (P0-413-1).
+	ModeCosignKeyless Mode = "cosign-keyless"
+)
+
+// ResolveMode normalizes a manifest's recorded Mode for dispatch. An
+// empty Mode (a pre-413 manifest, or one whose `mode` key is absent)
+// resolves to ModeEmbeddedEd25519 — the only mode that existed before
+// this slice. This is the single backward-compatibility seam
+// (P0-413-4): every pre-existing ed25519-signed bundle dispatches to the
+// embedded verifier exactly as before.
+func ResolveMode(m Mode) Mode {
+	if m == "" {
+		return ModeEmbeddedEd25519
+	}
+	return m
 }
 
 // ErrNoSigningKey is returned by NewSigner when given a nil/empty key.
@@ -113,6 +170,7 @@ func (s *Signer) SignBundle(b *Bundle) (Signature, error) {
 	digest := bundleDigest(b)
 	sig := ed25519.Sign(s.priv, digest[:])
 	return Signature{
+		Mode:      ModeEmbeddedEd25519,
 		Algorithm: "ed25519",
 		PublicKey: hex.EncodeToString(s.pub),
 		Digest:    hex.EncodeToString(digest[:]),
@@ -120,12 +178,46 @@ func (s *Signer) SignBundle(b *Bundle) (Signature, error) {
 	}, nil
 }
 
-// VerifyBundle re-derives the bundle digest and checks the embedded
-// signature against it. It is the verification counterpart to
-// SignBundle: an auditor (or the platform's own integrity check) calls
-// it to confirm the bundle has not been tampered with since export.
+// VerifyBundle verifies a bundle by dispatching on its recorded signing
+// Mode (ADR-0010). It is the verification counterpart to the export
+// signers: an auditor (or the platform's own integrity check) calls it
+// to confirm the bundle has not been tampered with since export.
+//
+// Dispatch:
+//
+//   - ModeEmbeddedEd25519 (or an absent/empty Mode — the backward-compat
+//     case, P0-413-4): verified fully in-process, no external binary.
+//   - ModeCosignKMS: requires a cosign verifier; callers that need to
+//     verify KMS-signed bundles use VerifyBundleWithCosign instead. This
+//     function returns ErrCosignVerifierRequired so a caller that holds
+//     only the embedded path fails closed rather than silently passing a
+//     KMS bundle it cannot check.
+//   - ModeCosignKeyless: not implemented in Phase 1 (slice 414).
+//
 // Returns nil when the signature is valid.
 func VerifyBundle(b *Bundle) error {
+	switch ResolveMode(b.Signature.Mode) {
+	case ModeEmbeddedEd25519:
+		return verifyEmbedded(b)
+	case ModeCosignKMS:
+		return ErrCosignVerifierRequired
+	case ModeCosignKeyless:
+		return fmt.Errorf("oscal: signing mode %q is not supported in this build (slice 414)", ModeCosignKeyless)
+	default:
+		return fmt.Errorf("oscal: unknown signing mode %q", b.Signature.Mode)
+	}
+}
+
+// ErrCosignVerifierRequired is returned by VerifyBundle when the bundle
+// was signed with a cosign mode but the caller passed no cosign
+// verifier. Use VerifyBundleWithCosign for those bundles. Failing closed
+// here is deliberate: a verifier MUST NOT report "valid" for a signature
+// path it did not actually check.
+var ErrCosignVerifierRequired = errors.New("oscal: bundle is cosign-signed; use VerifyBundleWithCosign with a cosign verifier")
+
+// verifyEmbedded re-derives the bundle digest and checks the in-process
+// ed25519 signature against it.
+func verifyEmbedded(b *Bundle) error {
 	sig := b.Signature
 	if sig.Algorithm != "ed25519" {
 		return fmt.Errorf("oscal: unsupported signature algorithm %q", sig.Algorithm)
