@@ -71,6 +71,11 @@ bin/
 .ruff_cache/
 .mypy_cache/
 .pytest_cache/
+# Local code-analysis tool cache (understand-anything) — per-machine, never commit.
+# ~9.8M snapshot (knowledge-graph.json, fingerprints.json, meta.json) pinned to one
+# developer's working tree at one instant; not a shared artifact. Directory-anchored
+# trailing-slash form so it can only match this cache dir, never a tracked file.
+.understand-anything/
 
 ### Coverage
 coverage/
