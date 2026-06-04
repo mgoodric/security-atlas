@@ -3,7 +3,18 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-03 (batch 185 reconcile — slice 411 merged at `cfaa30a9`; slice 400 ADR open (#956) awaiting maintainer sign-off; spillover 412 filed)
+**Last reconciled:** 2026-06-03 (batch 186 claim-stake — ADR-0010 APPROVED + merged (`ae14ea4d`); slice 400 → merged; 368 re-scoped; 413 (Phase 1) → in-progress; 414 (Phase 2) filed gated)
+
+## Drift detected — 2026-06-03 (batch 186 claim-stake · maintainer approved ADR-0010 cosign phased plan)
+
+Maintainer **approved ADR-0010's ADOPT-DEFERRED** recommendation (2026-06-03). Acting on it:
+
+- **400** (OSCAL cosign signing decision spike + ADR) — **MERGED** at `ae14ea4d` (#956). Decision gate cleared; ADR-0010 is the design authority.
+- **368** (OSCAL ed25519 → cosign, tracking parent) — `blocked` → **in-progress (tracking parent)**. Re-scoped per ADR-0010 into two phased sub-slices (filed below). SaaS default revised keyless→`cosign-kms`-at-GA; air-gap stays `embedded-ed25519`.
+- **413** (cosign-kms + retained embedded, Phase 1 / 368a, ~3d) — **NEW**, `ready` → **in-progress**. Building now. `internal/oscal/cosign` wrapper + `cosign-kms` + retained `embedded-ed25519` + Mode discriminator + manifest mode + verification dispatch + backward-compat + CLI sign|verify|config-check + runbook + Mode A/B integration tests. **NO Fulcio/Rekor/OIDC** (P0-413-1). cosign Apache-2.0 bundle-clean.
+- **414** (cosign-keyless + Fulcio + Rekor, Phase 2 / 368b, ~2d) — **NEW**, `not-ready` (gated). Blocked on a separate OIDC-identity-strategy decision (public IdP vs private Sigstore vs Sigstore-root onboarding) + on 413 landing. Air-gap can never use keyless.
+
+Also this session: dependabot triage in flight (6 clean queued for merge; 7 failing major-version bumps flagged for manual migration); cosmetic cleanup done (per-doc status reconcile #957 · worktree/branch prune · 411 merged #958 · 412 spillover ready).
 
 ## Reconcile — 2026-06-03 (batch 185 · slice 411 merged · slice 400 ADR awaiting sign-off)
 
