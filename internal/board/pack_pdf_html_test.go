@@ -2,7 +2,7 @@
 // (internal/board/pack_pdf.go). The chromedp render itself needs a real
 // browser and is exercised by integration tests; the HTML builder is pure
 // and is the load-bearing surface for the visual fidelity to the
-// Plans/mockups/board-pack.html reference.
+// Plans/_archive/mockups/board-pack.html reference.
 //
 // Load-bearing functions exercised:
 //

@@ -3240,6 +3240,21 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Changed
 
+- **slice 459** — swept stale `Plans/mockups/` provenance citations in source
+  code comments to the archived path `Plans/_archive/mockups/`. Slice 437
+  `git mv`'d the iteration-1 HTML mockups out of the active tree and repointed
+  the only functional resolver (`web/e2e-audit/lib/manifest.ts` `mockupsDir()`),
+  but ~30 inline `// per Plans/mockups/<page>.html` design-provenance comments in
+  `internal/board/`, `internal/catalog/`, `web/components/`, `web/lib/`, and
+  `web/e2e/` were left pointing at the pre-archive path, so a developer chasing a
+  comment hit a dead path. Comment-only churn — no behavioral, runtime, or
+  test-assertion change. Deliberately untouched: the dated historical records
+  (`CHANGELOG.md` prior entries, `docs/audit-log/**`, `docs/audits/**`,
+  `docs/issues/**`, `docs/design/**`, the dated `Plans/canvas/13-*` audit) keep
+  their pre-archive citations verbatim as point-in-time fact, and the
+  `manifest.test.ts` deliberately-invalid `mockupPath` fixture (a negative
+  regex-rejection case, not a provenance link) is left as-is.
+
 - **slice 084** — release-signing toolchain coordinated migration to the
   cosign v3 + Sigstore protobuf-bundle stack: `.github/workflows/
 release.yml` bumps `sigstore/cosign-installer@v3 → @v4.1.2` (SHA

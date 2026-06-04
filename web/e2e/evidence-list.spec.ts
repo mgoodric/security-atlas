@@ -113,7 +113,7 @@ test.describe("/evidence list view", () => {
   });
 
   // Slice 234 — three new filter pills bring the row to six-pill
-  // mockup parity (Plans/mockups/evidence.html lines 125-184):
+  // mockup parity (Plans/_archive/mockups/evidence.html lines 125-184):
   // Source (composite actor_type|actor_id), Scope (scope_cell_id), and
   // Since (preset window mapped client-side to an RFC3339 cutoff).
   // Each pill renders, selecting a non-sentinel option narrows the

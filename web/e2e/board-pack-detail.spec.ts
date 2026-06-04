@@ -73,7 +73,7 @@ test.describe("board-pack detail view", () => {
   });
 
   test("slice 218 / P0-218-2: no fabricated tenant-name segment", async () => {
-    // The mockup at Plans/mockups/board-pack.html lines 27-30 ships a
+    // The mockup at Plans/_archive/mockups/board-pack.html lines 27-30 ships a
     // three-segment chain that opens with `Sentinel Labs`. We
     // deliberately diverge — no session-bound tenant name to render
     // honestly. Regression guard: the live breadcrumb never carries

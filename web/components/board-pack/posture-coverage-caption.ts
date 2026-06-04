@@ -8,7 +8,7 @@
 // The component imports the constant and renders it; the unit test
 // pins the constant to the constitutional source.
 //
-// Source of truth: Plans/mockups/board-pack.html §01 footer
+// Source of truth: Plans/_archive/mockups/board-pack.html §01 footer
 // (lines 146–148). Any drift between this constant and the mockup is
 // a bug — keep them aligned.
 

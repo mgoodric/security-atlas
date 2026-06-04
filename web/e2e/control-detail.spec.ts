@@ -174,7 +174,7 @@ test.describe("control detail view", () => {
     //   - out-of-scope row: data-coverage-state="out-of-scope" + the
     //     literal text "n/a"
     // The strength bar's width reflects the COVERAGE percent, not the
-    // raw strength (mockup binding — see Plans/mockups/control.html
+    // raw strength (mockup binding — see Plans/_archive/mockups/control.html
     // lines 192/203/214). Assertions are commented pending the
     // slice-082 seed harness (same convention as the surrounding
     // tests). The slice 256 P0-1 contract — no client-side fabrication

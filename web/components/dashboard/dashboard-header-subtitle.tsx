@@ -1,7 +1,7 @@
 // Slice 229 — dashboard header subtitle (tenant context + evidence
 // freshness pct). Closes the parity gap surfaced by slice 204's audit
 // fleet (dashboard slug, finding F-204D-2): the mockup at
-// `Plans/mockups/dashboard.html` (lines 117-120) renders contextual
+// `Plans/_archive/mockups/dashboard.html` (lines 117-120) renders contextual
 // orientation copy next to the H1 — the live build rendered generic
 // marketing copy that did not communicate which tenant the operator
 // was viewing nor what the aggregate freshness posture was.
