@@ -3,7 +3,7 @@
 **Cluster:** Quality / e2e
 **Estimate:** 0.5d-1d (depending on root-cause depth)
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** spillover from batch 104 (slices 229 + 268). Filed 2026-05-24.
 
 ## Narrative

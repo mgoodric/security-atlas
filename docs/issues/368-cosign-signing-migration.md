@@ -1,9 +1,66 @@
 # 368 — OSCAL export bundle signing: ed25519 → cosign
 
 **Cluster:** Oscal
-**Estimate:** 5d
+**Estimate:** 5d (re-scoped into 368a ~3d + 368b ~2d — see "Re-scoped by ADR-0010")
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `blocked` (on ADR-0010 maintainer sign-off; see "Re-scoped by ADR-0010")
+**Gated by:** [ADR-0010](../adr/0010-oscal-cosign-signing.md) (slice 400 decision spike)
+
+## Re-scoped by ADR-0010 (slice 400 decision spike)
+
+[ADR-0010](../adr/0010-oscal-cosign-signing.md) is the maintainer's go/no-go
+gate for this slice. Its recommendation — **ADOPT-DEFERRED, confidence HIGH** —
+re-scopes the single 5d "build all three modes, keyless-default-for-SaaS" plan
+below into **two phased sub-slices**, because:
+
+1. **The `cosign-keyless` OIDC-identity premise in this doc does not hold as
+   written.** Slice 188's AS mints a per-deployment, non-public issuer
+   (`aud = <atlas-instance-issuer>`), which is **not** in public Fulcio's
+   federated trust root. atlas's own machine identity therefore cannot mint a
+   Fulcio cert without either a public-IdP coupling, a private Sigstore stack,
+   or a Sigstore-root onboarding process. Keyless is gated on resolving that.
+2. **`cosign-kms` is reachable now** with no Fulcio/Rekor/OIDC dependency and
+   closes the bulk of the named auditor friction (ad-hoc key + bespoke
+   verifier) with stock `cosign verify-blob`.
+3. **Air-gap self-host can only use `embedded-ed25519`** — retained, default
+   there, non-negotiable.
+
+**Status: this slice is `blocked` pending maintainer approval of ADR-0010.** On
+approval, file the two sub-slices below; this slice becomes the tracking parent.
+
+### 368a — Phase 1 (cosign-kms + retained embedded), ~3d — `ready` on ADR approval
+
+`internal/oscal/cosign` wrapper + `cosign-kms` mode + retained
+`embedded-ed25519` + `Mode` discriminator + manifest mode + verification
+dispatch + backward-compat + CLI `sign|verify|config-check` + runbook +
+integration tests for Modes A & B. Maps to the day-by-day plan below:
+Day 1 (wrapper + kms) · Day 3 (dispatch + manifest + backward-compat) ·
+Day 4 (CLI + runbook) · most of Day 5 (Mode-A/B integration tests + decisions
+log). **No Fulcio/Rekor/OIDC.** Covers AC-1, AC-2 (kms + embedded values),
+AC-3, AC-4, AC-5, AC-7, AC-10, and AC-6 for Modes A & B.
+
+### 368b — Phase 2 (cosign-keyless + Fulcio + Rekor), ~2d — `not-ready` (gated)
+
+`cosign-keyless` mode plus Fulcio cert issuance plus Rekor transparency-log
+handling, keyless verification dispatch, keyless integration tests, and the SaaS
+keyless-default flip. Maps to Day 2 (keyless + Fulcio) plus the keyless slice of
+Day 5. **Blocked-by:** a separate, short OIDC-identity-strategy decision
+(public IdP vs private Sigstore vs Sigstore-root onboarding) — see ADR-0010
+"the single decision … secondary decision." This is canvas §9's "Full Sigstore
+transparency-log in v3" line. Covers the `cosign-keyless` portion of AC-2, AC-3,
+AC-6, and the revised AC-9 SaaS default.
+
+### AC-9 revision (per ADR-0010 default-mode table)
+
+The original AC-9 below set the Helm/SaaS default to `cosign-keyless`. **ADR-0010
+revises this:** at GA the SaaS (Helm) default is **`cosign-kms`** (reachable,
+operator-controlled identity, no Sigstore public-infra dependency);
+`cosign-keyless` becomes the SaaS default only after 368b + the OIDC-identity
+decision land. The `docker-compose.yml` self-host default stays
+`embedded-ed25519` (unchanged). See ADR-0010 "Recommended default mode per
+deployment shape."
+
+---
 
 ## Narrative
 
@@ -79,8 +136,8 @@ STRIDE pass:
 - [ ] **AC-5.** Existing ed25519-signed bundles continue to verify under the new dispatch (backward compatibility).
 - [ ] **AC-6.** Integration test (`oscal_cosign_integration_test.go` with `//go:build integration`): sign + verify round-trip in each mode succeeds; a tampered bundle fails verification in each mode.
 - [ ] **AC-7.** `docs/runbooks/oscal-signing.md` covers the three modes, when to use each, prerequisites, and migration.
-- [ ] **AC-8.** ADR-0003 (or a new ADR) records the multi-mode decision + the mode-selection logic.
-- [ ] **AC-9.** Default mode for `docker-compose.yml` self-host deployment is `embedded-ed25519` (no cosign prerequisite); default for `deploy/helm` SaaS deployment is `cosign-keyless`.
+- [ ] **AC-8.** ~~ADR-0003 (or a new ADR) records the multi-mode decision + the mode-selection logic.~~ **DONE — recorded in [ADR-0010](../adr/0010-oscal-cosign-signing.md)** (slice 400). The mode-selection logic + per-deployment defaults live there.
+- [ ] **AC-9.** **REVISED by ADR-0010.** Default mode for `docker-compose.yml` self-host deployment is `embedded-ed25519` (no cosign prerequisite) — unchanged. Default for `deploy/helm` SaaS deployment is **`cosign-kms` at GA** (was `cosign-keyless`); `cosign-keyless` becomes the SaaS default only after 368b + the OIDC-identity decision. See ADR-0010 "Recommended default mode per deployment shape."
 - [ ] **AC-10.** `pre-commit run --all-files` passes; CI green.
 
 ## Constitutional invariants honored

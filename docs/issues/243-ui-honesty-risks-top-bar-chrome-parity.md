@@ -3,7 +3,7 @@
 **Cluster:** Quality / UI hygiene (frontend)
 **Estimate:** 0.5d (presentational; the global-search piece is tracked separately as #223 and is the substantive one)
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 
