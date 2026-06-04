@@ -3,7 +3,7 @@
 **Cluster:** Backend / Frontend / Multi-tenancy
 **Estimate:** 3-4d
 **Type:** JUDGMENT (one D1 + several smaller calls; pre-grilled architecture in CONTEXT.md)
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

@@ -16,14 +16,49 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-// Handler bundles the slice-064 control-detail read routes over a single
-// Store. Every route is a pure read; the Handler holds no write surface.
-type Handler struct {
-	store *Store
+// controlDetailReader is the per-route read seam the three
+// /v1/controls/{id}/{policies,risks,history} paths read through (slice 411,
+// contract-tier rollout). It carries JUST the three read methods those
+// routes need — deliberately narrow (slice 409 D1 / slice 410's list-only
+// precedent: a full read interface over the wider Store surface, which also
+// serves the tenant-wide evidence ledger + count, would be a bigger refactor
+// than recording three goldens justifies). The contract-tier recorder
+// (handler_contract_test.go) injects a fixed-row stub satisfying this seam so
+// the three wire shapes record on the plain `go test ./...` unit surface with
+// no Postgres pool (ADR-0007 / P0-409-1). The production *Store satisfies it
+// verbatim; the seam is unexported and New(*Store) is unchanged (P0-409-2).
+// The Evidence handler keeps using the concrete h.store directly — it is the
+// tenant-wide ledger window, not part of the control-detail tab cluster the
+// e2e suite traverses, and is left for a follow-on (decisions log).
+type controlDetailReader interface {
+	PoliciesForControl(ctx context.Context, controlID uuid.UUID) ([]dbx.ListPoliciesLinkedToControlRow, error)
+	RisksForControl(ctx context.Context, controlID uuid.UUID) ([]dbx.ListRisksLinkedToControlRow, error)
+	HistoryForControl(ctx context.Context, controlID uuid.UUID, p historyPage) ([]dbx.ListControlEvaluationHistoryPagedRow, error)
 }
 
-// New constructs a Handler over the application pgx pool.
-func New(store *Store) *Handler { return &Handler{store: store} }
+// Handler bundles the slice-064 control-detail read routes over a single
+// Store. Every route is a pure read; the Handler holds no write surface.
+//
+// reader is the slice-411 per-route read seam the policies/risks/history
+// paths read through; New points it at store, so production behavior is
+// identical. The Evidence handler keeps using store directly.
+type Handler struct {
+	store  *Store
+	reader controlDetailReader
+}
+
+// New constructs a Handler over the application pgx pool. The slice-411
+// per-route read seam (reader) is wired to the same store — the public
+// signature is unchanged (P0-409-2).
+func New(store *Store) *Handler { return &Handler{store: store, reader: store} }
+
+// newHandlerWithReader constructs a Handler whose policies/risks/history
+// paths read through an arbitrary read seam. It exists ONLY for the slice-411
+// contract recorder, which injects a fixed-row stub so the three wire shapes
+// record with no Postgres pool. Unexported — not part of the public surface.
+func newHandlerWithReader(reader controlDetailReader) *Handler {
+	return &Handler{reader: reader}
+}
 
 // ===== wire shapes =====
 //
@@ -257,7 +292,7 @@ func (h *Handler) Policies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.store.PoliciesForControl(ctx, controlID)
+	rows, err := h.reader.PoliciesForControl(ctx, controlID)
 	if err != nil {
 		httperr.WriteInternal(w, r, "controldetail", err)
 		return
@@ -290,7 +325,7 @@ func (h *Handler) Risks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.store.RisksForControl(ctx, controlID)
+	rows, err := h.reader.RisksForControl(ctx, controlID)
 	if err != nil {
 		httperr.WriteInternal(w, r, "controldetail", err)
 		return
@@ -336,7 +371,7 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.store.HistoryForControl(ctx, controlID, historyPage{
+	rows, err := h.reader.HistoryForControl(ctx, controlID, historyPage{
 		cursor:   cursor,
 		pageRows: pageRows,
 	})

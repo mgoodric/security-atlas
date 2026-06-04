@@ -3,7 +3,24 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-05-30 (batch 184 reconcile — slice 082 stale-`ready` drift corrected → merged at `425845b0` (#253) · queue genuinely empty · LOOP TERMINATED)
+**Last reconciled:** 2026-06-03 (batch 185 reconcile — slice 411 merged at `cfaa30a9`; slice 400 ADR open (#956) awaiting maintainer sign-off; spillover 412 filed)
+
+## Reconcile — 2026-06-03 (batch 185 · slice 411 merged · slice 400 ADR awaiting sign-off)
+
+- **411** (contract-tier rollout: controls-detail + audit-workspace routes, parent 409) — Quality · JUDGMENT — **MERGED** at `cfaa30a9` (#958). Recorded goldens for the highest-traffic 394-hand-mocked subset: `GET /v1/controls/{id}/policies`, `/risks`, `/history` (one 3-method unexported `controlDetailReader` seam) + `GET /v1/audit-periods` (1-method `periodLister` seam). All 4 BFFs verbatim passthrough → `toEqual(golden)`. Drift proven (control-risks `link_weight`→`weight`). Unit-surface recorders (no DB/integration tag, P0-409-1); `New(...)` unchanged (P0-409-2). vitest 1263 (20 new); auditperiods 0%→14%. Deferred the multi-package tail → spillover **412**.
+- **412** (contract-tier: controls/audit tail) — spillover from 411, `ready` (deps merged). Covers the remainder: controldetail coverage/effectiveness/state/attestations/evidence-window + audit populations/samples/walkthroughs/notes. Loop-ready pick.
+- **400** (OSCAL cosign signing decision spike + ADR, parent 368) — Oscal · JUDGMENT — **ADR authored, PR #956 OPEN, AWAITING MAINTAINER SIGN-OFF** (P0-400-2: does NOT auto-merge). ADR-0010 (`docs/adr/0010-oscal-cosign-signing.md`). Recommendation **ADOPT-DEFERRED, confidence HIGH**: keyless blocked on identity federation (atlas AS issuer not in public Fulcio trust root; air-gap can't reach Fulcio/Rekor); build `cosign-kms` + retain `embedded-ed25519` default first (368a ~3d), defer `cosign-keyless` (368b ~2d) gated on an OIDC-identity decision. cosign Apache-2.0 → license-clean to bundle. Re-scoped 368 (`ready`→`blocked` on ADR-0010 sign-off; split 368a/368b; SaaS default keyless→kms-at-GA). **368 doc status now reflects this.**
+
+Decision pending from maintainer: approve/reject ADR-0010's ADOPT-DEFERRED + the 368 phased re-scope (PR #956). Also in flight: dependabot triage (6 clean queued; 7 failing major-version bumps flagged) + completed cosmetic cleanup (per-doc status reconcile #957 · worktree/branch prune).
+
+## Drift detected — 2026-06-03 (batch 185 claim-stake · maintainer-directed · 400 + 411)
+
+Loop restarted by maintainer direction (2026-06-03) after the batch-184 terminus. Two genuinely-outstanding slices authorized to build:
+
+- **400** (OSCAL signing cosign/Sigstore decision spike + ADR, parent 368) — Oscal · JUDGMENT (decision-only) — `ready` → **in-progress**. Authors `docs/adr/NNNN-oscal-cosign-signing.md`: value vs status-quo ed25519, the 3 modes (cosign-keyless / cosign-kms / embedded-ed25519), cost ledger (cosign binary + Fulcio/Rekor live deps + OIDC machine identity + ~5d build), cosign Apache-2.0 license-bundling check, and a confidence-rated ADOPT / ADOPT-DEFERRED / DON'T-ADOPT recommendation + per-deployment default. NO production code (P0-400-1). **Does NOT auto-merge (P0-400-2)** — the recommendation returns to the maintainer for the 368 go/no-go.
+- **411** (contract-tier rollout: controls-detail + audit-workspace routes, parent 409) — Quality · JUDGMENT — `blocked` → **in-progress** (maintainer cleared the appetite gate). Lands Option-A read seams + provider recorders + transform-aware consumer asserts for the highest-traffic controls-detail (`/v1/controls/*`) and audit-workspace (`/v1/audit/*`) routes the e2e suite traverses (the ones 394's fulfillFromGolden would otherwise hand-mock); drift-proof per endpoint; spillover the long tail (spec anticipates a controls/audit split). Zero-new-gate (ADR-0007).
+
+Conflict-safe (400 = docs/ADR + 368 doc; 411 = internal/api controls/audit + web/lib/contracts). Running in parallel. Also this session: dependabot triage (merge clean + rebase stale) + cosmetic cleanup (per-doc status reconcile + local worktree/branch prune).
 
 ## Reconcile — 2026-05-30 (batch 184 · slice 082 status-drift correction · LOOP TERMINATED)
 

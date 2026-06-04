@@ -3,7 +3,7 @@
 **Cluster:** Backend / Frontend / Multi-tenancy
 **Estimate:** 3-4d (tracer-bullet scope locked by maintainer 2026-05-20)
 **Type:** JUDGMENT
-**Status:** `ready` (scope locked 2026-05-20 — see "What this slice ships (v1 tracer-bullet scope)" below)
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

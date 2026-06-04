@@ -40,13 +40,44 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-// Handler bundles the slice-028 routes over a single period.Store.
-type Handler struct {
-	store *period.Store
+// periodLister is the LIST-ONLY read seam the List (GET /v1/audit-periods)
+// path reads through (slice 411, contract-tier rollout). It carries JUST the
+// one List method that endpoint needs — deliberately narrow (slice 409 D1 /
+// slice 410's list-only precedent: a full read interface over the wider
+// period.Store surface — Create/Get/List/Freeze/ControlState/AttachPopulation/
+// … — would be a bigger refactor than recording one golden justifies). The
+// contract-tier recorder (handler_contract_test.go) injects a fixed-row stub
+// satisfying this seam so the GET /v1/audit-periods wire shape records on the
+// plain `go test ./...` unit surface with no Postgres pool (ADR-0007 /
+// P0-409-1). The production *period.Store satisfies it verbatim; the seam is
+// unexported and New(*period.Store) is unchanged (P0-409-2). Every other
+// handler keeps using the concrete h.store directly.
+type periodLister interface {
+	List(ctx context.Context) ([]period.Period, error)
 }
 
-// New constructs a Handler.
-func New(store *period.Store) *Handler { return &Handler{store: store} }
+// Handler bundles the slice-028 routes over a single period.Store.
+//
+// lister is the slice-411 list-only read seam the List path reads through;
+// New points it at store, so production behavior is identical. Every other
+// handler keeps using store directly.
+type Handler struct {
+	store  *period.Store
+	lister periodLister
+}
+
+// New constructs a Handler. The slice-411 list-only seam (lister) is wired to
+// the same store — the public signature is unchanged (P0-409-2).
+func New(store *period.Store) *Handler { return &Handler{store: store, lister: store} }
+
+// newHandlerWithLister constructs a Handler whose List path reads through an
+// arbitrary list-only seam. It exists ONLY for the slice-411 contract
+// recorder, which injects a fixed-row stub so the GET /v1/audit-periods wire
+// shape records with no Postgres pool. Unexported — not part of the public
+// surface.
+func newHandlerWithLister(lister periodLister) *Handler {
+	return &Handler{lister: lister}
+}
 
 // ----- wire shapes -----
 
@@ -164,7 +195,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	ps, err := h.store.List(ctx)
+	ps, err := h.lister.List(ctx)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list audit periods", err)
 		return

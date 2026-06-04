@@ -3,7 +3,7 @@
 **Cluster:** Quality / UI hygiene
 **Estimate:** 0.5d (option A — replace with linked instructions) · 2.0d (option B — ship inline push UI)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** #204 (UI parity audit fleet)
 
 ## Narrative

@@ -3,7 +3,7 @@
 **Cluster:** Backend (export)
 **Estimate:** ~1d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** spillover from slice 204 / precursor to slice 230 (dashboard Export + New-board-report header CTAs). Filed 2026-05-23 to unblock the "Export" half of slice 230 (the "New board report" half is already covered by slice 053 board-pack composer).
 
 ## Narrative

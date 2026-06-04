@@ -3,7 +3,7 @@
 **Cluster:** Frontend + Auth
 **Estimate:** 0.5d
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** #204 (per-page UI parity audit fleet) — settings audit. Slice 154 settings-only audit assumed an OIDC-backed human user; this finding is class category-iii (data-bound surface that lies) for the case where the JWT is bound to a credential rather than a human.
 
 ## Narrative

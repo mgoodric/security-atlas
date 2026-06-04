@@ -3,7 +3,7 @@
 **Cluster:** Performance / Operability
 **Estimate:** 1d
 **Type:** AFK (mechanically verifiable)
-**Status:** `in-review`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

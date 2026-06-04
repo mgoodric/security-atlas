@@ -3,7 +3,7 @@
 **Cluster:** Oscal
 **Estimate:** 0.5-1d
 **Type:** JUDGMENT (decision-only)
-**Status:** `ready`
+**Status:** `in-review` (ADR-0010 authored; PR #956 open — AWAITING MAINTAINER SIGN-OFF per P0-400-2)
 **Parent:** 368 (OSCAL export bundle signing ed25519 → cosign)
 
 ## Narrative

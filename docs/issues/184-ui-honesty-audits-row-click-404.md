@@ -3,7 +3,7 @@
 **Cluster:** Quality / UI hygiene
 **Estimate:** 0.5d (option A — disable click) · 2.0d (option B — ship detail page)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

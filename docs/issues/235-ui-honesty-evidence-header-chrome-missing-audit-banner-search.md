@@ -3,7 +3,7 @@
 **Cluster:** Quality / UI hygiene · cross-cutting (chrome)
 **Estimate:** 2.0d (audit-period banner is a cross-cutting shell element; search is a separate v1.5 feature)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** #204 (UI parity audit fleet)
 
 ## Narrative

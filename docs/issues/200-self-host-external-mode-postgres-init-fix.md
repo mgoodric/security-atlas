@@ -3,7 +3,7 @@
 **Cluster:** Quality / Infra
 **Estimate:** 0.5d
 **Type:** JUDGMENT (diagnose-heavy; root-cause must be confirmed before fix)
-**Status:** `ready` (spillover from slice 196)
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Provenance
 
