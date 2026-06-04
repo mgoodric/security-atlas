@@ -3,7 +3,7 @@
 **Cluster:** Quality
 **Estimate:** 1-2d (M)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (`9d8e4179`, #985 — 5 fuzz targets + bounded CI; no crashers)
 **Priority:** P1
 
 ## Narrative
