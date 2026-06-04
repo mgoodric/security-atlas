@@ -268,15 +268,54 @@ func TestRun_FiresInlineSweepAndExitsOnCancel(t *testing.T) {
 
 	s := scheduler.New(admin, app, registry, nil)
 
-	// Long interval; the inline sweep is the one tick we exercise.
-	// 500ms is plenty for the SweepOnce write path.
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	// Two concerns this test exercises must NOT share one clock:
+	//
+	//   1. The inline pre-tick sweep's real DB work (list tenants → begin
+	//      tx → apply tenant GUC → compute evaluators → insert observation
+	//      → commit) must run to completion. That work flows under the same
+	//      ctx passed to Run — so ctx must NOT be cancelled until the sweep
+	//      has finished.
+	//   2. Run() exits only when ctx is cancelled.
+	//
+	// The earlier version used ONE context.WithTimeout(500ms) for both: the
+	// 500ms deadline doubled as the inline sweep's work budget AND the exit
+	// trigger. Under CI load a cold-pool first sweep can exceed 500ms, so
+	// ctx cancels mid-sweep, the observation insert is aborted, no row is
+	// written, and the `observations >= 1` assertion fails — the integration
+	// flake observed on dependabot PRs #636/#637/#951/#953. 500ms is not a
+	// safe lower bound for cold-pool DB I/O under contention.
+	//
+	// Deterministic fix: a cancel-only context (no artificial deadline) so
+	// the inline sweep always runs to completion, then poll for the row the
+	// sweep writes, then cancel() to drive the clean-exit path. The exit is
+	// triggered by an OBSERVED completion, not a wall-clock guess.
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	done := make(chan error, 1)
 	go func() {
 		done <- s.Run(ctx, 5*time.Second)
 	}()
+
+	// Wait for the inline sweep to land its first observation. Generous
+	// outer bound (5s) absorbs cold-pool latency under CI load; the poll
+	// returns as soon as the row appears, so the warm-path cost is ~one
+	// poll interval. The 5s interval passed to Run guarantees the ticker
+	// has not fired a second sweep within this window, so the row we see is
+	// the INLINE sweep's.
+	deadline := time.Now().Add(5 * time.Second)
+	for countObservations(t, admin, tenant) < 1 {
+		if time.Now().After(deadline) {
+			cancel()
+			<-done
+			t.Fatalf("inline sweep wrote no observation within 5s; want >= 1")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Inline sweep is confirmed done. Now exercise the clean-exit path:
+	// cancelling ctx must make Run return nil promptly.
+	cancel()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -284,9 +323,5 @@ func TestRun_FiresInlineSweepAndExitsOnCancel(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("Run did not return within 10s of context cancellation")
-	}
-
-	if got := countObservations(t, admin, tenant); got < 1 {
-		t.Errorf("post-Run observations = %d; want >= 1 (the inline sweep should have written at least one)", got)
 	}
 }
