@@ -99,6 +99,35 @@ checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
   algorithm: sha256
 
+sboms:
+  # Per-artifact SBOM (slice 451). GoReleaser auto-invokes `syft` (installed
+  # on the release runner by release.yml's "Install syft" step, left on PATH
+  # precisely so this block could be enabled without a workflow change).
+  #
+  # JUDGMENT calls (recorded in docs/audit-log/451-slsa-provenance-sbom-decisions.md):
+  # - Format = SPDX JSON. CycloneDX is equally supported by syft; SPDX is
+  #   chosen so the binary surface matches what container-publish.yml's
+  #   buildx `sbom: true` emits (SPDX by default), giving a diligence
+  #   verifier one format across both supply-chain surfaces. SPDX is also
+  #   the format `slsa-verifier` and most stock tooling treats as canonical.
+  # - Scope = `archive` → one SBOM per released archive (the "per release
+  #   artifact" shape AC-1 + P0-451-2 want), NOT a single aggregate SBOM.
+  #
+  # Gating (AC-4 / P0-451-4): GoReleaser fails the release if a `syft` SBOM
+  # command exits non-zero, and the workflow's "Verify SBOMs are non-empty"
+  # step (release.yml) asserts every emitted SBOM has a non-zero package
+  # count — an empty/zero-component SBOM fails the release rather than
+  # shipping as false assurance. This block is NOT best-effort.
+  - id: archive-sbom
+    artifacts: archive
+    documents:
+      - "${artifact}.spdx.sbom.json"
+    cmd: syft
+    args:
+      - "$artifact"
+      - "--output"
+      - "spdx-json=$document"
+
 signs:
   # Keyless OIDC signing via Sigstore/Fulcio. No private key in secrets.
   # The workflow grants id-token: write so cosign can mint a short-lived
