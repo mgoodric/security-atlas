@@ -89,3 +89,26 @@ repos:
         language: system
         files: ^\.github/workflows/.*\.ya?ml$
         pass_filenames: true
+
+  # Machine-local-cache guard — slice 458. Fails when a staged path matches
+  # a known per-machine cache shape (`.understand-anything/`, `.cache/`,
+  # `node_modules/`, `.DS_Store`, …). Background: a 9.8M
+  # `.understand-anything/` cache was once swept into main by a broad
+  # `git add .` BEFORE its `.gitignore` rule landed (slice 433). `.gitignore`
+  # stops the forward accident only for untracked paths; this guard blocks
+  # the NEXT cache-dir of that footgun at commit time. The same script runs
+  # in CI (the `cache-path-guard` job in ci.yml) for defense in depth — a
+  # contributor who skips local hooks is still caught.
+  #
+  # `pass_filenames: true` so the staged file list arrives as argv (the
+  # script's bare-path / --args mode); the denylist lives in the script
+  # (DENY_DIRS / DENY_FILES). `always_run: false` (default) + no `files:`
+  # filter means it only runs against the staged set, which is exactly the
+  # surface we guard.
+  - repo: local
+    hooks:
+      - id: cache-path-guard
+        name: cache-path-guard (slice 458)
+        entry: scripts/check-staged-cache-paths.sh
+        language: system
+        pass_filenames: true
