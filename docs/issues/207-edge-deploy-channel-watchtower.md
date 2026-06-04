@@ -3,7 +3,7 @@
 **Cluster:** Infra / Deploy
 **Estimate:** 1d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** maintainer-surfaced 2026-05-22. Iterating on slice 206's deployment-blocking fix required a manual cut-tag-release-redeploy cycle. The maintainer wants a continuous-deploy edge channel that ships every `main` push to a parallel Unraid instance (`atlas-edge.home.gmoney.sh`) without going through release-please's cadence. The versioned channel (`atlas.home.gmoney.sh`) keeps its slow stable cadence; edge runs hot.
 
 ## Narrative

@@ -3,7 +3,7 @@
 **Cluster:** Frontend
 **Estimate:** 0.5d
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** #204 (per-page UI parity audit fleet) — settings audit. Slice 154 audited section content; the admin-variant SSR/CSR mismatch surfaces when fetching `/settings` with an admin JWT and comparing SSR HTML to the post-hydration DOM. 154's findings did not include this.
 
 ## Narrative

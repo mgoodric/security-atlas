@@ -3,7 +3,7 @@
 **Cluster:** frontend
 **Estimate:** 0.25d (mockup-only path) · 1.5d (extend periodWire path)
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 
