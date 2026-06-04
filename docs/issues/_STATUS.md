@@ -3,16 +3,22 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-03 (batch 188 claim-stake — slices 423 + 429 + 433 + 437 → in-progress (parallel, conflict-safe))
+**Last reconciled:** 2026-06-04 (batch 188 reconcile — 423 + 429 + 433 + 437 MERGED; spillovers 457/458/459 filed; ~34 backlog slices remain)
 
-## Drift detected — 2026-06-03 (batch 188 claim-stake · 423 + 429 + 433 + 437)
+## Reconcile — 2026-06-04 (batch 188 · 423 + 429 + 433 + 437 merged)
 
-Second drain batch from the 415-455 analysis backlog. Conflict-safe (disjoint: web/e2e / READMEs / .gitignore / Plans+CLAUDE.md; only CHANGELOG shared).
+Second drain batch — all four merged (CHANGELOG cascade across the 4 parallel PRs resolved keep-all-bullets at each merge).
 
-- **423** (OSCAL export e2e) — Quality · `ready` → **in-progress**. Playwright spec driving /audits → trigger OSCAL bundle export → assert download + Content-Type (mirrors slice 388 board-pack export; covers the slice-413 signed path).
-- **429** (connector + Go/TS SDK READMEs) — Docs · `ready` → **in-progress**. `connectors/aws/README.md` + `pkg/sdk-go/README.md` + `sdk/typescript/README.md` (the missing flagship surfaces).
-- **433** (gitignore `.understand-anything/`) — Infra · `ready` → **in-progress**. Add the 9.8MB local-analysis cache to root `.gitignore`.
-- **437** (archive `Plans/mockups/`) — Infra · `ready` → **in-progress**. `git mv` the iteration-1 HTML to `Plans/_archive/mockups/` + update the CLAUDE.md mockups note (kills the recurring false-drift source).
+- **423** (OSCAL export e2e) — Quality — **MERGED** at `7298f546` (#981). Found the assumed browser-download surface doesn't exist in v1 (handler returns JSON, no BFF route, no per-period detail page); asserted the real reachable wire boundary (in-page fetch → `application/json` + 4 OSCAL members + the slice-413 embedded-ed25519 signed manifest) rather than faking a download event. Missing download surface → spillover **457**.
+- **429** (connector + Go/TS SDK READMEs) — Docs — **MERGED** at `74ca43be` (#979). AWS connector + Go SDK + TS SDK READMEs, all verified against shipped source (honestly documented that the TS SDK ships only OAuth, no push wrapper yet); least-privilege read-only IAM.
+- **433** (gitignore `.understand-anything/`) — Infra — **MERGED** at `1508501c` (#978). **Finding:** the cache was ALREADY committed to history at batch 164 (the footgun already fired); added the ignore + `git rm --cached` (files preserved). Spillover **458** (pre-commit guard + the pre-public-launch history-scrub decision).
+- **437** (archive `Plans/mockups/`) — Infra — **MERGED** at `7ce4cc6f` (#980). 12 mockups `git mv`'d to `Plans/_archive/mockups/` (history-preserving) + repointed the web/e2e-audit UI-honesty harness `mockupsDir()` resolver + CLAUDE.md/canvas references; per-page mockup-vs-web divergence is no longer fileable drift. Comment-citation sweep → spillover **459**.
+
+Spillovers filed (de-collided from parallel duplicate numbering): **457** (OSCAL export browser-download surface · `ready`) · **458** (pre-commit guard against committing machine-local caches + history-scrub decision · `ready`) · **459** (sweep code-comment mockup-path citations · `ready`).
+
+Backlog: ~34 analysis slices remain ready (417-421, 424-426, 428, 430-432, 434-445, 448, 450-454) + 456-459. Next batch continues draining. Decision-gates 446/455 + not-ready 447 stay out of the auto-loop.
+
+## Reconcile — 2026-06-03 (batch 187 · 416 + 422 + 427 merged)
 
 ## Reconcile — 2026-06-03 (batch 187 · 416 + 422 + 427 merged)
 
