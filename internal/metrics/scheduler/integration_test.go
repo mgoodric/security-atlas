@@ -363,25 +363,28 @@ func TestRun_FiresInlineSweepAndExitsOnCancel(t *testing.T) {
 	}
 
 	// The rows are now guaranteed durable because the sweep committed before
-	// the hook fired and before we cancelled — the DB count corroborates the
-	// report. This is a corroboration, not the primary assertion, so it is
-	// no longer a race.
+	// the hook fired and before we cancelled — this tenant's count corroborates
+	// the report. Corroboration, not the primary assertion, so no longer a race.
+	// We assert THIS tenant got >= 1 row, NOT equality to rep.ObservationsWritten:
+	// the report counts observations across ALL tenants in the sweep UNION
+	// (rep.TenantsSwept may be > 1 in a shared CI database), so the global
+	// report count is not comparable to this single tenant's row count.
 	if got := countObservations(t, admin, tenant); got < 1 {
 		t.Errorf("post-Run observations = %d; want >= 1 (committed inline sweep)", got)
-	}
-	if got := countObservations(t, admin, tenant); got != rep.ObservationsWritten {
-		t.Errorf("DB observation count = %d; want %d (matches the inline report)", got, rep.ObservationsWritten)
 	}
 }
 
 // TestRun_InlineSweepStress replays the full Run-inline-sweep-then-cancel
 // lifecycle 5 times against the same fresh tenant to confirm the deadline
-// race is gone (slice 340 chromedp 5x-stress precedent). metric_observations
-// is append-only (slice 076), so each iteration adds one batch; we assert
-// every iteration's RETURNED report wrote >= 1 observation and that the DB
-// total grows monotonically by exactly each iteration's reported batch. If
-// the old race were present, an iteration whose COMMIT lost to a deadline
-// would report 0 written and break the running total.
+// race is gone (slice 340 chromedp 5x-stress precedent). Each iteration we
+// assert the RETURNED report wrote >= 1 observation (the deterministic
+// anti-race signal) AND that this tenant's append-only metric_observations
+// row count (slice 076) STRICTLY GROWS. We do NOT compare to a running sum
+// of rep.ObservationsWritten — that count is global across the sweep UNION
+// (rep.TenantsSwept may be > 1 in a shared CI database) and is not comparable
+// to this single tenant's row count. If the old race were present, an
+// iteration whose COMMIT lost to a deadline would report 0 written, or this
+// tenant's count would fail to grow.
 func TestRun_InlineSweepStress(t *testing.T) {
 	admin := openPool(t, adminDSN(t))
 	app := openPool(t, appDSN(t))
@@ -392,15 +395,16 @@ func TestRun_InlineSweepStress(t *testing.T) {
 	registry := metricseval.NewRegistry(app)
 
 	const iterations = 5
-	cumulative := 0
+	prev := countObservations(t, admin, tenant)
 	for i := 0; i < iterations; i++ {
 		rep := runInlineSweepOnce(t, admin, app, registry, tenant)
 		if rep.ObservationsWritten < 1 {
 			t.Fatalf("iteration %d: ObservationsWritten = %d; want >= 1 (deadline race regressed)", i, rep.ObservationsWritten)
 		}
-		cumulative += rep.ObservationsWritten
-		if got := countObservations(t, admin, tenant); got != cumulative {
-			t.Fatalf("iteration %d: DB count = %d; want %d (append-only running total of reported writes)", i, got, cumulative)
+		got := countObservations(t, admin, tenant)
+		if got <= prev {
+			t.Fatalf("iteration %d: this tenant's observation count = %d; want > %d (append-only growth)", i, got, prev)
 		}
+		prev = got
 	}
 }
