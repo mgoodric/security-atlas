@@ -86,6 +86,7 @@ plugins:
 nav:
   - Intro: index.md
   - Install: install.md
+  - Connect an external IdP (OIDC): oidc-setup.md
   - Configuration reference: configuration.md
   - Framework setup: framework-setup.md
   - First audit: first-audit.md
