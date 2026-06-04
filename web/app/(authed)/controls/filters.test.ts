@@ -204,7 +204,7 @@ describe("formatFrameworksCell", () => {
   });
 
   test("AC-5 + AC-7: multi-framework joins with middle-dot separator", () => {
-    // Matches `Plans/mockups/controls.html` line 217 example
+    // Matches `Plans/_archive/mockups/controls.html` line 217 example
     // (`SOC2 · ISO · CSF` on IAC-06).
     expect(formatFrameworksCell(["SOC2", "ISO", "CSF"])).toBe(
       "SOC2 · ISO · CSF",

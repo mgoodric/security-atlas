@@ -2,7 +2,7 @@
 //
 // The /audits page formerly rendered a permanently-disabled "Export
 // OSCAL bundle" button next to three working CSV/JSON/XLSX exports
-// (slices 138 / 139). The mockup at `Plans/mockups/audits.html` line
+// (slices 138 / 139). The mockup at `Plans/_archive/mockups/audits.html` line
 // 116 positioned the OSCAL export as a primary affordance, but the
 // underlying capability is a per-period (not list-level) operation —
 // the right home for it is the per-period detail view (slice 184

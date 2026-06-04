@@ -11,7 +11,7 @@ import { CONTROL_TABS, formatTabCount, isTabKey } from "./tabs";
 
 describe("CONTROL_TABS", () => {
   it("renders the seven mockup tabs in mockup order", () => {
-    // Plans/mockups/control.html lines 143-149: Overview, Evidence,
+    // Plans/_archive/mockups/control.html lines 143-149: Overview, Evidence,
     // Mappings, Effective scope, Policies, Risks, History.
     expect(CONTROL_TABS.map((t) => t.key)).toEqual([
       "overview",

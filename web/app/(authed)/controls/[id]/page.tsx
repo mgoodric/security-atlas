@@ -7,9 +7,9 @@
 //   Risks / History). Tab state is URL-bound via `?tab=<name>` so
 //   deep links resolve to the right tab; default is Overview when
 //   the param is missing or unrecognised. The tab strip mirrors
-//   `Plans/mockups/control.html` lines 139-152.
+//   `Plans/_archive/mockups/control.html` lines 139-152.
 //
-// Built per `Plans/mockups/control.html`. Renders, in mockup order:
+// Built per `Plans/_archive/mockups/control.html`. Renders, in mockup order:
 //   - control header: CTRL id, SCF anchor pill, lifecycle badge, family,
 //     title, owner/implementation/freshness-class meta
 //   - KPI strip: effectiveness 30d, frameworks satisfied, evidence
@@ -94,7 +94,7 @@ import { classifyControlDetailError } from "../error-classifier";
 import { CONTROL_TABS, formatTabCount, isTabKey, type TabKey } from "./tabs";
 
 // Slice 253 — page size for the evidence stream card. Five rows mirrors
-// the mockup (`Plans/mockups/control.html` lines 389-440). The KPI sub-
+// the mockup (`Plans/_archive/mockups/control.html` lines 389-440). The KPI sub-
 // text reads "in last 30 days" (the upstream default window) — when the
 // stream's count maxes at the limit AND a next_cursor is present we
 // surface a "<limit>+ in last 30 days" hint rather than fabricating a
@@ -499,7 +499,7 @@ function ControlDetailPageInner() {
 
       {/* ============ TAB STRIP ============ */}
       {/* Slice 254 — sticky seven-tab strip per mockup
-          (Plans/mockups/control.html lines 139-152). The strip uses
+          (Plans/_archive/mockups/control.html lines 139-152). The strip uses
           the slice 044 inlined-tab-list pattern (the codebase has no
           shared tabs primitive; introducing one would violate
           P0-254-1's "do not introduce a new component primitive"). The
@@ -720,7 +720,7 @@ function KpiCard({
 
 // =================== TAB PANELS ===================
 
-// OverviewPanel — Plans/mockups/control.html shows the Overview tab as
+// OverviewPanel — Plans/_archive/mockups/control.html shows the Overview tab as
 // the "everything-at-a-glance" surface (lines 156-560). Slice 254
 // preserves the exact two-column layout that shipped pre-tab-strip
 // (anti-criterion P0-254-3): coverage + UCF graph + evidence stream
@@ -1343,7 +1343,7 @@ function HistoryBody({
 }
 
 // Slice 253 — one row of the evidence-stream card. Mirrors the mockup
-// (`Plans/mockups/control.html` lines 389-440): a result dot, the
+// (`Plans/_archive/mockups/control.html` lines 389-440): a result dot, the
 // observed_at timestamp, a summary line (the evidence_kind + the
 // connector/actor tag), and a pass/fail/na/inconclusive badge. The
 // `source` JSONB is rendered as a brief tag — `{actor_type}/{actor_id}`

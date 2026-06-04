@@ -469,7 +469,7 @@ function EvidencePageInner() {
       options: resultOptions,
     },
     // Slice 234 — three new pills bring the row to the six-pill mockup
-    // parity (Plans/mockups/evidence.html lines 125-184). Source binds
+    // parity (Plans/_archive/mockups/evidence.html lines 125-184). Source binds
     // both source_actor_* params atomically (composite key handled by
     // updateSourceFilter); Scope binds scope_cell_id; Since maps a
     // preset key to an RFC3339 cutoff client-side.
@@ -653,7 +653,7 @@ function EvidencePageInner() {
   // text so a Playwright selector can target it specifically. When the
   // ledger is empty (`total === 0`) the suffix collapses to empty —
   // the meta row's "No records in ledger yet" carries the operator
-  // signal in that case (mockup parity: `Plans/mockups/evidence.html`
+  // signal in that case (mockup parity: `Plans/_archive/mockups/evidence.html`
   // line 111).
   const ledgerSuffix =
     ledgerTotal === undefined ? "" : ledgerSubtitleSuffix(ledgerTotal);
@@ -840,7 +840,7 @@ function EvidencePageInner() {
           mobileMode="cards"
         />
         {/* Slice 237 — cursor-paginated footer. Matches the mockup at
-            Plans/mockups/evidence.html lines 266-272. Renders only when
+            Plans/_archive/mockups/evidence.html lines 266-272. Renders only when
             the current page has rows (slice 246 D3 convention: empty
             sets surface the EmptyState above instead). The Previous
             stack lives in `cursorStack` (in-memory, page-scoped). */}

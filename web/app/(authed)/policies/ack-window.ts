@@ -4,7 +4,7 @@
 // `<ListPagination>` primitive from slice 246) discloses the
 // acknowledgment-window cadence the platform uses internally for the
 // per-policy ack-rate cell rendered in the slice 107 column. The
-// mockup at `Plans/mockups/policies.html` lines 278-284 shows the
+// mockup at `Plans/_archive/mockups/policies.html` lines 278-284 shows the
 // disclosure as a tail substring on the footer's summary line:
 //
 //     Showing 1–7 of 17 · 365-day acknowledgment window
@@ -52,7 +52,7 @@
  * evaluator (slice 107).
  *
  * SOC 2 CC1.4 acknowledgment-cadence convention; matches the mockup
- * at `Plans/mockups/policies.html` line 279.
+ * at `Plans/_archive/mockups/policies.html` line 279.
  *
  * Single source of truth — the rendered caption derives from this
  * constant, and a future change to the policy-of-record (e.g. a

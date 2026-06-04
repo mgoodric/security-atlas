@@ -4,7 +4,7 @@
 // same policies list the table renders. Pure data → string; no React,
 // no DOM (vitest-unit-testable without a tree).
 //
-// The mockup at `Plans/mockups/policies.html` lines 110-111 carries an
+// The mockup at `Plans/_archive/mockups/policies.html` lines 110-111 carries an
 // inline header tally on the same baseline as the H1; the live page
 // (`web/app/(authed)/policies/page.tsx`) renders only the title +
 // subtitle today, which is the gap slice 239 closes. The shared
@@ -34,7 +34,7 @@
 // only — no filter-pill or pagination scope creep here.
 //
 // Separator is " · " (U+00B7 MIDDLE DOT with single spaces) to match
-// the mockup at `Plans/mockups/policies.html` line 111 verbatim and to
+// the mockup at `Plans/_archive/mockups/policies.html` line 111 verbatim and to
 // stay consistent with the slice 215 audits tally on the same shell.
 
 import type { Policy } from "@/lib/api/policies";

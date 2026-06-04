@@ -4,7 +4,7 @@
 //   - `initialsFor(profile)` derives a two-letter avatar string from the
 //     profile shape (display_name → first letters of first two words;
 //     fallback to email local-part; fallback to "??"). Mirrors the
-//     `Plans/mockups/settings.html` profile avatar.
+//     `Plans/_archive/mockups/settings.html` profile avatar.
 //   - `tailRoles(roles, isAdmin)` filters the slice-130 `roles` array to
 //     the secondary roles that should render as the "+ grc_engineer"
 //     muted tail next to the primary admin/user badge. Excludes the

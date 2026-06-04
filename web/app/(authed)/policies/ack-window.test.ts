@@ -57,7 +57,7 @@ describe("policy acknowledgment-window disclosure constants (slice 240)", () => 
   });
 
   it("caption matches the mockup exactly ('365-day acknowledgment window')", () => {
-    // The mockup at `Plans/mockups/policies.html` line 279 reads:
+    // The mockup at `Plans/_archive/mockups/policies.html` line 279 reads:
     //     Showing 1-7 of 17 · 365-day acknowledgment window
     // The substring after the bullet is the rendered caption.
     // Pinning the literal here is the truth-telling counterpart

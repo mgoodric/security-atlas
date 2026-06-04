@@ -102,7 +102,7 @@ export function recordCountMeta(shown: number, total: number): string {
 /**
  * Slice 236 — render the page-title subtitle's ledger-context suffix.
  *
- * The mockup (`Plans/mockups/evidence.html` line 111) shows
+ * The mockup (`Plans/_archive/mockups/evidence.html` line 111) shows
  * `append-only · 14,712 records · 7 connectors`. The connectors count
  * is deferred to a future slice (P0-236-1 — separate connector
  * inventory endpoint), so this slice surfaces only the records count.

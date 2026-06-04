@@ -123,7 +123,7 @@ export function clearFilters(): ControlFilters {
  * data-out so the cell renderer in `page.tsx` can stay JSX-only and so
  * the formatting contract is vitest-pinned.
  *
- * Contract (matches `Plans/mockups/controls.html` line 217):
+ * Contract (matches `Plans/_archive/mockups/controls.html` line 217):
  *   - Non-empty input → join with " · " (middle-dot, U+00B7,
  *     surrounded by single spaces).
  *   - Empty input → the em-dash placeholder, mirroring the `—`
