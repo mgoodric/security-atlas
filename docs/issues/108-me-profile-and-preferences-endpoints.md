@@ -3,7 +3,7 @@
 **Cluster:** Backend / API
 **Estimate:** 2-3d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

@@ -3,7 +3,7 @@
 **Cluster:** Frontend
 **Estimate:** 0.1d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** #204 (per-page UI parity audit fleet) — settings audit. Slice 154 (settings-only audit) is the prior-art reference; this finding was not surfaced by 154 because 154 focused on in-page section content, not page-level metadata.
 
 ## Narrative

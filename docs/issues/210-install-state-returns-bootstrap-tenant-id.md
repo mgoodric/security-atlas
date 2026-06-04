@@ -3,7 +3,7 @@
 **Cluster:** Auth (backend + bootstrap seed)
 **Estimate:** ~0.25d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** spillover surfaced 2026-05-23 during atlas-edge sign-in validation. Slice 209 shipped a frontend that gates the email/password form on a `tenant_id` field that `/v1/install-state` never returned. Result: on a fresh install — exactly the deploy shape slice 209 was built for — the email/password card is silently hidden and operators see only the legacy bearer-paste form. This slice closes the contract gap.
 
 ## Narrative

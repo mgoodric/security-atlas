@@ -3,7 +3,7 @@
 **Cluster:** Frontend / Quality
 **Estimate:** 0.5-1d (diagnose-heavy)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

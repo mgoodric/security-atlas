@@ -3,7 +3,7 @@
 **Cluster:** frontend (option A — update mockup) · board (option B — add backend section)
 **Estimate:** 0.5d (option A) · 2.5d (option B)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

@@ -3,7 +3,7 @@
 **Cluster:** Backend / Auth
 **Estimate:** 2-3d
 **Type:** JUDGMENT
-**Status:** `in-review`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

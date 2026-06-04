@@ -3,7 +3,7 @@
 **Cluster:** Frontend + Auth
 **Estimate:** 0.25d
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** #204 (per-page UI parity audit fleet) — settings audit. Slice 154 audited the OIDC-human-user case for Notifications; this finding is class category-ii (broken interaction) + category-iii (data-bound surface) for the credential-bearer case. Composes with #250.
 
 ## Narrative

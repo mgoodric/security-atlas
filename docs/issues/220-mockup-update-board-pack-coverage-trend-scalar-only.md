@@ -3,7 +3,7 @@
 **Cluster:** frontend
 **Estimate:** 0.5d (option A — update mockup) · 3.0d (option B — ship time series)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 
