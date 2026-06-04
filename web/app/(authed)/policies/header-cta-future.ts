@@ -14,7 +14,7 @@
 //
 // Both are inert and undisclosed — the slice-178 honesty-gap class
 // (F-178-241 in the audit log of `/policies` against
-// `Plans/mockups/policies.html` lines 116-121). The mockup shows
+// `Plans/_archive/mockups/policies.html` lines 116-121). The mockup shows
 // both buttons as active primary affordances; the production page
 // renders them grey and unclickable with no tooltip / no link / no
 // "coming in slice X" pointer. The user sees a button-shaped

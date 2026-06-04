@@ -5,7 +5,7 @@
 // Today `/audits` (plural) 404'd in the sidebar (audit finding F-4 in
 // `Plans/canvas/13-ui-mockup-audit-2026-05-16.md`). This page ships the
 // missing list view per the design captured in slice 093
-// (`Plans/mockups/audits.html` + `Plans/canvas/12-ui-fill-in-design-
+// (`Plans/_archive/mockups/audits.html` + `Plans/canvas/12-ui-fill-in-design-
 // decisions.md` §2/3/6/7/8).
 //
 // Disambiguation per design doc §6:

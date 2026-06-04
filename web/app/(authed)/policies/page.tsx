@@ -5,7 +5,7 @@
 // Today `/policies` 404'd in the sidebar (audit finding F-4 in
 // `Plans/canvas/13-ui-mockup-audit-2026-05-16.md`). This page ships
 // the missing list view per the design captured in slice 093
-// (`Plans/mockups/policies.html` + `Plans/canvas/12-ui-fill-in-design-
+// (`Plans/_archive/mockups/policies.html` + `Plans/canvas/12-ui-fill-in-design-
 // decisions.md` §2/3/7/8).
 //
 // The page consumes the shared `web/components/list/*` shell from slice
@@ -148,7 +148,7 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
 ];
 
 // Slice 238 — ack-status band pill. Labels mirror the mockup at
-// `Plans/mockups/policies.html` lines 154-165; values are URL-safe
+// `Plans/_archive/mockups/policies.html` lines 154-165; values are URL-safe
 // short identifiers so `?ack_status=ge95` is bookmarkable (AC-3).
 const ACK_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All ack rates" },
