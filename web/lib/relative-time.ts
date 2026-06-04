@@ -6,7 +6,7 @@
 // rather than the compact ring-readout form ("8m", "3d"). The two are
 // deliberately separate: the freshness-clock's compact form fits inside
 // the SVG ring readout, while the header sub-line is full sentence-form
-// per the mockup (`Plans/mockups/control.html` line 100 — "last evaluated
+// per the mockup (`Plans/_archive/mockups/control.html` line 100 — "last evaluated
 // 8 minutes ago").
 //
 // Inputs:

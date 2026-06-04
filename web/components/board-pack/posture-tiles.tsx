@@ -1,4 +1,4 @@
-// Slice 043 — posture stat tiles (per Plans/mockups/board-pack.html §01).
+// Slice 043 — posture stat tiles (per Plans/_archive/mockups/board-pack.html §01).
 //
 // Renders one tile per registered framework: coverage %, delta arrow, and
 // a one-line state caption. Data is the slice-032 FrameworkPosture array

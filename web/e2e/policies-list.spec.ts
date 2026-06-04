@@ -93,7 +93,7 @@ test.describe("/policies list view", () => {
   test("AC-1 (slice 238): ack_status pill renders between owner_role and meta", async () => {
     //    // Slice 238 — the third filter pill ("Ack status") sits between
     //    // the Owner role pill and the right-aligned "Showing N of M"
-    //    // meta counter. The mockup at Plans/mockups/policies.html
+    //    // meta counter. The mockup at Plans/_archive/mockups/policies.html
     //    // lines 154-165 names four options: All / >= 95% / < 95% /
     //    // < 50%.
     //    await page.goto("/policies");

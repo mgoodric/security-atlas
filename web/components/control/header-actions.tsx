@@ -2,7 +2,7 @@
 
 // Slice 255 — control-detail header actions + "last evaluated" timestamp.
 //
-// Mockup parity target: `Plans/mockups/control.html` lines 92-102. The
+// Mockup parity target: `Plans/_archive/mockups/control.html` lines 92-102. The
 // top-right header well carries:
 //
 //   1. A row of three action buttons (in mockup order):

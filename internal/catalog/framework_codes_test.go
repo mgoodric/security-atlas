@@ -12,7 +12,7 @@ import (
 
 func TestFrameworkDisplayCode_CanonicalSlugs(t *testing.T) {
 	// AC-2 + AC-7 — the six v1 frameworks have stable abbreviations
-	// matching `Plans/mockups/controls.html` line 217.
+	// matching `Plans/_archive/mockups/controls.html` line 217.
 	cases := map[string]string{
 		"soc2":     "SOC2",
 		"iso27001": "ISO",

@@ -7,7 +7,7 @@
 // peers). The page slices its own `visible` array client-side; this
 // component renders the "Showing M–N of TOTAL" footer plus Prev / Next
 // buttons that match the iteration-1 mockups verbatim
-// (`Plans/mockups/risks.html` lines 267-273, `controls.html`, etc.).
+// (`Plans/_archive/mockups/risks.html` lines 267-273, `controls.html`, etc.).
 //
 // Constitutional commitment: NO page-specific imports, types, or
 // strings here. The page owns the page-state (URL binding, default

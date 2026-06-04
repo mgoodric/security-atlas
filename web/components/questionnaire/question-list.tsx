@@ -2,7 +2,7 @@
 //
 // Closes ISC-22 + AC-9 (slice 263):
 //   - Renders one row per question grouped by domain (matches the
-//     mockup at Plans/mockups/questionnaire.html lines 156-159).
+//     mockup at Plans/_archive/mockups/questionnaire.html lines 156-159).
 //   - Each row shows: question code, truncated question text (clamped
 //     to 2 lines), answer status chip (Unanswered / Draft / Final),
 //     and the SCF anchor ID.

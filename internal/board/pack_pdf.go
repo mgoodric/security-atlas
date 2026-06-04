@@ -95,7 +95,7 @@ func RenderPackPDF(ctx context.Context, sp StoredPack) ([]byte, error) {
 }
 
 // buildPackHTML renders the quarterly pack as a print-friendly HTML document
-// matching the Plans/mockups/board-pack.html visual reference: a cover, then
+// matching the Plans/_archive/mockups/board-pack.html visual reference: a cover, then
 // one numbered card per section showing the section's effective narrative
 // plus its structured data. Walks SectionKeys in canonical order.
 func buildPackHTML(sp StoredPack) string {

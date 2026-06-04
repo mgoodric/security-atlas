@@ -1,4 +1,4 @@
-// Slice 043 — publish footer (per Plans/mockups/board-pack.html footer).
+// Slice 043 — publish footer (per Plans/_archive/mockups/board-pack.html footer).
 //
 // The publish button is disabled until every fixed section is approved
 // (AC-6 + slice 032 decision D6). The platform enforces the gate too —

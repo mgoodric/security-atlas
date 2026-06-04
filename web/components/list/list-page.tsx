@@ -25,7 +25,7 @@ export type ListPageProps = {
    * same baseline. Used by /audits for the status tally
    * (`1 in_progress · 4 frozen · 1 closed`) per slice 215. The
    * adornment is a sibling of the H1 inside a `flex items-baseline`
-   * row, matching `Plans/mockups/audits.html` lines 109-112.
+   * row, matching `Plans/_archive/mockups/audits.html` lines 109-112.
    *
    * Callers SHOULD wrap the adornment in a `<span>` with semantic
    * styling (e.g. small muted text) and an `aria-label` describing
