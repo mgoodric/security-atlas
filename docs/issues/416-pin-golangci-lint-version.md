@@ -3,7 +3,7 @@
 **Cluster:** Infra
 **Estimate:** 0.5d
 **Type:** AFK
-**Status:** `ready` (no unmerged deps)
+**Status:** `merged` (`baf06f64`, #973 — golangci v2.12.2 pinned)
 
 ## Narrative
 
