@@ -219,24 +219,55 @@ Watchtower polls hourly by default in Unraid examples; the 86400s (24h) interval
 
 ## Database migrations across upgrades
 
-`atlas migrate up` is idempotent — running it against an already-current database is a no-op. Watchtower restarts the container but does not run migrations. The platform itself runs migrations on startup if `ATLAS_MIGRATE_ON_START=true` is set; for production we recommend leaving that **off** and running migrations manually so a bad migration cannot brick an auto-update:
+Migrations are idempotent — applying an already-current set is a no-op.
+Watchtower restarts the container but does **not** run migrations. For
+production, run migrations **manually before** the new server takes
+traffic so a bad migration cannot brick an auto-update.
+
+The full procedure — pin a version, take a pre-upgrade checkpoint, apply
+migrations, verify, and roll back — is the canonical, published
+**[Upgrade runbook](https://mgoodric.github.io/security-atlas/upgrade/)**.
+The concrete migration command for the bundle is the idempotent
+bootstrap one-shot:
 
 ```sh
-# Before applying a new release manually:
-docker compose pull atlas
-docker compose run --rm atlas atlas migrate up
-docker compose up -d atlas
+docker compose -f deploy/docker/docker-compose.yml pull
+docker compose -f deploy/docker/docker-compose.yml stop atlas web
+docker compose -f deploy/docker/docker-compose.yml run --rm atlas-bootstrap
+docker compose -f deploy/docker/docker-compose.yml up -d atlas web
 ```
 
-If you have Watchtower turned on, set `ATLAS_MIGRATE_ON_START=true` only if every release ships with reversible migrations and you've established that the project's release discipline catches forward-only migrations during review.
+See the [Upgrade runbook](https://mgoodric.github.io/security-atlas/upgrade/)
+for the version-pinning table, the verify checks, the rollback path, and
+the major-Postgres-upgrade dump-and-restore.
 
 ---
 
 ## Backups
 
-- **Postgres** — `pg_dump` nightly to your S3-compatible store. The `atlas-pg-data` Docker volume is the on-disk state.
-- **Artifact store** — versioning + lifecycle rules at the bucket level. The platform's evidence ledger has a sha256 per record; a corrupted artifact is detectable by re-running `atlas evidence verify`.
-- **Configuration** — keep `docker-compose.yml` + `.env` (if you use one) in a private repo.
+The full operator procedure — Postgres dump **and restore**, MinIO
+`mc mirror` both directions, signing-key and bootstrap-token handling,
+backup encryption at rest, and a **tested restore drill** — is the
+canonical, published
+**[Backup and restore runbook](https://mgoodric.github.io/security-atlas/backup-restore/)**.
+
+The summary:
+
+- **Postgres** — `pg_dump` to an encrypted, access-controlled,
+  off-host S3-compatible store. The `pg-data` Docker volume is the
+  on-disk state; the dump is the recoverable artifact.
+- **Artifact store** — `mc mirror` to the offsite store, with versioning
+  - lifecycle rules and server-side encryption at the bucket level.
+- **Signing keys + secrets** — the OAuth keystore, `OSCAL_SIGNING_KEY`,
+  and the bootstrap token are backed up **separately, with stricter
+  access control** than the data dump. Rotate the bootstrap token after
+  every restore.
+- **Configuration** — keep `docker-compose.yml` + `.env` in a private,
+  access-controlled repo.
+
+Do not stop at "I have a dump." Run the
+[restore drill](https://mgoodric.github.io/security-atlas/backup-restore/#tested-restore-drill)
+to prove the dump restores and the restored evidence is intact.
 
 ---
 
