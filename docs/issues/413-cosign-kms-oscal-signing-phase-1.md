@@ -31,15 +31,15 @@ See [ADR-0010](../adr/0010-oscal-cosign-signing.md) for the full value/cost/deci
 
 ## Acceptance criteria (368 AC subset covered by Phase 1)
 
-- [ ] **AC-1.** `internal/oscal/cosign` wrapper lands (timeouts, env allowlist, error mapping).
-- [ ] **AC-2.** `cosign-kms` + `embedded-ed25519` modes both selectable + functional.
-- [ ] **AC-3.** Export manifest records the signing `Mode`; verification dispatches on it.
-- [ ] **AC-4.** Backward-compat: existing ed25519-signed bundles still verify.
-- [ ] **AC-5.** CLI `sign | verify | config-check`.
-- [ ] **AC-6 (Modes A & B).** Integration tests for kms + embedded sign→verify round-trips.
-- [ ] **AC-7.** Operator runbook (mode selection, KMS setup, air-gap guidance).
-- [ ] **AC-10.** cosign binary dependency handled per ADR-0010 (Apache-2.0 bundle-clean; pin version; provenance in asset-inventory §2.3).
-- [ ] **AC-8 / AC-11.** `pre-commit run --all-files` + CI green; no air-gap regression.
+- [x] **AC-1.** `internal/oscal/cosign` wrapper lands (timeouts, env allowlist, error mapping).
+- [x] **AC-2.** `cosign-kms` + `embedded-ed25519` modes both selectable + functional.
+- [x] **AC-3.** Export manifest records the signing `Mode`; verification dispatches on it.
+- [x] **AC-4.** Backward-compat: existing ed25519-signed bundles still verify.
+- [x] **AC-5.** CLI `sign | verify | config-check`.
+- [x] **AC-6 (Modes A & B).** Integration tests for kms + embedded sign→verify round-trips.
+- [x] **AC-7.** Operator runbook (mode selection, KMS setup, air-gap guidance).
+- [x] **AC-10.** cosign binary dependency handled per ADR-0010 (Apache-2.0 bundle-clean; pin version; provenance in asset-inventory §2.3).
+- [x] **AC-8 / AC-11.** `pre-commit run --all-files` + CI green; no air-gap regression.
 
 ## Dependencies
 
