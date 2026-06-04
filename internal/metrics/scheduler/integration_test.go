@@ -251,11 +251,96 @@ func TestSweepOnce_AppendsOnRepeatedRuns(t *testing.T) {
 	}
 }
 
-// ===== Run-loop integration: a tight Run + context-cancel run against
-// a real DB exits cleanly and produces observations from the inline
-// pre-tick sweep. Exercises the Run() path that the SweepOnce-only
-// tests above do not (Run wraps SweepOnce in a goroutine-friendly
-// error-swallowing wrapper). =====
+// ===== Run-loop integration: Run fires one inline pre-tick sweep, then
+// exits cleanly when its context is cancelled. Exercises the Run() path
+// that the SweepOnce-only tests above do not (Run wraps SweepOnce in a
+// goroutine-friendly error-swallowing wrapper).
+//
+// Flake history (fixed here): the prior version handed Run a 500ms-deadline
+// context and then asserted on the DB row count. That single context had to
+// cover the ENTIRE list-tenants -> per-tenant BEGIN -> N-evaluator ->
+// INSERT -> COMMIT cycle; under the serialized `-p 1 -race` integration job
+// that work routinely exceeds 500ms. When the deadline fired mid-sweep the
+// COMMIT returned context.Canceled, the sweep wrapper swallowed it, zero
+// rows landed, and the >=1 assertion failed (~10+ reruns across sessions).
+//
+// The fix decouples inline-sweep COMPLETION from the cancel DEADLINE:
+//
+//   - Run's context is NOT on a wall-clock; the inline sweep runs to
+//     completion against real DB latency.
+//   - We assert on the inline sweep's RETURNED SweepReport (surfaced via
+//     the SetInlineSweepHookForTest hook) rather than racing a timeout
+//     against DB latency. ObservationsWritten >= 1 is the deterministic
+//     ground truth.
+//   - Only AFTER the inline sweep reports do we cancel the context, which
+//     proves the ticker loop exits cleanly on cancel.
+//
+// This removes the race rather than widening the window (cf. slice 381:
+// no single-sample wall-clock asserts).
+// =====
+
+// runInlineSweepOnce drives one Run() lifecycle to completion: it registers
+// the inline-sweep hook, starts Run with a cancellable (non-wall-clock)
+// context, waits for the inline sweep to report, then cancels and waits for
+// Run to return nil. It returns the inline sweep's report. Factored out so
+// the stress test can replay it N times.
+func runInlineSweepOnce(t *testing.T, admin, app *pgxpool.Pool, registry *metricseval.Registry, tenant uuid.UUID) scheduler.SweepReport {
+	t.Helper()
+
+	s := scheduler.New(admin, app, registry, nil)
+
+	// Buffered so the hook never blocks Run even if we are slow to receive.
+	inline := make(chan struct {
+		rep scheduler.SweepReport
+		err error
+	}, 1)
+	s.SetInlineSweepHookForTest(func(rep scheduler.SweepReport, err error) {
+		inline <- struct {
+			rep scheduler.SweepReport
+			err error
+		}{rep, err}
+	})
+
+	// Run's context is cancellable but NOT on a 500ms wall-clock: the inline
+	// sweep gets as long as the DB legitimately needs. Long ticker interval
+	// so the only sweep we exercise is the inline one.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- s.Run(ctx, 1*time.Hour)
+	}()
+
+	// Wait for the inline sweep to COMPLETE and report. Generous ceiling
+	// guards against a genuine hang (not a flake knob — the inline sweep is
+	// expected to finish in well under a second; the ceiling only catches a
+	// deadlock).
+	var got scheduler.SweepReport
+	select {
+	case res := <-inline:
+		if res.err != nil {
+			t.Fatalf("inline sweep returned err=%v; want nil", res.err)
+		}
+		got = res.rep
+	case <-time.After(30 * time.Second):
+		t.Fatal("inline sweep did not report within 30s (hang, not a deadline race)")
+	}
+
+	// The inline sweep finished cleanly; NOW cancel to prove the ticker loop
+	// exits gracefully on cancel.
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Run returned err=%v; want nil on graceful cancel", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return within 10s of context cancellation")
+	}
+
+	return got
+}
 
 func TestRun_FiresInlineSweepAndExitsOnCancel(t *testing.T) {
 	admin := openPool(t, adminDSN(t))
@@ -266,27 +351,56 @@ func TestRun_FiresInlineSweepAndExitsOnCancel(t *testing.T) {
 
 	registry := metricseval.NewRegistry(app)
 
-	s := scheduler.New(admin, app, registry, nil)
+	rep := runInlineSweepOnce(t, admin, app, registry, tenant)
 
-	// Long interval; the inline sweep is the one tick we exercise.
-	// 500ms is plenty for the SweepOnce write path.
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-
-	done := make(chan error, 1)
-	go func() {
-		done <- s.Run(ctx, 5*time.Second)
-	}()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Errorf("Run returned err=%v; want nil", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("Run did not return within 10s of context cancellation")
+	// Deterministic ground truth: the inline sweep's RETURNED report says it
+	// wrote at least one observation. No wall-clock race.
+	if rep.TenantsSwept < 1 {
+		t.Errorf("inline sweep TenantsSwept = %d; want >= 1 (our tenant is in the UNION)", rep.TenantsSwept)
+	}
+	if rep.ObservationsWritten < 1 {
+		t.Errorf("inline sweep ObservationsWritten = %d; want >= 1 (at least one evaluator should succeed against a minimally-seeded tenant)", rep.ObservationsWritten)
 	}
 
+	// The rows are now guaranteed durable because the sweep committed before
+	// the hook fired and before we cancelled — the DB count corroborates the
+	// report. This is a corroboration, not the primary assertion, so it is
+	// no longer a race.
 	if got := countObservations(t, admin, tenant); got < 1 {
-		t.Errorf("post-Run observations = %d; want >= 1 (the inline sweep should have written at least one)", got)
+		t.Errorf("post-Run observations = %d; want >= 1 (committed inline sweep)", got)
+	}
+	if got := countObservations(t, admin, tenant); got != rep.ObservationsWritten {
+		t.Errorf("DB observation count = %d; want %d (matches the inline report)", got, rep.ObservationsWritten)
+	}
+}
+
+// TestRun_InlineSweepStress replays the full Run-inline-sweep-then-cancel
+// lifecycle 5 times against the same fresh tenant to confirm the deadline
+// race is gone (slice 340 chromedp 5x-stress precedent). metric_observations
+// is append-only (slice 076), so each iteration adds one batch; we assert
+// every iteration's RETURNED report wrote >= 1 observation and that the DB
+// total grows monotonically by exactly each iteration's reported batch. If
+// the old race were present, an iteration whose COMMIT lost to a deadline
+// would report 0 written and break the running total.
+func TestRun_InlineSweepStress(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	seedCatalog(t, admin, app)
+	tenant := freshTenant(t, admin)
+	seedAnchorControl(t, admin, tenant)
+
+	registry := metricseval.NewRegistry(app)
+
+	const iterations = 5
+	cumulative := 0
+	for i := 0; i < iterations; i++ {
+		rep := runInlineSweepOnce(t, admin, app, registry, tenant)
+		if rep.ObservationsWritten < 1 {
+			t.Fatalf("iteration %d: ObservationsWritten = %d; want >= 1 (deadline race regressed)", i, rep.ObservationsWritten)
+		}
+		cumulative += rep.ObservationsWritten
+		if got := countObservations(t, admin, tenant); got != cumulative {
+			t.Fatalf("iteration %d: DB count = %d; want %d (append-only running total of reported writes)", i, got, cumulative)
+		}
 	}
 }
