@@ -5,6 +5,14 @@
 
 **Last reconciled:** 2026-06-04 (batch 191 reconcile — 462 + 417 + 431 MERGED; spillover 463 filed; ~25 backlog slices remain)
 
+## Drift detected — 2026-06-04 (batch 192 claim-stake · 463 + 432 + 460)
+
+Sixth drain batch from the 415-463 analysis backlog. Conflict-safe subset (coverage-thresholds.json=463 only · docs-site nav=432 only · .env.example/compose=460 only; shared surface = CHANGELOG only). 463 deliberately paired away from 426/456 (the other coverage-thresholds slices).
+
+- **463** (`demoseed.Seeder.Teardown` leaves the parent `tenants` row behind on a passing run — product teardown-contract bug) — Infra · JUDGMENT — `ready` → **in-progress**. Branch `infra/463-demoseed-teardown-tenant-row`. Makes `internal/demoseed` Teardown the true inverse of Seed (no orphaned tenant row) + a Seed→Teardown round-trip test; likely lifts the demoseed coverage floor (81). demoseed already enrolled in shard manifest leg B1 → no manifest change.
+- **432** (backup / restore + upgrade operator runbooks) — Docs · JUDGMENT — `ready` → **in-progress**. Branch `docs/432-backup-restore-runbooks`. New `docs-site/docs/backup-restore.md` + `upgrade.md` + mkdocs nav, grounded in the shipped `docs/governance/business-continuity.md` (slice 373 BCP/DR) + `docs/runbooks/oscal-signing.md`.
+- **460** (`NATS_URL` read by the server but absent from `.env.example`) — Infra · JUDGMENT — `ready` → **in-progress**. Branch `infra/460-nats-url-env-example`. Adds `NATS_URL` (and any other server-read-but-untemplated key) to `.env.example` + the docker-compose env, verified against `cmd/atlas/main`.
+
 ## Reconcile — 2026-06-04 (batch 191 · 462 + 417 + 431 merged)
 
 Fifth drain batch — all three merged. Disjoint surfaces held (ci.yml=417 · docs-site nav=431 · admindemo test=462); CHANGELOG auto-merged on update-branch each cycle. All three engineers shipped clean first-pass (no stalls, no resume).
