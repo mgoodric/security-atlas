@@ -594,7 +594,16 @@ jobs:
           cache: true
       - uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9
         with:
-          version: latest
+          # Pinned golangci-lint binary version (slice 416). `Go · lint` is a
+          # required check; a floating `version: latest` lets an upstream
+          # release change what the gate enforces on the next CI run with no
+          # review (same failure class as slice 090's govulncheck@latest red-
+          # wall). This pin MUST stay in sync with the `GOLANGCI_VERSION` pin
+          # in the justfile so local `just lint-go` and CI lint agree. Bump
+          # both in a dedicated `chore(golangci):` slice so the new analyzer
+          # set lands as an auditable diff — never as a surprise red check on
+          # an unrelated PR (mirrors the SQLC_VERSION bump convention).
+          version: v2.12.2
 
       # Slice 367 — CWE-209 errleak check. Rejects new code reflecting
       # err.Error() into 5xx JSON response bodies. Background: slice 327

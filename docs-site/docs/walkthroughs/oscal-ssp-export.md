@@ -340,6 +340,10 @@ The chain has three abort points before any file lands on disk. The frozen-perio
 
 The AI-assist boundary is preserved structurally: `internal/oscal/` and `oscal-bridge/` together import no inference client. SSP narrative text is the operator-authored control-bundle description, carried verbatim. Slice 030 explicitly verifies this by absence.
 
+## 10. Handing the Bundle to an Auditor
+
+Once the signed bundle is on disk, you hand it to the auditor. They verify it independently — confirming it is authentic and untampered — using stock `cosign` (for `cosign-kms` bundles) or the `atlas oscal verify` convenience command (either mode). That verifier-side flow is documented in [Verify a signed OSCAL export](../audit/verify-export.md).
+
 ### Where to read more
 
 - **Canvas:** [`Plans/canvas/03-ucf.md`](https://github.com/mgoodric/security-atlas/blob/main/Plans/canvas/03-ucf.md) §3.4 — OSCAL is the wire format; [`Plans/canvas/08-audit-workflow.md`](https://github.com/mgoodric/security-atlas/blob/main/Plans/canvas/08-audit-workflow.md) §8.4 — freeze horizon
