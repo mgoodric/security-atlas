@@ -115,25 +115,77 @@ func resetDemoAuditRows(t *testing.T) {
 	}
 }
 
-// cleanupDemoTenant deletes the demo tenant slug + all anchored rows.
+// removeDemoTenant deletes the demo tenant slug + all anchored rows,
+// synchronously and best-effort. It is robust to ANY prior state:
+//
+//   - a fully-seeded leftover (carries the slice-205 forensic mark) —
+//     demoseed.Seeder.Teardown removes it plus its child rows;
+//   - a bare or partial leftover (no forensic mark, or child rows the
+//     Seeder.Teardown statement list does not cover) — Teardown either
+//     refuses (non-forensic-marked tenant) or commits without removing
+//     the tenant row, so a direct child-row sweep + DELETE FROM tenants
+//     keyed on id is the catch-all.
+//
+// It returns no error: a clean DB (no demo tenant) is a no-op, and the
+// caller's only contract is "the demo slug is absent afterward", which
+// the post-condition guard below proves on the way out via t.Fatalf.
+//
+// Slice 462: this is the self-correcting primitive. Tests call it
+// SYNCHRONOUSLY at the top (to establish a clean precondition regardless
+// of a prior aborted run that skipped its t.Cleanup) AND register it as
+// t.Cleanup (to remove the demo slug on the way out even if this run's
+// test body fails). Mirrors slice 461's "setup self-corrects, does not
+// assume" property — for the tenants table rather than scf_anchors.
+func removeDemoTenant(t *testing.T, slug string) {
+	t.Helper()
+	ctx := context.Background()
+
+	// Look up tenant id by slug. Absent => nothing to do.
+	var id uuid.UUID
+	if err := adminPool.QueryRow(ctx,
+		`SELECT id FROM tenants WHERE slug = $1`, slug,
+	).Scan(&id); err != nil {
+		return // didn't exist (incl. pgx.ErrNoRows)
+	}
+
+	// Best-effort Seeder.Teardown — the clean path for a fully-seeded
+	// leftover. It removes the tenant's primitive rows AND the tenant
+	// row. Errors are swallowed: a non-forensic-marked leftover makes
+	// Teardown refuse, which the raw sweep below then handles.
+	if seeder, ierr := demoseed.NewSeeder(adminPool, demoseed.DefaultScale); ierr == nil {
+		_ = seeder.Teardown(ctx, slug, uuid.Nil, uuid.Nil)
+	}
+
+	// Catch-all raw sweep keyed on the tenant id. Runs unconditionally
+	// (cheap; deletes 0 rows if Teardown already cleaned them) so a
+	// leftover Teardown refused or could not fully clean is still
+	// removed. FK order: children before parent. Every statement is
+	// best-effort — a missing child table or an empty table is fine.
+	for _, stmt := range []string{
+		`DELETE FROM me_audit_log    WHERE tenant_id = $1`,
+		`DELETE FROM super_admin_audit_log WHERE actor_tenant_id = $1`,
+		`DELETE FROM user_roles      WHERE tenant_id = $1`,
+		`DELETE FROM local_credentials WHERE tenant_id = $1`,
+		`DELETE FROM sessions        WHERE tenant_id = $1`,
+		`DELETE FROM users           WHERE tenant_id = $1`,
+		`DELETE FROM tenants         WHERE id = $1`,
+	} {
+		_, _ = adminPool.Exec(ctx, stmt, id)
+	}
+}
+
+// cleanupDemoTenant establishes a clean `demo`-slug precondition for the
+// test SYNCHRONOUSLY (removing any leftover from a prior aborted run)
+// and registers a deferred t.Cleanup that removes it again on the way
+// out (so this run's tenant does not leak to the next run, even on a
+// failed assertion). Slice 462: the synchronous call is the root-cause
+// fix — the test no longer ASSUMES the demo slug is absent, it ENSURES
+// it. The deferred cleanup remains as belt-and-suspenders.
 func cleanupDemoTenant(t *testing.T, slug string) {
 	t.Helper()
+	removeDemoTenant(t, slug) // synchronous: self-correct prior state.
 	t.Cleanup(func() {
-		// Look up tenant id by slug.
-		var id uuid.UUID
-		err := adminPool.QueryRow(context.Background(),
-			`SELECT id FROM tenants WHERE slug = $1`, slug,
-		).Scan(&id)
-		if err != nil {
-			return // didn't exist
-		}
-		seeder, ierr := demoseed.NewSeeder(adminPool, demoseed.DefaultScale)
-		if ierr != nil {
-			return
-		}
-		_ = seeder.Teardown(context.Background(), slug, uuid.Nil, uuid.Nil)
-		_, _ = adminPool.Exec(context.Background(),
-			`DELETE FROM tenants WHERE id = $1`, id)
+		removeDemoTenant(t, slug) // deferred: do not leak to next run.
 	})
 }
 
