@@ -1,5 +1,11 @@
 # 13 — UI vs mockup audit (2026-05-16, post-slice-093)
 
+> **Path note (slice 437):** this is a dated point-in-time audit; its inline
+> `Plans/mockups/...` references record where the mockups lived in 2026-05.
+> They have since been archived to `Plans/_archive/mockups/` and `web/` is
+> canonical — per-page mockup-vs-`web/` divergence is no longer fileable drift.
+> The references below are left verbatim as a historical record.
+
 > One-pass audit comparing the current Next.js implementation against the
 > mockups under `Plans/mockups/` after slice 093 (mockups for 6 missing
 > top-level pages) merged. Captures drift that needed in-place repair plus

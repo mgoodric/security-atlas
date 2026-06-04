@@ -2,7 +2,7 @@
 
 > Decisions captured during slice 093 so the six follow-up implementation slices
 > (`/controls`, `/evidence`, `/risks`, `/policies`, `/audits`, `/settings`) don't
-> re-litigate them. The artifacts live at `Plans/mockups/{controls,evidence,risks,policies,audits,settings}.html`.
+> re-litigate them. The artifacts live at `Plans/_archive/mockups/{controls,evidence,risks,policies,audits,settings}.html` (archived iteration-1 references per slice 437; `web/` is canonical).
 
 ---
 
