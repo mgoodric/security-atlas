@@ -3,7 +3,19 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-04 (batch 190 reconcile — 461 + 428 + 451 MERGED; spillover 462 filed; ~28 backlog slices remain)
+**Last reconciled:** 2026-06-04 (batch 191 reconcile — 462 + 417 + 431 MERGED; spillover 463 filed; ~25 backlog slices remain)
+
+## Reconcile — 2026-06-04 (batch 191 · 462 + 417 + 431 merged)
+
+Fifth drain batch — all three merged. Disjoint surfaces held (ci.yml=417 · docs-site nav=431 · admindemo test=462); CHANGELOG auto-merged on update-branch each cycle. All three engineers shipped clean first-pass (no stalls, no resume).
+
+- **431** (external-IdP OIDC setup guide) — Docs · JUDGMENT — **MERGED** at `bdca8df7` (#994). New `docs-site/docs/oidc-setup.md` + mkdocs nav. Documents the SHIPPED per-tenant DB-backed `oidc_idp_configs` / `/admin/sso` UI + `PATCH /v1/admin/sso` + `POST /v1/admin/sso/preflight` path (verified against `internal/api/adminsso/handler.go` + `internal/auth/oidc/oidc.go` + the schema per AC-14 — env-var IdP config confirmed non-existent, not invented). Load-bearing security guidance: exact-match own-origin redirect URI (open-redirect history slices 086/161), encrypted-at-rest client secret never committed, `allowed_email_domains` principal restriction. Okta/Entra/Keycloak per-IdP notes. `mkdocs build --strict` green. 14/14 ACs. No spillover.
+- **462** (admindemo suite self-corrects a leaked `demo` tenant) — Infra · JUDGMENT — **MERGED** at `56af1e61` (#995). Mirrors slice 461's "setup ensures, does not assume" philosophy: `cleanupDemoTenant` now removes the `demo` slug synchronously at setup AND retains the deferred `t.Cleanup`, with an unconditional FK-ordered raw sweep. Reproduced the exact false-red (`handler_integration_test.go:261`) RED→GREEN; three consecutive dirty-DB `-p 1` runs green. Spillover **463**.
+- **417** (shard the `-p 1` integration job — Phase A serial + Phase B matrix) — Infra · JUDGMENT — **MERGED** at `e662bed4` (#996). Splits the serial integration job into a `[A, B1, B2, B3]` matrix across runners (each leg still `-p 1` internally; sharding is not `-p N`) + a fan-in `tests-integration` job that reports the UNCHANGED required check `Go · integration (Postgres RLS)` — so **no branch-protection change needed** (the E-class required-check-rename risk was cleared via the fan-in pattern). Catalog-seed cluster (`scf_anchors`/`evidence_kind_schemas`) pinned to Leg A; tenant-scoped `evidence_records` packages safe to shard (RLS-keyed). A machine-checked coverage-union guard proves the leg union == the 89 integration-tagged packages exactly (no package dropped), and the slice-345 enrolment guard now reads the shard manifest. **First live run: all 4 shards + enrolment + fan-in green; the feared Leg-B2 scheduler flake did NOT fire.** 17/17 ACs. No spillover (soft pair with 418 noted for future).
+
+Spillover (single, no de-collision needed): **463** (`demoseed.Seeder.Teardown` leaves the parent `tenants` row behind even on a passing run — a PRODUCT teardown-contract bug that 462's test hardening masks; orchestrator-filed from 462's decisions log so it stays on the backlog · cites parent 462 · `ready`).
+
+Backlog: ~25 analysis slices remain ready (418-420, 424-426, 432, 434-445, 448, 450, 452-453) + 456, 457, 458, 459, 460, 463. Decision-gates 446/455 + not-ready 447 stay out of the auto-loop; 449-OPA moot (1.17 merged via #953). Note: 417 landed, so the merge-queue integration bottleneck should now shard across runners on future batches.
 
 ## Drift detected — 2026-06-04 (batch 191 claim-stake · 462 + 417 + 431)
 
