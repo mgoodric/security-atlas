@@ -3,7 +3,7 @@
 **Cluster:** Infra (CI security)
 **Estimate:** 0.5d (audit-mode wiring) + 2 weeks of soak before block-mode flip (separate slice)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

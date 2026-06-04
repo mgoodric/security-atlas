@@ -3,7 +3,7 @@
 **Cluster:** Frontend (deploy / routing)
 **Estimate:** ~0.5d
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** spillover surfaced 2026-05-22 during live atlas-edge provisioning. NPM path-based routing works as an operator workaround but requires every deployment topology to re-add three NPM `Location` blocks. Slice 206 exempted `/v1/*` + `/metrics` in `web/proxy.ts` so the Next.js redirect-to-login gate fires after the path check — but Next.js itself still has no route at `/v1/*`, so the dashboard's browser-side data fetches return 404 from the Next.js catch-all. The fix is in-repo and portable.
 
 ## Narrative

@@ -3,7 +3,7 @@
 **Cluster:** Oscal
 **Estimate:** 0.5-1d
 **Type:** JUDGMENT (decision-only)
-**Status:** `ready`
+**Status:** `merged` (`ae14ea4d`, #956 — ADR-0010; maintainer-approved ADOPT-DEFERRED 2026-06-03)
 **Parent:** 368 (OSCAL export bundle signing ed25519 → cosign)
 
 ## Narrative

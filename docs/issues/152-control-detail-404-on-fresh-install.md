@@ -3,7 +3,7 @@
 **Cluster:** Backend / Frontend
 **Estimate:** 0.5d
 **Type:** JUDGMENT (D1: seed-on-bootstrap vs friendly-404)
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

@@ -3,7 +3,7 @@
 **Cluster:** Infra
 **Estimate:** 0.5d
 **Type:** AFK
-**Status:** `ready` (maintainer green-lit 2026-05-20 — no real users yet, so no release-window blast-radius concern; proceed as solo iteration when picked up)
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

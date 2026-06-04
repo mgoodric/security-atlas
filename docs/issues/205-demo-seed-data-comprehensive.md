@@ -3,7 +3,7 @@
 **Cluster:** Backend (seed / fixtures) + Quality (docs)
 **Estimate:** 3d
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** maintainer-surfaced 2026-05-22. The product has no curated demo dataset — fresh installs land on `deploy/docker/bootstrap/seed.sql` which seeds the bare minimum (1 tenant, 1 user, 1 scope dimension, 1 scope cell). Slice 082's `web/e2e/seed.ts` produces per-spec test fixtures but they're terse and tuned for test assertions, not narrative. Operators wanting to demo security-atlas have nothing to show.
 
 ## Narrative

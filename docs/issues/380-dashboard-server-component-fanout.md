@@ -4,7 +4,7 @@
 **Estimate:** 1.5d
 **Type:** JUDGMENT (the right server-side fan-out pattern requires
 canvas-vs-Next.js-15-AppRouter trade-off discussion)
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

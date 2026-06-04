@@ -3,7 +3,7 @@
 **Cluster:** Quality (UI parity / honesty)
 **Estimate:** 2d (fleet wall-clock + spillover-filing overhead; ~11 mockup pages × ~15 min per page + aggregate)
 **Type:** AFK
-**Status:** `ready` (BUT operationally blocked on resolving the v1.14.0 500-error class — see Dependencies)
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** maintainer-surfaced 2026-05-22. Prior audits (slice 154 settings-only, slice 178 honesty-harness first-pass) produced spillovers (162/163/164/183/184/185/186 — all merged) but did not exhaustively cover every page or compare every comp claim against runtime behavior. Maintainer's frustration with the deployed v1.14.0 UI is the trigger: dark-mode wiring missing (filed as slice 203), light-mode logo invisible (slice 203 again), and per maintainer's 2026-05-22 message most components return 500 errors on the deployed v1.14.0 release.
 
 ## Narrative
