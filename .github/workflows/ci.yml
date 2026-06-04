@@ -240,6 +240,18 @@ jobs:
         with:
           go-version: "1.26"
           cache: true
+      - name: Install cosign
+        # Slice 413: the internal/oscal/cosign integration tests exercise
+        # the real `cosign sign-blob`/`verify-blob` exec boundary (ADR-0010
+        # Phase 1, Mode A). Pinned to the same cosign-installer + cosign
+        # v3.0.6 the release-signing job uses (.github/workflows/release.yml),
+        # so the OSCAL-bundle signing tests and release signing track one
+        # cosign version. Absent this step the cosign integration tests
+        # self-skip (binary not on PATH) — installing it makes them run and
+        # keeps the internal/oscal/cosign coverage floor honest.
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: "v3.0.6"
       - name: Start MinIO
         run: |
           docker run -d --name minio \
@@ -433,6 +445,7 @@ jobs:
             ./internal/exception/... \
             ./internal/catalog/metrics/... \
             ./internal/oscal/... \
+            ./internal/oscal/cosign/... \
             ./internal/policy/pdf/... \
             ./internal/policy/seed/... \
             ./internal/risk/aggrule/... \

@@ -3,7 +3,15 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-03 (batch 186 claim-stake — ADR-0010 APPROVED + merged (`ae14ea4d`); slice 400 → merged; 368 re-scoped; 413 (Phase 1) → in-progress; 414 (Phase 2) filed gated)
+**Last reconciled:** 2026-06-03 (batch 186 reconcile — slice 413 cosign-kms Phase 1 merged at `f777ff07`; 414 Phase 2 gated; 368 Phase 1 done)
+
+## Reconcile — 2026-06-03 (batch 186 · slice 413 cosign-kms Phase 1 merged)
+
+- **413** (cosign-kms + retained embedded-ed25519, 368 Phase 1) — Oscal · **MERGED** at `f777ff07` (#961). New `internal/oscal/cosign` wrapper (injectable exec runner, curated env allowlist, typed errors); `Signature.Mode` ∈ {embedded-ed25519, cosign-kms, reserved keyless}; verify dispatch on manifest mode; backward-compat (old ed25519 bundles verify, tested); CLI `sign|verify|config-check`; operator runbook; Mode A/B integration tests. Defaults: docker-compose→embedded-ed25519 (air-gap), connected+KMS→cosign-kms, SaaS/Helm GA→cosign-kms. Security find: cosign v3 needs `--tlog-upload=false` to honor no-Rekor (regression-tested). `internal/oscal/cosign` 91.5% (floor 88). cosign install added to ci.yml.
+- **368** (cosign tracking parent) — Phase 1 (413) complete. Remaining: **414** Phase 2 (keyless), `not-ready`, gated on the OIDC-identity-strategy decision.
+- **400** merged (#956, ADR-0010). **411** merged (#958), spillover **412** ready. **412** (controls/audit contract tail) loop-ready.
+
+Dependabot triage: merged #945 (mkdocs) + #947 (shadcn); #954/#820/#656/#953 (clean, integration-CI) being swept; 7 major-version bumps (632/634-637/948-951... eslint10/vitest4/ts6/@types-node25/react-query/go-otel) need manual migration — flagged, not auto-mergeable.
 
 ## Drift detected — 2026-06-03 (batch 186 claim-stake · maintainer approved ADR-0010 cosign phased plan)
 
