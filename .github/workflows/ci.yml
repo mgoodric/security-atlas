@@ -188,11 +188,60 @@ jobs:
 
       - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
-  tests-integration:
-    name: Go · integration (Postgres RLS)
+  # ====================================================================
+  # Slice 417 — sharded integration matrix (Phase A serial + Phase B fan-out).
+  #
+  # The integration tier was a single serial `-p 1` job over ~89 packages
+  # and the merge-queue wall-clock bottleneck (~9-13 min, re-run on every
+  # update-branch). Slice 417 SHARDS it ACROSS runners — it does NOT
+  # parallelize within one runner (slice 334 settled `-p N` as out of
+  # scope; each leg below stays `-p 1`). The parallelism is the matrix:
+  # each leg is a separate GHA runner with its OWN Postgres + MinIO + NATS
+  # + seed, so two parallel legs cannot race on the shared platform-layer
+  # rows (`scf_anchors`, `evidence_kind_schemas`, `evidence_records`) the
+  # old `-p 1` serialized — they have separate databases.
+  #
+  #   * Leg A  — serial, -p 1, the SHARED-SEED / platform-layer cluster
+  #              (SCF global catalog seeders + the eval/control consumers
+  #              coupled to the freshly-seeded catalog). P0-2 pins the
+  #              catalog seeders here. The migration round-trip (slice 297),
+  #              the slice-461 order-independence guard, the slice-417
+  #              shard-coverage guard, and the slice-393 watermark all run
+  #              on Leg A and ONLY on Leg A (AC-12 / AC-10 / AC-6).
+  #   * Leg B1/B2/B3 — the tenant-scoped handler families, each on its own
+  #              runner, each still `-p 1` internally (AC-4 / P0-4). Their
+  #              isolation is the transaction-scoped `SET LOCAL
+  #              app.current_tenant` RLS pattern slice 334 documented as the
+  #              REAL (non-`-p 1`) isolation mechanism.
+  #
+  # The package->leg assignment lives in scripts/integration-shards.txt
+  # (the source of truth); the run step reads it via run-integration-shard.sh.
+  # The slice-417 shard-coverage guard (scripts/check-integration-shard-coverage.sh)
+  # proves the union of legs == the integration-tagged package set EXACTLY
+  # (no package dropped — T-1), disjoint (no double-run — T-2), and the
+  # catalog-seed cluster pinned to Leg A (P0-2). Each leg uploads a distinct
+  # coverage artifact; the fan-in `tests-integration` job below merges them
+  # with the unit profile and runs the slice-279 gate on the UNION (AC-7),
+  # then reports the SINGLE required check `Go · integration (Postgres RLS)`
+  # (AC-11) — green only when every leg passed. Branch-protection contexts
+  # are UNCHANGED: the per-leg `Go · integration (shard ...)` checks are NOT
+  # required; the fan-in keeps the original required name.
+  #
+  # Local reproducer (one leg):
+  #   SHARD_MANIFEST=scripts/integration-shards.txt \
+  #     scripts/run-integration-shard.sh A /tmp/cov-A.txt
+  # Full serial reproducer (unchanged):
+  #   go test -tags=integration -race -p 1 ./internal/...
+  # ====================================================================
+  tests-integration-shard:
+    name: Go · integration (shard ${{ matrix.leg }})
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: [A, B1, B2, B3]
     services:
       postgres:
         image: postgres:16-alpine
@@ -309,158 +358,56 @@ jobs:
         # so pg_catalog reads are not RLS-filtered. See scripts/audit-rls.sh
         # and docs/architecture/rls.md.
         run: ./scripts/audit-rls.sh
-      - name: Run integration tests
-        # `-p 1` serializes test packages so multiple binaries do not
-        # race on shared PLATFORM-LAYER rows in the test database.
-        # The concrete colliding tables are:
+      - name: Run integration shard (-p 1 within the leg)
+        # Slice 417: run ONLY this leg's packages, read from the source of
+        # truth scripts/integration-shards.txt via run-integration-shard.sh.
+        # `-p 1` is ALWAYS passed (the helper hard-codes it): the parallelism
+        # is ACROSS the matrix legs (each a separate runner with its own
+        # Postgres), never `-p N` within a runner (P0-4 / AC-4). slice 334's
+        # `-p 1` rationale is preserved per-leg.
         #
-        #   * evidence_kind_schemas — schema-registry seed rows
-        #     INSERTed by both schemaregistry and evidence/ingest
-        #     test setup; (kind, version) primary key races on
-        #     concurrent ON CONFLICT DO NOTHING.
-        #   * scf_anchors — slice 006 seed rows that downstream
-        #     packages INSERT additional anchors on top of;
-        #     cross-binary ordering is non-deterministic.
-        #   * evidence_records — append-only ledger writes whose
-        #     (tenant_id, kind, idempotency_key) unique index
-        #     enforces the slice 003 ingestion contract; multiple
-        #     binaries hitting the same triple collide.
+        # Why -p 1 stays load-bearing per leg: within a single leg's DB,
+        # multiple test binaries could still race on platform-layer rows
+        # (`scf_anchors` [no tenant_id], the catalog rows of
+        # `evidence_kind_schemas`, the append-only `evidence_records`
+        # ledger). `-p 1` serializes the binaries so they cannot. Across
+        # legs there is no race: each leg has its OWN database, and P0-2
+        # pins the catalog SEEDERS to Leg A so no two parallel legs seed
+        # the global catalog (slice 417 threat T-2). The tenant-scoped
+        # isolation that protects the Phase B legs is the transaction-scoped
+        # `SET LOCAL app.current_tenant` RLS pattern (slice 334), which
+        # `-p 1` was never the mechanism for.
         #
-        # IMPORTANT: `-p 1` is NOT about RLS. The RLS pattern
-        # (internal/tenancy/apply.go: SET LOCAL app.current_tenant)
-        # is transaction-scoped, so two parallel binaries each in
-        # their own BEGIN ... ROLLBACK with their own tenant GUC
-        # cannot leak across. The colliding rows above live at the
-        # platform / shared-seed / append-only-ledger layer, NOT in
-        # tenant-scoped tables — that's the actual reason -p 1 is
-        # load-bearing. See the "-p 1 rationale review" section of
-        # docs/audits/334-test-framework-review.md for the full
-        # analysis.
-        #
-        # Future relaxation path (v3, NOT now): split this job into
-        # a Phase A (serial, -p 1) over the shared-seed packages
-        # (db, schemaregistry, evidence/ingest, catalog) and a
-        # Phase B (parallel, -p N) over the tenant-scoped packages
-        # (controls, risks, evidence/records post-seed, policies,
-        # audit, vendor). Only worth doing once integration-job
-        # wall-clock becomes a merge-velocity problem.
-        #
-        # Local reproducer:
-        #   go test -tags=integration -race -p 1 ./internal/...
-        #
-        # Slice-by-slice enrolment history for the package list below
-        # (which packages were added when, before% → after% deltas,
-        # and the load-bearing "enrolment is the move" pattern):
-        # see docs/ci/integration-job-history.md.
+        # Slice-by-slice enrolment history for the package list:
+        # see docs/ci/integration-job-history.md and the shard-assignment
+        # rationale in docs/ci/integration-shards.md.
         run: |
-          # Slice 393 (Q-8): bookend the suite with a wall-clock measurement
-          # so the clean-main watermark step below can RECORD the job's own
-          # elapsed time rather than re-running the suite a second time.
+          # Slice 393 (Q-8): bookend the leg with a wall-clock measurement
+          # so the clean-main watermark step (Leg A only) can RECORD the
+          # critical-path leg's elapsed time rather than re-running anything.
           atlas_wallclock_start="$(date +%s)"
           echo "ATLAS_WALLCLOCK_START=${atlas_wallclock_start}" >> "$GITHUB_ENV"
-          go test -tags=integration -race -p 1 -v \
-            -covermode=atomic \
-            -coverprofile=coverage.txt \
-            -coverpkg=./... \
-            ./internal/db/... \
-            ./internal/api/scfimport/... \
-            ./internal/api/anchors/... \
-            ./internal/api/scfseed/... \
-            ./internal/api/schemaregistry/... \
-            ./internal/evidence/ingest/... \
-            ./internal/evidence/streambuf/... \
-            ./internal/artifact/... \
-            ./internal/api/artifacts/... \
-            ./internal/api/policyacks/... \
-            ./internal/featureflag/... \
-            ./internal/api/features/... \
-            ./internal/eval/... \
-            ./internal/api/controlstate/... \
-            ./internal/decision/... \
-            ./internal/api/dashboard/... \
-            ./internal/api/dashboardexport/... \
-            ./internal/api/risks/... \
-            ./internal/authz/... \
-            ./internal/control/... \
-            ./internal/platform/... \
-            ./internal/frameworkscope/... \
-            ./internal/risk/... \
-            ./internal/scope/... \
-            ./internal/vendor/... \
-            ./internal/policy/... \
-            ./internal/board/... \
-            ./internal/api/controldetail/... \
-            ./internal/api/controls/... \
-            ./internal/audit \
-            ./internal/audit/sink/... \
-            ./internal/audit/unifiedlog/... \
-            ./internal/audit/walkthrough/... \
-            ./internal/metrics/scheduler/... \
-            ./internal/api/metrics/... \
-            ./internal/metrics/eval/... \
-            ./internal/api/soc2import/... \
-            ./internal/auth/oauthclient/... \
-            ./internal/auth/oauthcode/... \
-            ./internal/auth/revocation/... \
-            ./internal/auth/userprefs/... \
-            ./internal/api/oauth/... \
-            ./internal/api/mcpwriteproposals/... \
-            ./internal/mcp/writeproposals/... \
-            ./internal/questionnaire/... \
-            ./internal/api/adminauditperiods/... \
-            ./internal/api/adminsuperadmins/... \
-            ./internal/api/admintenants/... \
-            ./internal/api/adminvendors/... \
-            ./internal/api/tenants/... \
-            ./internal/demoseed/... \
-            ./internal/auth/oidc/... \
-            ./internal/auth/jwtmw/... \
-            ./internal/auth/users/... \
-            ./internal/audit/period/... \
-            ./internal/api/adminauditlog/... \
-            ./internal/api/adminauthzbundle/... \
-            ./internal/api/admincreds/... \
-            ./internal/api/admindemo/... \
-            ./internal/api/adminsso/... \
-            ./internal/api/adminusers/... \
-            ./internal/api/aggregationrules/... \
-            ./internal/api/me/... \
-            ./internal/api/decisions/... \
-            ./internal/api/board/... \
-            ./internal/api/calendar/... \
-            ./internal/api/policies/... \
-            ./internal/api/vendors/... \
-            ./internal/api/search/... \
-            ./internal/api/questionnaires/... \
-            ./internal/api/ucfcoverage/... \
-            ./internal/api/emptyset/... \
-            ./internal/api/freshnessdrift/... \
-            ./internal/audit/notes/... \
-            ./internal/auth \
-            ./internal/auth/keystore/fsstore/... \
-            ./internal/mcp/... \
-            ./internal/observability/otel/... \
-            ./internal/drift/... \
-            ./internal/freshness/... \
-            ./internal/freshnessdrift/... \
-            ./internal/exception/... \
-            ./internal/catalog/metrics/... \
-            ./internal/oscal/... \
-            ./internal/oscal/cosign/... \
-            ./internal/policy/pdf/... \
-            ./internal/policy/seed/... \
-            ./internal/risk/aggrule/... \
-            ./internal/api
-      # Slice 461: order-independence guard. The main run above uses CI's
-      # CURATED package order (scfimport/anchors first). This step re-runs
-      # the catalog-sensitive packages in a deliberately NON-curated
-      # (alphabetical) order against a freshly-truncated catalog and asserts
-      # green. It catches the reintroduction of an order-coupled SCF-seed
-      # guard — the silent-reorder fragility slice 461 closes — which the
-      # curated-order run alone would not surface. Reuses this job's Postgres
-      # + applied migrations; adds only a few seconds and no new infra.
+          GO_TEST_EXTRA="-race" \
+            bash scripts/run-integration-shard.sh "${{ matrix.leg }}" coverage.txt
+      # Slice 461: order-independence guard. The main run above uses the
+      # manifest's CURATED package order (scfimport/anchors first on Leg A).
+      # This step re-runs the catalog-sensitive packages in a deliberately
+      # NON-curated (alphabetical) order against a freshly-truncated catalog
+      # and asserts green. It catches the reintroduction of an order-coupled
+      # SCF-seed guard — the silent-reorder fragility slice 461 closes. The
+      # catalog-sensitive packages all live on Leg A (P0-2), so this guard
+      # runs on Leg A only, where the catalog is seeded.
       - name: Assert SCF-seed order-independence (slice 461)
+        if: matrix.leg == 'A'
         run: bash scripts/check-integration-seed-order-independence.sh
+      # Slice 417 AC-6 / P0-1: the shard-coverage completeness guard. Proves
+      # the union of all legs' packages == the integration-tagged set EXACTLY
+      # (no package dropped — T-1), disjoint (no double-run — T-2), and the
+      # catalog-seed cluster pinned to Leg A (P0-2). Pure file analysis — no
+      # DB — so it runs once, on Leg A.
+      - name: Assert shard-coverage union completeness (slice 417)
+        if: matrix.leg == 'A'
+        run: bash scripts/check-integration-shard-coverage.sh
       - name: Upload integration coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
         with:
@@ -468,69 +415,49 @@ jobs:
           files: ./coverage.txt
           flags: integration
           fail_ci_if_error: false
-      # Slice 279 — download the unit-coverage artifact uploaded by the
-      # build-go job, merge it with the integration profile via
-      # gocovmerge, and run the per-package gate on the merged profile.
-      # This is the canonical coverage threshold check: the unit-only
-      # gate in build-go is the fast fence (catches regressions in
-      # unit tests); the merged gate here is the truth (counts
-      # integration-only-covered statements that the unit-only gate
-      # skipped). Floors in coverage-thresholds.json are sized to the
-      # merged profile per the slice 279 audit.
-      - name: Download unit coverage artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
-        with:
-          name: go-unit-coverage
-          path: /tmp/go-unit-coverage
-        continue-on-error: true
-      - name: Install gocovmerge
-        run: go install github.com/wadey/gocovmerge@b5bfa59ec0adc420475f97f89b58045c721d761c
-      - name: Merge unit + integration coverage profiles
-        run: |
-          if [ -f /tmp/go-unit-coverage/coverage.txt ]; then
-            gocovmerge /tmp/go-unit-coverage/coverage.txt coverage.txt > merged-coverage.txt
-            echo "merged unit + integration profiles"
-            wc -l /tmp/go-unit-coverage/coverage.txt coverage.txt merged-coverage.txt
-          else
-            echo "no unit-coverage artifact (perhaps build-go was skipped); falling back to integration-only profile"
-            cp coverage.txt merged-coverage.txt
-          fi
-      - name: Go · merged coverage gate (slice 279)
-        run: go run ./cmd/scripts/coverage-gate -profile=merged-coverage.txt
-      - name: Upload merged coverage profile as workflow artifact
+      # Slice 417 AC-5: each shard uploads its coverage profile under a
+      # DISTINCT artifact name so the fan-in job can merge all legs.
+      - name: Upload this shard's integration coverage profile
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: go-merged-coverage
-          path: merged-coverage.txt
+          name: go-integration-coverage-${{ matrix.leg }}
+          path: coverage.txt
           if-no-files-found: warn
       # ================================================================
       # Slice 393 (Q-8) — integration wall-clock watermark, clean-main only.
       #
-      # RECORDER, not a gate (P0-393-3 / slice 353 D6). On a clean main
-      # push only, feed the integration job's own measured duration
-      # (bookended in the "Run integration tests" step above) into
-      # scripts/measure-integration-wallclock.sh in RECORD mode
-      # (WALLCLOCK_SECONDS set ⇒ no second suite run). The script appends
-      # to docs/integration-wallclock.tsv and warns — does NOT fail —
-      # when the duration crosses the 20-min Phase-A/B-split trigger.
+      # RECORDER, not a gate (P0-393-3 / slice 353 D6). Slice 417 AC-10:
+      # the watermark now measures the CRITICAL-PATH leg (the slowest of
+      # Leg A / B1 / B2 / B3) rather than the old serial total, so the
+      # 20-min trip-wire reflects real merge-blocking latency. We record
+      # one row per leg on clean main (each leg stamps its matrix.leg in
+      # the SHA column); the slowest leg is the critical path and the
+      # trip-wire fires off whichever leg crosses it. This is a faithful
+      # per-leg sample series — the analysis (max across legs) is done when
+      # reading docs/integration-wallclock.tsv, not at write time, matching
+      # the slice-393 "recorder not gate" posture.
       #
       # Gated to clean main (event push + ref main) so the watermark is a
-      # single authoritative series, not one row per PR re-run. Reaching
-      # this step at all means every prior step (incl. the coverage gate)
-      # passed, so the sample is a clean-suite measurement.
+      # single authoritative series, not one row per PR re-run.
       #
       # Local repro: WALLCLOCK_SECONDS=900 bash scripts/measure-integration-wallclock.sh
       #   self-test: bash scripts/measure-integration-wallclock_test.sh
-      # See slice 353 (Q-8) + slice 393.
+      # See slice 353 (Q-8) + slice 393 + slice 417 AC-10.
       # ================================================================
-      - name: Record integration wall-clock watermark (slice 393 Q-8)
+      - name: Record integration wall-clock watermark (slice 393 Q-8 / 417 AC-10)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           end="$(date +%s)"
           seconds=$(( end - ATLAS_WALLCLOCK_START ))
-          WALLCLOCK_SECONDS="$seconds" bash scripts/measure-integration-wallclock.sh
+          # Stamp the leg into the SHA column so the per-leg series is
+          # distinguishable and the critical-path (max) leg is readable.
+          WALLCLOCK_SHA="$(git rev-parse --short HEAD)-shard-${{ matrix.leg }}" \
+            WALLCLOCK_SECONDS="$seconds" bash scripts/measure-integration-wallclock.sh
+      # Slice 417 AC-12: the migration round-trip runs EXACTLY ONCE (Leg A),
+      # not redundantly per shard.
       - name: Migration round-trip — down then up
+        if: matrix.leg == 'A'
         run: |
           # Slice 297: TRUNCATE all data tables before the round-trip
           # so the down migrations cast pure schema, not data. The
@@ -571,6 +498,111 @@ jobs:
               *) echo "re-applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
             esac
           done
+
+  # ====================================================================
+  # Slice 417 — integration fan-in (the SINGLE required check, AC-11).
+  #
+  # `needs:` every shard leg + build-go. Reports the required status
+  # `Go · integration (Postgres RLS)` — UNCHANGED branch-protection name
+  # (AC-11): the per-leg `Go · integration (shard ...)` checks are NOT in
+  # the contexts list, so branch protection still gates on this one name.
+  #
+  # GREEN ONLY WHEN ALL LEGS PASS: the explicit `result != 'success'`
+  # check below fails this job if any shard failed/was cancelled, so a fail
+  # on any leg fails the required check (a `needs:` on a matrix job already
+  # blocks the fan-in if a leg fails, but `if: always()` is required to run
+  # the COVERAGE MERGE even on a leg failure — so we re-assert the leg
+  # result explicitly to keep "any leg red ⇒ required check red").
+  #
+  # COVERAGE MERGE (AC-7 / P0-3 / T-3): download the unit profile + every
+  # leg's integration profile, merge ALL of them with gocovmerge into the
+  # single profile the slice-279 gate reads. The gate runs on the UNION,
+  # never a single leg's fragment — otherwise package floors evaluate
+  # against partial data (slice 417 threat T-3). Floors are NOT lifted by
+  # this slice (slice 279 ratchet is monotonic; P0-3).
+  # ====================================================================
+  tests-integration:
+    name: Go · integration (Postgres RLS)
+    needs: [changes, build-go, tests-integration-shard]
+    if: always() && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      # AC-11: any shard failure (or cancellation) fails this required
+      # check. The matrix uses fail-fast: false so every leg reports, but
+      # the required check must be RED if any leg is RED.
+      - name: Require every integration shard to have passed
+        if: needs.tests-integration-shard.result != 'success'
+        run: |
+          echo "One or more integration shards did not succeed: result=${{ needs.tests-integration-shard.result }}" >&2
+          echo "The required check 'Go · integration (Postgres RLS)' is RED because a shard leg failed." >&2
+          exit 1
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: "1.26"
+          cache: true
+      # Slice 279 — the unit-coverage artifact (uploaded by build-go).
+      - name: Download unit coverage artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+        with:
+          name: go-unit-coverage
+          path: /tmp/cov/unit
+        continue-on-error: true
+      # Slice 417 AC-7 — every shard's integration profile. download-artifact
+      # with a name pattern + merge-multiple pulls all four leg artifacts
+      # (go-integration-coverage-A / -B1 / -B2 / -B3) into one directory.
+      - name: Download all integration shard coverage profiles
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+        with:
+          pattern: go-integration-coverage-*
+          path: /tmp/cov/shards
+          merge-multiple: false
+        continue-on-error: true
+      - name: Install gocovmerge
+        run: go install github.com/wadey/gocovmerge@b5bfa59ec0adc420475f97f89b58045c721d761c
+      # Slice 417 AC-7 / P0-3 — merge unit + EVERY leg's integration profile
+      # into the single merged profile the slice-279 gate consumes. The gate
+      # MUST see the union; a single leg's fragment under-counts (T-3).
+      - name: Merge unit + all shard integration coverage profiles
+        run: |
+          set -euo pipefail
+          profiles=()
+          if [ -f /tmp/cov/unit/coverage.txt ]; then
+            profiles+=(/tmp/cov/unit/coverage.txt)
+            echo "found unit profile"
+          else
+            echo "WARNING: no unit-coverage artifact (build-go skipped?)"
+          fi
+          # Each shard artifact is a directory go-integration-coverage-<leg>/
+          # containing coverage.txt.
+          shopt -s nullglob
+          for p in /tmp/cov/shards/go-integration-coverage-*/coverage.txt; do
+            profiles+=("$p")
+            echo "found shard profile: $p"
+          done
+          if [ "${#profiles[@]}" -eq 0 ]; then
+            echo "no coverage profiles found to merge" >&2
+            exit 1
+          fi
+          gocovmerge "${profiles[@]}" > merged-coverage.txt
+          echo "merged ${#profiles[@]} profile(s):"
+          wc -l "${profiles[@]}" merged-coverage.txt
+      - name: Go · merged coverage gate (slice 279)
+        run: go run ./cmd/scripts/coverage-gate -profile=merged-coverage.txt
+      - name: Upload merged coverage profile as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: go-merged-coverage
+          path: merged-coverage.txt
+          if-no-files-found: warn
 
   tests-integration-stub:
     name: Go · integration (Postgres RLS)
