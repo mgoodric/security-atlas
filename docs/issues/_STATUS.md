@@ -5,6 +5,14 @@
 
 **Last reconciled:** 2026-06-04 (batch 193 reconcile — 426 + 458 + 465 MERGED; spillover 466 filed; ~19 backlog slices remain)
 
+## Drift detected — 2026-06-04 (batch 194 claim-stake · 438 + 448 + 459)
+
+Eighth drain batch from the 415-466 analysis backlog. Conflict-safe subset (coverage+shard=438 SOLE · web/app=448 only · comments=459 only; shared surface = CHANGELOG only). 436 (god-file split) deferred — touches httpserver.go + dbx + web/lib, too high-conflict for a batch.
+
+- **438** (ISO 27001:2022 crosswalk loader — 2nd framework, proves the UCF graph) — Backend · JUDGMENT — `ready` → **in-progress**. Branch `feat/438-iso27001-crosswalk-loader`. Generalizes the slice-007 `internal/api/soc2import` loader to a framework-agnostic crosswalk importer + imports a curated high-signal ISO Annex A subset via SCF anchors (requirement → SCF anchor only, never requirement → requirement; P0-438-1). The SOLE coverage-thresholds + shard-manifest pick this batch (renames the soc2import floor + manifest entry). Unblocks 447.
+- **448** (bulk operations + saved filter-views — controls list operator ergonomics) — Frontend · JUDGMENT — `ready` → **in-progress**. Branch `feat/448-bulk-ops-saved-views`. Multi-select bulk actions + persisted saved views on the controls list. Pure `web/app/`.
+- **459** (sweep code-comment `Plans/mockups/` provenance citations to the archived path) — Infra · JUDGMENT — `ready` → **in-progress**. Branch `chore/459-mockup-comment-sweep`. Updates stale `Plans/mockups/` citations in `internal/board` comments + `web/e2e-audit` + `web/docs` to the slice-437 archived path `Plans/_archive/mockups/`. Comment/doc-only.
+
 ## Reconcile — 2026-06-04 (batch 193 · 426 + 458 + 465 merged)
 
 Seventh drain batch — all three merged. Disjoint surfaces held (coverage-thresholds=426 · ci.yml=458 · deploy/+.env=465). Mid-batch the release-please bot auto-merged `7b7725a4 chore(main): release 1.17.0 (#630)` (expected bot drift, ff-pulled). 426's last leg hit an UNRELATED flake (`TestPDF_ReturnsPDFOrServiceUnavailable` in `internal/api/board`, 30s chromedp-render timeout in shard B2 — board is NOT in 426's changed files); reran the failed leg → green (load-induced, not a regression). All three engineers shipped clean first-pass.
