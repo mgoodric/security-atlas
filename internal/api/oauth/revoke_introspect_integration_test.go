@@ -211,6 +211,106 @@ func TestIntegrationIntrospect_UnauthInspector_Returns401(t *testing.T) {
 	}
 }
 
+// TestIntegrationIntrospect_ExpiredToken_Inactive (slice 422, AC-4):
+// an AUTHENTICATED inspector introspecting an EXPIRED but
+// validly-signed and un-revoked token MUST get 200 + {active:false} —
+// NOT 401 and NOT active:true. The deny here is the temporal
+// claim-validation arm (introspect.go jwt.Validate → writeInactive):
+// a regression that reported an expired token as active would let a
+// stale token pass a resource server's introspection check, a privilege
+// extension past the token's intended lifetime.
+func TestIntegrationIntrospect_ExpiredToken_Inactive(t *testing.T) {
+	srv, signer, _, clients, _ := newRevokeIntrospectServer(t)
+	clientID, clientSecret := issueClientForTest(t, clients)
+
+	// Mint a token whose exp is in the past (signature still valid).
+	tenantID := uuid.New()
+	expiredTok, err := signer.Sign(context.Background(), jwt.AtlasClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    testIssuer,
+			Subject:   "user:alice-introspect-expired",
+			Audience:  []string{testIssuer},
+			ExpiresAt: time.Now().Add(-time.Hour).Unix(),
+			IssuedAt:  time.Now().Add(-2 * time.Hour).Unix(),
+			NotBefore: time.Now().Add(-2 * time.Hour).Unix(),
+			ID:        uuid.NewString(),
+		},
+		CurrentTenantID:  tenantID,
+		AvailableTenants: []uuid.UUID{tenantID},
+	})
+	if err != nil {
+		t.Fatalf("Sign expired: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("token", expiredTok)
+	form.Set("client_id", clientID)
+	form.Set("client_secret", clientSecret)
+
+	resp, body := postFormAt(t, srv.URL+oauth.PathIntrospect, form, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d body = %s — expired must be 200+{active:false}, not %d", resp.StatusCode, body, resp.StatusCode)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if act, _ := out["active"].(bool); act {
+		t.Fatalf("active = true for EXPIRED token; want false (body %s)", body)
+	}
+}
+
+// TestIntegrationIntrospect_BadSignatureToken_Inactive (slice 422,
+// AC-4): an AUTHENTICATED inspector introspecting a token whose
+// signature does NOT verify against the AS keystore MUST get 200 +
+// {active:false}. The deny is the signature-verification arm
+// (introspect.go signer.Verify → writeInactive). A forged token must
+// never report active.
+func TestIntegrationIntrospect_BadSignatureToken_Inactive(t *testing.T) {
+	srv, _, _, clients, _ := newRevokeIntrospectServer(t)
+	clientID, clientSecret := issueClientForTest(t, clients)
+
+	// Mint a token under a DIFFERENT keystore so the server's signer
+	// cannot verify it.
+	otherKS, err := fsstore.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("fsstore.Open: %v", err)
+	}
+	otherSigner := tokensign.New(otherKS)
+	tenantID := uuid.New()
+	foreignTok, err := otherSigner.Sign(context.Background(), jwt.AtlasClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    testIssuer,
+			Subject:   "user:forged",
+			Audience:  []string{testIssuer},
+			ExpiresAt: time.Now().Add(time.Hour).Unix(),
+			IssuedAt:  time.Now().Unix(),
+			ID:        uuid.NewString(),
+		},
+		CurrentTenantID: tenantID,
+	})
+	if err != nil {
+		t.Fatalf("Sign foreign: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("token", foreignTok)
+	form.Set("client_id", clientID)
+	form.Set("client_secret", clientSecret)
+
+	resp, body := postFormAt(t, srv.URL+oauth.PathIntrospect, form, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d body = %s — bad-signature must be 200+{active:false}", resp.StatusCode, body)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if act, _ := out["active"].(bool); act {
+		t.Fatalf("active = true for forged-signature token; want false (body %s)", body)
+	}
+}
+
 // TestIntegrationRevoke_HappyPath: AC-13..AC-17. client_credentials
 // caller revokes a token; subsequent introspection returns inactive.
 func TestIntegrationRevoke_HappyPath(t *testing.T) {
