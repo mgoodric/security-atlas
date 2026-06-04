@@ -2832,6 +2832,32 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 428** — ADRs for the four load-bearing canvas invariants that
+  previously had no decision record. Adds four retrospective ADRs under
+  `docs/adr/`, one per pillar invariant: `0011-rls-tenant-isolation.md`
+  (invariant #6 — tenant isolation via PostgreSQL Row-Level Security,
+  deny-on-missing-context; canvas §5.4), `0012-append-only-evidence-ledger.md`
+  (invariant #2 — append-only ledger + separated ingestion/evaluation +
+  point-in-time replay; canvas §4.3), `0013-ucf-graph-one-control-n-satisfactions.md`
+  (invariant #1 — UCF graph with STRM-typed edges through SCF anchors, no
+  per-framework duplication; canvas §3 + `Plans/UCF_GRAPH_MODEL.md`), and
+  `0014-multidimensional-scope-frameworkscope-intersection.md` (invariants
+  #4/#5 — multidimensional tuple-space scope + `effective_scope =
+  applicability_expr ∩ framework_scope.predicate`; canvas §5.1-5.5, grouped
+  because #5 operates on the cell space #4 defines). Each ADR follows the
+  house Context / Decision / Consequences / Alternatives-considered shape,
+  marks itself **retrospective** (records an already-shipped decision, does
+  not re-open it), names the concrete rejected alternative (application-layer
+  tenant filtering; mutable evidence table / compaction; per-framework
+  duplicated controls / pairwise crosswalk; scope-as-tree / global shared
+  scope), and cross-links its canvas section + CLAUDE.md invariant number.
+  The four pillar ADRs are surfaced in the docs site under Design decisions
+  via a new `docs-site/docs/design/architecture-decision-records.md` index
+  page (links to the repo-internal ADRs, matching the logo-decision pattern;
+  the ADR files stay in `docs/adr/` outside the mkdocs `docs_dir`). No canvas
+  or CLAUDE.md invariant text was modified — the ADRs are additive
+  trade-off-context records.
+
 - **slice 142** — super_admin role full schema + management surface
   (slice 198 follow-on). Promotes slice 198's `super_admins` stub
   (`user_id, granted_at, granted_via`) to a management-grade schema:
