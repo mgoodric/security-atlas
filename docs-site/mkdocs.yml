@@ -118,6 +118,7 @@ nav:
   - Troubleshooting:
       - First-time login: troubleshooting/first-login.md
   - Design decisions:
+      - Architecture decision records: design/architecture-decision-records.md
       - Logo selection: design/logo-decision.md
 
 # Slice 140 — copy the canonical docs/openapi.yaml into the docs site
