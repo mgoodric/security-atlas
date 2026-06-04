@@ -25,6 +25,10 @@ on:
     paths:
       - "docs-site/**"
       - ".github/workflows/docs-publish.yml"
+      # Slice 430 — the config-reference drift guard must also fire when
+      # the env template or the guard script changes, not only the page.
+      - "deploy/docker/.env.example"
+      - "scripts/check-config-reference-drift.sh"
 
 # Default permissions are read-only at the workflow level; jobs widen
 # only what they need.
@@ -81,6 +85,30 @@ jobs:
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: docs-site/site
+
+  config-drift:
+    # Slice 430 — assert docs-site/docs/configuration.md stays in
+    # lockstep with deploy/docker/.env.example. Informational (matching
+    # this workflow's advisory posture per slice 058): a docs-hygiene
+    # failure surfaces loudly on the PR without blocking an unrelated
+    # code merge. The guard also runs as `just config-reference-drift-check`.
+    name: Config reference drift
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Check config-reference / .env.example drift
+        run: bash scripts/check-config-reference-drift.sh
+
+      - name: Run drift-guard self-tests
+        run: bash scripts/check-config-reference-drift_test.sh
 
   deploy:
     name: Deploy to GitHub Pages
