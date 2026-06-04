@@ -38,8 +38,30 @@ test-frontend:
 # Run all linters (Go + frontend + Python)
 lint: lint-go lint-errleak lint-duphelper lint-frontend lint-python
 
-# Lint Go (golangci-lint)
-lint-go:
+# Pinned golangci-lint version. Mirrors the `version:` pin on the
+# golangci-lint-action in .github/workflows/ci.yml (the required `Go · lint`
+# check) so local `just lint-go` and CI enforce the SAME analyzer set. A
+# floating version would let an upstream release red-wall every open PR with
+# no review (slice 416; same class as slice 090's govulncheck@latest). Bump
+# this AND the ci.yml pin together in a dedicated `chore(golangci):` slice so
+# the new analyzer set lands as an auditable diff (mirrors SQLC_VERSION).
+GOLANGCI_VERSION := "v2.12.2"
+
+# Verify the installed golangci-lint matches the pin. `golangci-lint version`
+# prints e.g. "golangci-lint has version 2.12.2 built with ..." — extract the
+# bare X.Y.Z and compare against the pin (sans leading `v`).
+golangci-version-check:
+    @installed=$(golangci-lint version 2>/dev/null | sed -nE 's/.*has version ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p'); \
+    pinned=$(echo "{{GOLANGCI_VERSION}}" | sed 's/^v//'); \
+    if [ "$installed" != "$pinned" ]; then \
+        echo "golangci-lint version mismatch: installed=${installed:-missing} pinned=$pinned"; \
+        echo "Install the pinned version: 'brew install golangci-lint' on macOS, or download from https://github.com/golangci/golangci-lint/releases/tag/{{GOLANGCI_VERSION}}"; \
+        exit 1; \
+    fi
+
+# Lint Go (golangci-lint). The version check ensures local lint enforces the
+# same analyzer set as CI's required `Go · lint` gate.
+lint-go: golangci-version-check
     golangci-lint run ./...
 
 # Slice 367 — CWE-209 errleak check.
