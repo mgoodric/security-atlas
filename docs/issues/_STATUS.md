@@ -3,15 +3,19 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-04 (batch 189 claim-stake — slices 421 + 430 + 454 → in-progress (parallel, conflict-safe))
+**Last reconciled:** 2026-06-04 (batch 189 reconcile — 421 + 430 + 454 MERGED; spillovers 460/461 filed; ~31 backlog slices remain)
 
-## Drift detected — 2026-06-04 (batch 189 claim-stake · 421 + 430 + 454)
+## Reconcile — 2026-06-04 (batch 189 · 421 + 430 + 454 merged)
 
-Third drain batch (kept to 3 to limit the CHANGELOG cascade). Conflict-safe: 421 = internal/\* fuzz tests + ci.yml; 430 = docs-site; 454 = go.mod. One ci.yml / one docs-nav / one go.mod.
+Third drain batch — all three merged (CHANGELOG cascade resolved keep-all-bullets).
 
-- **421** (parser fuzz harnesses) — Quality · `ready` → **in-progress**. Go native `testing.F` fuzz targets for the untrusted-input parsers (OSCAL bundle / SCF import / semver / CSV / Excel) + a bounded CI fuzz pass; seed corpus from goldens.
-- **430** (config/env-var reference page) — Docs · `ready` → **in-progress**. `docs-site/docs/configuration.md` — the ~34 `.env.example` keys as one reference table with a drift guard.
-- **454** (go-otel observability group bump) — Infra · `ready` → **in-progress**. Bump the 13-module otel group; verify compile + traces emit; supersedes dependabot #951.
+- **421** (parser fuzz harnesses) — Quality — **MERGED** at `9d8e4179` (#985). 5 Go native `testing.F` targets (OSCAL bundle / SCF import / semver / manual CSV / Excel), corpus-seeded from goldens; bounded `Go · fuzz (bounded)` CI job (20s/target, path-filtered w/ stub twin). Ran 6-10M execs/target — NO crashers (parsers robust). No spillover.
+- **430** (config/env-var reference page) — Docs — **MERGED** at `07c2c25c` (#984). `docs-site/docs/configuration.md` (28 keys, security-critical flagged) + a mechanical drift-guard script + `config-drift` CI job + 7-case test. Spillover **460** (`NATS_URL` server-read but not in `.env.example`).
+- **454** (go-otel observability group bump) — Infra — **MERGED** at `b839f98a` (#986). 13 otel modules 1.43→1.44 (additive, zero source edits); 57 otel-pkg integration tests green; redaction/no-secret-leak checks pass. Supersedes dependabot #951 (maintainer can close it). Spillover **461**.
+
+Spillovers (de-collided — 430 + 454 both computed 460): **460** (NATS_URL not templated in `.env.example` · `ready`) · **461** (integration-suite SCF-seed-order coupling — the long-assumed "GOV-01 local-only artifact" is a REAL self-correcting-guard bug; a partial `DELETE FROM scf_anchors` leaves a stale subset, the lazy-seed guard then skips reseed · `ready`).
+
+Backlog: ~31 analysis slices remain ready (417-420, 424-426, 428, 431-432, 434-445, 448, 450-453) + 456,457,458,459,460,461. Decision-gates 446/455 + not-ready 447 stay out of the auto-loop; 449-OPA moot (1.17 merged via #953).
 
 Second drain batch — all four merged (CHANGELOG cascade across the 4 parallel PRs resolved keep-all-bullets at each merge).
 

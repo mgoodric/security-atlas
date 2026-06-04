@@ -3,7 +3,7 @@
 **Cluster:** Docs
 **Estimate:** M
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (`07c2c25c`, #984 — config reference + drift guard; spillover 460)
 
 ## Narrative
 

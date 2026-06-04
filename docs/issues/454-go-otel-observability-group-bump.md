@@ -4,7 +4,7 @@
 **Estimate:** S/M (0.5-1d)
 **Type:** AFK
 
-**Status:** `ready`
+**Status:** `merged` (`b839f98a`, #986 — go-otel 1.43→1.44; supersedes #951; spillover 461)
 
 ## Narrative
 
