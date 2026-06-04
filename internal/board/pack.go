@@ -1,6 +1,6 @@
 // pack.go — the QUARTERLY BOARD PACK domain model (slice 032).
 //
-// The quarterly board pack (canvas §7.5, Plans/mockups/board-pack.html) is
+// The quarterly board pack (canvas §7.5, Plans/_archive/mockups/board-pack.html) is
 // the full board-meeting artifact — it EXTENDS the slice-031 monthly brief
 // into a multi-section, board-ready report with a draft -> publish lifecycle.
 //

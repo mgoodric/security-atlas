@@ -1,4 +1,4 @@
-// Slice 043 — pack cover header (per Plans/mockups/board-pack.html).
+// Slice 043 — pack cover header (per Plans/_archive/mockups/board-pack.html).
 //
 // The cover renders the report id, draft/published badge, title, period
 // range subtitle, and a three-cell metadata strip (period, generated_at,
@@ -9,7 +9,7 @@
 // Slice 219 — the Author cell was dropped: the backend board-pack record
 // has no author field, so the previous `value="—"` placeholder was a
 // UI-honesty gap (em-dash reads as "missing data" when the field is
-// not modeled). The mockup at Plans/mockups/board-pack.html line 69 still
+// not modeled). The mockup at Plans/_archive/mockups/board-pack.html line 69 still
 // shows a 4-cell strip including Author; we intentionally diverge.
 // Honesty > parity.
 

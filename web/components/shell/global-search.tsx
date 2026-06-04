@@ -4,7 +4,7 @@
 // + ⌘K keyboard shortcut + popover results grouped by entity type +
 // keyboard navigation + 250ms debounce + 50-row hard cap) and
 // supersedes spillover slice 272. Mockup reference:
-// `Plans/mockups/controls.html` lines 43-47.
+// `Plans/_archive/mockups/controls.html` lines 43-47.
 //
 // Slice 361 — WCAG 4.1.2 Name/Role/Value combobox ARIA wiring layered
 // on top of the slice 223 surface. The input is now wired as a

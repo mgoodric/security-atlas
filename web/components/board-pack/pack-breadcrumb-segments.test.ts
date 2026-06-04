@@ -34,7 +34,7 @@ describe("packBreadcrumbSegments", () => {
   });
 
   test("does NOT fabricate a tenant-name segment (P0-218-2)", () => {
-    // Regression guard. The mockup at Plans/mockups/board-pack.html
+    // Regression guard. The mockup at Plans/_archive/mockups/board-pack.html
     // lines 27-30 ships a "Sentinel Labs" → "Board reports" → period
     // chain. We deliberately drop both fabricated segments — there's
     // no session-bound tenant name to render honestly, and there's no

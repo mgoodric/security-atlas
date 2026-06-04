@@ -6,7 +6,7 @@
 // caption text lives in posture-coverage-caption.ts (pure TS) per the
 // slice 183 precedent (calendar/link-for.ts split out of its sibling
 // view modules for the same reason). This unit pins it to the
-// constitutional methodology string from Plans/mockups/board-pack.html
+// constitutional methodology string from Plans/_archive/mockups/board-pack.html
 // §01 (lines 146–148).
 //
 // Why this is sufficient coverage for AC-4: the wire shape that matters
@@ -24,7 +24,7 @@ import { POSTURE_COVERAGE_CAPTION } from "./posture-coverage-caption";
 
 describe("POSTURE_COVERAGE_CAPTION", () => {
   test("matches the constitutional mockup string verbatim", () => {
-    // The string below is copy-pasted from Plans/mockups/board-pack.html
+    // The string below is copy-pasted from Plans/_archive/mockups/board-pack.html
     // lines 146–148. Any divergence here is the bug. Do NOT relax this
     // by normalizing whitespace or punctuation — the methodology
     // sentence is audit-trail content (canvas §5.5 invariant 5).

@@ -1,6 +1,6 @@
 // Slice 043 — templated-narrative provenance badge.
 //
-// The mockup (Plans/mockups/board-pack.html) ships a violet "AI-drafted ·
+// The mockup (Plans/_archive/mockups/board-pack.html) ships a violet "AI-drafted ·
 // llama3.1-8b · approved" badge depicting a v3+ future state where the
 // platform optionally polishes the templated narrative with a local LLM.
 // v1 is templated-only — slice 032's pack_narrative.go imports no

@@ -5,7 +5,7 @@
 // slice 271. The breadcrumb chip is distinct from the TenantSwitcher
 // — the switcher is an INTERACTIVE control (dropdown to pick a
 // different tenant); the breadcrumb is READ-ONLY wayfinding ("you
-// are here"). Mockup reference: `Plans/mockups/controls.html` lines
+// are here"). Mockup reference: `Plans/_archive/mockups/controls.html` lines
 // 33-37.
 //
 // Why a client component: it reads `usePathname()` to derive the

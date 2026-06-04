@@ -1,4 +1,4 @@
-// Slice 043 — sticky top export bar (per Plans/mockups/board-pack.html).
+// Slice 043 — sticky top export bar (per Plans/_archive/mockups/board-pack.html).
 //
 // Renders Export PDF + Copy Markdown + Approve & publish. The export
 // links point at the slice-043 BFF passthrough routes (NOT the raw
