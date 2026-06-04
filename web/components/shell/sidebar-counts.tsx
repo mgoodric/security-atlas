@@ -1,7 +1,7 @@
 // Slice 214 — sidebar item count badges (Controls + Risks).
 //
 // Closes the parity gap surfaced by slice 204's audit fleet: the
-// mockup at `Plans/mockups/audits.html` (lines 63-76) shows two
+// mockup at `Plans/_archive/mockups/audits.html` (lines 63-76) shows two
 // sidebar rows carrying right-aligned count badges:
 //
 //   - Controls   |  mono "82"  (muted)

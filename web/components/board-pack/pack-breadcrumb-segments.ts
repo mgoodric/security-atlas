@@ -18,7 +18,7 @@
 //   * Every segment links to a real route OR is plain text derived from
 //     pack data.
 //   * NO fabricated tenant-name segment (the mockup at
-//     Plans/mockups/board-pack.html lines 27-30 ships a "Sentinel Labs"
+//     Plans/_archive/mockups/board-pack.html lines 27-30 ships a "Sentinel Labs"
 //     segment; we deliberately drop it — there's no session-bound tenant
 //     name to render honestly at the time of build).
 //   * NO fabricated parent "Board reports" segment (the mockup line 30

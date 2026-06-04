@@ -5,7 +5,7 @@
 // the same as the breadcrumb's parent segment — keeping both would be
 // the redundancy AC-2 warns against; slice 218 D2).
 //
-// Mockup parity target: Plans/mockups/board-pack.html lines 27-33.
+// Mockup parity target: Plans/_archive/mockups/board-pack.html lines 27-33.
 // Anti-parity: we drop the mockup's fabricated `Sentinel Labs` +
 // `Board reports` segments (no session-bound tenant name + no parent
 // route on main). See pack-breadcrumb.ts for the honesty rationale.
@@ -75,7 +75,7 @@ function ChevronRight({
   "aria-hidden"?: boolean | "true" | "false";
   "data-testid"?: string;
 }) {
-  // Inline SVG matches the mockup chevron (Plans/mockups/board-pack.html
+  // Inline SVG matches the mockup chevron (Plans/_archive/mockups/board-pack.html
   // lines 29 + 31) to keep the visual identical without adding a new
   // dependency. Heroicons / lucide-react aren't in the export-bar's
   // dependency surface today, and pulling them in for one chevron is

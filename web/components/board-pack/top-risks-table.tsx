@@ -1,4 +1,4 @@
-// Slice 043 — top risks aging table (per Plans/mockups/board-pack.html §02).
+// Slice 043 — top risks aging table (per Plans/_archive/mockups/board-pack.html §02).
 //
 // Renders the slice-032 RiskAging rows as a table with treatment chip,
 // residual severity, and aging days. Data only — no fabrication.

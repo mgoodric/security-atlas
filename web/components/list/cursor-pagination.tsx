@@ -23,7 +23,7 @@
 // not persisted. The component is a dumb renderer; storage is the
 // page's concern.
 //
-// Mockup parity: `Plans/mockups/evidence.html` lines 266-272.
+// Mockup parity: `Plans/_archive/mockups/evidence.html` lines 266-272.
 
 import type { ReactNode } from "react";
 

@@ -21,7 +21,7 @@ export type MeProfile = {
   // callers can rely on it without a nil-check. The Profile section
   // on /settings renders the additional roles (excluding the primary
   // admin/user already shown via the `is_admin` badge) as a muted
-  // tail, mirroring the `Plans/mockups/settings.html` "admin +
+  // tail, mirroring the `Plans/_archive/mockups/settings.html` "admin +
   // grc_engineer" pattern.
   roles: string[];
 };
