@@ -330,6 +330,17 @@ services:
       # Local-HTTP default: cookies are not Secure-flagged. Set to "true"
       # once the deployment is behind TLS.
       ATLAS_SECURE_COOKIES: ${ATLAS_SECURE_COOKIES:-false}
+      # Slice 465: opt into X-Forwarded-For client-IP capture for session
+      # rows (read by internal/api/auth/clientip.go +
+      # internal/api/admindemo/handler.go). The `:-` empty default means
+      # an unset variable maps to an empty value — the server's "1"-gated
+      # check stays false, so the shipped bundle records r.RemoteAddr
+      # exactly as it does today (default OFF, byte-identical when unset).
+      # SECURITY: only set this to "1" in .env when atlas is behind a
+      # trusted reverse proxy that overwrites inbound X-Forwarded-For;
+      # trusting it otherwise is a client-IP spoofing vector. See
+      # .env.example for the full warning.
+      TRUST_FORWARDED_HEADERS: ${TRUST_FORWARDED_HEADERS:-}
       # Slice 036: artifact store wiring.
       ARTIFACTS_BUCKET: ${ARTIFACTS_BUCKET:-atlas-artifacts}
       ARTIFACTS_S3_ENDPOINT: http://minio:9000

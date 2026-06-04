@@ -76,6 +76,15 @@ a deployment vulnerability, not a convenience.
       deployment is behind TLS, so session cookies carry the `Secure`
       flag. A `Secure` cookie over plain HTTP is silently dropped by
       browsers; the default `false` is for local HTTP only.
+    - **`TRUST_FORWARDED_HEADERS`** — when set to `1`, the server reads
+      the client IP for session rows from the `X-Forwarded-For` header
+      instead of the direct TCP peer. **Off by default** (shipped
+      commented out). `X-Forwarded-For` is a plain request header any
+      client can set, so enabling this without a trusted reverse proxy
+      that **overwrites** the inbound header is a **client-IP spoofing
+      vector** — forged IPs land on every session row and on any
+      IP-based rate-limit or audit decision. Set it **only** when atlas
+      sits behind a proxy you have configured to scrub the header.
 <!-- prettier-ignore-end -->
 
 ## Required
@@ -116,9 +125,10 @@ JetStream is the durable event substrate. Their host ports are in the
 
 ## Cookies and security
 
-| Variable               | Default | Required? | Scope  | Description                                                                                                                                                                                                                                          |
-| ---------------------- | ------- | --------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ATLAS_SECURE_COOKIES` | `false` | no        | server | Marks session cookies `Secure`. Set to `true` once the deployment is behind TLS. A `Secure` cookie over plain HTTP is silently dropped — the `false` default is for local HTTP only. See the [security-critical](#security-critical-variables) note. |
+| Variable                  | Default         | Required? | Scope  | Description                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------- | --------------- | --------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ATLAS_SECURE_COOKIES`    | `false`         | no        | server | Marks session cookies `Secure`. Set to `true` once the deployment is behind TLS. A `Secure` cookie over plain HTTP is silently dropped — the `false` default is for local HTTP only. See the [security-critical](#security-critical-variables) note.                                                                                                                                                                                |
+| `TRUST_FORWARDED_HEADERS` | _(unset → off)_ | no        | server | When set to `1`, the server captures the session-row client IP from the leftmost `X-Forwarded-For` entry (RFC 7239) instead of the direct TCP peer (`r.RemoteAddr`). Shipped commented out; **off by default**. Set it **only** behind a trusted reverse proxy that overwrites inbound `X-Forwarded-For` — otherwise it is a client-IP spoofing vector (slice 465). See the [security-critical](#security-critical-variables) note. |
 
 ## Observability
 
