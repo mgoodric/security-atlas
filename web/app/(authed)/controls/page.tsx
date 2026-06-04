@@ -5,7 +5,7 @@
 // Today `/controls` 404'd in the sidebar (audit finding F-4 in
 // `Plans/canvas/13-ui-mockup-audit-2026-05-16.md`). This page ships the
 // missing list view per the design captured in slice 093
-// (`Plans/mockups/controls.html` + `Plans/canvas/12-ui-fill-in-design-
+// (`Plans/_archive/mockups/controls.html` + `Plans/canvas/12-ui-fill-in-design-
 // decisions.md` §1/2/3/7/8).
 //
 // The page consumes the shared `web/components/list/*` shell — the
@@ -610,7 +610,7 @@ function ControlsPageInner() {
         ),
     },
     // Slice 226 — Frameworks-per-row column. Right-aligned per the
-    // mockup (`Plans/mockups/controls.html` line 197). Renders the
+    // mockup (`Plans/_archive/mockups/controls.html` line 197). Renders the
     // display abbreviations joined by `·`; empty set renders `—`
     // (AC-6). The abbreviation authority lives in the backend
     // (`internal/catalog/framework_codes.go`); the frontend is a pure

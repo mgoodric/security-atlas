@@ -13,7 +13,7 @@
 //
 // Slice 238 — `ack_status` band predicate.
 //
-//   The mockup at `Plans/mockups/policies.html` lines 154-165 names
+//   The mockup at `Plans/_archive/mockups/policies.html` lines 154-165 names
 //   four bands: `All` / `>= 95% acknowledged` / `< 95% acknowledged`
 //   / `< 50% acknowledged`. The thresholds match the slice 101
 //   `ackRateBand` SOC 2 CC1.4 norm (`./ack-rate.ts`).
@@ -40,7 +40,7 @@ export const ALL = "all" as const;
 
 /**
  * URL-safe band identifiers for the `ack_status` pill. Slice 238 — the
- * bands match the mockup at `Plans/mockups/policies.html` lines 154-
+ * bands match the mockup at `Plans/_archive/mockups/policies.html` lines 154-
  * 165 and the SOC 2 CC1.4 thresholds in `./ack-rate.ts`.
  *
  * - `ALL` (default): no narrowing — every row is included.

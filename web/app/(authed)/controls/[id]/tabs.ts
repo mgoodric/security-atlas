@@ -2,7 +2,7 @@
 //
 // Two responsibilities:
 //   1. The TabKey type + validator (`isTabKey`). The seven tabs are
-//      ordered to match the mockup (`Plans/mockups/control.html`
+//      ordered to match the mockup (`Plans/_archive/mockups/control.html`
 //      lines 143-149). The URL surface (`?tab=<key>`) is the
 //      canonical source of truth; the validator narrows arbitrary
 //      strings to the literal union so the page-level renderer can

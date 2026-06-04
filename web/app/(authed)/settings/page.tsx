@@ -1,6 +1,6 @@
 // Slice 103 -- /settings (user-facing only; admin lives at /admin).
 // Slice 108 -- wired /v1/me, /v1/me/preferences, /v1/me/sessions.
-// Slice 154 -- parity audit pass against Plans/mockups/settings.html:
+// Slice 154 -- parity audit pass against Plans/_archive/mockups/settings.html:
 //              section anchors (#profile / #appearance / ...), theme
 //              swatches, multi-role tail badge, editable time-zone
 //              picker bound to PATCH /v1/me, copy delta on the
