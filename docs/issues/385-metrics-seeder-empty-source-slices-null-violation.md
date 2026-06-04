@@ -4,7 +4,7 @@
 **Estimate:** 0.5d
 **Type:** AFK (mechanically verifiable — the fix is a nil-vs-empty-slice
 normalization with a regression test)
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

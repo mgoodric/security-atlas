@@ -3,7 +3,7 @@
 **Cluster:** Quality / Testing
 **Estimate:** 1.5d (harness + first-pass audit + CHANGELOG/docs; spillover fix slices file separately, not bundled)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

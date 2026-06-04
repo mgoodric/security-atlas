@@ -3,7 +3,7 @@
 **Cluster:** Frontend (auth)
 **Estimate:** 1d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** spillover surfaced 2026-05-22 from a deployment-blocking production bug report. Slice 197 retired the slice-034 opaque-bearer middleware on the Go backend but never migrated the BFF layer to read the new `atlas_jwt` cookie that slice 189's OAuth callback writes. The deployed v1.14.0 build leaves every authenticated user in an infinite login loop.
 
 ## Narrative

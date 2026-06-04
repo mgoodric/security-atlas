@@ -3,7 +3,7 @@
 **Cluster:** Frontend
 **Estimate:** 0.5d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** spillover surfaced 2026-05-22 from user report on a post-release deploy. Slice 170 explicitly deferred this work (comment in `web/app/(authed)/settings/page.tsx:710-714`: "The v1 build does not ship dark-mode stylesheet tokens... the persistence is the contract.").
 
 ## Narrative

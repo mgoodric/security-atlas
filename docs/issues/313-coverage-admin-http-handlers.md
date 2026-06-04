@@ -3,7 +3,7 @@
 **Cluster:** Quality
 **Estimate:** 2-3d (5 packages share the slice-290 integration-enrollment pattern; per-package wiring + unit tests for pure-Go helpers)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

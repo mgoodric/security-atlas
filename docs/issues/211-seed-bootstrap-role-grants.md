@@ -3,7 +3,7 @@
 **Cluster:** Auth (bootstrap seed)
 **Estimate:** ~0.25d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** spillover surfaced 2026-05-23 on atlas-edge.home.gmoney.sh post slice 210 fix. After signing in via the slice 209 email/password form, the user's JWT carries `atlas:roles={}` and `atlas:super_admin=false`. Every admin/auditor-gated endpoint (most of `/v1/*` and most `/api/*` BFF surfaces) returns 403. Dashboard panels render "Could not load this panel · 403 Forbidden".
 
 ## Narrative

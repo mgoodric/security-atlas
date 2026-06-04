@@ -3,7 +3,7 @@
 **Cluster:** Quality / e2e
 **Estimate:** 0.25-0.5d
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** spillover from slice 254 (PR #615).
 
 ## Narrative

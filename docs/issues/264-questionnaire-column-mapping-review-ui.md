@@ -3,7 +3,7 @@
 **Cluster:** Frontend
 **Estimate:** 1.0d (single page surface; reuses existing shadcn/ui Table primitives)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** slice 204 (per-page UI parity audit) — finding category iv (MOCKUP-STALE)
 
 ## Narrative
