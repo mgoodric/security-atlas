@@ -36,7 +36,7 @@ The full design lives in `Plans/`. On a new session:
 3. **Companion deep-dives:**
    - `Plans/UCF_GRAPH_MODEL.md` — graph diagrams + worked example
    - `Plans/EVIDENCE_SDK.md` — full SDK contract including push profile
-4. **Mockups:** `Plans/mockups/index.html` — iteration-1 UI mockups (HTML + Tailwind via CDN, no build)
+4. **Mockups (archived):** `Plans/_archive/mockups/index.html` — iteration-1 UI mockups (HTML + Tailwind via CDN, no build). Archived out of the active tree (slice 437); `web/` is canonical. Per-page mockup-vs-`web/` divergence is expected and is NOT fileable drift — see `Plans/_archive/mockups/README.md`.
 
 For a specific design question, skip the linear read and jump to the relevant section.
 
@@ -198,7 +198,7 @@ security-atlas/
 │   ├── canvas/                   # split sections (01-11 + sources)
 │   ├── UCF_GRAPH_MODEL.md       # graph deep dive
 │   ├── EVIDENCE_SDK.md          # SDK deep dive
-│   └── mockups/                  # iteration-1 HTML mockups
+│   └── _archive/mockups/         # archived iteration-1 HTML mockups (web/ is canonical)
 │
 ├── cmd/                          # Go main entrypoints
 │   ├── atlas/                    # platform binary
@@ -271,7 +271,7 @@ security-atlas/
 
 1. **Canvas (`Plans/canvas/*.md`) edits** — write to the split files, not the hub. The hub (`Plans/ARCHITECTURE_CANVAS.md`) is an index — only edit it for executive summary / navigation / load-bearing-decisions changes.
 2. **Companion docs** (`UCF_GRAPH_MODEL.md`, `EVIDENCE_SDK.md`) stay at `Plans/` root, not under `canvas/`.
-3. **Mockups in `Plans/mockups/`** were iteration-1 HTML; the production frontend now lives at `web/`. Treat the mockups as reference, not production code.
+3. **Mockups (archived to `Plans/_archive/mockups/`)** were iteration-1 HTML; the production frontend now lives at `web/` and is canonical. Treat the mockups as historical reference, not production code. They were relocated out of the active tree (slice 437) because per-page divergence between a mockup and the shipped `web/` page is expected — such divergence is **NOT fileable drift** (it was a recurring false-drift source: slices 216/220/231/245/258/259). See `Plans/_archive/mockups/README.md` before filing any mockup-vs-`web/` finding.
 4. **New architectural decisions** land as ADRs under `docs/adr/NNNN-*.md` (per the documentation discipline); the canvas captures the resolved invariant, the ADR captures the trade-off context.
 
 ### Spine ordering (already executed; left as the historical record)
@@ -378,7 +378,7 @@ These are explicitly deferred. Do not pick one unilaterally. (Full list: `Plans/
 
 - Repo on GitHub: https://github.com/mgoodric/security-atlas (private)
 - Canvas hub: `Plans/ARCHITECTURE_CANVAS.md`
-- Mockups: open `Plans/mockups/index.html` in a browser
+- Mockups (archived): open `Plans/_archive/mockups/index.html` in a browser
 
 ---
 

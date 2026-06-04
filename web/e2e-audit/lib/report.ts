@@ -113,7 +113,7 @@ export function writeMarkdownReport(
       lines.push(`### ${f.category} · \`${f.route}\` · \`${f.subject}\``);
       lines.push("");
       if (f.mockupPath) {
-        lines.push(`- Mockup: \`Plans/mockups/${f.mockupPath}\``);
+        lines.push(`- Mockup: \`Plans/_archive/mockups/${f.mockupPath}\``);
       }
       if (f.details) {
         lines.push(`- Details: ${f.details}`);

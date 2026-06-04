@@ -36,7 +36,7 @@
         Catalog · SCF, Admin) ship live in the Next.js app without iteration-1 mockups; see the
         <a href="#unmocked" class="text-brand-600 hover:text-brand-700">unmocked section</a> below. Click into any
         screen, then iterate via the canvas docs and the source files in
-        <code class="mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Plans/mockups/</code>.
+        <code class="mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Plans/_archive/mockups/</code>.
       </p>
     </header>
   </div>
@@ -179,7 +179,7 @@
         Six top-level list-view pages the user naturally tries from the top-nav. All six routes are live in the Next.js
         app under <span class="mono text-xs">web/app/(authed)/</span>; these wireframes are the original design intent
         and remain useful as reference. See
-        <a href="../canvas/12-ui-fill-in-design-decisions.md" class="text-brand-600 hover:text-brand-700">design decisions</a>
+        <a href="../../canvas/12-ui-fill-in-design-decisions.md" class="text-brand-600 hover:text-brand-700">design decisions</a>
         for top-nav order, empty-state / loading-skeleton patterns, and the /settings vs /admin scope decision.
       </p>
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -258,7 +258,7 @@
         in the Next.js app under <span class="mono text-xs">web/app/(authed)/</span>. If a future contributor wants to
         iterate one of these screens via the iteration-1 mockup loop, they can graduate the surface to a full tile at
         that time. See
-        <a href="../canvas/12-ui-fill-in-design-decisions.md" class="text-brand-600 hover:text-brand-700">canvas §12</a>
+        <a href="../../canvas/12-ui-fill-in-design-decisions.md" class="text-brand-600 hover:text-brand-700">canvas §12</a>
         for the v2 canonical top-nav order.
       </p>
       <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -307,18 +307,18 @@
     </div>
 
     <div class="mt-10 text-sm text-slate-500 max-w-3xl">
-      <p class="mb-1"><strong class="text-slate-700">How to iterate:</strong> open any screen, take notes on what feels off, and tell Claude. Each screen lives in a single self-contained HTML file under <code class="mono bg-slate-100 px-1 py-0.5 rounded">Plans/mockups/</code> — easy to diff, easy to revise.</p>
+      <p class="mb-1"><strong class="text-slate-700">How to iterate:</strong> open any screen, take notes on what feels off, and tell Claude. Each screen lives in a single self-contained HTML file under <code class="mono bg-slate-100 px-1 py-0.5 rounded">Plans/_archive/mockups/</code> — these are archived iteration-1 references; <code class="mono bg-slate-100 px-1 py-0.5 rounded">web/</code> is canonical.</p>
       <p>Tailwind via CDN. No build. No npm. View source on any page to see exactly what's there.</p>
     </div>
   </main>
 
   <footer class="border-t border-slate-200 mt-12">
     <div class="max-w-6xl mx-auto px-8 py-6 flex items-center justify-between text-xs text-slate-500">
-      <div>Plans/mockups/ · iteration 1</div>
+      <div>Plans/_archive/mockups/ · iteration 1 (archived; web/ is canonical)</div>
       <div class="flex gap-4">
-        <a href="../ARCHITECTURE_CANVAS.md" class="hover:text-slate-700">Architecture canvas</a>
-        <a href="../UCF_GRAPH_MODEL.md" class="hover:text-slate-700">UCF graph model</a>
-        <a href="../EVIDENCE_SDK.md" class="hover:text-slate-700">Evidence SDK</a>
+        <a href="../../ARCHITECTURE_CANVAS.md" class="hover:text-slate-700">Architecture canvas</a>
+        <a href="../../UCF_GRAPH_MODEL.md" class="hover:text-slate-700">UCF graph model</a>
+        <a href="../../EVIDENCE_SDK.md" class="hover:text-slate-700">Evidence SDK</a>
       </div>
     </div>
   </footer>
