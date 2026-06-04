@@ -3,7 +3,7 @@
 **Cluster:** Docs
 **Estimate:** S
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (`2dcb70be`, #974 — auditor verify-export docs-site page)
 
 ## Narrative
 

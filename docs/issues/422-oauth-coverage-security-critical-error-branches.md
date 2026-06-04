@@ -3,7 +3,7 @@
 **Cluster:** Quality
 **Estimate:** 1-2d (M)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (`3e6eae8e`, #975 — oauth cov 74.7→79.0, floor 77; spillover 456)
 **Priority:** P1
 
 ## Narrative

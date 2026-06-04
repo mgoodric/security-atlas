@@ -3,15 +3,18 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-03 (batch 187 claim-stake — slices 416 + 422 + 427 → in-progress (parallel, conflict-safe))
+**Last reconciled:** 2026-06-03 (batch 187 reconcile — slices 416 + 422 + 427 MERGED; spillover 456 filed; 38 backlog slices remain)
 
-## Drift detected — 2026-06-03 (batch 187 claim-stake · 416 + 422 + 427)
+## Reconcile — 2026-06-03 (batch 187 · 416 + 422 + 427 merged)
 
-First implementation batch from the 415-455 analysis backlog. Conflict-safe (disjoint files): 416 = ci.yml, 422 = internal/api/oauth + coverage-thresholds.json, 427 = docs-site.
+First implementation batch from the 415-455 analysis backlog — all three merged clean (422 hit a CHANGELOG collision with 416/427, resolved keep-all-bullets).
 
-- **416** (pin golangci-lint version) — Infra · `ready` → **in-progress**. Drop `version: latest` on the required `Go · lint` check; pin explicitly.
-- **422** (lift internal/api/oauth coverage toward the 90% security-critical advisory) — Quality · `ready` → **in-progress**. Cover the RFC error branches (invalid_grant / revoked-code / denied tenant-switch / refused super_admin); lift the floor in-PR (monotonic ratchet).
-- **427** (auditor verify-export docs-site page) — Docs · `ready` → **in-progress**. Surface the oscal-signing `cosign verify-blob` flow into the published docs-site nav in auditor voice.
+- **416** (pin golangci-lint version) — Infra — **MERGED** at `baf06f64` (#973). Pinned to `v2.12.2` via a justfile single-source `GOLANGCI_VERSION` + parity check (mirrors the sqlc pin); dropped `version: latest` on the required `Go · lint` check.
+- **422** (oauth coverage lift) — Quality — **MERGED** at `3e6eae8e` (#975). Coverage 74.7%→**79.0%**, floor 72→**77** (monotonic ratchet, same PR); new tests assert the specific RFC error codes (token-exchange refusals, expired/wrong-iss/wrong-aud subject_token, denied tenant-switch no-leak, device-code expired/cross-client, introspect inactive arms). Spillover **456** filed for the residual toward the 90% advisory.
+- **427** (auditor verify-export docs page) — Docs — **MERGED** at `2dcb70be` (#974). `docs-site/docs/audit/verify-export.md` in the published nav + a "Handing the Bundle to an Auditor" cross-link; every `cosign verify-blob`/`atlas oscal verify` command hand-tested against real signed bundles; `mkdocs build --strict` green.
+- **456** (oauth coverage residual + signer-failure arms toward 90%) — Quality · spillover from 422 · `ready` (dep 422 merged). Loop-ready pick.
+
+Backlog: **38** analysis slices remain ready (417-421, 423-426, 428-448 except 447-not-ready, 449-455 except the moot 449) + 456. Next batch picks continue draining.
 
 ## Backlog registration — 2026-06-03 (41 slices 415-455 from comprehensive project analysis)
 
