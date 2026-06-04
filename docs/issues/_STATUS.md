@@ -5,6 +5,14 @@
 
 **Last reconciled:** 2026-06-04 (batch 189 reconcile — 421 + 430 + 454 MERGED; spillovers 460/461 filed; ~31 backlog slices remain)
 
+## Drift detected — 2026-06-04 (batch 190 claim-stake · 461 + 428 + 451)
+
+Fourth drain batch from the 415-461 analysis backlog. Conflict-safe subset (ci.yml=461 only · mkdocs nav + docs/adr=428 only · release.yml + .goreleaser=451 only; shared surface = CHANGELOG only):
+
+- **461** (integration-suite SCF-seed-order coupling — the real GOV-01 self-correcting-guard bug) — Infra · JUDGMENT — `ready` → **in-progress**. Branch `infra/461-integration-seed-order-coupling`. Fixes the partial-`DELETE FROM scf_anchors`-leaves-stale-subset / lazy-seed-guard-skips-reseed coupling so the suite passes outside CI's curated package order; adds a guard so the `tests-integration` package list cannot be reordered without re-validating.
+- **428** (ADRs for the four load-bearing canvas invariants) — Docs · JUDGMENT — `ready` → **in-progress**. Branch `docs/428-pillar-invariant-adrs`. Writes ADRs for invariants #6 (RLS), #2 (append-only ledger / ingestion-eval split), #1 (UCF graph), #4/#5 (multidim scope + FrameworkScope) + registers them in the docs-site nav.
+- **451** (SLSA provenance + SBOM for binary/CLI/SDK releases) — Infra · JUDGMENT — `ready` → **in-progress**. Branch `infra/451-slsa-provenance-sbom`. Adds SLSA provenance + SBOM emission to the GoReleaser release workflow (no workflow-permission widening; syft already on the runner).
+
 ## Reconcile — 2026-06-04 (batch 189 · 421 + 430 + 454 merged)
 
 Third drain batch — all three merged (CHANGELOG cascade resolved keep-all-bullets).
