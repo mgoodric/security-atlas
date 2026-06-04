@@ -42,7 +42,7 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useMemo } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   EmptyState,
@@ -57,6 +57,7 @@ import {
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { type AnchorWithState } from "@/lib/api/anchors";
 import {
   fetchControlsList,
@@ -91,6 +92,22 @@ import {
   NEW_CONTROL_FUTURE_REASON,
   NEW_CONTROL_FUTURE_TESTID,
 } from "./new-control-future";
+import { SavedViewsBar, SelectionBar } from "./controls-toolbar";
+import {
+  isOverCap,
+  pruneSelection,
+  selectAllState,
+  toggleSelectAll,
+  toggleSelection,
+} from "./selection";
+import {
+  addView,
+  findView,
+  readViews,
+  removeView,
+  writeViews,
+  type SavedView,
+} from "./saved-views";
 
 const FILTER_KEYS: (keyof ControlFilters)[] = [
   "framework",
@@ -283,6 +300,136 @@ function ControlsPageInner() {
     [visible, currentPage],
   );
 
+  // Slice 448 — multi-select state. A Set of anchor ids (the row key).
+  // The pure set math lives in `./selection`; this holds the Set in
+  // React state and prunes ids that vanish from the fetched row set so
+  // a stale selection never references a row the operator can't see.
+  const [selected, setSelected] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+
+  // The ids visible after the active filters (NOT page-sliced — select-
+  // all-in-view operates on the full filtered set the operator narrowed
+  // to, which is the mental model; pagination is a display concern).
+  const visibleIds = useMemo(
+    () => visible.map((row) => row.anchor.id),
+    [visible],
+  );
+
+  // Prune the selection whenever the fetched row set changes (e.g. a
+  // refetch removed an anchor). Keyed on the full row id list so a
+  // filter change (which only narrows `visible`) does NOT drop a
+  // selection the operator made under a broader filter.
+  const allRowIds = useMemo(() => rows.map((r) => r.anchor.id), [rows]);
+  useEffect(() => {
+    // Sync local selection state when the external row source (the
+    // fetched anchor set) changes — the canonical post-data-change
+    // cleanup case the react-hooks/set-state-in-effect rule is
+    // intentionally disabled for (same precedent as the slice 170
+    // AppearanceSelector hydration in settings/page.tsx). The functional
+    // updater is a no-op (returns the same reference) when no id was
+    // dropped, so this does not cause a cascading render in the steady
+    // state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelected((prev) => {
+      const pruned = pruneSelection(prev, allRowIds);
+      return pruned.size === prev.size ? prev : pruned;
+    });
+  }, [allRowIds]);
+
+  const headerSelectState = selectAllState(visibleIds, selected);
+  const selectionOverCap = isOverCap(selected);
+
+  const onToggleRow = useCallback((id: string) => {
+    setSelected((prev) => toggleSelection(prev, id));
+  }, []);
+
+  const onToggleSelectAll = useCallback(() => {
+    setSelected((prev) => toggleSelectAll(visibleIds, prev));
+  }, [visibleIds]);
+
+  const onClearSelection = useCallback(() => {
+    setSelected(new Set<string>());
+  }, []);
+
+  // Slice 448 — saved filter-views. Persisted client-side per user
+  // (decisions log D1). Hydrated from localStorage on mount; the page
+  // is the only place that touches `window` (the module is pure).
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [activeViewId, setActiveViewId] = useState<string>("");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // Post-mount hydration from localStorage. Reading in an effect (not
+    // a lazy initializer) keeps the server-render + first client-render
+    // deterministic (empty list) so there is no hydration mismatch; the
+    // browser-only store is read after mount. Same disciplined disable
+    // as the slice 170 theme hydration (settings/page.tsx line 838).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSavedViews(readViews(window.localStorage));
+  }, []);
+
+  const persistViews = useCallback((next: SavedView[]) => {
+    setSavedViews(next);
+    if (typeof window !== "undefined") {
+      writeViews(window.localStorage, next);
+    }
+  }, []);
+
+  // Apply a saved view's filter state to the URL (the URL is the source
+  // of truth for filters — slice 224/227). Drops the page param so the
+  // restored view starts at page 1.
+  const onLoadView = useCallback(
+    (id: string) => {
+      setActiveViewId(id);
+      if (id === "") {
+        // "None" — clear filters back to default.
+        clearAll();
+        return;
+      }
+      const view = findView(savedViews, id);
+      if (!view) return;
+      const sp = new URLSearchParams();
+      for (const k of FILTER_KEYS) {
+        if (view.filters[k] !== ALL) sp.set(k, view.filters[k]);
+      }
+      router.replace(`/controls?${sp.toString()}`);
+    },
+    // clearAll + router are stable across renders for this page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [savedViews, router],
+  );
+
+  const onSaveView = useCallback(
+    (name: string): { ok: true } | { ok: false; message: string } => {
+      const id =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `view-${Date.now()}`;
+      const result = addView(savedViews, id, name, filters);
+      if (!result.ok) {
+        const message =
+          result.reason === "empty-name"
+            ? "Enter a name for this view."
+            : result.reason === "duplicate-name"
+              ? "A view with that name already exists."
+              : "Saved-view limit reached — delete one before saving another.";
+        return { ok: false, message };
+      }
+      persistViews(result.views);
+      setActiveViewId(id);
+      return { ok: true };
+    },
+    [savedViews, filters, persistViews],
+  );
+
+  const onDeleteView = useCallback(
+    (id: string) => {
+      persistViews(removeView(savedViews, id));
+      if (activeViewId === id) setActiveViewId("");
+    },
+    [savedViews, activeViewId, persistViews],
+  );
+
   const familyOptions: { value: string; label: string }[] = useMemo(() => {
     const families = uniqueFamilies(rows);
     return [
@@ -360,6 +507,40 @@ function ControlsPageInner() {
   );
 
   const columns: ListColumn<AnchorRow>[] = [
+    // Slice 448 — multi-select column. Header is the select-all-in-view
+    // tri-state checkbox; each row carries a per-row checkbox. The
+    // checkbox click stops propagation so it never triggers the row's
+    // navigate-to-detail onRowClick.
+    {
+      id: "select",
+      header: (
+        <span
+          className="inline-flex"
+          // Stop the header click from sorting/navigating (defensive —
+          // the header has no click handler today).
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Checkbox
+            aria-label="Select all controls in view"
+            data-testid="controls-select-all"
+            checked={headerSelectState === "all"}
+            indeterminate={headerSelectState === "some"}
+            onCheckedChange={() => onToggleSelectAll()}
+          />
+        </span>
+      ),
+      cell: (row) => (
+        <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
+          <Checkbox
+            aria-label={`Select control ${row.anchor.scf_id}`}
+            data-testid="controls-row-select"
+            checked={selected.has(row.anchor.id)}
+            onCheckedChange={() => onToggleRow(row.anchor.id)}
+          />
+        </span>
+      ),
+      className: "w-8",
+    },
     {
       id: "scf_id",
       header: "SCF anchor",
@@ -596,6 +777,25 @@ function ControlsPageInner() {
         />
       }
     >
+      {/* Slice 448 — saved filter-views bar (always shown) + selection
+          bar (shown only when a selection exists). The save affordance
+          is enabled only when at least one filter is active (saving the
+          all-default filter set is meaningless). */}
+      <SavedViewsBar
+        views={savedViews}
+        activeViewId={activeViewId}
+        canSave={!isDefault(filters)}
+        onLoadView={onLoadView}
+        onSaveView={onSaveView}
+        onDeleteView={onDeleteView}
+      />
+      {selected.size > 0 ? (
+        <SelectionBar
+          selectedCount={selected.size}
+          overCap={selectionOverCap}
+          onClear={onClearSelection}
+        />
+      ) : null}
       {cellsCapped ? (
         <Alert data-testid="controls-scope-cells-capped" className="mb-3">
           <AlertTitle>Scope filter capped at {SCOPE_CELL_CAP} cells</AlertTitle>

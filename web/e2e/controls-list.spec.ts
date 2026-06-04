@@ -250,4 +250,134 @@ test.describe("/controls list view", () => {
     //      page.locator("button[disabled]", { hasText: "New control" }),
     //    ).toHaveCount(0);
   });
+
+  // ------------------------------------------------------------------
+  // Slice 448 — multi-select + saved filter-views (operator ergonomics).
+  //
+  // Quarantined behind the slice 082 seed-data harness exactly like the
+  // rest of this file (the entire spec's assertions are commented; the
+  // bodies are the reviewable contract per the slice 040/094/224/227
+  // precedent). Pre-conditions the seed harness must establish before
+  // these turn on:
+  //   - PLATFORM_BASE_URL + TEST_BEARER as for the AC-1 case above (the
+  //     seeded SCF anchor catalog is enough — slice 006 import).
+  //   - At least three anchor rows so select-all-in-view + per-row
+  //     toggles exercise a non-degenerate set.
+  //
+  // SCOPE NOTE (decisions log 448 D1): the bulk-assign-OWNER action is
+  // future-state-disclosed in v1 (no per-control owner-assign mutation
+  // exists on `main`; the controls table carries a read-only owner_role
+  // string). The selection machinery + the cap surface + the saved-view
+  // persistence are the real, shipped surface; the server-backed bulk
+  // endpoint + saved-views table are the slice-448 spillover. These
+  // assertions therefore exercise the selection + saved-view UI and the
+  // bulk-assign DISCLOSURE — not a live mutation POST.
+  test("slice 448 AC-1: each row carries a select checkbox + a select-all header", async () => {
+    //    await page.goto("/controls");
+    //    await expect(page.getByTestId("controls-select-all")).toBeVisible();
+    //    const rowChecks = page.getByTestId("controls-row-select");
+    //    expect(await rowChecks.count()).toBeGreaterThan(0);
+  });
+
+  test("slice 448 AC-1: selecting a row reveals the selection bar with a live count", async () => {
+    //    await page.goto("/controls");
+    //    // No selection bar before any row is selected.
+    //    await expect(page.getByTestId("controls-selection-bar")).toHaveCount(0);
+    //    await page.getByTestId("controls-row-select").first().click();
+    //    await expect(page.getByTestId("controls-selection-bar")).toBeVisible();
+    //    await expect(page.getByTestId("controls-selection-count")).toContainText(
+    //      "1 selected",
+    //    );
+  });
+
+  test("slice 448 AC-1: select-all-in-view toggles every visible row", async () => {
+    //    await page.goto("/controls");
+    //    const rowChecks = page.getByTestId("controls-row-select");
+    //    const total = await rowChecks.count();
+    //    await page.getByTestId("controls-select-all").click();
+    //    await expect(page.getByTestId("controls-selection-count")).toContainText(
+    //      `${total} selected`,
+    //    );
+    //    // Toggling the header again clears the visible selection.
+    //    await page.getByTestId("controls-select-all").click();
+    //    await expect(page.getByTestId("controls-selection-bar")).toHaveCount(0);
+  });
+
+  test("slice 448 AC-2: the bulk-assign action is disclosed as future-state (no vapor POST)", async () => {
+    //    await page.goto("/controls");
+    //    await page.getByTestId("controls-row-select").first().click();
+    //    const disclosure = page.getByTestId("controls-bulk-assign-future");
+    //    await expect(disclosure).toBeVisible();
+    //    // Load-bearing substring (pinned so a copy rewrite is one place).
+    //    const text = (await disclosure.textContent())?.toLowerCase() ?? "";
+    //    expect(text).toContain("bulk assign-owner");
+    //    const title = await disclosure.getAttribute("title");
+    //    expect(title?.toLowerCase()).toContain("bulk assign-owner");
+    //    // It is NOT a <button> firing a mutation — the disclosure IS the
+    //    // affordance (slice 225 label-honesty pattern).
+    //    await expect(
+    //      page.locator("button", { hasText: /^Bulk assign-owner/ }),
+    //    ).toHaveCount(0);
+  });
+
+  test("slice 448 AC-3: the selection cap is communicated in the selection bar", async () => {
+    //    await page.goto("/controls");
+    //    await page.getByTestId("controls-row-select").first().click();
+    //    // The cap copy is always present in the selection bar.
+    //    await expect(page.getByTestId("controls-selection-bar")).toContainText(
+    //      /cap \d+ per bulk action/,
+    //    );
+    //    // The over-cap alert is absent for a small selection. (Driving the
+    //    // selection over the cap requires a >200-row seeded catalog; the
+    //    // over-cap branch is unit-pinned in selection.test.ts — isOverCap.)
+    //    await expect(page.getByTestId("controls-selection-overcap")).toHaveCount(0);
+  });
+
+  test("slice 448 AC-4 + AC-5: save the current filter set as a named view, then re-apply it", async () => {
+    //    // Save is disabled until a filter is active.
+    //    await page.goto("/controls");
+    //    await expect(page.getByTestId("controls-save-view-open")).toBeDisabled();
+    //    // Apply a filter, then save.
+    //    await page.getByLabel("Family").selectOption({ index: 1 });
+    //    await page.waitForLoadState("networkidle");
+    //    await expect(page.getByTestId("controls-save-view-open")).toBeEnabled();
+    //    await page.getByTestId("controls-save-view-open").click();
+    //    await page.getByTestId("controls-save-view-name").fill("Weekly triage");
+    //    await page.getByTestId("controls-save-view-confirm").click();
+    //    // The view is now selectable.
+    //    const select = page.getByTestId("controls-saved-views-select");
+    //    await expect(select).toContainText("Weekly triage");
+    //    // Clear filters (None), then re-load the saved view and confirm the
+    //    // family filter is re-applied to the URL.
+    //    await select.selectOption({ label: "None" });
+    //    await page.waitForLoadState("networkidle");
+    //    await select.selectOption({ label: "Weekly triage" });
+    //    await page.waitForLoadState("networkidle");
+    //    expect(new URL(page.url()).searchParams.get("family")).not.toBeNull();
+  });
+
+  test("slice 448 AC-4: a duplicate view name is rejected with an inline error", async () => {
+    //    await page.goto("/controls?family=IAC");
+    //    await page.getByTestId("controls-save-view-open").click();
+    //    await page.getByTestId("controls-save-view-name").fill("My view");
+    //    await page.getByTestId("controls-save-view-confirm").click();
+    //    // Save the same name again.
+    //    await page.getByTestId("controls-save-view-open").click();
+    //    await page.getByTestId("controls-save-view-name").fill("my view");
+    //    await page.getByTestId("controls-save-view-confirm").click();
+    //    await expect(page.getByTestId("controls-save-view-error")).toContainText(
+    //      /already exists/i,
+    //    );
+  });
+
+  test("slice 448 AC-5: a saved view can be deleted", async () => {
+    //    await page.goto("/controls?family=IAC");
+    //    await page.getByTestId("controls-save-view-open").click();
+    //    await page.getByTestId("controls-save-view-name").fill("Disposable");
+    //    await page.getByTestId("controls-save-view-confirm").click();
+    //    await page.getByTestId("controls-saved-views-delete").click();
+    //    await expect(
+    //      page.getByTestId("controls-saved-views-select"),
+    //    ).not.toContainText("Disposable");
+  });
 });

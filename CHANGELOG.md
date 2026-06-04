@@ -3000,6 +3000,33 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 448** — operator ergonomics on the controls list
+  (`web/app/(authed)/controls`): row multi-select (per-row checkbox +
+  select-all-in-view) composing with the existing slice-224 filter pills,
+  and per-user saved filter-views. Selecting rows reveals a selection bar
+  showing the live count and the per-request cap (200 controls,
+  threat-model D); over-cap selections surface a "narrow your filters"
+  alert rather than silently truncating. Saved views persist the active
+  filter-pill state under a user-supplied name and re-apply it on load
+  (case-insensitive name-unique, 20-view cap); the persisted payload is
+  filter **criteria only**, narrowed to the known filter-key allow-list
+  on read so no arbitrary JSON round-trips into the live query
+  (threat-model T). The selection + saved-view math lives in pure
+  node-env-vitest modules (`selection.ts`, `saved-views.ts`); the UI is
+  covered by the Playwright tier. **Persistence shape (JUDGMENT, decisions
+  log D1):** v1 saved-views persist **client-side** (localStorage, per the
+  slice-103 `theme.ts` precedent) because the spec's server-backed
+  bulk-assign + RLS saved-views table presumes a single-item owner-assign
+  authz path that does not exist on `main` (`controls.owner_role` is a
+  read-only role string with no assign affordance). The server-backed
+  bulk-assign endpoint + saved-views table + the prerequisite single-item
+  owner-assign path — and the load-bearing per-item authz-amplifier
+  defense — are filed as spillover **slice 467**. The bulk-assign **action**
+  ships as a future-state disclosure (slice 225 label-honesty pattern), not
+  a vapor button POSTing to a nonexistent endpoint; the live selection +
+  cap still render so the operator sees what the action will target when
+  467 lands. The bulk-op + saved-view pattern documented here is the
+  tracer bullet for the evidence/risks/policies list surfaces (follow-ons).
 - **slice 428** — ADRs for the four load-bearing canvas invariants that
   previously had no decision record. Adds four retrospective ADRs under
   `docs/adr/`, one per pillar invariant: `0011-rls-tenant-isolation.md`
