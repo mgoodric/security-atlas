@@ -3,7 +3,7 @@
 **Cluster:** Frontend (+ minimal backend if needed)
 **Estimate:** ~1d
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 **Parent:** spillover from slice 204 / precursor to slice 232 (dashboard activity-feed "View full activity ledger" footer link). Filed 2026-05-23 to unblock the spillover identified during the slice 204 audit-fleet aggregate.
 
 ## Narrative

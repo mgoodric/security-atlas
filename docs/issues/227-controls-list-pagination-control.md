@@ -3,7 +3,7 @@
 **Cluster:** Quality / UI parity (frontend + small backend)
 **Estimate:** 1.5d (UI pagination + URL plumbing + upstream LIMIT/OFFSET)
 **Type:** AFK
-**Status:** `ready`
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 

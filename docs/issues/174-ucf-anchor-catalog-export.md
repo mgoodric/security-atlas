@@ -3,7 +3,7 @@
 **Cluster:** Backend / Frontend
 **Estimate:** 1-2d
 **Type:** AFK (D1 locked 2026-05-20 by maintainer — ship all three formats, each with its native projection)
-**Status:** `ready` (demand gate cleared 2026-05-20; D1 locked — see "What this slice ships" below)
+**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
 
 ## Narrative
 
