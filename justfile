@@ -226,6 +226,15 @@ openapi-generate:
 openapi-drift-check:
     bash scripts/check-openapi-drift.sh
 
+# Reproduce the config-reference drift guard locally. Slice 430 — exits
+# non-zero when docs-site/docs/configuration.md and
+# deploy/docker/.env.example disagree (a key in the template missing from
+# the page, or a page row for a variable the template does not define).
+# The config-reference-drift-check job in docs-publish.yml runs the same
+# script on every PR that touches the page or the template.
+config-reference-drift-check:
+    bash scripts/check-config-reference-drift.sh
+
 # Audit every public-schema table with a `tenant_id` column. Fails if any
 # such table lacks an RLS policy or FORCE ROW LEVEL SECURITY. Constitutional
 # invariant 6 enforcement — see docs/architecture/rls.md. Requires
