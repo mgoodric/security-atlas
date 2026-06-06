@@ -47,6 +47,23 @@ const (
 	rateLimitWindow = 60 * time.Second
 )
 
+// demoSeedRefusalMessage maps a seeder Apply error to an operator-facing
+// 409 message when the failure is a benign precondition (the target tenant
+// already holds the demo dataset, or a same-slug tenant exists without the
+// demo forensic mark). Returns ok=false for genuine internal faults, which
+// the caller maps to a 500. This keeps a re-seed click from surfacing as a
+// scary "internal error" when the real cause is "already loaded".
+func demoSeedRefusalMessage(err error) (string, bool) {
+	switch {
+	case errors.Is(err, demoseed.ErrTenantPopulated):
+		return "Demo data has already been loaded. Tear down the demo tenant first to re-seed.", true
+	case errors.Is(err, demoseed.ErrTenantUnmarked):
+		return "A tenant with the demo slug already exists but was not created by the demo seeder. Pick a fresh slug or remove it first.", true
+	default:
+		return "", false
+	}
+}
+
 // isEnabledFunc returns true when the env-var gate is satisfied.
 // Injected at construction so tests can override without touching
 // the real process env.
@@ -224,6 +241,13 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		ActorTenantID: actorTenantID,
 	})
 	if err != nil {
+		// A populated/unmarked tenant is an operator precondition, not an
+		// internal fault — surface it as a clear 409 instead of a masked
+		// 500. (Without this, a re-seed click showed "internal error".)
+		if msg, ok := demoSeedRefusalMessage(err); ok {
+			httpresp.WriteError(w, http.StatusConflict, msg)
+			return
+		}
 		httperr.WriteInternal(w, r, "seed failed", err)
 		return
 	}

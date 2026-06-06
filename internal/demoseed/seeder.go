@@ -92,6 +92,22 @@ const (
 // new tenant" from "real tenant that already has data".
 const PopulatedRowCap = 10
 
+// Refusal sentinels — Apply returns these (wrapped) when it declines to
+// seed an existing tenant. They are NOT internal errors: the caller (the
+// admindemo HTTP handler) maps them to a 409 Conflict with an operator-
+// facing "already loaded" message rather than a 500. errors.Is-matchable.
+var (
+	// ErrTenantPopulated — the target tenant already carries the
+	// slice-205 forensic mark AND has more than PopulatedRowCap rows in
+	// controls/risks/evidence_records (i.e. the demo dataset is already
+	// loaded). Re-seeding is refused; tear down first.
+	ErrTenantPopulated = errors.New("demoseed: tenant already populated with demo data")
+	// ErrTenantUnmarked — a tenant with the target slug exists but does
+	// NOT carry the slice-205 forensic mark (likely operator-created).
+	// Refused to avoid mixing synthetic data into a real tenant.
+	ErrTenantUnmarked = errors.New("demoseed: tenant exists without the demo forensic mark")
+)
+
 // Seeder writes the slice-205 demo dataset into a target tenant.
 //
 // Construction is intentionally narrow: callers pass exactly the
@@ -233,16 +249,16 @@ func (s *Seeder) Apply(ctx context.Context, in ApplyInput) (Result, error) {
 		}
 		if populated {
 			return Result{}, fmt.Errorf(
-				"demoseed: refusing to seed: tenant %q already has > %d rows in controls/risks/evidence_records; pick a fresh --tenant-slug",
-				in.Slug, PopulatedRowCap,
+				"refusing to seed: tenant %q already has > %d rows in controls/risks/evidence_records; pick a fresh --tenant-slug: %w",
+				in.Slug, PopulatedRowCap, ErrTenantPopulated,
 			)
 		}
 		// Existing tenant with < 10 rows that we did NOT create. Still
 		// refuse — the operator likely created this manually and the
 		// seeder would silently mix synthetic into manual.
 		return Result{}, fmt.Errorf(
-			"demoseed: refusing to seed: tenant %q already exists but does not carry the slice-205 forensic mark; pick a fresh --tenant-slug",
-			in.Slug,
+			"refusing to seed: tenant %q already exists but does not carry the slice-205 forensic mark; pick a fresh --tenant-slug: %w",
+			in.Slug, ErrTenantUnmarked,
 		)
 	}
 
