@@ -119,7 +119,10 @@ ${EDITOR:-vi} docker-compose.yml
 docker compose up -d
 
 # 5. Apply migrations once.
-docker compose exec atlas atlas migrate up
+#    The platform binary does NOT expose a `migrate` subcommand. Migrations
+#    (plus seed + SCF import + control upload) are applied by the
+#    `atlas-bootstrap` one-shot, which runs to completion and exits.
+docker compose run --rm atlas-bootstrap
 
 # 6. Confirm the platform is alive.
 curl -fsSL http://localhost:8080/health
