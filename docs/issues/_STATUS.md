@@ -3,7 +3,24 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-05 (batch 195 reconcile — 447 + 466 + 469 MERGED; spillover 470 filed; slice 471 filed via /idea-to-slice [PR #1018, pending review]; ~15 backlog slices remain)
+**Last reconciled:** 2026-06-06 (batch 196 reconcile — 456 + 470 MERGED; 471 merged + registered `ready`; spillover 472 filed; slice 473 filed [PR #1023, pending review]; ~14 backlog slices remain)
+
+## Reconcile — 2026-06-06 (batch 196 · 456 + 470 merged)
+
+Tenth drain batch (conservative 2-slice, orchestrator attention split across a live maintainer support thread). Both merged. 470's last leg hit the known questionnaires-PDF chromedp flake (`TestExportPDF_SmokeTest`, shard B3, 30s timeout — 470 touches ZERO Go files) → reran the leg → green.
+
+- **456** (oauth coverage residual toward the slice-350 90% advisory) — Quality · AFK — **MERGED** at `02c926f9` (#1022). `internal/api/oauth` merged coverage 79.0% → **80.8%**; hard floor 77 → **78** (`floor(measured-2pp)`); the 90 advisory unchanged. New residual unit + integration arms (token-exchange signer-fail via a verify-ok/sign-fail P-384 keystore; audit-write BeginTx/Exec failures; cc/authcode/device signer-fail). Spillover **472** (device-approval + DBUserResolver coverage tail toward 90).
+- **470** (trusted-proxy multi-container e2e seed harness) — Infra · JUDGMENT — **MERGED** at `4c5496df` (#1021). The full AC-6 e2e slice 466 deferred: an nginx header-overwriting proxy + a two-network compose overlay (trusted `atlasnet` + untrusted `clientnet`) + a `proxy` leg in the self-host-bundle CI matrix. **Live-proved:** login through the trusted proxy records `203.0.113.10` (proxy-supplied); a direct client forging `X-Forwarded-For: 198.51.100.66` records `10.124.0.3` (forged value rejected). clientip.go untouched. No Go integration package added (shard manifest untouched).
+
+Spillover (single): **472** (oauth device-approval + DBUserResolver coverage tail toward the 90% advisory · from 456 · `ready`).
+
+**Slice 471 (role-scoped control-checklist generator v0, AI-assist) — MERGED + REGISTERED.** The maintainer approved the /idea-to-slice spec; PR #1018 squash-merged to `main` (`eaec7295`). Its row is now `ready`. It is a 5th AI-assist v0 surface (with 440/441/444) and is **maintainer-prioritized, NOT blindly auto-looped** — it shares the unbuilt `internal/llm` Ollama foundation with the others; the maintainer sequences the AI-assist set.
+
+**Slice 473 (idempotent migrate-on-upgrade for self-host, fail-closed) — FILED, PR #1023 OPEN, pending maintainer review.** Filed 2026-06-06 from a CONFIRMED production incident (the maintainer's atlas-edge box: Watchtower auto-updates the `atlas-edge` binary but not the `atlas-bootstrap-edge` migrate one-shot, and the backend gates on `service_started` not `service_completed_successfully` → image update left a newer binary on a 3-migrations-behind schema → the demo-seed `me_audit_log_action_check` masked-500). Row registers `ready` once #1023 merges (spec not yet on main). Relates to 464 + 432.
+
+**Operational note (no slice, FYI):** the edge box's recurring `policy_versions`/`framework_id` scheduler ERRORs are EXPECTED v1 behavior — `policy_attestation_rate` + `audit_readiness_score` (slice 076) are forward-looking evaluators querying schema v1 deliberately lacks; the eval integration test (`internal/metrics/eval/integration_test.go:448-465`) asserts the relation-missing failure. Harmless but noisy (ERROR every 15 min); a candidate cosmetic polish (demote to one-time WARN / no-op when schema absent), not filed.
+
+Backlog: ~14 analysis slices remain ready (418-420, 424-425, 434-436, 439-445, 450, 452-453) + spillovers 457, 464, 468, 472 + AI-assist 440/441/444/471 (maintainer-sequenced). Decision-gates 446/455 + PCI-CDE-FrameworkScope stay out of the auto-loop; 449 moot. 473 registers on #1023 merge.
 
 ## Drift detected — 2026-06-05 (batch 196 claim-stake · 456 + 470)
 
