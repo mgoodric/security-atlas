@@ -1,13 +1,16 @@
 package oauth
 
 import (
+	"context"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthcode"
+	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 )
 
 // ExportComputePKCEChallengeS256 exposes computePKCEChallengeS256
@@ -91,3 +94,60 @@ func ExportBuildAtlasClaimsForUser(issuer string, ac authCodeForExport, roles ma
 // test package can pass an oauthcode.AuthCode without importing it at
 // the seam (it imports it anyway, but this keeps the seam explicit).
 type authCodeForExport = oauthcode.AuthCode
+
+// ===== slice 456 residual-coverage seams =====
+//
+// These unexported seams expose the best-effort audit-write methods
+// and the rate-limiter internals to the external test package WITHOUT
+// changing any production behavior (slice 409 precedent — New*Endpoint
+// stays byte-for-byte unchanged). They exist so the slice-456 tests can
+// drive the writeAudit / writeAuthCodeAudit failure arms (D3
+// best-effort, non-blocking) with a controllable pool, and the
+// tokenBucketLimiter overflow / window edge arms with an injected clock.
+
+// ExportTokenEndpointForAudit constructs a TokenEndpoint wired with the
+// supplied audit pool so the audit-write seams can drive the
+// failure arms. The signer is the only other required dep; clients may
+// be nil (the audit methods never touch the client store).
+func ExportTokenEndpointForAudit(signer *tokensign.Signer, auditPool *pgxpool.Pool, now func() time.Time) *TokenEndpoint {
+	return NewTokenEndpoint(signer, nil, TokenEndpointConfig{
+		Issuer:    "https://atlas.example.test",
+		AuditPool: auditPool,
+		Now:       now,
+	})
+}
+
+// ExportWriteAudit drives the token-exchange best-effort audit write
+// (token.go writeAudit). A failure inside MUST NOT panic or block — the
+// seam returns after the method completes regardless of the audit
+// outcome (D3).
+func ExportWriteAudit(t *TokenEndpoint, r *http.Request, subjectClaims jwt.AtlasClaims, targetTenant uuid.UUID) {
+	t.writeAudit(r, subjectClaims, targetTenant)
+}
+
+// ExportWriteAuthCodeAudit drives the authorization_code best-effort
+// audit write (pkce.go writeAuthCodeAudit).
+func ExportWriteAuthCodeAudit(t *TokenEndpoint, r interface{ Context() context.Context }, ac oauthcode.AuthCode) {
+	t.writeAuthCodeAudit(r, ac)
+}
+
+// ExportNewTokenBucketLimiter exposes the per-client token-bucket
+// limiter with an injected clock so the overflow-cap and window-edge
+// arms are assertable deterministically.
+func ExportNewTokenBucketLimiter(rate int, now func() time.Time) *ExportTokenBucketLimiter {
+	return newTokenBucketLimiter(rate, now)
+}
+
+// ExportLimiterAllow consumes a token from the bucket.
+func ExportLimiterAllow(l *ExportTokenBucketLimiter, key string) bool {
+	return l.Allow(key)
+}
+
+// ExportLimiterWindowSeconds returns the Retry-After window.
+func ExportLimiterWindowSeconds(l *ExportTokenBucketLimiter) int {
+	return l.WindowSeconds()
+}
+
+// ExportTokenBucketLimiter aliases the unexported limiter so the
+// external test package can hold a typed handle.
+type ExportTokenBucketLimiter = tokenBucketLimiter
