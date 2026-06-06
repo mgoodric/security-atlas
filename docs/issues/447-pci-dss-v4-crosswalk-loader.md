@@ -3,7 +3,7 @@
 **Cluster:** Catalog
 **Estimate:** M (1-2d)
 **Type:** JUDGMENT (crosswalk-mapping accuracy + CDE-scope example)
-**Status:** `not-ready` (gated on #438 — the generic crosswalk loader is unmerged)
+**Status:** `ready` (dependency #438 — the generic crosswalk loader — is merged on `main`)
 
 ## Narrative
 

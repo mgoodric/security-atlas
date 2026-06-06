@@ -3005,6 +3005,32 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 447** — PCI DSS v4.0 as the **third** framework, loaded through the
+  slice-438 framework-agnostic crosswalk importer with **no PCI-specific loader
+  code**. Ships a curated high-signal subset of 31 PCI v4.0 requirements
+  (spanning all 12 principal requirements) mapped requirement → SCF anchor in
+  `data/crosswalks/pci-dss-4.0.yaml`, using the same generic `requirement_code:`
+  key and `community_draft` attribution as the ISO crosswalk. Extends the
+  invariant-#1 graph proof from two frameworks to **three**: a single shared SCF
+  anchor (`IAC-01`) resolves to a SOC 2 criterion (CC6.1), an ISO Annex A
+  control (A.5.15), and a PCI requirement (8.2.1) through one anchor row — one
+  control, N framework satisfactions, no per-framework duplication and no
+  requirement → requirement edge (invariants #1 + #7). Adds the **invariant-#5
+  CDE-intersection proof** (canvas §5.5) via the existing slice-018
+  FrameworkScope machinery: the same org-wide control narrows to the Cardholder
+  Data Environment (2 cells) under the PCI `framework_scope` predicate while
+  staying org-wide (4 cells) under SOC 2 — `effective_scope = applicability_expr
+  ∩ framework_scope.predicate` differs per framework for the framework where it
+  matters most. New pure-Go loader/CDE unit tests + integration tests (PCI
+  import → anchors read round-trip; three-framework shared-anchor traversal;
+  SOC 2/ISO undisturbed). Mapping accuracy + the CDE example are JUDGMENT calls
+  recorded in [`docs/audit-log/447-pci-dss-crosswalk-decisions.md`](docs/audit-log/447-pci-dss-crosswalk-decisions.md)
+  (three low-confidence rows flagged for QSA review). The
+  `internal/api/soc2import` coverage floor ratchets 75 → 78 (measured merged
+  80.2%). Licensing posture: PCI requirement identifiers + titles + original
+  descriptions only; no verbatim PCI DSS standard text bundled. PCI CDE
+  FrameworkScope ownership UX, the PCI SAQ workflow, and full PCI v4.0 coverage
+  are explicitly deferred (canvas §10.3 phase 3).
 - **slice 448** — operator ergonomics on the controls list
   (`web/app/(authed)/controls`): row multi-select (per-row checkbox +
   select-all-in-view) composing with the existing slice-224 filter pills,
