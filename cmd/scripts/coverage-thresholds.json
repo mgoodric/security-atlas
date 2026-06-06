@@ -135,7 +135,7 @@
     "internal/api/schemaregistry": 79,
     "internal/api/search": 78,
     "internal/api/securityheaders": 98,
-    "internal/api/soc2import": 75,
+    "internal/api/soc2import": 78,
     "internal/api/tenancymw": 98,
     "internal/api/tenants": 74,
     "internal/api/testjwt": 93,

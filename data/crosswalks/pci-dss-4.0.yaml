@@ -1,0 +1,343 @@
+# PCI DSS v4.0 → SCF crosswalk
+#
+# DRAFT — community_draft attribution. Authored by the agent for slice 447
+# (the THIRD framework slice — it extends the slice-438 invariant-#1 proof to
+# THREE frameworks: one SCF anchor satisfies SOC 2 + ISO 27001 + PCI DSS at
+# once). Every row is an agent JUDGMENT call recorded in
+# docs/audit-log/447-pci-crosswalk-decisions.md.
+#
+# This file loads through the slice-438 framework-agnostic importer
+# (internal/api/soc2import) with NO PCI-specific loader code (P0-447-1). It
+# uses the generic `requirement_code:` key, identical to the ISO crosswalk.
+#
+# LICENSING POSTURE (deliberate — see decisions log):
+#   PCI DSS v4.0 is published by the PCI Security Standards Council and is a
+#   copyrighted standard. This file references only the requirement
+#   IDENTIFIERS (e.g. "8.3.1") and short TITLES — both factual references, not
+#   protected expression — and pairs each with an ORIGINAL agent-authored
+#   one-line description in `body`. It does NOT reproduce any verbatim text of
+#   the PCI DSS standard. The SCF anchors are imported separately by the
+#   operator (slice 006); this file ships only the PCI→SCF edge data
+#   (P0-447-7 — no pre-built SCF data bundled here).
+#
+# SCOPE DISCIPLINE (binding — slice 447 narrative):
+#   This is a CURATED high-signal subset (~31 requirements spanning all 12
+#   principal PCI requirements), NOT full PCI v4.0 sub-requirement coverage
+#   (which runs to ~300+ defined-approach requirements). The subset
+#   deliberately covers (a) the SOC 2 / ISO overlap zone — so a shared SCF
+#   anchor demonstrates invariant #1 across three frameworks — and (b) a
+#   handful of PCI-distinctive requirements (cardholder-data retention,
+#   stored-PAN encryption, network segmentation of the CDE) that show where
+#   PCI's narrow Cardholder Data Environment scope diverges from a broad SOC 2
+#   system boundary. Full PCI v4.0 coverage, the SAQ workflow, and CDE
+#   scope-reduction reporting are follow-on slices (canvas §10.3 phase 3).
+#
+# Source basis (methodology, not copied text):
+#   - PCI DSS v4.0 requirement IDs + short titles (factual refs)
+#   - SCF anchor families published in the platform's slice-006 fixture
+#   - NIST IR 8477 STRM methodology (canvas §3.2; UCF_GRAPH_MODEL.md §4)
+#   - SCF's own published PCI DSS mapping informs the anchor choices; these
+#     rows are the agent's independent draft pending review.
+#
+# Strength scoring rubric (identical to the SOC 2 + ISO crosswalks):
+#   1.0      — STRM equal: source and target describe the same control concept
+#   0.9      — STRM equal with minor scope difference
+#   0.7-0.8  — subset_of: the SCF anchor fully covers the PCI control and is broader
+#   0.6-0.8  — intersects_with high overlap: most of the PCI concept is covered
+#   0.4-0.6  — intersects_with partial overlap: explicit gap remains (LOW CONFIDENCE)
+#   <=0.5    — flagged for spot-check priority in the decisions log
+
+schema_version: "1.0"
+framework_slug: "pcidss"
+framework_name: "PCI DSS v4.0"
+framework_issuer: "PCI Security Standards Council"
+framework_version: "4.0"
+release_date: "2022-03-31"
+source_attribution: "community_draft"
+
+requirements:
+  # ===== Req 1: Install and maintain network security controls =====
+  - code: 1.2.1
+    title: "Network security control configuration standards"
+    body: "Configuration standards for network security controls are defined, implemented, and maintained."
+  - code: 1.3.1
+    title: "Inbound traffic to the CDE is restricted"
+    body: "Inbound traffic to the cardholder data environment is restricted to only what is necessary."
+  - code: 1.4.1
+    title: "Network security controls between trusted and untrusted networks"
+    body: "Network security controls are implemented between trusted and untrusted networks."
+
+  # ===== Req 2: Apply secure configurations =====
+  - code: 2.2.1
+    title: "Configuration standards for system components"
+    body: "Configuration standards are developed, implemented, and maintained for all system components, addressing known vulnerabilities and industry-accepted hardening."
+  - code: 2.2.4
+    title: "Only necessary services and functions are enabled"
+    body: "Only necessary services, protocols, daemons, and functions are enabled, and unnecessary functionality is removed or disabled."
+
+  # ===== Req 3: Protect stored account data =====
+  - code: 3.2.1
+    title: "Account data storage is kept to a minimum"
+    body: "Storage of account data is minimized through retention and disposal policies, procedures, and processes."
+  - code: 3.5.1
+    title: "Primary account number (PAN) is rendered unreadable"
+    body: "The primary account number is rendered unreadable anywhere it is stored, using strong cryptography."
+  - code: 3.6.1
+    title: "Cryptographic keys protecting stored account data are secured"
+    body: "Procedures protect cryptographic keys used to secure stored account data against disclosure and misuse."
+
+  # ===== Req 4: Protect cardholder data with strong cryptography during transmission =====
+  - code: 4.2.1
+    title: "Strong cryptography protects PAN during transmission"
+    body: "Strong cryptography and security protocols protect the primary account number during transmission over open, public networks."
+
+  # ===== Req 5: Protect all systems and networks from malicious software =====
+  - code: 5.2.1
+    title: "An anti-malware solution is deployed"
+    body: "An anti-malware solution is deployed on all system components, except those not at risk from malware."
+  - code: 5.3.1
+    title: "The anti-malware solution is kept current and active"
+    body: "The anti-malware solution is kept current via automatic updates and performs periodic and active scans."
+
+  # ===== Req 6: Develop and maintain secure systems and software =====
+  - code: 6.2.1
+    title: "Bespoke and custom software is developed securely"
+    body: "Bespoke and custom software is developed securely, based on industry standards and secure software development practices."
+  - code: 6.3.1
+    title: "Security vulnerabilities are identified and managed"
+    body: "Security vulnerabilities are identified, assigned a risk ranking, and managed through an established process."
+  - code: 6.3.3
+    title: "System components are protected from known vulnerabilities by patching"
+    body: "System components are protected from known vulnerabilities by installing applicable security patches within defined timeframes."
+  - code: 6.4.1
+    title: "Public-facing web applications are protected against attacks"
+    body: "Public-facing web applications are protected against attacks through automated technical solutions or review methods."
+
+  # ===== Req 7: Restrict access to system components and cardholder data by business need to know =====
+  - code: 7.2.1
+    title: "An access control model defines need-to-know access"
+    body: "An access control model is defined that grants access to system components and data based on business need-to-know and least privilege."
+  - code: 7.2.2
+    title: "Access is assigned based on job classification and function"
+    body: "Access to system components and data is assigned to users based on job classification, function, and least privilege."
+
+  # ===== Req 8: Identify users and authenticate access =====
+  - code: 8.2.1
+    title: "Users are uniquely identified before access is granted"
+    body: "All users are assigned a unique ID before access to system components or cardholder data is granted."
+  - code: 8.3.1
+    title: "Strong authentication for users and administrators"
+    body: "Access for all users is authenticated using at least one authentication factor managed under defined access-control rules."
+  - code: 8.4.1
+    title: "Multi-factor authentication for access into the CDE"
+    body: "Multi-factor authentication is implemented for all non-console administrative access and all remote access into the cardholder data environment."
+  - code: 8.5.1
+    title: "Multi-factor authentication systems are resistant to misuse"
+    body: "Multi-factor authentication systems are configured to resist replay attacks and bypass, and require all factors before access is granted."
+
+  # ===== Req 9: Restrict physical access to cardholder data =====
+  - code: 9.2.1
+    title: "Physical access controls protect facilities housing the CDE"
+    body: "Appropriate facility entry controls are in place to restrict physical access to systems in the cardholder data environment."
+  - code: 9.4.1
+    title: "Media containing cardholder data is physically secured"
+    body: "Media containing cardholder data is physically secured, and its storage and accessibility are controlled."
+
+  # ===== Req 10: Log and monitor all access =====
+  - code: 10.2.1
+    title: "Audit logs capture access to system components and data"
+    body: "Audit logs are enabled and active for all system components and capture access events, administrative actions, and security-relevant changes."
+  - code: 10.4.1
+    title: "Audit logs are reviewed for anomalies"
+    body: "Audit logs are reviewed to identify anomalies or suspicious activity, supported where feasible by automated mechanisms."
+
+  # ===== Req 11: Test security of systems and networks regularly =====
+  - code: 11.3.1
+    title: "Internal vulnerability scans are performed regularly"
+    body: "Internal vulnerability scans are performed periodically and after significant changes, and identified vulnerabilities are resolved."
+  - code: 11.4.1
+    title: "Penetration testing methodology is defined and executed"
+    body: "A penetration testing methodology is defined, documented, and executed against the CDE perimeter and critical systems."
+
+  # ===== Req 12: Support information security with organizational policies and programs =====
+  - code: 12.1.1
+    title: "An overall information security policy is established"
+    body: "An overall information security policy is established, published, maintained, and disseminated to relevant personnel."
+  - code: 12.6.1
+    title: "A security awareness program is implemented"
+    body: "A formal security awareness program is implemented to make personnel aware of the cardholder data security policy and procedures."
+  - code: 12.8.1
+    title: "Third-party service providers managing account data are managed"
+    body: "Third-party service providers with whom account data is shared or that could affect CDE security are identified and managed."
+  - code: 12.10.1
+    title: "An incident response plan exists and is ready to activate"
+    body: "An incident response plan exists and is ready to be activated in the event of a suspected or confirmed security incident."
+
+mappings:
+  # --- Req 1: Network security controls ---
+  - requirement_code: 1.2.1
+    scf_anchor: CFG-04
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "NSC configuration standards overlap with SCF Configuration Change Control; the firewall-rule baseline is the configuration-management surface."
+  - requirement_code: 1.3.1
+    scf_anchor: NET-04
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Restricting inbound traffic to the CDE maps to SCF Boundary Protection — shared with SOC 2 CC6.6 and ISO A.8.20 (three-framework anchor)."
+  - requirement_code: 1.4.1
+    scf_anchor: NET-08
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Controls between trusted and untrusted networks map to SCF Network Segmentation; CDE segmentation is the PCI scope-reduction lever."
+  # --- Req 2: Secure configurations ---
+  - requirement_code: 2.2.1
+    scf_anchor: CFG-02
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Hardening configuration standards map to SCF System Hardening Through Baseline Configurations."
+  - requirement_code: 2.2.4
+    scf_anchor: CFG-04
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "Disabling unnecessary services is a subset of the broader Configuration Change Control anchor (least-functionality facet)."
+  # --- Req 3: Protect stored account data ---
+  - requirement_code: 3.2.1
+    scf_anchor: DCH-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Minimizing account-data storage via retention overlaps with Data Classification & Handling; PCI's retention-minimization emphasis is narrower (CDE-specific)."
+  - requirement_code: 3.5.1
+    scf_anchor: CRY-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Rendering stored PAN unreadable via strong cryptography maps to SCF Use of Cryptographic Controls (data-at-rest protection)."
+  - requirement_code: 3.6.1
+    scf_anchor: CRY-09
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Protecting cryptographic keys for stored account data maps to SCF Cryptographic Key Management."
+  # --- Req 4: Protect CHD in transmission ---
+  - requirement_code: 4.2.1
+    scf_anchor: CRY-08
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Strong cryptography for PAN in transit maps to SCF Encryption In Transit — shared with SOC 2 CC6.7 and ISO A.8.24."
+  # --- Req 5: Anti-malware ---
+  - requirement_code: 5.2.1
+    scf_anchor: END-07
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Deploying an anti-malware solution maps to SCF Malicious Code Protection — shared with SOC 2 CC6.8 and ISO A.8.7."
+  - requirement_code: 5.3.1
+    scf_anchor: END-04
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Keeping anti-malware current and active overlaps with SCF Endpoint Protection Measures (managed-agent currency facet)."
+  # --- Req 6: Secure development ---
+  - requirement_code: 6.2.1
+    scf_anchor: SEA-05
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Secure development of bespoke/custom software maps to SCF Secure Software Development — shared with SOC 2 PI mappings and ISO A.8.25."
+  - requirement_code: 6.3.1
+    scf_anchor: VPM-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Identifying and ranking security vulnerabilities maps to SCF Vulnerability & Patch Management Policy — shared with SOC 2 CC7.1 and ISO A.8.8."
+  - requirement_code: 6.3.3
+    scf_anchor: VPM-04
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Patching system components against known vulnerabilities maps to SCF Software Patching — shared with SOC 2 CC7.1."
+  - requirement_code: 6.4.1
+    scf_anchor: SEA-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Protecting public-facing web apps (WAF / review) overlaps with Secure Engineering Principles; SCF sample lacks a dedicated WAF anchor (LOW CONFIDENCE)."
+  # --- Req 7: Need-to-know access ---
+  - requirement_code: 7.2.1
+    scf_anchor: IAC-07
+    relationship_type: equal
+    strength: 0.9
+    rationale: "An access-control model based on need-to-know/least-privilege maps to SCF User Provisioning & Lifecycle — shared with SOC 2 CC6.2/CC6.3 and ISO A.5.18."
+  - requirement_code: 7.2.2
+    scf_anchor: IAC-15
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Assigning access by job classification/function maps to SCF Role-Based Access Control."
+  # --- Req 8: Identify and authenticate ---
+  - requirement_code: 8.2.1
+    scf_anchor: IAC-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Assigning unique IDs before granting access maps to SCF Identification & Authentication Policy — the THREE-framework shared anchor with SOC 2 CC6.1 and ISO A.5.15 (invariant #1 proof)."
+  - requirement_code: 8.3.1
+    scf_anchor: IAC-01
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "Authenticating all users with at least one factor is a subset of the broader I&A policy anchor."
+  - requirement_code: 8.4.1
+    scf_anchor: IAC-06
+    relationship_type: equal
+    strength: 0.9
+    rationale: "MFA into the CDE maps to SCF Multi-Factor Authentication — shared with SOC 2 CC6.1 MFA mapping and ISO A.8.5."
+  - requirement_code: 8.5.1
+    scf_anchor: IAC-06
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "MFA replay/bypass resistance is a subset/hardening facet of the SCF Multi-Factor Authentication anchor."
+  # --- Req 9: Physical access ---
+  - requirement_code: 9.2.1
+    scf_anchor: PES-04
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Facility entry controls for the CDE map to SCF Physical Access Control — shared with SOC 2 CC6.4 and ISO A.7.2."
+  - requirement_code: 9.4.1
+    scf_anchor: DCH-03
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Physically securing media containing cardholder data overlaps with SCF Media & Physical Storage handling."
+  # --- Req 10: Log and monitor ---
+  - requirement_code: 10.2.1
+    scf_anchor: AAA-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Audit logs capturing access events map to SCF Auditing & Accountability — shared with SOC 2 CC7.2 and ISO A.8.15."
+  - requirement_code: 10.4.1
+    scf_anchor: MON-01
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Reviewing audit logs for anomalies maps to SCF Continuous Monitoring — shared with SOC 2 CC7.2 and ISO A.8.16."
+  # --- Req 11: Test security regularly ---
+  - requirement_code: 11.3.1
+    scf_anchor: VPM-01
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "Internal vulnerability scanning is a subset/instance of the Vulnerability & Patch Management Policy anchor (scanning facet)."
+  - requirement_code: 11.4.1
+    scf_anchor: VPM-04
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Penetration testing partially overlaps with Software Patching/VPM; SCF sample lacks a dedicated pen-test anchor (LOW CONFIDENCE)."
+  # --- Req 12: Org policies and programs ---
+  - requirement_code: 12.1.1
+    scf_anchor: GOV-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "An overall information security policy maps to SCF Information Security Governance — shared with SOC 2 CC1.1/CC2.1 and ISO A.5.1."
+  - requirement_code: 12.6.1
+    scf_anchor: HRS-04
+    relationship_type: equal
+    strength: 0.9
+    rationale: "A security awareness program maps to SCF Security Awareness Training — shared with SOC 2 CC1.4 and ISO A.6.3."
+  - requirement_code: 12.8.1
+    scf_anchor: TPM-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Managing third-party service providers handling account data maps to SCF Third-Party Management — shared with SOC 2 CC9.2 and ISO A.5.19."
+  - requirement_code: 12.10.1
+    scf_anchor: IRO-04
+    relationship_type: equal
+    strength: 0.9
+    rationale: "An incident response plan ready to activate maps to SCF Incident Response Plan — shared with SOC 2 CC7.3/CC7.4 and ISO A.5.24."
