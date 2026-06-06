@@ -3,7 +3,23 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-04 (batch 194 reconcile — 438 + 448 + 459 MERGED; spillovers 467 + 468 + 469 filed; 447 unblocked; ~18 backlog slices remain)
+**Last reconciled:** 2026-06-05 (batch 195 reconcile — 447 + 466 + 469 MERGED; spillover 470 filed; slice 471 filed via /idea-to-slice [PR #1018, pending review]; ~15 backlog slices remain)
+
+## Reconcile — 2026-06-05 (batch 195 · 447 + 466 + 469 merged)
+
+Ninth drain batch — all three merged. Disjoint surfaces held (coverage+shard=447 · auth/deploy=466 · web/app comments=469). 447's last leg hit THREE simultaneous load-induced timeout flakes (`TestPDF_ReturnsPDFOrServiceUnavailable` board · `TestExportPDF_SmokeTest` questionnaires · `FuzzReadBundle` context-deadline — all chromedp-PDF / fuzz-budget timeouts, none in 447's `soc2import` package, no crasher saved); reran the failed legs → all green. The simultaneity confirms a heavy-runner-load window, not a regression.
+
+- **469** (sweep `web/app/**` stale `Plans/mockups/` citations) — Infra · JUDGMENT — **MERGED** at `cbd26d51` (#1015). 36 citation comments across 23 `web/app/(authed)/**` files repointed to `Plans/_archive/mockups/`; the 437 → 459 → 469 sweep lineage is now closed (no live `Plans/mockups/` provenance citation remains anywhere). Comment-only.
+- **466** (`TRUSTED_PROXY_CIDRS` allowlist — structural fix for X-Forwarded-For trust) — Infra/Security · JUDGMENT — **MERGED** at `4d54e0e8` (#1016). Replaced the blunt slice-465 boolean with a validated CIDR allowlist + right-to-left XFF walk in `internal/api/auth/clientip.go` (fail-loud at boot; stops at first untrusted hop so a forged prefix is structurally unreachable); unified the session-auth + admin-demo rate-limiter IP-capture onto one impl; 50-hop DoS cap; old boolean kept as a deprecated alias. Empty/unset = direct-peer (byte-identical, proven via `docker compose config`). 20+ unit tests + 2 real-TCP wire tests. Full multi-container proxy e2e → spillover **470**.
+- **447** (PCI DSS v4.0 — 3rd framework via the slice-438 generic loader) — Backend · JUDGMENT — **MERGED** at `69078c86` (#1017, after flake-rerun). Curated 31-requirement PCI v4.0 crosswalk (all 12 principal requirements; requirement → SCF anchor only; identifiers/titles/own-descriptions, no copyrighted PCI text). **Invariant #1 across THREE frameworks proven:** anchor `IAC-01` satisfies SOC 2 CC6.1 + ISO A.5.15 + PCI 8.2.1. **Invariant #5 (FrameworkScope/CDE) proven:** `internal/frameworkscope/pci_cde_test.go` shows the same org-wide control narrows to 2 CDE cells under PCI but stays 4 cells under SOC 2 — a clean per-framework effective-scope divergence. soc2import floor 75→78. No manifest change (soc2import already leg-A enrolled). No spillover (PCI CDE FrameworkScope ownership UX is a maintainer decision-gate — see below).
+
+Spillover (single): **470** (multi-container header-overwriting-proxy e2e seed harness for TRUSTED_PROXY_CIDRS — the full AC-6 e2e the proxy-less self-host seed can't provide; covered at unit + real-TCP tier instead, not relaxed · from 466 · `ready`).
+
+**Maintainer decision-gate surfaced (NOT auto-filed):** 447's engineer flagged **PCI CDE FrameworkScope ownership UX** as a follow-on. This maps to the CLAUDE.md open decision "FrameworkScope ownership workflow UX — decide before PCI/HIPAA modules ship" — a design decision, not an auto-pickable slice. Left for maintainer (like 446/455).
+
+**Filed via /idea-to-slice (2026-06-05, maintainer-requested, NOT in the auto-loop):** slice **471** — role-scoped control-implementation checklist generator v0 (AI-assist; cited, non-binding). Spec PR **#1018 is OPEN pending maintainer review**; its `_STATUS.md` `ready` row will be registered by a `chore/status` action once #1018 merges (the spec doc is not yet on `main`). A 5th AI-assist v0 surface alongside 440/441/444, governed by the CLAUDE.md AI-assist boundary; shares the unbuilt `internal/llm` Ollama foundation with them.
+
+Backlog: ~15 analysis slices remain ready (418-420, 424-425, 434-436, 439-445, 450, 452-453) + spillovers 456, 457, 464, 468, 470. Decision-gates 446/455 + the new PCI-CDE-FrameworkScope gate stay out of the auto-loop; 449-OPA moot. 436 (god-file split) still deferred (high-conflict). The AI-assist v0 slices (440/441/444 + the pending 471) are maintainer-prioritized, not blindly auto-looped.
 
 ## Drift detected — 2026-06-04 (batch 195 claim-stake · 447 + 466 + 469)
 
