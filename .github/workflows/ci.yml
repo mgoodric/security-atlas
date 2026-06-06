@@ -994,7 +994,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [bundled, external]
+        # Slice 470: `proxy` mode fronts atlas with a header-overwriting
+        # nginx (docker-compose.proxy.yml overlay) and proves slice 466's
+        # TRUSTED_PROXY_CIDRS X-Forwarded-For walk end-to-end across a real
+        # multi-container topology (AC-2 honour proxy IP / AC-3 reject forged).
+        mode: [bundled, external, proxy]
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1031,7 +1035,17 @@ jobs:
           DATABASE_URL_APP=x
           DATABASE_URL_MIGRATE=x
           STUB
-          docker compose -f deploy/docker/docker-compose.yml \
+          # Slice 470: proxy mode layers the reverse-proxy overlay, so the
+          # logs dump must include the same -f files the harness used or the
+          # `proxy` service's logs (and the atlasnet network) are invisible.
+          # Build the -f list as an array so the overlay flag is not an
+          # unquoted word-split (shellcheck SC2086).
+          COMPOSE_FILES=(-f deploy/docker/docker-compose.yml)
+          if [ "${{ matrix.mode }}" = "proxy" ]; then
+            COMPOSE_FILES+=(-f deploy/docker/docker-compose.proxy.yml)
+            echo "TRUSTED_PROXY_CIDRS=x" >> /tmp/compose-logs.env
+          fi
+          docker compose "${COMPOSE_FILES[@]}" \
             --env-file /tmp/compose-logs.env \
             -p "sa-selfhost-${{ matrix.mode }}" logs || true
 
