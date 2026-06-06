@@ -5,6 +5,13 @@
 
 **Last reconciled:** 2026-06-05 (batch 195 reconcile — 447 + 466 + 469 MERGED; spillover 470 filed; slice 471 filed via /idea-to-slice [PR #1018, pending review]; ~15 backlog slices remain)
 
+## Drift detected — 2026-06-05 (batch 196 claim-stake · 456 + 470)
+
+Tenth drain batch — a conservative 2-slice batch (orchestrator attention split across a live maintainer support thread). Conflict-safe (coverage-thresholds=456 SOLE · deploy/e2e=470; `internal/api/auth` is coverage-excluded so no coverage collision; shared = CHANGELOG only). 464 deliberately deferred — it adds an evidence-verify integration surface (coverage + shard), so it needs its own sole-coverage+shard slot.
+
+- **456** (oauth coverage residual toward the slice-350 90% advisory) — Quality · AFK — `ready` → **in-progress**. Branch `quality/456-oauth-coverage-residual`. Lifts `internal/api/oauth` coverage past the slice-422 floor (77) toward the 90% security-critical advisory with the residual RFC error/signer-failure arms. The SOLE coverage-thresholds pick.
+- **470** (trusted-proxy multi-container e2e seed harness) — Infra · JUDGMENT — `ready` → **in-progress**. Branch `infra/470-trusted-proxy-e2e-harness`. The full AC-6 e2e for slice 466's `TRUSTED_PROXY_CIDRS` — fronts atlas with a header-overwriting proxy (docker-compose) so a client-forged `X-Forwarded-For` is proven ignored end-to-end (the proxy-less self-host seed couldn't provide this). deploy/docker + web/e2e + the slice-466 clientip surface.
+
 ## Reconcile — 2026-06-05 (batch 195 · 447 + 466 + 469 merged)
 
 Ninth drain batch — all three merged. Disjoint surfaces held (coverage+shard=447 · auth/deploy=466 · web/app comments=469). 447's last leg hit THREE simultaneous load-induced timeout flakes (`TestPDF_ReturnsPDFOrServiceUnavailable` board · `TestExportPDF_SmokeTest` questionnaires · `FuzzReadBundle` context-deadline — all chromedp-PDF / fuzz-budget timeouts, none in 447's `soc2import` package, no crasher saved); reran the failed legs → all green. The simultaneity confirms a heavy-runner-load window, not a regression.
