@@ -5,6 +5,13 @@
 
 **Last reconciled:** 2026-06-06 (batch 196 reconcile — 456 + 470 MERGED; 471 merged + registered `ready`; spillover 472 filed; slice 473 filed [PR #1023, pending review]; ~14 backlog slices remain)
 
+## Drift detected — 2026-06-06 (batch 197 claim-stake · 464 + 472)
+
+Eleventh drain batch — a clean 2-slice batch (the remaining ready backlog is dense with new-package/coverage slices that share the coverage-thresholds class, so only one coverage pick is safe per batch). Conflict-safe (464 = evidence/cmd/docs, 0 coverage-thresholds touch · 472 = oauth + coverage-thresholds, the SOLE coverage pick; shared = CHANGELOG only).
+
+- **464** (`atlas evidence verify` CLI: ledger-wide integrity walk + SELF_HOSTING migrate-up phrasing drift) — Infra · JUDGMENT — `ready` → **in-progress**. Branch `feat/464-atlas-evidence-verify-cli`. Adds the operator verb to re-walk the evidence ledger + verify per-record sha256 integrity (the surface slice 432 found missing), and fixes the SELF_HOSTING migrate-command doc drift. Real-world-validated by the b196 demo-seed investigation; complements pending slice 473.
+- **472** (oauth device-approval + DBUserResolver coverage tail toward the 90% advisory) — Quality · JUDGMENT — `ready` → **in-progress**. Branch `quality/472-oauth-coverage-tail`. Lifts `internal/api/oauth` past the slice-456 floor (78) with the device-approval + DBUserResolver arms. The SOLE coverage-thresholds pick.
+
 ## Reconcile — 2026-06-06 (batch 196 · 456 + 470 merged)
 
 Tenth drain batch (conservative 2-slice, orchestrator attention split across a live maintainer support thread). Both merged. 470's last leg hit the known questionnaires-PDF chromedp flake (`TestExportPDF_SmokeTest`, shard B3, 30s timeout — 470 touches ZERO Go files) → reran the leg → green.
