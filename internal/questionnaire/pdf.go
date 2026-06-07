@@ -23,12 +23,16 @@ import (
 
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+
+	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
 
-// PDFTimeout mirrors internal/board/pdf.go — headless Chrome boot +
-// PrintToPDF on a several-page questionnaire is typically <5s; 30s is
-// generous.
-const PDFTimeout = 30 * time.Second
+// PDFTimeout is retained as a compatibility alias. The authoritative bounded,
+// env-tunable render deadline now lives on the shared pdfrender.Limiter
+// (slice 475); RenderPDF routes through pdfrender.Default().
+//
+// Deprecated: use pdfrender.Default().RenderTimeout().
+const PDFTimeout = pdfrender.DefaultRenderTimeout
 
 // chromedpWSURLReadTimeout overrides chromedp's hardcoded 20s
 // wsURLReadTimeout watchdog (see chromedp v0.15.1 allocate.go:249).
@@ -73,7 +77,14 @@ func RenderPDF(ctx context.Context, in PDFInput) ([]byte, error) {
 		return nil, errors.New("questionnaire/pdf: nil context")
 	}
 	htmlDoc := buildHTML(in)
+	return pdfrender.Default().Do(ctx, func(ctx context.Context) ([]byte, error) {
+		return renderQuestionnaireBytes(ctx, htmlDoc)
+	})
+}
 
+// renderQuestionnaireBytes performs the chromedp render under the deadline the
+// limiter has already applied to ctx.
+func renderQuestionnaireBytes(ctx context.Context, htmlDoc string) ([]byte, error) {
 	var browserCtx context.Context
 	var cancelAlloc context.CancelFunc
 	var cancelBrowser context.CancelFunc

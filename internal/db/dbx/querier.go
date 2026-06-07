@@ -2204,6 +2204,14 @@ type Querier interface {
 	// conflict target. On conflict we update enabled + updated_at. This is the natural
 	// partial-merge primitive for AC-5 (PATCH /v1/me/preferences merges, no replacement).
 	UpsertUserNotificationPreference(ctx context.Context, arg UpsertUserNotificationPreferenceParams) error
+	// Slice 464: keyset-paginated ledger walk for `atlas evidence verify`.
+	// Read-only integrity walk — recomputes each record's canonical hash and
+	// compares to the stored `hash`. Ordered by id ASC so the caller can page
+	// with a cursor (last-seen id) without OFFSET drift on a large ledger.
+	// Tenant-scoped: RLS bounds the rows to the current tenant; the @after_id
+	// cursor and @page_size keep the working set bounded regardless of ledger
+	// size. The empty-UUID sentinel ('00000000-...') seeds the first page.
+	WalkEvidenceRecordsForVerify(ctx context.Context, arg WalkEvidenceRecordsForVerifyParams) ([]EvidenceRecord, error)
 	// ===== aggregation_rule_audit_log (append-only) =====
 	// Append-only. Every lifecycle transition (created / activated /
 	// deactivated / reactivated) and every threshold edit writes one row
