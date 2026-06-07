@@ -541,6 +541,12 @@
       "functions": 98,
       "lines": 98
     },
+    "lib/admin/assign-options.ts": {
+      "statements": 98,
+      "branches": 85,
+      "functions": 98,
+      "lines": 98
+    },
     "lib/api/_shared.ts": {
       "statements": 48,
       "branches": 98,
