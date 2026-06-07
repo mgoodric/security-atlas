@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/hris.worker_lifecycle/1.0.0.json",
+  "x-evidence-kind": "hris.worker_lifecycle.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IAC-22", "IAC-09", "HRS-04"],
+  "title": "HRIS worker lifecycle (joiner/mover/leaver) state",
+  "description": "One record per worker across an HRIS (Rippling, BambooHR): the worker's employment-lifecycle state (active / terminated / on-leave / pending), start (hire) date, end (termination) date, role/title, department, the manager ASSIGNMENT id (for access-review routing), and the work email (the only contact field — the access-review join key). Pulled read-only from the HRIS employee-directory API with a minimal field selector. The HRIS holds the most sensitive PII in the customer's stack; this evidence kind collects WORKER-LIFECYCLE FACTS ONLY and DELIBERATELY EXCLUDES SSN / national id, compensation / salary, home address, bank / payment details, benefits / health enrollment, performance-review fields, date of birth, personal phone, and gender / ethnicity / protected-class data — those fields are never requested and never enter the append-only evidence ledger (constitutional invariant #2). The connector reports descriptive lifecycle facts; the platform evaluator owns the access-review pass/fail per (control, scope) by reconciling this authoritative roster against the IdP/app entitlements (joiner/mover/leaver — SOC 2 CC6.1/CC6.2/CC6.3). Shared across the Rippling + BambooHR connectors because the two HRIS systems' lifecycle field set is identical at this altitude; the source_hris field preserves provenance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_hris", "worker_id", "employment_status"],
+  "properties": {
+    "source_hris": {
+      "type": "string",
+      "enum": ["rippling", "bamboohr"],
+      "description": "HRIS the record was collected from."
+    },
+    "worker_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "HRIS-native stable identifier of the worker (opaque, non-secret) — the stable key."
+    },
+    "employment_status": {
+      "type": "string",
+      "enum": ["active", "terminated", "on_leave", "pending", "unknown"],
+      "description": "The worker's lifecycle state. The evaluator distinguishes active (good) from terminated (must be off all entitlements — the leaver signal)."
+    },
+    "start_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Optional hire / start date (the joiner fact), as an ISO 8601 date (YYYY-MM-DD)."
+    },
+    "end_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Optional end / termination date (the leaver fact), as an ISO 8601 date (YYYY-MM-DD)."
+    },
+    "title": {
+      "type": "string",
+      "description": "Optional role / job title (the mover fact). Descriptive, non-sensitive."
+    },
+    "department": {
+      "type": "string",
+      "description": "Optional department / team (the mover fact). Descriptive, non-sensitive."
+    },
+    "manager_assignment_id": {
+      "type": "string",
+      "description": "Optional OPAQUE worker id of this worker's manager — the minimum identity to route an access review. NEVER the manager's personal contact detail."
+    },
+    "work_email": {
+      "type": "string",
+      "description": "Optional WORK email — the only contact field collected, and only because the access-review join keys the roster against IdP/app accounts by work email. NEVER a personal email."
+    }
+  }
+}
