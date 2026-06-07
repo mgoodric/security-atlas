@@ -3,7 +3,22 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-07 (batch 200 reconcile — 498 LLM foundation MERGED; ALL 3 gap-analysis real-defects now closed (495 + 492 + 498). 499/500/502 unblocked → ready; 513 doc-fix spillover filed.)
+**Last reconciled:** 2026-06-07 (batch 201 reconcile — 478 super-admin user↔tenant↔role assignment API MERGED; the maintainer-requested user-management feature. 479 (UI) unblocked → ready; 476 reduced to verification.)
+
+## Reconcile — 2026-06-07 (batch 201 · 478 merged)
+
+Solo batch — the maintainer-requested user-management feature. Merged CLEAN (no required or advisory failures). The tenant-access elevation surface was given extra security scrutiny (orchestrator spot-checked the server-side authority gate before merge); the OPA/super_admin gate is non-bypassable and P0-192-5 is intact.
+
+- **478** (super-admin user↔tenant↔role assignment API incl. self-assignment) — Backend/Multi-tenancy/Auth · JUDGMENT — **MERGED** at `8fe11520` (#1053). New `internal/api/adminusers` package: super-admin-gated `GET /v1/admin/users` (cross-tenant for super-admin; own-tenant for tenant-admin; bounded) + assign/revoke + super-admin SELF-assign (adds self → `available_tenants` → reachable in the membership-bounded switcher). **Load-bearing local-auth decision:** local users' empty `(idp_issuer,idp_subject)` tuple would over-match every local user if copied (the slice-476 hazard), so an assigned local target gets a stable synthetic key (`idp_issuer='urn:atlas:local'`, `idp_subject=<origin users.id>`) backfilled to the origin row in-tx — non-empty + unique, proven by `TestAssign_LocalAuth_NoOverMatch`. Authority gate is SERVER-SIDE: cross-tenant requires `super_admin` (BYPASSRLS authPool reachable only behind the gate); within-tenant requires tenant-admin under `atlas_app` RLS; foreign-tenant target by a tenant-admin → 403. Atomic + idempotent assign; dual audit (`me_audit_log` always + `super_admin_audit_log` on cross-tenant). P0-192-5 preserved (`internal/api/oauth` untouched). Migration `20260607010000_user_tenant_assignment_audit`. Coverage: extended the existing `adminusers` package (floor 61 unchanged, measured ~66%) — no coverage-thresholds.json change. 10/10 ACs, all 6 P0s honored. Decisions log: `docs/audit-log/478-user-tenant-assignment-decisions.md`. No spillover.
+
+**Downstream:**
+
+| Row | Transition            | Evidence                                                                                                                                                                  |
+| --- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 479 | `not-ready` → `ready` | admin user-mgmt UI · dep #478 now merged (`8fe11520`) · spec PR #1031 · consumes the 478 API                                                                              |
+| 476 | `ready` (reduced)     | demo-data reachability — the self-assign MECHANISM now ships in 478; 476 reduces to verification (self-assign to demo tenant → switch → see data) + an optional seed hint |
+
+Backlog after batch 201: OSCAL family 493/494/496/511/512 (one oscal-slice per batch, build on 492) · crosswalks 480/481/482 · connectors 486-491 · 474 · 508/509/510 · 479 (now ready, UI) · 499/500 (LLM infra follow-ons) · 513 (doc-fix) · 476 (verification) · the older analysis tail. No real-defects remain. MAINTAINER-SEQUENCED (do not auto-pick): 440/441/444/471/502.
 
 ## Drift detected — 2026-06-07 (batch 201 claim-stake · 478)
 
@@ -123,13 +138,13 @@ Ready now (18): 480,481,482,486,487,488,489,490,491,492,493,494,495,496,498,508,
 
 The maintainer approved + merged the demo-support-session spec PRs (#1023, #1029, #1031). Registering their rows. (475's impl already merged at `37155f96` in batch 197; its doc landed with #1029.)
 
-| Row | Transition              | Evidence                                                                                                                                                                       |
-| --- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 473 | (new) → `ready`         | `docs/issues/473-*.md` · migrate-on-upgrade (fail-closed) · spec PR #1023 merged · prod-confirmed gap                                                                          |
-| 475 | (new) → `merged`        | `docs/issues/475-*.md` · PDF render degrades to 503 · impl merged `37155f96` (#1030); doc landed via #1029                                                                     |
-| 476 | (new) → `ready`         | `docs/issues/476-*.md` · demo-data reachability · spec PR #1029 merged · NOTE: mechanism subsumed by 478/479 — may reduce to verification                                      |
-| 478 | `ready` → `in-progress` | `docs/issues/478-*.md` · super-admin user↔tenant assignment API (incl self-assign) · spec PR #1031 merged · revives slice-060.5 · batch 201 `auth/478-user-tenant-assignment` |
-| 479 | (new) → `not-ready`     | `docs/issues/479-*.md` · admin user-mgmt UI · dep #478 unmerged · spec PR #1031 merged                                                                                         |
+| Row | Transition       | Evidence                                                                                                                                                                           |
+| --- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 473 | (new) → `ready`  | `docs/issues/473-*.md` · migrate-on-upgrade (fail-closed) · spec PR #1023 merged · prod-confirmed gap                                                                              |
+| 475 | (new) → `merged` | `docs/issues/475-*.md` · PDF render degrades to 503 · impl merged `37155f96` (#1030); doc landed via #1029                                                                         |
+| 476 | (new) → `ready`  | `docs/issues/476-*.md` · demo-data reachability · spec PR #1029 merged · NOTE: mechanism subsumed by 478/479 — may reduce to verification                                          |
+| 478 | `merged`         | `docs/issues/478-*.md` · super-admin user↔tenant↔role assignment API (incl self-assign) · #1031 spec · #1053 impl `8fe11520` · batch 201 · unblocks 479 + subsumes 476 mechanism |
+| 479 | `ready`          | `docs/issues/479-*.md` · admin user-mgmt UI · dep #478 merged · spec PR #1031 · consumes the 478 API                                                                               |
 
 These join the batch-197 spillovers 474 (ingest-hash) + 477 (walkthrough-PDF), both `ready`. 478 unblocks 479; once 478's IMPLEMENTATION lands (a future build, not the spec), 479 flips to `ready`. The AI-assist set (440/441/444/471) remains maintainer-sequenced.
 
