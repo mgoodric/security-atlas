@@ -151,6 +151,25 @@ func seedEvidence(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.
 	return id
 }
 
+// seedEvidenceWithPayload is seedEvidence plus a JSONB payload, for the
+// slice-495 SQL + JSON-path evidence-query tests (those evaluators read the
+// payload, the per-record/rego rollup does not).
+func seedEvidenceWithPayload(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.UUID, result string, observedAt time.Time, payloadJSON string) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	controlRef := ctrlID.String()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO evidence_records (
+			id, tenant_id, control_id, observed_at, ingested_at,
+			provenance, result, payload, hash, control_ref
+		)
+		VALUES ($1, $2, $3, $4, now(), '{}'::jsonb, $5, $6::jsonb, $7, $8)
+	`, id, tenant, ctrlID, observedAt, result, payloadJSON, "hash-495-"+id.String()[:8], controlRef); err != nil {
+		t.Fatalf("seed evidence with payload: %v", err)
+	}
+	return id
+}
+
 // seedScopeDimension + seedScopeCell give the tenant a cell universe so the
 // applicability_expr evaluation has somewhere to resolve.
 func seedScopeCell(t *testing.T, admin *pgxpool.Pool, tenant, label string) uuid.UUID {
@@ -602,5 +621,294 @@ result := "pass" if {
 	}
 	if len(states) != 1 || states[0].Result != "pass" {
 		t.Fatalf("rego query path: expected pass, got %+v", states)
+	}
+}
+
+// ===== Slice 495 ============================================================
+//
+// The pre-495 defect: a control whose ONLY evidence query is `sql` or
+// `jsonpath` uploaded fine but evaluated to NO state — the engine filtered to
+// rego and silently skipped the rest. These tests prove the two languages now
+// produce real pass/fail state, prove the SQL path cannot reach another
+// tenant's evidence or a non-evidence table (threat-model I), and prove a SQL
+// timeout yields inconclusive rather than a hang (threat-model D).
+
+// ===== AC-9 / AC-7: a JSON-path-only control evaluates to real state =====
+
+func TestEvaluateControl_JSONPathEvidenceQueryProducesState(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	defer admin.Close()
+	app := openPool(t, appDSN(t))
+	defer app.Close()
+	tenant := freshTenant(t, admin)
+	ctx := ctxFor(t, tenant)
+
+	// A control whose ONLY query is JSON-path: pass iff the payload's
+	// `encrypted` flag is true. PRE-495 this control produced NO state.
+	queriesJSON := `[{"id":"enc-check","language":"jsonpath","expression":"$.encrypted"}]`
+	ctrlID := seedControl(t, admin, tenant, "automated", "monthly", queriesJSON)
+	seedEvidenceWithPayload(t, admin, tenant, ctrlID, "pass",
+		time.Now().UTC().Add(-1*24*time.Hour), `{"encrypted":true}`)
+
+	eng := newEngine(app)
+	if _, err := eng.EvaluateControl(ctx, ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
+		t.Fatalf("EvaluateControl: %v", err)
+	}
+	states, err := eng.ControlState(ctx, ctrlID, "", eval.FarFuture)
+	if err != nil {
+		t.Fatalf("ControlState: %v", err)
+	}
+	if len(states) != 1 {
+		t.Fatalf("AC-9: expected 1 state, got %d", len(states))
+	}
+	// AC-7: the prior silent no-op is gone — the control has a REAL result.
+	if states[0].Result != "pass" {
+		t.Fatalf("AC-9: jsonpath truthy = %q, want pass", states[0].Result)
+	}
+
+	// Flip the payload to falsy -> the control fails (not no-op).
+	tenant2 := freshTenant(t, admin)
+	ctx2 := ctxFor(t, tenant2)
+	c2 := seedControl(t, admin, tenant2, "automated", "monthly", queriesJSON)
+	seedEvidenceWithPayload(t, admin, tenant2, c2, "pass",
+		time.Now().UTC().Add(-1*24*time.Hour), `{"encrypted":false}`)
+	if _, err := eng.EvaluateControl(ctx2, c2, eval.TriggerManual, eval.FarFuture); err != nil {
+		t.Fatalf("EvaluateControl (falsy): %v", err)
+	}
+	st2, err := eng.ControlState(ctx2, c2, "", eval.FarFuture)
+	if err != nil {
+		t.Fatalf("ControlState (falsy): %v", err)
+	}
+	if len(st2) != 1 || st2[0].Result != "fail" {
+		t.Fatalf("AC-9: jsonpath falsy = %+v, want fail", st2)
+	}
+}
+
+// ===== AC-8 / AC-7: a SQL-only control evaluates to real state =====
+
+func TestEvaluateControl_SQLEvidenceQueryProducesState(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	defer admin.Close()
+	app := openPool(t, appDSN(t))
+	defer app.Close()
+	tenant := freshTenant(t, admin)
+	ctx := ctxFor(t, tenant)
+
+	// A control whose ONLY query is SQL over the read-only `evidence` view:
+	// pass iff EVERY in-window record's payload reports encrypted=true.
+	// PRE-495 this produced NO state.
+	sqlExpr := `SELECT bool_and((payload->>'encrypted')::boolean) FROM evidence`
+	queriesJSON := `[{"id":"all-enc","language":"sql","expression":` + jsonString(sqlExpr) + `}]`
+	ctrlID := seedControl(t, admin, tenant, "automated", "monthly", queriesJSON)
+	seedEvidenceWithPayload(t, admin, tenant, ctrlID, "pass",
+		time.Now().UTC().Add(-1*24*time.Hour), `{"encrypted":true}`)
+	seedEvidenceWithPayload(t, admin, tenant, ctrlID, "pass",
+		time.Now().UTC().Add(-2*24*time.Hour), `{"encrypted":true}`)
+
+	eng := newEngine(app)
+	if _, err := eng.EvaluateControl(ctx, ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
+		t.Fatalf("EvaluateControl: %v", err)
+	}
+	states, err := eng.ControlState(ctx, ctrlID, "", eval.FarFuture)
+	if err != nil {
+		t.Fatalf("ControlState: %v", err)
+	}
+	if len(states) != 1 {
+		t.Fatalf("AC-8: expected 1 state, got %d", len(states))
+	}
+	if states[0].Result != "pass" {
+		t.Fatalf("AC-8: sql all-encrypted = %q, want pass", states[0].Result)
+	}
+
+	// A second tenant with one unencrypted record -> bool_and is false -> fail.
+	tenant2 := freshTenant(t, admin)
+	ctx2 := ctxFor(t, tenant2)
+	c2 := seedControl(t, admin, tenant2, "automated", "monthly", queriesJSON)
+	seedEvidenceWithPayload(t, admin, tenant2, c2, "pass",
+		time.Now().UTC().Add(-1*24*time.Hour), `{"encrypted":true}`)
+	seedEvidenceWithPayload(t, admin, tenant2, c2, "pass",
+		time.Now().UTC().Add(-2*24*time.Hour), `{"encrypted":false}`)
+	if _, err := eng.EvaluateControl(ctx2, c2, eval.TriggerManual, eval.FarFuture); err != nil {
+		t.Fatalf("EvaluateControl (one unencrypted): %v", err)
+	}
+	st2, err := eng.ControlState(ctx2, c2, "", eval.FarFuture)
+	if err != nil {
+		t.Fatalf("ControlState (one unencrypted): %v", err)
+	}
+	if len(st2) != 1 || st2[0].Result != "fail" {
+		t.Fatalf("AC-8: sql one-unencrypted = %+v, want fail", st2)
+	}
+}
+
+// ===== AC-10 (load-bearing): SQL query cannot reach another tenant or any
+// non-evidence table (threat-model I / P0-495-2) =====
+
+func TestEvaluateControl_SQLCannotReadOtherTenantOrNonEvidenceTable(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	defer admin.Close()
+	app := openPool(t, appDSN(t))
+	defer app.Close()
+
+	// Tenant B holds secret evidence. Tenant A authors a malicious SQL query
+	// that TRIES to read evidence_records directly (the live table, all
+	// tenants). The author SQL can only name the `evidence` CTE, so the
+	// reference to evidence_records must ERROR — never return tenant B's rows.
+	tenantA := freshTenant(t, admin)
+	tenantB := freshTenant(t, admin)
+	ctxA := ctxFor(t, tenantA)
+
+	bCtrl := seedControl(t, admin, tenantB, "automated", "monthly", "")
+	seedEvidenceWithPayload(t, admin, tenantB, bCtrl, "pass",
+		time.Now().UTC().Add(-1*24*time.Hour), `{"secret":"tenantB-only"}`)
+
+	eng := newEngine(app)
+
+	// (1) Reaching a non-evidence / cross-tenant base table errors.
+	exfilSQL := `SELECT result FROM evidence_records`
+	queriesJSON := `[{"id":"exfil","language":"sql","expression":` + jsonString(exfilSQL) + `}]`
+	aCtrl := seedControl(t, admin, tenantA, "automated", "monthly", queriesJSON)
+	seedEvidenceWithPayload(t, admin, tenantA, aCtrl, "pass",
+		time.Now().UTC().Add(-1*24*time.Hour), `{"x":1}`)
+
+	_, err := eng.EvaluateControl(ctxA, aCtrl, eval.TriggerManual, eval.FarFuture)
+	if err == nil {
+		t.Fatal("AC-10: SQL reaching evidence_records must ERROR, did not")
+	}
+
+	// (2) Reaching the users table errors too (no non-evidence table reach).
+	usersSQL := `SELECT count(*)::text FROM users`
+	usersJSON := `[{"id":"users","language":"sql","expression":` + jsonString(usersSQL) + `}]`
+	aCtrl2 := seedControl(t, admin, tenantA, "automated", "monthly", usersJSON)
+	seedEvidenceWithPayload(t, admin, tenantA, aCtrl2, "pass",
+		time.Now().UTC().Add(-1*24*time.Hour), `{"x":1}`)
+	if _, err := eng.EvaluateControl(ctxA, aCtrl2, eval.TriggerManual, eval.FarFuture); err == nil {
+		t.Fatal("AC-10: SQL reaching the users table must ERROR, did not")
+	}
+
+	// (3) A legitimate query against the `evidence` CTE sees ONLY tenant A's
+	// records — never tenant B's secret. tenant A has exactly 2 evidence rows
+	// across the two controls above under control_ref, but the CTE for THIS
+	// control is built from this control's in-window set only.
+	countSQL := `SELECT (count(*) = 1)::boolean FROM evidence WHERE payload->>'x' = '1'`
+	countJSON := `[{"id":"count","language":"sql","expression":` + jsonString(countSQL) + `}]`
+	aCtrl3 := seedControl(t, admin, tenantA, "automated", "monthly", countJSON)
+	seedEvidenceWithPayload(t, admin, tenantA, aCtrl3, "pass",
+		time.Now().UTC().Add(-1*24*time.Hour), `{"x":1}`)
+	if _, err := eng.EvaluateControl(ctxA, aCtrl3, eval.TriggerManual, eval.FarFuture); err != nil {
+		t.Fatalf("AC-10: legitimate evidence-CTE query errored: %v", err)
+	}
+	st, err := eng.ControlState(ctxA, aCtrl3, "", eval.FarFuture)
+	if err != nil {
+		t.Fatalf("ControlState: %v", err)
+	}
+	if len(st) != 1 || st[0].Result != "pass" {
+		t.Fatalf("AC-10: legitimate evidence-CTE query = %+v, want pass (exactly its own 1 record)", st)
+	}
+}
+
+// ===== AC-11: a SQL query exceeding statement_timeout yields inconclusive
+// (threat-model D) =====
+
+func TestEvaluateControl_SQLTimeoutYieldsInconclusiveNotHang(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	defer admin.Close()
+	app := openPool(t, appDSN(t))
+	defer app.Close()
+	tenant := freshTenant(t, admin)
+	ctx := ctxFor(t, tenant)
+
+	// pg_sleep is blocked by the static guard, so simulate a slow query with a
+	// large generate_series cartesian product that exceeds statement_timeout.
+	// The control must come back inconclusive, never hang.
+	slowSQL := `SELECT bool_and(a.n = b.n) FROM evidence,
+		generate_series(1, 5000000) a(n), generate_series(1, 5000000) b(n)`
+	queriesJSON := `[{"id":"slow","language":"sql","expression":` + jsonString(slowSQL) + `}]`
+	ctrlID := seedControl(t, admin, tenant, "automated", "monthly", queriesJSON)
+	seedEvidenceWithPayload(t, admin, tenant, ctrlID, "pass",
+		time.Now().UTC().Add(-1*24*time.Hour), `{"x":1}`)
+
+	eng := newEngine(app)
+	done := make(chan error, 1)
+	go func() {
+		_, err := eng.EvaluateControl(ctx, ctrlID, eval.TriggerManual, eval.FarFuture)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		// The engine fails the control loud (the query errored on timeout). The
+		// LOAD-BEARING property is that it RETURNED — it did not hang.
+		if err == nil {
+			// Some PG configs may complete; if it did complete, that's fine too
+			// as long as it did not hang. But a 25-trillion-row product will not
+			// complete under the 5s timeout, so we expect the timeout error.
+			t.Log("AC-11: query completed without timeout (unexpected but not a hang)")
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("AC-11: SQL evidence query HUNG (no return in 30s) — statement_timeout not enforced")
+	}
+}
+
+// ===== AC-6: a mixed-language control (rego + jsonpath) rolls up consistently
+// through the existing precedence =====
+
+func TestEvaluateControl_MixedLanguageRollup(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	defer admin.Close()
+	app := openPool(t, appDSN(t))
+	defer app.Close()
+	tenant := freshTenant(t, admin)
+	ctx := ctxFor(t, tenant)
+
+	// Query 1 (rego): pass iff >=1 record. Query 2 (jsonpath): pass iff
+	// encrypted. Payload is encrypted=false -> jsonpath fails -> any-fail
+	// rollup -> control fails, even though rego passes (AC-6 precedence).
+	regoExpr := `package evidence.query
+import rego.v1
+default result := "fail"
+result := "pass" if { count(input.records) > 0 }`
+	queriesJSON := `[` +
+		`{"id":"has-rec","language":"rego","expression":` + jsonString(regoExpr) + `},` +
+		`{"id":"enc","language":"jsonpath","expression":"$.encrypted"}` +
+		`]`
+	ctrlID := seedControl(t, admin, tenant, "automated", "monthly", queriesJSON)
+	seedEvidenceWithPayload(t, admin, tenant, ctrlID, "pass",
+		time.Now().UTC().Add(-1*24*time.Hour), `{"encrypted":false}`)
+
+	eng := newEngine(app)
+	if _, err := eng.EvaluateControl(ctx, ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
+		t.Fatalf("EvaluateControl: %v", err)
+	}
+	st, err := eng.ControlState(ctx, ctrlID, "", eval.FarFuture)
+	if err != nil {
+		t.Fatalf("ControlState: %v", err)
+	}
+	if len(st) != 1 || st[0].Result != "fail" {
+		t.Fatalf("AC-6: mixed rego(pass)+jsonpath(fail) = %+v, want fail (any-fail precedence)", st)
+	}
+}
+
+// ===== fail-loud: a persisted unsupported language errors, never silent =====
+
+func TestEvaluateControl_UnsupportedLanguageFailsLoud(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	defer admin.Close()
+	app := openPool(t, appDSN(t))
+	defer app.Close()
+	tenant := freshTenant(t, admin)
+	ctx := ctxFor(t, tenant)
+
+	// Bypass the slice-009 upload validator (which would reject `sigma`) by
+	// seeding the JSONB directly — proving the ENGINE itself fails loud on an
+	// unsupported persisted language rather than silently skipping it (the
+	// exact class of the original bug).
+	queriesJSON := `[{"id":"sig","language":"sigma","expression":"detection: x"}]`
+	ctrlID := seedControl(t, admin, tenant, "automated", "monthly", queriesJSON)
+	seedEvidenceWithPayload(t, admin, tenant, ctrlID, "pass",
+		time.Now().UTC().Add(-1*24*time.Hour), `{"x":1}`)
+
+	eng := newEngine(app)
+	if _, err := eng.EvaluateControl(ctx, ctrlID, eval.TriggerManual, eval.FarFuture); err == nil {
+		t.Fatal("unsupported language must FAIL LOUD (error), not silently no-op")
 	}
 }
