@@ -38,6 +38,7 @@ func newEvidenceCmd() *cobra.Command {
 		Short: "evidence-ledger operations",
 	}
 	cmd.AddCommand(newEvidencePushCmd())
+	cmd.AddCommand(newEvidenceVerifyCmd())
 	return cmd
 }
 

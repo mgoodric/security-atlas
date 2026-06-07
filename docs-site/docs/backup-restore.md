@@ -329,29 +329,37 @@ $COMPOSE exec -T postgres psql -U atlas_migrate -d security_atlas \
 $COMPOSE exec -T postgres psql -U atlas_migrate -d security_atlas \
   -c "select count(*) from pg_policies where schemaname = 'public';"
 
-# (4) INTEGRITY — a signed OSCAL export still verifies on the restored
-#     data. Export a frozen audit period, then verify the bundle's
-#     signature. This exercises the cosign/ed25519 verification path
-#     end-to-end and proves the evidence behind the export is intact.
+# (4) INTEGRITY — re-walk the restored evidence ledger and verify each
+#     record's stored hash against a recomputed canonical hash. Exits
+#     non-zero if any record was silently corrupted by the backup/restore.
+#     Read-only; safe to run against live data.
+atlas evidence verify --all-tenants            # expect: mismatches=0, exit 0
+
+# (5) INTEGRITY (cryptographic, end-to-end) — a signed OSCAL export still
+#     verifies on the restored data. Export a frozen audit period, then
+#     verify the bundle's signature. This exercises the cosign/ed25519
+#     verification path end-to-end and proves the evidence behind the
+#     export is intact.
 atlas oscal-export --period <frozen-period-id> --out ./drill-bundle
 atlas oscal verify ./drill-bundle             # expect: signature OK
 ```
 
-The verify step (4) is the load-bearing assertion: **integrity, not just
+Steps (4) and (5) are the load-bearing assertions: **integrity, not just
 presence.** A silently-corrupt backup might restore "successfully" with
-damaged evidence; the signed-export verify catches damage that a row
-count would miss, because the export digest is a sha256 over the
-member bytes and the signature is checked against it.
+damaged evidence; the ledger-wide `evidence verify` walk catches a mutated
+record by recomputing its canonical hash, and the signed-export verify
+additionally catches damage end-to-end via a sha256 over the member bytes
+checked against the signature — both kinds of damage a row count would miss.
 
 <!-- prettier-ignore-start -->
-!!! note "Evidence-record integrity (current surface)"
-    Per-record sha256 integrity is computed and stored at ingest and is
-    relied on at every ledger read; there is **not yet** a standalone
-    `atlas evidence verify` operator command to re-walk the whole ledger
-    on demand. The signed-OSCAL-export verify above is the shipping,
-    end-to-end integrity check for the restore drill. A dedicated
-    ledger-wide verify verb is tracked as a follow-up
-    (see the decisions log for slice 432).
+!!! note "Evidence-record integrity (verify surfaces)"
+    Per-record sha256 integrity is computed and stored at ingest.
+    `atlas evidence verify` re-walks the ledger on demand and reports any
+    record whose stored hash no longer matches a recomputed canonical hash
+    — a tenant-scoped walk (`--tenant <uuid>`, as `atlas_app` under RLS) or
+    a cross-tenant walk (`--all-tenants`, as `atlas_service_account`). The
+    signed-OSCAL-export verify above is the complementary cryptographic,
+    end-to-end check. Run both in a restore drill.
 <!-- prettier-ignore-end -->
 
 ### Record the drill
