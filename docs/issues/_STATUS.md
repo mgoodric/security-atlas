@@ -3,7 +3,21 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-06 (batch 197 reconcile — 464 + 472 + 475 MERGED; spillovers 474 + 477 filed; the board-PDF flake class FIXED; demo-seed support thread resolved; specs 473/476/478/479 + demo-409 fix pending review)
+**Last reconciled:** 2026-06-06 (spec registration — 473/476/478/479 spec PRs merged + rows registered; 475 confirmed merged; demo-409 fix pending CI)
+
+## Drift detected — 2026-06-06 (spec registration · 473 + 476 + 478 + 479; maintainer-approved spec PRs merged)
+
+The maintainer approved + merged the demo-support-session spec PRs (#1023, #1029, #1031). Registering their rows. (475's impl already merged at `37155f96` in batch 197; its doc landed with #1029.)
+
+| Row | Transition          | Evidence                                                                                                                                  |
+| --- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| 473 | (new) → `ready`     | `docs/issues/473-*.md` · migrate-on-upgrade (fail-closed) · spec PR #1023 merged · prod-confirmed gap                                     |
+| 475 | (new) → `merged`    | `docs/issues/475-*.md` · PDF render degrades to 503 · impl merged `37155f96` (#1030); doc landed via #1029                                |
+| 476 | (new) → `ready`     | `docs/issues/476-*.md` · demo-data reachability · spec PR #1029 merged · NOTE: mechanism subsumed by 478/479 — may reduce to verification |
+| 478 | (new) → `ready`     | `docs/issues/478-*.md` · super-admin user↔tenant assignment API (incl self-assign) · spec PR #1031 merged · revives slice-060.5          |
+| 479 | (new) → `not-ready` | `docs/issues/479-*.md` · admin user-mgmt UI · dep #478 unmerged · spec PR #1031 merged                                                    |
+
+These join the batch-197 spillovers 474 (ingest-hash) + 477 (walkthrough-PDF), both `ready`. 478 unblocks 479; once 478's IMPLEMENTATION lands (a future build, not the spec), 479 flips to `ready`. The AI-assist set (440/441/444/471) remains maintainer-sequenced.
 
 ## Reconcile — 2026-06-06 (batch 197 · 464 + 472 merged; + 475 unblock fix)
 
