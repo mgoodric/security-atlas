@@ -3,7 +3,27 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-06 (batch 196 reconcile — 456 + 470 MERGED; 471 merged + registered `ready`; spillover 472 filed; slice 473 filed [PR #1023, pending review]; ~14 backlog slices remain)
+**Last reconciled:** 2026-06-06 (batch 197 reconcile — 464 + 472 + 475 MERGED; spillovers 474 + 477 filed; the board-PDF flake class FIXED; demo-seed support thread resolved; specs 473/476/478/479 + demo-409 fix pending review)
+
+## Reconcile — 2026-06-06 (batch 197 · 464 + 472 merged; + 475 unblock fix)
+
+Eleventh drain batch. Both batch-197 slices merged — but only after fixing the recurring board-PDF flake that had blocked the merge queue (a mid-batch slice 475 build, maintainer-directed). The flake class is now resolved.
+
+- **472** (oauth coverage tail toward 90% advisory) — Quality · JUDGMENT — **MERGED** at `f6cd0eec` (#1026, after rebasing onto 475). `internal/api/oauth` 80.8% → **89.3%**, floor 78 → **87** — ~0.7pp from the 90 security-critical advisory. Device-approval + DBUserResolver-authPool arms. No spillover.
+- **464** (`atlas evidence verify` ledger-integrity walk + SELF_HOSTING migrate-prose fix) — Infra · JUDGMENT — **MERGED** at `c3d08cbc` (#1027, UNSTABLE-codecov-only, after rebase). Adds the operator verb to re-walk the ledger + verify per-record sha256 (the surface slice 432's restore-drill found missing) + a `GRANT SELECT` migration for the cross-tenant service-account read. **Surfaced a real integrity finding → spillover 474:** the ingest hash covers `scope`, which isn't persisted, so the exact ingest hash can't be re-derived from a ledger row (the "hash verified at every read" guarantee is currently aspirational); verify hashes the reconstructable record instead.
+- **475** (board/questionnaire PDF render degrades to 503 under load) — Quality · JUDGMENT — **MERGED** at `37155f96` (#1030). The durable fix for the chromedp flake that recurred across batches 193/195/196 and **blocked batch 197 (failed 2 reruns)**. Root cause: a chromedp deadline-exceeded returned wrapped `context.DeadlineExceeded` (not `ErrChromeUnavailable`) → fell through to a 500 at 3 handler call sites. Fix: a shared `internal/pdfrender.Limiter` (90s tunable deadline, concurrency cap 2, bounded queue-wait) routing all board/questionnaire renders; all 3 degradation modes → 503; both tests rewritten deterministic + stress-run. Confirmed: shard B2 now SUCCESS on #1030 + the rebased 472/464. **The board-PDF + questionnaires-PDF load-timeout flake class is RESOLVED.** Spillover 477 (the `internal/audit/walkthrough` renderer has the identical bug). Note: 475's doc co-files with 476 on PR #1029 (pending) — impl is on main, doc lands when #1029 merges.
+
+Spillovers filed (docs on main): **474** (ingest-hash-not-ledger-reconstructable — evidence integrity · from 464 · `ready`) · **477** (walkthrough PDF render degradation, same class as 475 · from 475 · `ready`).
+
+**Maintainer support thread (this session) — resolved + captured:**
+
+- Demo-seed failure on the edge box: root-caused live (the box was 3 migrations behind because the `atlas-bootstrap-edge` migrate one-shot isn't re-run on image update); applied the 3 pending `me_audit_log` CHECK migrations directly → demo seed now works (50/20/200 loaded). The durable fix is **slice 473** (migrate-on-upgrade, PR #1023, pending review).
+- Demo re-seed showed a masked 500 → **demo-409-messaging fix** (PR #1028, pending — typed seeder sentinels → 409 "already loaded"). Not a slice (bug fix).
+- "How do I switch tenants" → the demo data sits in a separate tenant the operator can't reach (membership-bounded switcher + local-auth single-tenant identities). General fix filed as **slices 478 (super-admin user↔tenant assignment API, incl. self-assign) + 479 (admin user-mgmt UI)** (PR #1031) — these revive the never-shipped slice-060.5 gap and **subsume slice 476's** demo-reachability mechanism (476 reduces to verification once 478/479 land).
+
+Pending maintainer review (rows register on merge): **473** (#1023) · **476** + 475-doc (#1029) · **478** + **479** (#1031) · demo-409 fix (#1028). 478 = `ready`, 479 = `not-ready` (dep 478), 476 = `ready` (or close in favor of 478/479).
+
+Backlog: ~12 analysis slices remain ready (418-420, 424-425, 434, 436, 439-445, 448, 450, 452-453 minus those merged) + spillovers 457, 468, 474, 477. AI-assist 440/441/444/471 maintainer-sequenced. Decision-gates 446/455 + PCI-CDE-FrameworkScope out of the auto-loop. The board-PDF flake (475) no longer threatens the queue.
 
 ## Drift detected — 2026-06-06 (batch 197 claim-stake · 464 + 472)
 
