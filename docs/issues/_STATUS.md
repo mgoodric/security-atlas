@@ -3,7 +3,24 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-07 (batch 210 reconcile — 489 PagerDuty connector MERGED; the 12th connector. Spillovers 538-540 registered ready.)
+**Last reconciled:** 2026-06-07 (batch 211 reconcile — 445 email/SMTP notification channel MERGED; unblocks 510 automated-backup. Spillovers 542/543 ready, 541 not-ready (dep 439).)
+
+## Reconcile — 2026-06-07 (batch 211 · 445 merged)
+
+Solo batch — high-leverage ENABLER. Merged CLEAN (GitGuardian SUCCESS). **445 ships the email-delivery substrate, which UNBLOCKS slice 510 (automated-backup failure alerting) — 510 is now genuinely buildable (its dep is met).**
+
+- **445** (email/SMTP notification channel — delivery substrate) — Backend · JUDGMENT — **MERGED** at `197e61af` (#1087). One `Provider` interface + a stdlib `net/smtp` impl (env-configured for self-host; NO new dep) delivering from the existing slice-029 notification store (sink only — does not produce). One digest template (per-type counts + deep-link; minimum-disclosure — no raw evidence/S3 URLs/control text). Opt-in per-user toggle, default OPTED-OUT; one digest per user per UTC day (the `digest_key` UNIQUE constraint IS the idempotency key + rate limit); outcome recorded; SMTP timeout + backoff. **Security guards test-proven:** header-injection (a `\r\nBcc:` value collapses to one `To:` line — no standalone header; AC-12/P0-445-2), cross-tenant isolation (proven against live Postgres + CI shard B2 — tenant A never emails tenant B's user; AC-13/P0-445-3), account-email-only recipient (P0-445-1). Two four-policy-RLS tables (migration `20260607020000`). 17/17 ACs, all 7 P0s. Decisions log: `docs/audit-log/445-email-channel-decisions.md`.
+
+**Spillovers + downstream:**
+
+| Row | Transition            | Evidence                                                                                                   |
+| --- | --------------------- | ---------------------------------------------------------------------------------------------------------- |
+| 541 | (new) → `not-ready`   | wire slice-439 staleness digest to email delivery · dep 445 ✓ + 439 (unmerged) · #1087                     |
+| 542 | (new) → `ready`       | per-notification-kind email preferences · parent #445 · #1087                                              |
+| 543 | (new) → `ready`       | additional notification channels (Slack/webhook) · parent #445 · #1087                                     |
+| 510 | now genuinely `ready` | automated backup + scheduled restore-verification — its 445 email-alert dep is MET (was the b210 deferral) |
+
+Backlog after batch 211: **510 (automated backup — NOW UNBLOCKED, good next infra pick)** · connectors 490/491 + Azure/K8s/monitoring/PagerDuty follow-ons (519-522/523-526/533-535/538-540) · 508/509 (SCIM / group-role) · 542/543 (notify follow-ons) · OSCAL 496/511/512 · 474 · 499/500 · framework 514/516 · 476 (verification) · older analysis tail. No real-defects remain. MAINTAINER-SEQUENCED: 440/441/444/471/502. DEFERRED/NOT-READY: 517/518 · 528 · 536/537 · 541 (dep 439).
 
 ## Drift detected — 2026-06-07 (batch 211 claim-stake · 445)
 
@@ -581,49 +598,52 @@ Maintainer-directed deep analysis (6 parallel investigators: CI · testing · do
 
 **Notes:** 447 (PCI crosswalk) is `not-ready` — dep #438 (generic loader) unmerged. 449 (OPA upgrade) re-scopes to _post-upgrade regression validation_ — OPA 1.17 already merged clean via dependabot #953. 446 + 455 are decision-only spikes (ADR, no-auto-merge). 440/441/444 are AI-assist (board-narrative / questionnaire / gap-explanation) governed by the CLAUDE.md AI-assist boundary. ESLint 10 NOT filed (already slice 095).
 
-| Row | Transition              | Evidence                                                                                                        |
-| --- | ----------------------- | --------------------------------------------------------------------------------------------------------------- |
-| 415 | (new) → `ready`         | `docs/issues/415-*.md` · filed via /idea-to-slice                                                               |
-| 416 | (new) → `ready`         | `docs/issues/416-*.md` · filed via /idea-to-slice                                                               |
-| 417 | (new) → `ready`         | `docs/issues/417-*.md` · filed via /idea-to-slice                                                               |
-| 418 | (new) → `ready`         | `docs/issues/418-*.md` · filed via /idea-to-slice                                                               |
-| 419 | (new) → `ready`         | `docs/issues/419-*.md` · filed via /idea-to-slice                                                               |
-| 420 | (new) → `ready`         | `docs/issues/420-*.md` · filed via /idea-to-slice                                                               |
-| 421 | (new) → `ready`         | `docs/issues/421-*.md` · filed via /idea-to-slice                                                               |
-| 422 | (new) → `ready`         | `docs/issues/422-*.md` · filed via /idea-to-slice                                                               |
-| 423 | (new) → `ready`         | `docs/issues/423-*.md` · filed via /idea-to-slice                                                               |
-| 424 | (new) → `ready`         | `docs/issues/424-*.md` · filed via /idea-to-slice                                                               |
-| 425 | (new) → `ready`         | `docs/issues/425-*.md` · filed via /idea-to-slice                                                               |
-| 426 | (new) → `ready`         | `docs/issues/426-*.md` · filed via /idea-to-slice                                                               |
-| 427 | (new) → `ready`         | `docs/issues/427-*.md` · filed via /idea-to-slice                                                               |
-| 428 | (new) → `ready`         | `docs/issues/428-*.md` · filed via /idea-to-slice                                                               |
-| 429 | (new) → `ready`         | `docs/issues/429-*.md` · filed via /idea-to-slice                                                               |
-| 430 | (new) → `ready`         | `docs/issues/430-*.md` · filed via /idea-to-slice                                                               |
-| 431 | (new) → `ready`         | `docs/issues/431-*.md` · filed via /idea-to-slice                                                               |
-| 432 | (new) → `ready`         | `docs/issues/432-*.md` · filed via /idea-to-slice                                                               |
-| 433 | (new) → `ready`         | `docs/issues/433-*.md` · filed via /idea-to-slice                                                               |
-| 434 | (new) → `ready`         | `docs/issues/434-*.md` · filed via /idea-to-slice                                                               |
-| 435 | (new) → `ready`         | `docs/issues/435-*.md` · filed via /idea-to-slice                                                               |
-| 436 | (new) → `ready`         | `docs/issues/436-*.md` · filed via /idea-to-slice                                                               |
-| 437 | (new) → `ready`         | `docs/issues/437-*.md` · filed via /idea-to-slice                                                               |
-| 438 | (new) → `ready`         | `docs/issues/438-*.md` · filed via /idea-to-slice                                                               |
-| 439 | (new) → `ready`         | `docs/issues/439-*.md` · filed via /idea-to-slice                                                               |
-| 440 | (new) → `ready`         | `docs/issues/440-*.md` · filed via /idea-to-slice                                                               |
-| 441 | (new) → `ready`         | `docs/issues/441-*.md` · filed via /idea-to-slice                                                               |
-| 442 | (new) → `ready`         | `docs/issues/442-*.md` · filed via /idea-to-slice                                                               |
-| 443 | (new) → `ready`         | `docs/issues/443-*.md` · filed via /idea-to-slice                                                               |
-| 444 | (new) → `ready`         | `docs/issues/444-*.md` · filed via /idea-to-slice                                                               |
-| 445 | `ready` → `in-progress` | `docs/issues/445-*.md` · email/SMTP notification channel · batch 211 `backend/445-email-channel` · unblocks 510 |
-| 446 | (new) → `ready`         | `docs/issues/446-*.md` · filed via /idea-to-slice · decision-only ADR spike (no-auto-merge)                     |
-| 447 | (new) → `not-ready`     | `docs/issues/447-*.md` · filed via /idea-to-slice · dep #438 unmerged                                           |
-| 448 | (new) → `ready`         | `docs/issues/448-*.md` · filed via /idea-to-slice                                                               |
-| 449 | (new) → `ready`         | `docs/issues/449-*.md` · filed via /idea-to-slice · OPA 1.17 already on main (#953) → validation slice          |
-| 450 | (new) → `ready`         | `docs/issues/450-*.md` · filed via /idea-to-slice                                                               |
-| 451 | (new) → `ready`         | `docs/issues/451-*.md` · filed via /idea-to-slice                                                               |
-| 452 | (new) → `ready`         | `docs/issues/452-*.md` · filed via /idea-to-slice                                                               |
-| 453 | (new) → `ready`         | `docs/issues/453-*.md` · filed via /idea-to-slice                                                               |
-| 454 | (new) → `ready`         | `docs/issues/454-*.md` · filed via /idea-to-slice                                                               |
-| 455 | (new) → `ready`         | `docs/issues/455-*.md` · filed via /idea-to-slice · decision-only ADR spike (no-auto-merge)                     |
+| Row | Transition          | Evidence                                                                                                |
+| --- | ------------------- | ------------------------------------------------------------------------------------------------------- |
+| 415 | (new) → `ready`     | `docs/issues/415-*.md` · filed via /idea-to-slice                                                       |
+| 416 | (new) → `ready`     | `docs/issues/416-*.md` · filed via /idea-to-slice                                                       |
+| 417 | (new) → `ready`     | `docs/issues/417-*.md` · filed via /idea-to-slice                                                       |
+| 418 | (new) → `ready`     | `docs/issues/418-*.md` · filed via /idea-to-slice                                                       |
+| 419 | (new) → `ready`     | `docs/issues/419-*.md` · filed via /idea-to-slice                                                       |
+| 420 | (new) → `ready`     | `docs/issues/420-*.md` · filed via /idea-to-slice                                                       |
+| 421 | (new) → `ready`     | `docs/issues/421-*.md` · filed via /idea-to-slice                                                       |
+| 422 | (new) → `ready`     | `docs/issues/422-*.md` · filed via /idea-to-slice                                                       |
+| 423 | (new) → `ready`     | `docs/issues/423-*.md` · filed via /idea-to-slice                                                       |
+| 424 | (new) → `ready`     | `docs/issues/424-*.md` · filed via /idea-to-slice                                                       |
+| 425 | (new) → `ready`     | `docs/issues/425-*.md` · filed via /idea-to-slice                                                       |
+| 426 | (new) → `ready`     | `docs/issues/426-*.md` · filed via /idea-to-slice                                                       |
+| 427 | (new) → `ready`     | `docs/issues/427-*.md` · filed via /idea-to-slice                                                       |
+| 428 | (new) → `ready`     | `docs/issues/428-*.md` · filed via /idea-to-slice                                                       |
+| 429 | (new) → `ready`     | `docs/issues/429-*.md` · filed via /idea-to-slice                                                       |
+| 430 | (new) → `ready`     | `docs/issues/430-*.md` · filed via /idea-to-slice                                                       |
+| 431 | (new) → `ready`     | `docs/issues/431-*.md` · filed via /idea-to-slice                                                       |
+| 432 | (new) → `ready`     | `docs/issues/432-*.md` · filed via /idea-to-slice                                                       |
+| 433 | (new) → `ready`     | `docs/issues/433-*.md` · filed via /idea-to-slice                                                       |
+| 434 | (new) → `ready`     | `docs/issues/434-*.md` · filed via /idea-to-slice                                                       |
+| 435 | (new) → `ready`     | `docs/issues/435-*.md` · filed via /idea-to-slice                                                       |
+| 436 | (new) → `ready`     | `docs/issues/436-*.md` · filed via /idea-to-slice                                                       |
+| 437 | (new) → `ready`     | `docs/issues/437-*.md` · filed via /idea-to-slice                                                       |
+| 438 | (new) → `ready`     | `docs/issues/438-*.md` · filed via /idea-to-slice                                                       |
+| 439 | (new) → `ready`     | `docs/issues/439-*.md` · filed via /idea-to-slice                                                       |
+| 440 | (new) → `ready`     | `docs/issues/440-*.md` · filed via /idea-to-slice                                                       |
+| 441 | (new) → `ready`     | `docs/issues/441-*.md` · filed via /idea-to-slice                                                       |
+| 442 | (new) → `ready`     | `docs/issues/442-*.md` · filed via /idea-to-slice                                                       |
+| 443 | (new) → `ready`     | `docs/issues/443-*.md` · filed via /idea-to-slice                                                       |
+| 444 | (new) → `ready`     | `docs/issues/444-*.md` · filed via /idea-to-slice                                                       |
+| 445 | `merged`            | email/SMTP notification channel (delivery substrate) · #1087 impl `197e61af` · batch 211 · unblocks 510 |
+| 542 | `ready`             | per-notification-kind email preferences · Backend · parent #445 · #1087                                 |
+| 543 | `ready`             | additional notification channels (Slack/webhook) · Backend · parent #445 · #1087                        |
+| 541 | `not-ready`         | wire slice-439 staleness digest to email · dep 445 ✓ + 439 (unmerged) · parent #445 · #1087             |
+| 446 | (new) → `ready`     | `docs/issues/446-*.md` · filed via /idea-to-slice · decision-only ADR spike (no-auto-merge)             |
+| 447 | (new) → `not-ready` | `docs/issues/447-*.md` · filed via /idea-to-slice · dep #438 unmerged                                   |
+| 448 | (new) → `ready`     | `docs/issues/448-*.md` · filed via /idea-to-slice                                                       |
+| 449 | (new) → `ready`     | `docs/issues/449-*.md` · filed via /idea-to-slice · OPA 1.17 already on main (#953) → validation slice  |
+| 450 | (new) → `ready`     | `docs/issues/450-*.md` · filed via /idea-to-slice                                                       |
+| 451 | (new) → `ready`     | `docs/issues/451-*.md` · filed via /idea-to-slice                                                       |
+| 452 | (new) → `ready`     | `docs/issues/452-*.md` · filed via /idea-to-slice                                                       |
+| 453 | (new) → `ready`     | `docs/issues/453-*.md` · filed via /idea-to-slice                                                       |
+| 454 | (new) → `ready`     | `docs/issues/454-*.md` · filed via /idea-to-slice                                                       |
+| 455 | (new) → `ready`     | `docs/issues/455-*.md` · filed via /idea-to-slice · decision-only ADR spike (no-auto-merge)             |
 
 ## Reconcile — 2026-06-03 (batch 186 · slice 413 cosign-kms Phase 1 merged)
 
