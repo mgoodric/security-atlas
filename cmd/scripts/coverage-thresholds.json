@@ -187,6 +187,7 @@
     "internal/auth/tokensign": 72,
     "internal/auth/userprefs": 83,
     "internal/authz": 70,
+    "internal/backup": 73,
     "internal/board": 79,
     "internal/canonjson": 87,
     "internal/catalog": 98,
