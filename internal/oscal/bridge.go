@@ -25,6 +25,12 @@ type BridgeClient interface {
 	// RoundTripValidate parses an OSCAL document back through
 	// compliance-trestle, returning whether it is structurally valid.
 	RoundTripValidate(ctx context.Context, modelType string, oscalJSON []byte) (valid bool, errs []string, err error)
+	// ImportCatalog deserializes + validates an inbound OSCAL catalog JSON
+	// document, returning a normalized projection (or a structured
+	// validation error in the response). The ingest direction of
+	// invariant #8 (slice 492). The bridge never dereferences any href the
+	// document references.
+	ImportCatalog(ctx context.Context, oscalJSON []byte, sourceLabel string) (*oscalv1.ImportCatalogResponse, error)
 	// Close releases the underlying gRPC connection.
 	Close() error
 }
@@ -95,6 +101,19 @@ func (b *grpcBridge) RoundTripValidate(ctx context.Context, modelType string, os
 		return false, nil, err
 	}
 	return resp.GetValid(), resp.GetErrors(), nil
+}
+
+func (b *grpcBridge) ImportCatalog(ctx context.Context, oscalJSON []byte, sourceLabel string) (*oscalv1.ImportCatalogResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, bridgeRPCTimeout)
+	defer cancel()
+	resp, err := b.client.ImportCatalog(ctx, &oscalv1.ImportCatalogRequest{
+		OscalJson:   oscalJSON,
+		SourceLabel: sourceLabel,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (b *grpcBridge) Close() error {

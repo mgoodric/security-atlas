@@ -42,6 +42,16 @@ service OscalBridgeService {
   // validity. AC-6 / AC-7. The export pipeline calls this on every
   // bundle member before the bundle is finalized.
   rpc RoundTripValidate(RoundTripValidateRequest) returns (RoundTripValidateResponse);
+
+  // ImportCatalog deserializes an inbound OSCAL `catalog` JSON document
+  // via compliance-trestle, validates it against OSCAL v1.1.x, and
+  // returns a normalized catalog projection (controls + group structure)
+  // OR a structured validation error. This is the INGEST direction of
+  // invariant #8 (slice 492). The bridge NEVER dereferences any `href`
+  // / external resource the document references (back-matter resources
+  // are opaque metadata). A document-size cap + parse timeout bound the
+  // expansion-attack surface (threat-model D/I).
+  rpc ImportCatalog(ImportCatalogRequest) returns (ImportCatalogResponse);
 }
 
 // ----- shared -----
@@ -226,4 +236,46 @@ message RoundTripValidateResponse {
   bool valid = 1;
   // Human-readable validation errors when valid=false.
   repeated string errors = 2;
+}
+
+// ----- catalog import (ingest) -----
+
+message ImportCatalogRequest {
+  // The raw inbound OSCAL catalog JSON document bytes. The bridge parses
+  // these via compliance-trestle; it does NOT fetch any href the
+  // document references.
+  bytes oscal_json = 1;
+  // Operator-declared source label (e.g. "NIST SP 800-53 rev5"). Carried
+  // into the provenance record on the Go side; the bridge echoes it back.
+  string source_label = 2;
+}
+
+// ImportedControl is one normalized control from an imported OSCAL
+// catalog. control_id is the OSCAL `control-id`; group_path is the
+// `/`-joined chain of OSCAL group titles the control sits under (for
+// structural provenance). No href / external resource is resolved.
+message ImportedControl {
+  string control_id = 1;
+  string title = 2;
+  // The control's prose statement, flattened from the OSCAL part/prose
+  // tree into a single string.
+  string statement = 3;
+  string group_path = 4;
+}
+
+message ImportCatalogResponse {
+  // True when the document deserialized + validated as an OSCAL v1.1.x
+  // catalog. When false, controls is empty and errors is populated.
+  bool valid = 1;
+  // Human-readable validation errors when valid=false (or a size/cap
+  // rejection message).
+  repeated string errors = 2;
+  // The normalized control projection (empty when valid=false).
+  repeated ImportedControl controls = 3;
+  // The catalog's declared OSCAL version (echoed for provenance).
+  string oscal_version = 4;
+  // The catalog metadata title (echoed for provenance / display).
+  string catalog_title = 5;
+  // Echo of the request source_label.
+  string source_label = 6;
 }

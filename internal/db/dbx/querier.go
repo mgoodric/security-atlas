@@ -549,6 +549,9 @@ type Querier interface {
 	// edge doesn't exist yet. Importer calls this first to classify
 	// Created/Updated/Unchanged.
 	GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) (FwToScfEdge, error)
+	// Fetch one imported catalog by id. RLS scopes to the caller's tenant; a
+	// cross-tenant id returns ErrNoRows.
+	GetImportedCatalogByID(ctx context.Context, arg GetImportedCatalogByIDParams) (ImportedCatalog, error)
 	// The engine's "when did this rule last fire, and into which window"
 	// lookup. Used to decide whether the current write falls inside an
 	// existing window. Returns the most recent 'fired' row for the rule.
@@ -749,6 +752,23 @@ type Querier interface {
 	// surface (no UpdateEvidenceRecord, no DeleteEvidenceRecord exists).
 	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
 	InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error)
+	// Slice 492: OSCAL catalog-import queries.
+	//
+	// CRUD against the three new tables (imported_catalogs,
+	// imported_catalog_controls, imported_catalog_audit_log). Every query is
+	// tenant-bound via the leading $1 parameter (defense-in-depth behind RLS).
+	// The importer (internal/oscal/catalogimport) runs these inside ONE
+	// transaction under app.current_tenant so the import is atomic (AC-5).
+	// Create one imported-catalog provenance row. source defaults to
+	// 'oscal-import' (the table default) and is not set here.
+	InsertImportedCatalog(ctx context.Context, arg InsertImportedCatalogParams) (ImportedCatalog, error)
+	// Append one append-only import audit row (AC-7). Written on success
+	// ('catalog_imported') and on rejection ('import_rejected').
+	InsertImportedCatalogAuditLog(ctx context.Context, arg InsertImportedCatalogAuditLogParams) (ImportedCatalogAuditLog, error)
+	// Append one imported control mapped (or flagged NULL for mapping) to an
+	// SCF anchor. The (imported_catalog_id, source_control_id) UNIQUE
+	// constraint rejects a duplicate control within one catalog.
+	InsertImportedCatalogControl(ctx context.Context, arg InsertImportedCatalogControlParams) (ImportedCatalogControl, error)
 	// Append a row to the slice 108 audit ledger. before / after are JSONB; the handler
 	// builds them from the wire shape minus any redacted fields. Gated by handler logic on
 	// non-empty diff (anti-criterion ISC-A5).
@@ -1383,6 +1403,10 @@ type Querier interface {
 	// to with relationship type and strength. Joins through scf_anchors so the
 	// caller gets the scf_id + family + title in one round trip.
 	ListFwToScfEdgesForRequirement(ctx context.Context, frameworkRequirementID pgtype.UUID) ([]ListFwToScfEdgesForRequirementRow, error)
+	// Every control for one imported catalog, ordered for stable rendering.
+	ListImportedCatalogControls(ctx context.Context, arg ListImportedCatalogControlsParams) ([]ImportedCatalogControl, error)
+	// Enumerate every imported catalog for the tenant, most recent first.
+	ListImportedCatalogs(ctx context.Context, tenantID pgtype.UUID) ([]ImportedCatalog, error)
 	// Every (control, scope_cell)'s latest state for one control. DISTINCT ON
 	// collapses the append-only history to the current row per cell. Used by
 	// GET /v1/controls/:id/state when no scope filter is supplied.

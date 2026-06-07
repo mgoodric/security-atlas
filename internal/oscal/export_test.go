@@ -58,6 +58,11 @@ func (f *fakeBridge) RoundTripValidate(_ context.Context, _ string, _ []byte) (b
 	return f.roundTripOK, f.roundTripErrs, nil
 }
 
+func (f *fakeBridge) ImportCatalog(_ context.Context, _ []byte, _ string) (*oscalv1.ImportCatalogResponse, error) {
+	f.calls = append(f.calls, "import-catalog")
+	return &oscalv1.ImportCatalogResponse{Valid: true}, nil
+}
+
 func (f *fakeBridge) Close() error { return nil }
 
 // minimalAggregate builds an aggregate sufficient for the proto-conversion

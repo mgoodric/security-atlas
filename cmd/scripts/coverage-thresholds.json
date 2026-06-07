@@ -187,6 +187,7 @@
     "internal/metrics/scheduler": 76,
     "internal/observability/otel": 92,
     "internal/oscal": 69,
+    "internal/oscal/catalogimport": 77,
     "internal/oscal/cosign": 88,
     "internal/platform": 76,
     "internal/policy": 70,

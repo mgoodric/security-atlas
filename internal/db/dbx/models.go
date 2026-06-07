@@ -1277,6 +1277,44 @@ type FwToScfEdge struct {
 	UpdatedAt              pgtype.Timestamptz         `json:"updated_at"`
 }
 
+type ImportedCatalog struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	Source       string             `json:"source"`
+	ImportedBy   string             `json:"imported_by"`
+	SourceSha256 string             `json:"source_sha256"`
+	SourceLabel  string             `json:"source_label"`
+	OscalVersion string             `json:"oscal_version"`
+	CatalogTitle string             `json:"catalog_title"`
+	ControlCount int32              `json:"control_count"`
+	ImportedAt   pgtype.Timestamptz `json:"imported_at"`
+}
+
+type ImportedCatalogAuditLog struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	CatalogID    pgtype.UUID        `json:"catalog_id"`
+	Action       string             `json:"action"`
+	Actor        string             `json:"actor"`
+	SourceSha256 string             `json:"source_sha256"`
+	SourceLabel  string             `json:"source_label"`
+	ControlCount int32              `json:"control_count"`
+	Detail       []byte             `json:"detail"`
+	OccurredAt   pgtype.Timestamptz `json:"occurred_at"`
+}
+
+type ImportedCatalogControl struct {
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	ImportedCatalogID pgtype.UUID        `json:"imported_catalog_id"`
+	SourceControlID   string             `json:"source_control_id"`
+	Title             string             `json:"title"`
+	Statement         string             `json:"statement"`
+	GroupPath         string             `json:"group_path"`
+	ScfAnchorID       *string            `json:"scf_anchor_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type LocalCredential struct {
 	UserID       pgtype.UUID        `json:"user_id"`
 	TenantID     pgtype.UUID        `json:"tenant_id"`

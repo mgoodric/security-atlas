@@ -3020,6 +3020,21 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 492** — OSCAL **catalog import** (the ingest direction of
+  constitutional invariant #8, which names both directions explicitly; the
+  export half already shipped). A new `ImportCatalog` RPC on the Go↔Python
+  `oscal-bridge` deserializes an inbound OSCAL v1.1.x `catalog` JSON document
+  via compliance-trestle, validates it, and returns a normalized control
+  projection; a Go `Importer` (`internal/oscal/catalogimport`) persists the
+  controls **transactionally** as a distinct, provenance-labeled imported set
+  (source, importing user, source SHA-256, declared framework label) mapped
+  **requirement → SCF anchor** (invariant #7) — unmapped controls are flagged
+  for operator mapping, never auto-mapped. Import is tenant-scoped under RLS and
+  gated to the `grc_engineer` catalog-author role; the bridge never dereferences
+  any `href` the document references; a document-size cap + control-count cap +
+  parse timeout bound expansion attacks. New CLI:
+  `atlas-oscal import-catalog <file>` (`--json` supported). Profile import and
+  component-definition import are follow-on slices (#511, #512).
 - **slice 447** — PCI DSS v4.0 as the **third** framework, loaded through the
   slice-438 framework-agnostic crosswalk importer with **no PCI-specific loader
   code**. Ships a curated high-signal subset of 31 PCI v4.0 requirements

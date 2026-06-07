@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 
 from trestle.oscal.assessment_plan import AssessmentPlan
 from trestle.oscal.assessment_results import AssessmentResults, ImportAp, Result
+from trestle.oscal.catalog import Catalog
 from trestle.oscal.common import (
     ControlSelection,
     ImportSsp,
@@ -440,3 +441,154 @@ def round_trip_validate(model_type: str, oscal_json: bytes):
     except Exception as exc:  # noqa: BLE001 — trestle raises pydantic + ValueError
         return False, [f"{model_type} failed trestle round-trip: {exc}"]
     return True, []
+
+
+# --------------------------------------------------------------------------
+# catalog import (ingest direction — slice 492)
+# --------------------------------------------------------------------------
+
+# Bounds on the inbound document (threat-model D / I — see decisions log D3).
+# Enforced here in the bridge (the parser) as defense-in-depth; the Go side
+# enforces the same byte cap BEFORE the bytes cross the wire.
+MAX_CATALOG_BYTES = 16 * 1024 * 1024  # 16 MiB
+MAX_CATALOG_CONTROLS = 10_000
+
+
+class ImportedControl:
+    """A normalized control extracted from an imported OSCAL catalog.
+
+    Plain attribute holder (not a protobuf) so ``import_catalog`` is unit
+    testable without the generated stubs. The server maps these onto the
+    ``ImportedControl`` protobuf message.
+    """
+
+    __slots__ = ("control_id", "title", "statement", "group_path")
+
+    def __init__(self, control_id: str, title: str, statement: str, group_path: str):
+        self.control_id = control_id
+        self.title = title
+        self.statement = statement
+        self.group_path = group_path
+
+
+class ImportResult:
+    """Result of ``import_catalog`` — mirrors ``ImportCatalogResponse``."""
+
+    __slots__ = ("valid", "errors", "controls", "oscal_version", "catalog_title")
+
+    def __init__(self, valid, errors, controls, oscal_version, catalog_title):
+        self.valid = valid
+        self.errors = errors
+        self.controls = controls
+        self.oscal_version = oscal_version
+        self.catalog_title = catalog_title
+
+
+def _flatten_prose(parts) -> str:
+    """Flatten an OSCAL part/prose tree into a single statement string.
+
+    Only in-document ``prose`` text is read — no ``href`` / link is ever
+    dereferenced (P0-492-2 / threat-model I). ``links`` are intentionally
+    ignored: they may carry external ``href`` values that this importer
+    treats as opaque metadata, never fetched.
+    """
+    if not parts:
+        return ""
+    chunks: list[str] = []
+    for part in parts:
+        prose = getattr(part, "prose", None)
+        if prose:
+            chunks.append(prose.strip())
+        nested = getattr(part, "parts", None)
+        if nested:
+            nested_text = _flatten_prose(nested)
+            if nested_text:
+                chunks.append(nested_text)
+    return "\n\n".join(c for c in chunks if c)
+
+
+def _collect_controls(controls, group_path: str, acc: list[ImportedControl]) -> None:
+    """Walk a control list (and nested controls), appending projections."""
+    if not controls:
+        return
+    for ctl in controls:
+        acc.append(
+            ImportedControl(
+                control_id=ctl.id,
+                title=ctl.title or "",
+                statement=_flatten_prose(getattr(ctl, "parts", None)),
+                group_path=group_path,
+            )
+        )
+        # OSCAL controls may nest sub-controls (control enhancements).
+        _collect_controls(getattr(ctl, "controls", None), group_path, acc)
+
+
+def _collect_groups(groups, parent_path: str, acc: list[ImportedControl]) -> None:
+    """Walk a group tree, collecting every control with its group path."""
+    if not groups:
+        return
+    for grp in groups:
+        title = grp.title or grp.id or ""
+        path = f"{parent_path}/{title}" if parent_path else title
+        _collect_controls(getattr(grp, "controls", None), path, acc)
+        _collect_groups(getattr(grp, "groups", None), path, acc)
+
+
+def import_catalog(oscal_json: bytes, source_label: str = "") -> ImportResult:
+    """Deserialize + validate an inbound OSCAL catalog JSON document.
+
+    Returns an ``ImportResult``. ``valid=False`` carries a structured
+    error and an empty control list — the Go side persists NOTHING in that
+    case (AC-5 / P0-492-3). No ``href`` / external resource is dereferenced
+    (P0-492-2). A document over ``MAX_CATALOG_BYTES`` or with more than
+    ``MAX_CATALOG_CONTROLS`` controls is rejected (threat-model D / AC-3).
+    """
+    if len(oscal_json) > MAX_CATALOG_BYTES:
+        return ImportResult(
+            valid=False,
+            errors=[
+                f"catalog document is {len(oscal_json)} bytes, "
+                f"over the {MAX_CATALOG_BYTES}-byte import cap"
+            ],
+            controls=[],
+            oscal_version="",
+            catalog_title="",
+        )
+
+    try:
+        doc = json.loads(oscal_json)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return ImportResult(False, [f"invalid JSON: {exc}"], [], "", "")
+
+    if not isinstance(doc, dict) or "catalog" not in doc:
+        return ImportResult(False, ["document missing top-level key 'catalog'"], [], "", "")
+
+    try:
+        catalog = Catalog(**doc["catalog"])
+    except Exception as exc:  # noqa: BLE001 — trestle raises pydantic + ValueError
+        return ImportResult(False, [f"catalog failed OSCAL v1.1.x validation: {exc}"], [], "", "")
+
+    controls: list[ImportedControl] = []
+    _collect_controls(getattr(catalog, "controls", None), "", controls)
+    _collect_groups(getattr(catalog, "groups", None), "", controls)
+
+    if len(controls) > MAX_CATALOG_CONTROLS:
+        return ImportResult(
+            valid=False,
+            errors=[
+                f"catalog has {len(controls)} controls, "
+                f"over the {MAX_CATALOG_CONTROLS}-control import cap"
+            ],
+            controls=[],
+            oscal_version="",
+            catalog_title="",
+        )
+
+    if not controls:
+        return ImportResult(False, ["catalog contains zero controls"], [], "", "")
+
+    meta = catalog.metadata
+    oscal_version = getattr(meta, "oscal_version", "") or ""
+    catalog_title = getattr(meta, "title", "") or ""
+    return ImportResult(True, [], controls, str(oscal_version), str(catalog_title))
