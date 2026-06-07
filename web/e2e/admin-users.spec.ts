@@ -1,0 +1,358 @@
+// Slice 479 — Playwright E2E for the /admin/users management page.
+//
+// Assertions are driven by page.route() mocking of the BFF proxies at
+// /api/admin/users (+ /revoke) and /api/me. We mock the BFF rather than
+// seed real data because the slice-478 cross-tenant assign writes
+// platform-global rows under the BYPASSRLS pool — not something the
+// Playwright harness can clean up between specs (same rationale as
+// admin-tenants.spec.ts). The Go integration tests (478) assert the real
+// behaviour against Postgres.
+//
+// Coverage:
+//   (a) super_admin shape: cross-tenant list renders the Tenant column,
+//       the "Add me to a tenant" button appears, an assign POST refreshes
+//       the list (AC-1, AC-2).
+//   (b) self-assign surfaces the re-auth notice with a re-login link
+//       (AC-4 / P0-479-3 — no auto-switch).
+//   (c) revoke flow has a confirm step (AC-3).
+//   (d) authz-honest: tenant-admin shape shows NO Tenant column and NO
+//       self-assign button; an upstream 403 on assign surfaces inline,
+//       not a dead button (AC-5 / P0-479-2).
+//   (e) a11y: the assign dialog inputs + role fieldset are labelled
+//       (AC-6).
+
+import { expect, test } from "./fixtures";
+
+const TENANT_A = "11111111-1111-4111-8111-111111111111";
+const TENANT_B = "22222222-2222-4222-8222-222222222222";
+const USER_1 = "aaaaaaaa-1111-4111-8111-111111111111";
+const USER_2 = "bbbbbbbb-2222-4222-8222-222222222222";
+
+const SUPER_ROW_1 = {
+  id: USER_1,
+  tenant_id: TENANT_A,
+  email: "alpha@example.com",
+  display_name: "Alpha User",
+  status: "active",
+  roles: ["admin"],
+};
+const SUPER_ROW_2 = {
+  id: USER_2,
+  tenant_id: TENANT_B,
+  email: "bravo@example.com",
+  display_name: "Bravo User",
+  status: "active",
+  roles: ["viewer"],
+};
+const SUPER_ROW_NEW = {
+  id: USER_1,
+  tenant_id: TENANT_B,
+  email: "alpha@example.com",
+  display_name: "Alpha User",
+  status: "active",
+  roles: ["grc_engineer"],
+};
+
+const WITHIN_ROW = {
+  id: USER_1,
+  email: "alpha@example.com",
+  display_name: "Alpha User",
+  status: "active",
+  roles: ["admin"],
+};
+
+// mockMe stubs /api/me so the within-tenant revoke fallback has a session
+// tenant. Harmless for the cross-tenant specs.
+async function mockMe(page: import("@playwright/test").Page, tenantId: string) {
+  await page.route("**/api/me", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ tenant_id: tenantId }),
+    }),
+  );
+}
+
+test.describe("admin users management page", () => {
+  test("super_admin: lists cross-tenant users + supports assign", async ({
+    authedPage,
+  }) => {
+    await mockMe(authedPage, TENANT_A);
+    let listCallCount = 0;
+    await authedPage.route("**/api/admin/users", async (route) => {
+      const req = route.request();
+      if (req.method() === "GET") {
+        listCallCount++;
+        const items =
+          listCallCount === 1
+            ? [SUPER_ROW_1, SUPER_ROW_2]
+            : [SUPER_ROW_1, SUPER_ROW_2, SUPER_ROW_NEW];
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ items, cross_tenant: true }),
+        });
+        return;
+      }
+      if (req.method() === "POST") {
+        const body = req.postDataJSON() as {
+          user_id?: string;
+          tenant_id?: string;
+          roles?: string[];
+          self_assign?: boolean;
+        };
+        expect(body.user_id).toBe(USER_1);
+        expect(body.tenant_id).toBe(TENANT_B);
+        expect(body.roles).toContain("grc_engineer");
+        expect(body.self_assign).toBeFalsy();
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            user_id: USER_1,
+            tenant_id: TENANT_B,
+            roles: ["grc_engineer"],
+            idp_issuer: "urn:atlas:local",
+            idp_subject: USER_1,
+            membership_created: true,
+          }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await authedPage.goto("/admin/users");
+
+    // Cross-tenant table renders with a Tenant column.
+    await expect(authedPage.getByTestId("users-table")).toBeVisible();
+    await expect(authedPage.getByTestId(`user-row-${USER_1}`)).toBeVisible();
+    await expect(authedPage.getByTestId("users-table")).toContainText("Tenant");
+    // Self-assign button is visible for a super_admin.
+    await expect(authedPage.getByTestId("open-self-assign")).toBeVisible();
+
+    // Open assign dialog, fill it, submit.
+    await authedPage.getByTestId("open-assign-user").click();
+    await expect(authedPage.getByTestId("assign-user-dialog")).toBeVisible();
+    await authedPage.getByTestId("assign-user-id-input").fill(USER_1);
+    await authedPage.getByTestId("assign-tenant-id-input").fill(TENANT_B);
+    await authedPage.getByTestId("assign-role-grc_engineer").click();
+    await authedPage.getByTestId("assign-user-submit").click();
+
+    // After refetch the new membership row appears.
+    await expect(authedPage.getByTestId("users-table")).toContainText(
+      "grc_engineer",
+    );
+  });
+
+  test("super_admin: self-assign surfaces the re-auth notice (no auto-switch)", async ({
+    authedPage,
+  }) => {
+    await mockMe(authedPage, TENANT_A);
+    await authedPage.route("**/api/admin/users", async (route) => {
+      const req = route.request();
+      if (req.method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            items: [SUPER_ROW_1, SUPER_ROW_2],
+            cross_tenant: true,
+          }),
+        });
+        return;
+      }
+      if (req.method() === "POST") {
+        const body = req.postDataJSON() as { self_assign?: boolean };
+        expect(body.self_assign).toBe(true);
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            user_id: USER_1,
+            tenant_id: TENANT_B,
+            roles: ["admin"],
+            idp_issuer: "urn:atlas:local",
+            idp_subject: USER_1,
+            membership_created: true,
+          }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await authedPage.goto("/admin/users");
+    await authedPage.getByTestId("open-self-assign").click();
+
+    const dialog = authedPage.getByTestId("assign-user-dialog");
+    await expect(dialog).toBeVisible();
+    // Self-assign hides the user_id input.
+    await expect(authedPage.getByTestId("assign-user-id-input")).toBeHidden();
+
+    await authedPage.getByTestId("assign-tenant-id-input").fill(TENANT_B);
+    await authedPage.getByTestId("assign-role-admin").click();
+    await authedPage.getByTestId("assign-user-submit").click();
+
+    // The re-auth notice surfaces (AC-4); it links to the re-login flow.
+    await expect(authedPage.getByTestId("reauth-notice")).toBeVisible();
+    await expect(authedPage.getByTestId("reauth-tenant-id")).toContainText(
+      TENANT_B,
+    );
+    await expect(authedPage.getByTestId("reauth-relogin-link")).toHaveAttribute(
+      "href",
+      "/login?from=/admin/users",
+    );
+  });
+
+  test("super_admin: revoke has a confirm step", async ({ authedPage }) => {
+    await mockMe(authedPage, TENANT_A);
+    await authedPage.route("**/api/admin/users", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            items: [SUPER_ROW_1, SUPER_ROW_2],
+            cross_tenant: true,
+          }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+    await authedPage.route("**/api/admin/users/revoke", async (route) => {
+      const body = route.request().postDataJSON() as {
+        user_id?: string;
+        tenant_id?: string;
+      };
+      expect(body.user_id).toBe(USER_2);
+      expect(body.tenant_id).toBe(TENANT_B);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true }),
+      });
+    });
+
+    await authedPage.goto("/admin/users");
+    await authedPage.getByTestId(`revoke-user-${USER_2}`).click();
+
+    // The confirm dialog appears before any network call.
+    await expect(authedPage.getByTestId("revoke-confirm-dialog")).toBeVisible();
+    await authedPage.getByTestId("revoke-confirm-submit").click();
+    // After success the dialog closes.
+    await expect(authedPage.getByTestId("revoke-confirm-dialog")).toBeHidden();
+  });
+
+  test("authz-honest: tenant-admin sees no cross-tenant controls", async ({
+    authedPage,
+  }) => {
+    await mockMe(authedPage, TENANT_A);
+    await authedPage.route("**/api/admin/users", async (route) => {
+      if (route.request().method() === "GET") {
+        // Within-tenant shape: no tenant_id on rows, cross_tenant=false.
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            items: [WITHIN_ROW],
+            cross_tenant: false,
+          }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await authedPage.goto("/admin/users");
+    await expect(authedPage.getByTestId("users-table")).toBeVisible();
+    // No self-assign (cross-tenant) control for a tenant-admin (P0-479-2).
+    await expect(authedPage.getByTestId("open-self-assign")).toHaveCount(0);
+    // The within-tenant table has no Tenant column.
+    await expect(authedPage.getByTestId("users-table")).not.toContainText(
+      "Tenant",
+    );
+  });
+
+  test("authz-honest: an upstream 403 on assign surfaces inline (AC-5)", async ({
+    authedPage,
+  }) => {
+    await mockMe(authedPage, TENANT_A);
+    await authedPage.route("**/api/admin/users", async (route) => {
+      const req = route.request();
+      if (req.method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            items: [SUPER_ROW_1],
+            cross_tenant: true,
+          }),
+        });
+        return;
+      }
+      if (req.method() === "POST") {
+        await route.fulfill({
+          status: 403,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: "cross-tenant assignment requires super_admin",
+          }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await authedPage.goto("/admin/users");
+    await authedPage.getByTestId("open-assign-user").click();
+    await authedPage.getByTestId("assign-user-id-input").fill(USER_1);
+    await authedPage.getByTestId("assign-tenant-id-input").fill(TENANT_B);
+    await authedPage.getByTestId("assign-role-viewer").click();
+    await authedPage.getByTestId("assign-user-submit").click();
+
+    // The 403 message renders inline — not a silent failure / dead button.
+    await expect(authedPage.getByTestId("assign-user-error")).toBeVisible();
+    await expect(authedPage.getByTestId("assign-user-error")).toContainText(
+      "super_admin",
+    );
+  });
+
+  test("a11y: assign dialog inputs + role fieldset are labelled (AC-6)", async ({
+    authedPage,
+  }) => {
+    await mockMe(authedPage, TENANT_A);
+    await authedPage.route("**/api/admin/users", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            items: [SUPER_ROW_1],
+            cross_tenant: true,
+          }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await authedPage.goto("/admin/users");
+    await authedPage.getByTestId("open-assign-user").click();
+
+    // Inputs are associated with their <label htmlFor=...>.
+    await expect(
+      authedPage.locator('label[for="assign-user-id"]'),
+    ).toBeVisible();
+    await expect(
+      authedPage.locator('label[for="assign-tenant-id"]'),
+    ).toBeVisible();
+    // The role group is a fieldset with a legend.
+    await expect(authedPage.locator("fieldset legend")).toContainText("Roles");
+    // Each role checkbox has its own label.
+    await expect(
+      authedPage.locator('label[for="assign-role-admin"]'),
+    ).toBeVisible();
+  });
+});
