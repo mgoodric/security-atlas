@@ -23,12 +23,19 @@ import (
 
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+
+	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
 
-// PDFTimeout is the wall-clock budget for a single render. Headless
-// Chrome boot + PrintToPDF on a one-walkthrough page is typically <3s;
-// 45s is generous for CI where Chrome may cold-start under contention.
-const PDFTimeout = 45 * time.Second
+// PDFTimeout is retained as a compatibility alias for callers that referenced
+// the old per-package render budget. The authoritative, bounded, env-tunable
+// deadline now lives on the shared pdfrender.Limiter (slice 475, fanned out to
+// walkthroughs by slice 477); the handler gets it from
+// pdfrender.Default().RenderTimeout(). Kept so existing references compile; new
+// code should not read this directly.
+//
+// Deprecated: use pdfrender.Default().RenderTimeout().
+const PDFTimeout = pdfrender.DefaultRenderTimeout
 
 // chromedpWSURLReadTimeout overrides chromedp's hardcoded 20s
 // wsURLReadTimeout watchdog (see chromedp v0.15.1 allocate.go:249).
@@ -124,11 +131,29 @@ func ToExportJSON(w Walkthrough) ExportJSON {
 // builds a self-contained HTML document via the same data: URL pattern,
 // then drives chromedp to PrintToPDF. No external assets are loaded; the
 // renderer is sandboxable.
+//
+// The render is governed by the process-wide pdfrender.Limiter (slice 475,
+// fanned out here by slice 477): it acquires a concurrency slot (bounded wait
+// → pdfrender.ErrQueueSaturated on saturation) and runs under the limiter's
+// bounded render deadline (→ pdfrender.ErrRenderDeadline on expiry). Both
+// degrade to 503 at the handler — never a 500 or a hung request. Routing the
+// walkthrough renderer through the SAME shared limiter keeps the concurrency
+// cap a true total across all three chrome renderers (board, questionnaire,
+// walkthrough), rather than letting walkthroughs spawn chrome outside the cap
+// (slice 475 decision D1).
 func RenderPDF(ctx context.Context, w Walkthrough) ([]byte, error) {
 	if ctx == nil {
 		return nil, errors.New("walkthrough: nil context")
 	}
 	htmlDoc := buildPDFHTML(w)
+	return pdfrender.Default().Do(ctx, func(ctx context.Context) ([]byte, error) {
+		return renderWalkthroughBytes(ctx, htmlDoc)
+	})
+}
+
+// renderWalkthroughBytes performs the actual chromedp render under the deadline
+// the limiter has already applied to ctx.
+func renderWalkthroughBytes(ctx context.Context, htmlDoc string) ([]byte, error) {
 	var browserCtx context.Context
 	var cancelAlloc context.CancelFunc
 	var cancelBrowser context.CancelFunc

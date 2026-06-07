@@ -5,6 +5,14 @@
 
 **Last reconciled:** 2026-06-07 (backlog registration — 28 gap-analysis slices 480-510 filed via 5 parallel domain investigators; 18 ready + 10 not-ready)
 
+## Drift detected — 2026-06-07 (batch 198 claim-stake · 495 + 473 + 477)
+
+First build batch off the gap-analysis backlog — anchors on the worst real-defect (495). Conflict-safe (coverage-thresholds=495 SOLE · ci.yml/deploy=473 only · 477 touches neither, reuses 475's pdfrender.Limiter; internal/eval already shard-enrolled so 495 adds no manifest change; shared surface = CHANGELOG only).
+
+- **495** (control-as-code: evaluate SQL + JSON-path evidence queries, not just Rego) — Quality · JUDGMENT — `ready` → **in-progress**. Branch `feat/495-control-as-code-sql-jsonpath`. THE real defect: the engine accepts `rego|sql|jsonpath` at upload but only evaluates `rego`, so SQL/JSON-path controls silently produce no state. internal/eval/engine + internal/control/manifest.
+- **473** (idempotent migrate-on-upgrade for self-host, fail-closed) — Infra/Deploy · JUDGMENT — `ready` → **in-progress**. Branch `feat/473-migrate-on-upgrade`. The prod-confirmed fix (Watchtower updates the binary but not the migrator). deploy/docker + the self-host-bundle CI harness (AC-7 reproduces the incident).
+- **477** (walkthrough PDF render degrades to 503 under load) — Quality · JUDGMENT — `ready` → **in-progress**. Branch `fix/477-walkthrough-pdf-degradation`. The walkthrough renderer has the same bug 475 fixed for board/questionnaires; reuses internal/pdfrender.Limiter. Small.
+
 ## Backlog registration — 2026-06-07 (28 missing-functionality slices 480-510 from a comprehensive gap analysis)
 
 Maintainer-directed comprehensive gap analysis (5 parallel domain investigators: frameworks · connectors · evidence/audit/OSCAL · AI-assist/reporting · risk/policy/privacy/platform), each filing genuine missing-functionality slices via the /idea-to-slice method (template + mandatory STRIDE). Filed in 5 themed PRs (#1035 frameworks 480-484 · #1034 connectors 486-491 · #1038 audit/OSCAL 492-496 · #1037 AI 498-502 · #1036 risk/platform 504-510); rows registered here in one batch (per-slice registration infeasible at 28-scale). Blocks 485/497/503 left unused (quality over quantity). **Three findings are real defects, not just gaps:** 495 (control-as-code accepts rego|sql|jsonpath at upload but only EVALUATES rego — SQL/JSONpath controls silently produce no state) · 492 (OSCAL import missing = direct invariant-#8 violation) · 498 (the shared internal/llm foundation that 440/441/444/471 all assume has no owner). Investigators VERIFIED much is already built (push-cred UX, freshness alerting, risk methodology, policy lifecycle + 5 templates, exceptions, FrameworkScope workflow, Helm, all 4 OSCAL exports). Deliberately NOT filed: NIST 800-53 (alt anchor catalog), GDPR crosswalk (privacy-decision-entangled), trust center (v3/vanity anti-pattern), linear/bitwarden/workday connectors (sibling-covered/upper-market).
