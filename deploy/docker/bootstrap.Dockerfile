@@ -50,7 +50,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -o /out/atlas-cli ./cmd/atlas-cli
 
 # ----- Stage 2: runtime -----
-FROM postgres:16-alpine
+FROM postgres:18-alpine
 
 # postgres:16-alpine ships psql, sh, and wget. No extra packages needed.
 COPY --from=builder /out/atlas-cli /usr/local/bin/atlas-cli
