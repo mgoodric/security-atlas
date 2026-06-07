@@ -180,6 +180,7 @@
     "internal/frameworkscope": 75,
     "internal/freshness": 83,
     "internal/freshnessdrift": 24,
+    "internal/llm": 80,
     "internal/mcp": 80,
     "internal/mcp/tools": 73,
     "internal/mcp/writeproposals": 75,

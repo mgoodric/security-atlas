@@ -819,6 +819,21 @@ type AggregationRuleEvaluation struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type AiGeneration struct {
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	Surface        string             `json:"surface"`
+	PromptVersion  string             `json:"prompt_version"`
+	ModelName      string             `json:"model_name"`
+	ModelVersion   string             `json:"model_version"`
+	ModelProvider  string             `json:"model_provider"`
+	SystemPrompt   string             `json:"system_prompt"`
+	ContextInputs  []byte             `json:"context_inputs"`
+	RawDraft       string             `json:"raw_draft"`
+	SurfaceSubject string             `json:"surface_subject"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type AnswerLibrary struct {
 	ID             pgtype.UUID        `json:"id"`
 	TenantID       pgtype.UUID        `json:"tenant_id"`

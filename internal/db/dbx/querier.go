@@ -67,6 +67,9 @@ type Querier interface {
 	AttachPopulationToPeriod(ctx context.Context, arg AttachPopulationToPeriodParams) error
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
+	// Count of all generations for the current tenant. Used by the cross-tenant
+	// isolation integration test to prove tenant B sees zero of tenant A's rows.
+	CountAIGenerationsForTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Slice 055 overdue-job dedup probe: has this decision already had an
 	// `overdue_notified` audit row written? A non-zero count means the daily
 	// job already notified the decision_maker -- skip re-emission (P0
@@ -417,6 +420,9 @@ type Querier interface {
 	// Conflict. The CHECK constraint audit_periods_frozen_coherent enforces
 	// that the freeze tuple (frozen_at, frozen_hash, frozen_by) is set together.
 	FreezeAuditPeriod(ctx context.Context, arg FreezeAuditPeriodParams) (AuditPeriod, error)
+	// Fetch a single generation by id within the current tenant. Used by the
+	// smoke consumer to prove the round-trip + by future forensic lookups.
+	GetAIGeneration(ctx context.Context, arg GetAIGenerationParams) (AiGeneration, error)
 	// Constant-time lookup by HMAC hash. Returns the row whether revoked, retired,
 	// or expired — the caller (credstore.Authenticate) is responsible for the
 	// state-check tree.
@@ -848,6 +854,10 @@ type Querier interface {
 	// is an update, not a 23505. The slice-019 LinkRiskControl (no weights) stays
 	// for the create-risk path — it relies on the column DEFAULTs.
 	LinkRiskControlWithWeights(ctx context.Context, arg LinkRiskControlWithWeightsParams) error
+	// All generations for one surface subject, newest first. Powers the
+	// per-subject "recent AI drafts" rail. Served by
+	// idx_ai_generations_tenant_surface_subject.
+	ListAIGenerationsBySubject(ctx context.Context, arg ListAIGenerationsBySubjectParams) ([]AiGeneration, error)
 	// Active keys for a tenant. Excludes revoked rows; includes retired-but-not-yet-
 	// past-grace predecessors so the admin UI can show "rotating out — valid until X."
 	ListAPIKeysByTenant(ctx context.Context, tenantID pgtype.UUID) ([]ApiKey, error)
@@ -2236,6 +2246,22 @@ type Querier interface {
 	// cursor and @page_size keep the working set bounded regardless of ledger
 	// size. The empty-UUID sentinel ('00000000-...') seeds the first page.
 	WalkEvidenceRecordsForVerify(ctx context.Context, arg WalkEvidenceRecordsForVerifyParams) ([]EvidenceRecord, error)
+	// ai_generations — slice 498 shared AI-assist audit ledger.
+	//
+	// One row per LLM generation across every AI-assist surface. The table is
+	// APPEND-ONLY by construction (SELECT + INSERT RLS policies only, no
+	// UPDATE/DELETE policy under FORCE; atlas_app has no UPDATE/DELETE grant),
+	// so there is deliberately no UpdateAIGeneration / DeleteAIGeneration query
+	// -- the captured fields are immutable snapshots (P0-498-5).
+	//
+	// All queries are tenant-scoped via the leading tenant_id predicate; RLS
+	// under FORCE keeps the cross-tenant boundary safe even on a misconfigured
+	// query. Model output (system_prompt / context_inputs / raw_draft) is bound
+	// as PARAMETERIZED values only -- never interpolated (P0-498-7).
+	// Append one generation record. The writer (internal/llm.AuditWriter) binds
+	// every value, including the raw model draft, as a parameter -- the model
+	// output is treated as opaque data, never SQL.
+	WriteAIGeneration(ctx context.Context, arg WriteAIGenerationParams) (AiGeneration, error)
 	// ===== aggregation_rule_audit_log (append-only) =====
 	// Append-only. Every lifecycle transition (created / activated /
 	// deactivated / reactivated) and every threshold edit writes one row
