@@ -39,6 +39,13 @@ var Events = []string{
 	"policy_ack_due",
 	"risk_review_overdue",
 	"control_drift",
+	// Slice 566: the two slice-445 digest kinds that previously had no
+	// slice-108 event row (so no per-kind email opt-out). Added here AND to
+	// the migration CHECK constraint in the same slice (whitelist-move-
+	// together discipline). The notify-side mapping lives in
+	// internal/notify/email/kindfilter.go (kindToEvent).
+	"audit_note_reply",
+	"evidence_staleness",
 }
 
 // Channels is the canonical channel whitelist. Mirrors the migration's CHECK constraint.

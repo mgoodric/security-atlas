@@ -25,25 +25,31 @@ package email
 // `user_notification_preferences.event` key. The two taxonomies are NOT 1:1:
 //
 //   - The names differ by punctuation: notification `control.drift` (dot) maps
-//     to slice-108 event `control_drift` (underscore).
-//   - Some notification kinds have NO slice-108 event row at all
-//     (`audit_note.reply`, `evidence.staleness`). These are UNMAPPED.
-//
-// An UNMAPPED kind (absent from this map) defaults to included-when-master-on
-// (it has no per-kind opt-out surface yet — a future slice that adds a
-// slice-108 event row for it MUST also add the mapping here, mirroring the
-// schema-CHECK-and-whitelist-move-together discipline from slice 108).
+//     to slice-108 event `control_drift` (underscore). Slice 566 adds the same
+//     dot→underscore normalization for `audit_note.reply` →
+//     `audit_note_reply` and `evidence.staleness` → `evidence_staleness`.
+//   - A kind that has NO slice-108 event row (absent from this map) is
+//     UNMAPPED and defaults to included-when-master-on. Slice 566 closed the
+//     last two such kinds (`audit_note.reply`, `evidence.staleness`); a future
+//     slice that adds a slice-108 event row for a new kind MUST also add the
+//     mapping here, mirroring the schema-CHECK-and-whitelist-move-together
+//     discipline from slice 108.
 //
 // The slice-108 event whitelist (internal/auth/userprefs.Events) is:
 //
-//	audit_period_assignment, policy_ack_due, risk_review_overdue, control_drift
+//	audit_period_assignment, policy_ack_due, risk_review_overdue, control_drift,
+//	audit_note_reply, evidence_staleness
 var kindToEvent = map[string]string{
 	"audit_period_assignment": "audit_period_assignment",
 	"policy_ack_due":          "policy_ack_due",
 	"risk_review_overdue":     "risk_review_overdue",
 	"control.drift":           "control_drift",
-	// audit_note.reply  -> (no slice-108 event) UNMAPPED -> included-when-master-on
-	// evidence.staleness -> (no slice-108 event) UNMAPPED -> included-when-master-on
+	// Slice 566: previously UNMAPPED (default-on, no opt-out surface); now
+	// per-kind controllable via the slice-108 event whitelist. Default-on-
+	// missing-row still holds — an opted-in user keeps receiving both kinds
+	// until they set an explicit per-kind email=false (no silent suppression).
+	"audit_note.reply":   "audit_note_reply",
+	"evidence.staleness": "evidence_staleness",
 }
 
 // emailEnabledForKind decides whether a single notification kind should appear
