@@ -48,6 +48,7 @@ import {
   coverageBarPercent,
   formatCoverage,
 } from "@/components/control/coverage";
+import { bandStyle, classifyBand } from "@/components/control/confidence-band";
 
 export function CoverageTable({
   requirements,
@@ -74,6 +75,7 @@ export function CoverageTable({
             <TableHead className="w-32">STRM</TableHead>
             <TableHead className="w-20 text-right">Strength</TableHead>
             <TableHead className="w-20 text-right">Coverage</TableHead>
+            <TableHead className="w-24">Confidence</TableHead>
             <TableHead className="w-32">Coverage bar</TableHead>
             <TableHead className="w-8 sr-only">Drill-down</TableHead>
           </TableRow>
@@ -87,6 +89,15 @@ export function CoverageTable({
             );
             const barPct = coverageBarPercent(req.coverage, outOfScope);
             const coverageIsNumeric = coverageDisplay !== "n/a";
+            // Slice 482 — confidence band for this requirement row. The
+            // band reflects the EFFECTIVE per-row coverage (null when out
+            // of scope), so an out-of-scope or no-data row reads
+            // "uncovered" rather than borrowing the raw strength's band.
+            // Thresholds mirror the backend rollup (rollup.go) so the
+            // per-row label and the requirement-level rollup never
+            // disagree.
+            const band = classifyBand(outOfScope ? null : req.coverage);
+            const bStyle = bandStyle(band);
             return (
               <TableRow
                 key={req.edge_id}
@@ -145,6 +156,19 @@ export function CoverageTable({
                   {coverageDisplay}
                 </TableCell>
                 <TableCell>
+                  <span
+                    className={cn(
+                      "inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold capitalize",
+                      bStyle.badge,
+                    )}
+                    data-testid="confidence-band"
+                    data-band={band}
+                    title={bStyle.label}
+                  >
+                    {band}
+                  </span>
+                </TableCell>
+                <TableCell>
                   <div
                     className="h-1.5 overflow-hidden rounded-full bg-muted"
                     role="presentation"
@@ -198,7 +222,11 @@ export function CoverageTable({
         <span className="font-semibold text-foreground">Reading this:</span>{" "}
         coverage is strength × 30-day effectiveness, intersected with the
         framework&apos;s scope predicate. Where the framework is out of scope,
-        coverage is n/a.
+        coverage is n/a. The confidence band buckets that coverage:{" "}
+        <span className="font-medium">strong</span> (≥ 0.80),{" "}
+        <span className="font-medium">partial</span> (0.50–0.79),{" "}
+        <span className="font-medium">weak</span> (&lt; 0.50), and{" "}
+        <span className="font-medium">uncovered</span> (no in-scope evidence).
       </p>
     </div>
   );

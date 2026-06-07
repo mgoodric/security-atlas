@@ -980,3 +980,248 @@ func TestControlCoverage_Slice256_CoverageKeyAlwaysEmitted(t *testing.T) {
 		}
 	}
 }
+
+// ===== slice 482: per-requirement coverage-strength rollup =====
+//
+// CC6.6's crosswalk (data/crosswalks/soc2-tsc-2017.yaml) maps it to two
+// anchors:
+//   - NET-04  subset_of        strength 0.8
+//   - IAC-06  intersects_with  strength 0.7
+//
+// The rollup is best-satisfying-path: max over anchors of
+// (edge_strength × the tenant's best evaluated coverage on that anchor).
+
+// AC-1 / AC-3 (additive shape): the requirement coverage response gains
+// `coverage_strength` (numeric) + `confidence_band` (string) WITHOUT
+// removing the existing requirement / anchors / controls fields
+// (P0-482-5). With no tenant controls the band is "uncovered" (AC-2).
+func TestRequirementCoverage_Slice482_AdditiveFieldsUncoveredByDefault(t *testing.T) {
+	ensureCatalog(t)
+	wipeTenantState(t)
+
+	ts, bearer := setupHTTPServer(t, tenantA)
+	resp, body := get(t, ts, "/v1/requirements/soc2:2017:CC6.6/coverage", bearer)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
+	}
+	var got struct {
+		Requirement struct {
+			Code string `json:"code"`
+		} `json:"requirement"`
+		Anchors          []map[string]any `json:"anchors"`
+		Controls         []map[string]any `json:"controls"`
+		CoverageStrength *float64         `json:"coverage_strength"`
+		ConfidenceBand   string           `json:"confidence_band"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\nbody=%s", err, body)
+	}
+	// Existing fields unchanged (additive only — P0-482-5).
+	if got.Requirement.Code != "CC6.6" {
+		t.Fatalf("requirement.code = %q; want CC6.6 (existing field must survive)", got.Requirement.Code)
+	}
+	if len(got.Anchors) == 0 {
+		t.Fatal("anchors[] must still be present (additive only)")
+	}
+	// New additive fields present.
+	if got.CoverageStrength == nil {
+		t.Fatalf("coverage_strength missing; raw=%s", body)
+	}
+	if *got.CoverageStrength != 0 {
+		t.Fatalf("coverage_strength = %v; want 0 for tenant with no controls", *got.CoverageStrength)
+	}
+	if got.ConfidenceBand != "uncovered" {
+		t.Fatalf("confidence_band = %q; want uncovered for tenant with no controls", got.ConfidenceBand)
+	}
+}
+
+// AC-6: mixed-strength edges + mixed evidence produce the expected band.
+//
+// Tenant A seeds:
+//   - an IAC-06 control (edge strength 0.7) with all-pass evals → pass_rate 1.0
+//     → path = 0.7 × 1.0 = 0.70
+//   - a NET-04 control (edge strength 0.8) with 2/3-pass evals → pass_rate ~0.667
+//     → path = 0.8 × 0.667 = 0.533
+//
+// Both controls are in scope (permissive activated framework_scope + a
+// seeded scope cell). The best-satisfying-path rollup picks max(0.70,
+// 0.533) = 0.70 → "partial" band (0.5 ≤ 0.70 < 0.8). This exercises BOTH
+// the mixed-strength edges AND the MAX selection (the lower-strength
+// anchor with higher evidence beats the higher-strength anchor with
+// weaker evidence).
+func TestRequirementCoverage_Slice482_MixedEdgesMixedEvidenceBand(t *testing.T) {
+	ensureCatalog(t)
+	wipeTenantState(t)
+
+	soc2FVID := soc2017FrameworkVersionID(t)
+	seedActivatedFrameworkScope(t, tenantA, soc2FVID, "SOC 2 — 482 mixed")
+	seedScopeCell(t, tenantA)
+
+	iacControl := seedControl(t, tenantA, "IAC-06", "test-482-iac", "MFA (482)")
+	netControl := seedControl(t, tenantA, "NET-04", "test-482-net", "Boundary (482)")
+
+	now := time.Now().UTC()
+	// IAC-06: all pass → pass_rate 1.0.
+	seedEvaluation(t, tenantA, iacControl, "pass", now.Add(-1*time.Hour))
+	seedEvaluation(t, tenantA, iacControl, "pass", now.Add(-2*time.Hour))
+	// NET-04: 2 pass / 1 fail → pass_rate 2/3.
+	seedEvaluation(t, tenantA, netControl, "pass", now.Add(-1*time.Hour))
+	seedEvaluation(t, tenantA, netControl, "pass", now.Add(-2*time.Hour))
+	seedEvaluation(t, tenantA, netControl, "fail", now.Add(-3*time.Hour))
+
+	ts, bearer := setupHTTPServer(t, tenantA)
+	resp, body := get(t, ts, "/v1/requirements/soc2:2017:CC6.6/coverage", bearer)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
+	}
+	var got struct {
+		CoverageStrength float64 `json:"coverage_strength"`
+		ConfidenceBand   string  `json:"confidence_band"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\nbody=%s", err, body)
+	}
+	// max(0.7 × 1.0, 0.8 × 2/3) = max(0.70, 0.533) = 0.70.
+	want := 0.7
+	if d := got.CoverageStrength - want; d < -1e-6 || d > 1e-6 {
+		t.Fatalf("coverage_strength = %v; want %v (best path 0.7×1.0)", got.CoverageStrength, want)
+	}
+	if got.ConfidenceBand != "partial" {
+		t.Fatalf("confidence_band = %q; want partial (0.5 <= 0.70 < 0.8)", got.ConfidenceBand)
+	}
+}
+
+// AC-6 (band edge): a single strong path (NET-04 strength 0.8 × all-pass
+// 1.0 = 0.80) lands exactly on the strong-band floor. Confirms the 0.8
+// canvas worked-example value classifies as "strong".
+func TestRequirementCoverage_Slice482_StrongBandAtCanvasExample(t *testing.T) {
+	ensureCatalog(t)
+	wipeTenantState(t)
+
+	soc2FVID := soc2017FrameworkVersionID(t)
+	seedActivatedFrameworkScope(t, tenantA, soc2FVID, "SOC 2 — 482 strong")
+	seedScopeCell(t, tenantA)
+
+	netControl := seedControl(t, tenantA, "NET-04", "test-482-strong", "Boundary (482 strong)")
+	now := time.Now().UTC()
+	seedEvaluation(t, tenantA, netControl, "pass", now.Add(-1*time.Hour))
+	seedEvaluation(t, tenantA, netControl, "pass", now.Add(-2*time.Hour))
+
+	ts, bearer := setupHTTPServer(t, tenantA)
+	resp, body := get(t, ts, "/v1/requirements/soc2:2017:CC6.6/coverage", bearer)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
+	}
+	var got struct {
+		CoverageStrength float64 `json:"coverage_strength"`
+		ConfidenceBand   string  `json:"confidence_band"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\nbody=%s", err, body)
+	}
+	if d := got.CoverageStrength - 0.8; d < -1e-6 || d > 1e-6 {
+		t.Fatalf("coverage_strength = %v; want 0.8 (NET-04 0.8 × 1.0)", got.CoverageStrength)
+	}
+	if got.ConfidenceBand != "strong" {
+		t.Fatalf("confidence_band = %q; want strong (0.8 is the strong-band floor)", got.ConfidenceBand)
+	}
+}
+
+// AC-2 / AC-6 (out of scope): a control with all-pass evidence but NO
+// activated framework_scope contributes nothing — the requirement
+// resolves to uncovered, NOT to the control's pass rate. This is the
+// "in-scope gating" half of AC-2 (distinct from the "no controls" half
+// in the additive-fields test above).
+func TestRequirementCoverage_Slice482_OutOfScopeControlIsUncovered(t *testing.T) {
+	ensureCatalog(t)
+	wipeTenantState(t)
+
+	// Control + evidence but NO activated framework_scope for SOC 2.
+	iacControl := seedControl(t, tenantA, "IAC-06", "test-482-oos", "MFA (482 oos)")
+	now := time.Now().UTC()
+	seedEvaluation(t, tenantA, iacControl, "pass", now.Add(-1*time.Hour))
+	seedEvaluation(t, tenantA, iacControl, "pass", now.Add(-2*time.Hour))
+
+	ts, bearer := setupHTTPServer(t, tenantA)
+	resp, body := get(t, ts, "/v1/requirements/soc2:2017:CC6.6/coverage", bearer)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
+	}
+	var got struct {
+		CoverageStrength float64 `json:"coverage_strength"`
+		ConfidenceBand   string  `json:"confidence_band"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\nbody=%s", err, body)
+	}
+	if got.CoverageStrength != 0 {
+		t.Fatalf("coverage_strength = %v; want 0 (no activated framework_scope = out of scope)", got.CoverageStrength)
+	}
+	if got.ConfidenceBand != "uncovered" {
+		t.Fatalf("confidence_band = %q; want uncovered (out-of-scope control contributes nothing)", got.ConfidenceBand)
+	}
+}
+
+// AC-7 (threat-model I — THE load-bearing security assertion): tenant B's
+// coverage_strength for the SAME requirement reflects ITS OWN state (here:
+// uncovered, since tenant B has no controls), NEVER tenant A's. Tenant A
+// has a strong (0.8) NET-04 control; if the rollup leaked across the RLS
+// boundary tenant B would see 0.8 / "strong". It MUST see 0 / "uncovered".
+func TestRequirementCoverage_Slice482_RLSScopedRollup(t *testing.T) {
+	ensureCatalog(t)
+	wipeTenantState(t)
+
+	// Tenant A: a strong, in-scope control on NET-04.
+	soc2FVID := soc2017FrameworkVersionID(t)
+	seedActivatedFrameworkScope(t, tenantA, soc2FVID, "SOC 2 — A only")
+	seedScopeCell(t, tenantA)
+	netControl := seedControl(t, tenantA, "NET-04", "tenantA-482-net", "Tenant A Boundary")
+	now := time.Now().UTC()
+	seedEvaluation(t, tenantA, netControl, "pass", now.Add(-1*time.Hour))
+	seedEvaluation(t, tenantA, netControl, "pass", now.Add(-2*time.Hour))
+
+	// Sanity: tenant A sees its own strong score.
+	tsA, bearerA := setupHTTPServer(t, tenantA)
+	respA, bodyA := get(t, tsA, "/v1/requirements/soc2:2017:CC6.6/coverage", bearerA)
+	if respA.StatusCode != http.StatusOK {
+		t.Fatalf("tenant A status = %d; body=%s", respA.StatusCode, bodyA)
+	}
+	var gotA struct {
+		CoverageStrength float64 `json:"coverage_strength"`
+		ConfidenceBand   string  `json:"confidence_band"`
+	}
+	if err := json.Unmarshal(bodyA, &gotA); err != nil {
+		t.Fatalf("unmarshal A: %v", err)
+	}
+	if gotA.ConfidenceBand != "strong" {
+		t.Fatalf("tenant A confidence_band = %q; want strong (precondition for the leak test)", gotA.ConfidenceBand)
+	}
+
+	// Tenant B: same requirement, NO controls of its own. Must see its
+	// OWN (uncovered) score — never tenant A's strong 0.8. The handler
+	// never adds `WHERE tenant_id`; RLS makes tenant A's control + its
+	// evaluations invisible at the DB layer, so the rollup folds in
+	// nothing for tenant B.
+	tsB, bearerB := setupHTTPServer(t, tenantB)
+	respB, bodyB := get(t, tsB, "/v1/requirements/soc2:2017:CC6.6/coverage", bearerB)
+	if respB.StatusCode != http.StatusOK {
+		t.Fatalf("tenant B status = %d; body=%s", respB.StatusCode, bodyB)
+	}
+	var gotB struct {
+		CoverageStrength float64          `json:"coverage_strength"`
+		ConfidenceBand   string           `json:"confidence_band"`
+		Controls         []map[string]any `json:"controls"`
+	}
+	if err := json.Unmarshal(bodyB, &gotB); err != nil {
+		t.Fatalf("unmarshal B: %v", err)
+	}
+	if len(gotB.Controls) != 0 {
+		t.Fatalf("RLS VIOLATION: tenant B saw %d controls (tenant A's); want 0", len(gotB.Controls))
+	}
+	if gotB.CoverageStrength != 0 {
+		t.Fatalf("RLS VIOLATION: tenant B coverage_strength = %v; want 0 — tenant A's state leaked", gotB.CoverageStrength)
+	}
+	if gotB.ConfidenceBand != "uncovered" {
+		t.Fatalf("RLS VIOLATION: tenant B confidence_band = %q; want uncovered — tenant A's state leaked", gotB.ConfidenceBand)
+	}
+}
