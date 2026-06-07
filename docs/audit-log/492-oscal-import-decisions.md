@@ -155,11 +155,34 @@ Confidence: **high**.
   single `statement` string. Revisit if downstream surfaces need the structured
   parts (e.g. assessment-objective parts).
 
+### D8 — Coverage floor reflects bridge-INDEPENDENT coverage (CI reality)
+
+The three load-bearing integration tests (AC-9/10/11) require BOTH a real
+Postgres AND the Python compliance-trestle bridge. CI's integration shards do
+not ship the Python bridge, so those tests `t.Skip()` in CI — the exact
+slice-030 D2 precedent the existing `internal/oscal` package already lives under
+(its floor of 69 likewise reflects bridge-skipped CI reality, not local
+full-bridge coverage). The merged coverage gate therefore sees only this
+package's bridge-INDEPENDENT branches (role gate, input validation, rejection
+path, helpers): ~30.4%. The floor is set to **28** = floor(30.4 − 2), the
+honest CI-achievable value. Locally, with the bridge present, the package
+measures ~79%; the integration tests are the real safety net and were run green
+locally against a real Postgres + real bridge before merge.
+
+Confidence: **high** (matches the established slice-030 bridge-skip precedent).
+
 ## Detection-tier note
 
-No latent bug surfaced during the slice that escaped its target tier. The
-transactional-rollback guarantee (AC-10) and tenant isolation (AC-11) are proven
-at the integration tier — their target and actual tiers match
-(`target=integration, actual=integration`). The `href`-non-dereference guarantee
-is a `manual_review` + Python-unit assertion (`target=manual_review`), with no
-defect found.
+A real defect surfaced during the slice at the integration/CI tier: the first
+push set the coverage floor (77) from LOCAL full-bridge coverage, but CI's
+integration shard has no Python bridge, so the bridge-dependent tests skipped
+and the merged gate measured only ~16% → gate failed. Caught at
+`actual=integration` (the CI merged-coverage gate); the cheapest tier that
+should have caught it is the same (`target=integration`) — it is precisely the
+kind of environment-delta the integration gate exists to surface, and it was
+fixed by setting the floor to the bridge-independent value + adding pure-Go unit
+branches (D8). The transactional-rollback (AC-10) and tenant-isolation (AC-11)
+guarantees are proven at the integration tier locally
+(`target=integration, actual=integration`); the `href`-non-dereference guarantee
+is a `manual_review` + Python-unit assertion (`target=manual_review`), no defect
+found.

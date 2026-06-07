@@ -11,12 +11,22 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	oscalv1 "github.com/mgoodric/security-atlas/gen/proto/oscal/v1"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
+
+func mustParse(t *testing.T, s string) uuid.UUID {
+	t.Helper()
+	id, err := uuid.Parse(s)
+	if err != nil {
+		t.Fatalf("uuid.Parse(%q): %v", s, err)
+	}
+	return id
+}
 
 // fakeBridge records its call and returns a canned response / error.
 type fakeBridge struct {
@@ -119,6 +129,57 @@ func TestImport_RejectsOversizeDocument(t *testing.T) {
 	})
 	if !errors.Is(err, ErrDocumentTooLarge) {
 		t.Fatalf("expected ErrDocumentTooLarge, got %v", err)
+	}
+}
+
+func TestImport_ValidationRejectedSurfacesAndAttemptsAudit(t *testing.T) {
+	t.Parallel()
+	// A bridge that reports the document invalid drives the rejection
+	// branch: Import surfaces ErrValidationFailed and attempts a best-effort
+	// rejection audit (whose tx Begin fails here — swallowed by design, so
+	// the validation error still surfaces).
+	bridge := &fakeBridge{resp: &oscalv1.ImportCatalogResponse{
+		Valid:  false,
+		Errors: []string{"catalog failed OSCAL v1.1.x validation: control missing id"},
+	}}
+	beginner := &nilBeginner{}
+	im := NewImporter(beginner, bridge)
+	_, err := im.Import(tenantCtx(t), Request{
+		OscalJSON:  []byte(`{"catalog":{}}`),
+		ImportedBy: "tester",
+		Role:       authz.RoleGRCEngineer,
+	})
+	if !errors.Is(err, ErrValidationFailed) {
+		t.Fatalf("expected ErrValidationFailed, got %v", err)
+	}
+	if !bridge.called {
+		t.Error("bridge should have been called before rejection")
+	}
+	// The best-effort rejection audit tried to begin a transaction.
+	if !beginner.begun {
+		t.Error("rejection path should attempt to write an audit row (Begin)")
+	}
+}
+
+func TestTenantUUID(t *testing.T) {
+	t.Parallel()
+	// A valid tenant context resolves; a missing/invalid one errors.
+	ctx, _ := tenancy.WithTenant(context.Background(), "22222222-2222-4222-8222-222222222222")
+	id, err := tenantUUID(ctx)
+	if err != nil || id.String() != "22222222-2222-4222-8222-222222222222" {
+		t.Fatalf("tenantUUID = %v, %v", id, err)
+	}
+	if _, err := tenantUUID(context.Background()); err == nil {
+		t.Error("tenantUUID with no tenant in context should error")
+	}
+}
+
+func TestPgUUID(t *testing.T) {
+	t.Parallel()
+	id := mustParse(t, "33333333-3333-4333-8333-333333333333")
+	pg := pgUUID(id)
+	if !pg.Valid || pg.Bytes != id {
+		t.Errorf("pgUUID round-trip failed: %+v", pg)
 	}
 }
 
