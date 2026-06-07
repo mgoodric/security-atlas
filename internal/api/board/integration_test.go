@@ -34,6 +34,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,6 +44,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/freshness"
+	"github.com/mgoodric/security-atlas/internal/pdfrender"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -490,22 +492,145 @@ func TestPDF_ReturnsPDFOrServiceUnavailable(t *testing.T) {
 	briefID := body["id"].(string)
 
 	resp, raw := doRaw(t, env, "/v1/board-briefs/"+briefID+"/pdf")
+	assertPDFOrServiceUnavailable(t, resp, raw)
+}
+
+// assertPDFOrServiceUnavailable enforces the slice-475 contract: the PDF
+// endpoint returns EITHER a real 200 %PDF- body OR a 503 graceful degradation
+// — and NEVER a 500 / hang / any other status. The 503 path is no longer
+// merely "acceptable when chrome is absent": it is the documented, exhaustive
+// non-200 outcome (chrome absent OR render deadline exceeded OR queue
+// saturated), so a third status here is a hard failure.
+func assertPDFOrServiceUnavailable(t *testing.T, resp *http.Response, raw []byte) {
+	t.Helper()
 	switch resp.StatusCode {
 	case http.StatusOK:
-		// AC-4: a real PDF — bytes begin with the %PDF- magic header.
 		if len(raw) < 5 || string(raw[:5]) != "%PDF-" {
-			t.Errorf("AC-4: PDF body does not start with %%PDF- magic; got prefix %q", safePrefix(raw))
+			t.Errorf("AC-4/AC-6: PDF body does not start with %%PDF- magic; got prefix %q", safePrefix(raw))
 		}
 		if ct := resp.Header.Get("Content-Type"); ct != "application/pdf" {
-			t.Errorf("AC-4: PDF Content-Type = %q, want application/pdf", ct)
+			t.Errorf("AC-4/AC-6: PDF Content-Type = %q, want application/pdf", ct)
 		}
 	case http.StatusServiceUnavailable:
-		// Acceptable when chrome is unavailable in the test env — the
-		// handler degrades gracefully rather than 500ing.
-		t.Logf("AC-4: PDF endpoint returned 503 (chrome unavailable in this env) — acceptable degradation")
+		// Graceful degradation — the handler 503s rather than 500ing or
+		// hanging (slice 475 AC-1).
 	default:
-		t.Fatalf("AC-4: GET /pdf = %d, want 200 or 503; body=%q", resp.StatusCode, raw)
+		t.Fatalf("AC-1: GET /pdf = %d, want exactly 200 or 503; body=%q", resp.StatusCode, raw)
 	}
+}
+
+// TestPDF_RenderDeadlineDegradesTo503 is the load-bearing slice-475 AC-1
+// proof: when the bounded render deadline elapses (here forced tiny so even a
+// healthy chrome — or no chrome — exceeds it), the endpoint returns 503, NOT a
+// 500 and NOT a hang. We swap in a 1ns-deadline limiter so the render context
+// is already past deadline before any chrome work can finish.
+func TestPDF_RenderDeadlineDegradesTo503(t *testing.T) {
+	restore := pdfrender.SetDefaultForTest(pdfrender.New(2, time.Nanosecond, time.Second))
+	defer restore()
+
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	resp, body := doJSON(t, env, http.MethodPost, "/v1/board-briefs",
+		map[string]string{"period_end": "2026-04-30"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST: status %d", resp.StatusCode)
+	}
+	briefID := body["id"].(string)
+
+	resp, raw := doRaw(t, env, "/v1/board-briefs/"+briefID+"/pdf")
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("AC-1: render-deadline path = %d, want 503 (never 500/hang); body=%q",
+			resp.StatusCode, raw)
+	}
+}
+
+// TestPDF_QueueSaturationDegradesTo503 proves a burst over the concurrency cap
+// degrades to 503 (AC-3): a 1-slot, fail-fast (0 queue-wait) limiter plus one
+// occupied slot means a concurrent request is rejected with 503, never 500.
+func TestPDF_QueueSaturationDegradesTo503(t *testing.T) {
+	// 1 slot, render deadline long enough that the holder stays in-flight,
+	// 0 queue wait → the second caller saturates immediately.
+	restore := pdfrender.SetDefaultForTest(pdfrender.New(1, 5*time.Second, 0))
+	defer restore()
+
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	resp, body := doJSON(t, env, http.MethodPost, "/v1/board-briefs",
+		map[string]string{"period_end": "2026-04-30"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST: status %d", resp.StatusCode)
+	}
+	briefID := body["id"].(string)
+
+	// Fire two concurrent renders at a 1-slot/fail-fast limiter. The holder
+	// occupies the slot (it will either 200 if chrome is healthy or 503 if
+	// not); the other must saturate → 503. Either way, with a 1-slot
+	// fail-fast cap, AT LEAST one of the two is a 503 and NEITHER is a 500.
+	const n = 4
+	statuses := make([]int, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			resp, raw := doRaw(t, env, "/v1/board-briefs/"+briefID+"/pdf")
+			statuses[idx] = resp.StatusCode
+			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusServiceUnavailable {
+				t.Errorf("AC-3: concurrent render %d = %d, want 200 or 503; body=%q",
+					idx, resp.StatusCode, raw)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	sawSaturation := false
+	for _, s := range statuses {
+		if s == http.StatusServiceUnavailable {
+			sawSaturation = true
+		}
+	}
+	if !sawSaturation {
+		t.Fatalf("AC-3: expected at least one 503 under a 1-slot fail-fast cap; got %v", statuses)
+	}
+}
+
+// TestPDF_StressNoNonGraceful runs the PDF endpoint Nx under simulated
+// contention (a tight 1-slot cap + tiny render deadline) and asserts EVERY
+// response is graceful — exactly 200 or 503, never a 500 / other status / hang
+// (AC-4, slice-340 stress pattern).
+func TestPDF_StressNoNonGraceful(t *testing.T) {
+	restore := pdfrender.SetDefaultForTest(pdfrender.New(1, 50*time.Millisecond, 80*time.Millisecond))
+	defer restore()
+
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	resp, body := doJSON(t, env, http.MethodPost, "/v1/board-briefs",
+		map[string]string{"period_end": "2026-04-30"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST: status %d", resp.StatusCode)
+	}
+	briefID := body["id"].(string)
+
+	const n = 12
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			resp, raw := doRaw(t, env, "/v1/board-briefs/"+briefID+"/pdf")
+			assertPDFOrServiceUnavailable(t, resp, raw)
+		}(i)
+	}
+	wg.Wait()
 }
 
 func safePrefix(b []byte) string {

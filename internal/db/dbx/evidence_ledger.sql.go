@@ -385,3 +385,68 @@ func (q *Queries) ListEvidenceRecordsByControl(ctx context.Context, arg ListEvid
 	}
 	return items, nil
 }
+
+const walkEvidenceRecordsForVerify = `-- name: WalkEvidenceRecordsForVerify :many
+SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref
+FROM evidence_records
+WHERE tenant_id = $1
+  AND id > $2
+ORDER BY id ASC
+LIMIT $3
+`
+
+type WalkEvidenceRecordsForVerifyParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	AfterID  pgtype.UUID `json:"after_id"`
+	PageSize int32       `json:"page_size"`
+}
+
+// Slice 464: keyset-paginated ledger walk for `atlas evidence verify`.
+// Read-only integrity walk — recomputes each record's canonical hash and
+// compares to the stored `hash`. Ordered by id ASC so the caller can page
+// with a cursor (last-seen id) without OFFSET drift on a large ledger.
+// Tenant-scoped: RLS bounds the rows to the current tenant; the @after_id
+// cursor and @page_size keep the working set bounded regardless of ledger
+// size. The empty-UUID sentinel ('00000000-...') seeds the first page.
+func (q *Queries) WalkEvidenceRecordsForVerify(ctx context.Context, arg WalkEvidenceRecordsForVerifyParams) ([]EvidenceRecord, error) {
+	rows, err := q.db.Query(ctx, walkEvidenceRecordsForVerify, arg.TenantID, arg.AfterID, arg.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EvidenceRecord
+	for rows.Next() {
+		var i EvidenceRecord
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.EvidenceQueryID,
+			&i.ControlID,
+			&i.ScopeID,
+			&i.ObservedAt,
+			&i.IngestedAt,
+			&i.Provenance,
+			&i.Result,
+			&i.Payload,
+			&i.PayloadUri,
+			&i.Hash,
+			&i.FreshnessClass,
+			&i.ValidUntil,
+			&i.CreatedAt,
+			&i.IdempotencyKey,
+			&i.EvidenceKind,
+			&i.SchemaVersion,
+			&i.CredentialID,
+			&i.IngestionPath,
+			&i.SourceAttribution,
+			&i.ControlRef,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
