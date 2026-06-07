@@ -892,6 +892,25 @@ type Querier interface {
 	// future RLS-policy regression. The existing ListActiveControls query
 	// carries the same belt-and-suspenders clause.
 	ListActiveControlsForExport(ctx context.Context, arg ListActiveControlsForExportParams) ([]ListActiveControlsForExportRow, error)
+	// Slice 493 — SSP control-implementation-narrative projection.
+	//
+	// Identical row set to ListActiveControls (every active, non-superseded
+	// control for the active tenant, ordered by bundle_id) but the projection
+	// ADDS the human-authored `description` column — the control bundle's
+	// narrative (slice 009) that explains HOW the control is implemented. The
+	// SSP exporter fills ControlImplementation.Statement from this column
+	// (canvas §8.2; resolves slice 030's D-narrative stopgap).
+	//
+	// Why a SEPARATE query (slice 493 D-query, pattern-matched to slice 137 D2
+	// and slice 175 D2): the project convention is a purpose-built export
+	// projection, never widening the shared ListActiveControls row consumed by
+	// non-export callers. ListActiveControls stays unchanged for its existing
+	// consumers; this query is the SSP exporter's dedicated read.
+	//
+	// RLS posture: the WHERE tenant_id = $1 clause is belt-and-suspenders
+	// alongside the GUC-driven RLS policy (slice 002); tenancy.ApplyTenant
+	// upstream pins the GUC so the read is tenant-scoped (invariant #6).
+	ListActiveControlsWithDescription(ctx context.Context, tenantID pgtype.UUID) ([]ListActiveControlsWithDescriptionRow, error)
 	// Slice 062 — admin /v1/admin/audit-log query.
 	//
 	// One query against the admin_audit_log_v view (migration _022). Filters

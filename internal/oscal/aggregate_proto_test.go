@@ -47,7 +47,7 @@ func makeAggregate(
 	t *testing.T,
 	in ExportInput,
 	scopeCells []dbx.ScopeCell,
-	controls []dbx.ListActiveControlsRow,
+	controls []dbx.ListActiveControlsWithDescriptionRow,
 	policies []dbx.Policy,
 	populations []dbx.ListPopulationsForPeriodRow,
 	walkthroughs []dbx.Walkthrough,
@@ -128,11 +128,12 @@ func TestSSPInput_PopulatesScopeCellsControlsAndPolicies(t *testing.T) {
 			Dimensions: []byte(`{"env":"prod","cloud":"aws"}`),
 		},
 	}
-	controls := []dbx.ListActiveControlsRow{
+	controls := []dbx.ListActiveControlsWithDescriptionRow{
 		{
 			ID:                pgUUID(ctrlIDWithSCF),
 			ScfID:             &scfA,
 			Title:             "Encrypt customer data at rest",
+			Description:       "All customer data at rest is encrypted using AES-256 via KMS-managed keys; key rotation is enforced every 90 days.",
 			ControlFamily:     "IAC",
 			OwnerRole:         "infra_security",
 			ApplicabilityExpr: "env == 'prod'",
@@ -141,6 +142,7 @@ func TestSSPInput_PopulatesScopeCellsControlsAndPolicies(t *testing.T) {
 			ID:                pgUUID(ctrlIDNoSCF),
 			ScfID:             nil,
 			Title:             "Quarterly access review",
+			Description:       "", // no authored narrative -> labeled fallback
 			ControlFamily:     "IAM",
 			OwnerRole:         "grc_engineer",
 			ApplicabilityExpr: "true",
@@ -201,25 +203,39 @@ func TestSSPInput_PopulatesScopeCellsControlsAndPolicies(t *testing.T) {
 	if withSCF.ControlId != ctrlIDWithSCF.String() {
 		t.Errorf("control[0].ControlId mismatch")
 	}
-	// Statement template renders the control bundle's human-authored
-	// summary — Title + ControlFamily + OwnerRole — never anything
-	// AI-generated (CLAUDE.md product-runtime AI-assist boundary).
-	if withSCF.Statement == "" {
-		t.Error("control[0].Statement must be populated")
+	// AC-2: when the control has an authored description, the SSP
+	// implementation Statement IS that description, verbatim — never
+	// AI-generated (CLAUDE.md product-runtime AI-assist boundary), never
+	// the synthesized template.
+	wantDesc := "All customer data at rest is encrypted using AES-256 via KMS-managed keys; key rotation is enforced every 90 days."
+	if withSCF.Statement != wantDesc {
+		t.Errorf("control[0].Statement = %q, want the authored description verbatim %q", withSCF.Statement, wantDesc)
 	}
-	if !contains(withSCF.Statement, "Encrypt customer data at rest") {
-		t.Errorf("control[0].Statement %q does not include the Title", withSCF.Statement)
-	}
-	if !contains(withSCF.Statement, "IAC") {
-		t.Errorf("control[0].Statement %q does not include the control family", withSCF.Statement)
-	}
-	if !contains(withSCF.Statement, "infra_security") {
-		t.Errorf("control[0].Statement %q does not include the owner role", withSCF.Statement)
+	// AC-4: the authored-description path carries ONLY the description —
+	// no leftover synthesized boilerplate concatenated in.
+	if contains(withSCF.Statement, "control family") {
+		t.Errorf("control[0].Statement %q leaked the synthesized template into an authored description", withSCF.Statement)
 	}
 
 	noSCF := out.ControlImplementations[1]
 	if noSCF.ScfId != "" {
 		t.Errorf("control[1].ScfId = %q, want empty (nil ScfID branch)", noSCF.ScfId)
+	}
+	// AC-3: a control with no authored description falls back to a
+	// CLEARLY-LABELED synthesized summary — never empty (P0-493-1). The
+	// label must make it unmistakable to an auditor that the text is
+	// auto-generated, not authored.
+	if noSCF.Statement == "" {
+		t.Error("control[1].Statement must never be empty (P0-493-1)")
+	}
+	if !contains(noSCF.Statement, "Auto-generated") {
+		t.Errorf("control[1].Statement %q must be clearly labeled as auto-generated (AC-3)", noSCF.Statement)
+	}
+	if !contains(noSCF.Statement, "Quarterly access review") {
+		t.Errorf("control[1].Statement %q fallback should include the control title", noSCF.Statement)
+	}
+	if !contains(noSCF.Statement, "grc_engineer") {
+		t.Errorf("control[1].Statement %q fallback should include the owner role", noSCF.Statement)
 	}
 
 	if len(out.Policies) != 1 {
@@ -395,10 +411,11 @@ func TestPOAMInput_FailingControlsBecomePOAMItems(t *testing.T) {
 	lastObserved := time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)
 	evaluatedAt := time.Date(2026, 4, 2, 10, 0, 0, 0, time.UTC)
 
-	controls := []dbx.ListActiveControlsRow{
+	controls := []dbx.ListActiveControlsWithDescriptionRow{
 		{
 			ID:                pgUUID(ctrlID),
 			Title:             "Encrypt customer data at rest",
+			Description:       "AES-256 at rest.",
 			ControlFamily:     "IAC",
 			OwnerRole:         "infra_security",
 			ApplicabilityExpr: "true",
