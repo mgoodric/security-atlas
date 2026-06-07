@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/endpoint.device_posture/1.0.0.json",
+  "x-evidence-kind": "endpoint.device_posture.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["END-04", "CFG-02"],
+  "title": "Managed-device endpoint posture summary",
+  "description": "One record per managed device across an MDM (Jamf Pro managed Mac, Microsoft Intune managed device): the device's disk-encryption state (FileVault / BitLocker), screen-lock / passcode-policy compliance, OS version, managed/enrollment state, and the MDM's overall compliance verdict — plus the device->owner ASSIGNMENT identity (opaque id + optional display name) needed to attribute the device for an access review. Pulled read-only from the MDM API (Jamf read-only API role; Intune Entra app with DeviceManagementManagedDevices.Read.All). Posture/compliance SUMMARY only — NEVER device geolocation, installed-app inventory, device contents, browsing data, or owner personal contact detail (phone / personal email / address). The connector reports a descriptive posture; the platform evaluator owns the final pass/fail per (control, scope). Shared across the Jamf + Intune connectors because the two MDMs' device-posture field set is identical at the posture-summary altitude; the source_mdm field preserves provenance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source_mdm",
+    "device_id",
+    "disk_encryption_enabled",
+    "screen_lock_enabled",
+    "managed",
+    "enrolled",
+    "compliance_result"
+  ],
+  "properties": {
+    "source_mdm": {
+      "type": "string",
+      "enum": ["jamf", "intune"],
+      "description": "MDM the record was collected from."
+    },
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "MDM-native stable identifier of the managed device (opaque, non-secret)."
+    },
+    "device_name": {
+      "type": "string",
+      "description": "Optional human-readable device / asset name (e.g. 'ENG-MBP-014'). An asset label, NOT owner personal contact detail."
+    },
+    "os_version": {
+      "type": "string",
+      "description": "Optional operating-system version string (e.g. '14.5', '10.0.22631')."
+    },
+    "platform": {
+      "type": "string",
+      "description": "Optional OS platform family (e.g. 'macOS', 'Windows'). Descriptive."
+    },
+    "disk_encryption_enabled": {
+      "type": "boolean",
+      "description": "Whether full-disk encryption (FileVault on macOS / BitLocker on Windows) is enabled."
+    },
+    "screen_lock_enabled": {
+      "type": "boolean",
+      "description": "Whether a screen-lock / passcode policy is enforced and compliant on the device."
+    },
+    "managed": {
+      "type": "boolean",
+      "description": "Whether the device is currently managed/supervised by the MDM."
+    },
+    "enrolled": {
+      "type": "boolean",
+      "description": "Whether the device is currently enrolled in the MDM."
+    },
+    "compliance_result": {
+      "type": "string",
+      "enum": ["compliant", "noncompliant", "unknown"],
+      "description": "The MDM's overall device-compliance verdict. Descriptive — the platform evaluator owns the final pass/fail per (control, scope)."
+    },
+    "owner_assignment_id": {
+      "type": "string",
+      "description": "Optional OPAQUE id of the assigned user — the minimum identity to attribute the device to an owner for an access review. NEVER the owner's personal email, phone, or address."
+    },
+    "owner_display_name": {
+      "type": "string",
+      "description": "Optional human-readable display name of the assigned user (e.g. 'A. Engineer'). Assignment identity, NOT contact detail."
+    }
+  }
+}
