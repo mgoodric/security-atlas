@@ -280,6 +280,119 @@ func TestDeliverDigest_NoCrossTenant(t *testing.T) {
 	}
 }
 
+// seedNotification inserts one unread notification of a given type for the
+// (tenant, user). Used by the slice 542 per-kind filter tests.
+func seedNotification(t *testing.T, admin *pgxpool.Pool, tenantID, userID uuid.UUID, typ string) {
+	t.Helper()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO notifications (id, tenant_id, recipient_user_id, type, payload, created_at)
+		VALUES ($1, $2, $3, $4, '{}'::jsonb, now())
+	`, uuid.New(), tenantID, userID.String(), typ); err != nil {
+		t.Fatalf("seed notification %s: %v", typ, err)
+	}
+}
+
+// seedEmailPref inserts a slice-108 per-event `email`-channel preference row
+// for the (tenant, user). Used to drive the slice 542 per-kind filter.
+func seedEmailPref(t *testing.T, admin *pgxpool.Pool, tenantID, userID uuid.UUID, event string, enabled bool) {
+	t.Helper()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO user_notification_preferences (tenant_id, user_id, event, channel, enabled, updated_at)
+		VALUES ($1, $2, $3, 'email', $4, now())
+	`, tenantID, userID, event, enabled); err != nil {
+		t.Fatalf("seed email pref %s=%v: %v", event, enabled, err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.Exec(context.Background(),
+			`DELETE FROM user_notification_preferences WHERE tenant_id = $1`, tenantID); err != nil {
+			t.Logf("cleanup prefs: %v", err)
+		}
+	})
+}
+
+// Slice 542 / AC + threat-model I: a per-kind `email=false` opt-out removes
+// THAT kind's count from the digest, but delivery is otherwise unchanged — the
+// digest still goes to the same account email (the master opt-in is on and at
+// least one un-muted kind remains). A muted kind must not redirect delivery.
+func TestDeliverDigest_PerKindMute_RemovesCountKeepsDelivery(t *testing.T) {
+	app, admin := openPools(t)
+	prov := &fakeProvider{}
+	ch := email.NewChannel(app, prov, "https://atlas.example.test")
+
+	// seedUser seeds one audit_note.reply already (unmapped -> always kept).
+	tenantID, userID := seedUser(t, admin, "perkind@example.test", true)
+	// Add a control.drift (mapped -> control_drift) and a policy_ack_due.
+	seedNotification(t, admin, tenantID, userID, "control.drift")
+	seedNotification(t, admin, tenantID, userID, "policy_ack_due")
+	// Mute control.drift via the email channel; leave policy_ack_due default-on.
+	seedEmailPref(t, admin, tenantID, userID, "control_drift", false)
+
+	ctx := tenantCtx(t, tenantID)
+	if err := ch.SetEmailOptIn(ctx, tenantID, userID, true); err != nil {
+		t.Fatalf("SetEmailOptIn: %v", err)
+	}
+
+	res, err := ch.DeliverDigest(ctx, userID, userID.String())
+	if err != nil {
+		t.Fatalf("DeliverDigest: %v", err)
+	}
+	if !res.Sent {
+		t.Fatalf("expected delivery (audit_note.reply + policy_ack_due survive): %+v", res)
+	}
+
+	prov.mu.Lock()
+	defer prov.mu.Unlock()
+	if len(prov.sent) != 1 {
+		t.Fatalf("expected exactly one send, got %d", len(prov.sent))
+	}
+	msg := prov.sent[0]
+	// Delivery is unchanged: same account email (P0-542-2, threat-model I).
+	if msg.Recipient != "perkind@example.test" {
+		t.Fatalf("recipient changed by filter: %q", msg.Recipient)
+	}
+	// The muted kind's label must NOT appear; the surviving kinds' must.
+	if strings.Contains(msg.HTMLBody, "Control-drift alerts") {
+		t.Fatalf("muted control.drift kind leaked into digest body:\n%s", msg.HTMLBody)
+	}
+	if !strings.Contains(msg.HTMLBody, "Policy acknowledgments due") {
+		t.Fatalf("expected surviving policy_ack_due in body:\n%s", msg.HTMLBody)
+	}
+	if !strings.Contains(msg.HTMLBody, "Audit-note replies") {
+		t.Fatalf("expected surviving (unmapped) audit_note.reply in body:\n%s", msg.HTMLBody)
+	}
+}
+
+// Slice 542: when EVERY unread kind is muted via per-kind `email=false`, the
+// digest has zero surviving kinds and is skipped (no empty email sent). Master
+// is on; the per-kind filter narrows to nothing.
+func TestDeliverDigest_AllKindsMuted_Skips(t *testing.T) {
+	app, admin := openPools(t)
+	prov := &fakeProvider{}
+	ch := email.NewChannel(app, prov, "https://atlas.example.test")
+
+	tenantID, userID := seedUser(t, admin, "allmuted@example.test", false)
+	seedNotification(t, admin, tenantID, userID, "control.drift")
+	seedNotification(t, admin, tenantID, userID, "policy_ack_due")
+	seedEmailPref(t, admin, tenantID, userID, "control_drift", false)
+	seedEmailPref(t, admin, tenantID, userID, "policy_ack_due", false)
+
+	ctx := tenantCtx(t, tenantID)
+	if err := ch.SetEmailOptIn(ctx, tenantID, userID, true); err != nil {
+		t.Fatalf("SetEmailOptIn: %v", err)
+	}
+
+	res, err := ch.DeliverDigest(ctx, userID, userID.String())
+	if err != nil {
+		t.Fatalf("DeliverDigest: %v", err)
+	}
+	if res.Sent {
+		t.Fatalf("all kinds muted should skip, not send: %+v", res)
+	}
+	if got := prov.recipients(); len(got) != 0 {
+		t.Fatalf("all-muted user got a send: %v", got)
+	}
+}
+
 // AC-8: a failing provider records outcome=failed and surfaces the error;
 // the digest is NOT marked sent (re-attemptable next tick).
 func TestDeliverDigest_FailureRecorded(t *testing.T) {

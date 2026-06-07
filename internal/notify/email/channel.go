@@ -139,14 +139,30 @@ func (c *Channel) DeliverDigest(ctx context.Context, userID uuid.UUID, recipient
 			return fmt.Errorf("email: list notifications: %w", err)
 		}
 		counts := map[string]int{}
-		unread := 0
 		for _, r := range rows {
 			if r.ReadAt.Valid {
 				continue // digest is unread-only
 			}
 			counts[r.Type]++
-			unread++
 		}
+
+		// Per-notification-kind filter (slice 542). The master opt-in is
+		// already confirmed ON above (P0-542-1); here we narrow WHICH kinds
+		// appear by consulting the slice-108 per-event `email` channel pref.
+		// Absent row / unmapped kind defaults to included (default-on,
+		// backward-compatible). This operates purely on the in-memory,
+		// already-RLS-scoped count map — recipient + tenant path are
+		// untouched (P0-542-2, threat-model I).
+		prefs, err := q.ListUserNotificationPreferences(ctx, dbx.ListUserNotificationPreferencesParams{
+			TenantID: pgUUID(tenantID),
+			UserID:   pgUUID(userID),
+		})
+		if err != nil {
+			return fmt.Errorf("email: list notification preferences: %w", err)
+		}
+		emailChannelByEvent := emailChannelPrefMap(prefs)
+		var unread int
+		counts, unread = filterCountsByEmailPref(counts, emailChannelByEvent)
 		if unread == 0 {
 			result = DeliveryResult{Skipped: true, Reason: "no unread notifications"}
 			return nil
@@ -246,6 +262,22 @@ func (c *Channel) inTx(ctx context.Context, fn func(context.Context, *dbx.Querie
 
 func pgUUID(u uuid.UUID) pgtype.UUID {
 	return pgtype.UUID{Bytes: u, Valid: true}
+}
+
+// emailChannelPrefMap projects the slice-108 preference rows down to the
+// `email` channel only, as event -> enabled. Presence of an event key means an
+// explicit `email`-channel row exists for that event (so default-on-missing-row
+// can distinguish "no row" from "row says false"). Non-`email` channel rows
+// (e.g. `in_app`) are ignored — this filter governs the email digest only.
+func emailChannelPrefMap(prefs []dbx.UserNotificationPreference) map[string]bool {
+	out := make(map[string]bool, len(prefs))
+	for _, p := range prefs {
+		if p.Channel != "email" {
+			continue
+		}
+		out[p.Event] = p.Enabled
+	}
+	return out
 }
 
 // truncErr bounds the last_error string written to the delivery log and
