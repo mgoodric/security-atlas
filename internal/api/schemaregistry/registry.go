@@ -112,6 +112,9 @@ func DefaultSeed() []KindVersion {
 		// on-call coverage + bounded-window incident summaries.
 		{Kind: "pagerduty.oncall_coverage.v1", Version: "1.0.0"},
 		{Kind: "pagerduty.incident_summary.v1", Version: "1.0.0"},
+		// Slice 490: MDM connectors (Jamf + Intune) — shared managed-device
+		// endpoint-posture summary evidence kind (SOC 2 CC6.7 / CC6.8, ISO A.8).
+		{Kind: "endpoint.device_posture.v1", Version: "1.0.0"},
 		// Slice 023: policy acknowledgment workflow. Each
 		// POST /v1/policies/{id}/acknowledge emits one record of this
 		// kind through the slice-013 evidence ledger.
