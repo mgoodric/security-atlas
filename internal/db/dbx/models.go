@@ -947,6 +947,19 @@ type AuditorAssignment struct {
 	GrantedBy     string             `json:"granted_by"`
 }
 
+type BackupRun struct {
+	ID           pgtype.UUID        `json:"id"`
+	Kind         string             `json:"kind"`
+	TargetKind   *string            `json:"target_kind"`
+	ArtifactName *string            `json:"artifact_name"`
+	Outcome      string             `json:"outcome"`
+	SizeBytes    int64              `json:"size_bytes"`
+	ContentHash  string             `json:"content_hash"`
+	Detail       string             `json:"detail"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	FinishedAt   pgtype.Timestamptz `json:"finished_at"`
+}
+
 type BoardBrief struct {
 	ID          pgtype.UUID        `json:"id"`
 	TenantID    pgtype.UUID        `json:"tenant_id"`

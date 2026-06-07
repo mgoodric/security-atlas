@@ -61,6 +61,7 @@ sql:
       - "migrations/sql/20260606010000_oscal_imported_catalogs.sql"
       - "migrations/sql/20260607000000_ai_generations.sql"
       - "migrations/sql/20260607020000_email_delivery_channel.sql"
+      - "migrations/sql/20260607030000_backup_runs.sql"
     queries: "internal/db/queries"
     gen:
       go:

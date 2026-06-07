@@ -40,6 +40,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/backup"
 	metricscatalog "github.com/mgoodric/security-atlas/internal/catalog/metrics"
 	"github.com/mgoodric/security-atlas/internal/decision"
 	"github.com/mgoodric/security-atlas/internal/eval"
@@ -1023,6 +1024,64 @@ func main() {
 					errCh <- fmt.Errorf("metrics scheduler: %w", err)
 				}
 			}()
+		}
+	}
+
+	// Slice 510: automated backup + scheduled restore-verification. Two
+	// in-process tick-loops (mirroring the exception-expiry / metrics
+	// schedulers — no external cron for the single-VM self-host target).
+	// Both run as the migrator role (BYPASSRLS): a backup is a full
+	// cross-tenant dump (the deliberate, deployment-privileged RLS-boundary
+	// crossing the slice doc names) and backup_runs is granted to
+	// atlas_migrate ONLY (P0-510-1). Only mounts when the migrator URL is
+	// available (the same guard the other sweeps use).
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" {
+		bkCtx, bkCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		bkPool, err := atlasotel.NewTracedPool(bkCtx, migratorURL)
+		bkCancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: backup pool: %v\n", err)
+		} else {
+			bcfg := backup.ConfigFromEnv()
+			target, terr := backup.BuildTarget(context.Background(), bcfg, os.Getenv("ATLAS_BACKUP_S3_ENDPOINT"))
+			if terr != nil {
+				fmt.Fprintf(os.Stderr, "atlas: backup target: %v\n", terr)
+				bkPool.Close()
+			} else {
+				backuper := backup.NewBackuper(bkPool, target, bcfg, logger)
+				verifier := backup.NewVerifier(bkPool, target, migratorURL, bcfg.MaintenanceDB, logger)
+				// D9 / AC-6: on a failure, raise an in-app notification that
+				// composes with the slice-445 email channel. Targets the
+				// configured alert tenant + recipient (defaults to the
+				// bootstrap tenant); inert (log-only) when unconfigured.
+				alertTenant, alertRecipient := backup.AlertConfigFromEnv(os.LookupEnv)
+				alerter := backup.NewNotificationAlerter(bkPool, alertTenant, alertRecipient, logger)
+				backuper.SetAlertHook(alerter)
+				verifier.SetAlertHook(alerter)
+				// Both loops share bkPool; close it only once both have
+				// returned (they both stop on ctx cancel). An inner WaitGroup
+				// coordinates the single close without a double-close race.
+				var bkWG sync.WaitGroup
+				bkWG.Add(2)
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					bkWG.Wait()
+					bkPool.Close()
+				}()
+				go func() {
+					defer bkWG.Done()
+					fmt.Fprintf(os.Stderr, "atlas: backup scheduler ticking every %s (target=%s)\n",
+						bcfg.Interval.String(), bcfg.TargetKind)
+					backuper.RunBackup(ctx, bcfg.Interval)
+				}()
+				go func() {
+					defer bkWG.Done()
+					fmt.Fprintf(os.Stderr, "atlas: restore-verification scheduler ticking every %s\n",
+						bcfg.VerifyInterval.String())
+					verifier.RunVerify(ctx, bcfg.VerifyInterval)
+				}()
+			}
 		}
 	}
 
