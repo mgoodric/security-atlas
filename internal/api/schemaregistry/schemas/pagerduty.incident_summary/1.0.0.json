@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/pagerduty.incident_summary/1.0.0.json",
+  "x-evidence-kind": "pagerduty.incident_summary.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IRO-02", "IRO-09"],
+  "title": "PagerDuty incident summary",
+  "description": "One record per incident over a bounded look-back window: the incident's opaque id and number, urgency, status, the affected service identity, and the created / resolved timestamps. Pulled read-only from the PagerDuty REST API (incidents endpoint, since/until window). SUMMARY metadata ONLY — never the incident's free-text title, body, notes, customer data, postmortem text, or any responder personal contact detail. Proves incidents are detected, handled, and resolved (SOC 2 CC7.3/CC7.4/CC7.5; SCF IRO-02 Incident Handling, IRO-09 Incident Reporting). The connector reports a descriptive incident posture; the platform evaluator owns the final pass/fail per (control, scope). x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["incident_id", "status", "urgency", "created_at"],
+  "properties": {
+    "incident_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "PagerDuty-native stable identifier of the incident (an opaque ID, not a credential)."
+    },
+    "incident_number": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "PagerDuty-native sequential incident number (non-secret label)."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["triggered", "acknowledged", "resolved"],
+      "description": "Incident lifecycle status."
+    },
+    "urgency": {
+      "type": "string",
+      "enum": ["high", "low"],
+      "description": "PagerDuty incident urgency."
+    },
+    "service_id": {
+      "type": "string",
+      "description": "Opaque id of the affected PagerDuty service (non-secret label)."
+    },
+    "service_name": {
+      "type": "string",
+      "description": "Display name of the affected service. A service name, never incident free-text."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the incident was created (RFC 3339)."
+    },
+    "resolved_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the incident was resolved (RFC 3339); absent if not yet resolved."
+    }
+  }
+}

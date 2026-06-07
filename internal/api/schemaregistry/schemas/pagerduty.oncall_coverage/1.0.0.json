@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/pagerduty.oncall_coverage/1.0.0.json",
+  "x-evidence-kind": "pagerduty.oncall_coverage.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IRO-04", "IRO-07"],
+  "title": "PagerDuty on-call coverage",
+  "description": "One record per escalation policy: the policy's identity, the escalation tiers it defines, and WHO is currently on call at each tier (the on-call IDENTITY needed to prove coverage — assignee opaque user id + display name). Pulled read-only from the PagerDuty REST API (escalation policies + on-call endpoints). Coverage FACTS + on-call identity only — never a responder's personal phone number, personal email, or other personal contact detail, and never incident free-text. Proves an incident-response capability exists and is staffed (SOC 2 CC7.4; SCF IRO-04 Incident Response Plan, IRO-07 Incident Response Team). The connector reports a descriptive coverage posture; the platform evaluator owns the final pass/fail per (control, scope). x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "escalation_policy_id",
+    "escalation_policy_name",
+    "num_tiers",
+    "covered"
+  ],
+  "properties": {
+    "escalation_policy_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "PagerDuty-native stable identifier of the escalation policy (an opaque ID, not a credential)."
+    },
+    "escalation_policy_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable name of the escalation policy."
+    },
+    "num_tiers": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of escalation tiers (rules) defined on the policy. A coverage fact, not a credential."
+    },
+    "covered": {
+      "type": "boolean",
+      "description": "Whether at least one tier currently has an on-call assignee (the coverage posture for this policy)."
+    },
+    "tiers": {
+      "type": "array",
+      "description": "The escalation tiers in order, each with the on-call identities responsible at that tier. Identity (id + display name) only — never personal contact details.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["level", "on_call"],
+        "properties": {
+          "level": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "1-based escalation tier level (1 = first responders)."
+          },
+          "on_call": {
+            "type": "array",
+            "description": "On-call assignees at this tier — the identity needed to prove coverage. NEVER personal phone/personal email.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["assignee_kind", "assignee_id", "assignee_name"],
+              "properties": {
+                "assignee_kind": {
+                  "type": "string",
+                  "enum": ["user", "schedule"],
+                  "description": "Whether the tier escalates to a specific user or to an on-call schedule."
+                },
+                "assignee_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "PagerDuty-native opaque id of the on-call user or schedule (not a credential)."
+                },
+                "assignee_name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Display name of the on-call user or schedule. The IDENTITY needed to prove coverage — never a personal phone number or personal email address."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
