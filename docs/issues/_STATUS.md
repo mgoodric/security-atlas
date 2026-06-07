@@ -3,7 +3,22 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-07 (batch 213 reconcile — 549 edge-upgrade "pull the compose" runbook + 490 Jamf+Intune MDM connectors MERGED. 490 brings the connector count to 14. Spillovers 555-557 registered ready, 550-554 unused.)
+**Last reconciled:** 2026-06-07 (batch 214 reconcile — 514 full NIST CSF 2.0 coverage (35→106 Subcategories; invariant #1 proven at 4 frameworks via IAC-01), 476 demo-data reachability verification + CLI hint, 542 per-notification-kind email preferences ALL MERGED. Spillover 566 registered ready, 558-565 unused.)
+
+## Reconcile — 2026-06-07 (batch 214 · 514 + 476 + 542 merged)
+
+All three merged. 514 (#1100, `e19faf7a`) + 476 (#1098, `967d9afc`) + 542 (#1099, `0f3dd94c`); claim-stake #1097 (`b988b254`).
+
+- **514** (NIST CSF 2.0 full Subcategory coverage) — **MERGED**. Catalog-only data: `data/crosswalks/nist-csf-2.0.yaml` extended 35→**106** Subcategories (GV 31 / ID 21 / PR 22 / DE 11 / RS 13 / RC 8) on the slice-438 generic importer, zero loader code. Every edge requirement → SCF anchor (invariant #7); all 106 anchors resolve against the seeded sample catalog. Invariant #1 proof scales to 4 frameworks through the single IAC-01 anchor. 28 residual ≤0.65 low-confidence rows flagged in the decisions log (palette-bound; revisit on full-catalog import). No spillover.
+- **476** (demo-data reachability) — **MERGED**. Reduced to verification: a new `internal/api/adminusers` integration test pins the composed journey (real `demoseed.Seeder` → 478 self-assign → 192 resolver → dataset reachable), plus a 3-line `atlas-cli demo seed` reach-it hint closing the discoverability rough edge. Mechanism unchanged (478/479/192 own it; no duplication). detection_tier actual=production / target=integration. No spillover.
+- **542** (per-notification-kind email preferences) — **MERGED**. The 445 digest now consults the existing slice-108 `user_notification_preferences` per-event `email` column (no migration). Composition = master AND per-kind; **default-on-missing-row** (backward-compatible — a kind is suppressed only by an explicit `email=false`). Pure-Go `kindfilter.go` + 4 semantics unit cases + 2 integration tests. Spillover 566 filed (per-kind opt-out for the 2 unmapped kinds).
+
+| Row | Transition               | Evidence                                                                                                                                                                           |
+| --- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 514 | `in-progress` → `merged` | #1100 · `e19faf7a`                                                                                                                                                                 |
+| 476 | `in-progress` → `merged` | #1098 · `967d9afc`                                                                                                                                                                 |
+| 542 | `in-progress` → `merged` | #1099 · `0f3dd94c`                                                                                                                                                                 |
+| 566 | (new) → `ready`          | per-kind email prefs for unmapped kinds (audit_note.reply / evidence.staleness) · parent #542 (merged) · `docs/issues/566-per-kind-email-prefs-for-unmapped-notification-kinds.md` |
 
 ## Drift detected — 2026-06-07 (batch 214 claim-stake · 514 + 476 + 542)
 
@@ -363,67 +378,67 @@ First build batch off the gap-analysis backlog — anchors on the worst real-def
 
 Maintainer-directed comprehensive gap analysis (5 parallel domain investigators: frameworks · connectors · evidence/audit/OSCAL · AI-assist/reporting · risk/policy/privacy/platform), each filing genuine missing-functionality slices via the /idea-to-slice method (template + mandatory STRIDE). Filed in 5 themed PRs (#1035 frameworks 480-484 · #1034 connectors 486-491 · #1038 audit/OSCAL 492-496 · #1037 AI 498-502 · #1036 risk/platform 504-510); rows registered here in one batch (per-slice registration infeasible at 28-scale). Blocks 485/497/503 left unused (quality over quantity). **Three findings are real defects, not just gaps:** 495 (control-as-code accepts rego|sql|jsonpath at upload but only EVALUATES rego — SQL/JSONpath controls silently produce no state) · 492 (OSCAL import missing = direct invariant-#8 violation) · 498 (the shared internal/llm foundation that 440/441/444/471 all assume has no owner). Investigators VERIFIED much is already built (push-cred UX, freshness alerting, risk methodology, policy lifecycle + 5 templates, exceptions, FrameworkScope workflow, Helm, all 4 OSCAL exports). Deliberately NOT filed: NIST 800-53 (alt anchor catalog), GDPR crosswalk (privacy-decision-entangled), trust center (v3/vanity anti-pattern), linear/bitwarden/workday connectors (sibling-covered/upper-market).
 
-| Row | Transition              | Evidence                                                                                                                                               |
-| --- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 480 | `merged`                | NIST CSF 2.0 crosswalk (4th framework) · #1035 spec · #1064 impl `67c1a71f` · batch 204 · 4-framework invariant-#1 proof                               |
-| 514 | `ready` → `in-progress` | full CSF 2.0 Subcategory coverage (~71 remaining) + low-confidence re-map · Catalog · parent #480 · #1064 · batch 214 `catalog/514-csf-full`           |
-| 515 | `ready`                 | CSF Tier/Profile assessment workflow (maturity construct) · parent #480 · #1064                                                                        |
-| 481 | `merged`                | HIPAA Security Rule crosswalk (catalog-only) · #1035 spec · #1067 impl `ea45ba61` · batch 205 · completes §10.2 4-framework set (invariant #1 × 5)     |
-| 516 | `ready`                 | full HIPAA Security Rule coverage (§164.314/§164.316 + remaining) · Catalog · parent #481 · #1067                                                      |
-| 517 | `not-ready`             | HIPAA covered-entity workflow (BAA / required-vs-addressable / breach) · DEFERRED canvas §10.3 phase-3 · parent #481 · #1067                           |
-| 518 | `not-ready`             | HIPAA FrameworkScope ePHI-environment example · DEFERRED (pairs with #517) · parent #481 · #1067                                                       |
-| 482 | `merged`                | coverage-strength rollup + confidence-band UI (canvas §3.2 promise) · #1035 spec · #1081 impl `daeff078` · batch 209                                   |
-| 536 | `not-ready`             | crosswalk-review / conflict editing UI · DEFERRED · parent #482 · #1081                                                                                |
-| 537 | `not-ready`             | cross-framework coverage-strength comparison matrix · DEFERRED · parent #482 · #1081                                                                   |
-| 483 | (new) → `not-ready`     | mapping-tier governance · needs ADR/decision · #1035                                                                                                   |
-| 484 | (new) → `not-ready`     | framework versioning capability · needs concrete 2nd version · #1035                                                                                   |
-| 486 | `merged`                | Azure connector (Entra ID + Storage) · #1034 spec · #1070 impl `d4405209` · batch 206 · 8th connector / 3rd major cloud                                |
-| 519 | `ready`                 | Azure AKS workload-config evidence · Connectors · parent #486 · #1070                                                                                  |
-| 520 | `ready`                 | Azure NSG / firewall evidence · Connectors · parent #486 · #1070                                                                                       |
-| 521 | `ready`                 | Azure Key-Vault access-policy evidence · Connectors · parent #486 · #1070                                                                              |
-| 522 | `ready`                 | Azure event-driven profile (Event Grid / Activity-Log) · Connectors · parent #486 · #1070                                                              |
-| 487 | `merged`                | Kubernetes connector (RBAC + workload config) · #1034 spec · #1073 impl `4f233e76` · batch 207 · 9th connector                                         |
-| 523 | `ready`                 | K8s NetworkPolicy coverage evidence · Connectors · parent #487 · #1073                                                                                 |
-| 524 | `ready`                 | K8s Pod-Security-Standards admission-config evidence · Connectors · parent #487 · #1073                                                                |
-| 525 | `ready`                 | K8s Secret-inventory (metadata-only) evidence · Connectors · parent #487 · #1073                                                                       |
-| 526 | `ready`                 | K8s watch-based event-driven profile (audit log) · Connectors · parent #487 · #1073                                                                    |
-| 527 | `merged`                | admin user-assign dialog user+tenant dropdowns · Frontend · maintainer UX req on 479 · #1074 spec · #1077 impl `fcd4fb8c` · batch 208                  |
-| 488 | `merged`                | Datadog + Grafana monitoring connectors (10th+11th) · #1034 spec · #1078 impl `9fe3db71` · batch 208                                                   |
-| 528 | `not-ready`             | admin-assign searchable combobox (large-list scale) · DEFERRED · parent #527 · #1077                                                                   |
-| 533 | `ready`                 | Datadog Cloud-SIEM rule evidence · Connectors · parent #488 · #1078                                                                                    |
-| 534 | `ready`                 | Grafana SAML/RBAC config evidence · Connectors · parent #488 · #1078                                                                                   |
-| 535 | `ready`                 | monitoring alert-firing-history event-driven profile · Connectors · parent #488 · #1078                                                                |
-| 489 | `merged`                | PagerDuty connector (incident evidence; 12th connector) · #1034 spec · #1084 impl `b86e3d1a` · batch 210                                               |
-| 538 | `ready`                 | PagerDuty postmortem/retrospective evidence · Connectors · parent #489 · #1084                                                                         |
-| 539 | `ready`                 | PagerDuty responder-performance metrics · Connectors · parent #489 · #1084                                                                             |
-| 540 | `ready`                 | PagerDuty event-driven webhook profile · Connectors · parent #489 · #1084                                                                              |
-| 490 | `merged`                | Jamf + Intune MDM connectors · #1034 · batch 213 · #1095 `190b038e` · 14th connector                                                                   |
-| 491 | (new) → `ready`         | Rippling + BambooHR HRIS connectors · #1034                                                                                                            |
-| 492 | `merged`                | OSCAL import (catalog import) — invariant-#8 gap CLOSED · #1038 spec · #1047 impl `4e6ce46f` · batch 199                                               |
-| 493 | `merged`                | SSP control-implementation narratives (authored, not placeholder) · #1038 spec · #1057 impl `6259c45a` · batch 202                                     |
-| 494 | `merged`                | AR sampled-evidence IDs + walkthrough attachments · #1038 spec · #1061 impl `978a6320` · batch 203 · OSCAL audit-export story complete                 |
-| 495 | (new) → `ready`         | control-as-code SQL + JSON-path eval (silently-ignored bug) · #1038                                                                                    |
-| 496 | (new) → `ready`         | control-bundle test runner (fixture evidence → expected pass/fail) · #1038                                                                             |
-| 498 | `merged`                | shared internal/llm inference foundation + ai_generations + DB enforcement · #1037 spec · #1050 impl `7ba9bd4b` · batch 200 · unblocks 440/441/444/471 |
-| 499 | `ready`                 | cloud-LLM opt-in per-tenant + banner · dep 498 merged · #1037 (LLM infra follow-on)                                                                    |
-| 500 | `ready`                 | pgvector semantic-retrieval grounding · dep 498 merged · #1037 (LLM infra follow-on)                                                                   |
-| 501 | `not-ready`             | full multi-section board narrative + numeric verification + banned-phrase wiring · dep 498 ✓ + 440 (unmerged) · #1037                                  |
-| 502 | `ready`                 | AI evidence summarization v0 · dep 498 merged · #1037 (AI-assist v0 SURFACE — maintainer-sequencing caution)                                           |
-| 513 | `merged`                | correct AI-assist-boundary canonical-adopter doc (QuestionnaireAnswer→mcp_write_proposals) · Docs · parent #498 · #1060 impl `1dfcdb2e` · batch 203    |
-| 504 | (new) → `not-ready`     | privacy v0: right-to-erasure (tombstone) · privacy-v0 greenlight · #1036                                                                               |
-| 505 | (new) → `not-ready`     | privacy v0: DSAR export · privacy-v0 greenlight · #1036                                                                                                |
-| 506 | (new) → `not-ready`     | privacy v0: RoPA (5 high-signal seeds, not 50) · privacy-v0 greenlight · #1036                                                                         |
-| 507 | (new) → `not-ready`     | breach-notification workflow impl · dep 446 decision · #1036                                                                                           |
-| 508 | (new) → `ready`         | SCIM 2.0 user-lifecycle provisioning · #1036                                                                                                           |
-| 509 | (new) → `ready`         | IdP group→role mapping + multi-IdP · #1036                                                                                                             |
-| 510 | `merged`                | automated backup + scheduled restore-verification · #1036 spec · #1090 impl `a9cdbcee` · batch 212 · BCP/DR loop real                                  |
-| 544 | `not-ready`             | PITR / WAL archiving (sub-dump RPO) · DEFERRED · parent #510 · #1090                                                                                   |
-| 545 | `not-ready`             | Helm/K8s-native backup operator · DEFERRED · parent #510 · #1090                                                                                       |
-| 546 | `not-ready`             | cross-region backup replication · DEFERRED (OQ #03) · parent #510 · #1090                                                                              |
-| 549 | `merged`                | edge-upgrade runbook "pull the compose, not just the image" · Docs · maintainer req · #1091 · batch 213 · #1094 `1fed76e8`                             |
-| 555 | `ready`                 | MDM software-inventory evidence · parent #490 (merged) · Connectors · `docs/issues/555-mdm-software-inventory-evidence.md`                             |
-| 556 | `ready`                 | MDM config-profile-detail evidence · parent #490 (merged) · Connectors · `docs/issues/556-mdm-config-profile-detail-evidence.md`                       |
-| 557 | `ready`                 | MDM event-driven webhook profile · parent #490 (merged) · Connectors · `docs/issues/557-mdm-event-driven-webhook-profile.md`                           |
+| Row | Transition          | Evidence                                                                                                                                               |
+| --- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 480 | `merged`            | NIST CSF 2.0 crosswalk (4th framework) · #1035 spec · #1064 impl `67c1a71f` · batch 204 · 4-framework invariant-#1 proof                               |
+| 514 | `merged`            | full CSF 2.0 Subcategory coverage (35→106) + low-confidence re-map · Catalog · parent #480 · batch 214 · #1100 `e19faf7a` · invariant #1 ×4 frameworks |
+| 515 | `ready`             | CSF Tier/Profile assessment workflow (maturity construct) · parent #480 · #1064                                                                        |
+| 481 | `merged`            | HIPAA Security Rule crosswalk (catalog-only) · #1035 spec · #1067 impl `ea45ba61` · batch 205 · completes §10.2 4-framework set (invariant #1 × 5)     |
+| 516 | `ready`             | full HIPAA Security Rule coverage (§164.314/§164.316 + remaining) · Catalog · parent #481 · #1067                                                      |
+| 517 | `not-ready`         | HIPAA covered-entity workflow (BAA / required-vs-addressable / breach) · DEFERRED canvas §10.3 phase-3 · parent #481 · #1067                           |
+| 518 | `not-ready`         | HIPAA FrameworkScope ePHI-environment example · DEFERRED (pairs with #517) · parent #481 · #1067                                                       |
+| 482 | `merged`            | coverage-strength rollup + confidence-band UI (canvas §3.2 promise) · #1035 spec · #1081 impl `daeff078` · batch 209                                   |
+| 536 | `not-ready`         | crosswalk-review / conflict editing UI · DEFERRED · parent #482 · #1081                                                                                |
+| 537 | `not-ready`         | cross-framework coverage-strength comparison matrix · DEFERRED · parent #482 · #1081                                                                   |
+| 483 | (new) → `not-ready` | mapping-tier governance · needs ADR/decision · #1035                                                                                                   |
+| 484 | (new) → `not-ready` | framework versioning capability · needs concrete 2nd version · #1035                                                                                   |
+| 486 | `merged`            | Azure connector (Entra ID + Storage) · #1034 spec · #1070 impl `d4405209` · batch 206 · 8th connector / 3rd major cloud                                |
+| 519 | `ready`             | Azure AKS workload-config evidence · Connectors · parent #486 · #1070                                                                                  |
+| 520 | `ready`             | Azure NSG / firewall evidence · Connectors · parent #486 · #1070                                                                                       |
+| 521 | `ready`             | Azure Key-Vault access-policy evidence · Connectors · parent #486 · #1070                                                                              |
+| 522 | `ready`             | Azure event-driven profile (Event Grid / Activity-Log) · Connectors · parent #486 · #1070                                                              |
+| 487 | `merged`            | Kubernetes connector (RBAC + workload config) · #1034 spec · #1073 impl `4f233e76` · batch 207 · 9th connector                                         |
+| 523 | `ready`             | K8s NetworkPolicy coverage evidence · Connectors · parent #487 · #1073                                                                                 |
+| 524 | `ready`             | K8s Pod-Security-Standards admission-config evidence · Connectors · parent #487 · #1073                                                                |
+| 525 | `ready`             | K8s Secret-inventory (metadata-only) evidence · Connectors · parent #487 · #1073                                                                       |
+| 526 | `ready`             | K8s watch-based event-driven profile (audit log) · Connectors · parent #487 · #1073                                                                    |
+| 527 | `merged`            | admin user-assign dialog user+tenant dropdowns · Frontend · maintainer UX req on 479 · #1074 spec · #1077 impl `fcd4fb8c` · batch 208                  |
+| 488 | `merged`            | Datadog + Grafana monitoring connectors (10th+11th) · #1034 spec · #1078 impl `9fe3db71` · batch 208                                                   |
+| 528 | `not-ready`         | admin-assign searchable combobox (large-list scale) · DEFERRED · parent #527 · #1077                                                                   |
+| 533 | `ready`             | Datadog Cloud-SIEM rule evidence · Connectors · parent #488 · #1078                                                                                    |
+| 534 | `ready`             | Grafana SAML/RBAC config evidence · Connectors · parent #488 · #1078                                                                                   |
+| 535 | `ready`             | monitoring alert-firing-history event-driven profile · Connectors · parent #488 · #1078                                                                |
+| 489 | `merged`            | PagerDuty connector (incident evidence; 12th connector) · #1034 spec · #1084 impl `b86e3d1a` · batch 210                                               |
+| 538 | `ready`             | PagerDuty postmortem/retrospective evidence · Connectors · parent #489 · #1084                                                                         |
+| 539 | `ready`             | PagerDuty responder-performance metrics · Connectors · parent #489 · #1084                                                                             |
+| 540 | `ready`             | PagerDuty event-driven webhook profile · Connectors · parent #489 · #1084                                                                              |
+| 490 | `merged`            | Jamf + Intune MDM connectors · #1034 · batch 213 · #1095 `190b038e` · 14th connector                                                                   |
+| 491 | (new) → `ready`     | Rippling + BambooHR HRIS connectors · #1034                                                                                                            |
+| 492 | `merged`            | OSCAL import (catalog import) — invariant-#8 gap CLOSED · #1038 spec · #1047 impl `4e6ce46f` · batch 199                                               |
+| 493 | `merged`            | SSP control-implementation narratives (authored, not placeholder) · #1038 spec · #1057 impl `6259c45a` · batch 202                                     |
+| 494 | `merged`            | AR sampled-evidence IDs + walkthrough attachments · #1038 spec · #1061 impl `978a6320` · batch 203 · OSCAL audit-export story complete                 |
+| 495 | (new) → `ready`     | control-as-code SQL + JSON-path eval (silently-ignored bug) · #1038                                                                                    |
+| 496 | (new) → `ready`     | control-bundle test runner (fixture evidence → expected pass/fail) · #1038                                                                             |
+| 498 | `merged`            | shared internal/llm inference foundation + ai_generations + DB enforcement · #1037 spec · #1050 impl `7ba9bd4b` · batch 200 · unblocks 440/441/444/471 |
+| 499 | `ready`             | cloud-LLM opt-in per-tenant + banner · dep 498 merged · #1037 (LLM infra follow-on)                                                                    |
+| 500 | `ready`             | pgvector semantic-retrieval grounding · dep 498 merged · #1037 (LLM infra follow-on)                                                                   |
+| 501 | `not-ready`         | full multi-section board narrative + numeric verification + banned-phrase wiring · dep 498 ✓ + 440 (unmerged) · #1037                                  |
+| 502 | `ready`             | AI evidence summarization v0 · dep 498 merged · #1037 (AI-assist v0 SURFACE — maintainer-sequencing caution)                                           |
+| 513 | `merged`            | correct AI-assist-boundary canonical-adopter doc (QuestionnaireAnswer→mcp_write_proposals) · Docs · parent #498 · #1060 impl `1dfcdb2e` · batch 203    |
+| 504 | (new) → `not-ready` | privacy v0: right-to-erasure (tombstone) · privacy-v0 greenlight · #1036                                                                               |
+| 505 | (new) → `not-ready` | privacy v0: DSAR export · privacy-v0 greenlight · #1036                                                                                                |
+| 506 | (new) → `not-ready` | privacy v0: RoPA (5 high-signal seeds, not 50) · privacy-v0 greenlight · #1036                                                                         |
+| 507 | (new) → `not-ready` | breach-notification workflow impl · dep 446 decision · #1036                                                                                           |
+| 508 | (new) → `ready`     | SCIM 2.0 user-lifecycle provisioning · #1036                                                                                                           |
+| 509 | (new) → `ready`     | IdP group→role mapping + multi-IdP · #1036                                                                                                             |
+| 510 | `merged`            | automated backup + scheduled restore-verification · #1036 spec · #1090 impl `a9cdbcee` · batch 212 · BCP/DR loop real                                  |
+| 544 | `not-ready`         | PITR / WAL archiving (sub-dump RPO) · DEFERRED · parent #510 · #1090                                                                                   |
+| 545 | `not-ready`         | Helm/K8s-native backup operator · DEFERRED · parent #510 · #1090                                                                                       |
+| 546 | `not-ready`         | cross-region backup replication · DEFERRED (OQ #03) · parent #510 · #1090                                                                              |
+| 549 | `merged`            | edge-upgrade runbook "pull the compose, not just the image" · Docs · maintainer req · #1091 · batch 213 · #1094 `1fed76e8`                             |
+| 555 | `ready`             | MDM software-inventory evidence · parent #490 (merged) · Connectors · `docs/issues/555-mdm-software-inventory-evidence.md`                             |
+| 556 | `ready`             | MDM config-profile-detail evidence · parent #490 (merged) · Connectors · `docs/issues/556-mdm-config-profile-detail-evidence.md`                       |
+| 557 | `ready`             | MDM event-driven webhook profile · parent #490 (merged) · Connectors · `docs/issues/557-mdm-event-driven-webhook-profile.md`                           |
 
 Ready now (20): 480,481,482,486,487,488,489,491,492,493,494,495,496,498,508,509,510,555,556,557. Not-ready (10): 483,484 (framework decisions) · 499,500,501,502 (dep 498) · 504,505,506 (privacy-v0 greenlight) · 507 (dep 446). The loop can pick the 18 ready (conflict-class discipline applies — connectors share schemaregistry; new-package slices share coverage-thresholds; 492/493/494 share internal/oscal). The 3 real-defect slices (495/492/498) are high-value priorities.
 
@@ -431,13 +446,13 @@ Ready now (20): 480,481,482,486,487,488,489,491,492,493,494,495,496,498,508,509,
 
 The maintainer approved + merged the demo-support-session spec PRs (#1023, #1029, #1031). Registering their rows. (475's impl already merged at `37155f96` in batch 197; its doc landed with #1029.)
 
-| Row | Transition              | Evidence                                                                                                                                                                           |
-| --- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 473 | (new) → `ready`         | `docs/issues/473-*.md` · migrate-on-upgrade (fail-closed) · spec PR #1023 merged · prod-confirmed gap                                                                              |
-| 475 | (new) → `merged`        | `docs/issues/475-*.md` · PDF render degrades to 503 · impl merged `37155f96` (#1030); doc landed via #1029                                                                         |
-| 476 | `ready` → `in-progress` | `docs/issues/476-*.md` · demo-data reachability (reduced to verification) · spec PR #1029 · batch 214 `fix/476-demo-reachable`                                                     |
-| 478 | `merged`                | `docs/issues/478-*.md` · super-admin user↔tenant↔role assignment API (incl self-assign) · #1031 spec · #1053 impl `8fe11520` · batch 201 · unblocks 479 + subsumes 476 mechanism |
-| 479 | `merged`                | `docs/issues/479-*.md` · admin user-mgmt UI · dep #478 merged · #1031 spec · #1056 impl `7b970cc7` · batch 202 · user-mgmt feature complete e2e                                    |
+| Row | Transition       | Evidence                                                                                                                                                                           |
+| --- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 473 | (new) → `ready`  | `docs/issues/473-*.md` · migrate-on-upgrade (fail-closed) · spec PR #1023 merged · prod-confirmed gap                                                                              |
+| 475 | (new) → `merged` | `docs/issues/475-*.md` · PDF render degrades to 503 · impl merged `37155f96` (#1030); doc landed via #1029                                                                         |
+| 476 | `merged`         | `docs/issues/476-*.md` · demo-data reachability verification + CLI hint · batch 214 · #1098 `967d9afc`                                                                             |
+| 478 | `merged`         | `docs/issues/478-*.md` · super-admin user↔tenant↔role assignment API (incl self-assign) · #1031 spec · #1053 impl `8fe11520` · batch 201 · unblocks 479 + subsumes 476 mechanism |
+| 479 | `merged`         | `docs/issues/479-*.md` · admin user-mgmt UI · dep #478 merged · #1031 spec · #1056 impl `7b970cc7` · batch 202 · user-mgmt feature complete e2e                                    |
 
 These join the batch-197 spillovers 474 (ingest-hash) + 477 (walkthrough-PDF), both `ready`. 478 unblocks 479; once 478's IMPLEMENTATION lands (a future build, not the spec), 479 flips to `ready`. The AI-assist set (440/441/444/471) remains maintainer-sequenced.
 
@@ -660,52 +675,53 @@ Maintainer-directed deep analysis (6 parallel investigators: CI · testing · do
 
 **Notes:** 447 (PCI crosswalk) is `not-ready` — dep #438 (generic loader) unmerged. 449 (OPA upgrade) re-scopes to _post-upgrade regression validation_ — OPA 1.17 already merged clean via dependabot #953. 446 + 455 are decision-only spikes (ADR, no-auto-merge). 440/441/444 are AI-assist (board-narrative / questionnaire / gap-explanation) governed by the CLAUDE.md AI-assist boundary. ESLint 10 NOT filed (already slice 095).
 
-| Row | Transition              | Evidence                                                                                                     |
-| --- | ----------------------- | ------------------------------------------------------------------------------------------------------------ |
-| 415 | (new) → `ready`         | `docs/issues/415-*.md` · filed via /idea-to-slice                                                            |
-| 416 | (new) → `ready`         | `docs/issues/416-*.md` · filed via /idea-to-slice                                                            |
-| 417 | (new) → `ready`         | `docs/issues/417-*.md` · filed via /idea-to-slice                                                            |
-| 418 | (new) → `ready`         | `docs/issues/418-*.md` · filed via /idea-to-slice                                                            |
-| 419 | (new) → `ready`         | `docs/issues/419-*.md` · filed via /idea-to-slice                                                            |
-| 420 | (new) → `ready`         | `docs/issues/420-*.md` · filed via /idea-to-slice                                                            |
-| 421 | (new) → `ready`         | `docs/issues/421-*.md` · filed via /idea-to-slice                                                            |
-| 422 | (new) → `ready`         | `docs/issues/422-*.md` · filed via /idea-to-slice                                                            |
-| 423 | (new) → `ready`         | `docs/issues/423-*.md` · filed via /idea-to-slice                                                            |
-| 424 | (new) → `ready`         | `docs/issues/424-*.md` · filed via /idea-to-slice                                                            |
-| 425 | (new) → `ready`         | `docs/issues/425-*.md` · filed via /idea-to-slice                                                            |
-| 426 | (new) → `ready`         | `docs/issues/426-*.md` · filed via /idea-to-slice                                                            |
-| 427 | (new) → `ready`         | `docs/issues/427-*.md` · filed via /idea-to-slice                                                            |
-| 428 | (new) → `ready`         | `docs/issues/428-*.md` · filed via /idea-to-slice                                                            |
-| 429 | (new) → `ready`         | `docs/issues/429-*.md` · filed via /idea-to-slice                                                            |
-| 430 | (new) → `ready`         | `docs/issues/430-*.md` · filed via /idea-to-slice                                                            |
-| 431 | (new) → `ready`         | `docs/issues/431-*.md` · filed via /idea-to-slice                                                            |
-| 432 | (new) → `ready`         | `docs/issues/432-*.md` · filed via /idea-to-slice                                                            |
-| 433 | (new) → `ready`         | `docs/issues/433-*.md` · filed via /idea-to-slice                                                            |
-| 434 | (new) → `ready`         | `docs/issues/434-*.md` · filed via /idea-to-slice                                                            |
-| 435 | (new) → `ready`         | `docs/issues/435-*.md` · filed via /idea-to-slice                                                            |
-| 436 | (new) → `ready`         | `docs/issues/436-*.md` · filed via /idea-to-slice                                                            |
-| 437 | (new) → `ready`         | `docs/issues/437-*.md` · filed via /idea-to-slice                                                            |
-| 438 | (new) → `ready`         | `docs/issues/438-*.md` · filed via /idea-to-slice                                                            |
-| 439 | (new) → `ready`         | `docs/issues/439-*.md` · filed via /idea-to-slice                                                            |
-| 440 | (new) → `ready`         | `docs/issues/440-*.md` · filed via /idea-to-slice                                                            |
-| 441 | (new) → `ready`         | `docs/issues/441-*.md` · filed via /idea-to-slice                                                            |
-| 442 | (new) → `ready`         | `docs/issues/442-*.md` · filed via /idea-to-slice                                                            |
-| 443 | (new) → `ready`         | `docs/issues/443-*.md` · filed via /idea-to-slice                                                            |
-| 444 | (new) → `ready`         | `docs/issues/444-*.md` · filed via /idea-to-slice                                                            |
-| 445 | `merged`                | email/SMTP notification channel (delivery substrate) · #1087 impl `197e61af` · batch 211 · unblocks 510      |
-| 542 | `ready` → `in-progress` | per-notification-kind email preferences · Backend · parent #445 · #1087 · batch 214 `notify/542-email-prefs` |
-| 543 | `ready`                 | additional notification channels (Slack/webhook) · Backend · parent #445 · #1087                             |
-| 541 | `not-ready`             | wire slice-439 staleness digest to email · dep 445 ✓ + 439 (unmerged) · parent #445 · #1087                  |
-| 446 | (new) → `ready`         | `docs/issues/446-*.md` · filed via /idea-to-slice · decision-only ADR spike (no-auto-merge)                  |
-| 447 | (new) → `not-ready`     | `docs/issues/447-*.md` · filed via /idea-to-slice · dep #438 unmerged                                        |
-| 448 | (new) → `ready`         | `docs/issues/448-*.md` · filed via /idea-to-slice                                                            |
-| 449 | (new) → `ready`         | `docs/issues/449-*.md` · filed via /idea-to-slice · OPA 1.17 already on main (#953) → validation slice       |
-| 450 | (new) → `ready`         | `docs/issues/450-*.md` · filed via /idea-to-slice                                                            |
-| 451 | (new) → `ready`         | `docs/issues/451-*.md` · filed via /idea-to-slice                                                            |
-| 452 | (new) → `ready`         | `docs/issues/452-*.md` · filed via /idea-to-slice                                                            |
-| 453 | (new) → `ready`         | `docs/issues/453-*.md` · filed via /idea-to-slice                                                            |
-| 454 | (new) → `ready`         | `docs/issues/454-*.md` · filed via /idea-to-slice                                                            |
-| 455 | (new) → `ready`         | `docs/issues/455-*.md` · filed via /idea-to-slice · decision-only ADR spike (no-auto-merge)                  |
+| Row | Transition          | Evidence                                                                                                                                                                                     |
+| --- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 415 | (new) → `ready`     | `docs/issues/415-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 416 | (new) → `ready`     | `docs/issues/416-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 417 | (new) → `ready`     | `docs/issues/417-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 418 | (new) → `ready`     | `docs/issues/418-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 419 | (new) → `ready`     | `docs/issues/419-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 420 | (new) → `ready`     | `docs/issues/420-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 421 | (new) → `ready`     | `docs/issues/421-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 422 | (new) → `ready`     | `docs/issues/422-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 423 | (new) → `ready`     | `docs/issues/423-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 424 | (new) → `ready`     | `docs/issues/424-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 425 | (new) → `ready`     | `docs/issues/425-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 426 | (new) → `ready`     | `docs/issues/426-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 427 | (new) → `ready`     | `docs/issues/427-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 428 | (new) → `ready`     | `docs/issues/428-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 429 | (new) → `ready`     | `docs/issues/429-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 430 | (new) → `ready`     | `docs/issues/430-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 431 | (new) → `ready`     | `docs/issues/431-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 432 | (new) → `ready`     | `docs/issues/432-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 433 | (new) → `ready`     | `docs/issues/433-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 434 | (new) → `ready`     | `docs/issues/434-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 435 | (new) → `ready`     | `docs/issues/435-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 436 | (new) → `ready`     | `docs/issues/436-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 437 | (new) → `ready`     | `docs/issues/437-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 438 | (new) → `ready`     | `docs/issues/438-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 439 | (new) → `ready`     | `docs/issues/439-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 440 | (new) → `ready`     | `docs/issues/440-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 441 | (new) → `ready`     | `docs/issues/441-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 442 | (new) → `ready`     | `docs/issues/442-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 443 | (new) → `ready`     | `docs/issues/443-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 444 | (new) → `ready`     | `docs/issues/444-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 445 | `merged`            | email/SMTP notification channel (delivery substrate) · #1087 impl `197e61af` · batch 211 · unblocks 510                                                                                      |
+| 542 | `merged`            | per-notification-kind email preferences · Backend · parent #445 · batch 214 · #1099 `0f3dd94c` · spillover 566                                                                               |
+| 566 | `ready`             | per-kind email prefs for unmapped kinds (audit_note.reply / evidence.staleness) · parent #542 (merged) · Backend · `docs/issues/566-per-kind-email-prefs-for-unmapped-notification-kinds.md` |
+| 543 | `ready`             | additional notification channels (Slack/webhook) · Backend · parent #445 · #1087                                                                                                             |
+| 541 | `not-ready`         | wire slice-439 staleness digest to email · dep 445 ✓ + 439 (unmerged) · parent #445 · #1087                                                                                                  |
+| 446 | (new) → `ready`     | `docs/issues/446-*.md` · filed via /idea-to-slice · decision-only ADR spike (no-auto-merge)                                                                                                  |
+| 447 | (new) → `not-ready` | `docs/issues/447-*.md` · filed via /idea-to-slice · dep #438 unmerged                                                                                                                        |
+| 448 | (new) → `ready`     | `docs/issues/448-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 449 | (new) → `ready`     | `docs/issues/449-*.md` · filed via /idea-to-slice · OPA 1.17 already on main (#953) → validation slice                                                                                       |
+| 450 | (new) → `ready`     | `docs/issues/450-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 451 | (new) → `ready`     | `docs/issues/451-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 452 | (new) → `ready`     | `docs/issues/452-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 453 | (new) → `ready`     | `docs/issues/453-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 454 | (new) → `ready`     | `docs/issues/454-*.md` · filed via /idea-to-slice                                                                                                                                            |
+| 455 | (new) → `ready`     | `docs/issues/455-*.md` · filed via /idea-to-slice · decision-only ADR spike (no-auto-merge)                                                                                                  |
 
 ## Reconcile — 2026-06-03 (batch 186 · slice 413 cosign-kms Phase 1 merged)
 
