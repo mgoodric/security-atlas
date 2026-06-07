@@ -3,7 +3,32 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-07 (batch 199 reconcile — 492 OSCAL catalog import MERGED; the last open invariant-#8 violation closed. Spillovers 511 + 512 registered ready.)
+**Last reconciled:** 2026-06-07 (batch 200 reconcile — 498 LLM foundation MERGED; ALL 3 gap-analysis real-defects now closed (495 + 492 + 498). 499/500/502 unblocked → ready; 513 doc-fix spillover filed.)
+
+## Reconcile — 2026-06-07 (batch 200 · 498 merged)
+
+Solo batch — the THIRD and last of the three gap-analysis real-defects. Merged CLEAN (no advisory failures — the engineer's floor-80 + pure-Go branches cleared even codecov/patch, unlike the bridge-skip slices). **All three gap-analysis real-defects are now closed: 495 (control-as-code silent-eval) · 492 (OSCAL import invariant-#8) · 498 (LLM foundation).**
+
+- **498** (shared local-inference `internal/llm` client foundation + `ai_generations` audit record + runtime `ai_assisted↔human_approver` enforcement) — AI-assist · JUDGMENT — **MERGED** at `7ba9bd4b` (#1050). New `internal/llm` package: a narrow provider-agnostic `Client` (Generate, mandatory token-budget+timeout) + local Ollama default (Llama 3.1 8B, slice-182 D5) + a validating stub for CI; an append-only four-policy-RLS `ai_generations` audit table (full prompt/model-metadata/context/draft, snapshot-at-generation, no UPDATE path); a reusable `ai_assist_human_approver_guard` IMMUTABLE-function CHECK proving the boundary at the **DB layer**. Boundary-enforcing substrate (drafts only, never self-approves; opaque/parameterized model text; cross-tenant isolation proven). 14/14 ACs, all 9 P0s honored. New package `internal/llm` shard-enrolled (Leg B3) + coverage floor 80. Migration `20260607000000_ai_generations`. Decisions log: `docs/audit-log/498-llm-foundation-decisions.md`. **Unblocks 440/441/444/471** (the AI-assist v0 surfaces) — they become thin consumers.
+
+**Downstream unblocked by 498:**
+
+| Row | Transition            | Evidence                                                                                    |
+| --- | --------------------- | ------------------------------------------------------------------------------------------- |
+| 499 | `not-ready` → `ready` | cloud-LLM opt-in per-tenant + banner · dep 498 now merged · #1037                           |
+| 500 | `not-ready` → `ready` | pgvector semantic-retrieval grounding · dep 498 now merged · #1037                          |
+| 502 | `not-ready` → `ready` | AI evidence summarization v0 · dep 498 now merged · #1037                                   |
+| 501 | stays `not-ready`     | full board narrative — dep 498 ✓ **+ 440** (unmerged, maintainer-sequenced) → still blocked |
+
+**Spillover filed (D5 finding — docs on this branch, row registered below):** slice 498 surfaced that `CLAUDE.md` + canvas §4.6.5 name `QuestionnaireAnswer` as the canonical `ai_assisted/human_approver` adopter, but those columns actually live on `mcp_write_proposals` (slice 173) on `main`. The engineer templated the reusable guard from the REAL adopter + correctly did NOT front-run slice 440's questionnaire retrofit. The doc inaccuracy is tracked:
+
+| Row | Transition      | Evidence                                                                                                        |
+| --- | --------------- | --------------------------------------------------------------------------------------------------------------- |
+| 513 | (new) → `ready` | correct AI-assist-boundary canonical-adopter ref (QuestionnaireAnswer→mcp_write_proposals) · Docs · parent #498 |
+
+**Auto-loop note on the newly-ready AI-assist follow-ons:** 499 (cloud routing + banner) and 500 (pgvector grounding) are infra EXTENSIONS of the now-built 498 foundation; 502 (evidence-summarization v0) is a user-facing AI-assist v0 SURFACE and is closer in kind to the maintainer-sequenced 440/441/444/471 set — the next batch should treat 502 with the same maintainer-sequencing caution (prefer 499/500 infra or the non-AI backlog over 502 unless the maintainer signals). 513 is a CLAUDE.md/constitution doc edit (meta) — a future batch or the maintainer can take it; it does not have to run autonomously.
+
+Backlog after batch 200: 480/481/482 (crosswalks · share soc2import+coverage) · 486-491 connectors (share schemaregistry+coverage; one per batch) · 493/494/496 + 511/512 (OSCAL family — one oscal-slice per batch, all build on 492) · 499/500 (LLM infra follow-ons, now ready) · 474 · 478 (user-mgmt API, LARGE) · 508/509/510 · 513 (doc-fix) · the older analysis tail. No real-defects remain — the backlog is now feature/gap-fill + the OSCAL follow-ons. 478 merging flips 479 → ready.
 
 ## Drift detected — 2026-06-07 (batch 200 claim-stake · 498)
 
@@ -54,36 +79,37 @@ First build batch off the gap-analysis backlog — anchors on the worst real-def
 
 Maintainer-directed comprehensive gap analysis (5 parallel domain investigators: frameworks · connectors · evidence/audit/OSCAL · AI-assist/reporting · risk/policy/privacy/platform), each filing genuine missing-functionality slices via the /idea-to-slice method (template + mandatory STRIDE). Filed in 5 themed PRs (#1035 frameworks 480-484 · #1034 connectors 486-491 · #1038 audit/OSCAL 492-496 · #1037 AI 498-502 · #1036 risk/platform 504-510); rows registered here in one batch (per-slice registration infeasible at 28-scale). Blocks 485/497/503 left unused (quality over quantity). **Three findings are real defects, not just gaps:** 495 (control-as-code accepts rego|sql|jsonpath at upload but only EVALUATES rego — SQL/JSONpath controls silently produce no state) · 492 (OSCAL import missing = direct invariant-#8 violation) · 498 (the shared internal/llm foundation that 440/441/444/471 all assume has no owner). Investigators VERIFIED much is already built (push-cred UX, freshness alerting, risk methodology, policy lifecycle + 5 templates, exceptions, FrameworkScope workflow, Helm, all 4 OSCAL exports). Deliberately NOT filed: NIST 800-53 (alt anchor catalog), GDPR crosswalk (privacy-decision-entangled), trust center (v3/vanity anti-pattern), linear/bitwarden/workday connectors (sibling-covered/upper-market).
 
-| Row | Transition              | Evidence                                                                                                               |
-| --- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| 480 | (new) → `ready`         | NIST CSF 2.0 crosswalk · frameworks · #1035                                                                            |
-| 481 | (new) → `ready`         | HIPAA Security Rule crosswalk (catalog-only) · #1035                                                                   |
-| 482 | (new) → `ready`         | coverage-strength rollup (§3.2 promise 438 deferred) · #1035                                                           |
-| 483 | (new) → `not-ready`     | mapping-tier governance · needs ADR/decision · #1035                                                                   |
-| 484 | (new) → `not-ready`     | framework versioning capability · needs concrete 2nd version · #1035                                                   |
-| 486 | (new) → `ready`         | Azure connector (Entra ID + Storage) · #1034                                                                           |
-| 487 | (new) → `ready`         | Kubernetes connector (RBAC + workload config) · #1034                                                                  |
-| 488 | (new) → `ready`         | Datadog + Grafana monitoring connectors · #1034                                                                        |
-| 489 | (new) → `ready`         | PagerDuty connector (incident evidence) · #1034                                                                        |
-| 490 | (new) → `ready`         | Jamf + Intune MDM connectors · #1034                                                                                   |
-| 491 | (new) → `ready`         | Rippling + BambooHR HRIS connectors · #1034                                                                            |
-| 492 | `merged`                | OSCAL import (catalog import) — invariant-#8 gap CLOSED · #1038 spec · #1047 impl `4e6ce46f` · batch 199               |
-| 493 | (new) → `ready`         | SSP control-implementation narratives (not placeholder) · #1038                                                        |
-| 494 | (new) → `ready`         | AR sampled-evidence IDs + walkthrough attachments · #1038                                                              |
-| 495 | (new) → `ready`         | control-as-code SQL + JSON-path eval (silently-ignored bug) · #1038                                                    |
-| 496 | (new) → `ready`         | control-bundle test runner (fixture evidence → expected pass/fail) · #1038                                             |
-| 498 | `ready` → `in-progress` | shared internal/llm inference-client foundation (unblocks 440/441/444/471) · #1037 · batch 200 `ai/498-llm-foundation` |
-| 499 | (new) → `not-ready`     | cloud-LLM opt-in per-tenant + banner · dep 498 · #1037                                                                 |
-| 500 | (new) → `not-ready`     | pgvector semantic-retrieval grounding · dep 498 · #1037                                                                |
-| 501 | (new) → `not-ready`     | full multi-section board narrative + numeric verification + banned-phrase wiring · dep 498 + 440 · #1037               |
-| 502 | (new) → `not-ready`     | AI evidence summarization v0 · dep 498 · #1037                                                                         |
-| 504 | (new) → `not-ready`     | privacy v0: right-to-erasure (tombstone) · privacy-v0 greenlight · #1036                                               |
-| 505 | (new) → `not-ready`     | privacy v0: DSAR export · privacy-v0 greenlight · #1036                                                                |
-| 506 | (new) → `not-ready`     | privacy v0: RoPA (5 high-signal seeds, not 50) · privacy-v0 greenlight · #1036                                         |
-| 507 | (new) → `not-ready`     | breach-notification workflow impl · dep 446 decision · #1036                                                           |
-| 508 | (new) → `ready`         | SCIM 2.0 user-lifecycle provisioning · #1036                                                                           |
-| 509 | (new) → `ready`         | IdP group→role mapping + multi-IdP · #1036                                                                             |
-| 510 | (new) → `ready`         | automated backup + scheduled restore-verification · #1036                                                              |
+| Row | Transition          | Evidence                                                                                                                                               |
+| --- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 480 | (new) → `ready`     | NIST CSF 2.0 crosswalk · frameworks · #1035                                                                                                            |
+| 481 | (new) → `ready`     | HIPAA Security Rule crosswalk (catalog-only) · #1035                                                                                                   |
+| 482 | (new) → `ready`     | coverage-strength rollup (§3.2 promise 438 deferred) · #1035                                                                                           |
+| 483 | (new) → `not-ready` | mapping-tier governance · needs ADR/decision · #1035                                                                                                   |
+| 484 | (new) → `not-ready` | framework versioning capability · needs concrete 2nd version · #1035                                                                                   |
+| 486 | (new) → `ready`     | Azure connector (Entra ID + Storage) · #1034                                                                                                           |
+| 487 | (new) → `ready`     | Kubernetes connector (RBAC + workload config) · #1034                                                                                                  |
+| 488 | (new) → `ready`     | Datadog + Grafana monitoring connectors · #1034                                                                                                        |
+| 489 | (new) → `ready`     | PagerDuty connector (incident evidence) · #1034                                                                                                        |
+| 490 | (new) → `ready`     | Jamf + Intune MDM connectors · #1034                                                                                                                   |
+| 491 | (new) → `ready`     | Rippling + BambooHR HRIS connectors · #1034                                                                                                            |
+| 492 | `merged`            | OSCAL import (catalog import) — invariant-#8 gap CLOSED · #1038 spec · #1047 impl `4e6ce46f` · batch 199                                               |
+| 493 | (new) → `ready`     | SSP control-implementation narratives (not placeholder) · #1038                                                                                        |
+| 494 | (new) → `ready`     | AR sampled-evidence IDs + walkthrough attachments · #1038                                                                                              |
+| 495 | (new) → `ready`     | control-as-code SQL + JSON-path eval (silently-ignored bug) · #1038                                                                                    |
+| 496 | (new) → `ready`     | control-bundle test runner (fixture evidence → expected pass/fail) · #1038                                                                             |
+| 498 | `merged`            | shared internal/llm inference foundation + ai_generations + DB enforcement · #1037 spec · #1050 impl `7ba9bd4b` · batch 200 · unblocks 440/441/444/471 |
+| 499 | `ready`             | cloud-LLM opt-in per-tenant + banner · dep 498 merged · #1037 (LLM infra follow-on)                                                                    |
+| 500 | `ready`             | pgvector semantic-retrieval grounding · dep 498 merged · #1037 (LLM infra follow-on)                                                                   |
+| 501 | `not-ready`         | full multi-section board narrative + numeric verification + banned-phrase wiring · dep 498 ✓ + 440 (unmerged) · #1037                                  |
+| 502 | `ready`             | AI evidence summarization v0 · dep 498 merged · #1037 (AI-assist v0 SURFACE — maintainer-sequencing caution)                                           |
+| 513 | `ready`             | correct AI-assist-boundary canonical-adopter doc (QuestionnaireAnswer→mcp_write_proposals) · Docs · parent #498                                        |
+| 504 | (new) → `not-ready` | privacy v0: right-to-erasure (tombstone) · privacy-v0 greenlight · #1036                                                                               |
+| 505 | (new) → `not-ready` | privacy v0: DSAR export · privacy-v0 greenlight · #1036                                                                                                |
+| 506 | (new) → `not-ready` | privacy v0: RoPA (5 high-signal seeds, not 50) · privacy-v0 greenlight · #1036                                                                         |
+| 507 | (new) → `not-ready` | breach-notification workflow impl · dep 446 decision · #1036                                                                                           |
+| 508 | (new) → `ready`     | SCIM 2.0 user-lifecycle provisioning · #1036                                                                                                           |
+| 509 | (new) → `ready`     | IdP group→role mapping + multi-IdP · #1036                                                                                                             |
+| 510 | (new) → `ready`     | automated backup + scheduled restore-verification · #1036                                                                                              |
 
 Ready now (18): 480,481,482,486,487,488,489,490,491,492,493,494,495,496,498,508,509,510. Not-ready (10): 483,484 (framework decisions) · 499,500,501,502 (dep 498) · 504,505,506 (privacy-v0 greenlight) · 507 (dep 446). The loop can pick the 18 ready (conflict-class discipline applies — connectors share schemaregistry; new-package slices share coverage-thresholds; 492/493/494 share internal/oscal). The 3 real-defect slices (495/492/498) are high-value priorities.
 
