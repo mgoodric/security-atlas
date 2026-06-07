@@ -64,11 +64,23 @@ const (
 )
 
 // Handler owns the user admin routes.
+//
+//   - pool     : the RLS-bound atlas_app pool. Backs the within-tenant
+//     List/Get/PatchRoles (slice 062) and the within-tenant assign/revoke
+//     (slice 478).
+//   - authPool : the BYPASSRLS atlas_migrate pool (slice 478). Backs the
+//     cross-tenant super-admin list/assign/revoke (the target tenant != the
+//     actor's session-tenant GUC, so atlas_app RLS would block the write).
+//     MAY be nil — cross-tenant operations then return 503; within-tenant
+//     operations continue to work.
 type Handler struct {
-	pool *pgxpool.Pool
+	pool     *pgxpool.Pool
+	authPool *pgxpool.Pool
 }
 
-// New constructs a Handler.
+// New constructs a Handler. Backward-compatible with the slice-062 callers;
+// wire the BYPASSRLS pool via SetAuthPool (slice 478) for the cross-tenant
+// super-admin surface.
 func New(pool *pgxpool.Pool) *Handler {
 	return &Handler{pool: pool}
 }
@@ -388,4 +400,23 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+// credentialFromContext is the slice-478 thin re-export of
+// authctx.CredentialFromContext, used by the assign-path actor resolution
+// fallback for the within-tenant tenant-admin legacy-bearer case.
+func credentialFromContext(ctx context.Context) (cred credentialView, ok bool) {
+	c, present := authctx.CredentialFromContext(ctx)
+	if !present {
+		return credentialView{}, false
+	}
+	return credentialView{UserID: c.UserID, TenantID: c.TenantID, IsAdmin: c.IsAdmin}, true
+}
+
+// credentialView is the minimal slice of credstore.Credential the slice-478
+// assign path consumes — kept local so assign.go need not import credstore.
+type credentialView struct {
+	UserID   string
+	TenantID string
+	IsAdmin  bool
 }

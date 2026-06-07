@@ -607,6 +607,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/admin/users/assign:
+    post:
+      summary: POST /v1/admin/users/assign
+      tags: [admin-users]
+      operationId: post-v1-admin-users-assign
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/users/revoke:
+    post:
+      summary: POST /v1/admin/users/revoke
+      tags: [admin-users]
+      operationId: post-v1-admin-users-revoke
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/admin/users/{id}:
     get:
       summary: GET /v1/admin/users/{id}

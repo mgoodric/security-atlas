@@ -922,10 +922,22 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/admin/sso", ssoH.Get)
 	root.Patch("/v1/admin/sso", ssoH.Patch)
 	root.Post("/v1/admin/sso/preflight", ssoH.Preflight)
-	usersH := adminusers.New(s.dbPool)
-	root.Get("/v1/admin/users", usersH.List)
+	// Slice 478: extend the slice-062 users surface with the cross-tenant
+	// super-admin list + the assign/revoke verbs (incl. super-admin
+	// self-assign). SetAuthPool wires the BYPASSRLS pool used for the
+	// cross-tenant writes (the target tenant != the actor's session tenant,
+	// so atlas_app RLS would block the INSERT — slice 478 D2, mirroring
+	// admintenants.Create). When authPool is nil (unit-server harness),
+	// cross-tenant ops return 503 and within-tenant ops keep working.
+	// ListDispatch routes super-admins to the cross-tenant view and
+	// everyone else to the slice-062 within-tenant List (P0-478-3: a
+	// tenant-admin's view is never widened).
+	usersH := adminusers.New(s.dbPool).SetAuthPool(s.authPool)
+	root.Get("/v1/admin/users", usersH.ListDispatch)
 	root.Get("/v1/admin/users/{id}", usersH.Get)
 	root.Patch("/v1/admin/users/{id}/roles", usersH.PatchRoles)
+	root.Post("/v1/admin/users/assign", usersH.Assign)
+	root.Post("/v1/admin/users/revoke", usersH.Revoke)
 
 	// Slice 142: super_admin management surface. super_admin-gated
 	// (the handler reads jwtmw.FromContext().SuperAdmin); the OPA

@@ -188,6 +188,8 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/admin/sso/preflight", Tag: "admin-sso", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/sso/preflight"},
 	{Method: "POST", Path: "/v1/admin/super-admins", Tag: "admin-super-admins", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/super-admins"},
 	{Method: "POST", Path: "/v1/admin/tenants", Tag: "admin-tenants", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/tenants"},
+	{Method: "POST", Path: "/v1/admin/users/assign", Tag: "admin-users", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/users/assign"},
+	{Method: "POST", Path: "/v1/admin/users/revoke", Tag: "admin-users", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/users/revoke"},
 	{Method: "POST", Path: "/v1/aggregation-rules", Tag: "risks", Tier: "bearer", Internal: false, Summary: "POST /v1/aggregation-rules"},
 	{Method: "POST", Path: "/v1/artifacts:upload", Tag: "artifacts", Tier: "bearer", Internal: false, Summary: "POST /v1/artifacts:upload"},
 	{Method: "POST", Path: "/v1/audit-notes", Tag: "audit-notes", Tier: "bearer", Internal: false, Summary: "POST /v1/audit-notes"},

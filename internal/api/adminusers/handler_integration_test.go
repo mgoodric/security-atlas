@@ -26,7 +26,15 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 )
 
-var appPool *pgxpool.Pool
+// appPool is the RLS-bound atlas_app pool (DATABASE_URL_APP). adminPool is
+// the BYPASSRLS atlas_migrate pool (DATABASE_URL) — added in slice 478 for
+// the cross-tenant super-admin assign/revoke/list paths. When DATABASE_URL is
+// unset, adminPool stays nil and the slice-478 cross-tenant tests skip via
+// their own guard (assign_integration_test.go skipIfNoAdminPool).
+var (
+	appPool   *pgxpool.Pool
+	adminPool *pgxpool.Pool
+)
 
 func TestMain(m *testing.M) {
 	url := os.Getenv("DATABASE_URL_APP")
@@ -42,8 +50,19 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	appPool = p
+	if adminURL := os.Getenv("DATABASE_URL"); adminURL != "" {
+		a, aerr := pgxpool.New(ctx, adminURL)
+		if aerr != nil {
+			fmt.Fprintf(os.Stderr, "pgxpool.New admin: %v\n", aerr)
+			os.Exit(1)
+		}
+		adminPool = a
+	}
 	code := m.Run()
 	p.Close()
+	if adminPool != nil {
+		adminPool.Close()
+	}
 	os.Exit(code)
 }
 
