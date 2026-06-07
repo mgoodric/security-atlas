@@ -36,13 +36,15 @@ func TestLoad_ShippedCSFCrosswalkParses(t *testing.T) {
 	if cw.FrameworkVersion != "2.0" {
 		t.Fatalf("framework_version = %q; want 2.0", cw.FrameworkVersion)
 	}
-	// Curated subset spanning all six Functions, NOT full CSF Subcategory
-	// coverage (scope discipline — P0-480-6 deferral).
-	if n := len(cw.Requirements); n < 30 || n > 40 {
-		t.Fatalf("CSF requirements = %d; want curated subset in [30,40]", n)
+	// Slice 514 — FULL CSF 2.0 Subcategory coverage (~106), no longer the
+	// slice-480 curated 35-row subset. The exact-count assertion (AC-5) lives
+	// in TestLoad_CSFFullSubcategoryCoverage below; here we assert the file is
+	// at full-coverage scale (a regression to the thin subset would fail this).
+	if n := len(cw.Requirements); n < 100 {
+		t.Fatalf("CSF requirements = %d; want full Subcategory coverage (>=100)", n)
 	}
-	if len(cw.Mappings) < 30 {
-		t.Fatalf("expected >=30 CSF mappings; got %d", len(cw.Mappings))
+	if len(cw.Mappings) < 100 {
+		t.Fatalf("expected >=100 CSF mappings (full coverage); got %d", len(cw.Mappings))
 	}
 	if cw.SourceAttribution != "community_draft" {
 		t.Fatalf("crosswalk-level source_attribution = %q; want community_draft", cw.SourceAttribution)
@@ -78,6 +80,66 @@ func TestLoad_CSFSpansAllSixFunctions(t *testing.T) {
 		if !seen[fn] {
 			t.Fatalf("CSF subset is missing Function %q — all six Functions must be represented", fn)
 		}
+	}
+}
+
+// Slice 514 AC-5 — FULL CSF 2.0 Subcategory coverage. The shipped crosswalk
+// covers all 106 Subcategories across the six Functions / 22 Categories, each
+// with exactly one STRM-typed SCF-anchor edge. This asserts the exact full
+// count (a row added or dropped fails loudly so the count stays deliberate)
+// and the per-Function distribution, retaining all-six-Function coverage.
+func TestLoad_CSFFullSubcategoryCoverage(t *testing.T) {
+	t.Parallel()
+	cw, err := soc2import.Load(csfPath())
+	if err != nil {
+		t.Fatalf("Load CSF: %v", err)
+	}
+
+	// NIST CSF 2.0 (NIST CSWP 29) has 106 Subcategories.
+	const wantSubcategories = 106
+	if n := len(cw.Requirements); n != wantSubcategories {
+		t.Fatalf("CSF Subcategories = %d; want full coverage = %d", n, wantSubcategories)
+	}
+	// One STRM edge per Subcategory (1:1 — no Subcategory is left unmapped and
+	// none is mapped twice).
+	if n := len(cw.Mappings); n != wantSubcategories {
+		t.Fatalf("CSF mappings = %d; want one edge per Subcategory = %d", n, wantSubcategories)
+	}
+
+	// Per-Function distribution (the CSF 2.0 Category structure).
+	perFn := map[string]int{}
+	for _, r := range cw.Requirements {
+		fn, _, _ := strings.Cut(r.Code, ".")
+		perFn[fn]++
+	}
+	want := map[string]int{"GV": 31, "ID": 21, "PR": 22, "DE": 11, "RS": 13, "RC": 8}
+	for fn, n := range want {
+		if perFn[fn] != n {
+			t.Fatalf("CSF Function %s has %d Subcategories; want %d", fn, perFn[fn], n)
+		}
+	}
+
+	// Every Subcategory code is unique and every mapping resolves to a declared
+	// requirement (guards against a typo'd requirement_code in the data file).
+	reqSet := map[string]struct{}{}
+	for _, r := range cw.Requirements {
+		if _, dup := reqSet[r.Code]; dup {
+			t.Fatalf("duplicate CSF Subcategory code %q", r.Code)
+		}
+		reqSet[r.Code] = struct{}{}
+	}
+	mapped := map[string]struct{}{}
+	for _, m := range cw.Mappings {
+		if _, ok := reqSet[m.RequirementCode]; !ok {
+			t.Fatalf("mapping references undeclared Subcategory %q", m.RequirementCode)
+		}
+		if _, dup := mapped[m.RequirementCode]; dup {
+			t.Fatalf("Subcategory %q mapped more than once", m.RequirementCode)
+		}
+		mapped[m.RequirementCode] = struct{}{}
+	}
+	if len(mapped) != len(reqSet) {
+		t.Fatalf("mapped Subcategories = %d; want every one of %d mapped", len(mapped), len(reqSet))
 	}
 }
 

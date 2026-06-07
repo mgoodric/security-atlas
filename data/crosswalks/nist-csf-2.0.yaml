@@ -3,10 +3,13 @@
 # DRAFT — community_draft attribution. Authored by the agent for slice 480
 # (the FOURTH framework slice — it extends UCF invariant #1 from three
 # frameworks to four: one SCF anchor satisfies SOC 2 + ISO 27001 + PCI DSS +
-# CSF requirements at once). Every row is an agent JUDGMENT call recorded in
-# docs/audit-log/480-nist-csf-crosswalk-decisions.md.
+# CSF requirements at once) and EXTENDED to FULL Subcategory coverage by slice
+# 514. Every row is an agent JUDGMENT call recorded in
+# docs/audit-log/480-nist-csf-crosswalk-decisions.md (the curated 35-row subset)
+# and docs/audit-log/514-nist-csf-full-coverage-decisions.md (the remaining 71
+# rows + the slice-480 D7 low-confidence re-maps).
 #
-# LICENSING POSTURE (deliberate — see decisions log):
+# LICENSING POSTURE (deliberate — see decisions logs):
 #   NIST CSF 2.0 (NIST CSWP 29, Feb 2024) is a work of the U.S. federal
 #   government and is in the PUBLIC DOMAIN. This file nonetheless follows the
 #   438/467 source-attribution discipline: it references the Subcategory
@@ -17,25 +20,31 @@
 #   (source_attribution: community_draft), not an NIST- or SCF-published
 #   official crosswalk. The SCF anchors are imported separately by the
 #   operator (slice 006); this file ships only the CSF→SCF edge data
-#   (P0-480-7).
+#   (P0-480-7 / P0-514-5).
 #
-# SCOPE DISCIPLINE (binding — slice 480 narrative):
-#   This is a CURATED high-signal subset (36 Subcategories), NOT full CSF 2.0
-#   Subcategory coverage (~106 Subcategories). The subset deliberately spans
-#   ALL SIX Functions (GOVERN, IDENTIFY, PROTECT, DETECT, RESPOND, RECOVER) so
-#   every Function is represented, with emphasis on (a) the SOC 2 / ISO / PCI
-#   overlap zone — so shared SCF anchors demonstrate invariant #1 at four
-#   frameworks — and (b) the GOVERN function, CSF 2.0's headline addition,
-#   which has NO SOC 2 analog and maps to the SCF governance families
-#   (proving the graph does not assume framework overlap — AC-5). Full
-#   Subcategory completion and CSF Profile/Tier assessment are follow-on
-#   slices (see decisions log "Revisit once in use"), NOT catalog scope.
+# SCOPE (slice 514 — FULL coverage, supersedes slice 480's curated subset):
+#   This file now covers ALL 106 NIST CSF 2.0 Subcategories across the six
+#   Functions and 22 Categories:
+#     GOVERN (GV)   31  — GV.OC(5) GV.RM(7) GV.RR(4) GV.PO(2) GV.OV(3) GV.SC(10)
+#     IDENTIFY (ID) 21  — ID.AM(7) ID.RA(10) ID.IM(4)
+#     PROTECT (PR)  22  — PR.AA(6) PR.AT(2) PR.DS(4) PR.PS(6) PR.IR(4)
+#     DETECT (DE)   11  — DE.CM(5) DE.AE(6)
+#     RESPOND (RS)  13  — RS.MA(5) RS.AN(4) RS.CO(2) RS.MI(2)
+#     RECOVER (RC)   8  — RC.RP(6) RC.CO(2)
+#   A SaaS operator can now run a full CSF 2.0 self-assessment out of
+#   security-atlas, not only the high-signal subset. CSF Profile / Tier
+#   assessment (the maturity construct) remains OUT of catalog scope and is
+#   a separate slice (515) — this file ships Subcategory → SCF EDGES only.
 #
 # Source basis (methodology, not copied text):
 #   - NIST CSF 2.0 Function / Category / Subcategory IDs + short titles
 #     (factual references to a public-domain U.S. government work)
 #   - SCF anchor families published in the platform's slice-006 fixture
-#     (migrations/fixtures/scf-sample.json — 53 anchors)
+#     (migrations/fixtures/scf-sample.json — 53 anchors). EVERY edge below
+#     targets one of those 53 anchors so the import resolves against the
+#     seeded catalog (P0-514-4); where the sample fixture lacks a finer-grained
+#     anchor for a CSF outcome, the closest covering anchor is used and the
+#     residual gap is flagged in the slice-514 decisions log.
 #   - NIST IR 8477 STRM methodology (canvas §3.2; UCF_GRAPH_MODEL.md §4)
 #   - SCF's own published NIST CSF 2.0 mapping informs the anchor choices;
 #     these rows are the agent's independent draft pending review.
@@ -62,27 +71,96 @@ requirements:
   - code: "GV.OC-01"
     title: "Organizational mission and security objectives understood"
     body: "The organizational mission is understood and informs cybersecurity risk management."
+  - code: "GV.OC-02"
+    title: "Stakeholders and their expectations understood"
+    body: "Internal and external stakeholders and their cybersecurity expectations are understood and considered."
+  - code: "GV.OC-03"
+    title: "Legal, regulatory, and contractual requirements understood"
+    body: "Legal, regulatory, and contractual cybersecurity requirements are understood and managed."
+  - code: "GV.OC-04"
+    title: "Critical objectives and services communicated"
+    body: "Critical objectives, capabilities, and services that stakeholders depend on are understood and communicated."
+  - code: "GV.OC-05"
+    title: "Outcomes and dependencies for delivery established"
+    body: "Outcomes, capabilities, and services that the organization depends on are understood and communicated."
+  - code: "GV.RM-01"
+    title: "Risk management objectives agreed"
+    body: "Risk management objectives are established and agreed to by organizational stakeholders."
+  - code: "GV.RM-02"
+    title: "Risk appetite and tolerance established"
+    body: "Risk appetite and risk tolerance statements are established, communicated, and maintained."
+  - code: "GV.RM-03"
+    title: "Risk management integrated into enterprise processes"
+    body: "Cybersecurity risk management activities are included in enterprise risk management processes."
+  - code: "GV.RM-04"
+    title: "Strategic direction for risk response established"
+    body: "Strategic direction describing appropriate risk response options is established and communicated."
+  - code: "GV.RM-05"
+    title: "Risk communication lines established"
+    body: "Lines of communication for cybersecurity risk are established across the organization."
+  - code: "GV.RM-06"
+    title: "Standardized method for risk calculation"
+    body: "A standardized method for calculating, documenting, and prioritizing cybersecurity risk is established."
+  - code: "GV.RM-07"
+    title: "Strategic opportunities considered in risk decisions"
+    body: "Strategic opportunities (positive risks) are characterized and included in risk discussions."
   - code: "GV.RR-01"
     title: "Leadership accountability for cybersecurity risk"
     body: "Organizational leadership is accountable for cybersecurity risk and fosters a risk-aware culture."
   - code: "GV.RR-02"
     title: "Security roles and responsibilities established"
     body: "Cybersecurity roles, responsibilities, and authorities are established, communicated, and enforced."
+  - code: "GV.RR-03"
+    title: "Resources allocated to security strategy"
+    body: "Adequate resources are allocated commensurate with the cybersecurity risk strategy and objectives."
+  - code: "GV.RR-04"
+    title: "Security included in human resources practices"
+    body: "Cybersecurity is included in human resources practices for personnel."
   - code: "GV.PO-01"
     title: "Cybersecurity policy established"
     body: "An organizational cybersecurity policy is established and communicated."
-  - code: "GV.RM-01"
-    title: "Risk management objectives agreed"
-    body: "Risk management objectives are established and agreed to by organizational stakeholders."
-  - code: "GV.SC-01"
-    title: "Supply chain risk management program"
-    body: "A cyber supply chain risk management program is established and managed by stakeholders."
-  - code: "GV.SC-04"
-    title: "Suppliers prioritized by criticality"
-    body: "Suppliers are known and prioritized by criticality for supply-chain risk assessment."
+  - code: "GV.PO-02"
+    title: "Cybersecurity policy reviewed and updated"
+    body: "The cybersecurity policy is reviewed, updated, and communicated to reflect changes in requirements and risk."
   - code: "GV.OV-01"
     title: "Cybersecurity strategy outcomes reviewed"
     body: "Cybersecurity risk management strategy outcomes are reviewed to inform and adjust direction."
+  - code: "GV.OV-02"
+    title: "Strategy reviewed to cover risks and requirements"
+    body: "The cybersecurity risk management strategy is reviewed to confirm it covers organizational risks and requirements."
+  - code: "GV.OV-03"
+    title: "Risk management performance evaluated and adjusted"
+    body: "Organizational cybersecurity risk management performance is evaluated and reviewed for adjustments."
+  - code: "GV.SC-01"
+    title: "Supply chain risk management program"
+    body: "A cyber supply chain risk management program is established and managed by stakeholders."
+  - code: "GV.SC-02"
+    title: "Supply chain roles and responsibilities established"
+    body: "Cybersecurity roles and responsibilities for suppliers and third parties are established and coordinated."
+  - code: "GV.SC-03"
+    title: "Supply chain risk integrated into risk management"
+    body: "Cyber supply chain risk management is integrated into cybersecurity and enterprise risk management."
+  - code: "GV.SC-04"
+    title: "Suppliers prioritized by criticality"
+    body: "Suppliers are known and prioritized by criticality for supply-chain risk assessment."
+  - code: "GV.SC-05"
+    title: "Supply chain requirements established in contracts"
+    body: "Requirements to address cybersecurity risks are established, prioritized, and integrated into supplier contracts."
+  - code: "GV.SC-06"
+    title: "Supplier due diligence performed before engagement"
+    body: "Planning and due diligence are performed to reduce risks before entering into supplier relationships."
+  - code: "GV.SC-07"
+    title: "Supplier risk monitored over the relationship"
+    body: "Risks posed by suppliers and their products are understood, monitored, and managed over the relationship."
+  - code: "GV.SC-08"
+    title: "Suppliers included in incident response"
+    body: "Relevant suppliers are included in incident planning, response, and recovery activities."
+  - code: "GV.SC-09"
+    title: "Supply chain security in technology lifecycle"
+    body: "Supply chain security practices are integrated and monitored across the technology product and service lifecycle."
+  - code: "GV.SC-10"
+    title: "Supply chain risk managed through retirement"
+    body: "Cyber supply chain risk management plans include provisions for activities after the end of a supplier relationship."
 
   # ===== IDENTIFY (ID) =====
   - code: "ID.AM-01"
@@ -91,61 +169,166 @@ requirements:
   - code: "ID.AM-02"
     title: "Software asset inventory maintained"
     body: "Inventories of software, services, and systems managed by the organization are maintained."
+  - code: "ID.AM-03"
+    title: "Network communication and data flows maintained"
+    body: "Representations of authorized network communication and internal/external data flows are maintained."
+  - code: "ID.AM-04"
+    title: "Supplier-provided services inventoried"
+    body: "Inventories of services provided by suppliers are maintained."
+  - code: "ID.AM-05"
+    title: "Assets prioritized by criticality"
+    body: "Assets are prioritized based on classification, criticality, resources, and impact on the mission."
   - code: "ID.AM-07"
     title: "Data and metadata inventoried and classified"
     body: "Data and corresponding metadata are inventoried and classified for assets and risks."
+  - code: "ID.AM-08"
+    title: "Assets managed through their lifecycle"
+    body: "Systems, hardware, software, services, and data are managed throughout their lifecycles."
   - code: "ID.RA-01"
     title: "Asset vulnerabilities identified"
     body: "Vulnerabilities in assets are identified, validated, and recorded."
+  - code: "ID.RA-02"
+    title: "Threat intelligence received and analyzed"
+    body: "Cyber threat intelligence is received from information-sharing sources and analyzed."
+  - code: "ID.RA-03"
+    title: "Internal and external threats identified"
+    body: "Internal and external threats to the organization are identified and recorded."
   - code: "ID.RA-04"
     title: "Risk impacts and likelihoods determined"
     body: "Potential impacts and likelihoods of threats exploiting vulnerabilities are identified and recorded."
   - code: "ID.RA-05"
     title: "Risks prioritized for response"
     body: "Threats, vulnerabilities, likelihoods, and impacts are used to understand and prioritize risk."
+  - code: "ID.RA-06"
+    title: "Risk responses chosen and tracked"
+    body: "Risk responses are chosen, prioritized, planned, tracked, and communicated."
+  - code: "ID.RA-07"
+    title: "Changes and exceptions managed and tracked"
+    body: "Changes and exceptions are managed, assessed for risk impact, recorded, and tracked."
+  - code: "ID.RA-08"
+    title: "Vulnerability disclosure processes established"
+    body: "Processes for receiving, analyzing, and responding to vulnerability disclosures are established."
+  - code: "ID.RA-09"
+    title: "Hardware and software authenticity assessed"
+    body: "The authenticity and integrity of hardware and software are assessed before acquisition and use."
+  - code: "ID.RA-10"
+    title: "Critical suppliers assessed before acquisition"
+    body: "Critical suppliers are assessed prior to acquisition of products and services."
+  - code: "ID.IM-01"
+    title: "Improvements identified from evaluations"
+    body: "Improvements are identified from evaluations of organizational cybersecurity processes and activities."
+  - code: "ID.IM-02"
+    title: "Improvements identified from security tests"
+    body: "Improvements are identified from security tests and exercises, including those with suppliers and third parties."
+  - code: "ID.IM-03"
+    title: "Improvements identified from operational execution"
+    body: "Improvements are identified from execution of operational processes, procedures, and activities."
+  - code: "ID.IM-04"
+    title: "Incident response and continuity plans improved"
+    body: "Incident response, continuity, and recovery plans are established, communicated, maintained, and improved."
 
   # ===== PROTECT (PR) =====
   - code: "PR.AA-01"
     title: "Identities and credentials managed"
     body: "Identities and credentials for authorized users, services, and hardware are managed."
+  - code: "PR.AA-02"
+    title: "Identities proofed and bound to credentials"
+    body: "Identities are proofed and bound to credentials based on the context of interactions."
   - code: "PR.AA-03"
     title: "Users and devices authenticated"
     body: "Users, services, and hardware are authenticated commensurate with the risk of the transaction."
+  - code: "PR.AA-04"
+    title: "Identity assertions protected and verified"
+    body: "Identity assertions are protected, conveyed, and verified."
   - code: "PR.AA-05"
     title: "Access permissions enforce least privilege"
     body: "Access permissions and authorizations are defined and enforced, incorporating least privilege and separation of duties."
+  - code: "PR.AA-06"
+    title: "Physical access managed and enforced"
+    body: "Physical access to assets is managed, monitored, and enforced commensurate with risk."
   - code: "PR.AT-01"
     title: "Personnel security awareness training"
     body: "Personnel are provided with security awareness and training so they can perform their tasks securely."
+  - code: "PR.AT-02"
+    title: "Privileged users trained for specialized roles"
+    body: "Individuals in specialized roles are provided with role-based awareness and training."
   - code: "PR.DS-01"
     title: "Data-at-rest confidentiality protected"
     body: "The confidentiality, integrity, and availability of data-at-rest are protected."
   - code: "PR.DS-02"
     title: "Data-in-transit confidentiality protected"
     body: "The confidentiality, integrity, and availability of data-in-transit are protected."
+  - code: "PR.DS-10"
+    title: "Data-in-use confidentiality protected"
+    body: "The confidentiality, integrity, and availability of data-in-use are protected."
+  - code: "PR.DS-11"
+    title: "Backups of data created and tested"
+    body: "Backups of data are created, protected, maintained, and tested."
   - code: "PR.PS-01"
     title: "Configuration management practices established"
     body: "Configuration management practices are established and applied to platforms."
+  - code: "PR.PS-02"
+    title: "Software maintained, replaced, and removed"
+    body: "Software is maintained, replaced, and removed commensurate with risk."
+  - code: "PR.PS-03"
+    title: "Hardware maintained, replaced, and removed"
+    body: "Hardware is maintained, replaced, and removed commensurate with risk."
+  - code: "PR.PS-04"
+    title: "Log records generated for monitoring"
+    body: "Log records are generated and made available for continuous monitoring."
+  - code: "PR.PS-05"
+    title: "Unauthorized software installation prevented"
+    body: "Installation and execution of unauthorized software are prevented."
   - code: "PR.PS-06"
     title: "Secure software development practices applied"
     body: "Secure software development practices are integrated and their performance monitored across the SDLC."
   - code: "PR.IR-01"
     title: "Networks and environments protected"
     body: "Networks and environments are protected from unauthorized logical access and usage."
+  - code: "PR.IR-02"
+    title: "Technology assets protected from environmental threats"
+    body: "The organization's technology assets are protected from environmental threats."
+  - code: "PR.IR-03"
+    title: "Resilience mechanisms achieve availability"
+    body: "Mechanisms are implemented to achieve resilience requirements in normal and adverse situations."
+  - code: "PR.IR-04"
+    title: "Adequate resource capacity maintained"
+    body: "Adequate resource capacity to ensure availability is maintained."
 
   # ===== DETECT (DE) =====
   - code: "DE.CM-01"
     title: "Networks monitored for adverse events"
     body: "Networks and network services are monitored to find potentially adverse events."
+  - code: "DE.CM-02"
+    title: "Physical environment monitored for adverse events"
+    body: "The physical environment is monitored to find potentially adverse events."
   - code: "DE.CM-03"
     title: "Personnel activity monitored"
     body: "Personnel activity and technology usage are monitored to find potentially adverse events."
+  - code: "DE.CM-06"
+    title: "External service provider activity monitored"
+    body: "External service provider activities and services are monitored to find potentially adverse events."
   - code: "DE.CM-09"
     title: "Computing hardware and software monitored"
     body: "Computing hardware and software, runtime environments, and their data are monitored to find adverse events."
   - code: "DE.AE-02"
     title: "Adverse events analyzed"
     body: "Potentially adverse events are analyzed to better understand associated activities."
+  - code: "DE.AE-03"
+    title: "Event data aggregated and correlated"
+    body: "Information is correlated from multiple sources to detect adverse events."
+  - code: "DE.AE-04"
+    title: "Estimated impact of events understood"
+    body: "The estimated impact and scope of adverse events are understood."
+  - code: "DE.AE-06"
+    title: "Event information provided to authorized staff"
+    body: "Information on adverse events is provided to authorized staff and tools."
+  - code: "DE.AE-07"
+    title: "Threat intelligence integrated into analysis"
+    body: "Cyber threat intelligence and other contextual information are integrated into event analysis."
+  - code: "DE.AE-08"
+    title: "Incidents declared against criteria"
+    body: "Incidents are declared when adverse events meet defined incident criteria."
 
   # ===== RESPOND (RS) =====
   - code: "RS.MA-01"
@@ -154,37 +337,131 @@ requirements:
   - code: "RS.MA-02"
     title: "Incident reports triaged and validated"
     body: "Incident reports are triaged and validated."
-  - code: "RS.CO-02"
-    title: "Stakeholders notified of incidents"
-    body: "Internal and external stakeholders are notified of incidents."
+  - code: "RS.MA-03"
+    title: "Incidents categorized and prioritized"
+    body: "Incidents are categorized and prioritized."
+  - code: "RS.MA-04"
+    title: "Incidents escalated as needed"
+    body: "Incidents are escalated or elevated as needed."
+  - code: "RS.MA-05"
+    title: "Recovery initiation criteria applied"
+    body: "Criteria for initiating incident recovery are applied."
   - code: "RS.AN-03"
     title: "Incident root cause analysis performed"
     body: "Analysis is performed to establish what has taken place during an incident and the root cause."
+  - code: "RS.AN-06"
+    title: "Investigation actions recorded with integrity"
+    body: "Actions performed during an investigation are recorded, and the records' integrity is preserved."
+  - code: "RS.AN-07"
+    title: "Incident data and metadata collected and preserved"
+    body: "Incident data and metadata are collected, and their integrity and provenance are preserved."
+  - code: "RS.AN-08"
+    title: "Incident magnitude estimated and validated"
+    body: "An incident's magnitude is estimated and validated."
+  - code: "RS.CO-02"
+    title: "Stakeholders notified of incidents"
+    body: "Internal and external stakeholders are notified of incidents."
+  - code: "RS.CO-03"
+    title: "Information shared with designated stakeholders"
+    body: "Information is shared with designated internal and external stakeholders during response."
+  - code: "RS.MI-01"
+    title: "Incidents contained"
+    body: "Incidents are contained."
+  - code: "RS.MI-02"
+    title: "Incidents eradicated"
+    body: "Incidents are eradicated."
 
   # ===== RECOVER (RC) =====
   - code: "RC.RP-01"
     title: "Recovery plan executed"
     body: "The recovery portion of the incident response plan is executed once initiated from the incident response process."
+  - code: "RC.RP-02"
+    title: "Recovery actions selected, scoped, and performed"
+    body: "Recovery actions are selected, scoped, prioritized, and performed."
   - code: "RC.RP-03"
     title: "Backup integrity verified before restoration"
     body: "The integrity of backups and other restoration assets is verified before using them for restoration."
   - code: "RC.RP-04"
     title: "Critical functions restoration prioritized"
     body: "Critical mission functions and cybersecurity risk management are considered to establish post-incident operational norms."
+  - code: "RC.RP-05"
+    title: "Restored asset integrity verified"
+    body: "The integrity of restored assets is verified, systems and services are restored, and normal operating status is confirmed."
+  - code: "RC.RP-06"
+    title: "Recovery completion declared and documented"
+    body: "The end of incident recovery is declared based on criteria, and incident-related documentation is completed."
   - code: "RC.CO-03"
     title: "Recovery activities communicated to stakeholders"
     body: "Recovery activities and progress in restoring operational capabilities are communicated to stakeholders."
+  - code: "RC.CO-04"
+    title: "Public updates on recovery shared accurately"
+    body: "Public updates on incident recovery are shared using approved methods and messaging."
 
 mappings:
   # ===== GOVERN (GV) → SCF governance / risk / third-party families =====
-  # AC-5: GOVERN has no SOC 2 analog; these rows prove the graph handles a
-  # Function with no v1-framework overlap. GV.RR-02 → GOV-04 is the asserted
-  # no-analog anchor (governance family) in the integration test.
+  # AC-5 (slice 480): GOVERN has no SOC 2 analog; these rows prove the graph
+  # handles a Function with no v1-framework overlap. GV.RR-02 → GOV-04 is the
+  # asserted no-analog anchor (governance family) in the integration test.
   - requirement_code: "GV.OC-01"
     scf_anchor: "GOV-01"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Mission-informed cybersecurity objectives are a facet of SCF Information Security Governance."
+  - requirement_code: "GV.OC-02"
+    scf_anchor: "GOV-01"
+    relationship_type: "subset_of"
+    strength: 0.7
+    rationale: "Understanding stakeholder cybersecurity expectations is a governance-context activity within SCF Information Security Governance."
+  - requirement_code: "GV.OC-03"
+    scf_anchor: "CPL-01"
+    relationship_type: "subset_of"
+    strength: 0.85
+    rationale: "Understanding legal/regulatory/contractual security requirements maps to SCF Compliance Management."
+  - requirement_code: "GV.OC-04"
+    scf_anchor: "GOV-01"
+    relationship_type: "intersects_with"
+    strength: 0.65
+    rationale: "Communicating critical objectives and dependent services overlaps SCF Information Security Governance; BIA-style dependency mapping is a residual gap (LOW)."
+  - requirement_code: "GV.OC-05"
+    scf_anchor: "BCD-02"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Understanding the capabilities/services the org depends on overlaps SCF Business Continuity Plan (dependency analysis); broader organizational-context gap (LOW)."
+  - requirement_code: "GV.RM-01"
+    scf_anchor: "RSK-01"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Agreed risk-management objectives are governed by the SCF Risk Management Program."
+  - requirement_code: "GV.RM-02"
+    scf_anchor: "RSK-01"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Risk appetite/tolerance statements are established within the SCF Risk Management Program."
+  - requirement_code: "GV.RM-03"
+    scf_anchor: "RSK-01"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Integrating cybersecurity risk into enterprise risk management is part of the SCF Risk Management Program."
+  - requirement_code: "GV.RM-04"
+    scf_anchor: "RSK-01"
+    relationship_type: "intersects_with"
+    strength: 0.7
+    rationale: "Strategic direction for risk-response options overlaps the SCF Risk Management Program; response-strategy specificity is a residual gap."
+  - requirement_code: "GV.RM-05"
+    scf_anchor: "RSK-01"
+    relationship_type: "subset_of"
+    strength: 0.7
+    rationale: "Establishing risk-communication lines is part of operating the SCF Risk Management Program."
+  - requirement_code: "GV.RM-06"
+    scf_anchor: "RSK-04"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "A standardized risk-calculation/prioritization method is part of SCF Risk Assessment."
+  - requirement_code: "GV.RM-07"
+    scf_anchor: "RSK-01"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Characterizing strategic opportunities (positive risk) overlaps the SCF Risk Management Program; upside-risk treatment is a residual gap (LOW)."
   - requirement_code: "GV.RR-01"
     scf_anchor: "GOV-01"
     relationship_type: "subset_of"
@@ -195,31 +472,91 @@ mappings:
     relationship_type: "equal"
     strength: 0.9
     rationale: "Establishing and communicating security roles/responsibilities maps directly to SCF GOV-04."
+  - requirement_code: "GV.RR-03"
+    scf_anchor: "GOV-01"
+    relationship_type: "intersects_with"
+    strength: 0.65
+    rationale: "Allocating resources commensurate with the security strategy overlaps SCF Information Security Governance; budget/resourcing specificity is a residual gap (LOW)."
+  - requirement_code: "GV.RR-04"
+    scf_anchor: "HRS-01"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Including cybersecurity in HR practices maps to SCF Human Resources Security."
   - requirement_code: "GV.PO-01"
     scf_anchor: "GOV-01"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "An organizational cybersecurity policy is an instrument of security governance."
-  - requirement_code: "GV.RM-01"
-    scf_anchor: "RSK-01"
+  - requirement_code: "GV.PO-02"
+    scf_anchor: "GOV-01"
     relationship_type: "subset_of"
-    strength: 0.8
-    rationale: "Agreed risk-management objectives are governed by the SCF Risk Management Program."
-  - requirement_code: "GV.SC-01"
-    scf_anchor: "TPM-01"
-    relationship_type: "subset_of"
-    strength: 0.8
-    rationale: "A cyber supply-chain risk-management program is a subset of SCF Third-Party Management."
-  - requirement_code: "GV.SC-04"
-    scf_anchor: "TPM-04"
-    relationship_type: "intersects_with"
-    strength: 0.7
-    rationale: "Prioritizing suppliers by criticality overlaps with SCF Third-Party Risk Assessments."
+    strength: 0.75
+    rationale: "Periodic policy review/update/communication is part of maintaining SCF Information Security Governance."
   - requirement_code: "GV.OV-01"
     scf_anchor: "CPL-03"
     relationship_type: "intersects_with"
     strength: 0.6
     rationale: "Reviewing strategy outcomes overlaps the SCF Internal Audit Function; explicit gap on strategy-adjustment governance (LOW)."
+  - requirement_code: "GV.OV-02"
+    scf_anchor: "RSK-01"
+    relationship_type: "intersects_with"
+    strength: 0.65
+    rationale: "Reviewing the risk-management strategy for coverage of org risks/requirements overlaps the SCF Risk Management Program; strategy-review specificity is the residual gap (LOW)."
+  - requirement_code: "GV.OV-03"
+    scf_anchor: "CPL-03"
+    relationship_type: "intersects_with"
+    strength: 0.65
+    rationale: "Evaluating/adjusting risk-management performance overlaps the SCF Internal Audit Function; performance-metric specificity is the residual gap (LOW)."
+  - requirement_code: "GV.SC-01"
+    scf_anchor: "TPM-01"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "A cyber supply-chain risk-management program is a subset of SCF Third-Party Management."
+  - requirement_code: "GV.SC-02"
+    scf_anchor: "TPM-01"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Establishing supplier/third-party security roles and responsibilities is part of SCF Third-Party Management."
+  - requirement_code: "GV.SC-03"
+    scf_anchor: "TPM-01"
+    relationship_type: "intersects_with"
+    strength: 0.7
+    rationale: "Integrating supply-chain risk into cybersecurity/enterprise risk management spans SCF Third-Party Management and the Risk Management Program; the integration seam is the residual gap."
+  - requirement_code: "GV.SC-04"
+    scf_anchor: "TPM-04"
+    relationship_type: "intersects_with"
+    strength: 0.7
+    rationale: "Prioritizing suppliers by criticality overlaps with SCF Third-Party Risk Assessments."
+  - requirement_code: "GV.SC-05"
+    scf_anchor: "TPM-01"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Establishing supply-chain security requirements in supplier contracts is part of SCF Third-Party Management."
+  - requirement_code: "GV.SC-06"
+    scf_anchor: "TPM-04"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Pre-engagement supplier due diligence maps to SCF Third-Party Risk Assessments."
+  - requirement_code: "GV.SC-07"
+    scf_anchor: "TPM-04"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Ongoing monitoring of supplier risk over the relationship maps to SCF Third-Party Risk Assessments."
+  - requirement_code: "GV.SC-08"
+    scf_anchor: "IRO-04"
+    relationship_type: "intersects_with"
+    strength: 0.65
+    rationale: "Including relevant suppliers in incident response overlaps SCF Incident Response Plan; the supplier-coordination facet is the residual gap (LOW)."
+  - requirement_code: "GV.SC-09"
+    scf_anchor: "TPM-01"
+    relationship_type: "intersects_with"
+    strength: 0.7
+    rationale: "Integrating supply-chain security across the technology lifecycle overlaps SCF Third-Party Management; lifecycle-integration specificity is the residual gap."
+  - requirement_code: "GV.SC-10"
+    scf_anchor: "TPM-01"
+    relationship_type: "intersects_with"
+    strength: 0.65
+    rationale: "Post-relationship (offboarding) supply-chain risk provisions overlap SCF Third-Party Management; termination-specific handling is a residual gap (LOW)."
 
   # ===== IDENTIFY (ID) =====
   - requirement_code: "ID.AM-01"
@@ -232,16 +569,46 @@ mappings:
     relationship_type: "equal"
     strength: 0.9
     rationale: "Maintaining a software inventory maps directly to SCF Asset Inventory."
+  - requirement_code: "ID.AM-03"
+    scf_anchor: "NET-01"
+    relationship_type: "intersects_with"
+    strength: 0.65
+    rationale: "Maintaining authorized network-communication/data-flow representations overlaps SCF Network Security; data-flow-diagram specificity is a residual gap (LOW)."
+  - requirement_code: "ID.AM-04"
+    scf_anchor: "TPM-01"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Maintaining an inventory of supplier-provided services is part of SCF Third-Party Management."
+  - requirement_code: "ID.AM-05"
+    scf_anchor: "AST-01"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Prioritizing assets by criticality/classification is governed by the SCF Asset Management Policy."
   - requirement_code: "ID.AM-07"
     scf_anchor: "DCH-01"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Inventorying and classifying data is covered by SCF Data Classification & Handling."
+  - requirement_code: "ID.AM-08"
+    scf_anchor: "AST-01"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Managing assets across their lifecycle is governed by the SCF Asset Management Policy."
   - requirement_code: "ID.RA-01"
     scf_anchor: "VPM-01"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Identifying and recording asset vulnerabilities is part of SCF Vulnerability & Patch Management."
+  - requirement_code: "ID.RA-02"
+    scf_anchor: "MON-08"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Receiving/analyzing cyber threat intelligence overlaps SCF Anomalous Behavior Detection (the closest threat-analysis anchor in the sample fixture); a dedicated threat-intelligence anchor is absent (LOW)."
+  - requirement_code: "ID.RA-03"
+    scf_anchor: "RSK-04"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Identifying and recording internal/external threats is part of SCF Risk Assessment."
   - requirement_code: "ID.RA-04"
     scf_anchor: "RSK-04"
     relationship_type: "subset_of"
@@ -252,6 +619,51 @@ mappings:
     relationship_type: "equal"
     strength: 0.85
     rationale: "Prioritizing risk from threat/vuln/impact maps directly to SCF Risk Assessment."
+  - requirement_code: "ID.RA-06"
+    scf_anchor: "RSK-01"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Choosing, tracking, and communicating risk responses is part of the SCF Risk Management Program."
+  - requirement_code: "ID.RA-07"
+    scf_anchor: "CHG-02"
+    relationship_type: "intersects_with"
+    strength: 0.7
+    rationale: "Managing/assessing changes and exceptions for risk impact overlaps the SCF Change Control Process; the risk-exception facet is the residual gap."
+  - requirement_code: "ID.RA-08"
+    scf_anchor: "VPM-04"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Receiving/analyzing/responding to vulnerability disclosures is part of the SCF Vulnerability Remediation Process."
+  - requirement_code: "ID.RA-09"
+    scf_anchor: "TDA-01"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Assessing hardware/software authenticity and integrity before use is governed by SCF Technology Development & Acquisition."
+  - requirement_code: "ID.RA-10"
+    scf_anchor: "TPM-04"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Assessing critical suppliers prior to acquisition maps to SCF Third-Party Risk Assessments."
+  - requirement_code: "ID.IM-01"
+    scf_anchor: "CPL-03"
+    relationship_type: "intersects_with"
+    strength: 0.65
+    rationale: "Identifying improvements from process evaluations overlaps the SCF Internal Audit Function; continuous-improvement specificity is the residual gap (LOW)."
+  - requirement_code: "ID.IM-02"
+    scf_anchor: "VPM-04"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Improvements from security tests/exercises overlap the SCF Vulnerability Remediation Process (pentest/exercise findings feed remediation); a dedicated test-exercise anchor is absent (LOW)."
+  - requirement_code: "ID.IM-03"
+    scf_anchor: "MON-01"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Improvements from operational-process execution overlap SCF Continuous Monitoring; operational-improvement specificity is the residual gap (LOW)."
+  - requirement_code: "ID.IM-04"
+    scf_anchor: "IRO-04"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Establishing/maintaining/improving incident-response, continuity, and recovery plans is anchored by the SCF Incident Response Plan."
 
   # ===== PROTECT (PR) =====
   # PR.AA-01 → IAC-01 is the FOUR-FRAMEWORK shared anchor (invariant #1, AC-4):
@@ -261,21 +673,41 @@ mappings:
     relationship_type: "equal"
     strength: 0.9
     rationale: "Managing identities and credentials maps directly to SCF Identification & Authentication Policy (four-framework shared anchor)."
+  - requirement_code: "PR.AA-02"
+    scf_anchor: "IAC-07"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Identity proofing and binding to credentials is part of SCF User Provisioning & Lifecycle."
   - requirement_code: "PR.AA-03"
     scf_anchor: "IAC-06"
     relationship_type: "intersects_with"
     strength: 0.75
     rationale: "Risk-commensurate authentication strongly overlaps SCF Multi-Factor Authentication."
+  - requirement_code: "PR.AA-04"
+    scf_anchor: "IAC-01"
+    relationship_type: "intersects_with"
+    strength: 0.65
+    rationale: "Protecting/conveying/verifying identity assertions overlaps SCF Identification & Authentication Policy; federation/assertion-protection specificity is a residual gap (LOW)."
   - requirement_code: "PR.AA-05"
     scf_anchor: "IAC-21"
     relationship_type: "intersects_with"
     strength: 0.7
     rationale: "Least-privilege/separation-of-duties enforcement overlaps SCF Privileged Account Management; broader access governance gap (MEDIUM)."
+  - requirement_code: "PR.AA-06"
+    scf_anchor: "PES-04"
+    relationship_type: "equal"
+    strength: 0.85
+    rationale: "Managing/monitoring/enforcing physical access to assets maps directly to SCF Physical Access Control."
   - requirement_code: "PR.AT-01"
     scf_anchor: "HRS-04"
     relationship_type: "equal"
     strength: 0.9
     rationale: "Security awareness and training maps directly to SCF Security Awareness Training."
+  - requirement_code: "PR.AT-02"
+    scf_anchor: "HRS-04"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Role-based training for specialized/privileged roles is a subset of SCF Security Awareness Training."
   - requirement_code: "PR.DS-01"
     scf_anchor: "CRY-04"
     relationship_type: "subset_of"
@@ -286,11 +718,41 @@ mappings:
     relationship_type: "subset_of"
     strength: 0.7
     rationale: "Protecting data-in-transit is covered by SCF Encryption In Transit (CSF outcome is broader than encryption alone)."
+  - requirement_code: "PR.DS-10"
+    scf_anchor: "CRY-01"
+    relationship_type: "intersects_with"
+    strength: 0.55
+    rationale: "Protecting data-in-use overlaps SCF Use of Cryptographic Controls (the broadest crypto-protection anchor); confidential-compute/data-in-use specificity is absent from the sample fixture (LOW)."
+  - requirement_code: "PR.DS-11"
+    scf_anchor: "BCD-09"
+    relationship_type: "equal"
+    strength: 0.85
+    rationale: "Creating/protecting/maintaining/testing data backups maps directly to SCF Backups."
   - requirement_code: "PR.PS-01"
     scf_anchor: "CFG-02"
     relationship_type: "equal"
     strength: 0.85
     rationale: "Configuration management practices map directly to SCF Secure Baseline Configurations."
+  - requirement_code: "PR.PS-02"
+    scf_anchor: "VPM-01"
+    relationship_type: "intersects_with"
+    strength: 0.7
+    rationale: "Maintaining/replacing/removing software commensurate with risk overlaps SCF Vulnerability & Patch Management (patch/EOL lifecycle); broader software-lifecycle gap remains."
+  - requirement_code: "PR.PS-03"
+    scf_anchor: "AST-09"
+    relationship_type: "intersects_with"
+    strength: 0.7
+    rationale: "Maintaining/replacing/removing hardware overlaps SCF Asset Disposal (secure decommissioning); hardware-maintenance facet is the residual gap."
+  - requirement_code: "PR.PS-04"
+    scf_anchor: "AAA-01"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Generating log records for monitoring is part of SCF Auditing & Accountability."
+  - requirement_code: "PR.PS-05"
+    scf_anchor: "CFG-02"
+    relationship_type: "intersects_with"
+    strength: 0.7
+    rationale: "Preventing unauthorized software install/execution overlaps SCF Secure Baseline Configurations (allow-listing/hardening); application-control specificity is the residual gap."
   - requirement_code: "PR.PS-06"
     scf_anchor: "SEA-05"
     relationship_type: "equal"
@@ -301,6 +763,21 @@ mappings:
     relationship_type: "intersects_with"
     strength: 0.75
     rationale: "Protecting networks from unauthorized access strongly overlaps SCF Boundary Protection."
+  - requirement_code: "PR.IR-02"
+    scf_anchor: "PES-04"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Protecting assets from environmental threats overlaps SCF Physical Access Control (the closest physical/environmental anchor in the fixture); environmental-controls specificity is absent (LOW)."
+  - requirement_code: "PR.IR-03"
+    scf_anchor: "BCD-02"
+    relationship_type: "subset_of"
+    strength: 0.7
+    rationale: "Implementing resilience mechanisms to meet availability requirements is part of the SCF Business Continuity Plan."
+  - requirement_code: "PR.IR-04"
+    scf_anchor: "BCD-02"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Maintaining adequate resource capacity for availability overlaps the SCF Business Continuity Plan; capacity-planning specificity is the residual gap (LOW)."
 
   # ===== DETECT (DE) =====
   - requirement_code: "DE.CM-01"
@@ -308,11 +785,21 @@ mappings:
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Network monitoring for adverse events is part of SCF Continuous Monitoring."
+  - requirement_code: "DE.CM-02"
+    scf_anchor: "PES-04"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Monitoring the physical environment for adverse events overlaps SCF Physical Access Control (the closest physical anchor); physical-environment-monitoring specificity is a residual gap (LOW)."
   - requirement_code: "DE.CM-03"
     scf_anchor: "MON-08"
     relationship_type: "intersects_with"
     strength: 0.7
     rationale: "Monitoring personnel activity overlaps SCF Anomalous Behavior Detection."
+  - requirement_code: "DE.CM-06"
+    scf_anchor: "TPM-04"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Monitoring external service-provider activity overlaps SCF Third-Party Risk Assessments; continuous-provider-monitoring specificity is a residual gap (LOW)."
   - requirement_code: "DE.CM-09"
     scf_anchor: "MON-01"
     relationship_type: "subset_of"
@@ -323,6 +810,31 @@ mappings:
     relationship_type: "intersects_with"
     strength: 0.7
     rationale: "Analyzing adverse events overlaps SCF Anomalous Behavior Detection; broader correlation gap (MEDIUM)."
+  - requirement_code: "DE.AE-03"
+    scf_anchor: "AAA-12"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Correlating event information from multiple sources is part of SCF Audit Log Review (multi-source log analysis)."
+  - requirement_code: "DE.AE-04"
+    scf_anchor: "IRO-04"
+    relationship_type: "intersects_with"
+    strength: 0.65
+    rationale: "Understanding the estimated impact/scope of adverse events overlaps the SCF Incident Response Plan (impact triage); pre-incident impact-estimation specificity is the residual gap (LOW)."
+  - requirement_code: "DE.AE-06"
+    scf_anchor: "IRO-09"
+    relationship_type: "subset_of"
+    strength: 0.7
+    rationale: "Providing adverse-event information to authorized staff/tools is part of SCF Incident Reporting."
+  - requirement_code: "DE.AE-07"
+    scf_anchor: "MON-08"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Integrating cyber threat intelligence into event analysis overlaps SCF Anomalous Behavior Detection; a dedicated threat-intelligence anchor is absent from the fixture (LOW)."
+  - requirement_code: "DE.AE-08"
+    scf_anchor: "IRO-04"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Declaring incidents when events meet defined criteria is part of executing the SCF Incident Response Plan."
 
   # ===== RESPOND (RS) =====
   - requirement_code: "RS.MA-01"
@@ -335,16 +847,61 @@ mappings:
     relationship_type: "subset_of"
     strength: 0.75
     rationale: "Triaging and validating incident reports is part of SCF Incident Response Plan execution."
+  - requirement_code: "RS.MA-03"
+    scf_anchor: "IRO-04"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Categorizing and prioritizing incidents is part of SCF Incident Response Plan execution."
+  - requirement_code: "RS.MA-04"
+    scf_anchor: "IRO-04"
+    relationship_type: "subset_of"
+    strength: 0.7
+    rationale: "Escalating/elevating incidents is part of SCF Incident Response Plan execution."
+  - requirement_code: "RS.MA-05"
+    scf_anchor: "IRO-04"
+    relationship_type: "subset_of"
+    strength: 0.7
+    rationale: "Applying recovery-initiation criteria is part of the SCF Incident Response Plan (response-to-recovery handoff)."
+  - requirement_code: "RS.AN-03"
+    scf_anchor: "IRO-04"
+    relationship_type: "intersects_with"
+    strength: 0.65
+    rationale: "Incident root-cause analysis overlaps SCF Incident Response Plan; forensic-analysis specificity gap (LOW). The sample fixture has no dedicated forensic-analysis anchor (slice-480 D7 revisit; closest covering anchor retained)."
+  - requirement_code: "RS.AN-06"
+    scf_anchor: "AAA-01"
+    relationship_type: "intersects_with"
+    strength: 0.65
+    rationale: "Recording investigation actions with preserved integrity overlaps SCF Auditing & Accountability (tamper-evident audit records); chain-of-custody specificity is the residual gap (LOW)."
+  - requirement_code: "RS.AN-07"
+    scf_anchor: "AAA-10"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Collecting incident data/metadata with preserved integrity/provenance overlaps SCF Event Log Retention; forensic-preservation specificity is absent from the fixture (LOW)."
+  - requirement_code: "RS.AN-08"
+    scf_anchor: "IRO-04"
+    relationship_type: "subset_of"
+    strength: 0.7
+    rationale: "Estimating and validating an incident's magnitude is part of SCF Incident Response Plan execution."
   - requirement_code: "RS.CO-02"
     scf_anchor: "IRO-09"
     relationship_type: "equal"
     strength: 0.85
     rationale: "Notifying stakeholders of incidents maps directly to SCF Incident Reporting."
-  - requirement_code: "RS.AN-03"
+  - requirement_code: "RS.CO-03"
+    scf_anchor: "IRO-09"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Sharing information with designated stakeholders during response is part of SCF Incident Reporting."
+  - requirement_code: "RS.MI-01"
     scf_anchor: "IRO-04"
-    relationship_type: "intersects_with"
-    strength: 0.65
-    rationale: "Incident root-cause analysis overlaps SCF Incident Response Plan; forensic-analysis specificity gap (LOW)."
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Containing incidents is part of executing the SCF Incident Response Plan."
+  - requirement_code: "RS.MI-02"
+    scf_anchor: "IRO-04"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Eradicating incidents is part of executing the SCF Incident Response Plan."
 
   # ===== RECOVER (RC) =====
   - requirement_code: "RC.RP-01"
@@ -352,6 +909,11 @@ mappings:
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Executing the recovery plan is governed by the SCF Business Continuity Plan."
+  - requirement_code: "RC.RP-02"
+    scf_anchor: "BCD-02"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Selecting/scoping/prioritizing/performing recovery actions is part of the SCF Business Continuity Plan."
   - requirement_code: "RC.RP-03"
     scf_anchor: "BCD-11"
     relationship_type: "equal"
@@ -362,8 +924,23 @@ mappings:
     relationship_type: "intersects_with"
     strength: 0.65
     rationale: "Prioritizing critical-function restoration overlaps SCF Business Continuity Plan; post-incident-norms specificity gap (LOW)."
+  - requirement_code: "RC.RP-05"
+    scf_anchor: "BCD-11"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Verifying restored-asset integrity and confirming normal operating status is part of SCF Backup Testing (restore validation)."
+  - requirement_code: "RC.RP-06"
+    scf_anchor: "BCD-02"
+    relationship_type: "subset_of"
+    strength: 0.7
+    rationale: "Declaring/documenting the end of recovery is part of the SCF Business Continuity Plan."
   - requirement_code: "RC.CO-03"
     scf_anchor: "BCD-02"
     relationship_type: "intersects_with"
     strength: 0.6
-    rationale: "Communicating recovery progress overlaps SCF Business Continuity Plan; stakeholder-comms specificity gap (LOW)."
+    rationale: "Communicating recovery progress overlaps SCF Business Continuity Plan; stakeholder-comms specificity gap (LOW). The fixture has no dedicated recovery-communications anchor (slice-480 D7 revisit; closest covering anchor retained)."
+  - requirement_code: "RC.CO-04"
+    scf_anchor: "IRO-09"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Sharing approved public updates on recovery overlaps SCF Incident Reporting (external communications); public-messaging specificity is a residual gap (LOW)."
