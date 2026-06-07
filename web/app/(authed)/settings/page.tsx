@@ -910,7 +910,12 @@ type NotifEvent =
   | "audit_period_assignment"
   | "policy_ack_due"
   | "risk_review_overdue"
-  | "control_drift";
+  | "control_drift"
+  // Slice 566: the two slice-445 digest kinds that previously had no per-kind
+  // opt-out surface. Backed by the same slice-108 event whitelist (extended in
+  // the same slice's migration + internal/auth/userprefs.Events).
+  | "audit_note_reply"
+  | "evidence_staleness";
 
 const NOTIF_EVENTS: { key: NotifEvent; label: string; description: string }[] =
   [
@@ -939,6 +944,16 @@ const NOTIF_EVENTS: { key: NotifEvent; label: string; description: string }[] =
       key: "control_drift",
       label: "Control drift",
       description: "Controls you own that flip pass to fail",
+    },
+    {
+      key: "audit_note_reply",
+      label: "Audit-note replies",
+      description: "Replies on audit-note threads you're part of",
+    },
+    {
+      key: "evidence_staleness",
+      label: "Stale evidence",
+      description: "Digest of evidence whose freshness window has lapsed",
     },
   ];
 
