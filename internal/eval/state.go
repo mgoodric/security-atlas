@@ -22,7 +22,10 @@
 // cutoff; it never leaks into the pass/fail result itself.
 package eval
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // ResultPass / Fail / NA / Inconclusive mirror the `evidence_result` Postgres
 // enum. Kept as plain strings so the pure logic has no DB dependency.
@@ -85,21 +88,32 @@ func FreshnessMaxAge(class string) (time.Duration, bool) {
 	return d, known
 }
 
-// inWindowRecord is one evidence record's result that fell INSIDE the
-// freshness window. computeResult only ever sees in-window records — the
-// freshness filter (inWindowRecords) is applied first. This is the type-level
-// expression of anti-criterion P0-2: out-of-window evidence cannot reach the
-// result computation.
+// inWindowRecord is one evidence record that fell INSIDE the freshness window.
+// computeResult only ever sees in-window records — the freshness filter
+// (inWindowRecords) is applied first. This is the type-level expression of
+// anti-criterion P0-2: out-of-window evidence cannot reach the result
+// computation.
+//
+// payload + observedAt carry the JSONB payload bytes and the observed_at stamp
+// so the SQL + JSON-path evidence-query evaluators (slice 495) can run over
+// each in-window record. The Rego path ignores payload (it sees only result);
+// keeping the fields on the in-window struct lets all three evaluators share
+// one record set without a second DB read.
 type inWindowRecord struct {
-	result string
+	result     string
+	observedAt time.Time
+	payload    []byte
 }
 
 // allRecord is one evidence record before the freshness filter — the full
 // ledger slice for a (control, scope_cell). Carries observed_at because
-// computeFreshness needs the freshest timestamp regardless of window.
+// computeFreshness needs the freshest timestamp regardless of window, and
+// payload so the in-window slice can hand the JSONB to the SQL / JSON-path
+// evaluators (slice 495).
 type allRecord struct {
 	observedAt time.Time
 	result     string
+	payload    []byte
 }
 
 // inWindowRecords filters a full ledger slice down to the records whose
@@ -111,7 +125,7 @@ func inWindowRecords(all []allRecord, class string, now time.Time) []inWindowRec
 	out := make([]inWindowRecord, 0, len(all))
 	for _, r := range all {
 		if !r.observedAt.Before(cutoff) {
-			out = append(out, inWindowRecord{result: r.result})
+			out = append(out, inWindowRecord{result: r.result, observedAt: r.observedAt, payload: r.payload})
 		}
 	}
 	return out
@@ -180,6 +194,28 @@ func computeFreshness(all []allRecord, class string, now time.Time) string {
 		return FreshnessStale
 	}
 	return FreshnessFresh
+}
+
+// inWindowRecordsToJSON marshals the in-window record set to a JSONB array
+// suitable for the SQL evidence-query CTE ($1::jsonb). Each element is
+// {result, observed_at, payload}; payload is the record's raw JSONB (decoded so
+// it nests as an object/array, not a quoted string). Pure (no I/O) so the SQL
+// path's parameter construction is unit-testable without a DB.
+func inWindowRecordsToJSON(records []inWindowRecord) ([]byte, error) {
+	type elem struct {
+		Result     string          `json:"result"`
+		ObservedAt time.Time       `json:"observed_at"`
+		Payload    json.RawMessage `json:"payload"`
+	}
+	out := make([]elem, 0, len(records))
+	for _, r := range records {
+		p := r.payload
+		if len(p) == 0 {
+			p = []byte("null")
+		}
+		out = append(out, elem{Result: r.result, ObservedAt: r.observedAt, Payload: json.RawMessage(p)})
+	}
+	return json.Marshal(out)
 }
 
 // latestObservedAt returns the freshest observed_at across a ledger slice, or

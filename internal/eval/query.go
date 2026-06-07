@@ -63,7 +63,7 @@ func (e *Engine) ControlState(ctx context.Context, controlID uuid.UUID, scopePre
 	}
 
 	var out []State
-	err := e.store.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+	err := e.store.inTx(ctx, func(ctx context.Context, q *dbx.Queries, _ pgx.Tx, tenantID uuid.UUID) error {
 		if _, err := e.store.loadControl(ctx, q, tenantID, controlID); err != nil {
 			return err
 		}

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 )
@@ -61,7 +62,7 @@ func (e *Engine) Effectiveness(ctx context.Context, controlID uuid.UUID) (Effect
 		WindowStart: windowStart,
 		WindowEnd:   windowEnd,
 	}
-	err := e.store.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+	err := e.store.inTx(ctx, func(ctx context.Context, q *dbx.Queries, _ pgx.Tx, tenantID uuid.UUID) error {
 		// Confirm the control exists in-tenant first so an unknown id is a
 		// clean 404 rather than a silently-empty score.
 		if _, err := e.store.loadControl(ctx, q, tenantID, controlID); err != nil {

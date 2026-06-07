@@ -35,7 +35,7 @@ RETURNING *;
 -- Ordered observed_at DESC so the engine sees the freshest record first.
 -- This is a pure SELECT — the engine never mutates the ledger.
 SELECT id, tenant_id, control_id, control_ref, scope_id,
-       observed_at, result, freshness_class, hash
+       observed_at, result, freshness_class, hash, payload
 FROM evidence_records
 WHERE tenant_id = $1
   AND (control_id = $2 OR control_ref = $3)

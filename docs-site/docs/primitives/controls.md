@@ -37,6 +37,91 @@ evidence (a screenshot, a signed PDF, a meeting log) or asserts state
 with a digital acknowledgment. **Constitutional invariant 9 — manual
 evidence is first-class.**
 
+## Evidence-query languages (control-as-code)
+
+A control bundle's `evidence_queries[]` declares one or more queries the
+evaluation engine runs over the control's **in-window evidence records**
+(the records inside the control's freshness window). Each query has a
+`language`. Three languages are supported:
+
+| `language` | Runs                                                             | A query yields                                                              |
+| ---------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `rego`     | An OPA policy in a capability-restricted sandbox.                | The policy's `result` assignment (`pass`/`fail`/`na`/`inconclusive`).       |
+| `sql`      | A read-only SQL query over a tenant-scoped `evidence` view.      | One column per row: a `pass`/`fail`/`na`/`inconclusive` text, or a boolean. |
+| `jsonpath` | A Goessner-dialect JSON-path over each record's JSONB `payload`. | Per-record: a non-empty/truthy match is `pass`, no match is `fail`.         |
+
+When a control declares more than one query, the per-query results roll up
+through the standard precedence — **any `fail` → `fail`; else any `pass` →
+`pass`; else `inconclusive`; else `na`** — so a mixed-language control is
+consistent with a single-language one. A control with **zero** declared
+queries falls back to rolling up the raw `result` of its in-window evidence
+records.
+
+A query whose language is not one of the three above, or that cannot be
+parsed/compiled, **fails loudly**: the control evaluates to `inconclusive`
+with the error surfaced and logged. It never silently produces no state.
+
+### The SQL evidence-query sandbox
+
+A `sql` evidence query is **read-only and evidence-only**. It does NOT run
+against the live database. It runs against a single read-only relation named
+`evidence`, materialised from the control's in-window record set, inside a
+`READ ONLY` transaction:
+
+```sql
+-- The author SELECT may reference ONLY the `evidence` relation, which exposes:
+--   result      text          -- the record's pass/fail/na/inconclusive
+--   observed_at timestamptz    -- when the evidence was observed
+--   payload     jsonb          -- the record's JSONB payload
+SELECT bool_and((payload->>'mfa_enabled')::boolean) FROM evidence;
+```
+
+Constraints (all enforced):
+
+- **Single read-only `SELECT`** (or `WITH … SELECT`). Multi-statement input,
+  any write/DDL/DML keyword (`INSERT`, `UPDATE`, `DROP`, `COPY`, `SET`,
+  `pg_sleep`, …), and any schema-qualified reference (e.g.
+  `public.evidence_records`) are rejected before the query runs.
+- **No reach beyond `evidence`.** The query runs with an empty `search_path`
+  and against a read-only transaction, so it cannot read another tenant's
+  evidence, the `users`/`api_keys` tables, or any other relation — only its
+  own in-window evidence records. (Constitutional invariants #2 read-only
+  evaluation + #6 tenant isolation.)
+- **Bounded runtime.** A per-query `statement_timeout` applies; a query that
+  exceeds it evaluates to `inconclusive`, never a hang.
+
+The result contract: the query SELECTs exactly one column. A boolean maps
+`true`→`pass` / `false`→`fail`; a text value must already be a result
+enum member. Zero rows is treated as `fail` (the asserted condition matched
+nothing).
+
+### The JSON-path evidence-query surface
+
+A `jsonpath` query is evaluated **in process** against each in-window
+record's JSONB `payload` — there is no database reach at all. The path is a
+Goessner-dialect expression:
+
+```text
+# pass iff the payload reports encryption is on:
+$.encrypted
+# pass iff at least one check passed:
+$.checks[?(@.passed==true)]
+```
+
+A record "passes" the query when the path resolves to a present, truthy
+value (a non-empty array/object, a non-empty string, a non-zero number, or
+`true`); it "fails" when the path matches nothing or a falsy value. The
+per-record results roll up through the same precedence as the other
+languages. A per-query timeout bounds runaway expressions.
+
+### Not supported (scope boundary)
+
+`sigma` is **not** an evidence-query language. Sigma is detection-as-code
+(alerting), a separate concern from control evaluation; it is intentionally
+excluded from the evidence-query engine. Enforcement hooks (Kyverno /
+Custodian) and a query-authoring UI are likewise out of scope — evidence
+queries are authored in the uploaded control-bundle YAML.
+
 ## Browsing the control set
 
 Sign in and open **Controls** in the sidebar. The list view shows every

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/scope"
@@ -88,7 +89,7 @@ func (e *Engine) EvaluateControl(ctx context.Context, controlID uuid.UUID, trigg
 	evaluatedAt := e.now()
 	written := 0
 
-	err = e.store.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+	err = e.store.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tx pgx.Tx, tenantID uuid.UUID) error {
 		meta, err := e.store.loadControl(ctx, q, tenantID, controlID)
 		if err != nil {
 			return err
@@ -117,7 +118,7 @@ func (e *Engine) EvaluateControl(ctx context.Context, controlID uuid.UUID, trigg
 		}
 
 		for _, cellID := range targets {
-			row, err := e.computeRow(ctx, meta, records, cellID, evalRunID, trigger, evaluatedAt)
+			row, err := e.computeRow(ctx, tx, meta, records, cellID, evalRunID, trigger, evaluatedAt)
 			if err != nil {
 				return err
 			}
@@ -135,9 +136,12 @@ func (e *Engine) EvaluateControl(ctx context.Context, controlID uuid.UUID, trigg
 }
 
 // computeRow turns a control's metadata + its ledger slice into one
-// evaluationRow for a given scope cell. The result is computed either by the
-// bundle's Rego evidence query (when declared) or by the per-record result
-// rollup (when not). Freshness is always computed from raw observed_at.
+// evaluationRow for a given scope cell. The result is computed by evaluating
+// EVERY declared evidence query (rego, sql, jsonpath — slice 495) over the
+// in-window record set and rolling the per-query results up through the same
+// result-precedence logic the per-record rollup uses. A control with no
+// declared query falls back to the per-record evidence rollup. Freshness is
+// always computed from raw observed_at.
 //
 // NOTE: in v1 the evidence ledger's `scope_id` is not yet wired to scope
 // cells (slice 017's scope_cells are a separate table from slice 002's
@@ -147,26 +151,17 @@ func (e *Engine) EvaluateControl(ctx context.Context, controlID uuid.UUID, trigg
 // is a documented follow-up (slice 018's effective-scope intersection is the
 // natural home). This is faithful to AC-1's "(control × scope_cell × time)"
 // shape: state is recorded per applicable cell.
-func (e *Engine) computeRow(ctx context.Context, meta controlMeta, records []allRecord, cellID *uuid.UUID, evalRunID uuid.UUID, trigger string, now time.Time) (evaluationRow, error) {
+func (e *Engine) computeRow(ctx context.Context, tx pgx.Tx, meta controlMeta, records []allRecord, cellID *uuid.UUID, evalRunID uuid.UUID, trigger string, now time.Time) (evaluationRow, error) {
 	inWindow := inWindowRecords(records, meta.freshnessClass, now)
 	freshness := computeFreshness(records, meta.freshnessClass, now)
 
-	var result string
-	if meta.regoQuery != "" {
-		// A Rego evidence query decides the result. Empty in-window set
-		// still runs the policy (its default branch fires); the engine maps
-		// a no-evidence freshness to inconclusive below regardless.
-		r, err := evalRegoQuery(ctx, meta.regoQuery, inWindow)
-		if err != nil {
-			return evaluationRow{}, fmt.Errorf("control %s rego query: %w", meta.id, err)
-		}
-		result = r
-	} else {
-		result = computeResult(inWindow)
+	result, err := e.evalQueries(ctx, tx, meta, inWindow)
+	if err != nil {
+		return evaluationRow{}, err
 	}
 
 	// no_evidence is authoritative for the result: a control with zero
-	// in-window evidence is inconclusive regardless of what a Rego default
+	// in-window evidence is inconclusive regardless of what a query's default
 	// branch returned. This keeps the no_evidence-coherent CHECK constraint
 	// satisfied and honors "absence of evidence is not failure".
 	if freshness == FreshnessNoEvidence {
@@ -190,12 +185,66 @@ func (e *Engine) computeRow(ctx context.Context, meta controlMeta, records []all
 	return row, nil
 }
 
+// evalQueries runs EVERY declared evidence query (slice 495 closes the
+// rego-only gap) and rolls the per-query results up through the result-
+// precedence logic. The dispatch contract:
+//
+//   - no declared queries  → fall back to the per-record evidence rollup
+//     (computeResult over the in-window record results).
+//   - language == rego     → evalRegoQuery (the existing sandbox).
+//   - language == sql      → evalSQLQuery (read-only, evidence-only, timeout).
+//   - language == jsonpath → evalJSONPathQuery (in-process over each payload).
+//   - any other language   → FAIL LOUD. The slice-009 validator already rejects
+//     unknown languages at upload, but the engine must never silently skip a
+//     persisted query — that silent no-op was the exact pre-495 defect. An
+//     unsupported (or empty-expression) query returns an error, which fails
+//     the whole control evaluation rather than quietly producing no state.
+//
+// Per-query results combine via computeResult precedence (any fail → fail;
+// else any pass → pass; else inconclusive; else na), so a control with a mix
+// of rego + sql + jsonpath queries rolls up consistently (AC-6).
+func (e *Engine) evalQueries(ctx context.Context, tx pgx.Tx, meta controlMeta, inWindow []inWindowRecord) (string, error) {
+	if len(meta.queries) == 0 {
+		// No declared query: the per-record evidence rollup IS the result.
+		return computeResult(inWindow), nil
+	}
+
+	perQuery := make([]inWindowRecord, 0, len(meta.queries))
+	for _, q := range meta.queries {
+		if q.Expression == "" {
+			return "", fmt.Errorf("control %s evidence query (language %q): expression is empty", meta.id, q.Language)
+		}
+		if !SupportedQueryLanguages[q.Language] {
+			// FAIL LOUD — never silently skip a persisted query.
+			return "", fmt.Errorf("control %s evidence query: unsupported language %q (engine supports rego|sql|jsonpath)", meta.id, q.Language)
+		}
+
+		var (
+			res string
+			err error
+		)
+		switch q.Language {
+		case "rego":
+			res, err = evalRegoQuery(ctx, q.Expression, inWindow)
+		case "sql":
+			res, err = evalSQLQuery(ctx, tx, q.Expression, inWindow)
+		case "jsonpath":
+			res, err = evalJSONPathQuery(ctx, q.Expression, inWindow)
+		}
+		if err != nil {
+			return "", fmt.Errorf("control %s %s query: %w", meta.id, q.Language, err)
+		}
+		perQuery = append(perQuery, inWindowRecord{result: res})
+	}
+	return computeResult(perQuery), nil
+}
+
 // EvaluateAll evaluates every active (non-superseded) control for the tenant.
 // Used by the scheduled time-based recompute and by Replay. Returns the
 // total rows written across all controls.
 func (e *Engine) EvaluateAll(ctx context.Context, trigger string, asOf time.Time) (int, error) {
 	var controlIDs []uuid.UUID
-	err := e.store.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+	err := e.store.inTx(ctx, func(ctx context.Context, q *dbx.Queries, _ pgx.Tx, tenantID uuid.UUID) error {
 		rows, err := q.ListActiveControls(ctx, pgUUID(tenantID))
 		if err != nil {
 			return fmt.Errorf("list active controls: %w", err)
@@ -244,23 +293,31 @@ type evidenceQueryManifest struct {
 	Expression string `json:"expression"`
 }
 
-// firstRegoQuery extracts the first `rego`-language evidence query expression
-// from a control's evidence_queries JSONB. Returns "" when the bundle
-// declares no Rego query (the engine then falls back to the per-record
-// result rollup). Non-rego languages (sql, jsonpath) are not evaluated in
-// slice 012 — they are a documented follow-up — so they are skipped here.
-func firstRegoQuery(evidenceQueriesJSON []byte) (string, error) {
+// parseEvidenceQueries decodes a control's evidence_queries JSONB into the
+// engine's query list. Slice 495: the engine evaluates EVERY declared query
+// (rego, sql, jsonpath), not just the first rego one — so this returns the
+// full list in bundle order rather than picking one. An empty / absent list
+// means the control has no declared query and falls back to the per-record
+// evidence rollup.
+func parseEvidenceQueries(evidenceQueriesJSON []byte) ([]evidenceQueryManifest, error) {
 	if len(evidenceQueriesJSON) == 0 {
-		return "", nil
+		return nil, nil
 	}
 	var queries []evidenceQueryManifest
 	if err := json.Unmarshal(evidenceQueriesJSON, &queries); err != nil {
-		return "", fmt.Errorf("parse evidence_queries: %w", err)
+		return nil, fmt.Errorf("parse evidence_queries: %w", err)
 	}
-	for _, q := range queries {
-		if q.Language == "rego" && q.Expression != "" {
-			return q.Expression, nil
-		}
-	}
-	return "", nil
+	return queries, nil
+}
+
+// SupportedQueryLanguages enumerates the evidence-query languages the
+// evaluation engine can run. Slice 495 closed the rego-only gap: sql and
+// jsonpath now evaluate. (sigma is intentionally absent — it is detect-as-code,
+// out of scope per the canvas §4.4 boundary.) A language outside this set FAILS
+// LOUD at dispatch (evalQuery returns an error) rather than silently producing
+// no state — that silent no-op was the exact pre-495 defect.
+var SupportedQueryLanguages = map[string]bool{
+	"rego":     true,
+	"sql":      true,
+	"jsonpath": true,
 }
