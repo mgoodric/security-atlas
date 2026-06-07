@@ -3,7 +3,18 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-07 (batch 201 reconcile — 478 super-admin user↔tenant↔role assignment API MERGED; the maintainer-requested user-management feature. 479 (UI) unblocked → ready; 476 reduced to verification.)
+**Last reconciled:** 2026-06-07 (batch 202 reconcile — 493 SSP narratives + 479 user-mgmt UI MERGED; first true 2-slice batch off this pool. The user-management feature (478 API + 479 UI) is now complete end-to-end.)
+
+## Reconcile — 2026-06-07 (batch 202 · 493 + 479 merged)
+
+First TRUE 2-slice batch off this dense pool — the web-only 479 paired conflict-free with the backend 493. BOTH merged CLEAN (no required failures; 493's codecov/patch bridge-skip advisory self-resolved). Merge order: 479 first (web-only, faster CI) at `7b970cc7`, then 493 (rebased onto the new main, CHANGELOG keep-all resolved) at `6259c45a`. Conflict prediction held exactly — only CHANGELOG overlapped.
+
+- **493** (SSP export: real control-implementation narratives, not the synthesized placeholder) — evidence-pipeline (OSCAL) · JUDGMENT — **MERGED** at `6259c45a` (#1057). `ControlImplementation.Statement` now carries the control bundle's authored `description` (the narrative explaining HOW a control is implemented — the most-read SSP section) via a new `ListActiveControlsWithDescription` companion query (`ListActiveControls` untouched for other consumers); statement filled exactly once; the slice-030 `ApplicabilityExpr` placeholder + double-fill removed. Description-less controls fall back to a clearly-LABELED auto-generated summary (never empty, never misleadingly authored; no LLM). Tenant-scoped + point-in-time consistent; cross-tenant isolation proven. Extends `internal/oscal` (no coverage-thresholds/shard change). 9/9 ACs, all 5 P0s. AP/AR/POA&M + cosign path untouched. Resolves slice-030 `D-narrative`. No spillover.
+- **479** (admin user-management UI — assign users↔tenants↔roles incl. self) — Frontend/Multi-tenancy · JUDGMENT — **MERGED** at `7b970cc7` (#1056). Wires the slice-060 `/admin/users` scaffold to the merged 478 API: cross-tenant user list + assign/revoke + the "Add me to this tenant" self-assign affordance (explicit re-auth notice, never auto-switch). Authz-HONEST — server (478) is the sole authority; UI derives super-admin scope from the response shape + surfaces 403s inline (no dead/over-promising buttons). 2 BFF routes (bearer-forward, status-passthrough) + 24 vitest cases + a Playwright e2e; web/coverage-thresholds.json floors added (slice-347 vitest ratchet — NOT cmd/scripts). 7/7 ACs, all 5 P0s. P0-192-5 preserved. No spillover.
+
+**The user-management feature is now complete end-to-end (478 API + 479 UI).** Downstream: 476 (demo-data reachability) is now fully verifiable — the self-assign UI affordance (479) over the self-assign API (478) is the supported path to reach the demo tenant; 476 stays a `ready` verification task (self-assign to demo → re-auth → switch → see the 50/20/200 dataset + an optional seed hint).
+
+Backlog after batch 202: OSCAL family 494/496/511/512 (one oscal-slice per batch, build on 492) · crosswalks 480/481/482 · connectors 486-491 · 474 · 508/509/510 · 499/500 (LLM infra follow-ons) · 513 (doc-fix) · 476 (verification) · the older analysis tail. No real-defects remain. MAINTAINER-SEQUENCED (do not auto-pick): 440/441/444/471/502.
 
 ## Drift detected — 2026-06-07 (batch 202 claim-stake · 493 + 479)
 
@@ -107,37 +118,37 @@ First build batch off the gap-analysis backlog — anchors on the worst real-def
 
 Maintainer-directed comprehensive gap analysis (5 parallel domain investigators: frameworks · connectors · evidence/audit/OSCAL · AI-assist/reporting · risk/policy/privacy/platform), each filing genuine missing-functionality slices via the /idea-to-slice method (template + mandatory STRIDE). Filed in 5 themed PRs (#1035 frameworks 480-484 · #1034 connectors 486-491 · #1038 audit/OSCAL 492-496 · #1037 AI 498-502 · #1036 risk/platform 504-510); rows registered here in one batch (per-slice registration infeasible at 28-scale). Blocks 485/497/503 left unused (quality over quantity). **Three findings are real defects, not just gaps:** 495 (control-as-code accepts rego|sql|jsonpath at upload but only EVALUATES rego — SQL/JSONpath controls silently produce no state) · 492 (OSCAL import missing = direct invariant-#8 violation) · 498 (the shared internal/llm foundation that 440/441/444/471 all assume has no owner). Investigators VERIFIED much is already built (push-cred UX, freshness alerting, risk methodology, policy lifecycle + 5 templates, exceptions, FrameworkScope workflow, Helm, all 4 OSCAL exports). Deliberately NOT filed: NIST 800-53 (alt anchor catalog), GDPR crosswalk (privacy-decision-entangled), trust center (v3/vanity anti-pattern), linear/bitwarden/workday connectors (sibling-covered/upper-market).
 
-| Row | Transition              | Evidence                                                                                                                                               |
-| --- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 480 | (new) → `ready`         | NIST CSF 2.0 crosswalk · frameworks · #1035                                                                                                            |
-| 481 | (new) → `ready`         | HIPAA Security Rule crosswalk (catalog-only) · #1035                                                                                                   |
-| 482 | (new) → `ready`         | coverage-strength rollup (§3.2 promise 438 deferred) · #1035                                                                                           |
-| 483 | (new) → `not-ready`     | mapping-tier governance · needs ADR/decision · #1035                                                                                                   |
-| 484 | (new) → `not-ready`     | framework versioning capability · needs concrete 2nd version · #1035                                                                                   |
-| 486 | (new) → `ready`         | Azure connector (Entra ID + Storage) · #1034                                                                                                           |
-| 487 | (new) → `ready`         | Kubernetes connector (RBAC + workload config) · #1034                                                                                                  |
-| 488 | (new) → `ready`         | Datadog + Grafana monitoring connectors · #1034                                                                                                        |
-| 489 | (new) → `ready`         | PagerDuty connector (incident evidence) · #1034                                                                                                        |
-| 490 | (new) → `ready`         | Jamf + Intune MDM connectors · #1034                                                                                                                   |
-| 491 | (new) → `ready`         | Rippling + BambooHR HRIS connectors · #1034                                                                                                            |
-| 492 | `merged`                | OSCAL import (catalog import) — invariant-#8 gap CLOSED · #1038 spec · #1047 impl `4e6ce46f` · batch 199                                               |
-| 493 | `ready` → `in-progress` | SSP control-implementation narratives (not placeholder) · #1038 · batch 202 `oscal/493-ssp-narratives`                                                 |
-| 494 | (new) → `ready`         | AR sampled-evidence IDs + walkthrough attachments · #1038                                                                                              |
-| 495 | (new) → `ready`         | control-as-code SQL + JSON-path eval (silently-ignored bug) · #1038                                                                                    |
-| 496 | (new) → `ready`         | control-bundle test runner (fixture evidence → expected pass/fail) · #1038                                                                             |
-| 498 | `merged`                | shared internal/llm inference foundation + ai_generations + DB enforcement · #1037 spec · #1050 impl `7ba9bd4b` · batch 200 · unblocks 440/441/444/471 |
-| 499 | `ready`                 | cloud-LLM opt-in per-tenant + banner · dep 498 merged · #1037 (LLM infra follow-on)                                                                    |
-| 500 | `ready`                 | pgvector semantic-retrieval grounding · dep 498 merged · #1037 (LLM infra follow-on)                                                                   |
-| 501 | `not-ready`             | full multi-section board narrative + numeric verification + banned-phrase wiring · dep 498 ✓ + 440 (unmerged) · #1037                                  |
-| 502 | `ready`                 | AI evidence summarization v0 · dep 498 merged · #1037 (AI-assist v0 SURFACE — maintainer-sequencing caution)                                           |
-| 513 | `ready`                 | correct AI-assist-boundary canonical-adopter doc (QuestionnaireAnswer→mcp_write_proposals) · Docs · parent #498                                        |
-| 504 | (new) → `not-ready`     | privacy v0: right-to-erasure (tombstone) · privacy-v0 greenlight · #1036                                                                               |
-| 505 | (new) → `not-ready`     | privacy v0: DSAR export · privacy-v0 greenlight · #1036                                                                                                |
-| 506 | (new) → `not-ready`     | privacy v0: RoPA (5 high-signal seeds, not 50) · privacy-v0 greenlight · #1036                                                                         |
-| 507 | (new) → `not-ready`     | breach-notification workflow impl · dep 446 decision · #1036                                                                                           |
-| 508 | (new) → `ready`         | SCIM 2.0 user-lifecycle provisioning · #1036                                                                                                           |
-| 509 | (new) → `ready`         | IdP group→role mapping + multi-IdP · #1036                                                                                                             |
-| 510 | (new) → `ready`         | automated backup + scheduled restore-verification · #1036                                                                                              |
+| Row | Transition          | Evidence                                                                                                                                               |
+| --- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 480 | (new) → `ready`     | NIST CSF 2.0 crosswalk · frameworks · #1035                                                                                                            |
+| 481 | (new) → `ready`     | HIPAA Security Rule crosswalk (catalog-only) · #1035                                                                                                   |
+| 482 | (new) → `ready`     | coverage-strength rollup (§3.2 promise 438 deferred) · #1035                                                                                           |
+| 483 | (new) → `not-ready` | mapping-tier governance · needs ADR/decision · #1035                                                                                                   |
+| 484 | (new) → `not-ready` | framework versioning capability · needs concrete 2nd version · #1035                                                                                   |
+| 486 | (new) → `ready`     | Azure connector (Entra ID + Storage) · #1034                                                                                                           |
+| 487 | (new) → `ready`     | Kubernetes connector (RBAC + workload config) · #1034                                                                                                  |
+| 488 | (new) → `ready`     | Datadog + Grafana monitoring connectors · #1034                                                                                                        |
+| 489 | (new) → `ready`     | PagerDuty connector (incident evidence) · #1034                                                                                                        |
+| 490 | (new) → `ready`     | Jamf + Intune MDM connectors · #1034                                                                                                                   |
+| 491 | (new) → `ready`     | Rippling + BambooHR HRIS connectors · #1034                                                                                                            |
+| 492 | `merged`            | OSCAL import (catalog import) — invariant-#8 gap CLOSED · #1038 spec · #1047 impl `4e6ce46f` · batch 199                                               |
+| 493 | `merged`            | SSP control-implementation narratives (authored, not placeholder) · #1038 spec · #1057 impl `6259c45a` · batch 202                                     |
+| 494 | (new) → `ready`     | AR sampled-evidence IDs + walkthrough attachments · #1038                                                                                              |
+| 495 | (new) → `ready`     | control-as-code SQL + JSON-path eval (silently-ignored bug) · #1038                                                                                    |
+| 496 | (new) → `ready`     | control-bundle test runner (fixture evidence → expected pass/fail) · #1038                                                                             |
+| 498 | `merged`            | shared internal/llm inference foundation + ai_generations + DB enforcement · #1037 spec · #1050 impl `7ba9bd4b` · batch 200 · unblocks 440/441/444/471 |
+| 499 | `ready`             | cloud-LLM opt-in per-tenant + banner · dep 498 merged · #1037 (LLM infra follow-on)                                                                    |
+| 500 | `ready`             | pgvector semantic-retrieval grounding · dep 498 merged · #1037 (LLM infra follow-on)                                                                   |
+| 501 | `not-ready`         | full multi-section board narrative + numeric verification + banned-phrase wiring · dep 498 ✓ + 440 (unmerged) · #1037                                  |
+| 502 | `ready`             | AI evidence summarization v0 · dep 498 merged · #1037 (AI-assist v0 SURFACE — maintainer-sequencing caution)                                           |
+| 513 | `ready`             | correct AI-assist-boundary canonical-adopter doc (QuestionnaireAnswer→mcp_write_proposals) · Docs · parent #498                                        |
+| 504 | (new) → `not-ready` | privacy v0: right-to-erasure (tombstone) · privacy-v0 greenlight · #1036                                                                               |
+| 505 | (new) → `not-ready` | privacy v0: DSAR export · privacy-v0 greenlight · #1036                                                                                                |
+| 506 | (new) → `not-ready` | privacy v0: RoPA (5 high-signal seeds, not 50) · privacy-v0 greenlight · #1036                                                                         |
+| 507 | (new) → `not-ready` | breach-notification workflow impl · dep 446 decision · #1036                                                                                           |
+| 508 | (new) → `ready`     | SCIM 2.0 user-lifecycle provisioning · #1036                                                                                                           |
+| 509 | (new) → `ready`     | IdP group→role mapping + multi-IdP · #1036                                                                                                             |
+| 510 | (new) → `ready`     | automated backup + scheduled restore-verification · #1036                                                                                              |
 
 Ready now (18): 480,481,482,486,487,488,489,490,491,492,493,494,495,496,498,508,509,510. Not-ready (10): 483,484 (framework decisions) · 499,500,501,502 (dep 498) · 504,505,506 (privacy-v0 greenlight) · 507 (dep 446). The loop can pick the 18 ready (conflict-class discipline applies — connectors share schemaregistry; new-package slices share coverage-thresholds; 492/493/494 share internal/oscal). The 3 real-defect slices (495/492/498) are high-value priorities.
 
@@ -145,13 +156,13 @@ Ready now (18): 480,481,482,486,487,488,489,490,491,492,493,494,495,496,498,508,
 
 The maintainer approved + merged the demo-support-session spec PRs (#1023, #1029, #1031). Registering their rows. (475's impl already merged at `37155f96` in batch 197; its doc landed with #1029.)
 
-| Row | Transition              | Evidence                                                                                                                                                                           |
-| --- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 473 | (new) → `ready`         | `docs/issues/473-*.md` · migrate-on-upgrade (fail-closed) · spec PR #1023 merged · prod-confirmed gap                                                                              |
-| 475 | (new) → `merged`        | `docs/issues/475-*.md` · PDF render degrades to 503 · impl merged `37155f96` (#1030); doc landed via #1029                                                                         |
-| 476 | (new) → `ready`         | `docs/issues/476-*.md` · demo-data reachability · spec PR #1029 merged · NOTE: mechanism subsumed by 478/479 — may reduce to verification                                          |
-| 478 | `merged`                | `docs/issues/478-*.md` · super-admin user↔tenant↔role assignment API (incl self-assign) · #1031 spec · #1053 impl `8fe11520` · batch 201 · unblocks 479 + subsumes 476 mechanism |
-| 479 | `ready` → `in-progress` | `docs/issues/479-*.md` · admin user-mgmt UI · dep #478 merged · spec PR #1031 · consumes the 478 API · batch 202 `web/479-user-mgmt-ui`                                            |
+| Row | Transition       | Evidence                                                                                                                                                                           |
+| --- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 473 | (new) → `ready`  | `docs/issues/473-*.md` · migrate-on-upgrade (fail-closed) · spec PR #1023 merged · prod-confirmed gap                                                                              |
+| 475 | (new) → `merged` | `docs/issues/475-*.md` · PDF render degrades to 503 · impl merged `37155f96` (#1030); doc landed via #1029                                                                         |
+| 476 | (new) → `ready`  | `docs/issues/476-*.md` · demo-data reachability · spec PR #1029 merged · NOTE: mechanism subsumed by 478/479 — may reduce to verification                                          |
+| 478 | `merged`         | `docs/issues/478-*.md` · super-admin user↔tenant↔role assignment API (incl self-assign) · #1031 spec · #1053 impl `8fe11520` · batch 201 · unblocks 479 + subsumes 476 mechanism |
+| 479 | `merged`         | `docs/issues/479-*.md` · admin user-mgmt UI · dep #478 merged · #1031 spec · #1056 impl `7b970cc7` · batch 202 · user-mgmt feature complete e2e                                    |
 
 These join the batch-197 spillovers 474 (ingest-hash) + 477 (walkthrough-PDF), both `ready`. 478 unblocks 479; once 478's IMPLEMENTATION lands (a future build, not the spec), 479 flips to `ready`. The AI-assist set (440/441/444/471) remains maintainer-sequenced.
 
