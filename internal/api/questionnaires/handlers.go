@@ -318,12 +318,14 @@ func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 		in.Items = append(in.Items, pi)
 	}
 
-	pdfCtx, cancel := contextWithPDFDeadline(r.Context())
-	defer cancel()
-	buf, err := questionnaire.RenderPDF(pdfCtx, in)
+	// The render budget + concurrency cap live on the shared pdfrender
+	// limiter (slice 475); questionnaire.RenderPDF routes through it. We do
+	// NOT apply a second deadline here — the limiter owns it.
+	buf, err := questionnaire.RenderPDF(r.Context(), in)
 	if err != nil {
-		if errors.Is(err, questionnaire.ErrChromeUnavailable) {
-			httpresp.WriteError(w, http.StatusServiceUnavailable, "PDF export disabled: chrome not available in this deployment")
+		if status, msg, ok := pdfDegradation(err); ok {
+			logPDFDegradation(r, err)
+			httpresp.WriteError(w, status, msg)
 			return
 		}
 		httperr.WriteInternal(w, r, "questionnaires", err)

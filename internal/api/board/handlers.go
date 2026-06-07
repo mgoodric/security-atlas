@@ -22,7 +22,6 @@
 package board
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -230,14 +229,14 @@ func (h *Handler) PDF(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	renderCtx, cancel := context.WithTimeout(ctx, board.PDFTimeout)
-	defer cancel()
-	pdfBytes, err := board.RenderPDF(renderCtx, stored)
+	// The render budget + concurrency cap live on the shared pdfrender
+	// limiter (slice 475); board.RenderPDF routes through it. We do NOT wrap
+	// in a second WithTimeout here — the limiter owns the bounded deadline.
+	pdfBytes, err := board.RenderPDF(ctx, stored)
 	if err != nil {
-		if errors.Is(err, board.ErrChromeUnavailable) {
-			httpresp.WriteError(w, http.StatusServiceUnavailable,
-				"PDF rendering unavailable: chrome browser not found")
-
+		if status, msg, ok := pdfDegradation(err); ok {
+			logPDFDegradation(r, "board-brief", err)
+			httpresp.WriteError(w, status, msg)
 			return
 		}
 		httperr.WriteInternal(w, r, "board", err)

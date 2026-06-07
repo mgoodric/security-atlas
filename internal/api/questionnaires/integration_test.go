@@ -34,6 +34,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,6 +44,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
 
 // ----- harness -----
@@ -368,6 +370,14 @@ func TestExportPDF_SmokeTest(t *testing.T) {
 		map[string]any{"name": "pdf test"})
 	id := body["id"].(string)
 
+	resp, buf := exportPDF(t, env, id)
+	defer resp.Body.Close()
+	assertQuestionnairePDFOrServiceUnavailable(t, resp, buf)
+}
+
+// exportPDF POSTs the export-pdf endpoint and returns the response + body.
+func exportPDF(t *testing.T, env testEnv, id string) (*http.Response, []byte) {
+	t.Helper()
 	req, _ := http.NewRequest(http.MethodPost,
 		env.server.URL+"/v1/questionnaires/"+id+"/export-pdf", nil)
 	req.Header.Set("Authorization", "Bearer "+env.bearer)
@@ -375,21 +385,87 @@ func TestExportPDF_SmokeTest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusServiceUnavailable {
-		t.Skip("chrome unavailable in this environment; PDF export disabled")
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("PDF export = %d", resp.StatusCode)
-	}
 	buf, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("read PDF: %v", err)
+		t.Fatalf("read body: %v", err)
 	}
-	if !bytes.HasPrefix(buf, []byte("%PDF-")) {
-		t.Fatalf("PDF magic byte missing; first 16: %q", string(buf[:min(16, len(buf))]))
+	return resp, buf
+}
+
+// assertQuestionnairePDFOrServiceUnavailable enforces the slice-475 contract:
+// the export-pdf endpoint returns EITHER a real 200 %PDF- body OR a 503
+// graceful degradation — NEVER a 500 / hang / other status. The old test
+// t.Skip'd on 503; the contract now asserts it deterministically.
+func assertQuestionnairePDFOrServiceUnavailable(t *testing.T, resp *http.Response, buf []byte) {
+	t.Helper()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		if !bytes.HasPrefix(buf, []byte("%PDF-")) {
+			t.Fatalf("AC-6: PDF magic byte missing; first 16: %q", string(buf[:min(16, len(buf))]))
+		}
+		if ct := resp.Header.Get("Content-Type"); ct != "application/pdf" {
+			t.Errorf("AC-6: PDF Content-Type = %q, want application/pdf", ct)
+		}
+	case http.StatusServiceUnavailable:
+		// Graceful degradation — never a 500 / hang (slice 475 AC-1).
+	default:
+		t.Fatalf("AC-1: export-pdf = %d, want exactly 200 or 503; body=%q",
+			resp.StatusCode, string(buf[:min(64, len(buf))]))
 	}
+}
+
+// TestExportPDF_RenderDeadlineDegradesTo503 is the slice-475 AC-1 proof for the
+// questionnaire renderer: a tiny render deadline forces the render context past
+// deadline → the handler returns 503, NOT a 500 / hang.
+func TestExportPDF_RenderDeadlineDegradesTo503(t *testing.T) {
+	restore := pdfrender.SetDefaultForTest(pdfrender.New(2, time.Nanosecond, time.Second))
+	defer restore()
+
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	_, body := doJSON(t, env, http.MethodPost, "/v1/questionnaires",
+		map[string]any{"name": "deadline test"})
+	id := body["id"].(string)
+
+	resp, buf := exportPDF(t, env, id)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("AC-1: render-deadline path = %d, want 503 (never 500/hang); body=%q",
+			resp.StatusCode, string(buf[:min(64, len(buf))]))
+	}
+}
+
+// TestExportPDF_StressNoNonGraceful runs export-pdf Nx under a tight 1-slot cap
+// + tiny deadline and asserts every response is graceful — exactly 200 or 503
+// (AC-4, slice-340 stress pattern).
+func TestExportPDF_StressNoNonGraceful(t *testing.T) {
+	restore := pdfrender.SetDefaultForTest(pdfrender.New(1, 50*time.Millisecond, 80*time.Millisecond))
+	defer restore()
+
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	_, body := doJSON(t, env, http.MethodPost, "/v1/questionnaires",
+		map[string]any{"name": "stress test"})
+	id := body["id"].(string)
+
+	const n = 12
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, buf := exportPDF(t, env, id)
+			defer resp.Body.Close()
+			assertQuestionnairePDFOrServiceUnavailable(t, resp, buf)
+		}()
+	}
+	wg.Wait()
 }
 
 func min(a, b int) int {
