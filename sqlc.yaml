@@ -58,6 +58,7 @@ sql:
       - "migrations/sql/20260520020000_audit_log_subject_module.sql"
       - "migrations/sql/20260521000000_questionnaire_tracer.sql"
       - "migrations/sql/20260521010000_tenants_rename.sql"
+      - "migrations/sql/20260606010000_oscal_imported_catalogs.sql"
     queries: "internal/db/queries"
     gen:
       go:

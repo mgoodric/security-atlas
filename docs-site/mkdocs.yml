@@ -117,6 +117,7 @@ nav:
       - OSCAL SSP export: walkthroughs/oscal-ssp-export.md
   - For auditors:
       - Verify a signed OSCAL export: audit/verify-export.md
+  - OSCAL catalog import: oscal-catalog-import.md
   - REST API reference: api/index.md
   - OAuth grants map: oauth-grants.md
   - Troubleshooting:

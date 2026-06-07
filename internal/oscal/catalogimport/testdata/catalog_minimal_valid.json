@@ -1,0 +1,49 @@
+{
+  "catalog": {
+    "uuid": "c7f3098d-9d53-4691-ac17-aac8a21805ae",
+    "metadata": {
+      "title": "Minimal Test Catalog",
+      "last-modified": "2026-06-07T06:13:34.653333+00:00",
+      "version": "1.0",
+      "oscal-version": "1.1.2"
+    },
+    "groups": [
+      {
+        "id": "ac",
+        "title": "Access Control",
+        "controls": [
+          {
+            "id": "ac-1",
+            "title": "Policy and Procedures",
+            "parts": [
+              {
+                "name": "statement",
+                "prose": "The organization develops, documents, and disseminates an access control policy."
+              }
+            ]
+          },
+          {
+            "id": "ac-2",
+            "title": "Account Management",
+            "parts": [
+              {
+                "name": "statement",
+                "prose": "The organization manages information system accounts, including establishing conditions for group membership."
+              }
+            ]
+          },
+          {
+            "id": "IAC-06",
+            "title": "Multi-Factor Authentication",
+            "parts": [
+              {
+                "name": "statement",
+                "prose": "Enforce multi-factor authentication for privileged accounts."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

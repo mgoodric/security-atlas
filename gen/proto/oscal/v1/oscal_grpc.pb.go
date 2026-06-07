@@ -40,6 +40,7 @@ const (
 	OscalBridgeService_SerializeAssessment_FullMethodName = "/oscal.v1.OscalBridgeService/SerializeAssessment"
 	OscalBridgeService_SerializePOAM_FullMethodName       = "/oscal.v1.OscalBridgeService/SerializePOAM"
 	OscalBridgeService_RoundTripValidate_FullMethodName   = "/oscal.v1.OscalBridgeService/RoundTripValidate"
+	OscalBridgeService_ImportCatalog_FullMethodName       = "/oscal.v1.OscalBridgeService/ImportCatalog"
 )
 
 // OscalBridgeServiceClient is the client API for OscalBridgeService service.
@@ -64,6 +65,15 @@ type OscalBridgeServiceClient interface {
 	// validity. AC-6 / AC-7. The export pipeline calls this on every
 	// bundle member before the bundle is finalized.
 	RoundTripValidate(ctx context.Context, in *RoundTripValidateRequest, opts ...grpc.CallOption) (*RoundTripValidateResponse, error)
+	// ImportCatalog deserializes an inbound OSCAL `catalog` JSON document
+	// via compliance-trestle, validates it against OSCAL v1.1.x, and
+	// returns a normalized catalog projection (controls + group structure)
+	// OR a structured validation error. This is the INGEST direction of
+	// invariant #8 (slice 492). The bridge NEVER dereferences any `href`
+	// / external resource the document references (back-matter resources
+	// are opaque metadata). A document-size cap + parse timeout bound the
+	// expansion-attack surface (threat-model D/I).
+	ImportCatalog(ctx context.Context, in *ImportCatalogRequest, opts ...grpc.CallOption) (*ImportCatalogResponse, error)
 }
 
 type oscalBridgeServiceClient struct {
@@ -114,6 +124,16 @@ func (c *oscalBridgeServiceClient) RoundTripValidate(ctx context.Context, in *Ro
 	return out, nil
 }
 
+func (c *oscalBridgeServiceClient) ImportCatalog(ctx context.Context, in *ImportCatalogRequest, opts ...grpc.CallOption) (*ImportCatalogResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ImportCatalogResponse)
+	err := c.cc.Invoke(ctx, OscalBridgeService_ImportCatalog_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OscalBridgeServiceServer is the server API for OscalBridgeService service.
 // All implementations must embed UnimplementedOscalBridgeServiceServer
 // for forward compatibility.
@@ -136,6 +156,15 @@ type OscalBridgeServiceServer interface {
 	// validity. AC-6 / AC-7. The export pipeline calls this on every
 	// bundle member before the bundle is finalized.
 	RoundTripValidate(context.Context, *RoundTripValidateRequest) (*RoundTripValidateResponse, error)
+	// ImportCatalog deserializes an inbound OSCAL `catalog` JSON document
+	// via compliance-trestle, validates it against OSCAL v1.1.x, and
+	// returns a normalized catalog projection (controls + group structure)
+	// OR a structured validation error. This is the INGEST direction of
+	// invariant #8 (slice 492). The bridge NEVER dereferences any `href`
+	// / external resource the document references (back-matter resources
+	// are opaque metadata). A document-size cap + parse timeout bound the
+	// expansion-attack surface (threat-model D/I).
+	ImportCatalog(context.Context, *ImportCatalogRequest) (*ImportCatalogResponse, error)
 	mustEmbedUnimplementedOscalBridgeServiceServer()
 }
 
@@ -157,6 +186,9 @@ func (UnimplementedOscalBridgeServiceServer) SerializePOAM(context.Context, *Ser
 }
 func (UnimplementedOscalBridgeServiceServer) RoundTripValidate(context.Context, *RoundTripValidateRequest) (*RoundTripValidateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RoundTripValidate not implemented")
+}
+func (UnimplementedOscalBridgeServiceServer) ImportCatalog(context.Context, *ImportCatalogRequest) (*ImportCatalogResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ImportCatalog not implemented")
 }
 func (UnimplementedOscalBridgeServiceServer) mustEmbedUnimplementedOscalBridgeServiceServer() {}
 func (UnimplementedOscalBridgeServiceServer) testEmbeddedByValue()                            {}
@@ -251,6 +283,24 @@ func _OscalBridgeService_RoundTripValidate_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OscalBridgeService_ImportCatalog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ImportCatalogRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OscalBridgeServiceServer).ImportCatalog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OscalBridgeService_ImportCatalog_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OscalBridgeServiceServer).ImportCatalog(ctx, req.(*ImportCatalogRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OscalBridgeService_ServiceDesc is the grpc.ServiceDesc for OscalBridgeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -273,6 +323,10 @@ var OscalBridgeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RoundTripValidate",
 			Handler:    _OscalBridgeService_RoundTripValidate_Handler,
+		},
+		{
+			MethodName: "ImportCatalog",
+			Handler:    _OscalBridgeService_ImportCatalog_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
