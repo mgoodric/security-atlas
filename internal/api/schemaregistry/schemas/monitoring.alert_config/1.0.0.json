@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/monitoring.alert_config/1.0.0.json",
+  "x-evidence-kind": "monitoring.alert_config.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["MON-01"],
+  "title": "Monitoring / alerting configuration inventory",
+  "description": "One record per monitor / alert rule across a monitoring vendor (Datadog monitor, Grafana alert rule): the rule's name, type, enabled state, and the NAMES/HANDLES of the notification targets it routes to. Pulled read-only from the vendor API (Datadog monitors_read; Grafana Viewer service-account). Configuration + routing-target metadata only — never secret webhook URLs, integration tokens, recipient email addresses (PII), dashboard JSON, metric time-series, or log query results. The connector reports a descriptive enabled/disabled posture; the platform evaluator owns the final pass/fail per (control, scope). Shared across the Datadog + Grafana connectors because the two vendors' alert-configuration field set is identical at the config-inventory altitude; the source_vendor field preserves provenance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_vendor", "rule_id", "rule_name", "rule_type", "enabled"],
+  "properties": {
+    "source_vendor": {
+      "type": "string",
+      "enum": ["datadog", "grafana"],
+      "description": "Monitoring vendor the record was collected from."
+    },
+    "rule_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Vendor-native stable identifier of the monitor / alert rule (non-secret; an opaque ID, not a credential)."
+    },
+    "rule_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable name of the monitor / alert rule."
+    },
+    "rule_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Vendor-native rule type (e.g. Datadog 'metric alert' / 'log alert'; Grafana 'grafana' / 'datasource' rule). Descriptive string, not enumerated, so new vendor types do not require a schema bump."
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Whether the monitor / alert rule is currently active (not muted / paused / disabled)."
+    },
+    "folder": {
+      "type": "string",
+      "description": "Optional organizational grouping (Grafana folder; absent for Datadog). Non-secret label."
+    },
+    "notification_targets": {
+      "type": "array",
+      "description": "The notification targets the rule routes to — NAMES / HANDLES only, never secret webhook URLs, tokens, or recipient email addresses.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target_kind", "target_name"],
+        "properties": {
+          "target_kind": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Kind of notification target (e.g. 'slack', 'pagerduty', 'email', 'webhook', 'contact_point'). The KIND, not the secret."
+          },
+          "target_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The handle / channel name / contact-point name of the target (e.g. '#sec-oncall', 'pd-primary', 'Default contact point'). NEVER the secret webhook URL, integration token, or a recipient email address."
+          }
+        }
+      }
+    }
+  }
+}

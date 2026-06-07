@@ -1,0 +1,35 @@
+package main
+
+import (
+	"fmt"
+	"strings"
+	"text/tabwriter"
+
+	"github.com/spf13/cobra"
+
+	"github.com/mgoodric/security-atlas/connectors/datadog/internal/datadogauth"
+)
+
+// newPermissionsCmd prints the documented least-privilege read-only Datadog
+// scope the connector requires. Lets ops surface the canonical minimum without
+// grepping the source. The datadogauth test holds RequiredScope to a read-only
+// value (P0-488-2).
+func newPermissionsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "permissions",
+		Short: "print the least-privilege read-only Datadog scope this connector requires",
+		Run: func(cmd *cobra.Command, _ []string) {
+			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
+			_, _ = fmt.Fprintln(tw, "CREDENTIAL\tSCOPE\tGATES")
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n",
+				"Application key", datadogauth.RequiredScope, "monitoring.alert_config.v1 (monitor inventory)")
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n",
+				"API key", "(no scope — identifies the org)", "required alongside the Application key")
+			_ = tw.Flush()
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(),
+				strings.TrimSpace(`
+NEVER grant a write/admin Application-key scope (no monitors_write, no admin).
+The connector issues only read GETs against /api/v1/monitor.`))
+		},
+	}
+}
