@@ -3,7 +3,25 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-07 (batch 207 reconcile — 487 Kubernetes connector MERGED; the 9th connector. Spillovers 523-526 registered ready. PLUS maintainer-requested slice 527 (user-assign dropdowns) spec merged + registered ready.)
+**Last reconciled:** 2026-06-07 (batch 208 reconcile — 527 user-assign dropdowns (maintainer-requested) + 488 Datadog+Grafana monitoring connectors MERGED. Spillovers 533-535 ready; 528 deferred.)
+
+## Reconcile — 2026-06-07 (batch 208 · 527 + 488 merged)
+
+2-slice {web + backend} batch. BOTH merged CLEAN. **527 delivered the maintainer-requested assign-dialog dropdowns** (the UX follow-on to slice 479). 488 added the Datadog + Grafana monitoring connectors. Merge order: 527 first (web, faster CI) at `fcd4fb8c`, then 488 (rebased to one clean commit onto the new main, CHANGELOG keep-all) at `9fe3db71`. 488's GitGuardian branch-history false-positive (a webhook-shaped fixture string in an earlier commit) cleared via the documented squash-rebase to one clean commit (HEAD + history verified clean; placeholder is `webhook.invalid/REDACTED-FIXTURE`).
+
+- **527** (admin user-assign dialog user+tenant dropdowns) — Frontend · JUDGMENT — **MERGED** at `fcd4fb8c` (#1077). The assign dialog now uses dropdowns: user from the already-loaded `/v1/admin/users` list (no second fetch); tenant from `GET /v1/admin/tenants`. **Tenant-admin pinning enforced at the FETCH boundary** — the cross-tenant tenant list is fetched ONLY when `cross_tenant` is true, so a tenant-admin's browser never receives other-tenant names (STRIDE-I closed at fetch, stronger than a render-gate; P0-479-2/P0-527-1 preserved). Native `<select>` primitive (ZERO new deps — Radix isn't in the tree; the form family is @base-ui; honors the no-new-dep P0), a11y-correct. Self-assign + role checkboxes + revoke-confirm unchanged; authz-honest (403 inline, UI-honesty advisory green). 11/11 ACs, all 5 P0s. Decisions log: `docs/audit-log/527-admin-user-assign-dropdowns-decisions.md`. Spillover 528 (searchable combobox) deferred.
+- **488** (Datadog + Grafana monitoring connectors) — Connectors · JUDGMENT — **MERGED** at `9fe3db71` (#1078). Two connectors (the 10th + 11th), one shared `monitoring.alert_config.v1` evidence kind (identical config-inventory shape + a `source_vendor` discriminator) answering SOC2 CC7.2. Datadog monitor/alert inventory (read-only `monitors_read`) + Grafana alert-rule/notification-policy inventory (Viewer token). **Over-collection guard by construction** (P0-488-3): the type system has NO field for a secret webhook URL/token/recipient-PII/dashboard-JSON/metric-series/log-results; Datadog drops `@recipient` PII; Grafana never reads the contact-point secret settings blob — + belt-and-braces no-leak tests. Read-only least-privilege, credential never logged, honest pull interval, thin HTTP clients (clean go.mod), mocked source APIs + bufconn round-trips. 14/14 ACs, all 7 P0s. Decisions log: `docs/audit-log/488-monitoring-connectors-decisions.md`.
+
+**Spillovers filed:**
+
+| Row | Transition          | Evidence                                                                                                          |
+| --- | ------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| 528 | (new) → `not-ready` | admin-assign searchable combobox (large-list scale) · DEFERRED (no operator scale-pain yet) · parent #527 · #1077 |
+| 533 | (new) → `ready`     | Datadog Cloud-SIEM rule evidence · parent #488 · #1078                                                            |
+| 534 | (new) → `ready`     | Grafana SAML/RBAC config evidence · parent #488 · #1078                                                           |
+| 535 | (new) → `ready`     | monitoring alert-firing-history event-driven profile · parent #488 · #1078                                        |
+
+**Connectors now: 11** (7 MVP + Azure 486 + K8s 487 + Datadog 488 + Grafana 488). The maintainer-requested user-management UX (479 + 527) is complete. Backlog after batch 208: connectors 489-491 (PagerDuty / Jamf+Intune / Rippling+BambooHR) + Azure 519-522 + K8s 523-526 + monitoring 533-535 follow-ons · crosswalk 482 · OSCAL 496/511/512 · 474 · 508/509/510 · 499/500 · framework 514/516 · 476 (verification) · older analysis tail. No real-defects remain. MAINTAINER-SEQUENCED (do not auto-pick): 440/441/444/471/502. DEFERRED: 517/518 (HIPAA phase-3), 528 (combobox).
 
 ## Reconcile — 2026-06-07 (batch 207 · 487 merged; + maintainer slice 527 registered)
 
@@ -246,8 +264,12 @@ Maintainer-directed comprehensive gap analysis (5 parallel domain investigators:
 | 524 | `ready`             | K8s Pod-Security-Standards admission-config evidence · Connectors · parent #487 · #1073                                                                |
 | 525 | `ready`             | K8s Secret-inventory (metadata-only) evidence · Connectors · parent #487 · #1073                                                                       |
 | 526 | `ready`             | K8s watch-based event-driven profile (audit log) · Connectors · parent #487 · #1073                                                                    |
-| 527 | `ready`             | admin user-assign dialog user+tenant dropdowns · Frontend · maintainer UX req on 479 · spec #1074                                                      |
-| 488 | (new) → `ready`     | Datadog + Grafana monitoring connectors · #1034                                                                                                        |
+| 527 | `merged`            | admin user-assign dialog user+tenant dropdowns · Frontend · maintainer UX req on 479 · #1074 spec · #1077 impl `fcd4fb8c` · batch 208                  |
+| 488 | `merged`            | Datadog + Grafana monitoring connectors (10th+11th) · #1034 spec · #1078 impl `9fe3db71` · batch 208                                                   |
+| 528 | `not-ready`         | admin-assign searchable combobox (large-list scale) · DEFERRED · parent #527 · #1077                                                                   |
+| 533 | `ready`             | Datadog Cloud-SIEM rule evidence · Connectors · parent #488 · #1078                                                                                    |
+| 534 | `ready`             | Grafana SAML/RBAC config evidence · Connectors · parent #488 · #1078                                                                                   |
+| 535 | `ready`             | monitoring alert-firing-history event-driven profile · Connectors · parent #488 · #1078                                                                |
 | 489 | (new) → `ready`     | PagerDuty connector (incident evidence) · #1034                                                                                                        |
 | 490 | (new) → `ready`     | Jamf + Intune MDM connectors · #1034                                                                                                                   |
 | 491 | (new) → `ready`     | Rippling + BambooHR HRIS connectors · #1034                                                                                                            |
