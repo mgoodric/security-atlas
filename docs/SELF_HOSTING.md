@@ -119,12 +119,17 @@ ${EDITOR:-vi} docker-compose.yml
 # 4. Bring it up.
 docker compose up -d
 
-# 5. Migrations apply automatically on every bring-up.
+# 5. Migrations apply automatically on every bring-up *of a compose file
+#    that ships the always-run `atlas-migrate` one-shot* (slice 473+).
 #    The platform binary does NOT expose a `migrate` subcommand. Migrations
 #    are applied by the always-run `atlas-migrate` one-shot, which the
 #    `atlas` backend is gated on (it will not serve until migrations have
-#    completed). To apply migrations explicitly (e.g. ahead of bringing
-#    the server up), run just the migrate step:
+#    completed). Watchtower only advances container *images* — it never
+#    re-pulls the *compose file*, so a box still on a pre-473 compose has
+#    no `atlas-migrate` service and silently drifts. See
+#    [Upgrading: pull the compose, not just the image](#upgrading-pull-the-compose-not-just-the-image).
+#    To apply migrations explicitly (e.g. ahead of bringing the server
+#    up), run just the migrate step:
 docker compose run --rm atlas-migrate
 
 # 6. Confirm the platform is alive.
@@ -257,6 +262,93 @@ A binary can never end up newer than its schema.
     backend-gating `atlas-migrate` service closes that gap. See the
     [Upgrade runbook](https://mgoodric.github.io/security-atlas/upgrade/).
 <!-- prettier-ignore-end -->
+
+### Upgrading: pull the compose, not just the image
+
+**The rule:** upgrading the stack means pulling the updated compose file
+**and** the `.env.example` deltas, then re-running `up -d` — not just
+letting Watchtower pull new images.
+
+```sh
+git -C security-atlas pull            # or re-fetch the compose file
+docker compose -f deploy/docker/docker-compose.yml pull
+docker compose -f deploy/docker/docker-compose.yml up -d
+```
+
+**Why this matters.** Watchtower advances container **images**; it never
+re-pulls the **compose file**. Services, labels, gating, volumes, and env
+are operator-managed. A service added in a release — like slice 473's
+`atlas-migrate` migrate-on-upgrade one-shot — only appears when you pull
+the file. A box that has only ever let Watchtower update images is still
+running its **first-boot compose**, where migrations ran once (via the
+first-boot bootstrap) and never again. Every image bump that ships a new
+migration then drifts the schema.
+
+| What advances?         | Watchtower (image pull) | `git pull` + `up -d` |
+| ---------------------- | :---------------------: | :------------------: |
+| `atlas` binary         |           yes           |         yes          |
+| new compose service    |           no            |         yes          |
+| `atlas-migrate` gating |           no            |         yes          |
+| new migrations applied | only if service present |         yes          |
+
+#### Symptom of drift
+
+An HTTP 500 shortly after an image bump — where the **backend log** shows
+either:
+
+- a CHECK-constraint violation, e.g. `violates check constraint
+"..._action_check" (SQLSTATE 23514)` — a new allowed value the migration
+  would have added is missing; or
+- a missing relation or column, `SQLSTATE 42P01` (undefined table) /
+  `42703` (undefined column) — the binary expects schema the migration
+  would have created.
+
+means the running binary is ahead of the schema: **migration drift** from
+an image-only upgrade.
+
+#### Recovery
+
+**Preferred — adopt the slice-473 migrate service (one-time fix that also
+prevents recurrence):**
+
+```sh
+git -C security-atlas pull            # refresh docker-compose.yml + .env.example
+docker compose -f deploy/docker/docker-compose.yml pull
+docker compose -f deploy/docker/docker-compose.yml up -d
+```
+
+The now-present `atlas-migrate` service applies every pending migration
+before `atlas` serves, and stays in lockstep on future image bumps.
+
+**Stop-gap — hand-apply pending migrations** (only if you cannot pull the
+compose right now):
+
+1. **Take a backup checkpoint FIRST.** Follow the
+   [Backup and restore runbook](https://mgoodric.github.io/security-atlas/backup-restore/)
+   (slice 432) — a `pg_dump` you have proven restores. Do not skip this:
+   a hand-applied migration that goes wrong has no undo without it.
+2. **Find the gap.** List `migrations/sql/*.sql` (ignore the `.down.sql`
+   companions) and compare against the `schema_migrations` ledger
+   (columns `filename`, `applied_at`); apply only the files not yet
+   recorded, **in filename order** (the timestamp prefix is the order).
+3. **Apply each pending migration and record it in the ledger** so the
+   migrate service does not later double-apply it. Illustrative form
+   (substitute your DB/role names; never paste real credentials into a
+   shell history):
+
+   ```sh
+   { echo 'SET ROLE atlas_migrate;'; cat migrations/sql/<file>.sql; } \
+     | psql -U postgres -d security_atlas -v ON_ERROR_STOP=1
+   psql -U postgres -d security_atlas -c \
+     "INSERT INTO schema_migrations (filename, applied_at) \
+      VALUES ('<file>.sql', now()) ON CONFLICT DO NOTHING;"
+   ```
+
+4. Restart `atlas` and re-confirm `/health`. Then schedule the
+   compose-pull above so the box is permanently on a slice-473 compose.
+
+> The stop-gap is a recovery escape hatch, not the upgrade path. The
+> supported, repeatable upgrade is always **pull the compose + `up -d`**.
 
 For production, you can still apply migrations **explicitly before** the
 new server takes traffic — run just the migrate step, which is the same
