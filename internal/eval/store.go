@@ -45,13 +45,14 @@ type Store struct {
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 // controlMeta is the slice of a control's bundle the engine needs to
-// evaluate it: the freshness class, the implementation type, and the Rego
-// evidence query (if the bundle declares one).
+// evaluate it: the freshness class, the implementation type, and every
+// evidence query the bundle declares (slice 495 evaluates all three legal
+// languages — rego, sql, jsonpath — not just rego).
 type controlMeta struct {
 	id                 uuid.UUID
 	freshnessClass     string
 	implementationType string
-	regoQuery          string // empty when the bundle declares no Rego query
+	queries            []evidenceQueryManifest // every declared evidence query, in bundle order
 }
 
 // evaluationRow is the computed state for one (control, scope_cell) that the
@@ -88,11 +89,11 @@ func (s *Store) loadControl(ctx context.Context, q *dbx.Queries, tenantID, contr
 	if row.FreshnessClass != nil {
 		meta.freshnessClass = *row.FreshnessClass
 	}
-	rego, err := firstRegoQuery(row.EvidenceQueries)
+	queries, err := parseEvidenceQueries(row.EvidenceQueries)
 	if err != nil {
 		return controlMeta{}, err
 	}
-	meta.regoQuery = rego
+	meta.queries = queries
 	return meta, nil
 }
 
@@ -113,7 +114,7 @@ func (s *Store) loadEvidence(ctx context.Context, q *dbx.Queries, tenantID, cont
 	}
 	out := make([]allRecord, 0, len(rows))
 	for _, r := range rows {
-		rec := allRecord{result: string(r.Result)}
+		rec := allRecord{result: string(r.Result), payload: r.Payload}
 		if r.ObservedAt.Valid {
 			rec.observedAt = r.ObservedAt.Time
 		}
@@ -160,8 +161,12 @@ func (s *Store) appendEvaluation(ctx context.Context, q *dbx.Queries, tenantID u
 }
 
 // inTx opens a transaction, applies the tenant GUC, runs fn, commits on
-// success. Mirrors scope.Store.inTx / period.Store.inTx.
-func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries, uuid.UUID) error) error {
+// success. Mirrors scope.Store.inTx / period.Store.inTx. The raw pgx.Tx is
+// passed to fn (alongside the sqlc Queries) so the SQL evidence-query
+// evaluator (slice 495) can open a read-only subtransaction on the SAME
+// tenant-GUC-scoped connection — the SQL sandbox must run under the same RLS
+// context as the rest of the evaluation, never a fresh handle.
+func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries, pgx.Tx, uuid.UUID) error) error {
 	tenantStr, err := tenancy.TenantFromContext(ctx)
 	if err != nil {
 		return err
@@ -180,7 +185,7 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries,
 		return err
 	}
 	q := dbx.New(tx)
-	if err := fn(ctx, q, tenantID); err != nil {
+	if err := fn(ctx, q, tx, tenantID); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {

@@ -145,7 +145,7 @@ func (q *Queries) ListControlEvaluationsForEffectiveness(ctx context.Context, ar
 
 const listEvidenceForControlAsOf = `-- name: ListEvidenceForControlAsOf :many
 SELECT id, tenant_id, control_id, control_ref, scope_id,
-       observed_at, result, freshness_class, hash
+       observed_at, result, freshness_class, hash, payload
 FROM evidence_records
 WHERE tenant_id = $1
   AND (control_id = $2 OR control_ref = $3)
@@ -170,6 +170,7 @@ type ListEvidenceForControlAsOfRow struct {
 	Result         EvidenceResult         `json:"result"`
 	FreshnessClass EvidenceFreshnessClass `json:"freshness_class"`
 	Hash           string                 `json:"hash"`
+	Payload        []byte                 `json:"payload"`
 }
 
 // The evaluation engine's read of the evidence ledger for one control,
@@ -201,6 +202,7 @@ func (q *Queries) ListEvidenceForControlAsOf(ctx context.Context, arg ListEviden
 			&i.Result,
 			&i.FreshnessClass,
 			&i.Hash,
+			&i.Payload,
 		); err != nil {
 			return nil, err
 		}
