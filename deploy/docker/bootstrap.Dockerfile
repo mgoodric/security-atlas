@@ -9,9 +9,23 @@
 # postgres:16-alpine (which already ships psql + sh + wget) with the
 # statically-linked atlas-cli binary copied in.
 #
-# It is short-lived: it runs deploy/docker/bootstrap/bootstrap.sh, seeds
-# the deployment, and exits 0. The atlas service waits on it
-# (depends_on: ... condition: service_completed_successfully).
+# This image carries TWO entrypoint scripts and is used by TWO compose
+# services (slice 473):
+#
+#   * /bootstrap/migrate.sh  — run by the always-run `atlas-migrate[-edge]`
+#     service. Idempotent, fail-closed; applies roles + forward migrations
+#     + the atlas_app password on EVERY bring-up, then exits. The atlas
+#     backend `depends_on` this with `condition:
+#     service_completed_successfully` so it never serves a partial schema.
+#
+#   * /bootstrap/bootstrap.sh — run by the one-shot `atlas-bootstrap[-edge]`
+#     service (the default ENTRYPOINT). First-boot-only seed + SCF import +
+#     control-bundle upload. Exits 0 on success.
+#
+# Both are short-lived. The compose files select migrate.sh via an
+# `entrypoint:` override on the `atlas-migrate[-edge]` service; the default
+# ENTRYPOINT below stays bootstrap.sh so the bundled `build:` and the
+# pulled `image:` both keep the existing bootstrap behavior unchanged.
 #
 # The repo tree (migrations/, controls/, bootstrap scripts) is baked into
 # the image at /repo at build time. Tagged releases carry their own
@@ -41,19 +55,19 @@ FROM postgres:16-alpine
 # postgres:16-alpine ships psql, sh, and wget. No extra packages needed.
 COPY --from=builder /out/atlas-cli /usr/local/bin/atlas-cli
 
-# bootstrap.sh + seed.sql land in /bootstrap. migrations/ + controls/ get
-# baked into /repo so the image is self-contained — no host bind-mount
-# required. REPO_ROOT defaults to /repo (see bootstrap.sh).
+# bootstrap.sh + migrate.sh + seed.sql land in /bootstrap. migrations/ +
+# controls/ get baked into /repo so the image is self-contained — no host
+# bind-mount required. REPO_ROOT defaults to /repo (see both scripts).
 COPY deploy/docker/bootstrap/ /bootstrap/
 COPY migrations/                /repo/migrations/
 COPY controls/                  /repo/controls/
-RUN chmod +x /bootstrap/bootstrap.sh
+RUN chmod +x /bootstrap/bootstrap.sh /bootstrap/migrate.sh
 
 # Slice 196: pre-create /var/lib/atlas-bootstrap owned by the postgres
 # user so the docker-compose named volume `atlas-bootstrap-data`
 # mounted at this path inherits the postgres ownership. Without this,
 # the volume is root-owned and bootstrap.sh's
-# `oauth-bootstrap-credentials.json` write at phase 6a fails with
+# `oauth-bootstrap-credentials.json` write at phase 5a fails with
 # "permission denied". The runtime-mounted volume is the only place
 # the client_secret ever lives (P0-196-2: never baked into image
 # layers).

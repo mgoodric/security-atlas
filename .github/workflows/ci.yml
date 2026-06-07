@@ -998,7 +998,15 @@ jobs:
         # nginx (docker-compose.proxy.yml overlay) and proves slice 466's
         # TRUSTED_PROXY_CIDRS X-Forwarded-For walk end-to-end across a real
         # multi-container topology (AC-2 honour proxy IP / AC-3 reject forged).
-        mode: [bundled, external, proxy]
+        #
+        # Slice 473: `migrate` mode reproduces the 2026-06-05 migrate-on-
+        # upgrade incident — it brings the bundle up at migration set N,
+        # writes a brand-new sentinel migration (simulating a newer image's
+        # migration set), re-runs the always-run atlas-migrate service, and
+        # asserts the new migration applied AND the backend served only
+        # after migrate completed (the service_completed_successfully gate
+        # held), AND a second migrate run is an idempotent no-reseed no-op.
+        mode: [bundled, external, proxy, migrate]
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4

@@ -114,6 +114,17 @@ services:
     networks:
       - atlasnet
 
+  # Slice 473: the always-run migrate service must join atlasnet too. A
+  # service that declares ANY explicit `networks:` joins ONLY those, so
+  # without this entry atlas-migrate would land on the implicit default
+  # network while postgres is pinned to atlasnet — atlas-migrate could not
+  # reach Postgres and would loop forever on "Postgres not reachable",
+  # leaving its service_completed_successfully gate unmet so the whole
+  # proxy bring-up stalls. Mirror atlas-bootstrap's atlasnet membership.
+  atlas-migrate:
+    networks:
+      - atlasnet
+
   atlas-bootstrap:
     networks:
       - atlasnet

@@ -55,15 +55,16 @@ open http://localhost:3000
 
 Services in the bundle (`docker compose ps` / `just self-host-ps`):
 
-| Service           | Role                                                              |
-| ----------------- | ----------------------------------------------------------------- |
-| `postgres`        | Postgres 16 — primary store (`pg-data` volume)                    |
-| `nats`            | NATS JetStream — evidence-ingest buffer (`nats-data` volume)      |
-| `minio`           | S3-compatible artifact store (`minio-data` volume)                |
-| `minio-mc`        | one-shot — creates the artifacts bucket, then exits               |
-| `atlas-bootstrap` | one-shot — migrations + seed + SCF import + control upload, exits |
-| `atlas`           | platform server — gRPC `:50051`, HTTP `:8080` (`/health`)         |
-| `web`             | Next.js frontend — `:3000`                                        |
+| Service           | Role                                                                                                                  |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `postgres`        | Postgres 16 — primary store (`pg-data` volume)                                                                        |
+| `nats`            | NATS JetStream — evidence-ingest buffer (`nats-data` volume)                                                          |
+| `minio`           | S3-compatible artifact store (`minio-data` volume)                                                                    |
+| `minio-mc`        | one-shot — creates the artifacts bucket, then exits                                                                   |
+| `atlas-migrate`   | **always-run** one-shot — applies pending migrations on every bring-up, idempotent + fail-closed, exits 0 (slice 473) |
+| `atlas-bootstrap` | first-boot one-shot — seed + SCF import + control upload, exits                                                       |
+| `atlas`           | platform server — gRPC `:50051`, HTTP `:8080` (`/health`)                                                             |
+| `web`             | Next.js frontend — `:3000`                                                                                            |
 
 `just` recipes for the bundle: `self-host-up`, `self-host-down`
 (keeps data), `self-host-wipe` (`down -v` — deletes volumes),
@@ -118,11 +119,13 @@ ${EDITOR:-vi} docker-compose.yml
 # 4. Bring it up.
 docker compose up -d
 
-# 5. Apply migrations once.
+# 5. Migrations apply automatically on every bring-up.
 #    The platform binary does NOT expose a `migrate` subcommand. Migrations
-#    (plus seed + SCF import + control upload) are applied by the
-#    `atlas-bootstrap` one-shot, which runs to completion and exits.
-docker compose run --rm atlas-bootstrap
+#    are applied by the always-run `atlas-migrate` one-shot, which the
+#    `atlas` backend is gated on (it will not serve until migrations have
+#    completed). To apply migrations explicitly (e.g. ahead of bringing
+#    the server up), run just the migrate step:
+docker compose run --rm atlas-migrate
 
 # 6. Confirm the platform is alive.
 curl -fsSL http://localhost:8080/health
@@ -222,21 +225,47 @@ Watchtower polls hourly by default in Unraid examples; the 86400s (24h) interval
 
 ## Database migrations across upgrades
 
-Migrations are idempotent — applying an already-current set is a no-op.
-Watchtower restarts the container but does **not** run migrations. For
-production, run migrations **manually before** the new server takes
-traffic so a bad migration cannot brick an auto-update.
+**Migrations run automatically, on every bring-up, fail-closed (slice
+473).** The bundle ships a dedicated `atlas-migrate` service that applies
+any pending `migrations/sql/*.sql` not yet recorded in the
+`schema_migrations` ledger — as the `atlas_migrate` role (`BYPASSRLS`, no
+superuser), one transaction per file. It runs on **every** `docker
+compose up`, not only first boot, and it is:
 
-The full procedure — pin a version, take a pre-upgrade checkpoint, apply
-migrations, verify, and roll back — is the canonical, published
-**[Upgrade runbook](https://mgoodric.github.io/security-atlas/upgrade/)**.
-The concrete migration command for the bundle is the idempotent
-bootstrap one-shot:
+- **idempotent** — an already-current database applies nothing and exits
+  0 with a `schema current — no migrations to apply` log line (no
+  re-seed);
+- **fail-closed** — a failing migration exits the migrate step non-zero
+  with a `FATAL: migration '<filename>' failed` line, and the `atlas`
+  backend (gated on `atlas-migrate` via
+  `service_completed_successfully`) **does not start**. The platform
+  never serves against a partially-migrated schema.
+
+This is what makes a [Watchtower](#watchtower-opt-in-auto-update-from-ghcr)
+auto-update safe: when Watchtower pulls a newer `atlas` image, the
+`atlas-migrate` service advances in lockstep (it carries the same
+auto-update label) and the backend waits for it to finish before serving.
+A binary can never end up newer than its schema.
+
+<!-- prettier-ignore-start -->
+!!! note "Why this is a dedicated service (the 2026-06-05 incident)"
+    Earlier bundles applied migrations only inside the **first-boot**
+    `atlas-bootstrap` one-shot, which Watchtower never re-ran. An image
+    update advanced the binary while the migrate step stayed pinned — the
+    binary served against a stale schema and a downstream action failed
+    with a masked HTTP 500. Splitting migrations into an always-run,
+    backend-gating `atlas-migrate` service closes that gap. See the
+    [Upgrade runbook](https://mgoodric.github.io/security-atlas/upgrade/).
+<!-- prettier-ignore-end -->
+
+For production, you can still apply migrations **explicitly before** the
+new server takes traffic — run just the migrate step, which is the same
+idempotent runner the stack uses automatically:
 
 ```sh
 docker compose -f deploy/docker/docker-compose.yml pull
 docker compose -f deploy/docker/docker-compose.yml stop atlas web
-docker compose -f deploy/docker/docker-compose.yml run --rm atlas-bootstrap
+docker compose -f deploy/docker/docker-compose.yml run --rm atlas-migrate
 docker compose -f deploy/docker/docker-compose.yml up -d atlas web
 ```
 

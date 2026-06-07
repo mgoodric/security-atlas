@@ -24,12 +24,12 @@ path.
 
 ## Before you start
 
-| Decision                | Recommendation                                                                                                         |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| **What version to run** | Pin a specific tag, not `:latest`, in production (see [Pin a version](#1-pin-a-version))                               |
-| **When migrations run** | **Manually, before bringing the new server up** — do not let migrations run automatically on an auto-updated container |
-| **Backup checkpoint**   | Always — Postgres dump + artifact-store mirror, encrypted, offsite                                                     |
-| **Breaking changes**    | Read the release's `CHANGELOG.md` entry; breaking changes carry a documented upgrade path                              |
+| Decision                | Recommendation                                                                                                                                                                                                                     |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What version to run** | Pin a specific tag, not `:latest`, in production (see [Pin a version](#1-pin-a-version))                                                                                                                                           |
+| **When migrations run** | **Automatically on every bring-up, fail-closed** (slice 473) — the `atlas-migrate` service runs first and the backend will not serve until it completes. You may still run them explicitly before bringing the server up (step 3). |
+| **Backup checkpoint**   | Always — Postgres dump + artifact-store mirror, encrypted, offsite                                                                                                                                                                 |
+| **Breaking changes**    | Read the release's `CHANGELOG.md` entry; breaking changes carry a documented upgrade path                                                                                                                                          |
 
 ---
 
@@ -90,13 +90,37 @@ a checkpoint.
 
 ## 3. Apply the new release
 
-Migrations run **manually, before** the new server takes traffic, so a
-bad migration cannot brick an auto-update. The shipped migration
-mechanism is the idempotent bootstrap one-shot: it applies every
-`migrations/sql/*.sql` not yet recorded in the `schema_migrations`
+**Migrations run automatically, fail-closed, on every bring-up (slice
+473).** The bundle ships a dedicated `atlas-migrate` service: it applies
+every `migrations/sql/*.sql` not yet recorded in the `schema_migrations`
 ledger, in a single transaction per file, as the `atlas_migrate` role
-(`BYPASSRLS`). Re-running it against an already-current database is a
-no-op.
+(`BYPASSRLS`, no superuser). It is idempotent (an already-current
+database applies nothing and exits 0) and **fail-closed** — a failing
+migration exits non-zero naming the file, and the `atlas` backend, gated
+on `atlas-migrate` via `service_completed_successfully`, **does not
+serve** against a partial schema.
+
+Because `atlas-migrate` carries the same Watchtower auto-update label as
+the `atlas` binary, a Watchtower-driven image update advances the migrate
+step in lockstep and the backend waits for it — a binary can never end up
+newer than its schema.
+
+You can simply bring the stack up and let the migrate step run:
+
+```sh
+COMPOSE="docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env"
+
+# 1. Pull the new images at your pinned tag.
+$COMPOSE pull
+
+# 2. Bring the stack up. atlas-migrate runs first (applies pending
+#    migrations); atlas waits for it to complete, then serves.
+$COMPOSE up -d
+```
+
+For a controlled production upgrade you may still apply migrations
+**explicitly before** the server takes traffic — same idempotent runner,
+just invoked on its own:
 
 ```sh
 COMPOSE="docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env"
@@ -107,10 +131,10 @@ $COMPOSE pull
 # 2. Stop the application so the schema is not changing under live traffic.
 $COMPOSE stop atlas web
 
-# 3. Apply forward migrations manually (idempotent; runs as atlas_migrate).
-#    The bootstrap one-shot is the migration runner: it applies any
+# 3. Apply forward migrations explicitly (idempotent; runs as atlas_migrate).
+#    The atlas-migrate one-shot is the migration runner: it applies any
 #    new migrations/sql/*.sql and records them in schema_migrations.
-$COMPOSE run --rm atlas-bootstrap
+$COMPOSE run --rm atlas-migrate
 
 # 4. Bring the new server up. It reconnects as atlas_app (RLS-enforced).
 $COMPOSE up -d atlas web
@@ -118,16 +142,18 @@ $COMPOSE up -d atlas web
 
 <!-- prettier-ignore-start -->
 !!! note "Migration mechanism — reconciling the guidance"
-    The [self-host guide](https://github.com/mgoodric/security-atlas/blob/main/docs/SELF_HOSTING.md#database-migrations-across-upgrades)
-    describes the principle: run migrations **manually** before the new
-    server takes over, and keep automatic-on-start migration **off** in
-    production so a bad migration cannot brick an auto-update. This
-    runbook gives the concrete command for the bundle: the
-    `atlas-bootstrap` one-shot is the migration runner (it ledgers each
-    file in `schema_migrations` and is safe to re-run). If you drive a
-    bare Postgres outside the bundle, `just migrate-up` runs the same
-    `migrations/sql/*.sql` set via `psql`. Either way the rule is
-    unchanged: **manual, before the new server takes traffic.**
+    The migration runner for the bundle is the dedicated, always-run
+    `atlas-migrate` service (slice 473): it ledgers each file in
+    `schema_migrations` and is safe to re-run, runs on every bring-up,
+    and **fail-closed gates the backend** so a bad migration cannot let
+    a newer binary serve a stale schema. Earlier docs referred to the
+    `atlas-bootstrap` one-shot as the migration runner — that step now
+    does seed / SCF import / control upload only (first-boot), and the
+    migrate step is its own service. The platform binary still does NOT
+    expose a `migrate` subcommand (this reconciles the slice-464
+    SELF_HOSTING migrate-command drift). If you drive a bare Postgres
+    outside the bundle, `just migrate-up` runs the same
+    `migrations/sql/*.sql` set via `psql`.
 <!-- prettier-ignore-end -->
 
 ---

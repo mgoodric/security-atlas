@@ -46,16 +46,26 @@
 #   tag identity in `release.yml`. Operators who need a signed image
 #   pull from the stable channel.
 #
-# WATCHTOWER (AC-6)
+# WATCHTOWER (AC-6 / slice 473)
 #
 #   Only services with the label
 #     com.centurylinklabs.watchtower.enable=true
-#   are auto-updated. THIS COMPOSE FILE SETS THAT LABEL ONLY ON THE
-#   `atlas-edge` AND `web-edge` SERVICES — postgres/nats/minio are
-#   pinned to specific image tags and the operator updates those
-#   manually during a maintenance window. Watchtower itself runs as a
-#   separate container (slice 207 AC-6); see the operator runbook at
-#   `docs/operations/edge-deploy.md` for the recommended deployment.
+#   are auto-updated. THIS COMPOSE FILE SETS THAT LABEL ON THE
+#   `atlas-edge`, `web-edge` AND `atlas-migrate-edge` SERVICES —
+#   postgres/nats/minio are pinned to specific image tags and the
+#   operator updates those manually during a maintenance window.
+#   Watchtower itself runs as a separate container (slice 207 AC-6); see
+#   the operator runbook at `docs/operations/edge-deploy.md`.
+#
+#   Slice 473 — the `atlas-migrate-edge` label is LOAD-BEARING. Before
+#   this slice, Watchtower advanced the atlas-edge BINARY but NOT the
+#   un-labelled atlas-bootstrap-edge one-shot (which was the only migrate
+#   path), so the binary ran against a stale schema — the confirmed
+#   2026-06-05 incident (edge box 3 migrations behind -> masked HTTP
+#   500). atlas-migrate-edge now carries the label so Watchtower advances
+#   the migrate step in lockstep with the binary, AND atlas-edge is gated
+#   on it via `service_completed_successfully` so a binary update always
+#   re-runs migrate before serving. See bootstrap/migrate.sh.
 #
 # RUN
 #
@@ -177,10 +187,46 @@ services:
     restart: "no"
 
   # --------------------------------------------------------------------
-  # atlas-bootstrap-edge — one-shot first-boot for the EDGE instance.
+  # atlas-migrate-edge — ALWAYS-RUN, idempotent, fail-closed migrate step
+  # for the EDGE instance (slice 473). Pulls the same published bootstrap
+  # image (`:edge` tag) and selects migrate.sh via the entrypoint
+  # override: applies roles + every un-applied forward migration + the
+  # atlas_app password on EVERY bring-up, then exits 0.
+  #
+  # This is the SERVICE THE 2026-06-05 INCIDENT NEEDED. Watchtower
+  # advances this migrate step (it carries the enable label) in lockstep
+  # with the atlas-edge binary, and atlas-edge is gated on it via
+  # `service_completed_successfully` (see the atlas-edge block) — so a
+  # Watchtower binary update can never serve against a stale schema.
+  # --------------------------------------------------------------------
+  atlas-migrate-edge:
+    image: ghcr.io/mgoodric/security-atlas-bootstrap:edge
+    # Watchtower opt-IN — load-bearing on edge (see the WATCHTOWER header
+    # block). The migrate step MUST advance with the atlas-edge binary.
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    entrypoint: ["/bootstrap/migrate.sh"]
+    depends_on:
+      postgres-edge:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL_MIGRATE_EDGE:?}
+      ATLAS_APP_PASSWORD: ${ATLAS_APP_PASSWORD:?}
+      REPO_ROOT: /repo
+    # A transient Postgres-not-ready blip retries; a genuine migration
+    # failure exits non-zero (naming the file) and is NOT retried into a
+    # serving state — atlas-edge's completed-successfully gate blocks it.
+    restart: "on-failure"
+
+  # --------------------------------------------------------------------
+  # atlas-bootstrap-edge — one-shot FIRST-BOOT seed for the EDGE instance.
   # Pulls the published bootstrap image from GHCR (`:edge` tag); runs
-  # migrations + seed + SCF import + control-bundle upload against the
-  # EDGE Postgres + EDGE atlas, then exits 0.
+  # seed + SCF import + control-bundle upload against the EDGE Postgres +
+  # EDGE atlas, then exits 0.
+  #
+  # Slice 473: migrations + roles + atlas_app password moved to the
+  # always-run atlas-migrate-edge service above; this bootstrap is gated
+  # on that completing, so it always seeds a fully-migrated schema.
   #
   # The bundled stack BUILDS this image from source (`build:` block).
   # The edge stack PULLS it (`image:` block) because edge is a deployed
@@ -194,6 +240,9 @@ services:
       postgres-edge:
         condition: service_healthy
       minio-mc-edge:
+        condition: service_completed_successfully
+      # Slice 473: seed only a fully-migrated schema.
+      atlas-migrate-edge:
         condition: service_completed_successfully
     environment:
       DATABASE_URL: ${DATABASE_URL_MIGRATE_EDGE:?}
@@ -235,6 +284,20 @@ services:
         condition: service_healthy
       minio-edge:
         condition: service_healthy
+      # Slice 473 — FAIL-CLOSED migrate gate (P0-473-1, load-bearing).
+      # atlas-edge does NOT serve until atlas-migrate-edge has exited 0.
+      # On a Watchtower binary update both advance together; the binary
+      # waits for the migrate step, so it never serves a stale schema. A
+      # migration failure leaves this condition unmet and atlas-edge never
+      # starts — the masked-500 class from the 2026-06-05 incident cannot
+      # recur.
+      atlas-migrate-edge:
+        condition: service_completed_successfully
+      # Slice 065 deadlock avoidance carries to edge: bootstrap-edge stays
+      # `service_started` (its control-bundle upload phase BLOCKS on atlas
+      # /health). Migrations are now in atlas-migrate-edge (gated above),
+      # so the schema is current before atlas-edge starts and bootstrap's
+      # seed runs in parallel.
       atlas-bootstrap-edge:
         condition: service_started
     environment:
