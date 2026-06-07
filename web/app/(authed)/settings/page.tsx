@@ -91,6 +91,7 @@ import {
 } from "@/lib/api/admin";
 import { getSessionMe } from "@/lib/api/board";
 import {
+  getEmailChannelOptIn,
   getMe,
   getMyPreferences,
   listMySessions,
@@ -100,6 +101,7 @@ import {
   patchMe,
   patchMyPreferences,
   revokeMySession,
+  setEmailChannelOptIn,
 } from "@/lib/api/me";
 import { applyThemeClass } from "@/lib/theme-class";
 
@@ -1020,6 +1022,10 @@ function NotificationsSection() {
           </Alert>
         ) : (
           <div className="divide-y divide-border">
+            {/* Slice 445: master email-channel opt-in (AC-9). Default
+                opted-OUT (P0-445-7). Gates whether the per-event email
+                column actually reaches the inbox. */}
+            <EmailChannelMasterToggle />
             {NOTIF_EVENTS.map((ev) => (
               <NotificationRow
                 key={ev.key}
@@ -1082,6 +1088,53 @@ function NotificationRow({
           email
         </label>
       </div>
+    </div>
+  );
+}
+
+// Slice 445: the master email-channel opt-in toggle. Default opted-OUT
+// (P0-445-7); the operator opts in explicitly. Backed by GET/PUT
+// /api/me/email-channel. Until this is on, no notification reaches the
+// inbox regardless of the per-event email column.
+function EmailChannelMasterToggle() {
+  const qc = useQueryClient();
+  const optInQuery = useQuery({
+    queryKey: ["settings-email-channel"],
+    queryFn: getEmailChannelOptIn,
+  });
+  const optInMut = useMutation({
+    mutationFn: setEmailChannelOptIn,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["settings-email-channel"] });
+    },
+  });
+  // Default to false while loading and on error (fail-closed display):
+  // never imply the user is opted in when we are unsure.
+  const enabled = optInQuery.data?.enabled === true;
+  return (
+    <div
+      className="flex items-start justify-between gap-3 py-3"
+      data-testid="settings-email-channel-toggle-row"
+    >
+      <div>
+        <div className="text-sm font-medium">Email delivery</div>
+        <div className="text-xs text-muted-foreground">
+          Send a daily digest of your unread notifications to your account
+          email. Off by default; the email carries summary counts and a link
+          back into the app, never the notification details.
+        </div>
+      </div>
+      <label className="flex items-center gap-1.5 text-xs">
+        <input
+          type="checkbox"
+          checked={enabled}
+          disabled={optInQuery.isLoading || optInMut.isPending}
+          onChange={(e) => optInMut.mutate(e.target.checked)}
+          className="h-4 w-4"
+          data-testid="settings-email-channel-toggle"
+        />
+        {enabled ? "on" : "off"}
+      </label>
     </div>
   );
 }

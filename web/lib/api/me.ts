@@ -95,6 +95,41 @@ export async function getMyPreferences(): Promise<MePreferences> {
   return body.preferences;
 }
 
+// ===== Slice 445 — /v1/me/email-channel (master email opt-in) =====
+
+// EmailChannelOptIn is the wire shape for the per-user master email
+// opt-in toggle (AC-9). Default is opted-OUT server-side (P0-445-7).
+export type EmailChannelOptIn = { enabled: boolean };
+
+export async function getEmailChannelOptIn(): Promise<EmailChannelOptIn> {
+  const res = await fetch(`/api/me/email-channel`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as EmailChannelOptIn;
+}
+
+export async function setEmailChannelOptIn(
+  enabled: boolean,
+): Promise<EmailChannelOptIn> {
+  const res = await fetch(`/api/me/email-channel`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* body not JSON */
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as EmailChannelOptIn;
+}
+
 export async function patchMyPreferences(
   partial: MePreferences,
 ): Promise<MePreferences> {

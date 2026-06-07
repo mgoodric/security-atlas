@@ -166,6 +166,27 @@ none of its own.
 | -------------------------- | --------- | --------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `NEXT_PUBLIC_API_BASE_URL` | _(empty)_ | no        | web   | The API base URL the **browser** uses to reach the atlas HTTP API. Leave empty when a reverse proxy fronts both `web` and `atlas` under one hostname (the browser uses same-origin relative URLs). Set an absolute URL only when the browser must reach atlas at a different origin (e.g. dev: `http://localhost:8080`). |
 
+## Email / SMTP notification channel
+
+The email delivery channel (slice 445) sends a daily digest of a user's unread
+in-app notifications to their account email — but **only** if that user has
+opted in (Settings → Notifications → Email delivery; default **off**) and the
+deployment has SMTP configured. The digest carries summary counts + a deep-link
+back into the authenticated app — never the notification details. When
+`ATLAS_SMTP_HOST` is unset (the default) the channel is **inert**: no mail is
+ever sent. The channel sends only; it never receives mail. `ATLAS_SMTP_PASSWORD`
+is read from the environment only and is never logged.
+
+| Variable                | Default   | Required? | Scope  | Description                                                                                                                                                                    |
+| ----------------------- | --------- | --------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ATLAS_SMTP_HOST`       | _(unset)_ | no        | server | SMTP relay host. When unset the email channel is inert (no mail sent). Set host + sender to enable email delivery.                                                             |
+| `ATLAS_SMTP_PORT`       | `587`     | no        | server | SMTP submission port. STARTTLS is used opportunistically when the server advertises it.                                                                                        |
+| `ATLAS_SMTP_SENDER`     | _(unset)_ | no        | server | The `From:` address the digest is sent from. Required (together with host) to enable delivery.                                                                                 |
+| `ATLAS_SMTP_USERNAME`   | _(unset)_ | no        | server | SMTP auth username. When set, the channel authenticates with PLAIN auth (over STARTTLS) before sending.                                                                        |
+| `ATLAS_SMTP_PASSWORD`   | _(unset)_ | no        | server | SMTP auth password. **Secret** — supply a dedicated, least-privilege send-only credential; never logged. Generate/scope per your provider (e.g. `openssl rand -hex 32`).       |
+| `ATLAS_SMTP_TIMEOUT`    | `10s`     | no        | server | Wall-clock cap on a single SMTP dial+send (Go duration string). A slow/unreachable relay fails fast; failures are recorded and re-attempted on the next tick (no hot retry).   |
+| `ATLAS_PUBLIC_BASE_URL` | _(unset)_ | no        | server | Public base URL of the authenticated app, used to build the digest's "Open your notifications" deep-link. When unset, the link falls back to a relative `/notifications` path. |
+
 ## Test-mode
 
 <!-- prettier-ignore-start -->

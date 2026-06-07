@@ -2328,6 +2328,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/me/email-channel:
+    get:
+      summary: GET /v1/me/email-channel
+      tags: [me]
+      operationId: get-v1-me-email-channel
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    put:
+      summary: PUT /v1/me/email-channel
+      tags: [me]
+      operationId: put-v1-me-email-channel
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/me/notifications:
     get:
       summary: GET /v1/me/notifications

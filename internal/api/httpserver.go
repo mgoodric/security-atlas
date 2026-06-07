@@ -88,6 +88,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
+	"github.com/mgoodric/security-atlas/internal/notify/email"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
 	"github.com/mgoodric/security-atlas/internal/risk"
@@ -614,6 +615,16 @@ func (s *Server) httpHandler() http.Handler {
 	root.Patch("/v1/me", meProfileH.PatchMe)
 	root.Get("/v1/me/preferences", mePrefsH.GetPreferences)
 	root.Patch("/v1/me/preferences", mePrefsH.PatchPreferences)
+	// Slice 445: GET/PUT /v1/me/email-channel — the per-user master
+	// opt-in toggle for the email delivery channel (AC-9). Default
+	// opted-OUT (P0-445-7). The Channel is constructed with the SMTP
+	// provider from env (inert when no SMTP host configured) + the
+	// public base URL for the digest deep-link.
+	emailCfg := email.ConfigFromEnv()
+	emailCh := email.NewChannel(s.dbPool, email.NewSMTPProvider(emailCfg), emailCfg.BaseURL)
+	meEmailH := meapi.NewEmailChannel(emailCh)
+	root.Get("/v1/me/email-channel", meEmailH.Get)
+	root.Put("/v1/me/email-channel", meEmailH.Put)
 	root.Get("/v1/me/sessions", meSessionsH.ListSessions)
 	root.Delete("/v1/me/sessions", meSessionsH.RevokeOtherSessions)
 	root.Delete("/v1/me/sessions/{id}", meSessionsH.RevokeSession)

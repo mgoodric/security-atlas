@@ -65,6 +65,12 @@ type Querier interface {
 	// attachment; if the period is still open, frozen_at remains NULL and the
 	// slice-026 query path keeps the population live until the period freezes.
 	AttachPopulationToPeriod(ctx context.Context, arg AttachPopulationToPeriodParams) error
+	// Idempotency claim (AC-5): insert a pending delivery-log row for
+	// (tenant, recipient, digest_key). ON CONFLICT DO NOTHING means a
+	// second claim for the same digest returns no row — the caller skips the
+	// send (no double-send / 24h rate-limit). Returns the claimed row id when
+	// the claim succeeds.
+	ClaimEmailDigest(ctx context.Context, arg ClaimEmailDigestParams) (pgtype.UUID, error)
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
 	// Count of all generations for the current tenant. Used by the cross-tenant
@@ -497,6 +503,18 @@ type Querier interface {
 	// tenant (UNIQUE (tenant_id, decision_id)).
 	GetDecisionByDecisionID(ctx context.Context, arg GetDecisionByDecisionIDParams) (Decision, error)
 	GetDecisionByID(ctx context.Context, arg GetDecisionByIDParams) (Decision, error)
+	// Read a delivery-log row by id (tests + outcome inspection).
+	GetEmailDeliveryLog(ctx context.Context, arg GetEmailDeliveryLogParams) (EmailDeliveryLog, error)
+	// Slice 445 — email/SMTP notification delivery channel queries.
+	//
+	// These back the email delivery substrate (a SINK for slice-029
+	// notifications, NOT a producer). All queries are tenant-scoped via the
+	// leading tenant_id; RLS under FORCE keeps the cross-tenant boundary safe
+	// even on a misconfigured query (defense-in-depth on top of RLS).
+	// Read a user's email-channel master opt-in. A missing row (pgx.ErrNoRows)
+	// means OPTED-OUT (P0-445-7) — the application layer treats no-row as
+	// enabled=false.
+	GetEmailOptIn(ctx context.Context, arg GetEmailOptInParams) (bool, error)
 	// Single-control freshness lookup — used by tests and by future per-control
 	// detail surfaces.
 	GetEvidenceFreshnessByControl(ctx context.Context, arg GetEvidenceFreshnessByControlParams) (EvidenceFreshness, error)
@@ -1997,6 +2015,14 @@ type Querier interface {
 	LogArtifactAccess(ctx context.Context, arg LogArtifactAccessParams) error
 	// Flip a predecessor row to superseded. Idempotent: no-op if already set.
 	MarkControlSuperseded(ctx context.Context, arg MarkControlSupersededParams) error
+	// Record a failed delivery (AC-8). Sets outcome=failed + last_error +
+	// increments attempts. The digest_key is NOT released — the next tick
+	// can re-attempt by reading attempts for a backoff decision (D8); a
+	// dedicated re-claim/backoff scheduler is a follow-on.
+	MarkEmailDigestFailed(ctx context.Context, arg MarkEmailDigestFailedParams) error
+	// Record a successful delivery (AC-8). Sets outcome=sent + sent_at +
+	// increments attempts.
+	MarkEmailDigestSent(ctx context.Context, arg MarkEmailDigestSentParams) error
 	// Recipient-scoped mark-read. Idempotent: re-marking an already-read
 	// notification preserves the original read_at (COALESCE keeps the
 	// earliest timestamp).
@@ -2232,6 +2258,9 @@ type Querier interface {
 	// with secret-unchanged semantics. id is supplied by the caller (UUIDv4)
 	// so the insert path is deterministic in tests.
 	UpsertAdminSSO(ctx context.Context, arg UpsertAdminSSOParams) (UpsertAdminSSORow, error)
+	// Set a user's email-channel master opt-in (AC-9). The (tenant_id,
+	// user_id) PK is the conflict target.
+	UpsertEmailOptIn(ctx context.Context, arg UpsertEmailOptInParams) (bool, error)
 	// The freshness refresh write: UPSERT one control's freshness row onto the
 	// (tenant_id, control_id) unique key. valid_until and is_stale are computed
 	// in Go (Go owns the canvas §2.3 class -> max-age mapping via
