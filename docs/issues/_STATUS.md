@@ -5,6 +5,12 @@
 
 **Last reconciled:** 2026-06-07 (batch 200 reconcile — 498 LLM foundation MERGED; ALL 3 gap-analysis real-defects now closed (495 + 492 + 498). 499/500/502 unblocked → ready; 513 doc-fix spillover filed.)
 
+## Drift detected — 2026-06-07 (batch 201 claim-stake · 478)
+
+Solo batch — the MAINTAINER-REQUESTED user-management feature (478, super-admin user↔tenant↔role assignment API incl. self-assign), the highest user-value ready slice now that all 3 gap-analysis real-defects are closed. Run solo: 478 is LARGE (~3d) + a tenant-access ELEVATION surface (extra security-review scrutiny), touches auth/admin handlers + a membership-write path + `available_tenants` refresh + coverage-thresholds.json + likely a migration; every other ready backend slice also edits coverage-thresholds.json and no conflict-free web/docs pair was chosen this batch. **OQ-check (E-1):** clears — no Plans/canvas/11-open-questions.md item touches user-management / tenant-assignment / RBAC / membership (only CSA-licensing matched, irrelevant). Shared surface with main = CHANGELOG only.
+
+- **478** (super-admin user↔tenant↔role assignment API incl. self-assignment) — Backend/Multi-tenancy/Auth · JUDGMENT — `ready` → **in-progress**. Branch `auth/478-user-tenant-assignment`. Revives the never-shipped slice-060.5 backend gap (`/admin/users` is a scaffold; no `/v1/admin/users` write surface). A super-admin-gated REST surface to list/assign/revoke user↔tenant↔role, incl. SELF-assign (super-admin adds themselves to a tenant → appears in `available_tenants` → reachable in the membership-bounded switcher). The load-bearing JUDGMENT call: local-auth identity semantics (empty `(idp_issuer,idp_subject)` tuple must NOT over-match — the 476 hazard). Unblocks 479 (UI) + subsumes 476's demo-reachability mechanism. L (3d).
+
 ## Reconcile — 2026-06-07 (batch 200 · 498 merged)
 
 Solo batch — the THIRD and last of the three gap-analysis real-defects. Merged CLEAN (no advisory failures — the engineer's floor-80 + pure-Go branches cleared even codecov/patch, unlike the bridge-skip slices). **All three gap-analysis real-defects are now closed: 495 (control-as-code silent-eval) · 492 (OSCAL import invariant-#8) · 498 (LLM foundation).**
@@ -117,13 +123,13 @@ Ready now (18): 480,481,482,486,487,488,489,490,491,492,493,494,495,496,498,508,
 
 The maintainer approved + merged the demo-support-session spec PRs (#1023, #1029, #1031). Registering their rows. (475's impl already merged at `37155f96` in batch 197; its doc landed with #1029.)
 
-| Row | Transition          | Evidence                                                                                                                                  |
-| --- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| 473 | (new) → `ready`     | `docs/issues/473-*.md` · migrate-on-upgrade (fail-closed) · spec PR #1023 merged · prod-confirmed gap                                     |
-| 475 | (new) → `merged`    | `docs/issues/475-*.md` · PDF render degrades to 503 · impl merged `37155f96` (#1030); doc landed via #1029                                |
-| 476 | (new) → `ready`     | `docs/issues/476-*.md` · demo-data reachability · spec PR #1029 merged · NOTE: mechanism subsumed by 478/479 — may reduce to verification |
-| 478 | (new) → `ready`     | `docs/issues/478-*.md` · super-admin user↔tenant assignment API (incl self-assign) · spec PR #1031 merged · revives slice-060.5          |
-| 479 | (new) → `not-ready` | `docs/issues/479-*.md` · admin user-mgmt UI · dep #478 unmerged · spec PR #1031 merged                                                    |
+| Row | Transition              | Evidence                                                                                                                                                                       |
+| --- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 473 | (new) → `ready`         | `docs/issues/473-*.md` · migrate-on-upgrade (fail-closed) · spec PR #1023 merged · prod-confirmed gap                                                                          |
+| 475 | (new) → `merged`        | `docs/issues/475-*.md` · PDF render degrades to 503 · impl merged `37155f96` (#1030); doc landed via #1029                                                                     |
+| 476 | (new) → `ready`         | `docs/issues/476-*.md` · demo-data reachability · spec PR #1029 merged · NOTE: mechanism subsumed by 478/479 — may reduce to verification                                      |
+| 478 | `ready` → `in-progress` | `docs/issues/478-*.md` · super-admin user↔tenant assignment API (incl self-assign) · spec PR #1031 merged · revives slice-060.5 · batch 201 `auth/478-user-tenant-assignment` |
+| 479 | (new) → `not-ready`     | `docs/issues/479-*.md` · admin user-mgmt UI · dep #478 unmerged · spec PR #1031 merged                                                                                         |
 
 These join the batch-197 spillovers 474 (ingest-hash) + 477 (walkthrough-PDF), both `ready`. 478 unblocks 479; once 478's IMPLEMENTATION lands (a future build, not the spec), 479 flips to `ready`. The AI-assist set (440/441/444/471) remains maintainer-sequenced.
 
