@@ -50,14 +50,34 @@ func TestEmailEnabledForKind(t *testing.T) {
 			emailChannelByEvent: map[string]bool{"control_drift": false},
 			want:                true,
 		},
+		// Slice 566: audit_note.reply + evidence.staleness are now MAPPED.
+		// They are per-kind controllable; default-on-missing-row still holds.
 		{
-			name:                "unmapped kind (audit_note.reply) -> included-when-master-on",
+			name:                "slice-566 kind (audit_note.reply) email pref off -> mute",
+			kind:                "audit_note.reply",
+			emailChannelByEvent: map[string]bool{"audit_note_reply": false},
+			want:                false,
+		},
+		{
+			name:                "slice-566 kind (audit_note.reply) no row -> default-on (send)",
 			kind:                "audit_note.reply",
 			emailChannelByEvent: map[string]bool{"control_drift": false},
 			want:                true,
 		},
 		{
-			name:                "unmapped kind (evidence.staleness) -> included-when-master-on",
+			name:                "slice-566 kind (evidence.staleness) email pref off -> mute",
+			kind:                "evidence.staleness",
+			emailChannelByEvent: map[string]bool{"evidence_staleness": false},
+			want:                false,
+		},
+		{
+			name:                "slice-566 kind (evidence.staleness) email pref on -> send",
+			kind:                "evidence.staleness",
+			emailChannelByEvent: map[string]bool{"evidence_staleness": true},
+			want:                true,
+		},
+		{
+			name:                "slice-566 kind (evidence.staleness) no row -> default-on (send)",
 			kind:                "evidence.staleness",
 			emailChannelByEvent: map[string]bool{},
 			want:                true,
@@ -115,11 +135,20 @@ func TestFilterCountsByEmailPref(t *testing.T) {
 			wantTotal:           6,
 		},
 		{
-			name:                "all mapped kinds muted, unmapped survives",
+			name:                "some mapped kinds muted, a default-on kind survives",
 			counts:              map[string]int{"control.drift": 1, "risk_review_overdue": 1, "evidence.staleness": 5},
 			emailChannelByEvent: map[string]bool{"control_drift": false, "risk_review_overdue": false},
 			wantCounts:          map[string]int{"evidence.staleness": 5},
 			wantTotal:           5,
+		},
+		{
+			// Slice 566: a formerly-unmuteable kind can now be explicitly
+			// opted out via its new event row; siblings without rows stay.
+			name:                "slice-566 kind muted via explicit opt-out, sibling stays default-on",
+			counts:              map[string]int{"audit_note.reply": 3, "evidence.staleness": 2, "control.drift": 4},
+			emailChannelByEvent: map[string]bool{"audit_note_reply": false},
+			wantCounts:          map[string]int{"evidence.staleness": 2, "control.drift": 4},
+			wantTotal:           6,
 		},
 		{
 			name:                "everything muted -> empty map, zero total (digest skips)",
@@ -161,15 +190,13 @@ func TestKindToEventMapping(t *testing.T) {
 		"policy_ack_due":          "policy_ack_due",
 		"risk_review_overdue":     "risk_review_overdue",
 		"control.drift":           "control_drift",
+		// Slice 566: the two formerly-unmapped kinds, now per-kind
+		// controllable. Note the dot→underscore normalization.
+		"audit_note.reply":   "audit_note_reply",
+		"evidence.staleness": "evidence_staleness",
 	}
 	if !reflect.DeepEqual(kindToEvent, want) {
 		t.Fatalf("kindToEvent = %v, want %v", kindToEvent, want)
-	}
-	// The two unmapped kinds must NOT have entries (they default-on).
-	for _, unmapped := range []string{"audit_note.reply", "evidence.staleness"} {
-		if _, ok := kindToEvent[unmapped]; ok {
-			t.Fatalf("kind %q should be UNMAPPED (default-on), but has an event row", unmapped)
-		}
 	}
 }
 

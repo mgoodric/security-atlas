@@ -241,6 +241,9 @@ test.describe("/settings user-facing page", () => {
       "policy_ack_due",
       "risk_review_overdue",
       "control_drift",
+      // Slice 566: per-kind opt-out for the two formerly-unmapped digest kinds.
+      "audit_note_reply",
+      "evidence_staleness",
     ]) {
       await expect(page.getByTestId(`settings-notif-row-${key}`)).toBeVisible();
       await expect(
