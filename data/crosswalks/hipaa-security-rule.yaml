@@ -1,0 +1,345 @@
+# HIPAA Security Rule (45 CFR Part 164, Subpart C) → SCF crosswalk
+#
+# DRAFT — community_draft attribution. Authored by the agent for slice 481
+# (the FIFTH framework slice — it extends UCF invariant #1 from four frameworks
+# to five: one SCF anchor satisfies SOC 2 + ISO 27001 + PCI DSS + NIST CSF +
+# HIPAA requirements at once). Every row is an agent JUDGMENT call recorded in
+# docs/audit-log/481-hipaa-crosswalk-decisions.md.
+#
+# CATALOG, NOT WORKFLOW (binding — slice 481 narrative, P0-481-1):
+#   This file ships ONLY the HIPAA Security Rule standards / implementation
+#   specifications as requirement-grain catalog nodes, crosswalked to SCF
+#   anchors via STRM edges. It is the SAME thing slices 438/447/480 ship for
+#   their frameworks. It does NOT ship the HIPAA covered-entity workflow, BAA
+#   tracking, the required-vs-addressable implementation-specification DECISION
+#   workflow, breach risk-assessment (§164.402), or a HIPAA FrameworkScope
+#   ePHI-environment example — all of that is the canvas §10.3 deferred phase-3
+#   covered-entity workflow, NOT this slice.
+#
+# REQUIRED vs. ADDRESSABLE (documentation only — P0-481-1):
+#   The HIPAA Security Rule labels each implementation specification (R)equired
+#   or (A)ddressable (45 CFR §164.306(d)). We annotate that distinction in the
+#   per-requirement comment below as PUBLIC REGULATORY FACT for the operator's
+#   reading, but we do NOT carry it as a structured loader field and we do NOT
+#   build any required-vs-addressable decision flow — that flow is the deferred
+#   covered-entity workflow. The generic 438 loader's Requirement/Mapping
+#   structs have no metadata column for it, and adding one would be a loader
+#   change (P0-481-2 forbids HIPAA-specific loader code), so the R/A tag stays
+#   a comment. See decisions log D8.
+#
+# LICENSING POSTURE (deliberate — see decisions log D2):
+#   The HIPAA Security Rule is codified at 45 CFR Part 164 and, as a work of the
+#   U.S. federal government, is in the PUBLIC DOMAIN (like NIST CSF; unlike the
+#   copyrighted ISO 27001 and PCI DSS). This file nonetheless follows the
+#   438/467/480 source-attribution discipline: it references the CFR section
+#   IDENTIFIERS (e.g. "164.312(a)(1)") and short factual TITLES, and pairs each
+#   with an ORIGINAL agent-authored one-line description in `body`. The mapping
+#   rows are the agent's independent draft (source_attribution: community_draft),
+#   not an HHS- or SCF-published official crosswalk. SCF anchors are imported
+#   separately by the operator (slice 006); this file ships only the HIPAA→SCF
+#   edge data (P0-481-6 — no pre-built SCF data bundled).
+#
+# SCOPE DISCIPLINE (binding — slice 481 narrative):
+#   This is a CURATED high-signal subset (32 standards + implementation specs),
+#   NOT full Security Rule coverage. The subset deliberately spans ALL THREE
+#   safeguard categories — Administrative (§164.308), Physical (§164.310), and
+#   Technical (§164.312) — with emphasis on the SOC 2 / ISO / PCI / CSF overlap
+#   zone (identity, encryption, monitoring, contingency, training) so shared SCF
+#   anchors demonstrate invariant #1 at FIVE frameworks. Full Security Rule
+#   coverage (including §164.314 organizational + §164.316 documentation), the
+#   phase-3 covered-entity workflow, and the HIPAA FrameworkScope ePHI example
+#   are follow-on slices (see decisions log "Revisit once in use"), NOT catalog
+#   scope.
+#
+# Source basis (methodology, not copied text):
+#   - 45 CFR §§164.308 / 164.310 / 164.312 section identifiers + short titles
+#     (factual references to a public-domain U.S. government work)
+#   - SCF anchor families published in the platform's slice-006 fixture
+#     (migrations/fixtures/scf-sample.json — 53 anchors)
+#   - NIST IR 8477 STRM methodology (canvas §3.2; UCF_GRAPH_MODEL.md §4)
+#   - NIST SP 800-66r2 (HIPAA Security Rule → SP 800-53 guidance) informs the
+#     anchor choices; these rows are the agent's independent draft pending review.
+#
+# Strength scoring rubric (identical to the SOC 2 / ISO / PCI / CSF crosswalks
+# for consistency):
+#   1.0      — STRM equal: source and target describe the same control concept
+#   0.9      — STRM equal with minor scope difference
+#   0.7-0.8  — subset_of: the SCF anchor fully covers the HIPAA spec and is broader
+#   0.6-0.8  — intersects_with high overlap: most of the HIPAA spec is covered
+#   0.4-0.6  — intersects_with partial overlap: explicit gap remains (LOW CONFIDENCE)
+#   <=0.5    — flagged for spot-check priority in the decisions log
+
+schema_version: "1.0"
+framework_slug: "hipaa_security_rule"
+framework_name: "HIPAA Security Rule (45 CFR Part 164, Subpart C)"
+framework_issuer: "HHS"
+framework_version: "2013-01-25"
+source_attribution: "community_draft"
+
+requirements:
+  # ===== ADMINISTRATIVE SAFEGUARDS (§164.308) =====
+  # R/A tags below are 45 CFR §164.306(d) classifications (public regulatory
+  # fact, documentation only — no decision workflow; P0-481-1).
+  - code: "164.308(a)(1)(i)"
+    title: "Security Management Process"
+    body: "Implement policies and procedures to prevent, detect, contain, and correct security violations." # Standard (R)
+  - code: "164.308(a)(1)(ii)(A)"
+    title: "Risk Analysis"
+    body: "Conduct an accurate and thorough assessment of the risks to electronic protected health information." # Implementation spec (R)
+  - code: "164.308(a)(1)(ii)(B)"
+    title: "Risk Management"
+    body: "Implement security measures sufficient to reduce risks and vulnerabilities to a reasonable and appropriate level." # Implementation spec (R)
+  - code: "164.308(a)(2)"
+    title: "Assigned Security Responsibility"
+    body: "Identify the security official responsible for developing and implementing the required security policies and procedures." # Standard (R)
+  - code: "164.308(a)(3)(i)"
+    title: "Workforce Security"
+    body: "Implement policies ensuring workforce members have appropriate access to electronic protected health information and preventing unauthorized access." # Standard (R)
+  - code: "164.308(a)(3)(ii)(C)"
+    title: "Termination Procedures"
+    body: "Implement procedures for terminating access to electronic protected health information when employment ends or access is no longer required." # Implementation spec (A)
+  - code: "164.308(a)(4)(i)"
+    title: "Information Access Management"
+    body: "Implement policies and procedures for authorizing access to electronic protected health information." # Standard (R)
+  - code: "164.308(a)(4)(ii)(C)"
+    title: "Access Establishment and Modification"
+    body: "Implement policies that establish, document, review, and modify a user's right of access to systems holding electronic protected health information." # Implementation spec (A)
+  - code: "164.308(a)(5)(i)"
+    title: "Security Awareness and Training"
+    body: "Implement a security awareness and training program for all members of the workforce." # Standard (R)
+  - code: "164.308(a)(5)(ii)(B)"
+    title: "Protection from Malicious Software"
+    body: "Implement procedures for guarding against, detecting, and reporting malicious software." # Implementation spec (A)
+  - code: "164.308(a)(5)(ii)(C)"
+    title: "Log-in Monitoring"
+    body: "Implement procedures for monitoring log-in attempts and reporting discrepancies." # Implementation spec (A)
+  - code: "164.308(a)(6)(i)"
+    title: "Security Incident Procedures"
+    body: "Implement policies and procedures to address security incidents." # Standard (R)
+  - code: "164.308(a)(6)(ii)"
+    title: "Response and Reporting"
+    body: "Identify and respond to suspected or known security incidents, mitigate harmful effects, and document incidents and outcomes." # Implementation spec (R)
+  - code: "164.308(a)(7)(i)"
+    title: "Contingency Plan"
+    body: "Establish policies and procedures for responding to an emergency or other occurrence that damages systems containing electronic protected health information." # Standard (R)
+  - code: "164.308(a)(7)(ii)(A)"
+    title: "Data Backup Plan"
+    body: "Establish and implement procedures to create and maintain retrievable exact copies of electronic protected health information." # Implementation spec (R)
+  - code: "164.308(a)(7)(ii)(D)"
+    title: "Testing and Revision Procedures"
+    body: "Implement procedures for periodic testing and revision of contingency plans." # Implementation spec (A)
+  - code: "164.308(a)(8)"
+    title: "Evaluation"
+    body: "Perform periodic technical and nontechnical evaluation of how well security policies and procedures meet the Security Rule requirements." # Standard (R)
+  - code: "164.308(b)(1)"
+    title: "Business Associate Contracts"
+    body: "Obtain satisfactory assurances that a business associate will appropriately safeguard electronic protected health information it handles." # Standard (R)
+
+  # ===== PHYSICAL SAFEGUARDS (§164.310) =====
+  - code: "164.310(a)(1)"
+    title: "Facility Access Controls"
+    body: "Implement policies and procedures to limit physical access to electronic information systems and the facilities housing them while ensuring authorized access." # Standard (R)
+  - code: "164.310(b)"
+    title: "Workstation Use"
+    body: "Implement policies specifying the proper functions, manner of use, and physical surroundings of workstations that access electronic protected health information." # Standard (R)
+  - code: "164.310(c)"
+    title: "Workstation Security"
+    body: "Implement physical safeguards for all workstations that access electronic protected health information to restrict access to authorized users." # Standard (R)
+  - code: "164.310(d)(1)"
+    title: "Device and Media Controls"
+    body: "Implement policies governing the receipt and removal of hardware and electronic media containing electronic protected health information into and out of a facility." # Standard (R)
+  - code: "164.310(d)(2)(i)"
+    title: "Media Disposal"
+    body: "Implement policies and procedures to address the final disposition of electronic protected health information and the hardware or media on which it is stored." # Implementation spec (R)
+
+  # ===== TECHNICAL SAFEGUARDS (§164.312) =====
+  # 164.312(a)(1) Access Control is the FIVE-FRAMEWORK shared anchor (invariant
+  # #1, AC-4): SOC 2 CC6.1, ISO A.5.15, PCI 8.2.1, CSF PR.AA-01, and HIPAA
+  # 164.312(a)(1) all resolve to IAC-01.
+  - code: "164.312(a)(1)"
+    title: "Access Control"
+    body: "Implement technical policies and procedures so that only authorized persons or software programs are granted access to electronic protected health information." # Standard (R)
+  - code: "164.312(a)(2)(i)"
+    title: "Unique User Identification"
+    body: "Assign a unique name or number for identifying and tracking user identity." # Implementation spec (R)
+  - code: "164.312(a)(2)(iv)"
+    title: "Encryption and Decryption"
+    body: "Implement a mechanism to encrypt and decrypt electronic protected health information at rest." # Implementation spec (A)
+  - code: "164.312(b)"
+    title: "Audit Controls"
+    body: "Implement hardware, software, and procedural mechanisms that record and examine activity in systems containing electronic protected health information." # Standard (R)
+  - code: "164.312(c)(1)"
+    title: "Integrity"
+    body: "Implement policies and procedures to protect electronic protected health information from improper alteration or destruction." # Standard (R)
+  - code: "164.312(d)"
+    title: "Person or Entity Authentication"
+    body: "Implement procedures to verify that a person or entity seeking access to electronic protected health information is the one claimed." # Standard (R)
+  - code: "164.312(e)(1)"
+    title: "Transmission Security"
+    body: "Implement technical security measures to guard against unauthorized access to electronic protected health information transmitted over an electronic communications network." # Standard (R)
+  - code: "164.312(e)(2)(ii)"
+    title: "Encryption (Transmission)"
+    body: "Implement a mechanism to encrypt electronic protected health information whenever deemed appropriate during transmission." # Implementation spec (A)
+
+mappings:
+  # ===== ADMINISTRATIVE SAFEGUARDS (§164.308) → SCF =====
+  - requirement_code: "164.308(a)(1)(i)"
+    scf_anchor: "GOV-01"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "The Security Management Process (prevent/detect/contain/correct) is a facet of SCF Information Security Governance."
+  - requirement_code: "164.308(a)(1)(ii)(A)"
+    scf_anchor: "RSK-04"
+    relationship_type: "equal"
+    strength: 0.9
+    rationale: "HIPAA Risk Analysis maps directly to SCF Risk Assessment."
+  - requirement_code: "164.308(a)(1)(ii)(B)"
+    scf_anchor: "RSK-01"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "HIPAA Risk Management (reduce risks to reasonable level) is governed by the SCF Risk Management Program."
+  - requirement_code: "164.308(a)(2)"
+    scf_anchor: "GOV-04"
+    relationship_type: "equal"
+    strength: 0.9
+    rationale: "Assigning the security official maps directly to SCF Information Security Roles & Responsibilities."
+  - requirement_code: "164.308(a)(3)(i)"
+    scf_anchor: "HRS-01"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Workforce Security (appropriate access, prevent unauthorized access) is covered by SCF Human Resources Security."
+  - requirement_code: "164.308(a)(3)(ii)(C)"
+    scf_anchor: "HRS-09"
+    relationship_type: "equal"
+    strength: 0.85
+    rationale: "Termination Procedures map directly to the SCF Personnel Termination Process."
+  - requirement_code: "164.308(a)(4)(i)"
+    scf_anchor: "IAC-07"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Information Access Management (authorizing access) is covered by SCF User Provisioning & Lifecycle."
+  - requirement_code: "164.308(a)(4)(ii)(C)"
+    scf_anchor: "IAC-15"
+    relationship_type: "intersects_with"
+    strength: 0.7
+    rationale: "Access Establishment and Modification (establish/review/modify access rights) overlaps SCF Account Review; provisioning facet sits elsewhere (MEDIUM)."
+  - requirement_code: "164.308(a)(5)(i)"
+    scf_anchor: "HRS-04"
+    relationship_type: "equal"
+    strength: 0.9
+    rationale: "Security Awareness and Training maps directly to SCF Security Awareness Training."
+  - requirement_code: "164.308(a)(5)(ii)(B)"
+    scf_anchor: "END-07"
+    relationship_type: "equal"
+    strength: 0.85
+    rationale: "Protection from Malicious Software maps directly to SCF Malicious Code Protection."
+  - requirement_code: "164.308(a)(5)(ii)(C)"
+    scf_anchor: "MON-08"
+    relationship_type: "intersects_with"
+    strength: 0.7
+    rationale: "Log-in Monitoring (monitor log-in attempts, report discrepancies) overlaps SCF Anomalous Behavior Detection; broader correlation gap (MEDIUM)."
+  - requirement_code: "164.308(a)(6)(i)"
+    scf_anchor: "IRO-04"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Security Incident Procedures (policies to address incidents) are governed by the SCF Incident Response Plan."
+  - requirement_code: "164.308(a)(6)(ii)"
+    scf_anchor: "IRO-04"
+    relationship_type: "equal"
+    strength: 0.85
+    rationale: "Response and Reporting (respond, mitigate, document) maps directly to SCF Incident Response Plan execution."
+  - requirement_code: "164.308(a)(7)(i)"
+    scf_anchor: "BCD-02"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "The HIPAA Contingency Plan standard is covered by the SCF Business Continuity Plan."
+  - requirement_code: "164.308(a)(7)(ii)(A)"
+    scf_anchor: "BCD-09"
+    relationship_type: "equal"
+    strength: 0.9
+    rationale: "Data Backup Plan (retrievable exact copies) maps directly to SCF Backups."
+  - requirement_code: "164.308(a)(7)(ii)(D)"
+    scf_anchor: "BCD-11"
+    relationship_type: "equal"
+    strength: 0.85
+    rationale: "Testing and Revision Procedures (periodic contingency testing) map directly to SCF Backup Testing."
+  - requirement_code: "164.308(a)(8)"
+    scf_anchor: "CPL-03"
+    relationship_type: "intersects_with"
+    strength: 0.65
+    rationale: "Periodic Evaluation overlaps the SCF Internal Audit Function; the nontechnical-evaluation facet is broader than internal audit (LOW)."
+  - requirement_code: "164.308(b)(1)"
+    scf_anchor: "TPM-01"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Business Associate Contracts (satisfactory-assurance safeguards) are governed by SCF Third-Party Management."
+
+  # ===== PHYSICAL SAFEGUARDS (§164.310) → SCF =====
+  - requirement_code: "164.310(a)(1)"
+    scf_anchor: "PES-04"
+    relationship_type: "equal"
+    strength: 0.9
+    rationale: "Facility Access Controls map directly to SCF Physical Access Control."
+  - requirement_code: "164.310(b)"
+    scf_anchor: "PES-04"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Workstation Use (proper function, manner, surroundings) overlaps SCF Physical Access Control; the use-policy facet is broader than physical access (LOW)."
+  - requirement_code: "164.310(c)"
+    scf_anchor: "PES-04"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Workstation Security (physical safeguards restricting workstation access) is covered by SCF Physical Access Control."
+  - requirement_code: "164.310(d)(1)"
+    scf_anchor: "AST-01"
+    relationship_type: "intersects_with"
+    strength: 0.7
+    rationale: "Device and Media Controls (receipt/removal of hardware and media) overlap the SCF Asset Management Policy; the media-tracking facet is broader (MEDIUM)."
+  - requirement_code: "164.310(d)(2)(i)"
+    scf_anchor: "AST-09"
+    relationship_type: "equal"
+    strength: 0.85
+    rationale: "Media Disposal (final disposition of ePHI and storage media) maps directly to SCF Asset Disposal."
+
+  # ===== TECHNICAL SAFEGUARDS (§164.312) → SCF =====
+  # 164.312(a)(1) → IAC-01 is the FIVE-FRAMEWORK shared anchor (invariant #1, AC-4).
+  - requirement_code: "164.312(a)(1)"
+    scf_anchor: "IAC-01"
+    relationship_type: "equal"
+    strength: 0.9
+    rationale: "Technical Access Control (only authorized persons/programs access ePHI) maps directly to SCF Identification & Authentication Policy (five-framework shared anchor)."
+  - requirement_code: "164.312(a)(2)(i)"
+    scf_anchor: "IAC-07"
+    relationship_type: "intersects_with"
+    strength: 0.75
+    rationale: "Unique User Identification strongly overlaps SCF User Provisioning & Lifecycle (unique identity is a provisioning outcome)."
+  - requirement_code: "164.312(a)(2)(iv)"
+    scf_anchor: "CRY-04"
+    relationship_type: "equal"
+    strength: 0.85
+    rationale: "Encryption and Decryption of ePHI at rest maps directly to SCF Encryption At Rest."
+  - requirement_code: "164.312(b)"
+    scf_anchor: "AAA-01"
+    relationship_type: "equal"
+    strength: 0.9
+    rationale: "Audit Controls (record and examine system activity) map directly to SCF Auditing & Accountability."
+  - requirement_code: "164.312(c)(1)"
+    scf_anchor: "DCH-01"
+    relationship_type: "intersects_with"
+    strength: 0.65
+    rationale: "Integrity (protect ePHI from improper alteration/destruction) overlaps SCF Data Classification & Handling; a dedicated data-integrity anchor is absent from the sample fixture (LOW)."
+  - requirement_code: "164.312(d)"
+    scf_anchor: "IAC-01"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Person or Entity Authentication (verify claimed identity) is covered by SCF Identification & Authentication Policy."
+  - requirement_code: "164.312(e)(1)"
+    scf_anchor: "NET-04"
+    relationship_type: "intersects_with"
+    strength: 0.7
+    rationale: "Transmission Security (guard against unauthorized access to ePHI in transit) overlaps SCF Boundary Protection; the cryptographic facet sits in 164.312(e)(2)(ii) (MEDIUM)."
+  - requirement_code: "164.312(e)(2)(ii)"
+    scf_anchor: "CRY-08"
+    relationship_type: "equal"
+    strength: 0.85
+    rationale: "Encryption (Transmission) maps directly to SCF Encryption In Transit."
