@@ -16,6 +16,45 @@ new `migrate` mode IS that tier — it now reproduces the incident and
 fails if the gap regresses. Closing the `target` gap is the load-bearing
 deliverable.
 
+## Post-push regression fixes (PR #1042 CI)
+
+The first push passed the NEW `migrate` leg but broke the EXISTING
+`bundled` + `external` self-host-bundle legs (deterministic). Two
+distinct causes, both fixed without touching the compose gate or the AC-7
+scenario:
+
+1. **Harness EXIT-trap exit-status leak (caught: `integration`/CI; the
+   bundled+external legs).** The `cleanup()` EXIT trap ended with
+   `[ -n "$SENTINEL_SQL" ] && rm -f "$SENTINEL_SQL"`. In every non-migrate
+   mode `SENTINEL_SQL` is empty, so `[ -n "" ]` returns 1, the `&&`
+   short-circuits, and — because it is the LAST statement of a function
+   invoked from the EXIT trap — that 1 became the SCRIPT's exit code. Every
+   assertion passed (`ALL ASSERTIONS PASSED` printed) but the harness still
+   exited 1. `migrate` mode passed only because its non-empty `SENTINEL_SQL`
+   made the test true. Fix: replaced the `&&` one-liner with an `if`-block,
+   which evaluates to 0 when the condition is false. Pure harness fix; no
+   production/compose change.
+
+2. **Proxy overlay missing `atlas-migrate` network membership (proxy
+   leg).** `docker-compose.proxy.yml` (slice 470, not owned here) pins each
+   base service to the fixed `atlasnet` subnet via a per-service
+   `networks:` list. In compose, a service that declares ANY explicit
+   `networks:` joins ONLY those — so the new `atlas-migrate` service, absent
+   from the overlay, landed on the implicit default network while postgres
+   was on `atlasnet` only. atlas-migrate could not reach Postgres and
+   looped forever on "Postgres not reachable" (its `restart:"on-failure"`
+   masked it as a hang), so its `service_completed_successfully` gate never
+   resolved and the whole proxy bring-up stalled. Fix: add `atlas-migrate`
+   to the overlay's `atlasnet` membership, mirroring `atlas-bootstrap`.
+   This is a consequence of MY new service, so adding its network row is in
+   scope (minimal, mirrors the existing pattern).
+
+**Proof after both fixes (local, offset host ports to avoid the shared
+host's busy defaults):** all four legs exit 0 — `bundled`, `external`,
+`migrate` (AC-7 ledger 67→68 + serve-after-gate + idempotent no-reseed),
+and `proxy` (AC-2 proxy IP honoured `203.0.113.10` / AC-3 forged XFF
+rejected, recorded `10.124.0.3`).
+
 ## What shipped
 
 - `deploy/docker/bootstrap/migrate.sh` — NEW always-run, idempotent,

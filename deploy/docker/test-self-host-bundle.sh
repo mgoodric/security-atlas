@@ -143,7 +143,16 @@ cleanup() {
     log "tearing down"
     "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
     rm -f "${ENV_FILE}"
-    [ -n "${SENTINEL_SQL}" ] && rm -f "${SENTINEL_SQL}"
+    # Use an `if`, NOT `[ -n "$SENTINEL_SQL" ] && rm`: in the non-migrate
+    # modes SENTINEL_SQL is empty, so the `[ -n "" ]` test returns 1 and
+    # the `&&` short-circuits — and because this is the LAST statement of a
+    # function invoked from the EXIT trap, that non-zero status becomes the
+    # SCRIPT's exit code, failing bundled/external/proxy even when every
+    # assertion passed. The `if` block evaluates to 0 when the condition is
+    # false, so cleanup always returns success on the no-sentinel path.
+    if [ -n "${SENTINEL_SQL}" ]; then
+        rm -f "${SENTINEL_SQL}"
+    fi
 }
 trap cleanup EXIT
 
