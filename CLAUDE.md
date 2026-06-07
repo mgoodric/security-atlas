@@ -89,7 +89,7 @@ The platform does NOT:
 - Auto-approve its own mappings
 - Use Tenant A's confidential data to seed Tenant B's draft
 
-Schema-level enforcement: `ai_assisted=true` records cannot have `human_approved=true` without `human_approver` set. Audit log shows model name + version + diff between AI draft and final. (canvas §4.6.5)
+Schema-level enforcement: `ai_assisted=true` records cannot have `human_approved=true` without `human_approver` set. The canonical shipped adopter of this column set + approval guard is `mcp_write_proposals` (slice 173, migration `20260520030000_mcp_write_proposals.sql`), whose inline `mcp_wp_ai_assist_invariant` CHECK is the reference shape. Slice 498 extracted that predicate into the shared reusable `ai_assist_human_approver_guard` IMMUTABLE function + CHECK template (`internal/llm` + `migrations/sql/20260607000000_ai_generations.sql`); new AI-assist surfaces adopt the function rather than re-authoring the predicate. `questionnaire_answers` does NOT yet carry these columns on `main` — it gains them (adopting the same shared guard) when slice 440 lands the questionnaire answer-suggestion surface. See slice 498's decisions-log D5 (`docs/audit-log/498-llm-foundation-decisions.md`). Audit log shows model name + version + diff between AI draft and final. (canvas §4.6.5)
 
 **Inference backend:** local Ollama is the default (no data leaves deployment). Cloud LLMs (Anthropic / OpenAI / Bedrock) are opt-in per-tenant with a visible banner indicating routing.
 
