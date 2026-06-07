@@ -144,6 +144,25 @@ message SamplePopulation {
   string frozen_at = 5;
 }
 
+// WalkthroughAttachment is one screen-capture / transcript attached to a
+// walkthrough. Carried into the AR as an observation `relevant-evidence`
+// reference (slice 494). The attachment BYTES are never embedded — the AR
+// references them by content hash + the object-storage URI (P0-494-2); the
+// object store is the source of truth and the signed bundle is the
+// integrity layer.
+message WalkthroughAttachment {
+  string id = 1;
+  string filename = 2;
+  // lowercase-hex sha256 of the attachment bytes (the integrity anchor).
+  string content_hash = 3;
+  string content_type = 4;
+  // free-form annotation metadata reference (image-region notes etc.).
+  string annotation_ref = 5;
+  // object-storage URI / key (slice-036 storage_key) — the reference, not
+  // the bytes.
+  string storage_uri = 6;
+}
+
 // Walkthrough is an auditor/owner-recorded explanation, exported as an
 // assessment-results observation.
 message Walkthrough {
@@ -154,6 +173,10 @@ message Walkthrough {
   // lowercase hex sha256 of the canonical walkthrough content.
   string canonical_hash = 5;
   bool tamper_detected = 6;
+  // Attachment references (slice 494). Bytes are NOT embedded — each entry
+  // carries hash + storage URI only. Capped per-walkthrough by the
+  // exporter; an overflow entry notes any attachments beyond the cap.
+  repeated WalkthroughAttachment attachments = 7;
 }
 
 // AuditNote is one auditor<->auditee threaded comment, exported as an

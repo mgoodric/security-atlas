@@ -214,6 +214,142 @@ func (q *Queries) ListPopulationsForPeriod(ctx context.Context, arg ListPopulati
 	return items, nil
 }
 
+const listSampledEvidenceForPeriod = `-- name: ListSampledEvidenceForPeriod :many
+SELECT
+    latest.population_id,
+    se.evidence_record_id,
+    se.ordinal
+FROM (
+    SELECT DISTINCT ON (s.population_id)
+        s.id           AS sample_id,
+        s.population_id AS population_id
+    FROM samples s
+    JOIN populations p
+        ON p.tenant_id = s.tenant_id AND p.id = s.population_id
+    WHERE s.tenant_id = $1
+      AND p.audit_period_id = $2
+    ORDER BY s.population_id, s.created_at DESC, s.id DESC
+) latest
+JOIN sample_evidence se
+    ON se.tenant_id = $1 AND se.sample_id = latest.sample_id
+ORDER BY latest.population_id ASC, se.ordinal ASC
+`
+
+type ListSampledEvidenceForPeriodParams struct {
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID `json:"audit_period_id"`
+}
+
+type ListSampledEvidenceForPeriodRow struct {
+	PopulationID     pgtype.UUID `json:"population_id"`
+	EvidenceRecordID pgtype.UUID `json:"evidence_record_id"`
+	Ordinal          int32       `json:"ordinal"`
+}
+
+// Slice 494 (AC-1/AC-2): the DRAWN sample evidence ids for every population
+// pinned to one audit period. Joins populations -> samples -> sample_evidence.
+//
+// Invariant #10 by construction (AC-2/AC-7): the rows in sample_evidence were
+// materialized at draw-time over the FROZEN population (slice 026's
+// ListPopulationEvidenceIDs filters `observed_at <= frozen_at`), so a record
+// observed after the period's frozen_at was never in the draw and cannot
+// appear here. This query carries the already-frozen-correct draw forward; it
+// never re-samples live data.
+//
+// When a population has multiple samples (re-draws), only the MOST-RECENT
+// sample's draw is carried (the operative sample). The DISTINCT ON collapses
+// to one sample per population by created_at DESC; the full re-draw history
+// stays in sample_audit_log (slice 026), not in the AR.
+//
+// Ordered by population then ordinal (the deterministic Fisher-Yates shuffle
+// position) so the AR's sampled_evidence_ids preserve the auditor's sample
+// order (AC-9 reproducibility).
+func (q *Queries) ListSampledEvidenceForPeriod(ctx context.Context, arg ListSampledEvidenceForPeriodParams) ([]ListSampledEvidenceForPeriodRow, error) {
+	rows, err := q.db.Query(ctx, listSampledEvidenceForPeriod, arg.TenantID, arg.AuditPeriodID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSampledEvidenceForPeriodRow
+	for rows.Next() {
+		var i ListSampledEvidenceForPeriodRow
+		if err := rows.Scan(&i.PopulationID, &i.EvidenceRecordID, &i.Ordinal); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWalkthroughAttachmentsForPeriod = `-- name: ListWalkthroughAttachmentsForPeriod :many
+SELECT
+    wa.walkthrough_id,
+    wa.id,
+    wa.storage_key,
+    wa.content_type,
+    wa.sha256_hash,
+    wa.annotations
+FROM walkthrough_attachments wa
+JOIN walkthroughs w
+    ON w.tenant_id = wa.tenant_id AND w.id = wa.walkthrough_id
+WHERE wa.tenant_id = $1
+  AND w.audit_period_id = $2
+ORDER BY wa.walkthrough_id ASC, wa.uploaded_at ASC, wa.id ASC
+`
+
+type ListWalkthroughAttachmentsForPeriodParams struct {
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID `json:"audit_period_id"`
+}
+
+type ListWalkthroughAttachmentsForPeriodRow struct {
+	WalkthroughID pgtype.UUID `json:"walkthrough_id"`
+	ID            pgtype.UUID `json:"id"`
+	StorageKey    string      `json:"storage_key"`
+	ContentType   string      `json:"content_type"`
+	Sha256Hash    string      `json:"sha256_hash"`
+	Annotations   []byte      `json:"annotations"`
+}
+
+// Slice 494 (AC-4/AC-5): attachment references for every walkthrough pinned
+// to one audit period. Carries metadata only (id, filename, content hash,
+// content type, annotation jsonb, storage_key) — the attachment BYTES live in
+// the slice-036 object store and are NEVER read here (P0-494-2). The export
+// references them by hash + storage_key.
+//
+// Ordered by (walkthrough, uploaded_at, id) so the per-walkthrough attachment
+// order is stable and the exporter's cap (slice 494 D3) selects a
+// deterministic prefix.
+func (q *Queries) ListWalkthroughAttachmentsForPeriod(ctx context.Context, arg ListWalkthroughAttachmentsForPeriodParams) ([]ListWalkthroughAttachmentsForPeriodRow, error) {
+	rows, err := q.db.Query(ctx, listWalkthroughAttachmentsForPeriod, arg.TenantID, arg.AuditPeriodID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWalkthroughAttachmentsForPeriodRow
+	for rows.Next() {
+		var i ListWalkthroughAttachmentsForPeriodRow
+		if err := rows.Scan(
+			&i.WalkthroughID,
+			&i.ID,
+			&i.StorageKey,
+			&i.ContentType,
+			&i.Sha256Hash,
+			&i.Annotations,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWalkthroughsForPeriod = `-- name: ListWalkthroughsForPeriod :many
 SELECT id, tenant_id, audit_period_id, control_id, narrative, transcript,
        canonical_hash, status, created_by, created_at, updated_at

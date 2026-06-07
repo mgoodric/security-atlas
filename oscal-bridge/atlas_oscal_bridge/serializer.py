@@ -30,6 +30,7 @@ from trestle.oscal.common import (
     Metadata,
     Observation,
     Property,
+    RelevantEvidence,
     ReviewedControls,
     SystemComponent,
     SystemId,
@@ -279,6 +280,12 @@ def serialize_assessment(pb_input):
                 methods=["INTERVIEW"],
                 collected=_now_iso(),
                 props=props,
+                # Slice 494: walkthrough attachments map onto this same
+                # observation's relevant-evidence (decision D2) — co-located
+                # with the walkthrough they evidence (canvas §8.3 / §8.5). The
+                # bytes are NEVER embedded: href = object-storage URI, the
+                # content hash + type + annotation ref ride as props.
+                relevant_evidence=_walkthrough_evidence(wt) or None,
             )
         )
     for note in pb_input.audit_notes:
@@ -322,6 +329,41 @@ def serialize_assessment(pb_input):
     )
 
 
+def _walkthrough_evidence(wt) -> list:
+    """Map a walkthrough's attachments to OSCAL ``relevant-evidence`` (D2).
+
+    Each attachment becomes one ``RelevantEvidence`` whose ``href`` is the
+    object-storage URI (the reference, NOT the bytes — P0-494-2) and whose
+    props carry the content hash, content type, and annotation reference. The
+    overflow ref (slice 494 D3) has no storage URI; it is carried as a
+    description-only note so the auditor knows attachments exist beyond the
+    cap.
+    """
+    out = []
+    for att in wt.attachments:
+        props = []
+        if att.id:
+            props.append(_prop("attachment-id", att.id))
+        if att.content_hash:
+            props.append(_prop("content-hash", att.content_hash))
+        if att.content_type:
+            props.append(_prop("content-type", att.content_type))
+        if att.annotation_ref:
+            props.append(_prop("annotation-ref", att.annotation_ref))
+        # The overflow ref carries only a filename note (no storage URI);
+        # trestle requires href to be a non-empty string, so fall back to a
+        # stable in-document anchor when there is no real URI.
+        href = att.storage_uri or "#walkthrough-attachment-overflow"
+        out.append(
+            RelevantEvidence(
+                href=href,
+                description=att.filename or "Walkthrough attachment.",
+                props=props or None,
+            )
+        )
+    return out
+
+
 def _note_collected(created_at: str) -> datetime:
     if created_at:
         try:
@@ -348,6 +390,11 @@ def _population_props(populations):
                 str(len(pop.sampled_evidence_ids)),
             )
         )
+        # Slice 494 (AC-1): the DRAWN sample evidence ids, one prop per id in
+        # shuffle order. The ordinal-suffixed name preserves the deterministic
+        # auditor's-sample order (AC-9) so an importer can re-key the draw.
+        for ordinal, ev_id in enumerate(pop.sampled_evidence_ids):
+            props.append(_prop(f"population-{pop.population_id}-sampled-{ordinal}", ev_id))
     return props or None
 
 
