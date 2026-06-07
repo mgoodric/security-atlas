@@ -241,6 +241,18 @@
       "functions": 98,
       "lines": 94
     },
+    "app/api/admin/users/route.ts": {
+      "statements": 95,
+      "branches": 78,
+      "functions": 98,
+      "lines": 95
+    },
+    "app/api/admin/users/revoke/route.ts": {
+      "statements": 93,
+      "branches": 74,
+      "functions": 98,
+      "lines": 93
+    },
     "app/api/admin/vendors/export/route.ts": {
       "statements": 98,
       "branches": 88,
