@@ -1097,6 +1097,25 @@ type DecisionsAudit struct {
 	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
 }
 
+type EmailChannelOptin struct {
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Enabled   bool               `json:"enabled"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type EmailDeliveryLog struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	RecipientUserID string             `json:"recipient_user_id"`
+	DigestKey       string             `json:"digest_key"`
+	Outcome         string             `json:"outcome"`
+	Attempts        int32              `json:"attempts"`
+	LastError       string             `json:"last_error"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	SentAt          pgtype.Timestamptz `json:"sent_at"`
+}
+
 type EvidenceAuditLog struct {
 	ID             pgtype.UUID        `json:"id"`
 	TenantID       pgtype.UUID        `json:"tenant_id"`

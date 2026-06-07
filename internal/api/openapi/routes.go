@@ -111,6 +111,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/me/acknowledgments", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/acknowledgments"},
 	{Method: "GET", Path: "/v1/me/audit-period", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/audit-period"},
 	{Method: "GET", Path: "/v1/me/audit-periods", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/audit-periods"},
+	{Method: "GET", Path: "/v1/me/email-channel", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/email-channel"},
 	{Method: "GET", Path: "/v1/me/notifications", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/notifications"},
 	{Method: "GET", Path: "/v1/me/preferences", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/preferences"},
 	{Method: "GET", Path: "/v1/me/sessions", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/sessions"},
@@ -240,5 +241,6 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/walkthroughs/{id}/attachments", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "POST /v1/walkthroughs/{id}/attachments"},
 	{Method: "POST", Path: "/v1/walkthroughs/{id}:finalize", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "POST /v1/walkthroughs/{id}:finalize"},
 	{Method: "PUT", Path: "/v1/board-packs/{id}/sections/{key}", Tag: "board", Tier: "bearer", Internal: false, Summary: "PUT /v1/board-packs/{id}/sections/{key}"},
+	{Method: "PUT", Path: "/v1/me/email-channel", Tag: "me", Tier: "bearer", Internal: false, Summary: "PUT /v1/me/email-channel"},
 	{Method: "PUT", Path: "/v1/metrics/{id}/target", Tag: "me", Tier: "bearer", Internal: false, Summary: "PUT /v1/metrics/{id}/target"},
 }
