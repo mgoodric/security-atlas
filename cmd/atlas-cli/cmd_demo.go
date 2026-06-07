@@ -206,6 +206,21 @@ func runDemoSeed(cmd *cobra.Command, _ []string) error {
 		res.Walkthroughs, res.Exceptions, res.BoardBriefs, res.BoardPacks,
 		res.FrameworkScopes, res.AuditLogRows, len(res.EvidenceKindsUsed),
 	)
+
+	// Slice 476 — reach-it hint. The demo data lives in a SEPARATE tenant,
+	// so the operator who seeded it is not yet a member and the tenant does
+	// not appear in their switcher. Without this hint the seed is a dead end
+	// (the gap slice 476 was filed for). Point at the slice-478/479 self-
+	// assign journey; the membership-bounded switcher (P0-192-5) is the
+	// reason a grant is required, not a bug to work around.
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(),
+		"\nReach the demo data (it lives in a SEPARATE tenant):\n"+
+			"  1. As a super admin, open /admin/users and click \"Add me to a tenant\".\n"+
+			"  2. Self-assign to tenant_id %s with the role(s) you want.\n"+
+			"  3. Sign out and sign back in to mint a fresh token, then switch to\n"+
+			"     the demo tenant in the tenant switcher (top of the app shell).\n",
+		res.TenantID,
+	)
 	return nil
 }
 
