@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/azure.entra_role_assignment/1.0.0.json",
+  "x-evidence-kind": "azure.entra_role_assignment.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IAC-21", "IAC-22"],
+  "title": "Azure Entra ID role assignment",
+  "description": "One record per (principal, role, scope) directory-role / RBAC assignment in Microsoft Entra ID, plus the service-principal / app-registration inventory facts needed to interpret it. Pulled read-only from Microsoft Graph (Directory.Read.All + Application.Read.All). Config + assignment metadata only — never mailbox/profile PII. The platform evaluator decides pass/fail per (control, assignment); the connector emits descriptive (INCONCLUSIVE) records.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "assignment_id",
+    "principal_id",
+    "principal_type",
+    "role_definition_id"
+  ],
+  "properties": {
+    "assignment_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable id of the role assignment."
+    },
+    "principal_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Object id of the assigned principal."
+    },
+    "principal_type": {
+      "type": "string",
+      "enum": ["user", "servicePrincipal", "group", "unknown"],
+      "description": "Kind of the assigned principal."
+    },
+    "principal_display_name": {
+      "type": "string",
+      "description": "Human label of the assignment's principal (the name needed to read the assignment record — not mailbox/profile PII)."
+    },
+    "role_definition_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Directory-role template id or RBAC role-definition id."
+    },
+    "role_display_name": {
+      "type": "string",
+      "description": "Human-readable role name (e.g. Global Administrator, Reader)."
+    },
+    "directory_scope_id": {
+      "type": "string",
+      "description": "Scope of the assignment: '/' (tenant) or an administrative-unit / app scope id."
+    },
+    "is_privileged": {
+      "type": "boolean",
+      "description": "Connector-side heuristic: the role is a known high-privilege directory role."
+    },
+    "tenant_id": {
+      "type": "string",
+      "description": "Entra tenant id the assignment lives in."
+    }
+  }
+}
