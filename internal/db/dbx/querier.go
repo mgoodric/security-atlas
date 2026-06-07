@@ -367,6 +367,10 @@ type Querier interface {
 	// (tenant_id, content_hash) WHERE content_hash IS NOT NULL keeps the
 	// result single-row.
 	FindArtifactByHash(ctx context.Context, arg FindArtifactByHashParams) (Artifact, error)
+	// Transition a run to failed with a short reason. Never carries credentials.
+	FinishBackupRunFailed(ctx context.Context, arg FinishBackupRunFailedParams) (BackupRun, error)
+	// Transition a run to succeeded with the produced/verified artifact details.
+	FinishBackupRunSucceeded(ctx context.Context, arg FinishBackupRunSucceededParams) (BackupRun, error)
 	// Slice 066 — dashboard backend read endpoints.
 	//
 	// Three pure SELECT families that surface existing data behind the
@@ -849,6 +853,8 @@ type Querier interface {
 	// composite PK; conflicts are silently no-op so concurrent admins
 	// granting the same role don't fail.
 	InsertUserRole(ctx context.Context, arg InsertUserRoleParams) error
+	// The most recent successful backup run — what restore-verification restores.
+	LatestSucceededBackup(ctx context.Context) (BackupRun, error)
 	// ===== decision_controls =====
 	LinkDecisionControl(ctx context.Context, arg LinkDecisionControlParams) error
 	// ===== decision_exceptions =====
@@ -1634,6 +1640,8 @@ type Querier interface {
 	ListQuestionnaires(ctx context.Context, tenantID pgtype.UUID) ([]Questionnaire, error)
 	// Enumerate every question for a questionnaire in stable display order.
 	ListQuestionsForQuestionnaire(ctx context.Context, arg ListQuestionsForQuestionnaireParams) ([]QuestionnaireQuestion, error)
+	// Latest runs of a kind, newest first — backs the deployment status surface.
+	ListRecentBackupRuns(ctx context.Context, arg ListRecentBackupRunsParams) ([]BackupRun, error)
 	// The last N failures for the caller's tenant, newest first. Used by
 	// ops paths (a future admin UI surface) and by the integration test
 	// asserting projected-Entry fields landed correctly.
@@ -2143,6 +2151,15 @@ type Querier interface {
 	// query path then enforces `observed_at <= populations.frozen_at` on
 	// subsequent draws.
 	SetPopulationFrozenAt(ctx context.Context, arg SetPopulationFrozenAtParams) error
+	// backup_runs — slice 510 automated-backup status/audit ledger.
+	//
+	// DEPLOYMENT-scope (no tenant_id): a backup is a full cross-tenant operation.
+	// Granted to atlas_migrate ONLY (P0-510-1 / AC-7) — the in-process backup
+	// scheduler runs as the BYPASSRLS migrator role; no tenant-facing handler
+	// (atlas_app) can reach this table. Append-only: INSERT begins a run, the
+	// narrow Finish* updates transition outcome once; no DELETE query exists.
+	// Insert a run in the `running` state. kind is 'backup' or 'verify'.
+	StartBackupRun(ctx context.Context, arg StartBackupRunParams) (BackupRun, error)
 	// AC-6: draft -> review. Guarded so callers can never re-submit an already
 	// under-review row by accident (would still be valid but masks bugs).
 	SubmitFrameworkScope(ctx context.Context, arg SubmitFrameworkScopeParams) (FrameworkScope, error)

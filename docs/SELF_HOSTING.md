@@ -301,6 +301,57 @@ Do not stop at "I have a dump." Run the
 [restore drill](https://mgoodric.github.io/security-atlas/backup-restore/#tested-restore-drill)
 to prove the dump restores and the restored evidence is intact.
 
+### Automated backups + scheduled restore-verification
+
+The manual procedure above is the belt-and-suspenders, full-fidelity path.
+For day-to-day continuity, the `atlas` binary also runs an **in-process
+automated backup** + a **scheduled restore-verification** — so your recovery
+posture matches the
+[BCP/DR plan](https://github.com/mgoodric/security-atlas/blob/main/docs/governance/business-continuity.md)
+without depending on remembering to run the runbook. This operationalizes the
+runbook above; it does not replace it.
+
+What it does, each cycle (defaults: daily):
+
+- **Backs up** the database as a logical SQL dump and writes it through a
+  pluggable target — a local volume (default) or an S3-compatible bucket.
+- **Rotates** old backups out (default: keep 7 daily + 4 weekly) so storage
+  does not grow unbounded.
+- **Verifies** the latest backup by restoring it into a throwaway ephemeral
+  database, recomputing its sha256, running a smoke check, then destroying the
+  ephemeral database. A backup you have never restored is not a backup.
+- **Alerts** on failure: a failed backup or verification writes a durable
+  status record and raises an in-app notification (delivered by the email
+  channel when `ATLAS_SMTP_*` is configured), so a silently broken backup is
+  loud, not discovered at recovery time.
+
+It runs as a **deployment-privileged operation** — no tenant or user-facing
+role can trigger or read a backup. The dump is a full cross-tenant copy; treat
+the backup destination as crown-jewel-sensitive and encrypt it at rest (S3 SSE
+or volume encryption) exactly as the runbook describes.
+
+Configuration (all optional; sensible defaults for the single-VM bundle):
+
+| Env var                        | Default                  | Meaning                                                          |
+| ------------------------------ | ------------------------ | ---------------------------------------------------------------- |
+| `ATLAS_BACKUP_TARGET`          | `local`                  | `local` (volume) or `s3`                                         |
+| `ATLAS_BACKUP_DIR`             | `/var/lib/atlas/backups` | local-target directory (mount a volume here)                     |
+| `ATLAS_BACKUP_S3_BUCKET`       | —                        | bucket for the `s3` target                                       |
+| `ATLAS_BACKUP_S3_PREFIX`       | —                        | key prefix within the bucket                                     |
+| `ATLAS_BACKUP_S3_ENDPOINT`     | —                        | S3-compatible endpoint (e.g. MinIO); uses standard `AWS_*` creds |
+| `ATLAS_BACKUP_INTERVAL`        | `24h`                    | backup cadence                                                   |
+| `ATLAS_BACKUP_VERIFY_INTERVAL` | `24h`                    | restore-verification cadence                                     |
+| `ATLAS_BACKUP_KEEP_DAILY`      | `7`                      | dailies to retain                                                |
+| `ATLAS_BACKUP_KEEP_WEEKLY`     | `4`                      | weeklies to retain                                               |
+| `ATLAS_BACKUP_ALERT_RECIPIENT` | —                        | user id that receives failure notifications                      |
+
+> **Scope note.** The automated dump is a logical (data + minimal-schema)
+> dump tuned for continuity + restore-verification. For exact catalog fidelity
+> (extensions, indexes, constraints, RLS policies) the manual `pg_dump` path in
+> the runbook above remains the reference. Point-in-time recovery (WAL
+> archiving) is out of scope for v1 — the logical-dump + off-host target is the
+> v1 RPO mechanism.
+
 ---
 
 ## Monitoring
