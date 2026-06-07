@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,7 +30,7 @@ type aggregate struct {
 	period       dbx.AuditPeriod
 	frozenAt     time.Time
 	scopeCells   []dbx.ScopeCell
-	controls     []dbx.ListActiveControlsRow
+	controls     []dbx.ListActiveControlsWithDescriptionRow
 	policies     []dbx.Policy
 	populations  []dbx.ListPopulationsForPeriodRow
 	walkthroughs []dbx.Walkthrough
@@ -107,8 +108,15 @@ func (e *Exporter) Aggregate(ctx context.Context, in ExportInput) (*aggregate, e
 	}
 	agg.scopeCells = scopeCells
 
-	// 3. Active controls (SSP control-implementations).
-	controls, err := q.ListActiveControls(ctx, pgUUID(tenantID))
+	// 3. Active controls (SSP control-implementations). Slice 493: read
+	//    the description-bearing projection so the SSP implementation
+	//    Statement carries the control bundle's authored narrative
+	//    (canvas §8.2), not a synthesized placeholder. The read runs under
+	//    the same tenant RLS context + the same transaction as the rest of
+	//    the aggregate, so it is tenant-scoped (invariant #6) and
+	//    point-in-time consistent with the other reads (AC-5, threat-model
+	//    T + I).
+	controls, err := q.ListActiveControlsWithDescription(ctx, pgUUID(tenantID))
 	if err != nil {
 		return nil, fmt.Errorf("oscal: list active controls: %w", err)
 	}
@@ -185,9 +193,44 @@ func (a *aggregate) metadata(title string) *oscalv1.Metadata {
 	}
 }
 
+// fallbackStatementLabel prefixes a synthesized control-implementation
+// statement so an auditor reading the SSP cannot mistake it for the
+// operator's authored narrative. Slice 493 JUDGMENT decision D-fallback:
+// the label is deliberately explicit and front-loaded — an auditor skims
+// the first words of each statement, so the honesty marker must lead.
+const fallbackStatementLabel = "[Auto-generated summary — no authored implementation narrative on file.]"
+
+// controlStatement returns the SSP control-implementation statement for a
+// control row. Slice 493 (resolves slice 030 D-narrative):
+//
+//   - When the control bundle carries a human-authored `description`
+//     (slice 009), that description IS the statement, verbatim (AC-2).
+//     This is the narrative §8.2 calls for — how the control is actually
+//     implemented — and it is never AI-generated (CLAUDE.md
+//     product-runtime AI-assist boundary).
+//   - When the control has no authored description (a manual/minimal
+//     bundle), fall back to a CLEARLY-LABELED synthesized summary (AC-3)
+//     so the statement is never empty (P0-493-1) and an auditor is not
+//     misled into thinking the boilerplate is authored.
+//
+// The statement is filled exactly once at the call site (AC-4); the old
+// ApplicabilityExpr placeholder + double-fill are gone.
+func controlStatement(c dbx.ListActiveControlsWithDescriptionRow) string {
+	if desc := strings.TrimSpace(c.Description); desc != "" {
+		return desc
+	}
+	return fmt.Sprintf(
+		"%s Control %q (family: %s); implementation owned by role %q. "+
+			"Provide an authored control-implementation narrative to replace this placeholder.",
+		fallbackStatementLabel, c.Title, c.ControlFamily, c.OwnerRole,
+	)
+}
+
 // sspInput converts the aggregate into the SSP proto input. The control
 // implementation `statement` is the human-authored control description —
-// never AI-generated (CLAUDE.md product-runtime AI-assist boundary).
+// never AI-generated (CLAUDE.md product-runtime AI-assist boundary). When a
+// control has no authored description the statement falls back to a clearly
+// labeled synthesized summary (controlStatement / slice 493).
 func (a *aggregate) sspInput() *oscalv1.SspInput {
 	cells := make([]*oscalv1.ScopeCell, 0, len(a.scopeCells))
 	for _, sc := range a.scopeCells {
@@ -205,32 +248,18 @@ func (a *aggregate) sspInput() *oscalv1.SspInput {
 			scfID = *c.ScfID
 		}
 		linked := make([]string, 0)
-		// linked policy ids live on the full Control row; ListActiveControls
-		// returns a projection without them, so policy linkage is carried
-		// through the policies list rather than per-control here. The SSP
-		// still surfaces the full governance set via the policies field.
+		// linked policy ids live on the full Control row; the active-controls
+		// projection omits them, so policy linkage is carried through the
+		// policies list rather than per-control here. The SSP still surfaces
+		// the full governance set via the policies field.
 		impls = append(impls, &oscalv1.ControlImplementation{
 			ControlId:        uuid.UUID(c.ID.Bytes).String(),
 			ScfId:            scfID,
 			Title:            c.Title,
-			Statement:        c.ApplicabilityExpr, // placeholder until bundle desc wired; see note
+			Statement:        controlStatement(c), // filled exactly once (AC-4)
 			EvaluationResult: "",                  // filled below from failingEvals/none
 			LinkedPolicyIds:  linked,
 		})
-	}
-	// The control bundle's human-authored description is the SSP
-	// implementation statement. ListActiveControls returns the parsed
-	// projection; the description column is on the controls table as
-	// `description`. We re-fill Statement from the projection's
-	// description-bearing field. ListActiveControlsRow exposes Title and
-	// ControlFamily but not Description, so the statement uses Title +
-	// family as the concise human-authored summary. (Decision D-narrative,
-	// see docs/audit-log/030-oscal-ssp-poam-export-decisions.md.)
-	for i, c := range a.controls {
-		impls[i].Statement = fmt.Sprintf(
-			"%s (control family: %s). Implementation owned by role %q.",
-			c.Title, c.ControlFamily, c.OwnerRole,
-		)
 	}
 
 	pols := make([]*oscalv1.Policy, 0, len(a.policies))

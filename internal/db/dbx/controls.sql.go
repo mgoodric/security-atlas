@@ -422,6 +422,90 @@ func (q *Queries) ListActiveControlsForExport(ctx context.Context, arg ListActiv
 	return items, nil
 }
 
+const listActiveControlsWithDescription = `-- name: ListActiveControlsWithDescription :many
+SELECT id, tenant_id, bundle_id, version, scf_id, scf_anchor_id, title,
+       description, control_family, implementation_type, owner_role,
+       lifecycle_state, applicability_expr, freshness_class,
+       bundle_manifest_hash, created_at
+FROM controls
+WHERE tenant_id = $1 AND superseded_by IS NULL
+ORDER BY bundle_id ASC
+`
+
+type ListActiveControlsWithDescriptionRow struct {
+	ID                 pgtype.UUID               `json:"id"`
+	TenantID           pgtype.UUID               `json:"tenant_id"`
+	BundleID           string                    `json:"bundle_id"`
+	Version            int32                     `json:"version"`
+	ScfID              *string                   `json:"scf_id"`
+	ScfAnchorID        pgtype.UUID               `json:"scf_anchor_id"`
+	Title              string                    `json:"title"`
+	Description        string                    `json:"description"`
+	ControlFamily      string                    `json:"control_family"`
+	ImplementationType ControlImplementationType `json:"implementation_type"`
+	OwnerRole          string                    `json:"owner_role"`
+	LifecycleState     ControlLifecycleState     `json:"lifecycle_state"`
+	ApplicabilityExpr  string                    `json:"applicability_expr"`
+	FreshnessClass     *string                   `json:"freshness_class"`
+	BundleManifestHash string                    `json:"bundle_manifest_hash"`
+	CreatedAt          pgtype.Timestamptz        `json:"created_at"`
+}
+
+// Slice 493 — SSP control-implementation-narrative projection.
+//
+// Identical row set to ListActiveControls (every active, non-superseded
+// control for the active tenant, ordered by bundle_id) but the projection
+// ADDS the human-authored `description` column — the control bundle's
+// narrative (slice 009) that explains HOW the control is implemented. The
+// SSP exporter fills ControlImplementation.Statement from this column
+// (canvas §8.2; resolves slice 030's D-narrative stopgap).
+//
+// Why a SEPARATE query (slice 493 D-query, pattern-matched to slice 137 D2
+// and slice 175 D2): the project convention is a purpose-built export
+// projection, never widening the shared ListActiveControls row consumed by
+// non-export callers. ListActiveControls stays unchanged for its existing
+// consumers; this query is the SSP exporter's dedicated read.
+//
+// RLS posture: the WHERE tenant_id = $1 clause is belt-and-suspenders
+// alongside the GUC-driven RLS policy (slice 002); tenancy.ApplyTenant
+// upstream pins the GUC so the read is tenant-scoped (invariant #6).
+func (q *Queries) ListActiveControlsWithDescription(ctx context.Context, tenantID pgtype.UUID) ([]ListActiveControlsWithDescriptionRow, error) {
+	rows, err := q.db.Query(ctx, listActiveControlsWithDescription, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveControlsWithDescriptionRow
+	for rows.Next() {
+		var i ListActiveControlsWithDescriptionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.BundleID,
+			&i.Version,
+			&i.ScfID,
+			&i.ScfAnchorID,
+			&i.Title,
+			&i.Description,
+			&i.ControlFamily,
+			&i.ImplementationType,
+			&i.OwnerRole,
+			&i.LifecycleState,
+			&i.ApplicabilityExpr,
+			&i.FreshnessClass,
+			&i.BundleManifestHash,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listControlVersionsByBundle = `-- name: ListControlVersionsByBundle :many
 SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
        title, lifecycle_state, bundle_manifest_hash, created_at
