@@ -3,7 +3,51 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-05 (batch 195 reconcile — 447 + 466 + 469 MERGED; spillover 470 filed; slice 471 filed via /idea-to-slice [PR #1018, pending review]; ~15 backlog slices remain)
+**Last reconciled:** 2026-06-06 (batch 197 reconcile — 464 + 472 + 475 MERGED; spillovers 474 + 477 filed; the board-PDF flake class FIXED; demo-seed support thread resolved; specs 473/476/478/479 + demo-409 fix pending review)
+
+## Reconcile — 2026-06-06 (batch 197 · 464 + 472 merged; + 475 unblock fix)
+
+Eleventh drain batch. Both batch-197 slices merged — but only after fixing the recurring board-PDF flake that had blocked the merge queue (a mid-batch slice 475 build, maintainer-directed). The flake class is now resolved.
+
+- **472** (oauth coverage tail toward 90% advisory) — Quality · JUDGMENT — **MERGED** at `f6cd0eec` (#1026, after rebasing onto 475). `internal/api/oauth` 80.8% → **89.3%**, floor 78 → **87** — ~0.7pp from the 90 security-critical advisory. Device-approval + DBUserResolver-authPool arms. No spillover.
+- **464** (`atlas evidence verify` ledger-integrity walk + SELF_HOSTING migrate-prose fix) — Infra · JUDGMENT — **MERGED** at `c3d08cbc` (#1027, UNSTABLE-codecov-only, after rebase). Adds the operator verb to re-walk the ledger + verify per-record sha256 (the surface slice 432's restore-drill found missing) + a `GRANT SELECT` migration for the cross-tenant service-account read. **Surfaced a real integrity finding → spillover 474:** the ingest hash covers `scope`, which isn't persisted, so the exact ingest hash can't be re-derived from a ledger row (the "hash verified at every read" guarantee is currently aspirational); verify hashes the reconstructable record instead.
+- **475** (board/questionnaire PDF render degrades to 503 under load) — Quality · JUDGMENT — **MERGED** at `37155f96` (#1030). The durable fix for the chromedp flake that recurred across batches 193/195/196 and **blocked batch 197 (failed 2 reruns)**. Root cause: a chromedp deadline-exceeded returned wrapped `context.DeadlineExceeded` (not `ErrChromeUnavailable`) → fell through to a 500 at 3 handler call sites. Fix: a shared `internal/pdfrender.Limiter` (90s tunable deadline, concurrency cap 2, bounded queue-wait) routing all board/questionnaire renders; all 3 degradation modes → 503; both tests rewritten deterministic + stress-run. Confirmed: shard B2 now SUCCESS on #1030 + the rebased 472/464. **The board-PDF + questionnaires-PDF load-timeout flake class is RESOLVED.** Spillover 477 (the `internal/audit/walkthrough` renderer has the identical bug). Note: 475's doc co-files with 476 on PR #1029 (pending) — impl is on main, doc lands when #1029 merges.
+
+Spillovers filed (docs on main): **474** (ingest-hash-not-ledger-reconstructable — evidence integrity · from 464 · `ready`) · **477** (walkthrough PDF render degradation, same class as 475 · from 475 · `ready`).
+
+**Maintainer support thread (this session) — resolved + captured:**
+
+- Demo-seed failure on the edge box: root-caused live (the box was 3 migrations behind because the `atlas-bootstrap-edge` migrate one-shot isn't re-run on image update); applied the 3 pending `me_audit_log` CHECK migrations directly → demo seed now works (50/20/200 loaded). The durable fix is **slice 473** (migrate-on-upgrade, PR #1023, pending review).
+- Demo re-seed showed a masked 500 → **demo-409-messaging fix** (PR #1028, pending — typed seeder sentinels → 409 "already loaded"). Not a slice (bug fix).
+- "How do I switch tenants" → the demo data sits in a separate tenant the operator can't reach (membership-bounded switcher + local-auth single-tenant identities). General fix filed as **slices 478 (super-admin user↔tenant assignment API, incl. self-assign) + 479 (admin user-mgmt UI)** (PR #1031) — these revive the never-shipped slice-060.5 gap and **subsume slice 476's** demo-reachability mechanism (476 reduces to verification once 478/479 land).
+
+Pending maintainer review (rows register on merge): **473** (#1023) · **476** + 475-doc (#1029) · **478** + **479** (#1031) · demo-409 fix (#1028). 478 = `ready`, 479 = `not-ready` (dep 478), 476 = `ready` (or close in favor of 478/479).
+
+Backlog: ~12 analysis slices remain ready (418-420, 424-425, 434, 436, 439-445, 448, 450, 452-453 minus those merged) + spillovers 457, 468, 474, 477. AI-assist 440/441/444/471 maintainer-sequenced. Decision-gates 446/455 + PCI-CDE-FrameworkScope out of the auto-loop. The board-PDF flake (475) no longer threatens the queue.
+
+## Drift detected — 2026-06-06 (batch 197 claim-stake · 464 + 472)
+
+Eleventh drain batch — a clean 2-slice batch (the remaining ready backlog is dense with new-package/coverage slices that share the coverage-thresholds class, so only one coverage pick is safe per batch). Conflict-safe (464 = evidence/cmd/docs, 0 coverage-thresholds touch · 472 = oauth + coverage-thresholds, the SOLE coverage pick; shared = CHANGELOG only).
+
+- **464** (`atlas evidence verify` CLI: ledger-wide integrity walk + SELF_HOSTING migrate-up phrasing drift) — Infra · JUDGMENT — `ready` → **in-progress**. Branch `feat/464-atlas-evidence-verify-cli`. Adds the operator verb to re-walk the evidence ledger + verify per-record sha256 integrity (the surface slice 432 found missing), and fixes the SELF_HOSTING migrate-command doc drift. Real-world-validated by the b196 demo-seed investigation; complements pending slice 473.
+- **472** (oauth device-approval + DBUserResolver coverage tail toward the 90% advisory) — Quality · JUDGMENT — `ready` → **in-progress**. Branch `quality/472-oauth-coverage-tail`. Lifts `internal/api/oauth` past the slice-456 floor (78) with the device-approval + DBUserResolver arms. The SOLE coverage-thresholds pick.
+
+## Reconcile — 2026-06-06 (batch 196 · 456 + 470 merged)
+
+Tenth drain batch (conservative 2-slice, orchestrator attention split across a live maintainer support thread). Both merged. 470's last leg hit the known questionnaires-PDF chromedp flake (`TestExportPDF_SmokeTest`, shard B3, 30s timeout — 470 touches ZERO Go files) → reran the leg → green.
+
+- **456** (oauth coverage residual toward the slice-350 90% advisory) — Quality · AFK — **MERGED** at `02c926f9` (#1022). `internal/api/oauth` merged coverage 79.0% → **80.8%**; hard floor 77 → **78** (`floor(measured-2pp)`); the 90 advisory unchanged. New residual unit + integration arms (token-exchange signer-fail via a verify-ok/sign-fail P-384 keystore; audit-write BeginTx/Exec failures; cc/authcode/device signer-fail). Spillover **472** (device-approval + DBUserResolver coverage tail toward 90).
+- **470** (trusted-proxy multi-container e2e seed harness) — Infra · JUDGMENT — **MERGED** at `4c5496df` (#1021). The full AC-6 e2e slice 466 deferred: an nginx header-overwriting proxy + a two-network compose overlay (trusted `atlasnet` + untrusted `clientnet`) + a `proxy` leg in the self-host-bundle CI matrix. **Live-proved:** login through the trusted proxy records `203.0.113.10` (proxy-supplied); a direct client forging `X-Forwarded-For: 198.51.100.66` records `10.124.0.3` (forged value rejected). clientip.go untouched. No Go integration package added (shard manifest untouched).
+
+Spillover (single): **472** (oauth device-approval + DBUserResolver coverage tail toward the 90% advisory · from 456 · `ready`).
+
+**Slice 471 (role-scoped control-checklist generator v0, AI-assist) — MERGED + REGISTERED.** The maintainer approved the /idea-to-slice spec; PR #1018 squash-merged to `main` (`eaec7295`). Its row is now `ready`. It is a 5th AI-assist v0 surface (with 440/441/444) and is **maintainer-prioritized, NOT blindly auto-looped** — it shares the unbuilt `internal/llm` Ollama foundation with the others; the maintainer sequences the AI-assist set.
+
+**Slice 473 (idempotent migrate-on-upgrade for self-host, fail-closed) — FILED, PR #1023 OPEN, pending maintainer review.** Filed 2026-06-06 from a CONFIRMED production incident (the maintainer's atlas-edge box: Watchtower auto-updates the `atlas-edge` binary but not the `atlas-bootstrap-edge` migrate one-shot, and the backend gates on `service_started` not `service_completed_successfully` → image update left a newer binary on a 3-migrations-behind schema → the demo-seed `me_audit_log_action_check` masked-500). Row registers `ready` once #1023 merges (spec not yet on main). Relates to 464 + 432.
+
+**Operational note (no slice, FYI):** the edge box's recurring `policy_versions`/`framework_id` scheduler ERRORs are EXPECTED v1 behavior — `policy_attestation_rate` + `audit_readiness_score` (slice 076) are forward-looking evaluators querying schema v1 deliberately lacks; the eval integration test (`internal/metrics/eval/integration_test.go:448-465`) asserts the relation-missing failure. Harmless but noisy (ERROR every 15 min); a candidate cosmetic polish (demote to one-time WARN / no-op when schema absent), not filed.
+
+Backlog: ~14 analysis slices remain ready (418-420, 424-425, 434-436, 439-445, 450, 452-453) + spillovers 457, 464, 468, 472 + AI-assist 440/441/444/471 (maintainer-sequenced). Decision-gates 446/455 + PCI-CDE-FrameworkScope stay out of the auto-loop; 449 moot. 473 registers on #1023 merge.
 
 ## Drift detected — 2026-06-05 (batch 196 claim-stake · 456 + 470)
 

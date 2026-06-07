@@ -55,6 +55,21 @@ LIMIT $4 OFFSET $5;
 -- name: CountEvidenceRecordsByTenant :one
 SELECT count(*) FROM evidence_records WHERE tenant_id = $1;
 
+-- name: WalkEvidenceRecordsForVerify :many
+-- Slice 464: keyset-paginated ledger walk for `atlas evidence verify`.
+-- Read-only integrity walk — recomputes each record's canonical hash and
+-- compares to the stored `hash`. Ordered by id ASC so the caller can page
+-- with a cursor (last-seen id) without OFFSET drift on a large ledger.
+-- Tenant-scoped: RLS bounds the rows to the current tenant; the @after_id
+-- cursor and @page_size keep the working set bounded regardless of ledger
+-- size. The empty-UUID sentinel ('00000000-...') seeds the first page.
+SELECT *
+FROM evidence_records
+WHERE tenant_id = $1
+  AND id > sqlc.arg('after_id')
+ORDER BY id ASC
+LIMIT sqlc.arg('page_size');
+
 -- name: InsertEvidenceAuditEntry :one
 -- AC-7: every push attempt — accepted or rejected — lands in the audit
 -- log keyed by credential id. The platform layer writes one row per

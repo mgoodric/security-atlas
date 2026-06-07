@@ -1,0 +1,135 @@
+# security-atlas — slice 470: header-overwriting reverse-proxy overlay.
+#
+# This overlay is TEST-ONLY. It is NOT part of the shipped single-VM seed
+# (docker-compose.yml) — that bundle binds atlas to the public port directly
+# and ships no proxy by design (slice 466 D4). This overlay exists solely to
+# stand up the multi-container topology slice 466 AC-6 wanted but could not
+# wire from the proxy-less seed: a real header-overwriting proxy process in
+# front of atlas, connecting from a container-network address listed in
+# TRUSTED_PROXY_CIDRS.
+#
+# Compose-merge semantics: this file is layered ON TOP of docker-compose.yml
+#
+#   docker compose -f docker-compose.yml -f docker-compose.proxy.yml up -d
+#
+# so it only ADDS the `proxy` service + a fixed-subnet network and AUGMENTS
+# the `atlas` service's TRUSTED_PROXY_CIDRS env. Every other service is
+# inherited verbatim from the base file.
+#
+# DETERMINISTIC CIDR (load-bearing): the base compose's default network hands
+# out an arbitrary 172.x subnet, which TRUSTED_PROXY_CIDRS cannot be pinned to
+# ahead of time. This overlay defines TWO explicit fixed-subnet networks:
+#
+#   atlasnet   10.123.0.0/24  — TRUSTED. The proxy + every platform service
+#                               live here; TRUSTED_PROXY_CIDRS == this subnet,
+#                               so the proxy's source address is a trusted hop.
+#   clientnet  10.124.0.0/24  — UNTRUSTED. atlas is ALSO attached here, and the
+#                               direct-forging client (`forging-client` service)
+#                               lives ONLY here. A request it makes to atlas
+#                               over clientnet arrives from a 10.124.x peer,
+#                               which is NOT in TRUSTED_PROXY_CIDRS — so the
+#                               walk stops at that untrusted peer and the
+#                               client's forged X-Forwarded-For is rejected.
+#
+# Why a SEPARATE untrusted network rather than the host-published port for the
+# direct leg (slice 470 finding): a request to atlas's HOST-published port is
+# source-NAT'd by docker to the bridge GATEWAY address (10.123.0.1), which IS
+# inside the trusted /24 — so atlas would (correctly) treat it as a trusted hop
+# and honour the forged header. That is right walk behaviour but the WRONG
+# threat model for the AC-3 assertion. Driving the direct-forging login from a
+# container on a genuinely-untrusted network is the faithful model of "a client
+# that is NOT behind your trusted proxy".
+
+services:
+  # nginx that overwrites X-Forwarded-For with a fixed TEST-NET client IP and
+  # forwards to atlas. See deploy/docker/proxy/nginx.conf for the rationale.
+  proxy:
+    image: nginx:1.27-alpine
+    depends_on:
+      atlas:
+        condition: service_started
+    volumes:
+      - ../../deploy/docker/proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      # Host-publish the proxy's listen port so the harness can drive a login
+      # THROUGH the proxy from the runner. The base file host-publishes atlas
+      # :8080 directly, which is what the harness uses for the DIRECT-with-
+      # forged-XFF leg.
+      - "${PROXY_HTTP_PORT:-8088}:8088"
+    networks:
+      - atlasnet
+    restart: unless-stopped
+
+  # Attach the base services to the fixed-subnet network so the proxy reaches
+  # atlas by service name AND atlas sees the proxy's source address inside the
+  # trusted CIDR. (Compose merges this `networks:` list with the base file's;
+  # the base file declares no explicit network, so each service joins both the
+  # implicit default and atlasnet — service-name DNS works on both.)
+  # forging-client — a one-shot curl container on the UNTRUSTED clientnet only.
+  # The harness drives the AC-3 direct-forging login through this container so
+  # the request reaches atlas from a 10.124.x peer (outside TRUSTED_PROXY_CIDRS).
+  # It is `restart: no` and started on demand by the harness via
+  # `docker compose run --rm forging-client ...`; the long-running default
+  # command just keeps the service definition valid (the harness overrides it).
+  forging-client:
+    image: alpine/curl:8.10.0
+    depends_on:
+      atlas:
+        condition: service_started
+    networks:
+      - clientnet
+    # The harness invokes this via `compose run --rm forging-client <curl ...>`,
+    # overriding entrypoint/command. The placeholder keeps `compose config`
+    # valid without the container doing anything on a bare `up`.
+    entrypoint: ["sleep"]
+    command: ["1"]
+    restart: "no"
+
+  atlas:
+    environment:
+      # The proxy connects from a 10.123.0.0/24 address; trust the whole /24.
+      # A client on clientnet (10.124.0.0/24) is NOT in this allowlist, so its
+      # forged X-Forwarded-For is never honoured (the walk stops at the
+      # untrusted peer). This is the exact assertion slice 470 AC-2 / AC-3 prove.
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-10.123.0.0/24}
+    networks:
+      # atlas is multi-homed: trusted atlasnet (proxy hop) + untrusted clientnet
+      # (direct-forging client). The walk distinguishes them by source CIDR.
+      - atlasnet
+      - clientnet
+
+  postgres:
+    networks:
+      - atlasnet
+
+  nats:
+    networks:
+      - atlasnet
+
+  minio:
+    networks:
+      - atlasnet
+
+  minio-mc:
+    networks:
+      - atlasnet
+
+  atlas-bootstrap:
+    networks:
+      - atlasnet
+
+  web:
+    networks:
+      - atlasnet
+
+networks:
+  atlasnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.123.0.0/24
+  clientnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.124.0.0/24

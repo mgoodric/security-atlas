@@ -22,6 +22,19 @@
 #               that surfaced all five slice-065 bugs on the first real
 #               deploy.
 #
+#   proxy     — (slice 470) the bundled stack PLUS a header-overwriting
+#               nginx reverse proxy in front of atlas
+#               (docker-compose.proxy.yml overlay), with
+#               TRUSTED_PROXY_CIDRS set to the proxy's fixed
+#               container-network CIDR. Proves slice 466's right-to-left
+#               X-Forwarded-For walk end-to-end across a real multi-
+#               container topology: a login THROUGH the proxy records the
+#               proxy-supplied client IP on the session row, while a DIRECT
+#               login forging X-Forwarded-For records the direct peer (the
+#               forged value is rejected). This is the real-proxy-container
+#               e2e slice 466 D4 deferred because the proxy-less seed could
+#               not provide it.
+#
 # Usage:  deploy/docker/test-self-host-bundle.sh {bundled|external}
 #
 # Exit code 0 = every assertion passed. Non-zero on the first failure.
@@ -70,15 +83,26 @@
 set -euo pipefail
 
 MODE="${1:-}"
-if [ "${MODE}" != "bundled" ] && [ "${MODE}" != "external" ]; then
-    echo "usage: $0 {bundled|external}" >&2
+if [ "${MODE}" != "bundled" ] && [ "${MODE}" != "external" ] && [ "${MODE}" != "proxy" ]; then
+    echo "usage: $0 {bundled|external|proxy}" >&2
     exit 2
 fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 COMPOSE_DIR="${REPO_ROOT}/deploy/docker"
 ENV_FILE="${COMPOSE_DIR}/.env.test"
-COMPOSE=(docker compose -f "${COMPOSE_DIR}/docker-compose.yml" --env-file "${ENV_FILE}" -p "sa-selfhost-${MODE}")
+
+# Slice 470: the `proxy` mode layers the header-overwriting reverse-proxy
+# overlay ON TOP of the base bundle, so every compose invocation in this run
+# must carry BOTH -f files. The base `bundled`/`external` modes use only the
+# base file. Build the -f arg list once here so `up`, `run`, `logs`, `port`,
+# `down` all see the identical compose projection (a stale `down` that omits
+# the overlay would orphan the proxy container + the atlasnet network).
+COMPOSE_FILES=(-f "${COMPOSE_DIR}/docker-compose.yml")
+if [ "${MODE}" = "proxy" ]; then
+    COMPOSE_FILES+=(-f "${COMPOSE_DIR}/docker-compose.proxy.yml")
+fi
+COMPOSE=(docker compose "${COMPOSE_FILES[@]}" --env-file "${ENV_FILE}" -p "sa-selfhost-${MODE}")
 
 log()  { echo "[test-self-host:${MODE}] $*"; }
 fail() {
@@ -151,7 +175,10 @@ EOF
 #              own "pre-create atlas_migrate as a NON-SUPERUSER" step
 #              below is what actually creates the role — preserving the
 #              shared-cluster test premise.
-if [ "${MODE}" = "bundled" ]; then
+# Slice 470: `proxy` mode is the bundled stack plus the reverse-proxy overlay,
+# so it shares bundled mode's trust-on-the-docker-network Postgres auth and
+# the repo's 01-roles.sql initdb script.
+if [ "${MODE}" = "bundled" ] || [ "${MODE}" = "proxy" ]; then
     echo "POSTGRES_HOST_AUTH_METHOD=trust" >> "${ENV_FILE}"
     echo "PG_INITDB_ROLES=../../migrations/bootstrap/01-roles.sql" >> "${ENV_FILE}"
     # In bundled mode the migrate role connects with no password over the
@@ -163,6 +190,17 @@ if [ "${MODE}" = "bundled" ]; then
 else
     echo "POSTGRES_HOST_AUTH_METHOD=" >> "${ENV_FILE}"
     echo "PG_INITDB_ROLES=/dev/null" >> "${ENV_FILE}"
+fi
+
+# Slice 470: pin TRUSTED_PROXY_CIDRS into .env.test so EVERY compose
+# invocation (up/run/logs/down) sees the same allowlist. The value MUST equal
+# the fixed subnet docker-compose.proxy.yml declares for `atlasnet`
+# (10.123.0.0/24) — the proxy connects to atlas from an address in that /24,
+# so it is a trusted hop; the test runner is off-network, so its forged XFF is
+# rejected. In bundled/external modes the var is left unset (no proxy), so the
+# server records the direct peer exactly as the shipped seed does.
+if [ "${MODE}" = "proxy" ]; then
+    echo "TRUSTED_PROXY_CIDRS=10.123.0.0/24" >> "${ENV_FILE}"
 fi
 
 # ---------------------------------------------------------------------
@@ -497,6 +535,151 @@ print(f"  atlas:roles[{TENANT}] contains 'admin'")
 PY
 log "JWT carries super_admin=true + admin role in bootstrap tenant"
 rm -f "${LOGIN_RESP}"
+
+# ---------------------------------------------------------------------
+# Assertions 9 + 10 (slice 470) — PROXY MODE ONLY: the trusted-proxy
+# X-Forwarded-For walk (internal/api/auth/clientip.go, slice 466) proven
+# end-to-end across a real multi-container topology.
+#
+# This is the real-proxy-container e2e slice 466 D4 deferred. The
+# docker-compose.proxy.yml overlay (layered in via COMPOSE_FILES when
+# MODE=proxy) put an nginx in front of atlas that OVERWRITES
+# X-Forwarded-For with a fixed TEST-NET client IP (203.0.113.10), and set
+# TRUSTED_PROXY_CIDRS=10.123.0.0/24 (the proxy's fixed container subnet).
+#
+# Both legs sign in via /auth/local/login (which writes one `sessions` row
+# carrying ip_address = clientIP(r)), capture the session cookie (whose
+# value IS the session row id), then read THAT row's ip_address back
+# directly — so each assertion is pinned to the exact login it made, not a
+# racy "most recent row".
+#
+#   AC-2 (assertion 9): login THROUGH the proxy. atlas sees the request
+#     arrive from the proxy's 10.123.x peer (trusted) carrying the proxy-
+#     set XFF; the right-to-left walk returns the single untrusted hop =>
+#     ip_address == 203.0.113.10 (the proxy-supplied client IP).
+#
+#   AC-3 (assertion 10): login DIRECT to atlas's host-published :8080,
+#     the runner forging X-Forwarded-For: 198.51.100.66. The runner is
+#     off the trusted subnet, so the walk never consults XFF =>
+#     ip_address is the direct container peer, and is NOT 198.51.100.66.
+# ---------------------------------------------------------------------
+if [ "${MODE}" = "proxy" ]; then
+    PROXY_CLIENT_IP="203.0.113.10"   # TEST-NET-3, what the proxy re-issues
+    FORGED_IP="198.51.100.66"        # TEST-NET-2, what a direct client forges
+
+    # session_ip <session_id> -> the ip_address TEXT column for that row.
+    # Queried as the postgres superuser so RLS does not filter it out.
+    session_ip() {
+        docker exec -i "${PG_CID}" psql -U postgres -d security_atlas -t -A \
+            -c "SELECT coalesce(ip_address, '<null>') FROM sessions WHERE id = '$1'" \
+            2>/dev/null | tr -d '[:space:]'
+    }
+
+    # login_session_id <base_url> [extra curl args...] -> the atlas_session
+    # cookie value (== the session row id) from a fresh /auth/local/login.
+    # Body is written to a tmpfile and passed via --data @file so the
+    # password never lands in a process arg list.
+    login_session_id() {
+        local base_url="$1"; shift
+        local body jar code sid
+        body="$(mktemp)"; jar="$(mktemp)"
+        cat > "${body}" <<JSON
+{"tenant_id":"00000000-0000-4000-8000-000000000001","email":"admin@example.com","password":"test-default-user-password"}
+JSON
+        code="$(curl -sS -o /dev/null -w "%{http_code}" \
+            -c "${jar}" \
+            -X POST -H "Content-Type: application/json" \
+            --data "@${body}" "$@" \
+            "${base_url}/auth/local/login")"
+        rm -f "${body}"
+        if [ "${code}" != "200" ]; then
+            rm -f "${jar}"
+            echo "HTTP ${code}" >&2
+            return 1
+        fi
+        # The Netscape cookie jar's last field on the atlas_session line is
+        # the cookie value (the session id). awk on that line; trim CRLF.
+        sid="$(awk '$6 == "atlas_session" {print $7}' "${jar}" | tr -d '\r\n')"
+        rm -f "${jar}"
+        if [ -z "${sid}" ]; then
+            echo "no atlas_session cookie set" >&2
+            return 1
+        fi
+        printf '%s' "${sid}"
+    }
+
+    # --- Assertion 9 (AC-2): login THROUGH the proxy ---
+    log "proxy login: resolving proxy host-published :8088 port"
+    PROXY_HOSTPORT="$("${COMPOSE[@]}" port proxy 8088 2>/dev/null | awk -F: 'NF{print $NF}')"
+    [ -n "${PROXY_HOSTPORT}" ] || fail "could not resolve proxy host-published :8088 port"
+    # Wait for the proxy to be able to forward to atlas (atlas /health is
+    # already 200 by here, but nginx's own listener may need a beat).
+    PROXY_UP=""
+    for i in $(seq 1 30); do
+        # A 4xx/5xx from atlas is still proof the proxy forwarded; we only
+        # need the proxy reachable. Probe /health THROUGH the proxy.
+        if curl -fsS -o /dev/null "http://127.0.0.1:${PROXY_HOSTPORT}/health" 2>/dev/null; then
+            PROXY_UP=1; break
+        fi
+        sleep 2
+    done
+    [ -n "${PROXY_UP}" ] || fail "proxy never forwarded /health to atlas"
+
+    log "proxy login: POST /auth/local/login through the proxy"
+    PROXY_SID="$(login_session_id "http://127.0.0.1:${PROXY_HOSTPORT}")" \
+        || fail "proxy login failed: ${PROXY_SID}"
+    PROXY_ROW_IP="$(session_ip "${PROXY_SID}")"
+    [ "${PROXY_ROW_IP}" = "${PROXY_CLIENT_IP}" ] \
+        || fail "AC-2: session via proxy recorded ip_address=${PROXY_ROW_IP}, want the proxy-supplied ${PROXY_CLIENT_IP}"
+    log "AC-2 OK: login through proxy recorded ip_address=${PROXY_ROW_IP} (proxy-supplied client IP)"
+
+    # --- Assertion 10 (AC-3): DIRECT login from an UNTRUSTED network, forging
+    # X-Forwarded-For. The login is driven from the `forging-client` container,
+    # which lives ONLY on clientnet (10.124.0.0/24, NOT in TRUSTED_PROXY_CIDRS),
+    # and reaches atlas by service name over that network. atlas therefore sees
+    # the request arrive from a 10.124.x peer — an untrusted hop — so the walk
+    # never consults the forged X-Forwarded-For.
+    #
+    # NOTE (slice 470 finding): we do NOT use atlas's HOST-published port for
+    # this leg, because docker source-NATs a host-port request to the bridge
+    # GATEWAY (10.123.0.1), which is inside the trusted /24 — atlas would then
+    # correctly honour the forged header (right walk behaviour, wrong threat
+    # model for AC-3). Driving from an off-trust container is the faithful model.
+    #
+    # The forging-client curl prints the response headers (-D -) so we can read
+    # the Set-Cookie: atlas_session=<id> line — the session id whose row we
+    # then inspect. The body is discarded (-o /dev/null).
+    log "direct login: POST /auth/local/login from forging-client (clientnet, untrusted) forging X-Forwarded-For: ${FORGED_IP}"
+    FORGE_HDRS="$(mktemp)"
+    set +e
+    "${COMPOSE[@]}" run --rm --no-deps -T \
+        --entrypoint curl forging-client \
+        -sS -o /dev/null -D - \
+        -X POST -H "Content-Type: application/json" \
+        -H "X-Forwarded-For: ${FORGED_IP}" \
+        --data '{"tenant_id":"00000000-0000-4000-8000-000000000001","email":"admin@example.com","password":"test-default-user-password"}' \
+        "http://atlas:8080/auth/local/login" > "${FORGE_HDRS}" 2>/dev/null
+    FORGE_RC=$?
+    set -e
+    [ "${FORGE_RC}" = "0" ] || fail "AC-3: forging-client login curl exited ${FORGE_RC}"
+    # Extract the atlas_session cookie value from the Set-Cookie response header.
+    DIRECT_SID="$(grep -i '^set-cookie:' "${FORGE_HDRS}" \
+        | sed -n 's/.*atlas_session=\([^;]*\).*/\1/p' | head -n1 | tr -d '\r\n')"
+    rm -f "${FORGE_HDRS}"
+    [ -n "${DIRECT_SID}" ] || fail "AC-3: forging-client login set no atlas_session cookie (login failed?)"
+    DIRECT_ROW_IP="$(session_ip "${DIRECT_SID}")"
+    if [ "${DIRECT_ROW_IP}" = "${FORGED_IP}" ]; then
+        fail "AC-3: forged X-Forwarded-For (${FORGED_IP}) from an untrusted peer was HONOURED — spoofing not rejected"
+    fi
+    # The recorded peer must be the forging-client's clientnet address
+    # (10.124.x), never the forged TEST-NET value, and never null.
+    case "${DIRECT_ROW_IP}" in
+        10.124.*) : ;;  # expected: the untrusted clientnet peer
+        ""|"<null>") fail "AC-3: direct login recorded no ip_address (${DIRECT_ROW_IP})" ;;
+        *) log "AC-3 note: recorded peer ${DIRECT_ROW_IP} (expected a 10.124.x clientnet address; forged value still rejected)" ;;
+    esac
+    log "AC-3 OK: untrusted-peer login recorded ip_address=${DIRECT_ROW_IP} (forged ${FORGED_IP} rejected)"
+fi
 
 # ---------------------------------------------------------------------
 # Assertion 8 (AC-7): a fresh re-run of atlas-bootstrap against the now-
