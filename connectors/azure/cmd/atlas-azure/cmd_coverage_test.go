@@ -1,0 +1,379 @@
+// Unit tests for the atlas-azure cmd glue. Mirrors the slice-302 okta-connector
+// coverage suite: resolveCommon paths, root/sub-command wiring, the result-enum
+// mapper, the record builders' optional-field branches, dial transport
+// branches, authedContext, sdkOpts, connectorVersion, actorID, and the
+// permissions subcommand render.
+//
+// No vendor-prefixed tokens or real Azure secrets appear in fixtures — neutral
+// "test-*" strings only, per CLAUDE.md's hard rule.
+package main
+
+import (
+	"bytes"
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"google.golang.org/grpc/metadata"
+
+	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
+	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
+
+	"github.com/mgoodric/security-atlas/connectors/azure/internal/entra"
+	"github.com/mgoodric/security-atlas/connectors/azure/internal/storage"
+)
+
+// resetCommon snapshots the package-global `common` struct and restores it on
+// test cleanup. Cobra's flag binding mutates this global.
+func resetCommon(t *testing.T) {
+	t.Helper()
+	saved := common
+	t.Cleanup(func() { common = saved })
+	common.endpoint = ""
+	common.token = ""
+	common.insecure = false
+}
+
+func TestMapStorageResult(t *testing.T) {
+	cases := []struct {
+		name string
+		in   storage.ConfigResult
+		want evidencev1.Result
+	}{
+		{"pass", storage.ResultPass, evidencev1.Result_RESULT_PASS},
+		{"fail", storage.ResultFail, evidencev1.Result_RESULT_FAIL},
+		{"inconclusive", storage.ResultInconclusive, evidencev1.Result_RESULT_INCONCLUSIVE},
+		{"default", storage.ConfigResult("unknown"), evidencev1.Result_RESULT_UNSPECIFIED},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mapStorageResult(tc.in); got != tc.want {
+				t.Errorf("mapStorageResult(%q) = %v; want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveCommon_FromFlags(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:9999"
+	common.token = "test-bearer"
+	if err := resolveCommon(); err != nil {
+		t.Fatalf("resolveCommon: %v", err)
+	}
+}
+
+func TestResolveCommon_FromEnv(t *testing.T) {
+	resetCommon(t)
+	t.Setenv("SECURITY_ATLAS_ENDPOINT", "env:9999")
+	t.Setenv("SECURITY_ATLAS_TOKEN", "test-env-token")
+	if err := resolveCommon(); err != nil {
+		t.Fatalf("resolveCommon: %v", err)
+	}
+	if common.endpoint != "env:9999" {
+		t.Errorf("endpoint = %q", common.endpoint)
+	}
+}
+
+func TestResolveCommon_MissingEndpoint(t *testing.T) {
+	resetCommon(t)
+	t.Setenv("SECURITY_ATLAS_ENDPOINT", "")
+	t.Setenv("SECURITY_ATLAS_TOKEN", "test-token")
+	if err := resolveCommon(); err == nil || !strings.Contains(err.Error(), "endpoint") {
+		t.Fatalf("want endpoint error; got %v", err)
+	}
+}
+
+func TestResolveCommon_MissingToken(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:9999"
+	t.Setenv("SECURITY_ATLAS_TOKEN", "")
+	if err := resolveCommon(); err == nil || !strings.Contains(err.Error(), "token") {
+		t.Fatalf("want token error; got %v", err)
+	}
+}
+
+func TestNewRootCmd_HasSubcommands(t *testing.T) {
+	resetCommon(t)
+	root := newRootCmd()
+	if root.Use != ConnectorName {
+		t.Errorf("Use = %q; want %q", root.Use, ConnectorName)
+	}
+	names := map[string]bool{}
+	for _, c := range root.Commands() {
+		names[c.Name()] = true
+	}
+	for _, want := range []string{"register", "run", "permissions"} {
+		if !names[want] {
+			t.Errorf("subcommand %q missing; got %v", want, names)
+		}
+	}
+	for _, want := range []string{"endpoint", "token", "insecure"} {
+		if root.PersistentFlags().Lookup(want) == nil {
+			t.Errorf("persistent flag %q missing", want)
+		}
+	}
+}
+
+func TestNewRegisterCmd_PreRunErrorOnMissingEnv(t *testing.T) {
+	resetCommon(t)
+	t.Setenv("SECURITY_ATLAS_ENDPOINT", "")
+	t.Setenv("SECURITY_ATLAS_TOKEN", "")
+	reg := newRegisterCmd()
+	if err := reg.PreRunE(reg, nil); err == nil {
+		t.Fatal("expected PreRunE error when endpoint/token unset")
+	}
+}
+
+func TestNewRegisterCmd_RunEFailsOnUnreachableEndpoint(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	reg := newRegisterCmd()
+	err := reg.RunE(reg, nil)
+	if err == nil || !strings.Contains(err.Error(), "register") {
+		t.Fatalf("want register error; got %v", err)
+	}
+}
+
+func TestNewRunCmd_PreRunRejectsMissingEnvironment(t *testing.T) {
+	resetCommon(t)
+	cmd := newRunCmd()
+	if err := cmd.PreRunE(cmd, nil); err == nil || !strings.Contains(err.Error(), "environment") {
+		t.Fatalf("want environment error; got %v", err)
+	}
+}
+
+func TestNewRunCmd_PreRunRejectsBadAuthMode(t *testing.T) {
+	resetCommon(t)
+	cmd := newRunCmd()
+	if err := cmd.ParseFlags([]string{"--environment", "prod", "--auth-mode", "bogus", "--skip-storage"}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	if err := cmd.PreRunE(cmd, nil); err == nil || !strings.Contains(err.Error(), "auth-mode") {
+		t.Fatalf("want auth-mode error; got %v", err)
+	}
+}
+
+func TestNewRunCmd_PreRunRequiresSubscriptionForStorage(t *testing.T) {
+	resetCommon(t)
+	cmd := newRunCmd()
+	if err := cmd.ParseFlags([]string{"--environment", "prod"}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	if err := cmd.PreRunE(cmd, nil); err == nil || !strings.Contains(err.Error(), "subscription-id") {
+		t.Fatalf("want subscription-id error; got %v", err)
+	}
+}
+
+func TestNewRunCmd_PreRunResolveCommonFails(t *testing.T) {
+	resetCommon(t)
+	t.Setenv("SECURITY_ATLAS_ENDPOINT", "")
+	t.Setenv("SECURITY_ATLAS_TOKEN", "")
+	cmd := newRunCmd()
+	if err := cmd.ParseFlags([]string{"--environment", "prod", "--skip-storage"}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	if err := cmd.PreRunE(cmd, nil); err == nil {
+		t.Fatal("expected resolveCommon error to bubble up")
+	}
+}
+
+func TestNewPermissionsCmd_RendersTable(t *testing.T) {
+	cmd := newPermissionsCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.Run(cmd, nil)
+	out := buf.String()
+	if !strings.Contains(out, "SURFACE") {
+		t.Errorf("permissions output missing header; got %q", out)
+	}
+	for _, name := range []string{"Directory.Read.All", "Application.Read.All", "Reader"} {
+		if !strings.Contains(out, name) {
+			t.Errorf("permissions output missing %q; got %q", name, out)
+		}
+	}
+}
+
+func TestDialConnectorRegistry_BothTransports(t *testing.T) {
+	for _, insecure := range []bool{true, false} {
+		resetCommon(t)
+		common.endpoint = "127.0.0.1:1"
+		common.insecure = insecure
+		client, conn, err := dialConnectorRegistry()
+		if err != nil {
+			t.Fatalf("dialConnectorRegistry(insecure=%v): %v", insecure, err)
+		}
+		if client == nil || conn == nil {
+			t.Errorf("nil client/conn (insecure=%v)", insecure)
+		}
+		if conn != nil {
+			_ = conn.Close()
+		}
+	}
+}
+
+func TestAuthedContext_HasAuthMetadata(t *testing.T) {
+	resetCommon(t)
+	common.token = "test-bearer-token"
+	ctx, cancel := authedContext(5 * time.Second)
+	defer cancel()
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if !ok {
+		t.Fatal("no outgoing metadata")
+	}
+	vals := md.Get(sdk.MetadataAuthorization)
+	if len(vals) == 0 || vals[0] != sdk.BearerPrefix+"test-bearer-token" {
+		t.Errorf("auth header = %v", vals)
+	}
+}
+
+func TestSDKOpts(t *testing.T) {
+	resetCommon(t)
+	common.insecure = false
+	if sdkOpts() != nil {
+		t.Error("sdkOpts() should be nil when secure")
+	}
+	common.insecure = true
+	if len(sdkOpts()) != 1 {
+		t.Error("sdkOpts() should carry WithInsecure when insecure")
+	}
+}
+
+func TestConnectorVersion_NonEmpty(t *testing.T) {
+	if connectorVersion() == "" {
+		t.Error("connectorVersion empty")
+	}
+}
+
+func TestActorID_Shape(t *testing.T) {
+	for _, svc := range []string{"entra", "storage"} {
+		id := actorID(svc)
+		if !strings.HasPrefix(id, "connector:azure:"+svc+"@") {
+			t.Errorf("actorID(%q) = %q", svc, id)
+		}
+	}
+}
+
+func TestBuildEntraRecord_Shape(t *testing.T) {
+	a := entra.Assignment{
+		AssignmentID: "ra-1", PrincipalID: "p-1", PrincipalType: "user",
+		PrincipalDisplayName: "Alice", RoleDefinitionID: "role-1",
+		RoleDisplayName: "Reader", DirectoryScopeID: "/", IsPrivileged: false,
+		TenantID: "tenant-1", ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
+	}
+	rec, err := buildEntraRecord(a, "prod", "scf:IAC-21")
+	if err != nil {
+		t.Fatalf("buildEntraRecord: %v", err)
+	}
+	if rec.EvidenceKind != "azure.entra_role_assignment.v1" {
+		t.Errorf("kind = %q", rec.EvidenceKind)
+	}
+	if rec.Result != evidencev1.Result_RESULT_INCONCLUSIVE {
+		t.Errorf("result = %v; want INCONCLUSIVE (descriptive)", rec.Result)
+	}
+	if rec.IdempotencyKey == "" {
+		t.Error("empty idempotency key")
+	}
+	if got := scopeValue(rec.GetScope(), "cloud_account"); got != "azure:tenant-1" {
+		t.Errorf("cloud_account = %q; want azure:tenant-1", got)
+	}
+	if got := scopeValue(rec.GetScope(), "environment"); got != "prod" {
+		t.Errorf("environment = %q; want prod", got)
+	}
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{"assignment_id", "principal_id", "principal_type", "role_definition_id", "is_privileged", "principal_display_name", "role_display_name", "directory_scope_id", "tenant_id"} {
+		if _, ok := pl[k]; !ok {
+			t.Errorf("payload missing %q; got %v", k, pl)
+		}
+	}
+}
+
+func TestBuildEntraRecord_OmitsEmptyOptionals(t *testing.T) {
+	a := entra.Assignment{
+		AssignmentID: "ra", PrincipalID: "p", PrincipalType: "group",
+		RoleDefinitionID: "role", TenantID: "t",
+		ObservedAt: time.Now().UTC(),
+	}
+	rec, _ := buildEntraRecord(a, "prod", "scf:IAC-21")
+	pl := rec.GetPayload().AsMap()
+	if _, ok := pl["principal_display_name"]; ok {
+		t.Error("empty display name should be omitted")
+	}
+	if _, ok := pl["role_display_name"]; ok {
+		t.Error("empty role display name should be omitted")
+	}
+}
+
+func TestBuildStorageRecord_Shape(t *testing.T) {
+	c := storage.AccountConfig{
+		AccountID: "/sub/acct", AccountName: "acct", SubscriptionID: "sub-1",
+		ResourceGroup: "rg", Location: "eastus", EncryptionEnabled: true,
+		EncryptionKeySource: "Microsoft.Storage", HTTPSTrafficOnly: true,
+		MinimumTLSVersion: "TLS1_2", AllowBlobPublicAccess: false,
+		Result: storage.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
+	}
+	rec, err := buildStorageRecord(c, "prod", "scf:CRY-04")
+	if err != nil {
+		t.Fatalf("buildStorageRecord: %v", err)
+	}
+	if rec.EvidenceKind != "azure.storage_account_config.v1" {
+		t.Errorf("kind = %q", rec.EvidenceKind)
+	}
+	if rec.Result != evidencev1.Result_RESULT_PASS {
+		t.Errorf("result = %v; want PASS", rec.Result)
+	}
+	if got := scopeValue(rec.GetScope(), "cloud_account"); got != "azure:sub-1" {
+		t.Errorf("cloud_account = %q; want azure:sub-1", got)
+	}
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{"account_id", "account_name", "subscription_id", "encryption_enabled", "https_traffic_only", "allow_blob_public_access", "resource_group", "location", "encryption_key_source", "minimum_tls_version"} {
+		if _, ok := pl[k]; !ok {
+			t.Errorf("payload missing %q; got %v", k, pl)
+		}
+	}
+}
+
+func TestBuildStorageRecord_OmitsEmptyOptionals(t *testing.T) {
+	c := storage.AccountConfig{
+		AccountID: "/sub/a", AccountName: "a", SubscriptionID: "s",
+		EncryptionEnabled: true, HTTPSTrafficOnly: true,
+		Result: storage.ResultPass, ObservedAt: time.Now().UTC(),
+	}
+	rec, _ := buildStorageRecord(c, "prod", "scf:CRY-04")
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{"resource_group", "location", "encryption_key_source", "minimum_tls_version"} {
+		if _, ok := pl[k]; ok {
+			t.Errorf("empty optional %q should be omitted", k)
+		}
+	}
+}
+
+// scopeValue returns the first scope value for key. Empty when key absent.
+func scopeValue(dims []*evidencev1.ScopeDimension, key string) string {
+	for _, d := range dims {
+		if d.GetKey() == key && len(d.GetValues()) > 0 {
+			return d.GetValues()[0]
+		}
+	}
+	return ""
+}
+
+// TestDoRun_FailsOnMissingCredential drives doRun's first error branch:
+// azureauth.Resolve fails when no tenant id is set.
+func TestDoRun_FailsOnMissingCredential(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	t.Setenv("AZURE_TENANT_ID", "")
+	t.Setenv("AZURE_CLIENT_ID", "")
+	t.Setenv("AZURE_CLIENT_SECRET", "")
+
+	err := doRun(context.Background(), runFlags{environment: "prod", authMode: "client-credentials", skipStorage: true})
+	if err == nil || !strings.Contains(err.Error(), "auth") {
+		t.Fatalf("want auth error; got %v", err)
+	}
+}

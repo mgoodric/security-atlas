@@ -13,5 +13,6 @@ v1 connector roster (per `docs/issues/_INDEX.md`):
 | `connectors/osquery/`                   | 047   | Endpoint posture via Fleet (open-source, no proprietary agent)     |
 | `connectors/jira/` `connectors/linear/` | 048   | Ticket evidence (change management, incident response)             |
 | `connectors/manual/`                    | 049   | Universal escape hatch — CSV / S3 watcher / SFTP / UI upload       |
+| `connectors/azure/`                     | 486   | Entra ID role assignments + Azure Storage account config           |
 
 Empty in slice 001.

@@ -1,0 +1,47 @@
+package idem_test
+
+import (
+	"testing"
+	"time"
+
+	"github.com/mgoodric/security-atlas/connectors/azure/internal/idem"
+)
+
+func TestEntraRoleAssignmentKey_StableWithinHour(t *testing.T) {
+	a := time.Date(2026, 6, 7, 12, 5, 0, 0, time.UTC)
+	b := time.Date(2026, 6, 7, 12, 55, 0, 0, time.UTC)
+	if idem.EntraRoleAssignmentKey("assign-1", a) != idem.EntraRoleAssignmentKey("assign-1", b) {
+		t.Error("same hour should yield same key")
+	}
+}
+
+func TestEntraRoleAssignmentKey_DiffersAcrossHour(t *testing.T) {
+	a := time.Date(2026, 6, 7, 12, 5, 0, 0, time.UTC)
+	c := time.Date(2026, 6, 7, 13, 5, 0, 0, time.UTC)
+	if idem.EntraRoleAssignmentKey("assign-1", a) == idem.EntraRoleAssignmentKey("assign-1", c) {
+		t.Error("different hour should yield different key")
+	}
+}
+
+func TestStorageAccountKey_StableWithinHour(t *testing.T) {
+	a := time.Date(2026, 6, 7, 12, 5, 0, 0, time.UTC)
+	b := time.Date(2026, 6, 7, 12, 55, 0, 0, time.UTC)
+	if idem.StorageAccountKey("acct-1", a) != idem.StorageAccountKey("acct-1", b) {
+		t.Error("same hour should yield same key")
+	}
+}
+
+func TestKeys_DistinctAcrossKinds(t *testing.T) {
+	at := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
+	// Same id string, different kind prefix → different key.
+	if idem.EntraRoleAssignmentKey("x", at) == idem.StorageAccountKey("x", at) {
+		t.Error("different kinds must not collide on the same id")
+	}
+}
+
+func TestKeys_NonEmpty(t *testing.T) {
+	at := time.Now()
+	if idem.EntraRoleAssignmentKey("a", at) == "" || idem.StorageAccountKey("b", at) == "" {
+		t.Fatal("idempotency keys must be non-empty")
+	}
+}
