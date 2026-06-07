@@ -306,6 +306,157 @@ export async function createAdminTenant(
   return (await res.json()) as CreateTenantResponse;
 }
 
+// ===== Slice 479 — Admin user-management surface (binds to slice 478) =====
+//
+// Wire shape mirrors `internal/api/adminusers/{handler,assign}.go`:
+//
+//   GET  /v1/admin/users          -> super_admin: CrossTenantListResponse
+//                                    (items carry tenant_id); tenant-admin:
+//                                    the slice-062 ListResponse (no tenant_id).
+//   POST /v1/admin/users/assign   -> {user_id?, tenant_id, roles[], self_assign?}
+//                                    -> AssignResponse
+//   POST /v1/admin/users/revoke   -> {user_id, tenant_id, remove_membership?}
+//                                    -> 204 No Content
+//
+// Authority is enforced SERVER-SIDE (slice 478 D3): cross-tenant writes /
+// the cross-tenant list require the super_admin JWT claim; within-tenant
+// is allowed for a tenant-admin. The BFF forwards the bearer and passes
+// the upstream status + error through verbatim (P0-479-1: the UI does NOT
+// enforce authz; it surfaces the server's decisions honestly).
+
+// AdminUserRow is the UNION of the within-tenant and cross-tenant list
+// rows. `tenant_id` is present ONLY on the super_admin cross-tenant shape;
+// its presence is how the UI detects super_admin scope (P0-479-2: a
+// tenant-admin never receives cross-tenant rows, so never sees the
+// cross-tenant controls).
+export type AdminUserRow = {
+  id: string;
+  email: string;
+  display_name: string;
+  status: string;
+  roles: string[];
+  // Cross-tenant (super_admin) only:
+  tenant_id?: string;
+  idp_issuer?: string;
+  idp_subject?: string;
+};
+
+// AdminUserListResult carries the rows plus the derived super_admin scope
+// flag and the next-page cursor.
+export type AdminUserListResult = {
+  items: AdminUserRow[];
+  next_cursor?: string;
+  // crossTenant is true when the upstream returned the super_admin
+  // cross-tenant shape (every item carried a tenant_id). Derived, not a
+  // wire field — see deriveCrossTenant.
+  cross_tenant: boolean;
+};
+
+export type AssignUserRequest = {
+  user_id?: string;
+  tenant_id: string;
+  roles: string[];
+  self_assign?: boolean;
+};
+
+export type AssignUserResponse = {
+  user_id: string;
+  tenant_id: string;
+  roles: string[];
+  idp_issuer: string;
+  idp_subject: string;
+  membership_created: boolean;
+};
+
+export type RevokeUserRequest = {
+  user_id: string;
+  tenant_id: string;
+  remove_membership?: boolean;
+};
+
+// deriveCrossTenant reports whether the upstream list response is the
+// super_admin cross-tenant shape. The cross-tenant shape tags every row
+// with a non-empty tenant_id; the within-tenant shape omits it. An empty
+// list is treated as within-tenant (the safe default — no cross-tenant
+// controls), which is correct: an empty cross-tenant list means there is
+// nothing to act on cross-tenant anyway. Exported for unit testing.
+export function deriveCrossTenant(items: AdminUserRow[]): boolean {
+  return (
+    items.length > 0 &&
+    items.every((it) => typeof it.tenant_id === "string" && it.tenant_id !== "")
+  );
+}
+
+export async function listAdminUsers(
+  bearer: string,
+  opts: { cursor?: string; limit?: number } = {},
+): Promise<AdminUserListResult> {
+  const qs = new URLSearchParams();
+  if (opts.cursor) qs.set("cursor", opts.cursor);
+  if (opts.limit) qs.set("limit", String(opts.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  const res = await apiFetch(`/v1/admin/users${suffix}`, bearer);
+  const body = (await res.json()) as {
+    items?: AdminUserRow[];
+    next_cursor?: string;
+  };
+  const items = body.items ?? [];
+  return {
+    items,
+    next_cursor: body.next_cursor,
+    cross_tenant: deriveCrossTenant(items),
+  };
+}
+
+export async function assignAdminUser(
+  bearer: string,
+  req: AssignUserRequest,
+): Promise<AssignUserResponse> {
+  const res = await fetch(`${apiBaseURL()}/v1/admin/users/assign`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) msg = body.error;
+    } catch {
+      // fall through with the status-line message
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as AssignUserResponse;
+}
+
+export async function revokeAdminUser(
+  bearer: string,
+  req: RevokeUserRequest,
+): Promise<void> {
+  const res = await fetch(`${apiBaseURL()}/v1/admin/users/revoke`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok && res.status !== 204) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) msg = body.error;
+    } catch {
+      // fall through with the status-line message
+    }
+    throw new APIError(res.status, msg);
+  }
+}
+
 // ===== Slice 278 — Admin demo-seed UI (binds to internal/api/admindemo) =====
 //
 // Wire shape mirrors `internal/api/admindemo/handler.go`:
