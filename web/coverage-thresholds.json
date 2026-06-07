@@ -457,6 +457,12 @@
       "functions": 98,
       "lines": 93
     },
+    "app/api/requirements/[id]/coverage/route.ts": {
+      "statements": 98,
+      "branches": 73,
+      "functions": 98,
+      "lines": 98
+    },
     "app/api/risks/export/route.ts": {
       "statements": 98,
       "branches": 88,
@@ -506,6 +512,12 @@
       "lines": 98
     },
     "components/calendar/link-for.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "components/control/confidence-band.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,

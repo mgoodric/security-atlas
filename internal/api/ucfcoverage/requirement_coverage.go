@@ -2,14 +2,17 @@ package ucfcoverage
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 )
 
 // ===== /v1/requirements/{id}/coverage =====
@@ -73,6 +76,18 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Slice 482 — per-requirement coverage-strength rollup. Computed
+	// server-side (P0-482-4: never client-supplied) over the per-anchor
+	// edge strength × the tenant's evaluated coverage state, and ONLY
+	// over the RLS-scoped `controls` rows above (P0-482-3 + AC-2: a
+	// foreign tenant's controls are invisible at the DB layer, so its
+	// rollup reflects its own state or resolves to uncovered — never
+	// tenant A's). When the eval/scope stores aren't wired (unit servers
+	// built via New without AttachCoverage) the rollup defaults to the
+	// uncovered band rather than 500-ing, preserving the slice-008 shape
+	// plus the additive fields.
+	score, band := h.requirementRollup(ctx, req, anchors, controls)
+
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"requirement": requirementWire{
 			ID:    uuidStr(req.ID),
@@ -80,10 +95,138 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 			Title: req.Title,
 			Body:  req.Body,
 		},
-		"anchors":  anchorWiresFromAnchors(anchors),
-		"controls": controlWiresFromRows(controls),
+		"anchors":           anchorWiresFromAnchors(anchors),
+		"controls":          controlWiresFromRows(controls),
+		"coverage_strength": score,
+		"confidence_band":   string(band),
 	})
 
+}
+
+// requirementRollup computes the additive coverage_strength + confidence
+// band for one requirement (slice 482, AC-1/AC-2/AC-3).
+//
+// For each RLS-scoped control on the requirement's anchors it computes
+// the same per-control coverage slice 256 surfaces on
+// /v1/controls/{id}/coverage — strength-independent 30-day effectiveness
+// pass rate, gated by whether the requirement's framework_version is in
+// FrameworkScope for that control. The per-anchor coverage is the BEST
+// (max) such pass rate over the controls on that anchor; the
+// requirement score is the best-satisfying-path over anchors:
+// max(edge_strength × anchor_coverage). See rollup.go for the formula
+// rationale and docs/audit-log/482-coverage-strength-rollup-decisions.md
+// for the JUDGMENT calls.
+//
+// Defensive default: any error computing the tenant-evaluated state, or
+// an unwired Handler (engine/scope/fwScope nil), yields the uncovered
+// band. The rollup is a display value, not an audit-binding artifact
+// (threat-model R) — degrading to "uncovered" on a transient eval error
+// is safer than 500-ing the whole coverage read, and never over-reports.
+func (h *Handler) requirementRollup(
+	ctx context.Context,
+	req dbx.FrameworkRequirement,
+	anchors []anchorEdge,
+	controls []dbx.ListControlsForAnchorsRow,
+) (float64, ConfidenceBand) {
+	if h.engine == nil || h.scopeStore == nil || h.fwScopeStore == nil || len(controls) == 0 {
+		return 0, BandUncovered
+	}
+
+	// Best evaluated coverage per anchor id, over the tenant's controls.
+	bestCover := make(map[string]float64, len(anchors))
+	hasCover := make(map[string]bool, len(anchors))
+	reqFVID := uuidStr(req.FrameworkVersionID)
+
+	for _, c := range controls {
+		cover, ok, err := h.controlCoverageForFramework(ctx, c, reqFVID)
+		if err != nil {
+			// A transient eval/scope error on one control degrades that
+			// control's contribution to "no coverage" rather than failing
+			// the whole rollup; the score never over-reports.
+			continue
+		}
+		if !ok {
+			continue
+		}
+		aid := uuidStr(c.ScfAnchorID)
+		if !hasCover[aid] || cover > bestCover[aid] {
+			bestCover[aid] = cover
+			hasCover[aid] = true
+		}
+	}
+
+	acs := make([]anchorCoverage, 0, len(anchors))
+	for _, a := range anchors {
+		aid := uuidStr(a.scfAnchorID)
+		acs = append(acs, anchorCoverage{
+			edgeStrength: a.strength,
+			anchorCover:  bestCover[aid],
+			hasCoverage:  hasCover[aid],
+		})
+	}
+
+	score, any := rollupCoverageStrength(acs)
+	return score, classifyBand(score, any)
+}
+
+// controlCoverageForFramework returns the tenant-evaluated coverage of
+// one control AS IT APPLIES to the requirement's framework_version:
+// the 30-day effectiveness pass rate when (a) the control has evaluation
+// data in the window AND (b) the requirement's framework_version is in
+// the control's FrameworkScope. Returns (_, false, nil) when out of
+// scope or when the control has no effectiveness data — both map to "no
+// contribution" so the anchor isn't credited with phantom coverage
+// (mirrors slice 256 applyCoverage's null contract, lifted to the
+// rollup). The strength multiply happens in rollupCoverageStrength, not
+// here — this returns the anchor-coverage term only.
+func (h *Handler) controlCoverageForFramework(
+	ctx context.Context,
+	c dbx.ListControlsForAnchorsRow,
+	reqFVID string,
+) (float64, bool, error) {
+	controlID, err := uuid.Parse(uuidStr(c.ID))
+	if err != nil {
+		return 0, false, nil
+	}
+
+	eff, err := h.engine.Effectiveness(ctx, controlID)
+	if err != nil {
+		return 0, false, err
+	}
+	if eff.TotalCount == 0 {
+		// No effectiveness data — distinct from "0% effective". Does not
+		// contribute coverage (slice 256 P0-256-1, lifted to the rollup).
+		return 0, false, nil
+	}
+
+	if reqFVID == "" {
+		return 0, false, nil
+	}
+	fvID, perr := uuid.Parse(reqFVID)
+	if perr != nil {
+		return 0, false, nil
+	}
+	activated, aerr := h.fwScopeStore.Activated(ctx, fvID)
+	if aerr != nil {
+		if errors.Is(aerr, frameworkscope.ErrNotFound) {
+			// No activated framework_scope → effectively out of scope
+			// (canvas §5.5; matches slice 256 applyCoverage).
+			return 0, false, nil
+		}
+		return 0, false, aerr
+	}
+	applicability, err := h.scopeStore.ControlApplicability(ctx, controlID)
+	if err != nil {
+		return 0, false, err
+	}
+	cells, ierr := frameworkscope.EffectiveScope(ctx, applicability, activated.Predicate)
+	if ierr != nil {
+		return 0, false, ierr
+	}
+	if len(cells) == 0 {
+		return 0, false, nil // out of scope
+	}
+	return eff.PassRate, true, nil
 }
 
 // anchorEdge is the internal in-memory shape of "one SCF anchor with
