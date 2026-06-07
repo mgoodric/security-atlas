@@ -27,12 +27,18 @@ import (
 
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+
+	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
 
-// PDFTimeout is the wall-clock budget for a single render. Headless Chrome
-// boot + PrintToPDF on a one-page brief is typically <2s; 30s is generous.
-// Mirrors internal/policy/pdf.DefaultTimeout.
-const PDFTimeout = 30 * time.Second
+// PDFTimeout is retained as a compatibility alias for callers that referenced
+// the old per-package render budget. The authoritative, bounded, env-tunable
+// deadline now lives on the shared pdfrender.Limiter (slice 475); the handler
+// gets it from pdfrender.Default().RenderTimeout(). Kept so existing
+// references compile; new code should not read this directly.
+//
+// Deprecated: use pdfrender.Default().RenderTimeout().
+const PDFTimeout = pdfrender.DefaultRenderTimeout
 
 // chromedpWSURLReadTimeout overrides chromedp's hardcoded 20s
 // wsURLReadTimeout watchdog (see chromedp v0.15.1 allocate.go:249).
@@ -48,14 +54,27 @@ const chromedpWSURLReadTimeout = 60 * time.Second
 var ErrChromeUnavailable = errors.New("board/pdf: chrome browser unavailable")
 
 // RenderPDF returns a PDF byte stream for the frozen brief. The returned
-// bytes begin with the literal `%PDF-` magic header. Blocking; caller
-// supplies the timeout via ctx.
+// bytes begin with the literal `%PDF-` magic header.
+//
+// The render is governed by the process-wide pdfrender.Limiter (slice 475):
+// it acquires a concurrency slot (bounded wait → pdfrender.ErrQueueSaturated
+// on saturation) and runs under the limiter's bounded render deadline
+// (→ pdfrender.ErrRenderDeadline on expiry). Both degrade to 503 at the
+// handler — never a 500 or a hung request. The caller-supplied ctx still
+// bounds the whole operation (client disconnect / upstream deadline).
 func RenderPDF(ctx context.Context, sb StoredBrief) ([]byte, error) {
 	if ctx == nil {
 		return nil, errors.New("board/pdf: nil context")
 	}
 	htmlDoc := buildBriefHTML(sb)
+	return pdfrender.Default().Do(ctx, func(ctx context.Context) ([]byte, error) {
+		return renderBriefBytes(ctx, htmlDoc)
+	})
+}
 
+// renderBriefBytes performs the actual chromedp render under the deadline the
+// limiter has already applied to ctx.
+func renderBriefBytes(ctx context.Context, htmlDoc string) ([]byte, error) {
 	// Browser allocation mirrors internal/policy/pdf: connect to a remote
 	// CDP endpoint when CHROME_DEBUG_URL is set (CI / dev machines without a
 	// local Chrome), otherwise launch a local Chrome with --no-sandbox. We
