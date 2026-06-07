@@ -57,6 +57,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -75,7 +76,13 @@ import type {
   AdminUserRow,
   AdminUserListResult,
   AssignUserResponse,
+  TenantRow,
 } from "@/lib/api/admin";
+import {
+  userOptions,
+  tenantOptions,
+  tenantFieldMode,
+} from "@/lib/admin/assign-options";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -127,6 +134,38 @@ export default function UsersPage() {
 
   const crossTenant = data?.cross_tenant ?? false;
   const items = data?.items ?? [];
+
+  // AC-2 / AC-4: the cross-tenant tenant list is super_admin-only. Gate the
+  // fetch on `crossTenant` so a tenant-admin's browser never receives the
+  // other-tenant names (closes STRIDE-I at the fetch boundary — decisions
+  // log D3). No second authority probe — `crossTenant` is the existing
+  // signal (P0-527-2).
+  const { data: tenantsData } = useQuery({
+    queryKey: ["admin", "tenants"],
+    enabled: crossTenant,
+    queryFn: async (): Promise<TenantRow[]> => {
+      const res = await fetch("/api/admin/tenants", { cache: "no-store" });
+      const body = (await res.json()) as {
+        items?: TenantRow[];
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+      }
+      return body.items ?? [];
+    },
+  });
+
+  // AC-1: user options come from the ALREADY-LOADED list — no second fetch.
+  const userOpts = userOptions(items);
+  // AC-2/AC-4: tenant options only exist for a super_admin (the gated query).
+  const tenantOpts = tenantOptions(tenantsData ?? []);
+  // AC-3: pinned (tenant-admin) vs chooser (super_admin) — driven by the
+  // existing cross_tenant signal + the already-fetched session tenant.
+  const tenantMode = tenantFieldMode({
+    crossTenant,
+    sessionTenantId: me?.tenant_id,
+  });
 
   // resolveRevokeTenant picks the row's tenant_id (cross-tenant shape) or
   // falls back to the session tenant (within-tenant shape).
@@ -199,7 +238,10 @@ export default function UsersPage() {
   function openAssign(opts: { self?: boolean; userID?: string }) {
     setSelfAssign(opts.self === true);
     setAssignUserID(opts.userID ?? "");
-    setAssignTenantID("");
+    // AC-3: a tenant-admin's tenant is pinned to their session tenant — seed
+    // the field so the (read-only) value posts on submit. A super_admin
+    // starts with an empty chooser.
+    setAssignTenantID(tenantMode.kind === "pinned" ? tenantMode.tenantId : "");
     setAssignRoles([]);
     setAssignError(null);
     setAssignOpen(true);
@@ -212,13 +254,16 @@ export default function UsersPage() {
   }
 
   function clientValidateAssign(): string | null {
-    if (assignTenantID.trim() === "") return "tenant_id is required";
+    if (tenantMode.kind === "unresolved") {
+      return "your session tenant is still resolving — reload and retry";
+    }
+    if (assignTenantID.trim() === "") return "select a tenant";
     if (!UUID_PATTERN.test(assignTenantID.trim())) {
       return "tenant_id must be a UUID";
     }
     if (assignRoles.length === 0) return "select at least one role";
     if (!selfAssign) {
-      if (assignUserID.trim() === "") return "user_id is required";
+      if (assignUserID.trim() === "") return "select a user";
       if (!UUID_PATTERN.test(assignUserID.trim())) {
         return "user_id must be a UUID";
       }
@@ -475,43 +520,90 @@ export default function UsersPage() {
                 });
               }}
             >
+              {/* AC-1: user dropdown from the already-loaded list (no second
+                  fetch). Hidden in self-assign mode (the caller is the
+                  target). */}
               {!selfAssign ? (
                 <div className="space-y-1">
                   <label
                     htmlFor="assign-user-id"
                     className="text-xs font-medium text-muted-foreground"
                   >
-                    User UUID
+                    User
                   </label>
-                  <Input
+                  <Select
                     id="assign-user-id"
-                    data-testid="assign-user-id-input"
-                    placeholder="00000000-0000-0000-0000-000000000000"
+                    data-testid="assign-user-select"
                     value={assignUserID}
                     onChange={(e) => setAssignUserID(e.target.value)}
-                    spellCheck={false}
-                    autoComplete="off"
                     aria-describedby={assignErrorId}
-                  />
+                  >
+                    <option value="" disabled>
+                      Select a user…
+                    </option>
+                    {userOpts.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
                 </div>
               ) : null}
+
+              {/* AC-2/AC-3/AC-4: tenant field. Super_admin gets the populated
+                  cross-tenant dropdown; a tenant-admin's tenant is PINNED to
+                  their session tenant (read-only, NOT a chooser — P0-527-1 /
+                  P0-479-2). */}
               <div className="space-y-1">
                 <label
                   htmlFor="assign-tenant-id"
                   className="text-xs font-medium text-muted-foreground"
                 >
-                  Tenant UUID
+                  Tenant
                 </label>
-                <Input
-                  id="assign-tenant-id"
-                  data-testid="assign-tenant-id-input"
-                  placeholder="00000000-0000-0000-0000-000000000000"
-                  value={assignTenantID}
-                  onChange={(e) => setAssignTenantID(e.target.value)}
-                  spellCheck={false}
-                  autoComplete="off"
-                  aria-describedby={assignErrorId}
-                />
+                {tenantMode.kind === "chooser" ? (
+                  <Select
+                    id="assign-tenant-id"
+                    data-testid="assign-tenant-select"
+                    value={assignTenantID}
+                    onChange={(e) => setAssignTenantID(e.target.value)}
+                    aria-describedby={assignErrorId}
+                  >
+                    <option value="" disabled>
+                      Select a tenant…
+                    </option>
+                    {tenantOpts.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
+                ) : tenantMode.kind === "pinned" ? (
+                  <Input
+                    id="assign-tenant-id"
+                    data-testid="assign-tenant-pinned"
+                    value={tenantMode.tenantId}
+                    readOnly
+                    aria-readonly="true"
+                    spellCheck={false}
+                    className="font-mono text-xs text-muted-foreground"
+                  />
+                ) : (
+                  <Input
+                    id="assign-tenant-id"
+                    data-testid="assign-tenant-unresolved"
+                    value=""
+                    readOnly
+                    aria-readonly="true"
+                    placeholder="resolving your session tenant…"
+                  />
+                )}
+                {tenantMode.kind === "pinned" ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    Pinned to your tenant. Cross-tenant assignment requires
+                    super admin.
+                  </p>
+                ) : null}
               </div>
               <fieldset className="space-y-2" aria-describedby={assignErrorId}>
                 <legend className="text-xs font-medium text-muted-foreground">
@@ -566,7 +658,9 @@ export default function UsersPage() {
                 <Button
                   type="submit"
                   data-testid="assign-user-submit"
-                  disabled={assignMutation.isPending}
+                  disabled={
+                    assignMutation.isPending || tenantMode.kind === "unresolved"
+                  }
                 >
                   {assignMutation.isPending
                     ? "Assigning…"

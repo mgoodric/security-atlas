@@ -1,25 +1,29 @@
 // Slice 479 — Playwright E2E for the /admin/users management page.
+// Slice 527 — extended to drive the user + tenant DROPDOWNS that replaced
+// the raw-UUID text inputs.
 //
 // Assertions are driven by page.route() mocking of the BFF proxies at
-// /api/admin/users (+ /revoke) and /api/me. We mock the BFF rather than
-// seed real data because the slice-478 cross-tenant assign writes
-// platform-global rows under the BYPASSRLS pool — not something the
-// Playwright harness can clean up between specs (same rationale as
-// admin-tenants.spec.ts). The Go integration tests (478) assert the real
-// behaviour against Postgres.
+// /api/admin/users (+ /revoke), /api/admin/tenants (slice 527), and
+// /api/me. We mock the BFF rather than seed real data because the
+// slice-478 cross-tenant assign writes platform-global rows under the
+// BYPASSRLS pool — not something the Playwright harness can clean up
+// between specs (same rationale as admin-tenants.spec.ts). The Go
+// integration tests (478) assert the real behaviour against Postgres.
 //
 // Coverage:
 //   (a) super_admin shape: cross-tenant list renders the Tenant column,
-//       the "Add me to a tenant" button appears, an assign POST refreshes
-//       the list (AC-1, AC-2).
-//   (b) self-assign surfaces the re-auth notice with a re-login link
-//       (AC-4 / P0-479-3 — no auto-switch).
-//   (c) revoke flow has a confirm step (AC-3).
+//       the "Add me to a tenant" button appears, an assign via the user +
+//       tenant DROPDOWNS refreshes the list (AC-1, AC-2, AC-4, AC-5).
+//   (b) self-assign uses the tenant dropdown and surfaces the re-auth
+//       notice with a re-login link (AC-4 / AC-6 / P0-479-3 — no auto-switch).
+//   (c) revoke flow has a confirm step (AC-6, unchanged).
 //   (d) authz-honest: tenant-admin shape shows NO Tenant column and NO
-//       self-assign button; an upstream 403 on assign surfaces inline,
-//       not a dead button (AC-5 / P0-479-2).
-//   (e) a11y: the assign dialog inputs + role fieldset are labelled
-//       (AC-6).
+//       self-assign button; in the assign dialog the tenant field is
+//       PINNED (read-only), NOT a cross-tenant chooser, and the tenants
+//       BFF is never called (AC-3 / AC-7 / P0-527-1); an upstream 403 on
+//       assign surfaces inline, not a dead button (AC-7).
+//   (e) a11y: the assign dialog dropdowns + role fieldset are labelled
+//       (AC-8).
 
 import { expect, test } from "./fixtures";
 
@@ -61,8 +65,9 @@ const WITHIN_ROW = {
   roles: ["admin"],
 };
 
-// mockMe stubs /api/me so the within-tenant revoke fallback has a session
-// tenant. Harmless for the cross-tenant specs.
+// mockMe stubs /api/me so the within-tenant revoke fallback (and the
+// slice-527 pinned tenant field) has a session tenant. Harmless for the
+// cross-tenant specs.
 async function mockMe(page: import("@playwright/test").Page, tenantId: string) {
   await page.route("**/api/me", (route) =>
     route.fulfill({
@@ -73,11 +78,45 @@ async function mockMe(page: import("@playwright/test").Page, tenantId: string) {
   );
 }
 
+// mockTenants stubs the slice-527 tenant-dropdown BFF. Returns a counter
+// so a spec can assert the route was (or was NOT) called — the
+// tenant-admin path must NOT fetch the cross-tenant list (P0-527-1).
+function mockTenants(page: import("@playwright/test").Page) {
+  const calls = { count: 0 };
+  void page.route("**/api/admin/tenants", async (route) => {
+    calls.count++;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          {
+            id: TENANT_A,
+            name: "Tenant Alpha",
+            slug: "tenant-alpha",
+            is_bootstrap_tenant: true,
+            created_at: "2026-05-22T00:00:00.000Z",
+          },
+          {
+            id: TENANT_B,
+            name: "Tenant Bravo",
+            slug: "tenant-bravo",
+            is_bootstrap_tenant: false,
+            created_at: "2026-05-22T10:00:00.000Z",
+          },
+        ],
+      }),
+    });
+  });
+  return calls;
+}
+
 test.describe("admin users management page", () => {
   test("super_admin: lists cross-tenant users + supports assign", async ({
     authedPage,
   }) => {
     await mockMe(authedPage, TENANT_A);
+    const tenantCalls = mockTenants(authedPage);
     let listCallCount = 0;
     await authedPage.route("**/api/admin/users", async (route) => {
       const req = route.request();
@@ -131,11 +170,13 @@ test.describe("admin users management page", () => {
     // Self-assign button is visible for a super_admin.
     await expect(authedPage.getByTestId("open-self-assign")).toBeVisible();
 
-    // Open assign dialog, fill it, submit.
+    // Open assign dialog, choose user + tenant from the DROPDOWNS, submit.
     await authedPage.getByTestId("open-assign-user").click();
     await expect(authedPage.getByTestId("assign-user-dialog")).toBeVisible();
-    await authedPage.getByTestId("assign-user-id-input").fill(USER_1);
-    await authedPage.getByTestId("assign-tenant-id-input").fill(TENANT_B);
+    // The user dropdown is populated from the already-loaded list (AC-1).
+    await authedPage.getByTestId("assign-user-select").selectOption(USER_1);
+    // The tenant dropdown is populated from GET /api/admin/tenants (AC-2).
+    await authedPage.getByTestId("assign-tenant-select").selectOption(TENANT_B);
     await authedPage.getByTestId("assign-role-grc_engineer").click();
     await authedPage.getByTestId("assign-user-submit").click();
 
@@ -143,12 +184,15 @@ test.describe("admin users management page", () => {
     await expect(authedPage.getByTestId("users-table")).toContainText(
       "grc_engineer",
     );
+    // The tenant dropdown was populated from the BFF (super_admin path).
+    expect(tenantCalls.count).toBeGreaterThan(0);
   });
 
   test("super_admin: self-assign surfaces the re-auth notice (no auto-switch)", async ({
     authedPage,
   }) => {
     await mockMe(authedPage, TENANT_A);
+    mockTenants(authedPage);
     await authedPage.route("**/api/admin/users", async (route) => {
       const req = route.request();
       if (req.method() === "GET") {
@@ -187,10 +231,12 @@ test.describe("admin users management page", () => {
 
     const dialog = authedPage.getByTestId("assign-user-dialog");
     await expect(dialog).toBeVisible();
-    // Self-assign hides the user_id input.
-    await expect(authedPage.getByTestId("assign-user-id-input")).toBeHidden();
+    // Self-assign hides the user dropdown (the caller is the target).
+    await expect(authedPage.getByTestId("assign-user-select")).toHaveCount(0);
 
-    await authedPage.getByTestId("assign-tenant-id-input").fill(TENANT_B);
+    // A super_admin self-assigning still picks the target tenant via the
+    // dropdown.
+    await authedPage.getByTestId("assign-tenant-select").selectOption(TENANT_B);
     await authedPage.getByTestId("assign-role-admin").click();
     await authedPage.getByTestId("assign-user-submit").click();
 
@@ -249,6 +295,7 @@ test.describe("admin users management page", () => {
     authedPage,
   }) => {
     await mockMe(authedPage, TENANT_A);
+    const tenantCalls = mockTenants(authedPage);
     await authedPage.route("**/api/admin/users", async (route) => {
       if (route.request().method() === "GET") {
         // Within-tenant shape: no tenant_id on rows, cross_tenant=false.
@@ -273,12 +320,28 @@ test.describe("admin users management page", () => {
     await expect(authedPage.getByTestId("users-table")).not.toContainText(
       "Tenant",
     );
+
+    // Slice 527 (P0-527-1): in the assign dialog the tenant field is
+    // PINNED (read-only) to the session tenant, NOT a cross-tenant chooser.
+    await authedPage.getByTestId("open-assign-user").click();
+    await expect(authedPage.getByTestId("assign-user-dialog")).toBeVisible();
+    await expect(authedPage.getByTestId("assign-tenant-pinned")).toBeVisible();
+    await expect(authedPage.getByTestId("assign-tenant-pinned")).toHaveValue(
+      TENANT_A,
+    );
+    // There is NO tenant chooser dropdown for a tenant-admin.
+    await expect(authedPage.getByTestId("assign-tenant-select")).toHaveCount(0);
+    // And the cross-tenant tenants BFF was never called — the tenant-admin's
+    // browser never receives the other-tenant names (STRIDE-I closed at the
+    // fetch boundary).
+    expect(tenantCalls.count).toBe(0);
   });
 
-  test("authz-honest: an upstream 403 on assign surfaces inline (AC-5)", async ({
+  test("authz-honest: an upstream 403 on assign surfaces inline (AC-7)", async ({
     authedPage,
   }) => {
     await mockMe(authedPage, TENANT_A);
+    mockTenants(authedPage);
     await authedPage.route("**/api/admin/users", async (route) => {
       const req = route.request();
       if (req.method() === "GET") {
@@ -307,8 +370,8 @@ test.describe("admin users management page", () => {
 
     await authedPage.goto("/admin/users");
     await authedPage.getByTestId("open-assign-user").click();
-    await authedPage.getByTestId("assign-user-id-input").fill(USER_1);
-    await authedPage.getByTestId("assign-tenant-id-input").fill(TENANT_B);
+    await authedPage.getByTestId("assign-user-select").selectOption(USER_1);
+    await authedPage.getByTestId("assign-tenant-select").selectOption(TENANT_B);
     await authedPage.getByTestId("assign-role-viewer").click();
     await authedPage.getByTestId("assign-user-submit").click();
 
@@ -319,10 +382,11 @@ test.describe("admin users management page", () => {
     );
   });
 
-  test("a11y: assign dialog inputs + role fieldset are labelled (AC-6)", async ({
+  test("a11y: assign dialog dropdowns + role fieldset are labelled (AC-8)", async ({
     authedPage,
   }) => {
     await mockMe(authedPage, TENANT_A);
+    mockTenants(authedPage);
     await authedPage.route("**/api/admin/users", async (route) => {
       if (route.request().method() === "GET") {
         await route.fulfill({
