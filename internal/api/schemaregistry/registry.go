@@ -108,6 +108,10 @@ func DefaultSeed() []KindVersion {
 		// Slice 488: monitoring connectors (Datadog + Grafana) — shared
 		// alert/monitor configuration-inventory evidence kind.
 		{Kind: "monitoring.alert_config.v1", Version: "1.0.0"},
+		// Slice 489: PagerDuty connector (incident-response evidence) —
+		// on-call coverage + bounded-window incident summaries.
+		{Kind: "pagerduty.oncall_coverage.v1", Version: "1.0.0"},
+		{Kind: "pagerduty.incident_summary.v1", Version: "1.0.0"},
 		// Slice 023: policy acknowledgment workflow. Each
 		// POST /v1/policies/{id}/acknowledge emits one record of this
 		// kind through the slice-013 evidence ledger.
