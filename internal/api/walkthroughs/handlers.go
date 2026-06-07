@@ -378,12 +378,17 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(walkthrough.ToExportJSON(wt))
 	case "pdf":
-		ctx2, cancel := context.WithTimeout(r.Context(), walkthrough.PDFTimeout)
-		defer cancel()
-		buf, err := walkthrough.RenderPDF(ctx2, wt)
+		// The render budget + concurrency cap live on the shared pdfrender
+		// limiter (slice 475, fanned out to walkthroughs by slice 477);
+		// walkthrough.RenderPDF routes through it. We do NOT wrap in a second
+		// WithTimeout here — the limiter owns the bounded deadline. All three
+		// degradation modes (chrome absent / render deadline exceeded / render
+		// queue saturated) map to a deterministic 503 instead of a 500/hang.
+		buf, err := walkthrough.RenderPDF(r.Context(), wt)
 		if err != nil {
-			if errors.Is(err, walkthrough.ErrChromeUnavailable) {
-				httpresp.WriteError(w, http.StatusServiceUnavailable, "PDF rendering unavailable: chromedp browser missing")
+			if status, msg, ok := pdfDegradation(err); ok {
+				logPDFDegradation(r, err)
+				httpresp.WriteError(w, status, msg)
 				return
 			}
 			httperr.WriteInternal(w, r, "render PDF", err)
