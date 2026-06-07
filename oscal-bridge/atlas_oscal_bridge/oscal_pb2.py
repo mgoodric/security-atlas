@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0boscal.proto\x12\x08oscal.v1\"k\n\x08Metadata\x12\r\n\x05title\x18\x01 \x01(\t\x12\x0f\n\x07version\x18\x02 \x01(\t\x12\x15\n\roscal_version\x18\x03 \x01(\t\x12\x15\n\rlast_modified\x18\x04 \x01(\t\x12\x11\n\tfrozen_at\x18\x05 \x01(\t\"\xa9\x01\n\x15\x43ontrolImplementation\x12\x12\n\ncontrol_id\x18\x01 \x01(\t\x12\x0e\n\x06scf_id\x18\x02 \x01(\t\x12\r\n\x05title\x18\x03 \x01(\t\x12\x11\n\tstatement\x18\x04 \x01(\t\x12\x19\n\x11\x65valuation_result\x18\x05 \x01(\t\x12\x14\n\x0c\x65valuated_at\x18\x06 \x01(\t\x12\x19\n\x11linked_policy_ids\x18\x07 \x03(\t\"?\n\tScopeCell\x12\n\n\x02id\x18\x01 \x01(\t\x12\r\n\x05label\x18\x02 \x01(\t\x12\x17\n\x0f\x64imensions_json\x18\x03 \x01(\t\"D\n\x06Policy\x12\n\n\x02id\x18\x01 \x01(\t\x12\r\n\x05title\x18\x02 \x01(\t\x12\x0f\n\x07version\x18\x03 \x01(\t\x12\x0e\n\x06status\x18\x04 \x01(\t\"\x9f\x02\n\x08SspInput\x12$\n\x08metadata\x18\x01 \x01(\x0b\x32\x12.oscal.v1.Metadata\x12\x11\n\ttenant_id\x18\x02 \x01(\t\x12\x19\n\x11organization_name\x18\x03 \x01(\t\x12\x13\n\x0bsystem_name\x18\x04 \x01(\t\x12\x1a\n\x12system_description\x18\x05 \x01(\t\x12(\n\x0bscope_cells\x18\x06 \x03(\x0b\x32\x13.oscal.v1.ScopeCell\x12@\n\x17\x63ontrol_implementations\x18\x07 \x03(\x0b\x32\x1f.oscal.v1.ControlImplementation\x12\"\n\x08policies\x18\x08 \x03(\x0b\x32\x10.oscal.v1.Policy\"8\n\x13SerializeSSPRequest\x12!\n\x05input\x18\x01 \x01(\x0b\x32\x12.oscal.v1.SspInput\"*\n\x14SerializeSSPResponse\x12\x12\n\noscal_json\x18\x01 \x01(\x0c\"\x87\x01\n\x10SamplePopulation\x12\x15\n\rpopulation_id\x18\x01 \x01(\t\x12\x12\n\ncontrol_id\x18\x02 \x01(\t\x12\x17\n\x0fpopulation_size\x18\x03 \x01(\x03\x12\x1c\n\x14sampled_evidence_ids\x18\x04 \x03(\t\x12\x11\n\tfrozen_at\x18\x05 \x01(\t\"\x81\x01\n\x0bWalkthrough\x12\n\n\x02id\x18\x01 \x01(\t\x12\x12\n\ncontrol_id\x18\x02 \x01(\t\x12\x11\n\tnarrative\x18\x03 \x01(\t\x12\x0e\n\x06status\x18\x04 \x01(\t\x12\x16\n\x0e\x63\x61nonical_hash\x18\x05 \x01(\t\x12\x17\n\x0ftamper_detected\x18\x06 \x01(\x08\"p\n\tAuditNote\x12\n\n\x02id\x18\x01 \x01(\t\x12\x12\n\nscope_kind\x18\x02 \x01(\t\x12\x11\n\tscope_ref\x18\x03 \x01(\t\x12\x0e\n\x06\x61uthor\x18\x04 \x01(\t\x12\x0c\n\x04\x62ody\x18\x05 \x01(\t\x12\x12\n\ncreated_at\x18\x06 \x01(\t\"\x86\x02\n\x0f\x41ssessmentInput\x12$\n\x08metadata\x18\x01 \x01(\x0b\x32\x12.oscal.v1.Metadata\x12\x11\n\ttenant_id\x18\x02 \x01(\t\x12\x17\n\x0f\x61udit_period_id\x18\x03 \x01(\t\x12\x19\n\x11\x61udit_period_name\x18\x04 \x01(\t\x12/\n\x0bpopulations\x18\x05 \x03(\x0b\x32\x1a.oscal.v1.SamplePopulation\x12+\n\x0cwalkthroughs\x18\x06 \x03(\x0b\x32\x15.oscal.v1.Walkthrough\x12(\n\x0b\x61udit_notes\x18\x07 \x03(\x0b\x32\x13.oscal.v1.AuditNote\"F\n\x1aSerializeAssessmentRequest\x12(\n\x05input\x18\x01 \x01(\x0b\x32\x19.oscal.v1.AssessmentInput\"\\\n\x1bSerializeAssessmentResponse\x12\x1c\n\x14\x61ssessment_plan_json\x18\x01 \x01(\x0c\x12\x1f\n\x17\x61ssessment_results_json\x18\x02 \x01(\x0c\"\x94\x01\n\x08PoamItem\x12\n\n\x02id\x18\x01 \x01(\t\x12\x12\n\ncontrol_id\x18\x02 \x01(\t\x12\r\n\x05title\x18\x03 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x04 \x01(\t\x12\x10\n\x08severity\x18\x05 \x01(\t\x12\r\n\x05owner\x18\x06 \x01(\t\x12\x10\n\x08\x64ue_date\x18\x07 \x01(\t\x12\x11\n\tmilestone\x18\x08 \x01(\t\"\x80\x01\n\tPoamInput\x12$\n\x08metadata\x18\x01 \x01(\x0b\x32\x12.oscal.v1.Metadata\x12\x11\n\ttenant_id\x18\x02 \x01(\t\x12\x17\n\x0f\x61udit_period_id\x18\x03 \x01(\t\x12!\n\x05items\x18\x04 \x03(\x0b\x32\x12.oscal.v1.PoamItem\":\n\x14SerializePOAMRequest\x12\"\n\x05input\x18\x01 \x01(\x0b\x32\x13.oscal.v1.PoamInput\"+\n\x15SerializePOAMResponse\x12\x12\n\noscal_json\x18\x01 \x01(\x0c\"B\n\x18RoundTripValidateRequest\x12\x12\n\nmodel_type\x18\x01 \x01(\t\x12\x12\n\noscal_json\x18\x02 \x01(\x0c\":\n\x19RoundTripValidateResponse\x12\r\n\x05valid\x18\x01 \x01(\x08\x12\x0e\n\x06\x65rrors\x18\x02 \x03(\t\"@\n\x14ImportCatalogRequest\x12\x12\n\noscal_json\x18\x01 \x01(\x0c\x12\x14\n\x0csource_label\x18\x02 \x01(\t\"[\n\x0fImportedControl\x12\x12\n\ncontrol_id\x18\x01 \x01(\t\x12\r\n\x05title\x18\x02 \x01(\t\x12\x11\n\tstatement\x18\x03 \x01(\t\x12\x12\n\ngroup_path\x18\x04 \x01(\t\"\xa7\x01\n\x15ImportCatalogResponse\x12\r\n\x05valid\x18\x01 \x01(\x08\x12\x0e\n\x06\x65rrors\x18\x02 \x03(\t\x12+\n\x08\x63ontrols\x18\x03 \x03(\x0b\x32\x19.oscal.v1.ImportedControl\x12\x15\n\roscal_version\x18\x04 \x01(\t\x12\x15\n\rcatalog_title\x18\x05 \x01(\t\x12\x14\n\x0csource_label\x18\x06 \x01(\t2\xc9\x03\n\x12OscalBridgeService\x12M\n\x0cSerializeSSP\x12\x1d.oscal.v1.SerializeSSPRequest\x1a\x1e.oscal.v1.SerializeSSPResponse\x12\x62\n\x13SerializeAssessment\x12$.oscal.v1.SerializeAssessmentRequest\x1a%.oscal.v1.SerializeAssessmentResponse\x12P\n\rSerializePOAM\x12\x1e.oscal.v1.SerializePOAMRequest\x1a\x1f.oscal.v1.SerializePOAMResponse\x12\\\n\x11RoundTripValidate\x12\".oscal.v1.RoundTripValidateRequest\x1a#.oscal.v1.RoundTripValidateResponse\x12P\n\rImportCatalog\x12\x1e.oscal.v1.ImportCatalogRequest\x1a\x1f.oscal.v1.ImportCatalogResponseB?Z=github.com/mgoodric/security-atlas/gen/proto/oscal/v1;oscalv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0boscal.proto\x12\x08oscal.v1\"k\n\x08Metadata\x12\r\n\x05title\x18\x01 \x01(\t\x12\x0f\n\x07version\x18\x02 \x01(\t\x12\x15\n\roscal_version\x18\x03 \x01(\t\x12\x15\n\rlast_modified\x18\x04 \x01(\t\x12\x11\n\tfrozen_at\x18\x05 \x01(\t\"\xa9\x01\n\x15\x43ontrolImplementation\x12\x12\n\ncontrol_id\x18\x01 \x01(\t\x12\x0e\n\x06scf_id\x18\x02 \x01(\t\x12\r\n\x05title\x18\x03 \x01(\t\x12\x11\n\tstatement\x18\x04 \x01(\t\x12\x19\n\x11\x65valuation_result\x18\x05 \x01(\t\x12\x14\n\x0c\x65valuated_at\x18\x06 \x01(\t\x12\x19\n\x11linked_policy_ids\x18\x07 \x03(\t\"?\n\tScopeCell\x12\n\n\x02id\x18\x01 \x01(\t\x12\r\n\x05label\x18\x02 \x01(\t\x12\x17\n\x0f\x64imensions_json\x18\x03 \x01(\t\"D\n\x06Policy\x12\n\n\x02id\x18\x01 \x01(\t\x12\r\n\x05title\x18\x02 \x01(\t\x12\x0f\n\x07version\x18\x03 \x01(\t\x12\x0e\n\x06status\x18\x04 \x01(\t\"\x9f\x02\n\x08SspInput\x12$\n\x08metadata\x18\x01 \x01(\x0b\x32\x12.oscal.v1.Metadata\x12\x11\n\ttenant_id\x18\x02 \x01(\t\x12\x19\n\x11organization_name\x18\x03 \x01(\t\x12\x13\n\x0bsystem_name\x18\x04 \x01(\t\x12\x1a\n\x12system_description\x18\x05 \x01(\t\x12(\n\x0bscope_cells\x18\x06 \x03(\x0b\x32\x13.oscal.v1.ScopeCell\x12@\n\x17\x63ontrol_implementations\x18\x07 \x03(\x0b\x32\x1f.oscal.v1.ControlImplementation\x12\"\n\x08policies\x18\x08 \x03(\x0b\x32\x10.oscal.v1.Policy\"8\n\x13SerializeSSPRequest\x12!\n\x05input\x18\x01 \x01(\x0b\x32\x12.oscal.v1.SspInput\"*\n\x14SerializeSSPResponse\x12\x12\n\noscal_json\x18\x01 \x01(\x0c\"\x87\x01\n\x10SamplePopulation\x12\x15\n\rpopulation_id\x18\x01 \x01(\t\x12\x12\n\ncontrol_id\x18\x02 \x01(\t\x12\x17\n\x0fpopulation_size\x18\x03 \x01(\x03\x12\x1c\n\x14sampled_evidence_ids\x18\x04 \x03(\t\x12\x11\n\tfrozen_at\x18\x05 \x01(\t\"\x8e\x01\n\x15WalkthroughAttachment\x12\n\n\x02id\x18\x01 \x01(\t\x12\x10\n\x08\x66ilename\x18\x02 \x01(\t\x12\x14\n\x0c\x63ontent_hash\x18\x03 \x01(\t\x12\x14\n\x0c\x63ontent_type\x18\x04 \x01(\t\x12\x16\n\x0e\x61nnotation_ref\x18\x05 \x01(\t\x12\x13\n\x0bstorage_uri\x18\x06 \x01(\t\"\xb7\x01\n\x0bWalkthrough\x12\n\n\x02id\x18\x01 \x01(\t\x12\x12\n\ncontrol_id\x18\x02 \x01(\t\x12\x11\n\tnarrative\x18\x03 \x01(\t\x12\x0e\n\x06status\x18\x04 \x01(\t\x12\x16\n\x0e\x63\x61nonical_hash\x18\x05 \x01(\t\x12\x17\n\x0ftamper_detected\x18\x06 \x01(\x08\x12\x34\n\x0b\x61ttachments\x18\x07 \x03(\x0b\x32\x1f.oscal.v1.WalkthroughAttachment\"p\n\tAuditNote\x12\n\n\x02id\x18\x01 \x01(\t\x12\x12\n\nscope_kind\x18\x02 \x01(\t\x12\x11\n\tscope_ref\x18\x03 \x01(\t\x12\x0e\n\x06\x61uthor\x18\x04 \x01(\t\x12\x0c\n\x04\x62ody\x18\x05 \x01(\t\x12\x12\n\ncreated_at\x18\x06 \x01(\t\"\x86\x02\n\x0f\x41ssessmentInput\x12$\n\x08metadata\x18\x01 \x01(\x0b\x32\x12.oscal.v1.Metadata\x12\x11\n\ttenant_id\x18\x02 \x01(\t\x12\x17\n\x0f\x61udit_period_id\x18\x03 \x01(\t\x12\x19\n\x11\x61udit_period_name\x18\x04 \x01(\t\x12/\n\x0bpopulations\x18\x05 \x03(\x0b\x32\x1a.oscal.v1.SamplePopulation\x12+\n\x0cwalkthroughs\x18\x06 \x03(\x0b\x32\x15.oscal.v1.Walkthrough\x12(\n\x0b\x61udit_notes\x18\x07 \x03(\x0b\x32\x13.oscal.v1.AuditNote\"F\n\x1aSerializeAssessmentRequest\x12(\n\x05input\x18\x01 \x01(\x0b\x32\x19.oscal.v1.AssessmentInput\"\\\n\x1bSerializeAssessmentResponse\x12\x1c\n\x14\x61ssessment_plan_json\x18\x01 \x01(\x0c\x12\x1f\n\x17\x61ssessment_results_json\x18\x02 \x01(\x0c\"\x94\x01\n\x08PoamItem\x12\n\n\x02id\x18\x01 \x01(\t\x12\x12\n\ncontrol_id\x18\x02 \x01(\t\x12\r\n\x05title\x18\x03 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x04 \x01(\t\x12\x10\n\x08severity\x18\x05 \x01(\t\x12\r\n\x05owner\x18\x06 \x01(\t\x12\x10\n\x08\x64ue_date\x18\x07 \x01(\t\x12\x11\n\tmilestone\x18\x08 \x01(\t\"\x80\x01\n\tPoamInput\x12$\n\x08metadata\x18\x01 \x01(\x0b\x32\x12.oscal.v1.Metadata\x12\x11\n\ttenant_id\x18\x02 \x01(\t\x12\x17\n\x0f\x61udit_period_id\x18\x03 \x01(\t\x12!\n\x05items\x18\x04 \x03(\x0b\x32\x12.oscal.v1.PoamItem\":\n\x14SerializePOAMRequest\x12\"\n\x05input\x18\x01 \x01(\x0b\x32\x13.oscal.v1.PoamInput\"+\n\x15SerializePOAMResponse\x12\x12\n\noscal_json\x18\x01 \x01(\x0c\"B\n\x18RoundTripValidateRequest\x12\x12\n\nmodel_type\x18\x01 \x01(\t\x12\x12\n\noscal_json\x18\x02 \x01(\x0c\":\n\x19RoundTripValidateResponse\x12\r\n\x05valid\x18\x01 \x01(\x08\x12\x0e\n\x06\x65rrors\x18\x02 \x03(\t\"@\n\x14ImportCatalogRequest\x12\x12\n\noscal_json\x18\x01 \x01(\x0c\x12\x14\n\x0csource_label\x18\x02 \x01(\t\"[\n\x0fImportedControl\x12\x12\n\ncontrol_id\x18\x01 \x01(\t\x12\r\n\x05title\x18\x02 \x01(\t\x12\x11\n\tstatement\x18\x03 \x01(\t\x12\x12\n\ngroup_path\x18\x04 \x01(\t\"\xa7\x01\n\x15ImportCatalogResponse\x12\r\n\x05valid\x18\x01 \x01(\x08\x12\x0e\n\x06\x65rrors\x18\x02 \x03(\t\x12+\n\x08\x63ontrols\x18\x03 \x03(\x0b\x32\x19.oscal.v1.ImportedControl\x12\x15\n\roscal_version\x18\x04 \x01(\t\x12\x15\n\rcatalog_title\x18\x05 \x01(\t\x12\x14\n\x0csource_label\x18\x06 \x01(\t2\xc9\x03\n\x12OscalBridgeService\x12M\n\x0cSerializeSSP\x12\x1d.oscal.v1.SerializeSSPRequest\x1a\x1e.oscal.v1.SerializeSSPResponse\x12\x62\n\x13SerializeAssessment\x12$.oscal.v1.SerializeAssessmentRequest\x1a%.oscal.v1.SerializeAssessmentResponse\x12P\n\rSerializePOAM\x12\x1e.oscal.v1.SerializePOAMRequest\x1a\x1f.oscal.v1.SerializePOAMResponse\x12\\\n\x11RoundTripValidate\x12\".oscal.v1.RoundTripValidateRequest\x1a#.oscal.v1.RoundTripValidateResponse\x12P\n\rImportCatalog\x12\x1e.oscal.v1.ImportCatalogRequest\x1a\x1f.oscal.v1.ImportCatalogResponseB?Z=github.com/mgoodric/security-atlas/gen/proto/oscal/v1;oscalv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -48,34 +48,36 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_SERIALIZESSPRESPONSE']._serialized_end=831
   _globals['_SAMPLEPOPULATION']._serialized_start=834
   _globals['_SAMPLEPOPULATION']._serialized_end=969
-  _globals['_WALKTHROUGH']._serialized_start=972
-  _globals['_WALKTHROUGH']._serialized_end=1101
-  _globals['_AUDITNOTE']._serialized_start=1103
-  _globals['_AUDITNOTE']._serialized_end=1215
-  _globals['_ASSESSMENTINPUT']._serialized_start=1218
-  _globals['_ASSESSMENTINPUT']._serialized_end=1480
-  _globals['_SERIALIZEASSESSMENTREQUEST']._serialized_start=1482
-  _globals['_SERIALIZEASSESSMENTREQUEST']._serialized_end=1552
-  _globals['_SERIALIZEASSESSMENTRESPONSE']._serialized_start=1554
-  _globals['_SERIALIZEASSESSMENTRESPONSE']._serialized_end=1646
-  _globals['_POAMITEM']._serialized_start=1649
-  _globals['_POAMITEM']._serialized_end=1797
-  _globals['_POAMINPUT']._serialized_start=1800
-  _globals['_POAMINPUT']._serialized_end=1928
-  _globals['_SERIALIZEPOAMREQUEST']._serialized_start=1930
-  _globals['_SERIALIZEPOAMREQUEST']._serialized_end=1988
-  _globals['_SERIALIZEPOAMRESPONSE']._serialized_start=1990
-  _globals['_SERIALIZEPOAMRESPONSE']._serialized_end=2033
-  _globals['_ROUNDTRIPVALIDATEREQUEST']._serialized_start=2035
-  _globals['_ROUNDTRIPVALIDATEREQUEST']._serialized_end=2101
-  _globals['_ROUNDTRIPVALIDATERESPONSE']._serialized_start=2103
-  _globals['_ROUNDTRIPVALIDATERESPONSE']._serialized_end=2161
-  _globals['_IMPORTCATALOGREQUEST']._serialized_start=2163
-  _globals['_IMPORTCATALOGREQUEST']._serialized_end=2227
-  _globals['_IMPORTEDCONTROL']._serialized_start=2229
-  _globals['_IMPORTEDCONTROL']._serialized_end=2320
-  _globals['_IMPORTCATALOGRESPONSE']._serialized_start=2323
-  _globals['_IMPORTCATALOGRESPONSE']._serialized_end=2490
-  _globals['_OSCALBRIDGESERVICE']._serialized_start=2493
-  _globals['_OSCALBRIDGESERVICE']._serialized_end=2950
+  _globals['_WALKTHROUGHATTACHMENT']._serialized_start=972
+  _globals['_WALKTHROUGHATTACHMENT']._serialized_end=1114
+  _globals['_WALKTHROUGH']._serialized_start=1117
+  _globals['_WALKTHROUGH']._serialized_end=1300
+  _globals['_AUDITNOTE']._serialized_start=1302
+  _globals['_AUDITNOTE']._serialized_end=1414
+  _globals['_ASSESSMENTINPUT']._serialized_start=1417
+  _globals['_ASSESSMENTINPUT']._serialized_end=1679
+  _globals['_SERIALIZEASSESSMENTREQUEST']._serialized_start=1681
+  _globals['_SERIALIZEASSESSMENTREQUEST']._serialized_end=1751
+  _globals['_SERIALIZEASSESSMENTRESPONSE']._serialized_start=1753
+  _globals['_SERIALIZEASSESSMENTRESPONSE']._serialized_end=1845
+  _globals['_POAMITEM']._serialized_start=1848
+  _globals['_POAMITEM']._serialized_end=1996
+  _globals['_POAMINPUT']._serialized_start=1999
+  _globals['_POAMINPUT']._serialized_end=2127
+  _globals['_SERIALIZEPOAMREQUEST']._serialized_start=2129
+  _globals['_SERIALIZEPOAMREQUEST']._serialized_end=2187
+  _globals['_SERIALIZEPOAMRESPONSE']._serialized_start=2189
+  _globals['_SERIALIZEPOAMRESPONSE']._serialized_end=2232
+  _globals['_ROUNDTRIPVALIDATEREQUEST']._serialized_start=2234
+  _globals['_ROUNDTRIPVALIDATEREQUEST']._serialized_end=2300
+  _globals['_ROUNDTRIPVALIDATERESPONSE']._serialized_start=2302
+  _globals['_ROUNDTRIPVALIDATERESPONSE']._serialized_end=2360
+  _globals['_IMPORTCATALOGREQUEST']._serialized_start=2362
+  _globals['_IMPORTCATALOGREQUEST']._serialized_end=2426
+  _globals['_IMPORTEDCONTROL']._serialized_start=2428
+  _globals['_IMPORTEDCONTROL']._serialized_end=2519
+  _globals['_IMPORTCATALOGRESPONSE']._serialized_start=2522
+  _globals['_IMPORTCATALOGRESPONSE']._serialized_end=2689
+  _globals['_OSCALBRIDGESERVICE']._serialized_start=2692
+  _globals['_OSCALBRIDGESERVICE']._serialized_end=3149
 # @@protoc_insertion_point(module_scope)

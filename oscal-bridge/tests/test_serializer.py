@@ -111,6 +111,16 @@ def test_serialize_assessment_emits_valid_ap_and_ar():
                 status="finalized",
                 canonical_hash="abc123",
                 tamper_detected=False,
+                attachments=[
+                    oscal_pb2.WalkthroughAttachment(
+                        id="att-1",
+                        filename="mfa-flow.png",
+                        content_hash="deadbeef",
+                        content_type="image/png",
+                        annotation_ref='{"regions":[{"x":1}]}',
+                        storage_uri="tenant-1/att-1",
+                    )
+                ],
             )
         ],
         audit_notes=[
@@ -129,9 +139,33 @@ def test_serialize_assessment_emits_valid_ap_and_ar():
     ar_doc = json.loads(ar_json)
     assert "assessment-plan" in ap_doc
     assert "assessment-results" in ar_doc
+    result = ar_doc["assessment-results"]["results"][0]
     # walkthrough + audit note both became observations
-    obs = ar_doc["assessment-results"]["results"][0].get("observations", [])
+    obs = result.get("observations", [])
     assert len(obs) == 2
+
+    # Slice 494 AC-1: the drawn sample evidence ids ride as per-population props
+    # on the result, one per id in shuffle order.
+    prop_values = {p["value"] for p in result.get("props", [])}
+    assert {"ev-1", "ev-2", "ev-3"}.issubset(prop_values), result.get("props")
+
+    # Slice 494 AC-4/AC-5: the walkthrough attachment is emitted as
+    # relevant-evidence on the walkthrough observation, referenced by storage
+    # URI (href) + content hash (prop) — never embedded bytes.
+    wt_obs = next(
+        o
+        for o in obs
+        if any(
+            p.get("name") == "observation-source" and p.get("value") == "walkthrough"
+            for p in o.get("props", [])
+        )
+    )
+    rel_ev = wt_obs.get("relevant-evidence", [])
+    assert len(rel_ev) == 1, rel_ev
+    assert rel_ev[0]["href"] == "tenant-1/att-1"
+    re_prop_values = {p["value"] for p in rel_ev[0].get("props", [])}
+    assert "deadbeef" in re_prop_values  # content hash referenced, not bytes
+
     ap_valid, ap_errors = round_trip_validate("assessment-plan", ap_json)
     ar_valid, ar_errors = round_trip_validate("assessment-results", ar_json)
     assert ap_valid, ap_errors

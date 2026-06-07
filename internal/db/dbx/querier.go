@@ -1762,6 +1762,25 @@ type Querier interface {
 	ListSampleAnnotations(ctx context.Context, arg ListSampleAnnotationsParams) ([]SampleAnnotation, error)
 	ListSampleAuditLog(ctx context.Context, arg ListSampleAuditLogParams) ([]SampleAuditLog, error)
 	ListSampleEvidence(ctx context.Context, arg ListSampleEvidenceParams) ([]ListSampleEvidenceRow, error)
+	// Slice 494 (AC-1/AC-2): the DRAWN sample evidence ids for every population
+	// pinned to one audit period. Joins populations -> samples -> sample_evidence.
+	//
+	// Invariant #10 by construction (AC-2/AC-7): the rows in sample_evidence were
+	// materialized at draw-time over the FROZEN population (slice 026's
+	// ListPopulationEvidenceIDs filters `observed_at <= frozen_at`), so a record
+	// observed after the period's frozen_at was never in the draw and cannot
+	// appear here. This query carries the already-frozen-correct draw forward; it
+	// never re-samples live data.
+	//
+	// When a population has multiple samples (re-draws), only the MOST-RECENT
+	// sample's draw is carried (the operative sample). The DISTINCT ON collapses
+	// to one sample per population by created_at DESC; the full re-draw history
+	// stays in sample_audit_log (slice 026), not in the AR.
+	//
+	// Ordered by population then ordinal (the deterministic Fisher-Yates shuffle
+	// position) so the AR's sampled_evidence_ids preserve the auditor's sample
+	// order (AC-9 reproducibility).
+	ListSampledEvidenceForPeriod(ctx context.Context, arg ListSampledEvidenceForPeriodParams) ([]ListSampledEvidenceForPeriodRow, error)
 	// Enumerate the active tenant's scope cells. Newest first.
 	ListScopeCells(ctx context.Context, tenantID pgtype.UUID) ([]ScopeCell, error)
 	// Enumerate the active tenant's declared dimensions. Ordering: builtins first
@@ -1957,6 +1976,16 @@ type Querier interface {
 	// sha256_hash values, not the iteration order, so the list order does
 	// not affect the walkthrough hash directly.
 	ListWalkthroughAttachments(ctx context.Context, arg ListWalkthroughAttachmentsParams) ([]WalkthroughAttachment, error)
+	// Slice 494 (AC-4/AC-5): attachment references for every walkthrough pinned
+	// to one audit period. Carries metadata only (id, filename, content hash,
+	// content type, annotation jsonb, storage_key) — the attachment BYTES live in
+	// the slice-036 object store and are NEVER read here (P0-494-2). The export
+	// references them by hash + storage_key.
+	//
+	// Ordered by (walkthrough, uploaded_at, id) so the per-walkthrough attachment
+	// order is stable and the exporter's cap (slice 494 D3) selects a
+	// deterministic prefix.
+	ListWalkthroughAttachmentsForPeriod(ctx context.Context, arg ListWalkthroughAttachmentsForPeriodParams) ([]ListWalkthroughAttachmentsForPeriodRow, error)
 	ListWalkthroughAuditLog(ctx context.Context, arg ListWalkthroughAuditLogParams) ([]WalkthroughAuditLog, error)
 	ListWalkthroughsByControl(ctx context.Context, arg ListWalkthroughsByControlParams) ([]Walkthrough, error)
 	ListWalkthroughsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]Walkthrough, error)
