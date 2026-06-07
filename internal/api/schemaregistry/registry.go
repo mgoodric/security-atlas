@@ -102,6 +102,9 @@ func DefaultSeed() []KindVersion {
 		// Slice 486: Azure connector (Entra ID + Storage).
 		{Kind: "azure.entra_role_assignment.v1", Version: "1.0.0"},
 		{Kind: "azure.storage_account_config.v1", Version: "1.0.0"},
+		// Slice 487: Kubernetes connector (RBAC + workload security-context).
+		{Kind: "k8s.rbac_binding.v1", Version: "1.0.0"},
+		{Kind: "k8s.workload_security_context.v1", Version: "1.0.0"},
 		// Slice 023: policy acknowledgment workflow. Each
 		// POST /v1/policies/{id}/acknowledge emits one record of this
 		// kind through the slice-013 evidence ledger.

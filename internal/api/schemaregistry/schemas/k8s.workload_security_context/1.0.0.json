@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/k8s.workload_security_context/1.0.0.json",
+  "x-evidence-kind": "k8s.workload_security_context.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["CFG-02", "END-04"],
+  "title": "Kubernetes workload security context",
+  "description": "Per-workload (Deployment / DaemonSet / StatefulSet) effective security-context posture: run-as-non-root, privileged-container, read-only-root-filesystem, allow-privilege-escalation, and host-namespace (hostPID / hostIPC / hostNetwork) flags. Pulled read-only from the Kubernetes API (get/list on apps workloads + core pods). Security-context configuration only — never Secret values, ConfigMap values, container env, or logs. The connector reports a deterministic PASS/FAIL/INCONCLUSIVE verdict per workload; the platform evaluator owns the final policy call.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "workload_kind",
+    "workload_name",
+    "namespace",
+    "run_as_non_root",
+    "privileged",
+    "read_only_root_filesystem",
+    "allow_privilege_escalation",
+    "host_network",
+    "host_pid",
+    "host_ipc"
+  ],
+  "properties": {
+    "workload_kind": {
+      "type": "string",
+      "enum": ["Deployment", "DaemonSet", "StatefulSet"],
+      "description": "Workload controller kind."
+    },
+    "workload_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Workload name."
+    },
+    "namespace": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Namespace the workload runs in."
+    },
+    "run_as_non_root": {
+      "type": "boolean",
+      "description": "Effective runAsNonRoot for the pod template (true only when every container, after pod-level inheritance, runs as non-root)."
+    },
+    "privileged": {
+      "type": "boolean",
+      "description": "At least one container requests privileged: true."
+    },
+    "read_only_root_filesystem": {
+      "type": "boolean",
+      "description": "Every container sets readOnlyRootFilesystem: true."
+    },
+    "allow_privilege_escalation": {
+      "type": "boolean",
+      "description": "At least one container permits privilege escalation (allowPrivilegeEscalation not set to false)."
+    },
+    "host_network": {
+      "type": "boolean",
+      "description": "The pod template requests hostNetwork."
+    },
+    "host_pid": {
+      "type": "boolean",
+      "description": "The pod template requests hostPID."
+    },
+    "host_ipc": {
+      "type": "boolean",
+      "description": "The pod template requests hostIPC."
+    },
+    "container_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of containers in the pod template (context for interpreting the aggregate flags)."
+    }
+  }
+}
