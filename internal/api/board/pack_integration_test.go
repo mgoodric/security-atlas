@@ -378,23 +378,10 @@ func TestPackOutputs_MarkdownAndPDF(t *testing.T) {
 		t.Error("Markdown body missing the pack title")
 	}
 
-	// PDF — 200 with %PDF- magic bytes, or 503 when Chrome is unavailable
-	// (the harness machine may not have Chrome; 503 is the documented
-	// behavior, not a failure).
+	// PDF — exactly 200 (%PDF- magic) or 503 graceful degradation, never a
+	// 500 / hang (slice 475 AC-1). Shared assertion with the brief PDF test.
 	resp, raw = doRaw(t, env, "/v1/board-packs/"+packID+"/pdf")
-	switch resp.StatusCode {
-	case http.StatusOK:
-		if len(raw) < 5 || string(raw[:5]) != "%PDF-" {
-			t.Errorf("PDF body does not start with %%PDF- magic bytes")
-		}
-		if ct := resp.Header.Get("Content-Type"); ct != "application/pdf" {
-			t.Errorf("PDF content-type = %q, want application/pdf", ct)
-		}
-	case http.StatusServiceUnavailable:
-		t.Log("PDF endpoint returned 503 — Chrome unavailable on this host (documented behavior)")
-	default:
-		t.Errorf("GET /pdf = %d, want 200 or 503", resp.StatusCode)
-	}
+	assertPDFOrServiceUnavailable(t, resp, raw)
 }
 
 // ===== AC-7: a published pack is immutable =====

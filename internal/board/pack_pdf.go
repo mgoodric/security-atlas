@@ -26,6 +26,8 @@ import (
 
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+
+	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
 
 // Note: chromedpWSURLReadTimeout is declared in pdf.go (same package).
@@ -42,7 +44,14 @@ func RenderPackPDF(ctx context.Context, sp StoredPack) ([]byte, error) {
 		return nil, errors.New("board/pack-pdf: nil context")
 	}
 	htmlDoc := buildPackHTML(sp)
+	return pdfrender.Default().Do(ctx, func(ctx context.Context) ([]byte, error) {
+		return renderPackBytes(ctx, htmlDoc)
+	})
+}
 
+// renderPackBytes performs the chromedp render under the deadline the limiter
+// has already applied to ctx.
+func renderPackBytes(ctx context.Context, htmlDoc string) ([]byte, error) {
 	var browserCtx context.Context
 	var cancelAlloc context.CancelFunc
 	var cancelBrowser context.CancelFunc
