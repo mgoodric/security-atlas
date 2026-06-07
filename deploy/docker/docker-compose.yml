@@ -6,7 +6,10 @@
 #   nats             JetStream evidence-ingest buffer (slice 015)
 #   minio            S3-compatible artifact store (slice 036)
 #   minio-mc         one-shot: creates the artifacts bucket, then exits
-#   atlas-bootstrap  one-shot: migrations + seed + SCF import + control
+#   atlas-migrate    ALWAYS-RUN one-shot: roles + forward migrations +
+#                    atlas_app password, idempotent + fail-closed, then
+#                    exits 0 (slice 473)
+#   atlas-bootstrap  first-boot one-shot: seed + SCF import + control
 #                    bundle upload, then exits 0 (slice 037)
 #   atlas            platform server — gRPC :50051 + HTTP :8080 (/health)
 #   web              Next.js frontend — :3000
@@ -14,10 +17,22 @@
 # Startup ordering (enforced by depends_on conditions):
 #   postgres/nats/minio healthy
 #     -> minio-mc completes (bucket ready)
-#     -> atlas-bootstrap completes (DB migrated + seeded + SCF imported)
-#     -> atlas starts -> atlas-bootstrap phase 6 uploads control bundles
-#                        once /health is up
+#     -> atlas-migrate completes (schema current — roles + migrations +
+#        atlas_app password) — fail-closed gate (slice 473)
+#     -> atlas starts (gated on atlas-migrate completing — NEVER serves a
+#        partial schema) AND atlas-bootstrap starts (seed + SCF import)
+#        run in parallel
+#     -> atlas-bootstrap phase 5 uploads control bundles once /health is up
 #     -> web starts
+#
+# Slice 473 — migrate-on-upgrade (confirmed production incident). The
+# migrate step is its OWN service that runs on EVERY bring-up (not just
+# first boot), so a Watchtower-driven binary update can never serve
+# against a stale schema: `atlas` is gated on `atlas-migrate`'s
+# `service_completed_successfully`, so a binary update re-runs migrate
+# first and the backend waits for it. A migration failure fails the
+# migrate step loudly (naming the file) and the gate blocks the backend
+# from serving a partial schema. See bootstrap/migrate.sh.
 #
 # Target: a mid-size VM (4 vCPU / 16 GB RAM). Initial bring-up < 5 min
 # (acceptance criterion AC-1). See docs/SELF_HOSTING.md and
@@ -170,10 +185,66 @@ services:
     restart: "no"
 
   # --------------------------------------------------------------------
-  # atlas-bootstrap — one-shot first-boot: migrations + roles + seed
-  # (default tenant/scope/user) + SCF catalog import + control-bundle
-  # upload. Exits 0 on success. The repo tree is bind-mounted read-only
-  # at /repo so a `git pull` picks up new migrations without a rebuild.
+  # atlas-migrate — ALWAYS-RUN, idempotent, fail-closed migrate step
+  # (slice 473). Runs migrate.sh: applies bootstrap roles + every
+  # forward migration not yet recorded in schema_migrations + the
+  # atlas_app password, then exits 0. Unlike atlas-bootstrap this runs
+  # on EVERY bring-up / image update, NOT just first boot.
+  #
+  # WHY (confirmed production incident, 2026-06-05): the old stack
+  # applied migrations only inside the one-shot atlas-bootstrap, which is
+  # un-labelled + restart:"no". Watchtower advanced the atlas BINARY but
+  # never re-ran bootstrap, so the binary served against a stale schema
+  # (the maintainer's edge box fell 3 migrations behind -> a masked HTTP
+  # 500 on demo-seed). Splitting migrate into its own always-run service
+  # AND gating the backend on `service_completed_successfully` (see the
+  # atlas block) means a binary update re-runs migrate first and the
+  # backend never serves a partial schema.
+  #
+  # Shares the bootstrap image (same migrations + psql); selects
+  # migrate.sh via the entrypoint override. restart:"on-failure" lets a
+  # transient Postgres-not-ready blip retry, but a genuine migration
+  # failure still ends non-zero (migrate.sh exits 1 with the failing file
+  # named) and the backend's completed-successfully gate stays unmet.
+  # --------------------------------------------------------------------
+  atlas-migrate:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/bootstrap.Dockerfile
+    # Watchtower opt-IN: the migrate one-shot must move forward in lockstep
+    # with the atlas binary so an auto-updated binary always runs against a
+    # migrated schema. Without this label Watchtower would advance the
+    # binary while migrate stayed pinned — the exact incident this slice
+    # fixes. (The bundled stack builds from source, so the label is inert
+    # here; it documents intent + mirrors the edge channel, where it is
+    # load-bearing.)
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    entrypoint: ["/bootstrap/migrate.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # atlas_migrate DSN (BYPASSRLS); no password on the trust network.
+      DATABASE_URL: ${DATABASE_URL_MIGRATE:?}
+      # migrate.sh sets the atlas_app role password as part of the DDL step.
+      ATLAS_APP_PASSWORD: ${ATLAS_APP_PASSWORD:?}
+      REPO_ROOT: /repo
+    volumes:
+      - ../..:/repo:ro
+    # A transient blip (Postgres mid-init) is retryable; a real migration
+    # failure exits non-zero and is NOT retried into a serving state — the
+    # backend's service_completed_successfully gate blocks it regardless.
+    restart: "on-failure"
+
+  # --------------------------------------------------------------------
+  # atlas-bootstrap — one-shot FIRST-BOOT seed: default tenant/scope/user
+  # + SCF catalog import + control-bundle upload. Exits 0 on success.
+  # Slice 473: migrations + roles + atlas_app password moved to the
+  # always-run atlas-migrate service above; this bootstrap is gated on
+  # that completing, so it always seeds a fully-migrated schema. The repo
+  # tree is bind-mounted read-only at /repo so a `git pull` picks up new
+  # fixtures without a rebuild.
   # --------------------------------------------------------------------
   atlas-bootstrap:
     build:
@@ -183,6 +254,11 @@ services:
       postgres:
         condition: service_healthy
       minio-mc:
+        condition: service_completed_successfully
+      # Slice 473: seed only a fully-migrated schema. atlas-migrate is the
+      # single source of schema truth; gating here keeps seed.sql from
+      # ever running against a partial schema.
+      atlas-migrate:
         condition: service_completed_successfully
     environment:
       # DSNs are assembled in .env (see .env.example) rather than inline
@@ -238,37 +314,30 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-      # Slice 065 bug #2 — startup-ordering deadlock fix.
+      # Slice 473 — FAIL-CLOSED migrate gate (P0-473-1, load-bearing).
       #
-      # This was `condition: service_completed_successfully`, which is a
-      # deadlock: atlas would not start until atlas-bootstrap EXITED, but
-      # atlas-bootstrap phase 5 BLOCKS waiting for atlas's /health to
-      # return 200 (and phase 6 then uploads control bundles to the live
-      # server). Neither container could make progress; atlas-bootstrap
-      # timed out at 90 attempts, exited 1, and atlas never started.
+      # atlas does NOT start serving until atlas-migrate has exited 0
+      # (`service_completed_successfully`). This is the gate that makes a
+      # Watchtower-driven binary update safe: an updated atlas image waits
+      # for the always-run migrate step to bring the schema current before
+      # it serves a single request. If a migration fails, atlas-migrate
+      # exits non-zero (naming the failing file), this condition is NEVER
+      # satisfied, and atlas never serves a partial schema — the masked
+      # HTTP 500 class from the 2026-06-05 incident cannot recur.
+      atlas-migrate:
+        condition: service_completed_successfully
+      # Slice 065 bug #2 — startup-ordering deadlock (still load-bearing).
       #
-      # `service_started` matches the choreography the file header
-      # already describes ("-> atlas starts -> atlas-bootstrap phase 6
-      # uploads control bundles once /health is up"): atlas-bootstrap
-      # runs phases 1-4 (migrations + seed + SCF import) while atlas is
-      # booting in parallel, then phases 5-6 against the live server.
-      # The migrations are idempotent (slice 065 bug #3) so the race
-      # between "bootstrap applying migrations" and "atlas reading the
-      # schema" is benign — atlas's own restart loop (see the bumped
-      # healthcheck start_period below) absorbs the brief window where
-      # the schema is mid-apply.
-      #
-      # Alternative considered and REJECTED: split atlas-bootstrap into
-      # `atlas-bootstrap-pre` (phases 1-4, gated
-      # service_completed_successfully) + `atlas-bootstrap-post`
-      # (phases 5-6, depends_on atlas). That removes the parallelism
-      # entirely (atlas cannot start until every migration is applied)
-      # and doubles the compose service count + the bind-mount and env
-      # duplication, for no real gain: the idempotent-migration +
-      # start_period approach already converges reliably and keeps the
-      # bundle a single bootstrap unit. Revisit only if a future
-      # migration becomes genuinely non-idempotent or long-running
-      # enough that the start_period window is insufficient.
+      # atlas-bootstrap stays `service_started`, NOT
+      # `service_completed_successfully`: bootstrap phase 4 BLOCKS waiting
+      # for atlas's /health to return 200 (and phase 5 then uploads
+      # control bundles to the live server). Gating atlas on bootstrap
+      # *completing* would deadlock — neither container could make
+      # progress. With migrations now in the separate atlas-migrate
+      # service (gated above), the schema is guaranteed current before
+      # atlas starts, so bootstrap's remaining work (seed + SCF import +
+      # control upload) can run in parallel with atlas booting, exactly as
+      # the file header choreography describes.
       atlas-bootstrap:
         condition: service_started
     environment:
@@ -388,14 +457,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
-      # Slice 065 bug #2: bumped 20s -> 120s. With atlas-bootstrap now
-      # gated on `service_started` (above), atlas boots in PARALLEL with
-      # bootstrap's phase 1-4 migration apply. atlas's own connect-retry
-      # loop needs room to converge while the schema is still being
-      # applied; a 20s start_period would mark atlas unhealthy and churn
-      # the restart loop before bootstrap finished. 120s comfortably
-      # covers a cold-start migration apply on the target 4 vCPU / 16 GB
-      # VM while keeping the post-converge healthcheck cadence tight.
+      # Slice 065 bug #2 / slice 473: bumped 20s -> 120s. atlas is now
+      # gated on atlas-migrate completing (schema current before serve),
+      # and boots in PARALLEL with atlas-bootstrap's seed + SCF import.
+      # atlas's own connect-retry loop needs room to converge across a
+      # cold start; a 20s start_period would mark atlas unhealthy and
+      # churn the restart loop. 120s comfortably covers a cold start on
+      # the target 4 vCPU / 16 GB VM while keeping the post-converge
+      # healthcheck cadence tight.
       start_period: 120s
     restart: unless-stopped
 

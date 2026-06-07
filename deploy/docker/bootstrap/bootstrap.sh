@@ -3,27 +3,35 @@
 #
 # Runs as the one-shot `atlas-bootstrap` compose service. It is the
 # integration glue that makes the bundle "installable + seeded": it turns
-# an empty Postgres volume into a usable security-atlas deployment.
+# a freshly-migrated Postgres into a usable security-atlas deployment.
 #
-# Phases:
+# Slice 473: SQL migrations are NO LONGER applied here. They moved to the
+# dedicated always-run `atlas-migrate[-edge]` service (migrate.sh), which
+# both this bootstrap and the atlas backend `depends_on` with
+# `condition: service_completed_successfully`. So by the time this script
+# runs, the schema is already current AND the atlas_app password is set.
+# This script does ONLY the first-boot-only steps:
+#
 #   1. wait for Postgres to accept connections
-#   2. apply migrations/bootstrap/01-roles.sql + migrations/sql/*.sql
-#   3. seed: default tenant + builtin scope dimension + default scope cell
+#   2. seed: default tenant + builtin scope dimension + default scope cell
 #      + default local user (argon2id password hash)
-#   4. import the SCF catalog
-#   5. wait for the atlas server's /health to return 200
-#   6. upload the 50 SOC 2 control bundles
+#   3. import the SCF catalog
+#   4. wait for the atlas server's /health to return 200
+#   5. ensure an OAuth client + upload the 50 SOC 2 control bundles
 #
-# Idempotent: every phase is safe to re-run. Forward migrations are
-# tracked in a `schema_migrations` ledger and skipped once applied
-# (slice 065 bug #3 / AC-7) — the migration files themselves are NOT
-# blanket-guarded with IF NOT EXISTS, the ledger is what makes re-runs
-# safe; the CREATE TYPE statements inside them ARE individually guarded
-# so a migration that failed mid-apply can be retried. seed.sql uses
-# ON CONFLICT DO NOTHING; SCF import and control upload both upsert. So
+# Why the split (confirmed production incident, 2026-06-05): the old
+# bootstrap was the ONLY migrate path AND was one-shot/un-labelled, so
+# Watchtower advanced the binary while the migrate step never re-ran —
+# the binary served against a stale schema and a masked HTTP 500 surfaced
+# hours later. migrate.sh's header documents the incident in full.
+#
+# Idempotent: every phase is safe to re-run. seed.sql uses ON CONFLICT
+# DO NOTHING; SCF import and control upload both upsert. So
 # `docker compose up` after a restart re-runs this container and it
-# exits 0 without duplicating anything or erroring on already-applied
-# DDL.
+# exits 0 without duplicating anything (the migrate-on-upgrade footgun
+# this slice fixed lived in the MIGRATE step, which is now its own
+# always-run service — re-running THIS bootstrap stays a one-shot seed
+# no-op).
 #
 # Required env (set by docker-compose.yml from .env / .env.example):
 #   DATABASE_URL                 atlas_migrate connection string (BYPASSRLS)
@@ -32,8 +40,11 @@
 #   ATLAS_DEFAULT_USER_EMAIL     default local sign-in email
 #   ATLAS_DEFAULT_USER_PASSWORD  default local sign-in password
 #
+# Slice 473: ATLAS_APP_PASSWORD is consumed by migrate.sh (it sets the
+# atlas_app role password as part of the DDL-role migrate step), not here.
+#
 # Slice 196: ATLAS_BOOTSTRAP_TOKEN is no longer consumed by this script.
-# Phase 6 issues an OAuth client at runtime via `atlas-cli oauth
+# Phase 5 issues an OAuth client at runtime via `atlas-cli oauth
 # issue-client`, persists credentials to
 # ${ATLAS_DATA_DIR}/oauth-bootstrap-credentials.json (mode 0600), and
 # drives `atlas-cli controls upload --client-id ... --client-secret ...`.
@@ -54,6 +65,14 @@ CONTROLS_DIR="${CONTROLS_DIR:-$REPO_ROOT/controls/soc2}"
 log() { echo "[bootstrap] $*"; }
 
 # ----- Phase 1: wait for Postgres -----
+#
+# Slice 473: this bootstrap is gated on `atlas-migrate` via
+# `service_completed_successfully`, so by the time it runs the schema is
+# already current (roles created, all forward migrations applied,
+# atlas_app password set). We still wait for Postgres to accept our own
+# connection before seeding — the migrate gate guarantees the schema, the
+# wait-loop just covers the (brief) window between migrate exiting and
+# Postgres accepting this fresh connection.
 log "waiting for Postgres..."
 i=0
 until psql "$DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1; do
@@ -66,71 +85,12 @@ until psql "$DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1; do
 done
 log "Postgres reachable"
 
-# ----- Phase 2: migrations -----
-log "applying bootstrap roles..."
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$REPO_ROOT/migrations/bootstrap/01-roles.sql"
+# Slice 473: migrations + roles + atlas_app password moved to migrate.sh
+# (the always-run, fail-closed `atlas-migrate` service). They are NOT
+# re-applied here — the `service_completed_successfully` gate guarantees
+# the schema is current before this seed step runs.
 
-# Forward migrations are applied through a small `schema_migrations`
-# ledger (slice 065 bug #3 / AC-7). The repo has no versioning tool —
-# 01-roles.sql is run once and the `*.sql` files were originally just
-# `psql -f`'d in a loop on every boot. That is NOT idempotent: a second
-# `docker compose up` re-applies every file and the first unguarded
-# `CREATE TABLE` aborts the bootstrap, stranding the deployment.
-#
-# The fix is a ledger, not blanket `IF NOT EXISTS` across 31 migration
-# files: `_init.sql` is the sqlc source-of-truth and must stay clean, and
-# guarding every CREATE TABLE / ADD COLUMN / CREATE INDEX / CREATE POLICY
-# would be a large, fragile diff. Instead we record each applied
-# migration's basename and skip it on re-run. The CREATE TYPE statements
-# inside the migrations ARE still individually guarded (bug #3) so the
-# partial-failure recovery path — a migration that errored AFTER creating
-# its enums but BEFORE the ledger row was written — can re-run cleanly.
-#
-# `schema_migrations` is a plain unversioned table owned by atlas_migrate;
-# it carries no tenant_id and no RLS (it is operational metadata, not
-# tenant data — same category as a versioning tool's bookkeeping table).
-log "ensuring schema_migrations ledger..."
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-        filename    TEXT PRIMARY KEY,
-        applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-"
-
-log "applying forward migrations..."
-for f in "$REPO_ROOT"/migrations/sql/*.sql; do
-    case "$f" in
-        *.down.sql) ;;
-        *)
-            base="$(basename "$f")"
-            already="$(psql "$DATABASE_URL" -t -A \
-                -c "SELECT 1 FROM schema_migrations WHERE filename = '$base'")"
-            if [ "$already" = "1" ]; then
-                log "  skipping $base (already applied)"
-                continue
-            fi
-            log "  applying $base"
-            # Apply the migration and record the ledger row in ONE psql
-            # invocation wrapped in a transaction, so a migration that
-            # fails partway leaves NO ledger row and is retried next run.
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction \
-                -f "$f" \
-                -c "INSERT INTO schema_migrations (filename) VALUES ('$base')"
-            ;;
-    esac
-done
-
-# The application role needs a password so the atlas server (which
-# connects as atlas_app via DATABASE_URL_APP) can authenticate. Set it
-# from ATLAS_APP_PASSWORD — idempotent (ALTER ROLE ... PASSWORD is a
-# no-op-equivalent on re-run).
-if [ -n "${ATLAS_APP_PASSWORD:-}" ]; then
-    log "setting atlas_app role password..."
-    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-        -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
-fi
-
-# ----- Phase 3: seed default tenant / scope / user -----
+# ----- Phase 2: seed default tenant / scope / user -----
 log "generating argon2id hash for the default user password..."
 DEFAULT_USER_HASH="$(printf '%s\n' "$ATLAS_DEFAULT_USER_PASSWORD" | atlas-cli bootstrap hash-password)"
 
@@ -141,11 +101,11 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
     -v default_user_password_hash="$DEFAULT_USER_HASH" \
     -f "$BOOTSTRAP_DIR/seed.sql"
 
-# ----- Phase 4: import the SCF catalog -----
+# ----- Phase 3: import the SCF catalog -----
 log "importing SCF catalog from $SCF_CATALOG ..."
 atlas-cli catalog import-scf "$SCF_CATALOG"
 
-# ----- Phase 5: wait for the atlas server /health -----
+# ----- Phase 4: wait for the atlas server /health -----
 log "waiting for atlas /health at $ATLAS_HTTP_URL/health ..."
 i=0
 until wget -q -O /dev/null "$ATLAS_HTTP_URL/health" 2>/dev/null; do
@@ -158,7 +118,7 @@ until wget -q -O /dev/null "$ATLAS_HTTP_URL/health" 2>/dev/null; do
 done
 log "atlas /health is up"
 
-# ----- Phase 6a: ensure an OAuth client for bundle upload -----
+# ----- Phase 5a: ensure an OAuth client for bundle upload -----
 #
 # Slice 196 migrates this bootstrap step off the pre-shared
 # ATLAS_BOOTSTRAP_TOKEN onto OAuth client_credentials. The client is
@@ -232,7 +192,7 @@ if [ -z "$OAUTH_CLIENT_ID" ] || [ -z "$OAUTH_CLIENT_SECRET" ]; then
     exit 1
 fi
 
-# ----- Phase 6b: upload the 50 SOC 2 control bundles -----
+# ----- Phase 5b: upload the 50 SOC 2 control bundles -----
 log "uploading control bundles from $CONTROLS_DIR ..."
 uploaded=0
 for dir in "$CONTROLS_DIR"/*/; do

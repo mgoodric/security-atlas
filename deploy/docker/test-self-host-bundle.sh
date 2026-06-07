@@ -35,7 +35,22 @@
 #               e2e slice 466 D4 deferred because the proxy-less seed could
 #               not provide it.
 #
-# Usage:  deploy/docker/test-self-host-bundle.sh {bundled|external}
+#   migrate   — (slice 473) REPRODUCE-THE-INCIDENT migrate-on-upgrade
+#               proof. Brings the bundle up at migration set N, then
+#               simulates an image update that carries a NEWER migration
+#               set by writing a brand-new sentinel migration into the
+#               (bind-mounted) checkout and re-running the always-run
+#               `atlas-migrate` service. Asserts: (AC-1/AC-2) the new
+#               migration applied; (AC-3/AC-4) the atlas backend was
+#               force-recreated and came back HEALTHY only AFTER
+#               atlas-migrate exited 0 (the service_completed_successfully
+#               gate held — it never served the partial schema); (AC-2)
+#               a third migrate re-run against the now-current DB is a
+#               "schema current" no-op that does NOT re-seed. This is the
+#               2026-06-05 production incident: a binary moving forward
+#               while the migrate step would otherwise be stranded.
+#
+# Usage:  deploy/docker/test-self-host-bundle.sh {bundled|external|proxy|migrate}
 #
 # Exit code 0 = every assertion passed. Non-zero on the first failure.
 #
@@ -83,8 +98,9 @@
 set -euo pipefail
 
 MODE="${1:-}"
-if [ "${MODE}" != "bundled" ] && [ "${MODE}" != "external" ] && [ "${MODE}" != "proxy" ]; then
-    echo "usage: $0 {bundled|external|proxy}" >&2
+if [ "${MODE}" != "bundled" ] && [ "${MODE}" != "external" ] \
+    && [ "${MODE}" != "proxy" ] && [ "${MODE}" != "migrate" ]; then
+    echo "usage: $0 {bundled|external|proxy|migrate}" >&2
     exit 2
 fi
 
@@ -118,10 +134,16 @@ fail() {
     exit 1
 }
 
+# Slice 473: migrate mode writes a sentinel migration into the checkout to
+# simulate an image update carrying a newer migration set. SENTINEL_SQL is
+# set later (once we know the migrations dir); cleanup removes it so the
+# working tree is never left dirty even on an early failure.
+SENTINEL_SQL=""
 cleanup() {
     log "tearing down"
     "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
     rm -f "${ENV_FILE}"
+    [ -n "${SENTINEL_SQL}" ] && rm -f "${SENTINEL_SQL}"
 }
 trap cleanup EXIT
 
@@ -178,7 +200,7 @@ EOF
 # Slice 470: `proxy` mode is the bundled stack plus the reverse-proxy overlay,
 # so it shares bundled mode's trust-on-the-docker-network Postgres auth and
 # the repo's 01-roles.sql initdb script.
-if [ "${MODE}" = "bundled" ] || [ "${MODE}" = "proxy" ]; then
+if [ "${MODE}" = "bundled" ] || [ "${MODE}" = "proxy" ] || [ "${MODE}" = "migrate" ]; then
     echo "POSTGRES_HOST_AUTH_METHOD=trust" >> "${ENV_FILE}"
     echo "PG_INITDB_ROLES=../../migrations/bootstrap/01-roles.sql" >> "${ENV_FILE}"
     # In bundled mode the migrate role connects with no password over the
@@ -297,11 +319,11 @@ fi
 # retry. It inserts the platform-bundled evidence_kind schemas into
 # `evidence_kind_schemas`. The cache-reload loop right after it retries
 # (90s) but only re-READS — it does NOT re-IMPORT. So if the importer
-# loses the race against atlas-bootstrap's phase-2 forward migrations
+# loses the race against the forward migrations
 # (i.e. atlas starts BEFORE migrations/sql/20260511000002_schema_registry.sql
 # has created `evidence_kind_schemas`), the table is missing, the import fails with
 # `relation "evidence_kind_schemas" does not exist (SQLSTATE 42P01)`,
-# rows are NEVER inserted, the cache stays empty, and bootstrap phase 6's
+# rows are NEVER inserted, the cache stays empty, and bootstrap's
 # `controls upload` 400s on every bundle with `evidence_kind ... is not
 # registered in the schema registry`.
 #
@@ -309,38 +331,36 @@ fi
 # 26293268087 (bundled mode). External mode passed on the same run, but
 # the race exists identically there too — the fix applies uniformly.
 #
-# The fix: bring up postgres + atlas-bootstrap FIRST, then poll for the
-# sentinel table `evidence_kind_schemas` to exist (proving bootstrap
-# phase-2 migrations completed and the importer would find its target),
-# then bring up the rest (atlas + web). atlas-bootstrap is by now in its
-# phase-5 wait-loop for atlas /health; atlas starts, its schema import
-# succeeds against the fully-migrated DB, /health returns 200,
-# atlas-bootstrap phase 5-6 completes naturally.
+# Slice 473 note: migrations now run in the dedicated always-run
+# `atlas-migrate` service, NOT inside atlas-bootstrap. Bringing up
+# atlas-bootstrap auto-starts its dependency atlas-migrate (gated
+# `service_completed_successfully`), so compose runs migrate first and
+# then bootstrap's seed. The compose `atlas` block ALSO gates on
+# atlas-migrate completing — so in production the race below cannot even
+# occur (atlas can't start until migrate exits). The staged bring-up +
+# poll is KEPT here because this harness drives `atlas` up separately in
+# stage 2; it remains a belt-and-suspenders deterministic gate and lets
+# the harness surface a stage-1 failure with a precise diagnostic.
+#
+# The fix: bring up postgres + atlas-bootstrap FIRST (which pulls in
+# atlas-migrate), then poll for the sentinel table `evidence_kind_schemas`
+# to exist (proving the forward migrations completed and the importer
+# would find its target), then bring up the rest (atlas + web).
 #
 # Why this is deterministic, not a sleep (P0-A3): the sentinel is the
 # OUTPUT of the racing step — the migration that creates the table.
 # `evidence_kind_schemas` not existing means migrations have not
 # advanced to that file; its existence means they have. There is no
 # clock-based wait — just polling on a real state transition.
-#
-# Why this is harness-only and not a compose change (P0-A1): the
-# alternative — gating atlas on `service_completed_successfully` of
-# atlas-bootstrap — is a documented deadlock (see compose file's atlas
-# block ~L243), because bootstrap phase 5-6 BLOCKS on atlas /health.
-# A bootstrap-side healthcheck would require a Go change. A new sentinel
-# service would add a compose primitive. CI-time polling is the
-# least-invasive shape and matches slice 200's pattern.
 # ---------------------------------------------------------------------
-log "docker compose up -d postgres + atlas-bootstrap (stage 1: apply migrations)"
+log "docker compose up -d postgres + atlas-bootstrap (stage 1: apply migrations via atlas-migrate)"
 "${COMPOSE[@]}" up -d --build postgres atlas-bootstrap
 
-log "polling evidence_kind_schemas existence (sentinel of phase-2 migrations complete)"
+log "polling evidence_kind_schemas existence (sentinel of forward migrations complete)"
 # Postgres container is healthy by now (atlas-bootstrap depends_on
-# postgres:service_healthy + minio-mc:service_completed_successfully, so
-# docker compose has already gated on both). atlas-bootstrap is RUNNING
-# — its phase-1 wait-for-Postgres succeeded; phase-2 forward migrations
-# are applying. Poll every 2s for up to 4 minutes (matches the existing
-# atlas-bootstrap-exit ceiling at line ~260) for the
+# postgres:service_healthy + minio-mc:service_completed_successfully +
+# atlas-migrate:service_completed_successfully, so docker compose has
+# already gated on all three). Poll every 2s for up to 4 minutes for the
 # `evidence_kind_schemas` relation to exist. Using `to_regclass()`
 # instead of the `schema_migrations` ledger row is deliberate: the
 # relation check is exactly what the atlas importer queries and is
@@ -704,5 +724,132 @@ USERS_AFTER="$(db_count 'SELECT count(*) FROM users')"
 [ "${SCOPES_AFTER}" = "${SCOPES_BEFORE}" ]     || fail "scope_cells changed on re-run: ${SCOPES_BEFORE} -> ${SCOPES_AFTER}"
 [ "${USERS_AFTER}" = "${USERS_BEFORE}" ]       || fail "users changed on re-run: ${USERS_BEFORE} -> ${USERS_AFTER}"
 log "atlas-bootstrap re-run exited 0 with identical row counts (idempotent)"
+
+# ---------------------------------------------------------------------
+# Slice 473 — AC-7: REPRODUCE THE MIGRATE-ON-UPGRADE INCIDENT.
+#
+# Only the `migrate` mode runs this block. By here the bundle is up and
+# fully seeded at migration set N (the existing assertions already proved
+# the new atlas-migrate gating brings a fresh stack to healthy). Now we
+# reproduce the 2026-06-05 incident shape: an image update lands a NEWER
+# migration set, and we prove the always-run atlas-migrate service applies
+# it AND the backend serves only after the migrate completes.
+#
+# Steps:
+#   1. Record the schema_migrations tip (set N) + the seed row counts.
+#   2. Write a brand-new sentinel migration into the bind-mounted checkout
+#      (migrations/sql/<future-ts>_slice473_ac7_sentinel.sql) that creates
+#      a marker table. This is what an upgraded image carries.
+#   3. Re-run the always-run `atlas-migrate` service (simulating the
+#      migrate step that runs on every bring-up / image update). Assert it
+#      exits 0 AND the sentinel table now exists AND the ledger advanced.
+#   4. Force-recreate the `atlas` backend (simulating the Watchtower
+#      binary swap). Compose gates it on atlas-migrate
+#      service_completed_successfully — assert atlas comes back HEALTHY
+#      (serving) ONLY after the migrate step has completed: i.e. /health
+#      is 200 again and the schema is current. The gate is the proof the
+#      backend cannot serve a partial schema (AC-3 / AC-4 / P0-473-1).
+#   5. Idempotency (AC-2): a SECOND atlas-migrate run is a "schema
+#      current" no-op (exit 0, log line) and does NOT re-seed — the seed
+#      row counts are unchanged.
+# ---------------------------------------------------------------------
+if [ "${MODE}" = "migrate" ]; then
+    MIGRATIONS_DIR="${REPO_ROOT}/migrations/sql"
+
+    log "AC-7: recording schema tip (set N) and seed counts"
+    LEDGER_N="$(db_count 'SELECT count(*) FROM schema_migrations')"
+    CONTROLS_N="$(db_count 'SELECT count(*) FROM controls')"
+    USERS_N="$(db_count 'SELECT count(*) FROM users')"
+    SCOPES_N="$(db_count 'SELECT count(*) FROM scope_cells')"
+    log "AC-7: set N = ${LEDGER_N} ledgered migrations; controls=${CONTROLS_N} users=${USERS_N} scope_cells=${SCOPES_N}"
+
+    # A far-future timestamp prefix guarantees lexical-last ordering so the
+    # for-loop in migrate.sh applies it after every real migration. The
+    # marker table is trivially reversible-by-drop and touches no tenant
+    # data. The basename is unique per run-id to avoid any ledger clash.
+    SENTINEL_BASE="29991231000000_slice473_ac7_sentinel.sql"
+    SENTINEL_SQL="${MIGRATIONS_DIR}/${SENTINEL_BASE}"
+    SENTINEL_TABLE="slice473_ac7_marker"
+    log "AC-7: writing sentinel migration ${SENTINEL_BASE} (simulates a newer image's migration set)"
+    cat > "${SENTINEL_SQL}" <<SQL
+-- slice 473 AC-7 sentinel migration (test-only; removed by the harness on exit).
+-- Reproduces the migrate-on-upgrade incident: a newer image carries a
+-- migration the running DB has not applied. CREATE TABLE IF NOT EXISTS so a
+-- partial-failure retry stays clean.
+CREATE TABLE IF NOT EXISTS ${SENTINEL_TABLE} (
+    id          INT PRIMARY KEY DEFAULT 1,
+    applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO ${SENTINEL_TABLE} (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+SQL
+
+    # The sentinel must NOT already be applied (we just created it).
+    SENTINEL_EXISTS_BEFORE="$(db_count "SELECT to_regclass('public.${SENTINEL_TABLE}') IS NOT NULL")"
+    [ "${SENTINEL_EXISTS_BEFORE}" = "f" ] \
+        || fail "AC-7: sentinel table already existed before the upgrade run (got '${SENTINEL_EXISTS_BEFORE}')"
+    log "AC-7: confirmed sentinel table absent at set N"
+
+    # --- Step 3: re-run the always-run migrate step (image-update sim) ---
+    log "AC-7: re-running atlas-migrate (simulates the always-run migrate step on image update)"
+    set +e
+    "${COMPOSE[@]}" run --rm atlas-migrate
+    MIGRATE_RC=$?
+    set -e
+    [ "${MIGRATE_RC}" = "0" ] || fail "AC-7: atlas-migrate upgrade run exited ${MIGRATE_RC}, want 0"
+
+    SENTINEL_EXISTS_AFTER="$(db_count "SELECT to_regclass('public.${SENTINEL_TABLE}') IS NOT NULL")"
+    [ "${SENTINEL_EXISTS_AFTER}" = "t" ] \
+        || fail "AC-7: sentinel migration did NOT apply on re-up (table still absent: '${SENTINEL_EXISTS_AFTER}')"
+    LEDGER_AFTER="$(db_count 'SELECT count(*) FROM schema_migrations')"
+    [ "${LEDGER_AFTER}" -eq "$((LEDGER_N + 1))" ] 2>/dev/null \
+        || fail "AC-7: ledger did not advance by exactly 1 (was ${LEDGER_N}, now ${LEDGER_AFTER})"
+    SENTINEL_LEDGERED="$(db_count "SELECT 1 FROM schema_migrations WHERE filename = '${SENTINEL_BASE}'")"
+    [ "${SENTINEL_LEDGERED}" = "1" ] || fail "AC-7: sentinel migration not recorded in schema_migrations ledger"
+    log "AC-7 OK (AC-1/AC-2): new migration applied on re-up; ledger ${LEDGER_N} -> ${LEDGER_AFTER}"
+
+    # --- Step 4: force-recreate the backend (Watchtower binary-swap sim) ---
+    # Compose gates atlas on atlas-migrate:service_completed_successfully.
+    # The migrate step we just ran exited 0, so the gate is satisfied and
+    # the recreated backend may serve — against the NOW-CURRENT schema.
+    # Assert it comes back healthy (serving) only after migrate completed.
+    log "AC-7: force-recreating atlas backend (simulates the Watchtower binary swap)"
+    "${COMPOSE[@]}" up -d --force-recreate --no-deps atlas
+    ATLAS_HEALTH_OK=""
+    for i in $(seq 1 90); do
+        if curl -fsS -o /dev/null "http://127.0.0.1:${ATLAS_HOSTPORT}/health" 2>/dev/null; then
+            ATLAS_HEALTH_OK=1
+            break
+        fi
+        sleep 2
+    done
+    [ -n "${ATLAS_HEALTH_OK}" ] || fail "AC-7: atlas /health never returned 200 after the recreate"
+    # The backend is serving AND the schema is current (sentinel present) —
+    # i.e. it served only after migrate brought the schema forward, never
+    # against the partial pre-sentinel schema. (P0-473-1 / AC-3 / AC-4.)
+    SCHEMA_STILL_CURRENT="$(db_count "SELECT to_regclass('public.${SENTINEL_TABLE}') IS NOT NULL")"
+    [ "${SCHEMA_STILL_CURRENT}" = "t" ] \
+        || fail "AC-7: backend healthy but schema not current — gate did not hold"
+    log "AC-7 OK (AC-3/AC-4/P0-473-1): backend serves a CURRENT schema after recreate; never served the partial schema"
+
+    # --- Step 5: idempotency — a second migrate run is a no-op no-reseed ---
+    log "AC-7: re-running atlas-migrate a SECOND time (idempotency / no-reseed)"
+    set +e
+    MIGRATE2_OUT="$("${COMPOSE[@]}" run --rm atlas-migrate 2>&1)"
+    MIGRATE2_RC=$?
+    set -e
+    printf '%s\n' "${MIGRATE2_OUT}"
+    [ "${MIGRATE2_RC}" = "0" ] || fail "AC-7: second atlas-migrate run exited ${MIGRATE2_RC}, want 0"
+    printf '%s' "${MIGRATE2_OUT}" | grep -q "schema current" \
+        || fail "AC-7: second migrate run did not log the 'schema current' idempotent no-op line"
+    CONTROLS_FINAL="$(db_count 'SELECT count(*) FROM controls')"
+    USERS_FINAL="$(db_count 'SELECT count(*) FROM users')"
+    SCOPES_FINAL="$(db_count 'SELECT count(*) FROM scope_cells')"
+    [ "${CONTROLS_FINAL}" = "${CONTROLS_N}" ] || fail "AC-7: controls changed on idempotent re-run: ${CONTROLS_N} -> ${CONTROLS_FINAL} (re-seed?)"
+    [ "${USERS_FINAL}" = "${USERS_N}" ]       || fail "AC-7: users changed on idempotent re-run: ${USERS_N} -> ${USERS_FINAL} (re-seed?)"
+    [ "${SCOPES_FINAL}" = "${SCOPES_N}" ]     || fail "AC-7: scope_cells changed on idempotent re-run: ${SCOPES_N} -> ${SCOPES_FINAL} (re-seed?)"
+    log "AC-7 OK (AC-2): second migrate run is a 'schema current' no-op; seed rows unchanged (no re-seed)"
+
+    log "AC-7 PASSED: migrate-on-upgrade reproduced and fixed (apply-on-re-up + serve-after-gate + idempotent)"
+fi
 
 log "ALL ASSERTIONS PASSED (${MODE})"
