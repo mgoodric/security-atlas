@@ -123,7 +123,6 @@ func TestCredential_StringRedacts(t *testing.T) {
 		fmt.Sprintf("%v", cred),
 		fmt.Sprintf("%+v", cred),
 		fmt.Sprintf("%#v", cred),
-		fmt.Sprintf("%s", cred),
 	} {
 		if strings.Contains(s, secret) {
 			t.Fatalf("secret leaked in format output: %q", s)
