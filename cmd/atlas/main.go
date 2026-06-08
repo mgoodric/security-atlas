@@ -50,6 +50,10 @@ import (
 	"github.com/mgoodric/security-atlas/internal/freshnessdrift"
 	metricseval "github.com/mgoodric/security-atlas/internal/metrics/eval"
 	metricsscheduler "github.com/mgoodric/security-atlas/internal/metrics/scheduler"
+	notifyemail "github.com/mgoodric/security-atlas/internal/notify/email"
+	notifyscheduler "github.com/mgoodric/security-atlas/internal/notify/scheduler"
+	notifyslack "github.com/mgoodric/security-atlas/internal/notify/slack"
+	notifywebhook "github.com/mgoodric/security-atlas/internal/notify/webhook"
 	atlasotel "github.com/mgoodric/security-atlas/internal/observability/otel"
 	"github.com/mgoodric/security-atlas/internal/oscal"
 	"github.com/mgoodric/security-atlas/internal/platform"
@@ -1024,6 +1028,81 @@ func main() {
 					errCh <- fmt.Errorf("metrics scheduler: %w", err)
 				}
 			}()
+		}
+	}
+
+	// Slice 582: notification-channel digest scheduler. An in-process
+	// tick-loop (mirroring the metrics + backup schedulers — no external
+	// cron, single-VM self-host target, D1) that, once per UTC day,
+	// enumerates the opted-in (tenant, user) pairs per channel (email /
+	// Slack / webhook) and drives the EXISTING slice-445/543 DeliverDigest
+	// sinks under each user's own tenant context. Enumeration uses the
+	// migrator (BYPASSRLS) pool — the deliberate cross-tenant read of
+	// (tenant, user) keys only; per-user delivery re-reads RLS-scoped
+	// through the app pool. Only channels with config present are mounted;
+	// inert channels (no SMTP host / no webhook URL) are skipped so the
+	// driver never spins on a channel that can never deliver.
+	// ATLAS_DIGEST_INTERVAL overrides the daily cadence for dev loops.
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		dctx, dcancel := context.WithTimeout(context.Background(), 10*time.Second)
+		dPool, err := atlasotel.NewTracedPool(dctx, migratorURL)
+		dcancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: digest scheduler pool: %v\n", err)
+		} else {
+			var channels []notifyscheduler.Channel
+
+			// Email channel (slice 445) — mounts only when SMTP is configured.
+			emailCfg := notifyemail.ConfigFromEnv()
+			if emailCfg.Enabled() {
+				emailCh := notifyemail.NewChannel(pool, notifyemail.NewSMTPProvider(emailCfg), emailCfg.BaseURL)
+				channels = append(channels, notifyscheduler.EmailChannel(emailCh))
+			}
+
+			// Slack channel (slice 543) — mounts only when a webhook URL is set.
+			slackCfg := notifyslack.ConfigFromEnv()
+			if slackCfg.Enabled() {
+				slackCh := notifyslack.NewChannel(pool, notifyslack.NewHTTPTransport(slackCfg), slackCfg.BaseURL)
+				channels = append(channels, notifyscheduler.SlackChannel(slackCh))
+			}
+
+			// Webhook channel (slice 543) — mounts only when a URL is set and
+			// passes the SSRF guard (a rejected target fails fast, log-only).
+			webhookCfg := notifywebhook.ConfigFromEnv()
+			if webhookCfg.Enabled() {
+				transport, terr := notifywebhook.NewHTTPTransport(webhookCfg, notifywebhook.SSRFPolicy())
+				if terr != nil {
+					fmt.Fprintf(os.Stderr, "atlas: webhook digest channel: %v\n", terr)
+				} else {
+					webhookCh := notifywebhook.NewChannel(pool, transport, webhookCfg.BaseURL)
+					channels = append(channels, notifyscheduler.WebhookChannel(webhookCh))
+				}
+			}
+
+			if len(channels) == 0 {
+				fmt.Fprintln(os.Stderr, "atlas: digest scheduler — no channels configured, not started")
+				dPool.Close()
+			} else {
+				interval := notifyscheduler.DefaultInterval
+				if raw := os.Getenv("ATLAS_DIGEST_INTERVAL"); raw != "" {
+					if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+						interval = d
+					} else {
+						fmt.Fprintf(os.Stderr, "atlas: ATLAS_DIGEST_INTERVAL=%q invalid: %v\n", raw, perr)
+					}
+				}
+				ds := notifyscheduler.New(dPool, channels, logger)
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					defer dPool.Close()
+					fmt.Fprintf(os.Stderr, "atlas: digest scheduler ticking every %s (%d channels)\n",
+						interval.String(), len(channels))
+					if err := ds.Run(ctx, interval); err != nil {
+						errCh <- fmt.Errorf("digest scheduler: %w", err)
+					}
+				}()
+			}
 		}
 	}
 

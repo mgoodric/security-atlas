@@ -233,6 +233,7 @@
     "internal/metrics/scheduler": 76,
     "internal/notify": 85,
     "internal/notify/email": 65,
+    "internal/notify/scheduler": 69,
     "internal/notify/slack": 75,
     "internal/notify/webhook": 69,
     "internal/observability/otel": 92,

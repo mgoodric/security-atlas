@@ -119,6 +119,79 @@ func (q *Queries) GetWebhookOptIn(ctx context.Context, arg GetWebhookOptInParams
 	return enabled, err
 }
 
+const listSlackOptInUsers = `-- name: ListSlackOptInUsers :many
+SELECT tenant_id, user_id
+FROM slack_channel_optin
+WHERE enabled = true
+ORDER BY tenant_id, user_id
+`
+
+type ListSlackOptInUsersRow struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+// Slice 582 — digest-scheduler enumeration for the Slack channel: every
+// (tenant, user) pair that has OPTED IN. Walked from the BYPASSRLS migrator
+// pool (all tenants in one pass); per-user delivery re-reads under the
+// user's own tenant GUC (RLS). enabled = false / no-row excluded (default
+// opted-OUT, P0-543-3). Returns only the (tenant, user) keys — no PII.
+func (q *Queries) ListSlackOptInUsers(ctx context.Context) ([]ListSlackOptInUsersRow, error) {
+	rows, err := q.db.Query(ctx, listSlackOptInUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSlackOptInUsersRow
+	for rows.Next() {
+		var i ListSlackOptInUsersRow
+		if err := rows.Scan(&i.TenantID, &i.UserID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWebhookOptInUsers = `-- name: ListWebhookOptInUsers :many
+SELECT tenant_id, user_id
+FROM webhook_channel_optin
+WHERE enabled = true
+ORDER BY tenant_id, user_id
+`
+
+type ListWebhookOptInUsersRow struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+// Slice 582 — digest-scheduler enumeration for the webhook channel: every
+// (tenant, user) pair that has OPTED IN. Same shape + guarantees as
+// ListSlackOptInUsers. enabled = false / no-row excluded (default
+// opted-OUT). Returns only the (tenant, user) keys — no PII.
+func (q *Queries) ListWebhookOptInUsers(ctx context.Context) ([]ListWebhookOptInUsersRow, error) {
+	rows, err := q.db.Query(ctx, listWebhookOptInUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWebhookOptInUsersRow
+	for rows.Next() {
+		var i ListWebhookOptInUsersRow
+		if err := rows.Scan(&i.TenantID, &i.UserID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markChannelDigestFailed = `-- name: MarkChannelDigestFailed :exec
 UPDATE channel_delivery_log
 SET outcome = 'failed', attempts = attempts + 1, last_error = $3
