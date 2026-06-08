@@ -21,11 +21,13 @@ import (
 // ConnectorName is logged in `connectors list`.
 const ConnectorName = "intune-connector"
 
-// SupportedKinds is the canonical list of evidence kinds slice 490 emits from
-// the Intune connector.
-//   - endpoint.device_posture.v1 (managed-device compliance posture summary, pull)
+// SupportedKinds is the canonical list of evidence kinds the Intune connector
+// emits.
+//   - endpoint.device_posture.v1     (managed-device compliance posture summary, pull; slice 490)
+//   - endpoint.software_inventory.v1 (detected-software inventory, pull; slice 555)
 var SupportedKinds = []string{
 	"endpoint.device_posture.v1",
+	"endpoint.software_inventory.v1",
 }
 
 // PullInterval names the connector's pull cadence HONESTLY (P0-490-6). The
@@ -69,6 +71,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVar(&common.insecure, "insecure", false, "disable TLS to platform (loopback endpoints only)")
 	root.AddCommand(newRegisterCmd())
 	root.AddCommand(newRunCmd())
+	root.AddCommand(newRunSoftwareCmd())
 	root.AddCommand(newPermissionsCmd())
 	return root
 }
@@ -119,10 +122,11 @@ func sdkOpts() []sdk.Option {
 	return nil
 }
 
-const longDescription = `security-atlas Microsoft Intune MDM endpoint-posture connector
+const longDescription = `security-atlas Microsoft Intune MDM endpoint connector
 
-Emits one evidence kind:
-  - endpoint.device_posture.v1  (run subcommand, pull — managed-device compliance posture summary)
+Emits two evidence kinds:
+  - endpoint.device_posture.v1     (run subcommand, pull — managed-device compliance posture summary)
+  - endpoint.software_inventory.v1 (run-software subcommand, pull — detected-software inventory)
 
 Profile: pull. Each invocation is one bounded read-and-push pass on an
 operator-scheduled cadence (recommended 24h). This is NOT continuous
@@ -136,12 +140,20 @@ Least-privilege Microsoft Graph access (read-only):
     or push configuration to employee endpoints — that is a remote-wipe risk and
     must never be used.
 
-The connector reads device compliance POSTURE SUMMARY only — disk-encryption
-state (BitLocker), screen-lock/passcode-policy compliance (via complianceState),
-OS version, management/enrollment state, the MDM's compliance verdict, and the
-device->owner ASSIGNMENT identity (userPrincipalName + display name). It NEVER
-collects device geolocation, the detectedApps inventory, device contents,
-browsing data, or owner personal contact detail (phone / personal email).
+The 'run' subcommand reads device compliance POSTURE SUMMARY only —
+disk-encryption state (BitLocker), screen-lock/passcode-policy compliance (via
+complianceState), OS version, management/enrollment state, the MDM's compliance
+verdict, and the device->owner ASSIGNMENT identity (userPrincipalName + display
+name). It NEVER collects device geolocation, the detectedApps inventory, device
+contents, browsing data, or owner personal contact detail (phone / personal
+email).
+
+The 'run-software' subcommand reads the detected-software INVENTORY (the
+detectedApps endpoint) for patch-/vulnerability-management evidence, using the
+SAME read-only DeviceManagementManagedDevices.Read.All permission. Each item
+carries the app name + version + Graph app id ONLY. It NEVER collects executable
+file paths, per-user app-usage telemetry, license keys, device contents, or owner
+personal contact detail.
 
 Auth: set INTUNE_TENANT_ID + INTUNE_CLIENT_ID + INTUNE_CLIENT_SECRET. The
 client secret is read from the environment, never a CLI flag, and never logged

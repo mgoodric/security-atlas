@@ -40,3 +40,40 @@ func TestDevicePostureKey_HexLength(t *testing.T) {
 		t.Errorf("key length = %d; want 64 (sha256 hex)", len(got))
 	}
 }
+
+func TestSoftwareInventoryKey_StableWithinHourAndHexLength(t *testing.T) {
+	t.Parallel()
+	a := SoftwareInventoryKey("jamf", "d1", time.Date(2026, 6, 7, 12, 5, 0, 0, time.UTC))
+	b := SoftwareInventoryKey("jamf", "d1", time.Date(2026, 6, 7, 12, 55, 0, 0, time.UTC))
+	if a != b {
+		t.Fatalf("same hour should dedupe: %q != %q", a, b)
+	}
+	if len(a) != 64 {
+		t.Errorf("key length = %d; want 64", len(a))
+	}
+}
+
+func TestSoftwareInventoryKey_DiffersAcrossHourMDMAndDevice(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
+	if SoftwareInventoryKey("jamf", "d1", at) == SoftwareInventoryKey("jamf", "d1", at.Add(time.Hour)) {
+		t.Error("different hour should differ")
+	}
+	if SoftwareInventoryKey("jamf", "d1", at) == SoftwareInventoryKey("intune", "d1", at) {
+		t.Error("different mdm should differ")
+	}
+	if SoftwareInventoryKey("jamf", "d1", at) == SoftwareInventoryKey("jamf", "d2", at) {
+		t.Error("different device should differ")
+	}
+}
+
+// TestSoftwareInventoryKey_NamespacedFromPosture is the load-bearing guard: a
+// device's software-inventory record and its posture record never collide on the
+// same idempotency key for the same device + hour.
+func TestSoftwareInventoryKey_NamespacedFromPosture(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
+	if SoftwareInventoryKey("jamf", "d1", at) == DevicePostureKey("jamf", "d1", at) {
+		t.Error("software-inventory key must not collide with device-posture key for the same device+hour")
+	}
+}

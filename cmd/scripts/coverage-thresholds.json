@@ -121,6 +121,8 @@
     "connectors/mdm/devposture": 98,
     "connectors/mdm/devrecord": 90,
     "connectors/mdm/idem": 98,
+    "connectors/mdm/swinventory": 94,
+    "connectors/mdm/swrecord": 91,
     "connectors/jamf/cmd/atlas-jamf": 86,
     "connectors/jamf/internal/devices": 86,
     "connectors/jamf/internal/jamfauth": 98,

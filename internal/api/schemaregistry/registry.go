@@ -115,6 +115,11 @@ func DefaultSeed() []KindVersion {
 		// Slice 490: MDM connectors (Jamf + Intune) — shared managed-device
 		// endpoint-posture summary evidence kind (SOC 2 CC6.7 / CC6.8, ISO A.8).
 		{Kind: "endpoint.device_posture.v1", Version: "1.0.0"},
+		// Slice 555: MDM connectors (Jamf + Intune) — shared managed-device
+		// installed-software inventory evidence kind, the deliberate slice-490
+		// over-collection follow-on (patch-/vuln-mgmt + asset inventory:
+		// SCF VPM-04 / AST-03).
+		{Kind: "endpoint.software_inventory.v1", Version: "1.0.0"},
 		// Slice 491: HRIS connectors (Rippling + BambooHR) — shared
 		// worker-lifecycle (joiner/mover/leaver) evidence kind feeding the
 		// access-review + deprovisioning controls (SOC 2 CC6.1/CC6.2/CC6.3).
