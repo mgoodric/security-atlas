@@ -18,6 +18,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/azureauth"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/entra"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/idem"
+	"github.com/mgoodric/security-atlas/connectors/azure/internal/nsg"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/storage"
 )
 
@@ -29,6 +30,7 @@ var (
 	entraPull    = entra.Pull
 	storageScan  = storage.Inspect
 	aksScan      = aks.Inspect
+	nsgScan      = nsg.Inspect
 	newSDKClient = func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error) {
 		return sdk.NewClient(endpoint, bearer, opts...)
 	}
@@ -47,6 +49,9 @@ var (
 	newAKSAPI = func(hc *http.Client, subscriptionID, token string) aks.API {
 		return aks.NewClient(hc, "", subscriptionID, token)
 	}
+	newNSGAPI = func(hc *http.Client, subscriptionID, token string) nsg.API {
+		return nsg.NewClient(hc, "", subscriptionID, token)
+	}
 )
 
 // sdkPushClient is the narrow surface doRun consumes from sdk.Client.
@@ -64,19 +69,21 @@ type runFlags struct {
 	entraControl   string
 	storageControl string
 	aksControl     string
+	nsgControl     string
 	skipEntra      bool
 	skipStorage    bool
 	skipAKS        bool
+	skipNSG        bool
 }
 
 func newRunCmd() *cobra.Command {
 	var f runFlags
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "read Entra ID + Azure Storage + AKS and push evidence records",
+		Short: "read Entra ID + Azure Storage + AKS + NSG and push evidence records",
 		Long: `Read Microsoft Entra ID role assignments, Azure Storage account
-configuration, and AKS managed-cluster configuration, transform to evidence
-records, and push to the platform.
+configuration, AKS managed-cluster configuration, and NSG firewall-rule posture,
+transform to evidence records, and push to the platform.
 
 Profile: pull. One bounded read-and-push pass per invocation; operator-scheduled
 (recommended 24h). NOT continuous monitoring.
@@ -85,7 +92,8 @@ Least-privilege Azure permissions (read-only):
   - Microsoft Graph: Directory.Read.All  (gates azure.entra_role_assignment.v1)
   - Microsoft Graph: Application.Read.All (gates azure.entra_role_assignment.v1)
   - Azure Resource Manager: Reader role   (gates azure.storage_account_config.v1
-                                           + azure.aks_cluster_config.v1)
+                                           + azure.aks_cluster_config.v1
+                                           + azure.nsg_rules.v1)
 
 Auth: set AZURE_TENANT_ID + AZURE_CLIENT_ID + AZURE_CLIENT_SECRET (client-
 credentials), or pass --auth-mode managed-identity. The secret never appears in
@@ -105,6 +113,9 @@ a log line or an evidence record.`,
 			if !f.skipAKS && f.subscriptionID == "" {
 				return errors.New("--subscription-id is required for the AKS kind (or pass --skip-aks)")
 			}
+			if !f.skipNSG && f.subscriptionID == "" {
+				return errors.New("--subscription-id is required for the NSG kind (or pass --skip-nsg)")
+			}
 			return resolveCommon()
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -119,9 +130,11 @@ a log line or an evidence record.`,
 	cmd.Flags().StringVar(&f.entraControl, "entra-control", "scf:IAC-21", "control_id to attach to azure.entra_role_assignment.v1 records")
 	cmd.Flags().StringVar(&f.storageControl, "storage-control", "scf:CRY-04", "control_id to attach to azure.storage_account_config.v1 records")
 	cmd.Flags().StringVar(&f.aksControl, "aks-control", "scf:CFG-02", "control_id to attach to azure.aks_cluster_config.v1 records")
+	cmd.Flags().StringVar(&f.nsgControl, "nsg-control", "scf:NET-04", "control_id to attach to azure.nsg_rules.v1 records")
 	cmd.Flags().BoolVar(&f.skipEntra, "skip-entra", false, "skip azure.entra_role_assignment.v1 pull")
 	cmd.Flags().BoolVar(&f.skipStorage, "skip-storage", false, "skip azure.storage_account_config.v1 pull")
 	cmd.Flags().BoolVar(&f.skipAKS, "skip-aks", false, "skip azure.aks_cluster_config.v1 pull")
+	cmd.Flags().BoolVar(&f.skipNSG, "skip-nsg", false, "skip azure.nsg_rules.v1 pull")
 	return cmd
 }
 
@@ -208,6 +221,27 @@ func doRun(ctx context.Context, f runFlags) error {
 			}
 			if err := pushOne(ctx, sdkClient, rec); err != nil {
 				return fmt.Errorf("push aks %s: %w", c.ClusterName, err)
+			}
+			pushed++
+		}
+	}
+
+	if !f.skipNSG {
+		token, err := acquireToken(ctx, cred, httpClient, nsg.ARMScope)
+		if err != nil {
+			return fmt.Errorf("arm token: %w", err)
+		}
+		groups, err := nsgScan(ctx, newNSGAPI(httpClient, f.subscriptionID, token), f.subscriptionID, nil)
+		if err != nil {
+			return fmt.Errorf("nsg inspect: %w", err)
+		}
+		for _, g := range groups {
+			rec, err := buildNSGRecord(g, f.environment, f.nsgControl)
+			if err != nil {
+				return fmt.Errorf("build nsg record %s: %w", g.NSGName, err)
+			}
+			if err := pushOne(ctx, sdkClient, rec); err != nil {
+				return fmt.Errorf("push nsg %s: %w", g.NSGName, err)
 			}
 			pushed++
 		}
@@ -388,6 +422,93 @@ func mapAKSResult(r aks.ConfigResult) evidencev1.Result {
 	case aks.ResultFail:
 		return evidencev1.Result_RESULT_FAIL
 	case aks.ResultInconclusive:
+		return evidencev1.Result_RESULT_INCONCLUSIVE
+	default:
+		return evidencev1.Result_RESULT_UNSPECIFIED
+	}
+}
+
+// buildNSGRecord maps one NSG's firewall-rule posture into an evidence record.
+// The payload carries RULE metadata ONLY — never flow logs, packet captures, or
+// traffic contents (the nsg.GroupConfig / nsg.SecurityRule structs have no field
+// for such data; this builder cannot emit what it cannot read).
+func buildNSGRecord(g nsg.GroupConfig, env, controlID string) (*evidencev1.EvidenceRecord, error) {
+	now := g.ObservedAt.UTC().Truncate(time.Hour)
+	pm := map[string]any{
+		"nsg_id":             g.NSGID,
+		"nsg_name":           g.NSGName,
+		"subscription_id":    g.SubscriptionID,
+		"associated_subnets": g.AssociatedSubnets,
+		"associated_nics":    g.AssociatedNICs,
+		"rules":              nsgRulePayload(g.Rules),
+	}
+	if g.ResourceGroup != "" {
+		pm["resource_group"] = g.ResourceGroup
+	}
+	if g.Location != "" {
+		pm["location"] = g.Location
+	}
+	payload, err := structpb.NewStruct(pm)
+	if err != nil {
+		return nil, err
+	}
+	return &evidencev1.EvidenceRecord{
+		IdempotencyKey: idem.NSGRulesKey(g.NSGID, now),
+		EvidenceKind:   "azure.nsg_rules.v1",
+		SchemaVersion:  "1.0.0",
+		ControlId:      controlID,
+		Scope: []*evidencev1.ScopeDimension{
+			{Key: "cloud_account", Values: []string{"azure:" + g.SubscriptionID}},
+			{Key: "environment", Values: []string{env}},
+		},
+		ObservedAt: timestamppb.New(now),
+		Result:     mapNSGResult(g.Result),
+		Payload:    payload,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "connector",
+			ActorId:   actorID("nsg"),
+		},
+	}, nil
+}
+
+// nsgRulePayload renders the security-rule list into a structpb-compatible
+// []any. RULE metadata only — empty optional fields are omitted from each item.
+func nsgRulePayload(rules []nsg.SecurityRule) []any {
+	out := make([]any, 0, len(rules))
+	for _, r := range rules {
+		item := map[string]any{
+			"name":      r.Name,
+			"direction": r.Direction,
+			"access":    r.Access,
+		}
+		if r.Protocol != "" {
+			item["protocol"] = r.Protocol
+		}
+		item["priority"] = r.Priority
+		if r.SourceAddressPrefix != "" {
+			item["source_address_prefix"] = r.SourceAddressPrefix
+		}
+		if r.DestinationAddressPrefix != "" {
+			item["destination_address_prefix"] = r.DestinationAddressPrefix
+		}
+		if r.SourcePortRange != "" {
+			item["source_port_range"] = r.SourcePortRange
+		}
+		if r.DestinationPortRange != "" {
+			item["destination_port_range"] = r.DestinationPortRange
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func mapNSGResult(r nsg.ConfigResult) evidencev1.Result {
+	switch r {
+	case nsg.ResultPass:
+		return evidencev1.Result_RESULT_PASS
+	case nsg.ResultFail:
+		return evidencev1.Result_RESULT_FAIL
+	case nsg.ResultInconclusive:
 		return evidencev1.Result_RESULT_INCONCLUSIVE
 	default:
 		return evidencev1.Result_RESULT_UNSPECIFIED

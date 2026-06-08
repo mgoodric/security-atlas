@@ -20,6 +20,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/aks"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/azureauth"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/entra"
+	"github.com/mgoodric/security-atlas/connectors/azure/internal/nsg"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/storage"
 )
 
@@ -44,6 +45,7 @@ type seamOverrides struct {
 	entraPull   func(ctx context.Context, api entra.API, tenantID string, now func() time.Time) ([]entra.Assignment, error)
 	storageScan func(ctx context.Context, api storage.API, subscriptionID string, now func() time.Time) ([]storage.AccountConfig, error)
 	aksScan     func(ctx context.Context, api aks.API, subscriptionID string, now func() time.Time) ([]aks.ClusterConfig, error)
+	nsgScan     func(ctx context.Context, api nsg.API, subscriptionID string, now func() time.Time) ([]nsg.GroupConfig, error)
 	acquire     func(ctx context.Context, cred azureauth.Credential, hc *http.Client, scope string) (string, error)
 	newClient   func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error)
 }
@@ -81,6 +83,17 @@ func installSeams(t *testing.T, o seamOverrides) {
 	if o.aksScan != nil {
 		aksScan = o.aksScan
 	}
+	// nsgScan: default to a no-op empty pull so an unset NSG seam never reaches
+	// the live ARM client (the NSG kind is on-by-default). Tests that exercise
+	// the NSG path override this.
+	prevNSG := nsgScan
+	nsgScan = func(_ context.Context, _ nsg.API, _ string, _ func() time.Time) ([]nsg.GroupConfig, error) {
+		return nil, nil
+	}
+	t.Cleanup(func() { nsgScan = prevNSG })
+	if o.nsgScan != nil {
+		nsgScan = o.nsgScan
+	}
 	if o.newClient != nil {
 		prev := newSDKClient
 		newSDKClient = o.newClient
@@ -103,6 +116,7 @@ func okFlags() runFlags {
 		entraControl:   "scf:IAC-21",
 		storageControl: "scf:CRY-04",
 		aksControl:     "scf:CFG-02",
+		nsgControl:     "scf:NET-04",
 	}
 }
 
@@ -130,14 +144,19 @@ func TestDoRun_PushSuccessAllKinds(t *testing.T) {
 				{ClusterID: "/sub/c", ClusterName: "c", SubscriptionID: sub, RBACEnabled: true, NetworkPolicy: "calico", PrivateCluster: true, AuthorizedIPRanges: true, Result: aks.ResultPass, ObservedAt: time.Now().UTC()},
 			}, nil
 		},
+		nsgScan: func(_ context.Context, _ nsg.API, sub string, _ func() time.Time) ([]nsg.GroupConfig, error) {
+			return []nsg.GroupConfig{
+				{NSGID: "/sub/nsg", NSGName: "nsg", SubscriptionID: sub, Rules: []nsg.SecurityRule{{Name: "r", Direction: "inbound", Access: "deny"}}, Result: nsg.ResultPass, ObservedAt: time.Now().UTC()},
+			}, nil
+		},
 		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
 	})
 
 	if err := doRun(context.Background(), okFlags()); err != nil {
 		t.Fatalf("doRun: %v", err)
 	}
-	if fake.pushed != 3 {
-		t.Errorf("pushed = %d; want 3 (one entra + one storage + one aks)", fake.pushed)
+	if fake.pushed != 4 {
+		t.Errorf("pushed = %d; want 4 (one entra + one storage + one aks + one nsg)", fake.pushed)
 	}
 	if !fake.closeCalled {
 		t.Error("Close not called")
@@ -214,6 +233,82 @@ func TestDoRun_AKSPushError(t *testing.T) {
 	err := doRun(context.Background(), f)
 	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "push aks ") {
 		t.Fatalf("want wrapped push aks error; got %v", err)
+	}
+}
+
+func TestDoRun_SkipNSG(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		storageScan: func(_ context.Context, _ storage.API, sub string, _ func() time.Time) ([]storage.AccountConfig, error) {
+			return []storage.AccountConfig{{AccountID: "/a", AccountName: "a", SubscriptionID: sub, Result: storage.ResultPass, ObservedAt: time.Now().UTC()}}, nil
+		},
+		nsgScan: func(_ context.Context, _ nsg.API, _ string, _ func() time.Time) ([]nsg.GroupConfig, error) {
+			t.Fatal("nsgScan must not be called when --skip-nsg is set")
+			return nil, nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipEntra = true
+	f.skipAKS = true
+	f.skipNSG = true
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 1 {
+		t.Errorf("pushed = %d; want 1 (storage only)", fake.pushed)
+	}
+}
+
+func TestDoRun_NSGInspectError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("arm 403")
+	installSeams(t, seamOverrides{
+		nsgScan: func(_ context.Context, _ nsg.API, _ string, _ func() time.Time) ([]nsg.GroupConfig, error) {
+			return nil, sentinel
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	f := okFlags()
+	f.skipEntra = true
+	f.skipStorage = true
+	f.skipAKS = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "nsg inspect: ") {
+		t.Fatalf("want wrapped nsg inspect error; got %v", err)
+	}
+}
+
+func TestDoRun_NSGPushError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("push rejected")
+	fake := &fakeSDKClient{pushErr: sentinel}
+	installSeams(t, seamOverrides{
+		nsgScan: func(_ context.Context, _ nsg.API, sub string, _ func() time.Time) ([]nsg.GroupConfig, error) {
+			return []nsg.GroupConfig{{NSGID: "/nsg", NSGName: "nsg", SubscriptionID: sub, Rules: []nsg.SecurityRule{{Name: "r", Direction: "inbound", Access: "deny"}}, Result: nsg.ResultPass, ObservedAt: time.Now().UTC()}}, nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipEntra = true
+	f.skipStorage = true
+	f.skipAKS = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "push nsg ") {
+		t.Fatalf("want wrapped push nsg error; got %v", err)
 	}
 }
 

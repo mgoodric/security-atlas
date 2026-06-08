@@ -26,10 +26,12 @@ const ConnectorName = "azure-connector"
 //   - azure.entra_role_assignment.v1   (Microsoft Graph, pull)        — slice 486
 //   - azure.storage_account_config.v1  (Azure Resource Manager, pull) — slice 486
 //   - azure.aks_cluster_config.v1      (Azure Resource Manager, pull) — slice 519
+//   - azure.nsg_rules.v1               (Azure Resource Manager, pull) — slice 520
 var SupportedKinds = []string{
 	"azure.entra_role_assignment.v1",
 	"azure.storage_account_config.v1",
 	"azure.aks_cluster_config.v1",
+	"azure.nsg_rules.v1",
 }
 
 // PullInterval names the connector's pull cadence HONESTLY (P0-486-6). The
@@ -126,10 +128,11 @@ func sdkOpts() []sdk.Option {
 
 const longDescription = `security-atlas Azure connector
 
-Emits three evidence kinds:
+Emits four evidence kinds:
   - azure.entra_role_assignment.v1   (run subcommand, pull — Microsoft Graph)
   - azure.storage_account_config.v1  (run subcommand, pull — Azure Resource Manager)
   - azure.aks_cluster_config.v1      (run subcommand, pull — Azure Resource Manager)
+  - azure.nsg_rules.v1               (run subcommand, pull — Azure Resource Manager)
 
 Profile: pull. Each invocation is one bounded read-and-push pass on an
 operator-scheduled cadence (recommended 24h). This is NOT continuous

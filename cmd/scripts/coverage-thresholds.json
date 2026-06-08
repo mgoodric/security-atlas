@@ -82,6 +82,7 @@
     "connectors/azure/internal/azureauth": 93,
     "connectors/azure/internal/entra": 91,
     "connectors/azure/internal/idem": 98,
+    "connectors/azure/internal/nsg": 90,
     "connectors/azure/internal/storage": 91,
     "connectors/github/cmd/atlas-github": 84,
     "connectors/github/internal/githubauth": 88,

@@ -22,6 +22,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/aks"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/entra"
+	"github.com/mgoodric/security-atlas/connectors/azure/internal/nsg"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/storage"
 )
 
@@ -269,8 +270,28 @@ func TestMapAKSResult(t *testing.T) {
 	}
 }
 
+func TestMapNSGResult(t *testing.T) {
+	cases := []struct {
+		name string
+		in   nsg.ConfigResult
+		want evidencev1.Result
+	}{
+		{"pass", nsg.ResultPass, evidencev1.Result_RESULT_PASS},
+		{"fail", nsg.ResultFail, evidencev1.Result_RESULT_FAIL},
+		{"inconclusive", nsg.ResultInconclusive, evidencev1.Result_RESULT_INCONCLUSIVE},
+		{"default", nsg.ConfigResult("unknown"), evidencev1.Result_RESULT_UNSPECIFIED},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mapNSGResult(tc.in); got != tc.want {
+				t.Errorf("mapNSGResult(%q) = %v; want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestActorID_Shape(t *testing.T) {
-	for _, svc := range []string{"entra", "storage", "aks"} {
+	for _, svc := range []string{"entra", "storage", "aks", "nsg"} {
 		id := actorID(svc)
 		if !strings.HasPrefix(id, "connector:azure:"+svc+"@") {
 			t.Errorf("actorID(%q) = %q", svc, id)
@@ -446,6 +467,103 @@ func TestBuildAKSRecord_OmitsEmptyOptionals(t *testing.T) {
 	for _, k := range []string{"managed_identity", "local_accounts_disabled", "oidc_issuer_enabled", "node_pool_count"} {
 		if _, ok := pl[k]; !ok {
 			t.Errorf("boolean/count field %q must always be present", k)
+		}
+	}
+}
+
+func TestBuildNSGRecord_Shape(t *testing.T) {
+	g := nsg.GroupConfig{
+		NSGID: "/sub/nsg", NSGName: "nsg", SubscriptionID: "sub-1",
+		ResourceGroup: "rg", Location: "eastus",
+		AssociatedSubnets: 2, AssociatedNICs: 1,
+		Rules: []nsg.SecurityRule{
+			{Name: "allow-ssh-corp", Direction: "inbound", Access: "allow", Protocol: "tcp",
+				Priority: 100, SourceAddressPrefix: "203.0.113.0/24",
+				DestinationAddressPrefix: "*", SourcePortRange: "*", DestinationPortRange: "22"},
+		},
+		Result: nsg.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
+	}
+	rec, err := buildNSGRecord(g, "prod", "scf:NET-04")
+	if err != nil {
+		t.Fatalf("buildNSGRecord: %v", err)
+	}
+	if rec.EvidenceKind != "azure.nsg_rules.v1" {
+		t.Errorf("kind = %q", rec.EvidenceKind)
+	}
+	if rec.SchemaVersion != "1.0.0" {
+		t.Errorf("schema version = %q; want 1.0.0", rec.SchemaVersion)
+	}
+	if rec.Result != evidencev1.Result_RESULT_PASS {
+		t.Errorf("result = %v; want PASS", rec.Result)
+	}
+	if rec.IdempotencyKey == "" {
+		t.Error("empty idempotency key")
+	}
+	if !strings.HasPrefix(rec.GetSourceAttribution().GetActorId(), "connector:azure:nsg@") {
+		t.Errorf("nsg actor_id = %q", rec.GetSourceAttribution().GetActorId())
+	}
+	if got := scopeValue(rec.GetScope(), "cloud_account"); got != "azure:sub-1" {
+		t.Errorf("cloud_account = %q; want azure:sub-1", got)
+	}
+	if got := scopeValue(rec.GetScope(), "environment"); got != "prod" {
+		t.Errorf("environment = %q; want prod", got)
+	}
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{"nsg_id", "nsg_name", "subscription_id", "resource_group",
+		"location", "associated_subnets", "associated_nics", "rules"} {
+		if _, ok := pl[k]; !ok {
+			t.Errorf("payload missing %q; got %v", k, pl)
+		}
+	}
+	rules, ok := pl["rules"].([]any)
+	if !ok || len(rules) != 1 {
+		t.Fatalf("rules payload not a 1-item list: %v", pl["rules"])
+	}
+	rule, _ := rules[0].(map[string]any)
+	for _, k := range []string{"name", "direction", "access", "protocol", "priority",
+		"source_address_prefix", "destination_address_prefix", "source_port_range",
+		"destination_port_range"} {
+		if _, ok := rule[k]; !ok {
+			t.Errorf("rule payload missing %q; got %v", k, rule)
+		}
+	}
+	// Structural over-collection guard at the record layer (P0-520-2): no
+	// payload key may name a flow-log / packet / traffic-content / secret surface.
+	for k := range pl {
+		low := strings.ToLower(k)
+		for _, banned := range []string{"flowlog", "flow_log", "packet", "capture", "payload", "traffic", "secret", "credential", "password", "token"} {
+			if strings.Contains(low, banned) {
+				t.Errorf("nsg payload key %q contains banned over-collection token %q", k, banned)
+			}
+		}
+	}
+}
+
+func TestBuildNSGRecord_OmitsEmptyOptionals(t *testing.T) {
+	g := nsg.GroupConfig{
+		NSGID: "/sub/nsg", NSGName: "nsg", SubscriptionID: "s",
+		Rules:  []nsg.SecurityRule{{Name: "deny", Direction: "inbound", Access: "deny"}},
+		Result: nsg.ResultPass, ObservedAt: time.Now().UTC(),
+	}
+	rec, _ := buildNSGRecord(g, "prod", "scf:NET-04")
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{"resource_group", "location"} {
+		if _, ok := pl[k]; ok {
+			t.Errorf("empty optional %q should be omitted", k)
+		}
+	}
+	// Association counts always present (0 is signal, not absence).
+	for _, k := range []string{"associated_subnets", "associated_nics"} {
+		if _, ok := pl[k]; !ok {
+			t.Errorf("count field %q must always be present", k)
+		}
+	}
+	// Rule with empty optionals omits them.
+	rules := pl["rules"].([]any)
+	rule := rules[0].(map[string]any)
+	for _, k := range []string{"protocol", "source_address_prefix", "destination_port_range"} {
+		if _, ok := rule[k]; ok {
+			t.Errorf("empty rule optional %q should be omitted", k)
 		}
 	}
 }

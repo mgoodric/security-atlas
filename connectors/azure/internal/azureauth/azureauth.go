@@ -146,11 +146,13 @@ func DocumentedPermissions() []Permission {
 			Surface: "Azure Resource Manager",
 			Name:    "Reader (built-in role)",
 			Access:  "Read",
-			// The SAME ARM Reader role gates both ARM-sourced kinds — slice 519
-			// adds the AKS managed-cluster kind WITHOUT widening the scope
-			// (P0-519-2). Reader cannot call listClusterAdminCredential
-			// (P0-519-1), so admin kubeconfig is unreachable by construction.
-			Gates: "azure.storage_account_config.v1 (storage account configuration) + azure.aks_cluster_config.v1 (AKS managed-cluster configuration)",
+			// The SAME ARM Reader role gates every ARM-sourced kind — slice 519
+			// added the AKS managed-cluster kind and slice 520 adds the NSG
+			// firewall-rule kind WITHOUT widening the scope (P0-519-2 /
+			// P0-520-1). Reader cannot call listClusterAdminCredential
+			// (P0-519-1) and cannot mutate a network resource (P0-520-3), so
+			// admin kubeconfig and rule mutation are unreachable by construction.
+			Gates: "azure.storage_account_config.v1 (storage account configuration) + azure.aks_cluster_config.v1 (AKS managed-cluster configuration) + azure.nsg_rules.v1 (NSG firewall-rule posture)",
 		},
 	}
 }
