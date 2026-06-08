@@ -130,6 +130,66 @@ export async function setEmailChannelOptIn(
   return (await res.json()) as EmailChannelOptIn;
 }
 
+// ===== Slice 584 — /v1/me/{slack,webhook}-channel (master opt-ins) =====
+
+// ChannelOptIn is the wire shape for a per-user master channel opt-in
+// toggle. Identical to EmailChannelOptIn; the slice-543 Slack + webhook
+// routes return {enabled} just like the slice-445 email route. Default is
+// opted-OUT server-side (P0-543-3). The channel target (Slack URL /
+// webhook URL / tokens) is OPERATOR-configured env and is NEVER carried
+// on this wire (P0-543-2 / SSRF) — only the boolean opt-in flips.
+export type ChannelOptIn = { enabled: boolean };
+
+async function getChannelOptIn(path: string): Promise<ChannelOptIn> {
+  const res = await fetch(path, { cache: "no-store" });
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as ChannelOptIn;
+}
+
+async function setChannelOptIn(
+  path: string,
+  enabled: boolean,
+): Promise<ChannelOptIn> {
+  const res = await fetch(path, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* body not JSON */
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as ChannelOptIn;
+}
+
+export async function getSlackChannelOptIn(): Promise<ChannelOptIn> {
+  return getChannelOptIn(`/api/me/slack-channel`);
+}
+
+export async function setSlackChannelOptIn(
+  enabled: boolean,
+): Promise<ChannelOptIn> {
+  return setChannelOptIn(`/api/me/slack-channel`, enabled);
+}
+
+export async function getWebhookChannelOptIn(): Promise<ChannelOptIn> {
+  return getChannelOptIn(`/api/me/webhook-channel`);
+}
+
+export async function setWebhookChannelOptIn(
+  enabled: boolean,
+): Promise<ChannelOptIn> {
+  return setChannelOptIn(`/api/me/webhook-channel`, enabled);
+}
+
 export async function patchMyPreferences(
   partial: MePreferences,
 ): Promise<MePreferences> {

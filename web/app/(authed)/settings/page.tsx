@@ -94,6 +94,8 @@ import {
   getEmailChannelOptIn,
   getMe,
   getMyPreferences,
+  getSlackChannelOptIn,
+  getWebhookChannelOptIn,
   listMySessions,
   MePreferences,
   MeProfile,
@@ -102,6 +104,8 @@ import {
   patchMyPreferences,
   revokeMySession,
   setEmailChannelOptIn,
+  setSlackChannelOptIn,
+  setWebhookChannelOptIn,
 } from "@/lib/api/me";
 import { applyThemeClass } from "@/lib/theme-class";
 
@@ -1041,6 +1045,27 @@ function NotificationsSection() {
                 opted-OUT (P0-445-7). Gates whether the per-event email
                 column actually reaches the inbox. */}
             <EmailChannelMasterToggle />
+            {/* Slice 584: master Slack + webhook opt-ins, mirroring the
+                email toggle over the slice-543 routes. Default opted-OUT
+                (P0-543-3). The channel target is OPERATOR-configured env,
+                never user-supplied (P0-543-2 / SSRF) — these are opt-in
+                booleans only, no URL/token field. */}
+            <ChannelMasterToggle
+              testidPrefix="settings-slack-channel"
+              label="Slack delivery"
+              description="Send a daily digest of your unread notifications to the operator-configured Slack channel. Off by default; the message carries summary counts and a link back into the app, never the notification details."
+              queryKey="settings-slack-channel"
+              getOptIn={getSlackChannelOptIn}
+              setOptIn={setSlackChannelOptIn}
+            />
+            <ChannelMasterToggle
+              testidPrefix="settings-webhook-channel"
+              label="Webhook delivery"
+              description="Send a daily digest of your unread notifications to the operator-configured webhook endpoint. Off by default; the payload carries summary counts and a link back into the app, never the notification details."
+              queryKey="settings-webhook-channel"
+              getOptIn={getWebhookChannelOptIn}
+              setOptIn={setWebhookChannelOptIn}
+            />
             {NOTIF_EVENTS.map((ev) => (
               <NotificationRow
                 key={ev.key}
@@ -1147,6 +1172,65 @@ function EmailChannelMasterToggle() {
           onChange={(e) => optInMut.mutate(e.target.checked)}
           className="h-4 w-4"
           data-testid="settings-email-channel-toggle"
+        />
+        {enabled ? "on" : "off"}
+      </label>
+    </div>
+  );
+}
+
+// Slice 584: a generic master channel opt-in toggle, parameterized over
+// the channel's get/set fetchers. Mirrors EmailChannelMasterToggle exactly
+// (same fail-closed display + disabled-while-pending shape) so the Slack +
+// webhook rows behave identically to the email row. Default opted-OUT
+// (P0-543-3). The channel target is operator-configured env, never
+// user-supplied (P0-543-2) — this is a boolean toggle, not a URL field.
+function ChannelMasterToggle({
+  testidPrefix,
+  label,
+  description,
+  queryKey,
+  getOptIn,
+  setOptIn,
+}: {
+  testidPrefix: string;
+  label: string;
+  description: string;
+  queryKey: string;
+  getOptIn: () => Promise<{ enabled: boolean }>;
+  setOptIn: (enabled: boolean) => Promise<{ enabled: boolean }>;
+}) {
+  const qc = useQueryClient();
+  const optInQuery = useQuery({
+    queryKey: [queryKey],
+    queryFn: getOptIn,
+  });
+  const optInMut = useMutation({
+    mutationFn: setOptIn,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [queryKey] });
+    },
+  });
+  // Default to false while loading and on error (fail-closed display):
+  // never imply the user is opted in when we are unsure.
+  const enabled = optInQuery.data?.enabled === true;
+  return (
+    <div
+      className="flex items-start justify-between gap-3 py-3"
+      data-testid={`${testidPrefix}-toggle-row`}
+    >
+      <div>
+        <div className="text-sm font-medium">{label}</div>
+        <div className="text-xs text-muted-foreground">{description}</div>
+      </div>
+      <label className="flex items-center gap-1.5 text-xs">
+        <input
+          type="checkbox"
+          checked={enabled}
+          disabled={optInQuery.isLoading || optInMut.isPending}
+          onChange={(e) => optInMut.mutate(e.target.checked)}
+          className="h-4 w-4"
+          data-testid={`${testidPrefix}-toggle`}
         />
         {enabled ? "on" : "off"}
       </label>
