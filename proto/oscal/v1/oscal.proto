@@ -66,6 +66,22 @@ service OscalBridgeService {
   // returned. Caps (document size, resolved-control count, single import
   // level) bound the expansion-attack surface (threat-model D / AC-3).
   rpc ImportProfile(ImportProfileRequest) returns (ImportProfileResponse);
+
+  // ImportComponentDefinition deserializes an inbound OSCAL
+  // `component-definition` JSON document via compliance-trestle, validates it
+  // against OSCAL v1.1.x, and returns a normalized projection of the defined
+  // components + their implemented-requirements — the VENDOR'S
+  // control-implementation CLAIMS (slice 512). A component-definition is the
+  // vendor-side artifact: a product vendor ships it to assert "this product
+  // implements control X this way". The Go side persists each
+  // implemented-requirement as a vendor-attributed CLAIM (NOT
+  // platform-verified evidence; never auto-satisfies a control — the
+  // load-bearing P0-512-1). Like ImportCatalog the bridge NEVER dereferences
+  // any `href` / external resource the document references (P0-512-2 /
+  // threat-model I): links / back-matter resources are opaque metadata. A
+  // document-size cap + component-count + requirement-count cap bound the
+  // expansion-attack surface (threat-model D / AC-3).
+  rpc ImportComponentDefinition(ImportComponentDefinitionRequest) returns (ImportComponentDefinitionResponse);
 }
 
 // ----- shared -----
@@ -358,5 +374,68 @@ message ImportProfileResponse {
   // The profile's declared metadata title (echoed for provenance / display).
   string profile_title = 5;
   // Echo of the request source_label.
+  string source_label = 6;
+}
+
+// ----- component-definition import (ingest — slice 512) -----
+
+message ImportComponentDefinitionRequest {
+  // The raw inbound OSCAL component-definition JSON document bytes. The
+  // bridge parses these via compliance-trestle; it does NOT fetch any href
+  // the document references (P0-512-2).
+  bytes oscal_json = 1;
+  // Operator-declared source label, typically the vendor / product name
+  // (e.g. "Acme Cloud Platform"). Carried into the provenance record on the
+  // Go side; the bridge echoes it back.
+  string source_label = 2;
+}
+
+// VendorClaim is one implemented-requirement extracted from a component:
+// the vendor's ASSERTION that the component implements a specific control.
+// It is a CLAIM, never platform-verified evidence (P0-512-1). control_id is
+// the OSCAL `control-id` the requirement targets; statement is the vendor's
+// implementation narrative (flattened from the requirement description +
+// statement prose). No href / external resource is resolved.
+message VendorClaim {
+  // The OSCAL control-id this implemented-requirement targets.
+  string control_id = 1;
+  // The vendor's implementation narrative for this control (the requirement
+  // description + flattened statement prose).
+  string statement = 2;
+  // The implemented-requirement's OSCAL uuid (provenance / de-dup anchor),
+  // echoed verbatim. Empty if the document omitted it.
+  string requirement_uuid = 3;
+}
+
+// VendorComponent is one defined-component from a component-definition plus
+// the control-implementation claims it asserts. A component is a discrete
+// product / service the vendor describes (type e.g. "software", "service").
+message VendorComponent {
+  // The component's OSCAL uuid, echoed verbatim (provenance anchor).
+  string component_uuid = 1;
+  // The OSCAL component `type` (e.g. "software", "service", "hardware").
+  string component_type = 2;
+  // The component title (the product / service name).
+  string title = 3;
+  // The component description.
+  string description = 4;
+  // The vendor's implemented-requirement claims for this component.
+  repeated VendorClaim claims = 5;
+}
+
+message ImportComponentDefinitionResponse {
+  // True when the document deserialized + validated as an OSCAL v1.1.x
+  // component-definition. When false, components is empty and errors is set.
+  bool valid = 1;
+  // Human-readable validation errors when valid=false (or a size/cap
+  // rejection message).
+  repeated string errors = 2;
+  // The normalized component projection (empty when valid=false).
+  repeated VendorComponent components = 3;
+  // The component-definition's declared OSCAL version (echoed for provenance).
+  string oscal_version = 4;
+  // The component-definition metadata title (echoed for provenance/display).
+  string component_definition_title = 5;
+  // Echo of the request source_label (the vendor/product label).
   string source_label = 6;
 }

@@ -69,3 +69,58 @@ RETURNING *;
 SELECT * FROM imported_catalogs
 WHERE tenant_id = $1 AND kind = 'profile'
 ORDER BY imported_at DESC, id ASC;
+
+-- ===== slice 512: component-definition import (vendor-claim ingest) =====
+
+-- name: InsertImportedComponentDefinition :one
+-- Create one imported-COMPONENT-DEFINITION provenance row: source
+-- 'oscal-component-import', kind 'component_definition'. The vendor/product
+-- label rides in source_label and the document title in catalog_title; the
+-- per-component + per-claim rows live in imported_components +
+-- imported_component_claims (slice-512 D1/D2). control_count carries the
+-- TOTAL vendor-claim count across all components (for provenance display).
+INSERT INTO imported_catalogs
+    (id, tenant_id, source, kind, imported_by, source_sha256, source_label,
+     oscal_version, catalog_title, control_count)
+VALUES ($1, $2, 'oscal-component-import', 'component_definition', $3, $4, $5, $6, $7, $8)
+RETURNING *;
+
+-- name: ListImportedComponentDefinitions :many
+-- Enumerate every imported component-definition for the tenant, most recent
+-- first (index-served by idx_imported_catalogs_tenant_components).
+SELECT * FROM imported_catalogs
+WHERE tenant_id = $1 AND kind = 'component_definition'
+ORDER BY imported_at DESC, id ASC;
+
+-- name: InsertImportedComponent :one
+-- Append one defined-component for an imported component-definition. The
+-- (imported_catalog_id, component_uuid) UNIQUE constraint rejects a duplicate
+-- component within one import.
+INSERT INTO imported_components
+    (id, tenant_id, imported_catalog_id, component_uuid, component_type, title, description)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING *;
+
+-- name: InsertImportedComponentClaim :one
+-- Append one vendor-attributed CLAIM (an implemented-requirement) mapped (or
+-- flagged NULL for mapping) to an SCF anchor. is_vendor_claim defaults TRUE
+-- and claim_status defaults 'asserted' (the table defaults) — the import never
+-- writes anything else (P0-512-1).
+INSERT INTO imported_component_claims
+    (id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING *;
+
+-- name: ListImportedComponentsForDefinition :many
+-- Every defined-component for one imported component-definition, ordered for
+-- stable rendering.
+SELECT * FROM imported_components
+WHERE tenant_id = $1 AND imported_catalog_id = $2
+ORDER BY title ASC, component_uuid ASC;
+
+-- name: ListImportedComponentClaims :many
+-- Every vendor claim for one imported component, ordered for stable
+-- rendering.
+SELECT * FROM imported_component_claims
+WHERE tenant_id = $1 AND imported_component_id = $2
+ORDER BY control_id ASC, requirement_uuid ASC;

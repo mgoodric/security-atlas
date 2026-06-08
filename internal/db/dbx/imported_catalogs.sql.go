@@ -197,6 +197,153 @@ func (q *Queries) InsertImportedCatalogControl(ctx context.Context, arg InsertIm
 	return i, err
 }
 
+const insertImportedComponent = `-- name: InsertImportedComponent :one
+INSERT INTO imported_components
+    (id, tenant_id, imported_catalog_id, component_uuid, component_type, title, description)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, tenant_id, imported_catalog_id, component_uuid, component_type, title, description, created_at
+`
+
+type InsertImportedComponentParams struct {
+	ID                pgtype.UUID `json:"id"`
+	TenantID          pgtype.UUID `json:"tenant_id"`
+	ImportedCatalogID pgtype.UUID `json:"imported_catalog_id"`
+	ComponentUuid     string      `json:"component_uuid"`
+	ComponentType     string      `json:"component_type"`
+	Title             string      `json:"title"`
+	Description       string      `json:"description"`
+}
+
+// Append one defined-component for an imported component-definition. The
+// (imported_catalog_id, component_uuid) UNIQUE constraint rejects a duplicate
+// component within one import.
+func (q *Queries) InsertImportedComponent(ctx context.Context, arg InsertImportedComponentParams) (ImportedComponent, error) {
+	row := q.db.QueryRow(ctx, insertImportedComponent,
+		arg.ID,
+		arg.TenantID,
+		arg.ImportedCatalogID,
+		arg.ComponentUuid,
+		arg.ComponentType,
+		arg.Title,
+		arg.Description,
+	)
+	var i ImportedComponent
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ImportedCatalogID,
+		&i.ComponentUuid,
+		&i.ComponentType,
+		&i.Title,
+		&i.Description,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const insertImportedComponentClaim = `-- name: InsertImportedComponentClaim :one
+INSERT INTO imported_component_claims
+    (id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at
+`
+
+type InsertImportedComponentClaimParams struct {
+	ID                  pgtype.UUID `json:"id"`
+	TenantID            pgtype.UUID `json:"tenant_id"`
+	ImportedComponentID pgtype.UUID `json:"imported_component_id"`
+	ControlID           string      `json:"control_id"`
+	Statement           string      `json:"statement"`
+	RequirementUuid     string      `json:"requirement_uuid"`
+	ScfAnchorID         *string     `json:"scf_anchor_id"`
+}
+
+// Append one vendor-attributed CLAIM (an implemented-requirement) mapped (or
+// flagged NULL for mapping) to an SCF anchor. is_vendor_claim defaults TRUE
+// and claim_status defaults 'asserted' (the table defaults) — the import never
+// writes anything else (P0-512-1).
+func (q *Queries) InsertImportedComponentClaim(ctx context.Context, arg InsertImportedComponentClaimParams) (ImportedComponentClaim, error) {
+	row := q.db.QueryRow(ctx, insertImportedComponentClaim,
+		arg.ID,
+		arg.TenantID,
+		arg.ImportedComponentID,
+		arg.ControlID,
+		arg.Statement,
+		arg.RequirementUuid,
+		arg.ScfAnchorID,
+	)
+	var i ImportedComponentClaim
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ImportedComponentID,
+		&i.ControlID,
+		&i.Statement,
+		&i.RequirementUuid,
+		&i.ScfAnchorID,
+		&i.IsVendorClaim,
+		&i.ClaimStatus,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const insertImportedComponentDefinition = `-- name: InsertImportedComponentDefinition :one
+
+INSERT INTO imported_catalogs
+    (id, tenant_id, source, kind, imported_by, source_sha256, source_label,
+     oscal_version, catalog_title, control_count)
+VALUES ($1, $2, 'oscal-component-import', 'component_definition', $3, $4, $5, $6, $7, $8)
+RETURNING id, tenant_id, source, imported_by, source_sha256, source_label, oscal_version, catalog_title, control_count, imported_at, kind, profile_title
+`
+
+type InsertImportedComponentDefinitionParams struct {
+	ID           pgtype.UUID `json:"id"`
+	TenantID     pgtype.UUID `json:"tenant_id"`
+	ImportedBy   string      `json:"imported_by"`
+	SourceSha256 string      `json:"source_sha256"`
+	SourceLabel  string      `json:"source_label"`
+	OscalVersion string      `json:"oscal_version"`
+	CatalogTitle string      `json:"catalog_title"`
+	ControlCount int32       `json:"control_count"`
+}
+
+// ===== slice 512: component-definition import (vendor-claim ingest) =====
+// Create one imported-COMPONENT-DEFINITION provenance row: source
+// 'oscal-component-import', kind 'component_definition'. The vendor/product
+// label rides in source_label and the document title in catalog_title; the
+// per-component + per-claim rows live in imported_components +
+// imported_component_claims (slice-512 D1/D2). control_count carries the
+// TOTAL vendor-claim count across all components (for provenance display).
+func (q *Queries) InsertImportedComponentDefinition(ctx context.Context, arg InsertImportedComponentDefinitionParams) (ImportedCatalog, error) {
+	row := q.db.QueryRow(ctx, insertImportedComponentDefinition,
+		arg.ID,
+		arg.TenantID,
+		arg.ImportedBy,
+		arg.SourceSha256,
+		arg.SourceLabel,
+		arg.OscalVersion,
+		arg.CatalogTitle,
+		arg.ControlCount,
+	)
+	var i ImportedCatalog
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Source,
+		&i.ImportedBy,
+		&i.SourceSha256,
+		&i.SourceLabel,
+		&i.OscalVersion,
+		&i.CatalogTitle,
+		&i.ControlCount,
+		&i.ImportedAt,
+		&i.Kind,
+		&i.ProfileTitle,
+	)
+	return i, err
+}
+
 const insertImportedProfile = `-- name: InsertImportedProfile :one
 
 INSERT INTO imported_catalogs
@@ -324,6 +471,133 @@ func (q *Queries) ListImportedCatalogs(ctx context.Context, tenantID pgtype.UUID
 			&i.ImportedAt,
 			&i.Kind,
 			&i.ProfileTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listImportedComponentClaims = `-- name: ListImportedComponentClaims :many
+SELECT id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at FROM imported_component_claims
+WHERE tenant_id = $1 AND imported_component_id = $2
+ORDER BY control_id ASC, requirement_uuid ASC
+`
+
+type ListImportedComponentClaimsParams struct {
+	TenantID            pgtype.UUID `json:"tenant_id"`
+	ImportedComponentID pgtype.UUID `json:"imported_component_id"`
+}
+
+// Every vendor claim for one imported component, ordered for stable
+// rendering.
+func (q *Queries) ListImportedComponentClaims(ctx context.Context, arg ListImportedComponentClaimsParams) ([]ImportedComponentClaim, error) {
+	rows, err := q.db.Query(ctx, listImportedComponentClaims, arg.TenantID, arg.ImportedComponentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ImportedComponentClaim
+	for rows.Next() {
+		var i ImportedComponentClaim
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ImportedComponentID,
+			&i.ControlID,
+			&i.Statement,
+			&i.RequirementUuid,
+			&i.ScfAnchorID,
+			&i.IsVendorClaim,
+			&i.ClaimStatus,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listImportedComponentDefinitions = `-- name: ListImportedComponentDefinitions :many
+SELECT id, tenant_id, source, imported_by, source_sha256, source_label, oscal_version, catalog_title, control_count, imported_at, kind, profile_title FROM imported_catalogs
+WHERE tenant_id = $1 AND kind = 'component_definition'
+ORDER BY imported_at DESC, id ASC
+`
+
+// Enumerate every imported component-definition for the tenant, most recent
+// first (index-served by idx_imported_catalogs_tenant_components).
+func (q *Queries) ListImportedComponentDefinitions(ctx context.Context, tenantID pgtype.UUID) ([]ImportedCatalog, error) {
+	rows, err := q.db.Query(ctx, listImportedComponentDefinitions, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ImportedCatalog
+	for rows.Next() {
+		var i ImportedCatalog
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Source,
+			&i.ImportedBy,
+			&i.SourceSha256,
+			&i.SourceLabel,
+			&i.OscalVersion,
+			&i.CatalogTitle,
+			&i.ControlCount,
+			&i.ImportedAt,
+			&i.Kind,
+			&i.ProfileTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listImportedComponentsForDefinition = `-- name: ListImportedComponentsForDefinition :many
+SELECT id, tenant_id, imported_catalog_id, component_uuid, component_type, title, description, created_at FROM imported_components
+WHERE tenant_id = $1 AND imported_catalog_id = $2
+ORDER BY title ASC, component_uuid ASC
+`
+
+type ListImportedComponentsForDefinitionParams struct {
+	TenantID          pgtype.UUID `json:"tenant_id"`
+	ImportedCatalogID pgtype.UUID `json:"imported_catalog_id"`
+}
+
+// Every defined-component for one imported component-definition, ordered for
+// stable rendering.
+func (q *Queries) ListImportedComponentsForDefinition(ctx context.Context, arg ListImportedComponentsForDefinitionParams) ([]ImportedComponent, error) {
+	rows, err := q.db.Query(ctx, listImportedComponentsForDefinition, arg.TenantID, arg.ImportedCatalogID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ImportedComponent
+	for rows.Next() {
+		var i ImportedComponent
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ImportedCatalogID,
+			&i.ComponentUuid,
+			&i.ComponentType,
+			&i.Title,
+			&i.Description,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

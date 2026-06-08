@@ -38,6 +38,14 @@ type BridgeClient interface {
 	// import.href references ONLY against the supplied catalogs and NEVER
 	// dereferences an external href (P0-511-1).
 	ImportProfile(ctx context.Context, profileJSON []byte, catalogs [][]byte, sourceLabel string) (*oscalv1.ImportProfileResponse, error)
+	// ImportComponentDefinition deserializes + validates an inbound OSCAL
+	// component-definition JSON document, returning a normalized projection of
+	// the defined components + their implemented-requirements (the vendor's
+	// control-implementation CLAIMS) — or a structured validation error in the
+	// response. The vendor-claim ingest direction of invariant #8 (slice 512).
+	// The bridge never dereferences any href the document references
+	// (P0-512-2) and asserts nothing about whether a claim is true.
+	ImportComponentDefinition(ctx context.Context, oscalJSON []byte, sourceLabel string) (*oscalv1.ImportComponentDefinitionResponse, error)
 	// Close releases the underlying gRPC connection.
 	Close() error
 }
@@ -133,6 +141,19 @@ func (b *grpcBridge) ImportProfile(ctx context.Context, profileJSON []byte, cata
 	resp, err := b.client.ImportProfile(ctx, &oscalv1.ImportProfileRequest{
 		ProfileJson: profileJSON,
 		Catalogs:    supplied,
+		SourceLabel: sourceLabel,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (b *grpcBridge) ImportComponentDefinition(ctx context.Context, oscalJSON []byte, sourceLabel string) (*oscalv1.ImportComponentDefinitionResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, bridgeRPCTimeout)
+	defer cancel()
+	resp, err := b.client.ImportComponentDefinition(ctx, &oscalv1.ImportComponentDefinitionRequest{
+		OscalJson:   oscalJSON,
 		SourceLabel: sourceLabel,
 	})
 	if err != nil {

@@ -1377,6 +1377,30 @@ type ImportedCatalogControl struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
+type ImportedComponent struct {
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	ImportedCatalogID pgtype.UUID        `json:"imported_catalog_id"`
+	ComponentUuid     string             `json:"component_uuid"`
+	ComponentType     string             `json:"component_type"`
+	Title             string             `json:"title"`
+	Description       string             `json:"description"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type ImportedComponentClaim struct {
+	ID                  pgtype.UUID        `json:"id"`
+	TenantID            pgtype.UUID        `json:"tenant_id"`
+	ImportedComponentID pgtype.UUID        `json:"imported_component_id"`
+	ControlID           string             `json:"control_id"`
+	Statement           string             `json:"statement"`
+	RequirementUuid     string             `json:"requirement_uuid"`
+	ScfAnchorID         *string            `json:"scf_anchor_id"`
+	IsVendorClaim       bool               `json:"is_vendor_claim"`
+	ClaimStatus         string             `json:"claim_status"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+}
+
 type LocalCredential struct {
 	UserID       pgtype.UUID        `json:"user_id"`
 	TenantID     pgtype.UUID        `json:"tenant_id"`

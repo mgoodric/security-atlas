@@ -1,0 +1,9 @@
+{
+  "component-definition": {
+    "uuid": "not-a-uuid",
+    "metadata": {
+      "title": "Malformed Component Definition"
+    },
+    "components": "this should be an array, not a string"
+  }
+}

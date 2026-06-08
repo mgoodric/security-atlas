@@ -1,0 +1,65 @@
+{
+  "component-definition": {
+    "uuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "metadata": {
+      "title": "Acme Cloud Platform Component Definition",
+      "last-modified": "2026-06-07T00:00:00+00:00",
+      "version": "1.0",
+      "oscal-version": "1.1.2"
+    },
+    "components": [
+      {
+        "uuid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "type": "service",
+        "title": "Acme Identity Service",
+        "description": "Acme's managed identity and access platform.",
+        "control-implementations": [
+          {
+            "uuid": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            "source": "#nist-800-53",
+            "description": "How Acme Identity Service implements access controls.",
+            "implemented-requirements": [
+              {
+                "uuid": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                "control-id": "IAC-06",
+                "description": "Acme enforces phishing-resistant MFA on every administrative session.",
+                "statements": [
+                  {
+                    "statement-id": "IAC-06_smt",
+                    "uuid": "11112222-3333-4444-8555-666677778888",
+                    "description": "FIDO2/WebAuthn is required for all privileged roles."
+                  }
+                ]
+              },
+              {
+                "uuid": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                "control-id": "ac-2",
+                "description": "Acme provisions and deprovisions accounts via SCIM."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "uuid": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        "type": "software",
+        "title": "Acme Audit Logger",
+        "description": "Acme's tamper-evident audit logging agent.",
+        "control-implementations": [
+          {
+            "uuid": "99990000-1111-4222-8333-444455556666",
+            "source": "#nist-800-53",
+            "description": "How Acme Audit Logger implements audit controls.",
+            "implemented-requirements": [
+              {
+                "uuid": "77778888-9999-4000-8111-222233334444",
+                "control-id": "au-2",
+                "description": "Acme Audit Logger records all security-relevant events with a content hash chain."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

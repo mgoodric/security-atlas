@@ -26,6 +26,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/oscal"
 	"github.com/mgoodric/security-atlas/internal/oscal/catalogimport"
+	"github.com/mgoodric/security-atlas/internal/oscal/componentimport"
 	"github.com/mgoodric/security-atlas/internal/oscal/profileimport"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -63,6 +64,11 @@ func main() {
 	case "import-profile":
 		if err := runImportProfile(args[1:]); err != nil {
 			fmt.Fprintf(os.Stderr, "%s: import-profile: %v\n", binary, err)
+			os.Exit(1)
+		}
+	case "import-component-definition":
+		if err := runImportComponentDefinition(args[1:]); err != nil {
+			fmt.Fprintf(os.Stderr, "%s: import-component-definition: %v\n", binary, err)
 			os.Exit(1)
 		}
 	default:
@@ -111,12 +117,24 @@ Commands:
                     --imported-by  operator id recorded as provenance (default atlas-oscal)
                     --role         caller role: grc_engineer (default) or admin
                     --json         emit a JSON report instead of text
+  import-component-definition <file> [flags]
+                  import an inbound OSCAL component-definition JSON document
+                  (slice 512) — a vendor's control-implementation CLAIMS.
+                  Validates it via the bridge, persists each
+                  implemented-requirement as a provenance-labeled,
+                  VENDOR-ATTRIBUTED claim mapped requirement -> SCF anchor. A
+                  claim is the vendor's ASSERTION; it does NOT auto-satisfy a
+                  control — operator review (existing) is required to act on it.
+                  Flags:
+                    --dsn         Postgres DSN (atlas_app role); env DATABASE_URL_APP
+                    --tenant-id   tenant UUID to import under (required)
+                    --bridge-addr oscal-bridge gRPC address (default %s)
+                    --source-label declared vendor / product label (e.g. "Acme Cloud")
+                    --imported-by  operator id recorded as provenance (default atlas-oscal)
+                    --role         caller role: grc_engineer (default) or admin
+                    --json         emit a JSON report instead of text
   help            show this message
-
-  NOTE: component-definition import is a FOLLOW-ON slice (see docs/issues
-  for 512); this binary imports CATALOGS (import-catalog) and PROFILES
-  (import-profile) only.
-`, binary, defaultBridgeAddr, defaultBridgeAddr, defaultBridgeAddr, defaultBridgeAddr)
+`, binary, defaultBridgeAddr, defaultBridgeAddr, defaultBridgeAddr, defaultBridgeAddr, defaultBridgeAddr)
 }
 
 // splitPositional separates the single positional <file> argument from the
@@ -398,6 +416,116 @@ func runImportProfile(args []string) error {
 	fmt.Printf("  source sha256:  %s\n", report.SourceSha256)
 	fmt.Printf("  controls:       %d resolved (%d mapped to SCF anchors, %d need operator mapping)\n",
 		report.ControlCount, report.MappedCount, report.ControlCount-report.MappedCount)
+	return nil
+}
+
+// runImportComponentDefinition implements `atlas-oscal
+// import-component-definition <file> [flags]` (AC-9). It reads an OSCAL
+// component-definition JSON file, validates + normalizes it via the bridge,
+// persists the vendor claims transactionally under the given tenant, and
+// prints a text or --json report.
+func runImportComponentDefinition(args []string) error {
+	fs := flag.NewFlagSet("import-component-definition", flag.ContinueOnError)
+	dsn := fs.String("dsn", "", "Postgres DSN (atlas_app role); env DATABASE_URL_APP")
+	tenantID := fs.String("tenant-id", "", "tenant UUID to import under (required)")
+	bridgeAddr := fs.String("bridge-addr", defaultBridgeAddr, "oscal-bridge gRPC address")
+	sourceLabel := fs.String("source-label", "", "declared vendor / product label")
+	importedBy := fs.String("imported-by", binary, "operator id recorded as provenance")
+	roleStr := fs.String("role", string(authz.RoleGRCEngineer), "caller role: grc_engineer or admin")
+	asJSON := fs.Bool("json", false, "emit a JSON report instead of text")
+
+	file, flagArgs, err := splitPositional(args)
+	if err != nil {
+		return err
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return err
+	}
+	if len(fs.Args()) != 0 {
+		return fmt.Errorf("unexpected extra arguments: %v", fs.Args())
+	}
+
+	if *dsn == "" {
+		*dsn = os.Getenv("DATABASE_URL_APP")
+	}
+	if *dsn == "" {
+		return errors.New("--dsn or DATABASE_URL_APP is required (use the atlas_app role)")
+	}
+	if *tenantID == "" {
+		return errors.New("--tenant-id is required")
+	}
+
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", file, err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, *dsn)
+	if err != nil {
+		return fmt.Errorf("pgxpool: %w", err)
+	}
+	defer pool.Close()
+
+	bridge, err := oscal.DialBridge(*bridgeAddr)
+	if err != nil {
+		return fmt.Errorf("connect to oscal-bridge at %s: %w", *bridgeAddr, err)
+	}
+	defer func() { _ = bridge.Close() }()
+
+	tenantCtx, err := tenancy.WithTenant(ctx, *tenantID)
+	if err != nil {
+		return fmt.Errorf("tenancy context: %w", err)
+	}
+
+	importer := componentimport.NewImporter(pool, bridge)
+	report, err := importer.Import(tenantCtx, componentimport.Request{
+		OscalJSON:   data,
+		SourceLabel: *sourceLabel,
+		ImportedBy:  *importedBy,
+		Role:        authz.Role(*roleStr),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, componentimport.ErrUnauthorizedRole):
+			return fmt.Errorf("role %q may not import component-definitions (requires grc_engineer or admin)", *roleStr)
+		case errors.Is(err, componentimport.ErrValidationFailed):
+			return fmt.Errorf("the component-definition failed OSCAL v1.1.x validation; NOTHING was persisted: %w", err)
+		case errors.Is(err, componentimport.ErrDocumentTooLarge):
+			return fmt.Errorf("the component-definition document is too large: %w", err)
+		default:
+			return err
+		}
+	}
+
+	if *asJSON {
+		out, _ := json.MarshalIndent(map[string]any{
+			"import_id":       report.ImportID.String(),
+			"source_sha256":   report.SourceSha256,
+			"oscal_version":   report.OSCALVersion,
+			"title":           report.Title,
+			"source_label":    report.SourceLabel,
+			"component_count": report.ComponentCount,
+			"claim_count":     report.ClaimCount,
+			"mapped_count":    report.MappedCount,
+		}, "", "  ")
+		fmt.Println(string(out))
+		return nil
+	}
+
+	fmt.Printf("OSCAL component-definition imported (vendor claims)\n")
+	fmt.Printf("  import id:      %s\n", report.ImportID)
+	fmt.Printf("  title:          %s\n", report.Title)
+	fmt.Printf("  OSCAL version:  %s\n", report.OSCALVersion)
+	fmt.Printf("  vendor label:   %s\n", report.SourceLabel)
+	fmt.Printf("  source sha256:  %s\n", report.SourceSha256)
+	fmt.Printf("  components:     %d\n", report.ComponentCount)
+	fmt.Printf("  vendor claims:  %d imported (%d mapped to SCF anchors, %d need operator mapping)\n",
+		report.ClaimCount, report.MappedCount, report.ClaimCount-report.MappedCount)
+	fmt.Printf("  NOTE: these are VENDOR ASSERTIONS, not platform-verified evidence;\n")
+	fmt.Printf("        they do NOT mark any control satisfied (operator review required).\n")
 	return nil
 }
 
