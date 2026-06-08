@@ -20,6 +20,7 @@ import (
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/netpol"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/rbac"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/workload"
 )
@@ -52,6 +53,91 @@ func TestMapWorkloadResult(t *testing.T) {
 				t.Errorf("mapWorkloadResult(%q) = %v; want %v", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestMapNetpolResult(t *testing.T) {
+	cases := []struct {
+		name string
+		in   netpol.CoverageResult
+		want evidencev1.Result
+	}{
+		{"pass", netpol.ResultPass, evidencev1.Result_RESULT_PASS},
+		{"fail", netpol.ResultFail, evidencev1.Result_RESULT_FAIL},
+		{"inconclusive", netpol.ResultInconclusive, evidencev1.Result_RESULT_INCONCLUSIVE},
+		{"default", netpol.CoverageResult("unknown"), evidencev1.Result_RESULT_UNSPECIFIED},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mapNetpolResult(tc.in); got != tc.want {
+				t.Errorf("mapNetpolResult(%q) = %v; want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildNetpolRecord_Shape(t *testing.T) {
+	c := netpol.Coverage{
+		Namespace: "prod", PolicyCount: 2, DefaultDenyIngress: true, DefaultDenyEgress: false,
+		Policies: []netpol.PolicySummary{
+			{Name: "default-deny-ingress", PolicyTypes: []string{"Ingress"}, SelectsAllPods: true},
+			{Name: "allow-api", PolicyTypes: []string{"Ingress"}, IngressRuleCount: 1},
+		},
+		Result: netpol.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
+	}
+	rec, err := buildNetpolRecord(c, "cluster-1", "prod", "scf:NET-04")
+	if err != nil {
+		t.Fatalf("buildNetpolRecord: %v", err)
+	}
+	if rec.EvidenceKind != "k8s.networkpolicy_coverage.v1" {
+		t.Errorf("kind = %q", rec.EvidenceKind)
+	}
+	if rec.Result != evidencev1.Result_RESULT_PASS {
+		t.Errorf("result = %v; want PASS", rec.Result)
+	}
+	if rec.IdempotencyKey == "" {
+		t.Error("empty idempotency key")
+	}
+	if got := scopeValue(rec.GetScope(), "cluster"); got != "cluster-1" {
+		t.Errorf("cluster = %q", got)
+	}
+	if got := scopeValue(rec.GetScope(), "namespace"); got != "prod" {
+		t.Errorf("namespace scope = %q; want prod", got)
+	}
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{"namespace", "policy_count", "default_deny_ingress", "default_deny_egress", "policies"} {
+		if _, ok := pl[k]; !ok {
+			t.Errorf("payload missing %q; got %v", k, pl)
+		}
+	}
+	policies, ok := pl["policies"].([]any)
+	if !ok || len(policies) != 2 {
+		t.Fatalf("policies = %v; want 2 entries", pl["policies"])
+	}
+}
+
+func TestBuildNetpolRecord_OmitsEmptyPolicies(t *testing.T) {
+	c := netpol.Coverage{
+		Namespace: "dev", PolicyCount: 0, Result: netpol.ResultFail,
+		ObservedAt: time.Now().UTC(),
+	}
+	rec, err := buildNetpolRecord(c, "c", "prod", "scf:NET-04")
+	if err != nil {
+		t.Fatalf("buildNetpolRecord: %v", err)
+	}
+	pl := rec.GetPayload().AsMap()
+	if _, ok := pl["policies"]; ok {
+		t.Error("empty policies slice should be omitted")
+	}
+	if rec.Result != evidencev1.Result_RESULT_FAIL {
+		t.Errorf("result = %v; want FAIL", rec.Result)
+	}
+}
+
+func TestActorID_NetpolShape(t *testing.T) {
+	id := actorID("netpol")
+	if !strings.HasPrefix(id, "connector:k8s:netpol@") {
+		t.Errorf("actorID(netpol) = %q", id)
 	}
 }
 
@@ -193,7 +279,7 @@ func TestNewPermissionsCmd_RendersClusterRole(t *testing.T) {
 	if !strings.Contains(out, "API GROUP") {
 		t.Errorf("permissions output missing header; got %q", out)
 	}
-	for _, want := range []string{"rbac.authorization.k8s.io", "clusterrolebindings", "deployments", "get,list"} {
+	for _, want := range []string{"rbac.authorization.k8s.io", "clusterrolebindings", "deployments", "networking.k8s.io", "networkpolicies", "get,list"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("permissions output missing %q; got %q", want, out)
 		}

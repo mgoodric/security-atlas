@@ -111,6 +111,7 @@
     "connectors/k8s/cmd/atlas-k8s": 88,
     "connectors/k8s/internal/idem": 98,
     "connectors/k8s/internal/k8sauth": 93,
+    "connectors/k8s/internal/netpol": 93,
     "connectors/k8s/internal/rbac": 89,
     "connectors/k8s/internal/workload": 93,
     "connectors/manual/cmd/atlas-manual": 71,

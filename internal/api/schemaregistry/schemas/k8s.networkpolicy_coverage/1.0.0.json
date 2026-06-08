@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/k8s.networkpolicy_coverage/1.0.0.json",
+  "x-evidence-kind": "k8s.networkpolicy_coverage.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["NET-04", "NET-01"],
+  "title": "Kubernetes NetworkPolicy coverage",
+  "description": "Per-namespace Kubernetes NetworkPolicy segmentation posture captured read-only from the Kubernetes API (get/list on networking.k8s.io/v1 networkpolicies + core namespaces): how many NetworkPolicies exist in the namespace, a per-policy SPEC summary (name, the directions it governs, whether its podSelector is empty i.e. selects every pod, and a COUNT of its ingress/egress rule blocks), and the derived default-deny assessment per direction. The minimum that demonstrates the network-segmentation control (e.g. which namespaces enforce a default-deny vs are unprotected). NetworkPolicy SPEC metadata ONLY — never pod contents, container env, Secret / ConfigMap values, the peer/CIDR/port contents inside a rule block, nor actual traffic. The connector reads NetworkPolicy objects + the namespace list (read-only) and never reads pod logs, exec, or secrets. The connector emits a descriptive PASS/FAIL/INCONCLUSIVE verdict per namespace; the platform evaluator owns the final policy call. x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "namespace",
+    "policy_count",
+    "default_deny_ingress",
+    "default_deny_egress"
+  ],
+  "properties": {
+    "namespace": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Namespace the coverage assessment is for."
+    },
+    "policy_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of NetworkPolicy objects in the namespace (0 means fully unprotected — allow-all default)."
+    },
+    "default_deny_ingress": {
+      "type": "boolean",
+      "description": "True when at least one all-pods (empty-podSelector) Ingress policy has zero ingress allow rules — the canonical default-deny-ingress posture."
+    },
+    "default_deny_egress": {
+      "type": "boolean",
+      "description": "True when at least one all-pods (empty-podSelector) Egress policy has zero egress allow rules — the canonical default-deny-egress posture."
+    },
+    "policies": {
+      "type": "array",
+      "description": "Per-policy SPEC summaries for the namespace. SPEC metadata only — never the peer / CIDR / port contents of a rule block.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "selects_all_pods"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "NetworkPolicy name."
+          },
+          "policy_types": {
+            "type": "array",
+            "description": "Directions the policy governs (Ingress / Egress).",
+            "items": {
+              "type": "string",
+              "enum": ["Ingress", "Egress"]
+            }
+          },
+          "selects_all_pods": {
+            "type": "boolean",
+            "description": "True when spec.podSelector is empty ({}), i.e. the policy applies to every pod in the namespace."
+          },
+          "ingress_rule_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of ingress rule blocks (allow rules). Zero on an all-pods Ingress policy is default-deny ingress."
+          },
+          "egress_rule_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of egress rule blocks (allow rules). Zero on an all-pods Egress policy is default-deny egress."
+          }
+        }
+      }
+    }
+  }
+}

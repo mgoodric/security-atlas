@@ -46,11 +46,28 @@ func TestWorkloadKey_StableAndDistinct(t *testing.T) {
 	}
 }
 
+func TestNetpolCoverageKey_StableAndDistinct(t *testing.T) {
+	t.Parallel()
+	a := time.Date(2026, 6, 7, 12, 5, 0, 0, time.UTC)
+	b := time.Date(2026, 6, 7, 12, 55, 0, 0, time.UTC)
+	if NetpolCoverageKey("prod", a) != NetpolCoverageKey("prod", b) {
+		t.Error("same namespace within the hour should share a key")
+	}
+	if NetpolCoverageKey("prod", a) == NetpolCoverageKey("dev", a) {
+		t.Error("different namespace should differ")
+	}
+	c := time.Date(2026, 6, 7, 13, 0, 0, 0, time.UTC)
+	if NetpolCoverageKey("prod", a) == NetpolCoverageKey("prod", c) {
+		t.Error("different hour should differ")
+	}
+}
+
 func TestKeys_AreHex64(t *testing.T) {
 	t.Parallel()
 	for _, k := range []string{
 		RBACBindingKey("cluster", "", "x", time.Now()),
 		WorkloadKey("Deployment", "n", "x", time.Now()),
+		NetpolCoverageKey("prod", time.Now()),
 	} {
 		if len(k) != 64 {
 			t.Errorf("key %q len = %d; want 64 (sha256 hex)", k, len(k))

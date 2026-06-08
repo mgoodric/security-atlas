@@ -179,10 +179,16 @@ func DocumentedClusterRole() []PolicyRule {
 			Gates:     "k8s.workload_security_context.v1 (workload security contexts)",
 		},
 		{
+			APIGroups: []string{"networking.k8s.io"},
+			Resources: []string{"networkpolicies"},
+			Verbs:     readOnlyVerbs,
+			Gates:     "k8s.networkpolicy_coverage.v1 (NetworkPolicy segmentation posture)",
+		},
+		{
 			APIGroups: []string{""},
 			Resources: []string{"namespaces"},
 			Verbs:     readOnlyVerbs,
-			Gates:     "namespace enumeration (scope context for both kinds)",
+			Gates:     "namespace enumeration (scope context for all kinds)",
 		},
 	}
 }

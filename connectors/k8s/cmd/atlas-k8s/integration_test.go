@@ -18,6 +18,7 @@ import (
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/k8sauth"
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/netpol"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/rbac"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/workload"
 )
@@ -82,8 +83,8 @@ func TestRegister_ListsConnector(t *testing.T) {
 	for _, h := range list.GetHandles() {
 		if h.GetName() == ConnectorName {
 			found = true
-			if len(h.GetSupportedKinds()) != 2 {
-				t.Errorf("supported_kinds = %d; want 2", len(h.GetSupportedKinds()))
+			if len(h.GetSupportedKinds()) != 3 {
+				t.Errorf("supported_kinds = %d; want 3", len(h.GetSupportedKinds()))
 			}
 			if strings.Join(h.GetProfilesSupported(), ",") != "pull" {
 				t.Errorf("profiles_supported = %v; want [pull]", h.GetProfilesSupported())
@@ -95,10 +96,10 @@ func TestRegister_ListsConnector(t *testing.T) {
 	}
 }
 
-// TestRun_PushesBothKinds verifies AC-2/AC-3/AC-5/AC-6/AC-9: collect from faked
+// TestRun_PushesAllKinds verifies AC-2/AC-3/AC-5/AC-6/AC-9: collect from faked
 // Kubernetes API surfaces, build canonical records, push them through the
 // platform's single Push RPC, and assert the receipt (sha256 content hash).
-func TestRun_PushesBothKinds(t *testing.T) {
+func TestRun_PushesAllKinds(t *testing.T) {
 	_, conn, bearer := newBufconnPlatform(t)
 	client := sdk.NewClientFromConn(conn, bearer)
 	fixed := func() time.Time { return time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC) }
@@ -157,6 +158,49 @@ func TestRun_PushesBothKinds(t *testing.T) {
 	if got := scopeValue(wlRec.GetScope(), "cluster"); got != "cluster-1" {
 		t.Errorf("workload cluster = %q; want cluster-1", got)
 	}
+
+	// NetworkPolicy coverage (faked Kubernetes API surface — NO live cluster).
+	// The faked namespace embeds an ingress peer + podSelector label that must
+	// NOT escape into the pushed record (over-collection guard).
+	npAPI := &fakeNetpolForIntegration{namespaces: []netpol.RawNamespace{
+		{Name: "prod", Policies: []netpol.RawPolicy{
+			{Name: "default-deny-ingress", PolicyTypes: []string{netpol.PolicyTypeIngress}, SelectsAllPods: true},
+		}},
+		{Name: "dev"}, // unprotected — no policies
+	}}
+	coverage, err := netpol.Assess(context.Background(), npAPI, fixed)
+	if err != nil {
+		t.Fatalf("netpol.Assess: %v", err)
+	}
+	if len(coverage) != 2 {
+		t.Fatalf("coverage len = %d; want 2", len(coverage))
+	}
+	var prodCov *netpol.Coverage
+	for i := range coverage {
+		if coverage[i].Namespace == "prod" {
+			prodCov = &coverage[i]
+		}
+	}
+	if prodCov == nil || prodCov.Result != netpol.ResultPass || !prodCov.DefaultDenyIngress {
+		t.Fatalf("prod namespace should PASS with default-deny ingress; got %+v", prodCov)
+	}
+	npRec, err := buildNetpolRecord(*prodCov, "cluster-1", "prod", "scf:NET-04")
+	if err != nil {
+		t.Fatalf("buildNetpolRecord: %v", err)
+	}
+	npReceipt, err := client.Push(context.Background(), npRec)
+	if err != nil {
+		t.Fatalf("Push netpol: %v", err)
+	}
+	if npReceipt.GetHash() == "" {
+		t.Fatal("netpol receipt hash empty (AC-5 sha256 content-hash)")
+	}
+	if !strings.HasPrefix(npRec.GetSourceAttribution().GetActorId(), "connector:k8s:netpol@") {
+		t.Errorf("netpol actor_id = %q", npRec.GetSourceAttribution().GetActorId())
+	}
+	if got := scopeValue(npRec.GetScope(), "namespace"); got != "prod" {
+		t.Errorf("netpol namespace scope = %q; want prod", got)
+	}
 }
 
 // TestRun_DedupesWithinHour verifies AC-6: two records from the same resource in
@@ -207,6 +251,16 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 	wls, _ := workload.Inspect(context.Background(), wlAPI, fixed)
 	wlRec, _ := buildWorkloadRecord(wls[0], "cluster-1", "prod", "scf:CFG-02")
 
+	// NetworkPolicy coverage: the faked policy embeds a podSelector label + an
+	// ingress peer that must NOT escape into the record.
+	npAPI := &fakeNetpolForIntegration{namespaces: []netpol.RawNamespace{
+		{Name: "prod", Policies: []netpol.RawPolicy{
+			{Name: "allow-api", PolicyTypes: []string{netpol.PolicyTypeIngress}, IngressRuleCount: 1},
+		}},
+	}}
+	covs, _ := netpol.Assess(context.Background(), npAPI, fixed)
+	npRec, _ := buildNetpolRecord(covs[0], "cluster-1", "prod", "scf:NET-04")
+
 	// Allow-list of permitted top-level payload keys per kind. Any key NOT in
 	// the allow-list is a leak and fails the test (config / authz metadata only).
 	rbacAllowed := map[string]bool{
@@ -219,6 +273,10 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 		"run_as_non_root": true, "privileged": true, "read_only_root_filesystem": true,
 		"allow_privilege_escalation": true, "host_network": true, "host_pid": true,
 		"host_ipc": true, "container_count": true,
+	}
+	netpolAllowed := map[string]bool{
+		"namespace": true, "policy_count": true, "default_deny_ingress": true,
+		"default_deny_egress": true, "policies": true,
 	}
 	bannedSubstrings := []string{"secret", "configmap", "config_map", "env", "value", "data", "token", "password", "log"}
 
@@ -237,6 +295,27 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 	}
 	check(t, rbacRec, rbacAllowed)
 	check(t, wlRec, workloadAllowed)
+	check(t, npRec, netpolAllowed)
+
+	// The nested per-policy summaries must carry SPEC metadata only — never a
+	// peer / selector / port value. Allow-list the nested keys too.
+	nestedAllowed := map[string]bool{
+		"name": true, "policy_types": true, "selects_all_pods": true,
+		"ingress_rule_count": true, "egress_rule_count": true,
+	}
+	if policies, ok := npRec.GetPayload().AsMap()["policies"].([]any); ok {
+		for _, p := range policies {
+			m, ok := p.(map[string]any)
+			if !ok {
+				t.Fatalf("policy summary is not a map: %T", p)
+			}
+			for k := range m {
+				if !nestedAllowed[k] {
+					t.Errorf("netpol policy summary carries non-allow-listed key %q (possible peer/selector leak)", k)
+				}
+			}
+		}
+	}
 }
 
 // TestCredential_NeverLogged verifies AC-11 + P0-487-4: the cluster credential's
@@ -272,4 +351,10 @@ type fakeWorkloadForIntegration struct{ workloads []workload.RawWorkload }
 
 func (f *fakeWorkloadForIntegration) ListWorkloads(_ context.Context) ([]workload.RawWorkload, error) {
 	return f.workloads, nil
+}
+
+type fakeNetpolForIntegration struct{ namespaces []netpol.RawNamespace }
+
+func (f *fakeNetpolForIntegration) ListNamespaceCoverage(_ context.Context) ([]netpol.RawNamespace, error) {
+	return f.namespaces, nil
 }

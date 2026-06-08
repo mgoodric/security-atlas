@@ -121,6 +121,12 @@ func DefaultSeed() []KindVersion {
 		// Slice 487: Kubernetes connector (RBAC + workload security-context).
 		{Kind: "k8s.rbac_binding.v1", Version: "1.0.0"},
 		{Kind: "k8s.workload_security_context.v1", Version: "1.0.0"},
+		// Slice 523: Kubernetes connector NetworkPolicy coverage posture
+		// (network-segmentation controls: SCF NET-04 / NET-01). Read-only
+		// (get/list on networking.k8s.io/v1 networkpolicies + core namespaces) —
+		// NetworkPolicy SPEC metadata only, NEVER pod contents, container env,
+		// secrets, the peer/CIDR/port contents of a rule block, or traffic.
+		{Kind: "k8s.networkpolicy_coverage.v1", Version: "1.0.0"},
 		// Slice 488: monitoring connectors (Datadog + Grafana) — shared
 		// alert/monitor configuration-inventory evidence kind.
 		{Kind: "monitoring.alert_config.v1", Version: "1.0.0"},
