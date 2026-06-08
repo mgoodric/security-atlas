@@ -187,6 +187,45 @@ is read from the environment only and is never logged.
 | `ATLAS_SMTP_TIMEOUT`    | `10s`     | no        | server | Wall-clock cap on a single SMTP dial+send (Go duration string). A slow/unreachable relay fails fast; failures are recorded and re-attempted on the next tick (no hot retry).   |
 | `ATLAS_PUBLIC_BASE_URL` | _(unset)_ | no        | server | Public base URL of the authenticated app, used to build the digest's "Open your notifications" deep-link. When unset, the link falls back to a relative `/notifications` path. |
 
+## Slack notification channel
+
+A second delivery channel (slice 543) for the same daily unread-notification
+digest, posted to an operator-configured Slack incoming-webhook. Per-user
+opt-in (Settings → Notifications → Slack delivery; default **off**). The Slack
+message carries summary counts + a deep-link only — never notification details
+(minimum disclosure, same discipline as email). When `ATLAS_SLACK_WEBHOOK_URL`
+is unset the channel is **inert**. The webhook URL is operator-configured (never
+user-controlled, never derived from notification content) and carries a secret
+token in its path; it is read from the environment only and is never logged.
+
+| Variable                  | Default   | Required? | Scope  | Description                                                                                                                                                  |
+| ------------------------- | --------- | --------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ATLAS_SLACK_WEBHOOK_URL` | _(unset)_ | no        | server | Slack incoming-webhook URL. **Secret** (carries a token in its path) — never logged. When unset the Slack channel is inert (nothing is posted).              |
+| `ATLAS_SLACK_TIMEOUT`     | `10s`     | no        | server | Wall-clock cap on a single Slack POST (Go duration string). A slow/unreachable endpoint fails fast; failures are recorded and re-attempted on the next tick. |
+
+## Generic webhook notification channel
+
+A third delivery channel (slice 543) posting the same minimum-disclosure digest
+as a flat JSON payload to an operator-configured endpoint (PagerDuty, a SIEM, an
+internal bot). Per-user opt-in (default **off**). Payload = summary counts + a
+deep-link only; never notification details. When `ATLAS_WEBHOOK_URL` is unset
+the channel is **inert**.
+
+**SSRF safety:** the target URL is operator-configured (not user free-text, not
+notification-derived) **and** validated at startup — it must be `https` and must
+not resolve to an internal address (loopback, RFC1918, link-local incl. the
+`169.254.169.254` cloud-metadata IP, ULA, or CGNAT). A URL pointing at an
+internal service is rejected and the channel stays disabled. The optional bearer
+token + HMAC signing secret are read from the environment only and are never
+logged.
+
+| Variable                    | Default   | Required? | Scope  | Description                                                                                                                                                           |
+| --------------------------- | --------- | --------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ATLAS_WEBHOOK_URL`         | _(unset)_ | no        | server | Target webhook URL. Must be `https` and must not resolve to an internal address (SSRF guard, validated at startup). When unset the channel is inert.                  |
+| `ATLAS_WEBHOOK_BEARER`      | _(unset)_ | no        | server | Optional `Authorization: Bearer` token sent with each POST. **Secret** — never logged.                                                                                |
+| `ATLAS_WEBHOOK_HMAC_SECRET` | _(unset)_ | no        | server | Optional HMAC-SHA256 signing key. When set, each POST carries an `X-Atlas-Signature` hex digest of the body so the receiver can verify it. **Secret** — never logged. |
+| `ATLAS_WEBHOOK_TIMEOUT`     | `10s`     | no        | server | Wall-clock cap on a single webhook POST (Go duration string). A slow/unreachable endpoint fails fast; failures are recorded and re-attempted on the next tick.        |
+
 ## Test-mode
 
 <!-- prettier-ignore-start -->

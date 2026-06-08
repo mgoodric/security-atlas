@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -89,6 +90,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/notify/email"
+	"github.com/mgoodric/security-atlas/internal/notify/slack"
+	"github.com/mgoodric/security-atlas/internal/notify/webhook"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
 	"github.com/mgoodric/security-atlas/internal/risk"
@@ -625,6 +628,32 @@ func (s *Server) httpHandler() http.Handler {
 	meEmailH := meapi.NewEmailChannel(emailCh)
 	root.Get("/v1/me/email-channel", meEmailH.Get)
 	root.Put("/v1/me/email-channel", meEmailH.Put)
+	// Slice 543: GET/PUT /v1/me/slack-channel + /v1/me/webhook-channel —
+	// per-user master opt-in toggles for the additional delivery channels.
+	// Default opted-OUT (P0-543-3). Each channel's target + credentials are
+	// OPERATOR-configured via env (inert when unset); the webhook URL is
+	// SSRF-validated at construction (P0-543-2). These are SINKS only
+	// (P0-543-4) — the toggle just records the per-user opt-in.
+	slackCfg := slack.ConfigFromEnv()
+	slackCh := slack.NewChannel(s.dbPool, slack.NewHTTPTransport(slackCfg), slackCfg.BaseURL)
+	meSlackH := meapi.NewChannelOptIn("slack", slackCh.GetOptIn, slackCh.SetOptIn)
+	root.Get("/v1/me/slack-channel", meSlackH.Get)
+	root.Put("/v1/me/slack-channel", meSlackH.Put)
+	webhookCfg := webhook.ConfigFromEnv()
+	webhookTransport, webhookErr := webhook.NewHTTPTransport(webhookCfg, webhook.SSRFPolicy())
+	if webhookErr != nil {
+		// A misconfigured (internal-target) webhook URL fails fast and
+		// visibly at startup rather than silently delivering to an internal
+		// service (P0-543-2). The opt-in toggle still needs a channel, so
+		// fall back to an inert transport and surface the config error.
+		slog.Default().Error("webhook channel disabled: invalid target",
+			slog.String("error", webhookErr.Error()))
+		webhookTransport, _ = webhook.NewHTTPTransport(webhook.Config{}, webhook.SSRFPolicy())
+	}
+	webhookCh := webhook.NewChannel(s.dbPool, webhookTransport, webhookCfg.BaseURL)
+	meWebhookH := meapi.NewChannelOptIn("webhook", webhookCh.GetOptIn, webhookCh.SetOptIn)
+	root.Get("/v1/me/webhook-channel", meWebhookH.Get)
+	root.Put("/v1/me/webhook-channel", meWebhookH.Put)
 	root.Get("/v1/me/sessions", meSessionsH.ListSessions)
 	root.Delete("/v1/me/sessions", meSessionsH.RevokeOtherSessions)
 	root.Delete("/v1/me/sessions/{id}", meSessionsH.RevokeSession)

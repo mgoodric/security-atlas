@@ -65,6 +65,12 @@ type Querier interface {
 	// attachment; if the period is still open, frozen_at remains NULL and the
 	// slice-026 query path keeps the population live until the period freezes.
 	AttachPopulationToPeriod(ctx context.Context, arg AttachPopulationToPeriodParams) error
+	// Idempotency claim: insert a pending delivery-log row for
+	// (tenant, channel, recipient, digest_key). ON CONFLICT DO NOTHING means a
+	// second claim returns no row — the caller skips the send (no double-send /
+	// 24h rate-limit). The `channel` column keeps slack + webhook claims
+	// independent.
+	ClaimChannelDigest(ctx context.Context, arg ClaimChannelDigestParams) (pgtype.UUID, error)
 	// Idempotency claim (AC-5): insert a pending delivery-log row for
 	// (tenant, recipient, digest_key). ON CONFLICT DO NOTHING means a
 	// second claim for the same digest returns no row — the caller skips the
@@ -499,6 +505,8 @@ type Querier interface {
 	// cross-tenant id returns ErrNoRows (the handler maps that to 404). Works
 	// for both draft and published packs.
 	GetBoardPackByID(ctx context.Context, arg GetBoardPackByIDParams) (BoardPack, error)
+	// Read a delivery-log row by id (tests + outcome inspection).
+	GetChannelDeliveryLog(ctx context.Context, arg GetChannelDeliveryLogParams) (ChannelDeliveryLog, error)
 	// Returns the JSON-encoded applicability_expr for a single control. The column
 	// is TEXT (slice 002); slice 017 stores JSON in that text.
 	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)
@@ -650,6 +658,15 @@ type Querier interface {
 	// Read a session by cookie id. Returns the row whether revoked or expired;
 	// the caller checks `revoked_at IS NULL` and `expires_at > now()`.
 	GetSessionByID(ctx context.Context, arg GetSessionByIDParams) (Session, error)
+	// Slice 543 — Slack + generic-webhook notification delivery channel queries.
+	//
+	// These back two additional delivery SINKS (NOT producers, P0-543-4),
+	// generalizing the slice-445 email queries. All queries are tenant-scoped
+	// via the leading tenant_id; RLS under FORCE keeps the cross-tenant
+	// boundary safe even on a misconfigured query (defense-in-depth).
+	// Read a user's Slack-channel master opt-in. A missing row (pgx.ErrNoRows)
+	// means OPTED-OUT (P0-543-3).
+	GetSlackOptIn(ctx context.Context, arg GetSlackOptInParams) (bool, error)
 	// Slice 144 — tenant identity queries.
 	//
 	// The `tenants` table was added in slice 144 (migration
@@ -669,6 +686,8 @@ type Querier interface {
 	GetUserByID(ctx context.Context, arg GetUserByIDParams) (User, error)
 	GetVendor(ctx context.Context, arg GetVendorParams) (Vendor, error)
 	GetWalkthroughByID(ctx context.Context, arg GetWalkthroughByIDParams) (Walkthrough, error)
+	// Read a user's webhook-channel master opt-in. Missing row = OPTED-OUT.
+	GetWebhookOptIn(ctx context.Context, arg GetWebhookOptInParams) (bool, error)
 	// Slice 124 — defense-in-depth role probe for the unified audit-log endpoint.
 	//
 	// Returns TRUE when the caller holds 'auditor' OR 'grc_engineer' in user_roles
@@ -2031,6 +2050,11 @@ type Querier interface {
 	// Append a row to the access log. Action is enforced by CHECK
 	// ('upload' | 'download'). Caller passes tenant_id + artifact_id + actor.
 	LogArtifactAccess(ctx context.Context, arg LogArtifactAccessParams) error
+	// Record a failed delivery. outcome=failed + last_error + attempts++. The
+	// digest_key is NOT released — the next tick can re-attempt (D8 analog).
+	MarkChannelDigestFailed(ctx context.Context, arg MarkChannelDigestFailedParams) error
+	// Record a successful delivery. outcome=sent + sent_at + attempts++.
+	MarkChannelDigestSent(ctx context.Context, arg MarkChannelDigestSentParams) error
 	// Flip a predecessor row to superseded. Idempotent: no-op if already set.
 	MarkControlSuperseded(ctx context.Context, arg MarkControlSupersededParams) error
 	// Record a failed delivery (AC-8). Sets outcome=failed + last_error +
@@ -2333,6 +2357,9 @@ type Querier interface {
 	// result + notes (the audit log still captures every attempt via
 	// WriteSampleAuditLog).
 	UpsertSampleAnnotation(ctx context.Context, arg UpsertSampleAnnotationParams) (SampleAnnotation, error)
+	// Set a user's Slack-channel master opt-in. (tenant_id, user_id) PK is the
+	// conflict target.
+	UpsertSlackOptIn(ctx context.Context, arg UpsertSlackOptInParams) (bool, error)
 	// Used by the OIDC callback: provision-on-first-sign-in by (idp_issuer, idp_subject).
 	// The composite UNIQUE index on (idp_issuer, idp_subject) WHERE both non-empty
 	// is the conflict target. On conflict we update display_name + email (the IdP
@@ -2342,6 +2369,8 @@ type Querier interface {
 	// conflict target. On conflict we update enabled + updated_at. This is the natural
 	// partial-merge primitive for AC-5 (PATCH /v1/me/preferences merges, no replacement).
 	UpsertUserNotificationPreference(ctx context.Context, arg UpsertUserNotificationPreferenceParams) error
+	// Set a user's webhook-channel master opt-in.
+	UpsertWebhookOptIn(ctx context.Context, arg UpsertWebhookOptInParams) (bool, error)
 	// Slice 464: keyset-paginated ledger walk for `atlas evidence verify`.
 	// Read-only integrity walk — recomputes each record's canonical hash and
 	// compares to the stored `hash`. Ordered by id ASC so the caller can page
