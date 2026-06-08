@@ -2463,11 +2463,65 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/me/slack-channel:
+    get:
+      summary: GET /v1/me/slack-channel
+      tags: [me]
+      operationId: get-v1-me-slack-channel
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    put:
+      summary: PUT /v1/me/slack-channel
+      tags: [me]
+      operationId: put-v1-me-slack-channel
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/me/tenants:
     get:
       summary: GET /v1/me/tenants
       tags: [me]
       operationId: get-v1-me-tenants
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/me/webhook-channel:
+    get:
+      summary: GET /v1/me/webhook-channel
+      tags: [me]
+      operationId: get-v1-me-webhook-channel
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    put:
+      summary: PUT /v1/me/webhook-channel
+      tags: [me]
+      operationId: put-v1-me-webhook-channel
       security:
         - bearer: []
       responses:

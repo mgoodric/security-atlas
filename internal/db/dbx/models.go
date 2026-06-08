@@ -983,6 +983,19 @@ type BoardPack struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ChannelDeliveryLog struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	Channel         string             `json:"channel"`
+	RecipientUserID string             `json:"recipient_user_id"`
+	DigestKey       string             `json:"digest_key"`
+	Outcome         string             `json:"outcome"`
+	Attempts        int32              `json:"attempts"`
+	LastError       string             `json:"last_error"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	SentAt          pgtype.Timestamptz `json:"sent_at"`
+}
+
 type Control struct {
 	ID                   pgtype.UUID               `json:"id"`
 	TenantID             pgtype.UUID               `json:"tenant_id"`
@@ -1730,6 +1743,13 @@ type Session struct {
 	GeoCity *string `json:"geo_city"`
 }
 
+type SlackChannelOptin struct {
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Enabled   bool               `json:"enabled"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 // Slice 144: canonical tenant identity row. Adopted late — through v1, tenant_id was a bare UUID with no parent. The slice-192 `GET /v1/me/tenants` handler reads `name` from here; `PATCH /v1/tenants/{id}` (slice 144) mutates it under per-tenant admin or super_admin authority.
 type Tenant struct {
 	ID pgtype.UUID `json:"id"`
@@ -1833,4 +1853,11 @@ type WalkthroughAuditLog struct {
 	Detail        []byte             `json:"detail"`
 	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
 	SubjectModule string             `json:"subject_module"`
+}
+
+type WebhookChannelOptin struct {
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Enabled   bool               `json:"enabled"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }

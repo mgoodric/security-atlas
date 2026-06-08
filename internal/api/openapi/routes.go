@@ -115,7 +115,9 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/me/notifications", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/notifications"},
 	{Method: "GET", Path: "/v1/me/preferences", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/preferences"},
 	{Method: "GET", Path: "/v1/me/sessions", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/sessions"},
+	{Method: "GET", Path: "/v1/me/slack-channel", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/slack-channel"},
 	{Method: "GET", Path: "/v1/me/tenants", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/tenants"},
+	{Method: "GET", Path: "/v1/me/webhook-channel", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/me/webhook-channel"},
 	{Method: "GET", Path: "/v1/metrics", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/metrics"},
 	{Method: "GET", Path: "/v1/metrics/cascade", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/metrics/cascade"},
 	{Method: "GET", Path: "/v1/metrics/{id}", Tag: "me", Tier: "bearer", Internal: false, Summary: "GET /v1/metrics/{id}"},
@@ -242,5 +244,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/walkthroughs/{id}:finalize", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "POST /v1/walkthroughs/{id}:finalize"},
 	{Method: "PUT", Path: "/v1/board-packs/{id}/sections/{key}", Tag: "board", Tier: "bearer", Internal: false, Summary: "PUT /v1/board-packs/{id}/sections/{key}"},
 	{Method: "PUT", Path: "/v1/me/email-channel", Tag: "me", Tier: "bearer", Internal: false, Summary: "PUT /v1/me/email-channel"},
+	{Method: "PUT", Path: "/v1/me/slack-channel", Tag: "me", Tier: "bearer", Internal: false, Summary: "PUT /v1/me/slack-channel"},
+	{Method: "PUT", Path: "/v1/me/webhook-channel", Tag: "me", Tier: "bearer", Internal: false, Summary: "PUT /v1/me/webhook-channel"},
 	{Method: "PUT", Path: "/v1/metrics/{id}/target", Tag: "me", Tier: "bearer", Internal: false, Summary: "PUT /v1/metrics/{id}/target"},
 }
