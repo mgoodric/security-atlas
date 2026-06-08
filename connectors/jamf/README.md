@@ -6,18 +6,24 @@ A.8 auditor demand ("prove laptops are disk-encrypted, have a screen-lock
 policy, and are managed"), today a manual Jamf export. It follows the locked
 connector pattern verbatim: register-per-run, a stable `actor_id`, an
 hour-truncated `observed_at`, scope minimums, and vendor-native read-only auth.
-It emits two evidence kinds:
+It emits three evidence kinds:
 
-| Kind                             | Profile | Source                                                            |
-| -------------------------------- | ------- | ----------------------------------------------------------------- |
-| `endpoint.device_posture.v1`     | pull    | Jamf Pro API `GET /api/v1/computers-inventory` (posture sections) |
-| `endpoint.software_inventory.v1` | pull    | Jamf Pro API `GET /api/v1/computers-inventory` (`APPLICATIONS`)   |
+| Kind                             | Profile | Source                                                                    |
+| -------------------------------- | ------- | ------------------------------------------------------------------------- |
+| `endpoint.device_posture.v1`     | pull    | Jamf Pro API `GET /api/v1/computers-inventory` (posture sections)         |
+| `endpoint.software_inventory.v1` | pull    | Jamf Pro API `GET /api/v1/computers-inventory` (`APPLICATIONS`)           |
+| `endpoint.config_profile.v1`     | pull    | Jamf Pro API `GET /api/v1/computers-inventory` (`CONFIGURATION_PROFILES`) |
 
-Both evidence shapes are **shared** with the Intune connector (the field sets are
-identical at the summary altitude); `source_mdm` preserves provenance. The
+All three evidence shapes are **shared** with the Intune connector (the field sets
+are identical at the summary altitude); `source_mdm` preserves provenance. The
 software-inventory kind (slice 555) is the deliberate slice-490 over-collection
 follow-on: the `APPLICATIONS` section excluded from the posture summary is
 collected here as a separate, scoped kind for patch-/vulnerability-management.
+The config-profile kind (slice 556) reports WHICH configuration / compliance
+profiles are deployed + their compliance-relevant settings, as evidence for
+configuration-management controls (SCF `CFG-02` / `CFG-04`) — with a structural
+secret-redaction boundary that keeps Wi-Fi PSKs, VPN shared secrets, certificate
+private keys, SCEP challenges, and raw payload blobs out of every record.
 
 The connector is **API-based**, not an in-host agent — consistent with the "no
 closed proprietary collector agents on endpoints" anti-pattern. The on-device
@@ -97,6 +103,9 @@ atlas-jamf run --environment prod
 
 # Read installed-software inventory and push evidence (same read-only credential).
 atlas-jamf run-software --environment prod
+
+# Read configuration-profile detail and push evidence (same read-only credential).
+atlas-jamf run-config-profiles --environment prod
 ```
 
 ## Software-inventory boundary (slice 555)
@@ -110,6 +119,23 @@ read requests ONLY the `GENERAL` + `APPLICATIONS` sections (never
 `USER_AND_LOCATION` or the GPS `location` section), and the `RawSoftwareItem`
 struct has no field for a path / usage / license key — a leak would be a compile
 error. The per-device list is bounded (`MaxSoftwarePerDevice = 500`).
+
+## Config-profile secret-redaction boundary (slice 556 — load-bearing)
+
+The `run-config-profiles` subcommand reads configuration-profile DETAIL (the
+`CONFIGURATION_PROFILES` inventory section) for configuration-management evidence
+(SCF `CFG-02` / `CFG-04`). Each profile carries the **name** + **identifier** +
+**type** + assigned **scope** + **uuid** + **last-modified** + a bounded list of
+compliance-relevant **settings**. It NEVER collects the secrets profiles routinely
+embed — Wi-Fi PSKs, VPN shared secrets, certificate private keys, API tokens, SCEP
+challenges, or raw payload-content blobs. Enforcement is structural at three
+layers: the read requests profile METADATA only (the `CONFIGURATION_PROFILES`
+section carries no raw payload blob); the `RawConfigSetting` struct has no field
+for a credential — a leak would be a compile error; and the settings allow-list
+(`cfgprofile.AllowedSettingKeys`) plus a credential deny-list drop any
+secret-bearing key at both the normalizer and the record builder. v0 emits
+per-profile metadata only; per-setting enrichment (through the same allow-list) is
+follow-on slice 595.
 
 ## Scope minimums
 
@@ -128,9 +154,13 @@ accuracy recheck:
 - `endpoint.software_inventory.v1` → `VPM-04` (Vulnerability Remediation
   Process), `AST-03` (Asset Inventory) — a deliberately different anchor set
   (the kind answers a different control question than posture).
+- `endpoint.config_profile.v1` → `CFG-02` (Secure Baseline Configurations),
+  `CFG-04` (Configuration Change Control) — configuration-management evidence at
+  a finer grain than the posture verdict.
 
 ## Follow-ons (out of v0 scope)
 
 - software-inventory cursor pagination for large fleets (slice 590);
-- configuration-profile detail evidence (slice 556);
+- config-profile per-setting enrichment (populate `settings[]` through the same
+  allow-list, slice 595);
 - event-driven profile via MDM compliance-state-change webhooks (slice 557).

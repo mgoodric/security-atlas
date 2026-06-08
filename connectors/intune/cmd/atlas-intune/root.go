@@ -25,9 +25,11 @@ const ConnectorName = "intune-connector"
 // emits.
 //   - endpoint.device_posture.v1     (managed-device compliance posture summary, pull; slice 490)
 //   - endpoint.software_inventory.v1 (detected-software inventory, pull; slice 555)
+//   - endpoint.config_profile.v1     (configuration-profile detail, pull; slice 556)
 var SupportedKinds = []string{
 	"endpoint.device_posture.v1",
 	"endpoint.software_inventory.v1",
+	"endpoint.config_profile.v1",
 }
 
 // PullInterval names the connector's pull cadence HONESTLY (P0-490-6). The
@@ -72,6 +74,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newRegisterCmd())
 	root.AddCommand(newRunCmd())
 	root.AddCommand(newRunSoftwareCmd())
+	root.AddCommand(newRunConfigProfilesCmd())
 	root.AddCommand(newPermissionsCmd())
 	return root
 }
@@ -124,9 +127,10 @@ func sdkOpts() []sdk.Option {
 
 const longDescription = `security-atlas Microsoft Intune MDM endpoint connector
 
-Emits two evidence kinds:
+Emits three evidence kinds:
   - endpoint.device_posture.v1     (run subcommand, pull — managed-device compliance posture summary)
   - endpoint.software_inventory.v1 (run-software subcommand, pull — detected-software inventory)
+  - endpoint.config_profile.v1     (run-config-profiles subcommand, pull — configuration-profile detail)
 
 Profile: pull. Each invocation is one bounded read-and-push pass on an
 operator-scheduled cadence (recommended 24h). This is NOT continuous
@@ -154,6 +158,16 @@ SAME read-only DeviceManagementManagedDevices.Read.All permission. Each item
 carries the app name + version + Graph app id ONLY. It NEVER collects executable
 file paths, per-user app-usage telemetry, license keys, device contents, or owner
 personal contact detail.
+
+The 'run-config-profiles' subcommand reads configuration-profile DETAIL (the
+deviceConfigurationStates expansion) for configuration-management evidence (SCF
+CFG-02 / CFG-04), using the SAME read-only DeviceManagementManagedDevices.Read.All
+permission. Each profile carries the name + identifier + type + assigned scope +
+uuid + last-modified + a bounded list of compliance-relevant settings. It NEVER
+collects the secrets configuration profiles routinely embed — Wi-Fi PSKs, VPN
+shared secrets, certificate private keys, API tokens, SCEP challenges, or raw
+payload blobs: the read requests assignment metadata only and the settings field
+is restricted to a non-secret compliance-relevant allow-list.
 
 Auth: set INTUNE_TENANT_ID + INTUNE_CLIENT_ID + INTUNE_CLIENT_SECRET. The
 client secret is read from the environment, never a CLI flag, and never logged
