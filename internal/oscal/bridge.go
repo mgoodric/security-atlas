@@ -32,12 +32,13 @@ type BridgeClient interface {
 	// document references.
 	ImportCatalog(ctx context.Context, oscalJSON []byte, sourceLabel string) (*oscalv1.ImportCatalogResponse, error)
 	// ImportProfile resolves an inbound OSCAL profile JSON document against
-	// one or more SUPPLIED catalog documents, returning the resolved control
-	// projection (or a structured error in the response). The resolve
-	// direction of invariant #8 (slice 511). The bridge resolves
-	// import.href references ONLY against the supplied catalogs and NEVER
-	// dereferences an external href (P0-511-1).
-	ImportProfile(ctx context.Context, profileJSON []byte, catalogs [][]byte, sourceLabel string) (*oscalv1.ImportProfileResponse, error)
+	// the SUPPLIED catalog documents and (slice 578) the SUPPLIED intermediate
+	// profile documents — a bounded profile-over-profile chain — returning the
+	// resolved control projection (or a structured error in the response). The
+	// resolve direction of invariant #8 (slice 511). The bridge resolves
+	// import.href references ONLY against the supplied documents and NEVER
+	// dereferences an external href (P0-511-1 / P0-578-1).
+	ImportProfile(ctx context.Context, profileJSON []byte, catalogs [][]byte, profiles [][]byte, sourceLabel string) (*oscalv1.ImportProfileResponse, error)
 	// ImportComponentDefinition deserializes + validates an inbound OSCAL
 	// component-definition JSON document, returning a normalized projection of
 	// the defined components + their implemented-requirements (the vendor's
@@ -131,16 +132,21 @@ func (b *grpcBridge) ImportCatalog(ctx context.Context, oscalJSON []byte, source
 	return resp, nil
 }
 
-func (b *grpcBridge) ImportProfile(ctx context.Context, profileJSON []byte, catalogs [][]byte, sourceLabel string) (*oscalv1.ImportProfileResponse, error) {
+func (b *grpcBridge) ImportProfile(ctx context.Context, profileJSON []byte, catalogs [][]byte, profiles [][]byte, sourceLabel string) (*oscalv1.ImportProfileResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, bridgeRPCTimeout)
 	defer cancel()
 	supplied := make([]*oscalv1.SuppliedCatalog, 0, len(catalogs))
 	for _, c := range catalogs {
 		supplied = append(supplied, &oscalv1.SuppliedCatalog{OscalJson: c})
 	}
+	suppliedProfiles := make([]*oscalv1.SuppliedProfile, 0, len(profiles))
+	for _, p := range profiles {
+		suppliedProfiles = append(suppliedProfiles, &oscalv1.SuppliedProfile{OscalJson: p})
+	}
 	resp, err := b.client.ImportProfile(ctx, &oscalv1.ImportProfileRequest{
 		ProfileJson: profileJSON,
 		Catalogs:    supplied,
+		Profiles:    suppliedProfiles,
 		SourceLabel: sourceLabel,
 	})
 	if err != nil {

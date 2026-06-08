@@ -86,8 +86,18 @@ type OscalBridgeServiceClient interface {
 	// names no supplied catalog is a structured error, not a fetch (P0-511-1 /
 	// threat-model I — the load-bearing difference from ImportCatalog). The
 	// resolved output is re-validated against OSCAL v1.1.x before it is
-	// returned. Caps (document size, resolved-control count, single import
-	// level) bound the expansion-attack surface (threat-model D / AC-3).
+	// returned. Caps (document size, resolved-control count, import-chain
+	// depth) bound the expansion-attack surface (threat-model D / AC-3).
+	//
+	// Slice 578 extends ImportProfile to CHAINED profile-over-profile
+	// resolution: a profile whose `import.href` names another SUPPLIED profile
+	// (not only a catalog) is resolved recursively until the chain bottoms out
+	// at a supplied catalog. The chain is bounded by a maximum depth and is
+	// rejected on a cycle (a profile that imports itself directly or
+	// transitively) — never an infinite loop / fetch. Every link's href is
+	// still rewritten to a sandboxed `trestle://` path pointing at a supplied
+	// document; an href that names no supplied document is a structured error,
+	// not a fetch (P0-578-1, carrying forward P0-511-1).
 	ImportProfile(ctx context.Context, in *ImportProfileRequest, opts ...grpc.CallOption) (*ImportProfileResponse, error)
 	// ImportComponentDefinition deserializes an inbound OSCAL
 	// `component-definition` JSON document via compliance-trestle, validates it
@@ -225,8 +235,18 @@ type OscalBridgeServiceServer interface {
 	// names no supplied catalog is a structured error, not a fetch (P0-511-1 /
 	// threat-model I — the load-bearing difference from ImportCatalog). The
 	// resolved output is re-validated against OSCAL v1.1.x before it is
-	// returned. Caps (document size, resolved-control count, single import
-	// level) bound the expansion-attack surface (threat-model D / AC-3).
+	// returned. Caps (document size, resolved-control count, import-chain
+	// depth) bound the expansion-attack surface (threat-model D / AC-3).
+	//
+	// Slice 578 extends ImportProfile to CHAINED profile-over-profile
+	// resolution: a profile whose `import.href` names another SUPPLIED profile
+	// (not only a catalog) is resolved recursively until the chain bottoms out
+	// at a supplied catalog. The chain is bounded by a maximum depth and is
+	// rejected on a cycle (a profile that imports itself directly or
+	// transitively) — never an infinite loop / fetch. Every link's href is
+	// still rewritten to a sandboxed `trestle://` path pointing at a supplied
+	// document; an href that names no supplied document is a structured error,
+	// not a fetch (P0-578-1, carrying forward P0-511-1).
 	ImportProfile(context.Context, *ImportProfileRequest) (*ImportProfileResponse, error)
 	// ImportComponentDefinition deserializes an inbound OSCAL
 	// `component-definition` JSON document via compliance-trestle, validates it
