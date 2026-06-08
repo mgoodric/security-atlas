@@ -25,8 +25,16 @@ import (
 )
 
 // channelOptInWire is the JSON shape for GET and PUT on a channel toggle.
+//
+// Slice 585: GET additionally carries `configured` — whether the OPERATOR
+// has configured this channel's delivery target via env. It is derived from
+// the channel's config-presence check (slack.Config.Enabled() /
+// webhook.Config.Enabled()), which reports only PRESENCE of the env, never
+// the secret value itself (P0-585 / P0-543-2). PUT ignores `configured`
+// (server-derived, not client-set); the PUT body remains {enabled} only.
 type channelOptInWire struct {
-	Enabled bool `json:"enabled"`
+	Enabled    bool `json:"enabled"`
+	Configured bool `json:"configured"`
 }
 
 // ChannelOptInHandler bundles GET/PUT for one channel's opt-in toggle. It
@@ -34,18 +42,25 @@ type channelOptInWire struct {
 // share one handler implementation (no duplication).
 type ChannelOptInHandler struct {
 	label string
-	get   func(ctx context.Context, tenantID, userID uuid.UUID) (bool, error)
-	set   func(ctx context.Context, tenantID, userID uuid.UUID, enabled bool) error
+	// configured reports whether the OPERATOR has configured this channel's
+	// delivery target (env present). Captured at construction from the
+	// channel's Config.Enabled(); it is a boolean PRESENCE signal only and
+	// never carries the secret target (P0-585).
+	configured bool
+	get        func(ctx context.Context, tenantID, userID uuid.UUID) (bool, error)
+	set        func(ctx context.Context, tenantID, userID uuid.UUID, enabled bool) error
 }
 
 // NewChannelOptIn constructs a handler from a channel's get/set funcs.
 // label names the channel for error strings (e.g. "slack", "webhook").
+// configured is the operator-config-presence boolean (see field doc).
 func NewChannelOptIn(
 	label string,
+	configured bool,
 	get func(ctx context.Context, tenantID, userID uuid.UUID) (bool, error),
 	set func(ctx context.Context, tenantID, userID uuid.UUID, enabled bool) error,
 ) *ChannelOptInHandler {
-	return &ChannelOptInHandler{label: label, get: get, set: set}
+	return &ChannelOptInHandler{label: label, configured: configured, get: get, set: set}
 }
 
 // Get returns the caller's master opt-in state; default false (P0-543-3).
@@ -64,7 +79,7 @@ func (h *ChannelOptInHandler) Get(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "get "+h.label+"-channel opt-in", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, channelOptInWire{Enabled: enabled})
+	httpresp.WriteJSON(w, http.StatusOK, channelOptInWire{Enabled: enabled, Configured: h.configured})
 }
 
 // Put sets the caller's master opt-in. Tenant + user come from the
@@ -93,5 +108,5 @@ func (h *ChannelOptInHandler) Put(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "set "+h.label+"-channel opt-in", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, channelOptInWire{Enabled: in.Enabled})
+	httpresp.WriteJSON(w, http.StatusOK, channelOptInWire{Enabled: in.Enabled, Configured: h.configured})
 }

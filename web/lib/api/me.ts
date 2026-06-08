@@ -99,7 +99,13 @@ export async function getMyPreferences(): Promise<MePreferences> {
 
 // EmailChannelOptIn is the wire shape for the per-user master email
 // opt-in toggle (AC-9). Default is opted-OUT server-side (P0-445-7).
-export type EmailChannelOptIn = { enabled: boolean };
+//
+// Slice 585: `configured` reports whether the OPERATOR has configured the
+// channel's delivery target (SMTP env present). It is a boolean PRESENCE
+// signal only — the SMTP host/credentials are NEVER carried on this wire
+// (P0-585). Optional for backward tolerance; the settings toggle treats a
+// missing/undefined value as configured (the prior always-enabled behavior).
+export type EmailChannelOptIn = { enabled: boolean; configured?: boolean };
 
 export async function getEmailChannelOptIn(): Promise<EmailChannelOptIn> {
   const res = await fetch(`/api/me/email-channel`, { cache: "no-store" });
@@ -138,7 +144,13 @@ export async function setEmailChannelOptIn(
 // opted-OUT server-side (P0-543-3). The channel target (Slack URL /
 // webhook URL / tokens) is OPERATOR-configured env and is NEVER carried
 // on this wire (P0-543-2 / SSRF) — only the boolean opt-in flips.
-export type ChannelOptIn = { enabled: boolean };
+//
+// Slice 585: `configured` reports whether the OPERATOR has configured this
+// channel's delivery target (Slack/webhook env present + SSRF-valid). It is
+// a boolean PRESENCE signal only — the URL/token is NEVER carried on this
+// wire (P0-585 / P0-543-2). Optional for backward tolerance; a
+// missing/undefined value is treated as configured (prior behavior).
+export type ChannelOptIn = { enabled: boolean; configured?: boolean };
 
 async function getChannelOptIn(path: string): Promise<ChannelOptIn> {
   const res = await fetch(path, { cache: "no-store" });
