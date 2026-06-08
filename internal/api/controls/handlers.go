@@ -79,6 +79,10 @@ type uploadResp struct {
 	// — e.g. "the bundle declares no tests". Empty (dropped) when the gate had
 	// nothing to say.
 	GateWarning string `json:"gate_warning,omitempty"`
+	// GateTestReport carries the per-case report when a RED bundle was accepted
+	// under the slice-608 advisory gate policy (the upload was NOT blocked, but
+	// the uploader still sees which cases are red). Nil (dropped) otherwise.
+	GateTestReport *bundletest.Report `json:"gate_test_report,omitempty"`
 }
 
 // gateRejectionResp is the 400 body returned when the slice-574 upload test-
@@ -167,7 +171,23 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 	if h.store != nil {
 		gateRunner = h.store
 	}
-	verdict, err := runGate(ctx, gateRunner, bundle)
+	// Slice 608: resolve the per-tenant gate policy. A nil store (unit servers)
+	// or any tenant without an explicit value resolves to the strict default,
+	// preserving slice 574's global behaviour. An unrecognised stored value
+	// (only reachable if the DB CHECK were bypassed) also falls back to strict
+	// — never a looser posture than the default.
+	mode := GateModeStrict
+	if h.store != nil {
+		raw, merr := h.store.BundleGateMode(ctx)
+		if merr != nil {
+			httperr.WriteInternal(w, r, "resolve gate policy", merr)
+			return
+		}
+		if parsed, ok := ParseGateMode(raw); ok {
+			mode = parsed
+		}
+	}
+	verdict, err := runGate(ctx, gateRunner, bundle, mode)
 	if err != nil {
 		httperr.WriteInternal(w, r, "bundle test gate", err)
 		return
@@ -199,11 +219,12 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusCreated
 	}
 	resp := uploadResp{
-		ControlID:   result.ControlID.String(),
-		BundleID:    result.BundleID,
-		Version:     result.Version,
-		IsNewBundle: result.IsNewBundle,
-		GateWarning: verdict.warning,
+		ControlID:      result.ControlID.String(),
+		BundleID:       result.BundleID,
+		Version:        result.Version,
+		IsNewBundle:    result.IsNewBundle,
+		GateWarning:    verdict.warning,
+		GateTestReport: verdict.advisoryReport,
 	}
 	// SupersededID is set only when this upload actually superseded a
 	// predecessor. It is the zero UUID for an initial upload AND for a

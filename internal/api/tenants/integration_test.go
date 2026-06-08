@@ -347,3 +347,129 @@ func TestPatchTenant_VisibleInUnifiedAuditLog(t *testing.T) {
 		t.Fatalf("expected action=tenant_rename, got %q", action)
 	}
 }
+
+// ----- slice 608: bundle_gate_mode PATCH surface (AC-5) -----
+
+// TestPatchTenant_GateModeHappyPath proves a tenant admin can set the
+// control-bundle gate policy via PATCH and that the response + DB reflect it.
+func TestPatchTenant_GateModeHappyPath(t *testing.T) {
+	tenantID := seedTenant(t, "Gate Mode Co")
+	userID := uuid.NewString()
+	h := newRouter(t, tenantID, userID, true)
+
+	res, body := patch(t, h, "/v1/tenants/"+tenantID.String(), map[string]any{"bundle_gate_mode": "advisory"})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%v", res.StatusCode, body)
+	}
+	tenant, _ := body["tenant"].(map[string]any)
+	if tenant["bundle_gate_mode"] != "advisory" {
+		t.Fatalf("expected bundle_gate_mode=advisory in response, got %v", tenant["bundle_gate_mode"])
+	}
+	// Default tenants start strict; confirm the column actually changed in the DB.
+	var mode string
+	if err := adminPool.QueryRow(context.Background(),
+		`SELECT bundle_gate_mode FROM tenants WHERE id = $1`, tenantID).Scan(&mode); err != nil {
+		t.Fatalf("read gate mode: %v", err)
+	}
+	if mode != "advisory" {
+		t.Fatalf("DB gate mode = %q; want advisory", mode)
+	}
+}
+
+// TestPatchTenant_GateModeDefaultStrict confirms a freshly-seeded tenant
+// carries the strict default (the slice-574 safe behaviour) before any PATCH.
+func TestPatchTenant_GateModeDefaultStrict(t *testing.T) {
+	tenantID := seedTenant(t, "Default Strict Co")
+	var mode string
+	if err := adminPool.QueryRow(context.Background(),
+		`SELECT bundle_gate_mode FROM tenants WHERE id = $1`, tenantID).Scan(&mode); err != nil {
+		t.Fatalf("read gate mode: %v", err)
+	}
+	if mode != "strict" {
+		t.Fatalf("a new tenant must default to strict; got %q", mode)
+	}
+}
+
+// TestPatchTenant_GateModeInvalidRejected proves an out-of-enum value is a 400
+// (handler allow-list; the DB CHECK is the second leg).
+func TestPatchTenant_GateModeInvalidRejected(t *testing.T) {
+	tenantID := seedTenant(t, "Invalid Gate Co")
+	userID := uuid.NewString()
+	h := newRouter(t, tenantID, userID, true)
+
+	res, _ := patch(t, h, "/v1/tenants/"+tenantID.String(), map[string]any{"bundle_gate_mode": "bogus"})
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid gate mode, got %d", res.StatusCode)
+	}
+	// Column must remain at the strict default.
+	var mode string
+	if err := adminPool.QueryRow(context.Background(),
+		`SELECT bundle_gate_mode FROM tenants WHERE id = $1`, tenantID).Scan(&mode); err != nil {
+		t.Fatalf("read gate mode: %v", err)
+	}
+	if mode != "strict" {
+		t.Fatalf("invalid PATCH must not mutate the column; got %q", mode)
+	}
+}
+
+// TestPatchTenant_GateModeAuditRow proves a gate-policy change writes a
+// me_audit_log row with the new action and the before/after transition.
+func TestPatchTenant_GateModeAuditRow(t *testing.T) {
+	tenantID := seedTenant(t, "Gate Audit Co")
+	userID := uuid.NewString()
+	h := newRouter(t, tenantID, userID, true)
+
+	res, _ := patch(t, h, "/v1/tenants/"+tenantID.String(), map[string]any{"bundle_gate_mode": "mandatory_tests"})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH failed: status %d", res.StatusCode)
+	}
+	var count int
+	if err := adminPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM me_audit_log WHERE tenant_id = $1 AND action = 'tenant_gate_policy_update'`,
+		tenantID).Scan(&count); err != nil {
+		t.Fatalf("count audit rows: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 tenant_gate_policy_update audit row, got %d", count)
+	}
+	var before, after []byte
+	if err := adminPool.QueryRow(context.Background(),
+		`SELECT before, after FROM me_audit_log WHERE tenant_id = $1 AND action = 'tenant_gate_policy_update'`,
+		tenantID).Scan(&before, &after); err != nil {
+		t.Fatalf("read audit row: %v", err)
+	}
+	if !bytes.Contains(before, []byte("strict")) {
+		t.Errorf("before blob missing prior mode: %s", before)
+	}
+	if !bytes.Contains(after, []byte("mandatory_tests")) {
+		t.Errorf("after blob missing new mode: %s", after)
+	}
+}
+
+// TestPatchTenant_NameAndGateModeTogether proves a single PATCH can set both
+// fields, writing one audit row per mutator.
+func TestPatchTenant_NameAndGateModeTogether(t *testing.T) {
+	tenantID := seedTenant(t, "Both Fields Co")
+	userID := uuid.NewString()
+	h := newRouter(t, tenantID, userID, true)
+
+	res, body := patch(t, h, "/v1/tenants/"+tenantID.String(),
+		map[string]any{"name": "Renamed Both", "bundle_gate_mode": "advisory"})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%v", res.StatusCode, body)
+	}
+	tenant, _ := body["tenant"].(map[string]any)
+	if tenant["name"] != "Renamed Both" || tenant["bundle_gate_mode"] != "advisory" {
+		t.Fatalf("expected both fields updated; got %v", tenant)
+	}
+	var renameCount, gateCount int
+	_ = adminPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM me_audit_log WHERE tenant_id = $1 AND action = 'tenant_rename'`,
+		tenantID).Scan(&renameCount)
+	_ = adminPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM me_audit_log WHERE tenant_id = $1 AND action = 'tenant_gate_policy_update'`,
+		tenantID).Scan(&gateCount)
+	if renameCount != 1 || gateCount != 1 {
+		t.Fatalf("expected 1 rename + 1 gate-policy audit row; got rename=%d gate=%d", renameCount, gateCount)
+	}
+}

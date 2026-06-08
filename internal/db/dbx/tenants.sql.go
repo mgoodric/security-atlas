@@ -11,17 +11,45 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getTenantBundleGateMode = `-- name: GetTenantBundleGateMode :one
+SELECT bundle_gate_mode
+FROM tenants
+WHERE id = $1
+`
+
+// Slice 608: read the caller-tenant's control-bundle upload gate policy.
+// RLS scopes the row to the current tenant; the WHERE clause exists only so
+// the query returns at most one row. Returns ErrNoRows when no tenants row
+// exists for the caller (e.g. a bare-UUID tenant that predates slice 144) —
+// the resolver maps that absence to the 'strict' default.
+func (q *Queries) GetTenantBundleGateMode(ctx context.Context, id pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getTenantBundleGateMode, id)
+	var bundle_gate_mode string
+	err := row.Scan(&bundle_gate_mode)
+	return bundle_gate_mode, err
+}
+
 const getTenantByID = `-- name: GetTenantByID :one
 
 SELECT
     id,
     name,
     is_bootstrap_tenant,
+    bundle_gate_mode,
     created_at,
     updated_at
 FROM tenants
 WHERE id = $1
 `
+
+type GetTenantByIDRow struct {
+	ID                pgtype.UUID        `json:"id"`
+	Name              string             `json:"name"`
+	IsBootstrapTenant bool               `json:"is_bootstrap_tenant"`
+	BundleGateMode    string             `json:"bundle_gate_mode"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
 
 // Slice 144 — tenant identity queries.
 //
@@ -36,13 +64,59 @@ WHERE id = $1
 // Read a single tenant row by id under the caller's tenant context.
 // Returns ErrNoRows when the caller's tenant_id GUC does not match
 // the requested id (RLS filters the row out).
-func (q *Queries) GetTenantByID(ctx context.Context, id pgtype.UUID) (Tenant, error) {
+func (q *Queries) GetTenantByID(ctx context.Context, id pgtype.UUID) (GetTenantByIDRow, error) {
 	row := q.db.QueryRow(ctx, getTenantByID, id)
-	var i Tenant
+	var i GetTenantByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
 		&i.IsBootstrapTenant,
+		&i.BundleGateMode,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateTenantBundleGateMode = `-- name: UpdateTenantBundleGateMode :one
+UPDATE tenants
+SET bundle_gate_mode = $2
+WHERE id = $1
+RETURNING
+    id,
+    name,
+    is_bootstrap_tenant,
+    bundle_gate_mode,
+    created_at,
+    updated_at
+`
+
+type UpdateTenantBundleGateModeParams struct {
+	ID             pgtype.UUID `json:"id"`
+	BundleGateMode string      `json:"bundle_gate_mode"`
+}
+
+type UpdateTenantBundleGateModeRow struct {
+	ID                pgtype.UUID        `json:"id"`
+	Name              string             `json:"name"`
+	IsBootstrapTenant bool               `json:"is_bootstrap_tenant"`
+	BundleGateMode    string             `json:"bundle_gate_mode"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Slice 608: set the caller-tenant's control-bundle upload gate policy.
+// RLS gates this to the caller's own row. The CHECK constraint
+// `tenants_bundle_gate_mode_chk` rejects an out-of-enum value at the DB
+// layer (defense in depth atop the handler's allow-list).
+func (q *Queries) UpdateTenantBundleGateMode(ctx context.Context, arg UpdateTenantBundleGateModeParams) (UpdateTenantBundleGateModeRow, error) {
+	row := q.db.QueryRow(ctx, updateTenantBundleGateMode, arg.ID, arg.BundleGateMode)
+	var i UpdateTenantBundleGateModeRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.IsBootstrapTenant,
+		&i.BundleGateMode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -57,6 +131,7 @@ RETURNING
     id,
     name,
     is_bootstrap_tenant,
+    bundle_gate_mode,
     created_at,
     updated_at
 `
@@ -66,19 +141,29 @@ type UpdateTenantNameParams struct {
 	Name string      `json:"name"`
 }
 
+type UpdateTenantNameRow struct {
+	ID                pgtype.UUID        `json:"id"`
+	Name              string             `json:"name"`
+	IsBootstrapTenant bool               `json:"is_bootstrap_tenant"`
+	BundleGateMode    string             `json:"bundle_gate_mode"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 // Update a tenant's name. RLS gates this to the caller's own row.
 // Returns the post-update row so the handler can emit the new value
 // on the wire (and serialize before/after for the audit log).
 //
 // The case-insensitive UNIQUE expression index on LOWER(name) raises
 // `unique_violation` on duplicate; the handler maps to 409.
-func (q *Queries) UpdateTenantName(ctx context.Context, arg UpdateTenantNameParams) (Tenant, error) {
+func (q *Queries) UpdateTenantName(ctx context.Context, arg UpdateTenantNameParams) (UpdateTenantNameRow, error) {
 	row := q.db.QueryRow(ctx, updateTenantName, arg.ID, arg.Name)
-	var i Tenant
+	var i UpdateTenantNameRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
 		&i.IsBootstrapTenant,
+		&i.BundleGateMode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

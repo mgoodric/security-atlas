@@ -135,7 +135,7 @@ func TestRunGate_PassingBundleAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	v, err := runGate(context.Background(), nil, bundle)
+	v, err := runGate(context.Background(), nil, bundle, GateModeStrict)
 	if err != nil {
 		t.Fatalf("runGate: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestRunGate_FailingBundleBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	v, err := runGate(context.Background(), nil, bundle)
+	v, err := runGate(context.Background(), nil, bundle, GateModeStrict)
 	if err != nil {
 		t.Fatalf("runGate: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestRunGate_NoTestsAllowedWithWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	v, err := runGate(context.Background(), nil, bundle)
+	v, err := runGate(context.Background(), nil, bundle, GateModeStrict)
 	if err != nil {
 		t.Fatalf("runGate: %v", err)
 	}
@@ -188,6 +188,135 @@ func TestRunGate_NoTestsAllowedWithWarning(t *testing.T) {
 	}
 	if v.hasTests() {
 		t.Fatalf("hasTests must be false for a no-tests bundle")
+	}
+}
+
+// TestRunGate_AdvisoryAcceptsRedBundle proves slice 608 AC-3: under advisory
+// mode a bundle with a FAILING test is ACCEPTED (not blocked) with the per-case
+// report carried as the advisory report + a warning.
+func TestRunGate_AdvisoryAcceptsRedBundle(t *testing.T) {
+	t.Parallel()
+	tarBytes := buildBundleTarball(t, jsonpathManifest, map[string]string{"t.yaml": failingTests})
+	bundle, err := control.ParseTarball(bytes.NewReader(tarBytes))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	v, err := runGate(context.Background(), nil, bundle, GateModeAdvisory)
+	if err != nil {
+		t.Fatalf("runGate: %v", err)
+	}
+	if v.blocked {
+		t.Fatalf("advisory mode must NOT block a red bundle")
+	}
+	if v.advisoryReport == nil || v.advisoryReport.Failed != 1 {
+		t.Fatalf("expected an advisory report with 1 failure; got %+v", v.advisoryReport)
+	}
+	if !strings.Contains(v.warning, "advisory") {
+		t.Fatalf("expected an advisory warning; got %q", v.warning)
+	}
+}
+
+// TestRunGate_AdvisoryStillAllowsGreen proves advisory mode does not change the
+// green-bundle outcome: a passing bundle is allowed with no advisory report.
+func TestRunGate_AdvisoryStillAllowsGreen(t *testing.T) {
+	t.Parallel()
+	tarBytes := buildBundleTarball(t, jsonpathManifest, map[string]string{"t.yaml": passingTests})
+	bundle, err := control.ParseTarball(bytes.NewReader(tarBytes))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	v, err := runGate(context.Background(), nil, bundle, GateModeAdvisory)
+	if err != nil {
+		t.Fatalf("runGate: %v", err)
+	}
+	if v.blocked {
+		t.Fatalf("a green bundle must be allowed under advisory mode")
+	}
+	if v.advisoryReport != nil {
+		t.Fatalf("a green bundle carries no advisory report; got %+v", v.advisoryReport)
+	}
+}
+
+// TestRunGate_MandatoryTestsRejectsNoTests proves slice 608 AC-4: under
+// mandatory_tests mode a bundle that ships NO tests/ is BLOCKED.
+func TestRunGate_MandatoryTestsRejectsNoTests(t *testing.T) {
+	t.Parallel()
+	tarBytes := buildBundleTarball(t, jsonpathManifest, nil) // no tests
+	bundle, err := control.ParseTarball(bytes.NewReader(tarBytes))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	v, err := runGate(context.Background(), nil, bundle, GateModeMandatoryTests)
+	if err != nil {
+		t.Fatalf("runGate: %v", err)
+	}
+	if !v.blocked {
+		t.Fatalf("mandatory_tests mode must block a no-tests bundle")
+	}
+	if !strings.Contains(v.warning, "mandatory_tests") {
+		t.Fatalf("expected a mandatory_tests warning; got %q", v.warning)
+	}
+}
+
+// TestRunGate_MandatoryTestsStillBlocksRed proves mandatory_tests keeps the
+// strict red-tests hard-block (it is a stricter posture, never looser).
+func TestRunGate_MandatoryTestsStillBlocksRed(t *testing.T) {
+	t.Parallel()
+	tarBytes := buildBundleTarball(t, jsonpathManifest, map[string]string{"t.yaml": failingTests})
+	bundle, err := control.ParseTarball(bytes.NewReader(tarBytes))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	v, err := runGate(context.Background(), nil, bundle, GateModeMandatoryTests)
+	if err != nil {
+		t.Fatalf("runGate: %v", err)
+	}
+	if !v.blocked {
+		t.Fatalf("mandatory_tests mode must still block a red bundle")
+	}
+	if v.report == nil || v.report.Failed != 1 {
+		t.Fatalf("expected a report with 1 failure; got %+v", v.report)
+	}
+}
+
+// TestParseGateMode covers the settings-API + DB-value validator.
+func TestParseGateMode(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in     string
+		want   GateMode
+		wantOK bool
+	}{
+		{"strict", GateModeStrict, true},
+		{"advisory", GateModeAdvisory, true},
+		{"mandatory_tests", GateModeMandatoryTests, true},
+		{"", DefaultGateMode, true}, // empty resolves to default for read paths
+		{"bogus", "", false},
+		{"STRICT", "", false}, // case-sensitive
+	}
+	for _, c := range cases {
+		got, ok := ParseGateMode(c.in)
+		if ok != c.wantOK || (ok && got != c.want) {
+			t.Errorf("ParseGateMode(%q) = (%q, %v); want (%q, %v)", c.in, got, ok, c.want, c.wantOK)
+		}
+	}
+	if DefaultGateMode != GateModeStrict {
+		t.Fatalf("DefaultGateMode must remain strict (slice-574 safe default); got %q", DefaultGateMode)
+	}
+}
+
+// TestGateModeValid covers the GateMode.Valid predicate.
+func TestGateModeValid(t *testing.T) {
+	t.Parallel()
+	for _, m := range []GateMode{GateModeStrict, GateModeAdvisory, GateModeMandatoryTests} {
+		if !m.Valid() {
+			t.Errorf("%q must be valid", m)
+		}
+	}
+	for _, m := range []GateMode{"", "bogus", "STRICT"} {
+		if GateMode(m).Valid() {
+			t.Errorf("%q must be invalid", m)
+		}
 	}
 }
 
@@ -218,7 +347,7 @@ evidence_queries:
 		t.Fatalf("parse: %v", err)
 	}
 	// nil runner → SQL fixture cannot run → per-case ERROR → block.
-	v, err := runGate(context.Background(), nil, bundle)
+	v, err := runGate(context.Background(), nil, bundle, GateModeStrict)
 	if err != nil {
 		t.Fatalf("runGate: %v", err)
 	}
