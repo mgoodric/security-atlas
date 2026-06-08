@@ -397,6 +397,18 @@
       "functions": 98,
       "lines": 93
     },
+    "app/api/me/slack-channel/route.ts": {
+      "statements": 93,
+      "branches": 78,
+      "functions": 98,
+      "lines": 93
+    },
+    "app/api/me/webhook-channel/route.ts": {
+      "statements": 93,
+      "branches": 78,
+      "functions": 98,
+      "lines": 93
+    },
     "app/api/me/route.ts": {
       "statements": 93,
       "branches": 78,

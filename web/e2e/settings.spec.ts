@@ -58,6 +58,7 @@
 //   AC-10 Roles tail badge renders when slice-130 roles array is non-empty (slice 154)
 //   AC-11 Rotate-twice-in-a-row chains predecessors + fresh secret per rotate (slice 163)
 //   AC-13 Page <title> is route-specific via per-route layout metadata (slice 248)
+//   AC-15 Slack + webhook master toggles render opted-out by default (slice 584)
 //   (AC-12 lives in the AppearanceSection block alongside AC-2; the slice
 //   203 author elected to keep the numbering inline rather than renumber.)
 
@@ -257,6 +258,48 @@ test.describe("/settings user-facing page", () => {
     await expect(
       page.getByTestId("settings-notif-row-audit_period_assignment"),
     ).toContainText("in-progress period");
+  });
+
+  test("AC-15 (slice 584): Slack + webhook master toggles render opted-out by default", async ({
+    authedPage: page,
+  }) => {
+    // Slice 584: the Notifications section gains a master opt-in toggle
+    // for each of the slice-543 channels (Slack + generic webhook),
+    // mirroring the slice-445 email-delivery toggle. Each is backed by
+    // GET/PUT /v1/me/{slack,webhook}-channel and defaults opted-OUT
+    // (P0-543-3) — the seed user has no opt-in row, so the GET resolves
+    // enabled=false against the live platform and the checkbox renders
+    // unchecked with the "off" label. The toggle row renders whether or
+    // not the deployment has the channel env-configured; the operator-
+    // configured target/secret is NEVER surfaced (P0-543-2 / SSRF) — the
+    // row is a boolean toggle, no URL/token field.
+    await page.goto("/settings");
+    await expect(
+      page.getByTestId("settings-section-notifications"),
+    ).toBeVisible();
+
+    // Both new rows render with their copy + a toggle.
+    const slackRow = page.getByTestId("settings-slack-channel-toggle-row");
+    await expect(slackRow).toBeVisible();
+    await expect(slackRow).toContainText("Slack delivery");
+    const slackToggle = page.getByTestId("settings-slack-channel-toggle");
+    await expect(slackToggle).toBeVisible();
+    await expect(slackToggle).not.toBeChecked();
+
+    const webhookRow = page.getByTestId("settings-webhook-channel-toggle-row");
+    await expect(webhookRow).toBeVisible();
+    await expect(webhookRow).toContainText("Webhook delivery");
+    const webhookToggle = page.getByTestId("settings-webhook-channel-toggle");
+    await expect(webhookToggle).toBeVisible();
+    await expect(webhookToggle).not.toBeChecked();
+
+    // P0-543-2 / SSRF boundary: neither row exposes a free-text target
+    // input. The rows contain no <input> other than the boolean toggle
+    // checkbox itself.
+    await expect(slackRow.locator('input[type="text"]')).toHaveCount(0);
+    await expect(slackRow.locator('input[type="url"]')).toHaveCount(0);
+    await expect(webhookRow.locator('input[type="text"]')).toHaveCount(0);
+    await expect(webhookRow.locator('input[type="url"]')).toHaveCount(0);
   });
 
   test("AC-8: time-zone <select> reflects current value + PATCH wires", async ({
