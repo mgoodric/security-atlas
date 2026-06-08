@@ -80,6 +80,7 @@ tags:
   - name: install
   - name: mcp
   - name: me
+  - name: oscal
   - name: policies
   - name: questionnaires
   - name: risks
@@ -2728,6 +2729,26 @@ paths:
       summary: PATCH /v1/org_units/{id}
       tags: [risks]
       operationId: patch-v1-org_units-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/oscal/imported-profiles/{id}/provenance:
+    get:
+      summary: GET /v1/oscal/imported-profiles/{id}/provenance
+      tags: [oscal]
+      operationId: get-v1-oscal-imported-profiles-id-provenance
       security:
         - bearer: []
       parameters:

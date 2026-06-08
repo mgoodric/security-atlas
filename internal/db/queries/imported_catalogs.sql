@@ -70,6 +70,38 @@ SELECT * FROM imported_catalogs
 WHERE tenant_id = $1 AND kind = 'profile'
 ORDER BY imported_at DESC, id ASC;
 
+-- ===== slice 599: resolved-chain provenance read =====
+
+-- name: GetProfileImportProvenance :one
+-- Read the resolved-chain provenance for one imported PROFILE baseline. The
+-- chain (the ordered {role, sha256, bytes} array slice 578 records) plus
+-- chain_depth live in the `profile_imported` success-audit row's detail JSONB,
+-- keyed by catalog_id = the baseline's imported_catalogs.id. The join to
+-- imported_catalogs both confirms the id is a PROFILE baseline (kind =
+-- 'profile') and carries the baseline's display metadata for the read surface.
+-- RLS scopes both tables to the caller's tenant; the leading $1 tenant_id
+-- predicate is defense-in-depth behind RLS. A cross-tenant or non-profile id,
+-- or a baseline with no success-audit row, returns ErrNoRows.
+SELECT
+    ic.id              AS baseline_id,
+    ic.profile_title   AS profile_title,
+    ic.source_label    AS source_label,
+    ic.oscal_version   AS oscal_version,
+    ic.imported_at     AS imported_at,
+    al.source_sha256   AS source_sha256,
+    al.occurred_at     AS occurred_at,
+    al.detail          AS detail
+FROM imported_catalogs ic
+JOIN imported_catalog_audit_log al
+    ON al.tenant_id = ic.tenant_id
+   AND al.catalog_id = ic.id
+   AND al.action = 'profile_imported'
+WHERE ic.tenant_id = $1
+  AND ic.id = $2
+  AND ic.kind = 'profile'
+ORDER BY al.occurred_at DESC
+LIMIT 1;
+
 -- ===== slice 512: component-definition import (vendor-claim ingest) =====
 
 -- name: InsertImportedComponentDefinition :one

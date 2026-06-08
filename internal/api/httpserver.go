@@ -50,6 +50,7 @@ import (
 	metricsapi "github.com/mgoodric/security-atlas/internal/api/metrics"
 	orgunitsapi "github.com/mgoodric/security-atlas/internal/api/orgunits"
 	oscalexportapi "github.com/mgoodric/security-atlas/internal/api/oscalexport"
+	oscalprovenanceapi "github.com/mgoodric/security-atlas/internal/api/oscalprovenance"
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	policyacksapi "github.com/mgoodric/security-atlas/internal/api/policyacks"
 	questionnairesapi "github.com/mgoodric/security-atlas/internal/api/questionnaires"
@@ -799,6 +800,19 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/controls/{id}/policies", controlDetailH.Policies)
 	root.Get("/v1/controls/{id}/risks", controlDetailH.Risks)
 	root.Get("/v1/controls/{id}/history", controlDetailH.History)
+	// Slice 599: OSCAL resolved-chain provenance read. A single pure read
+	// over the slice-578 provenance persisted into the append-only
+	// imported_catalog_audit_log.detail JSON of the `profile_imported`
+	// success row. It surfaces, for one imported profile baseline, the
+	// ordered chain of resolved documents + their roles + sha256 hashes (the
+	// "diligence the diligence tool" provenance story for chained imports).
+	// Routes appended per the parallel-batch convention (chi rejects two
+	// Mounts at "/"). The path is a fresh top-level segment -- no shadowing.
+	// The Store is a pure read surface (it never writes the audit-log ledger
+	// -- constitutional invariant #2) and never touches the oscal-bridge: the
+	// provenance is already in Postgres, so the read is bridge-free.
+	oscalProvenanceH := oscalprovenanceapi.New(oscalprovenanceapi.NewStore(s.dbPool))
+	root.Get("/v1/oscal/imported-profiles/{id}/provenance", oscalProvenanceH.Provenance)
 	// Slice 016: evidence freshness + control drift read model. Two
 	// read-only endpoints over the slice-016 read-model tables
 	// (evidence_freshness, control_drift_snapshots). Routes appended per the
