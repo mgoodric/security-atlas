@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -27,6 +28,7 @@ type componentStore interface {
 	ListDefinitions(ctx context.Context) ([]dbx.ImportedCatalog, error)
 	GetDefinitionWithClaims(ctx context.Context, defID uuid.UUID) (DefinitionWithClaims, error)
 	Disposition(ctx context.Context, claimID uuid.UUID, toStatus, actor, note string) (dbx.ImportedComponentClaim, error)
+	MapScfAnchor(ctx context.Context, claimID uuid.UUID, scfAnchorID, actor string) (dbx.ImportedComponentClaim, error)
 }
 
 // Handler wires the OSCAL component-claim read + disposition routes over a
@@ -95,6 +97,14 @@ type definitionDetailWire struct {
 // dispositionReq is the optional body for an accept/reject/needs-info action.
 type dispositionReq struct {
 	Note string `json:"note"`
+}
+
+// mapScfAnchorReq is the body for PATCH /component-claims/{id}/scf-anchor. The
+// scf_anchor_id is the SCF code (e.g. "IAC-06"), validated server-side against
+// the bundled scf_anchors catalog. Requirement -> SCF anchor only (invariant
+// #7): there is no claim id here, only a crosswalk target.
+type mapScfAnchorReq struct {
+	ScfAnchorID string `json:"scf_anchor_id"`
 }
 
 // ListDefinitions handles GET /v1/oscal/component-definitions — a tenant's
@@ -246,6 +256,70 @@ func (h *Handler) disposition(w http.ResponseWriter, r *http.Request, toStatus s
 		"dispositioned_by": updated.DispositionedBy,
 		"dispositioned_at": tsPtr(updated.DispositionedAt),
 		"disposition_note": updated.DispositionNote,
+	})
+}
+
+// MapScfAnchor handles PATCH /v1/oscal/component-claims/{id}/scf-anchor — an
+// operator maps an unmapped vendor claim to a canonical SCF anchor.
+//
+// It is gated on IsApprover (grc_engineer) | IsAdmin — mapping is a write that
+// records the human-approved crosswalk (the same write tier as disposition; a
+// bare read role is not enough). The body carries {scf_anchor_id} (the SCF
+// code, e.g. "IAC-06"), validated server-side against the bundled catalog.
+//
+// THE LOAD-BEARING BOUNDARY: mapping sets the crosswalk only. The store writes
+// the claim's scf_anchor_id + an append-only mapping-audit row; it NEVER
+// touches control_evaluations (the claim stays a claim — invariant #2 / #7 /
+// P0-512-1). On success the claim's `unmapped` flag clears in the read API.
+func (h *Handler) MapScfAnchor(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCredContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer (approver) role required to map a vendor claim to an SCF anchor")
+		return
+	}
+	claimID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "component-claim id must be a uuid")
+		return
+	}
+	var req mapScfAnchorReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "request body must be JSON")
+		return
+	}
+	if strings.TrimSpace(req.ScfAnchorID) == "" {
+		httpresp.WriteError(w, http.StatusBadRequest, "scf_anchor_id is required")
+		return
+	}
+
+	updated, err := h.store.MapScfAnchor(ctx, claimID, strings.TrimSpace(req.ScfAnchorID), cred.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrClaimNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "component claim not found")
+		case errors.Is(err, ErrAnchorNotFound):
+			httpresp.WriteError(w, http.StatusUnprocessableEntity, "scf_anchor_id does not resolve to a bundled SCF anchor")
+		default:
+			httperr.WriteInternal(w, r, "oscalcomponents", err)
+		}
+		return
+	}
+
+	scf := ""
+	if updated.ScfAnchorID != nil {
+		scf = *updated.ScfAnchorID
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
+		"id":              uuidString(updated.ID),
+		"control_id":      updated.ControlID,
+		"is_vendor_claim": updated.IsVendorClaim,
+		"claim_status":    updated.ClaimStatus,
+		"scf_anchor_id":   scf,
+		"unmapped":        updated.ScfAnchorID == nil,
 	})
 }
 

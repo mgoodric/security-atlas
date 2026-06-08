@@ -176,6 +176,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "PATCH", Path: "/v1/me", Tag: "me", Tier: "bearer", Internal: false, Summary: "PATCH /v1/me"},
 	{Method: "PATCH", Path: "/v1/me/notifications/{id}/read", Tag: "me", Tier: "bearer", Internal: false, Summary: "PATCH /v1/me/notifications/{id}/read"},
 	{Method: "PATCH", Path: "/v1/me/preferences", Tag: "me", Tier: "bearer", Internal: false, Summary: "PATCH /v1/me/preferences"},
+	{Method: "PATCH", Path: "/v1/oscal/component-claims/{id}/scf-anchor", Tag: "oscal", Tier: "bearer", Internal: false, Summary: "PATCH /v1/oscal/component-claims/{id}/scf-anchor — operator maps an unmapped vendor claim to a canonical SCF anchor"},
 	{Method: "PATCH", Path: "/v1/org_units/{id}", Tag: "risks", Tier: "bearer", Internal: false, Summary: "PATCH /v1/org_units/{id}"},
 	{Method: "PATCH", Path: "/v1/policies/{id}/approve", Tag: "policies", Tier: "bearer", Internal: false, Summary: "PATCH /v1/policies/{id}/approve"},
 	{Method: "PATCH", Path: "/v1/policies/{id}/submit", Tag: "policies", Tier: "bearer", Internal: false, Summary: "PATCH /v1/policies/{id}/submit"},

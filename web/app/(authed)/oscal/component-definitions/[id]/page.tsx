@@ -14,23 +14,33 @@
 // surfaces the slice-512 `scf_anchor_id IS NULL` claims that still need an
 // SCF-anchor mapping.
 //
+// Slice 620 adds the operator MAPPING affordance: an unmapped claim
+// (scf_anchor_id IS NULL) gets a searchable SCF-anchor picker. Mapping sets
+// the human-approved crosswalk (requirement -> SCF anchor only, invariant #7);
+// it does NOT fabricate control coverage — the claim stays a claim. On success
+// the "Unmapped to SCF" badge clears and the mapped anchor shows.
+//
 // Data source:
-//   GET  /api/oscal/component-definitions/[id]                  (claims)
-//   POST /api/oscal/component-claims/[claimId]/disposition      (disposition)
+//   GET   /api/oscal/component-definitions/[id]                 (claims)
+//   POST  /api/oscal/component-claims/[claimId]/disposition     (disposition)
+//   PATCH /api/oscal/component-claims/[claimId]/scf-anchor       (mapping)
+//   GET   /api/anchors                                           (picker catalog)
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { use, useState } from "react";
+import { use, useMemo, useState } from "react";
 
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bffControlFetch } from "@/lib/api/_shared";
+import type { Anchor } from "@/lib/api/anchors";
 import type {
   ClaimStatus,
   ComponentDefinitionDetail,
   Disposition,
   DispositionResult,
+  MapScfAnchorResult,
 } from "@/lib/api/oscal-components";
 
 function statusBadgeVariant(
@@ -46,6 +56,27 @@ function statusBadgeVariant(
     default:
       return "secondary";
   }
+}
+
+// filterAnchors narrows the SCF-anchor catalog by a case-insensitive substring
+// match over scf_id + family + name. Exported for unit testing the picker
+// search behaviour without standing up the React tree. A blank query caps the
+// list at `cap` so the picker never renders the full ~1,400-anchor catalog.
+export function filterAnchors(
+  anchors: Anchor[],
+  query: string,
+  cap = 25,
+): Anchor[] {
+  const q = query.trim().toLowerCase();
+  if (q === "") return anchors.slice(0, cap);
+  return anchors
+    .filter(
+      (a) =>
+        a.scf_id.toLowerCase().includes(q) ||
+        a.family.toLowerCase().includes(q) ||
+        a.name.toLowerCase().includes(q),
+    )
+    .slice(0, cap);
 }
 
 function statusLabel(status: ClaimStatus): string {
@@ -70,12 +101,25 @@ export default function ComponentDefinitionDetailPage({
   const qc = useQueryClient();
   const [note, setNote] = useState<Record<string, string>>({});
   const [actionError, setActionError] = useState<string | null>(null);
+  // Per-claim SCF-anchor picker search term (only used for unmapped claims).
+  const [anchorQuery, setAnchorQuery] = useState<Record<string, string>>({});
 
   const detailQ = useQuery({
     queryKey: ["oscal", "component-definition", id],
     queryFn: () =>
       bffControlFetch<ComponentDefinitionDetail>(
         `/api/oscal/component-definitions/${id}`,
+      ),
+  });
+
+  // The bundled SCF-anchor catalog backing the picker. Fetched once; the
+  // picker filters client-side. Only loaded lazily is unnecessary here — the
+  // catalog is small and shared across every unmapped claim on the page.
+  const anchorsQ = useQuery({
+    queryKey: ["anchors", "catalog"],
+    queryFn: () =>
+      bffControlFetch<{ anchors: Anchor[] }>(`/api/anchors`).then(
+        (b) => b.anchors,
       ),
   });
 
@@ -106,6 +150,43 @@ export default function ComponentDefinitionDetailPage({
         throw new Error(msg);
       }
       return (await res.json()) as DispositionResult;
+    },
+    onSuccess: () => {
+      setActionError(null);
+      void qc.invalidateQueries({
+        queryKey: ["oscal", "component-definition", id],
+      });
+    },
+    onError: (err: Error) => setActionError(err.message),
+  });
+
+  // Slice 620 — map an unmapped claim to a canonical SCF anchor. On success
+  // the detail query is invalidated so the claim re-renders mapped (the
+  // "Unmapped to SCF" badge clears + the anchor shows).
+  const mapM = useMutation({
+    mutationFn: async (args: {
+      claimId: string;
+      scfAnchorId: string;
+    }): Promise<MapScfAnchorResult> => {
+      const res = await fetch(
+        `/api/oscal/component-claims/${args.claimId}/scf-anchor`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scf_anchor_id: args.scfAnchorId }),
+        },
+      );
+      if (!res.ok) {
+        let msg = `${res.status} ${res.statusText}`;
+        try {
+          const j = (await res.json()) as { error?: string };
+          if (j.error) msg = j.error;
+        } catch {
+          // keep status line
+        }
+        throw new Error(msg);
+      }
+      return (await res.json()) as MapScfAnchorResult;
     },
     onSuccess: () => {
       setActionError(null);
@@ -276,10 +357,113 @@ export default function ComponentDefinitionDetailPage({
                   Needs info
                 </Button>
               </div>
+
+              {c.unmapped && (
+                <ScfAnchorPicker
+                  claimId={c.id}
+                  anchors={anchorsQ.data ?? []}
+                  loading={anchorsQ.isLoading}
+                  query={anchorQuery[c.id] ?? ""}
+                  onQueryChange={(v) =>
+                    setAnchorQuery((prev) => ({ ...prev, [c.id]: v }))
+                  }
+                  onMap={(scfAnchorId) =>
+                    mapM.mutate({ claimId: c.id, scfAnchorId })
+                  }
+                  pending={mapM.isPending}
+                />
+              )}
             </li>
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+// ScfAnchorPicker is the slice-620 SCF-anchor mapping affordance for ONE
+// unmapped claim. It renders a search box + a short filtered list of bundled
+// SCF anchors; clicking one PATCHes the mapping. The picker NEVER lets the
+// operator type a free-form anchor — every option resolves to a real
+// scf_anchors row (invariant #7), and the platform validates again server-side.
+function ScfAnchorPicker({
+  claimId,
+  anchors,
+  loading,
+  query,
+  onQueryChange,
+  onMap,
+  pending,
+}: {
+  claimId: string;
+  anchors: Anchor[];
+  loading: boolean;
+  query: string;
+  onQueryChange: (v: string) => void;
+  onMap: (scfAnchorId: string) => void;
+  pending: boolean;
+}) {
+  const filtered = useMemo(
+    () => filterAnchors(anchors, query),
+    [anchors, query],
+  );
+
+  return (
+    <div
+      className="space-y-2 rounded-md border border-dashed p-3"
+      data-testid="scf-anchor-picker"
+    >
+      <p className="text-xs font-medium text-muted-foreground">
+        Map this claim to a canonical SCF anchor. Setting the crosswalk does not
+        satisfy a control on its own.
+      </p>
+      <input
+        type="text"
+        className="w-full rounded-md border p-2 text-sm"
+        placeholder="Search SCF anchors (code, family, name)…"
+        data-testid="scf-anchor-search"
+        value={query}
+        onChange={(e) => onQueryChange(e.target.value)}
+      />
+      {loading ? (
+        <p className="text-xs text-muted-foreground">Loading anchors…</p>
+      ) : filtered.length === 0 ? (
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="scf-anchor-empty"
+        >
+          No matching SCF anchors.
+        </p>
+      ) : (
+        <ul
+          className="max-h-48 space-y-1 overflow-y-auto"
+          data-testid="scf-anchor-options"
+        >
+          {filtered.map((a) => (
+            <li key={a.id}>
+              <button
+                type="button"
+                className="flex w-full flex-col rounded-md border px-2 py-1 text-left text-sm hover:bg-accent disabled:opacity-50"
+                data-testid="scf-anchor-option"
+                data-scf-id={a.scf_id}
+                disabled={pending}
+                onClick={() => onMap(a.scf_id)}
+              >
+                <span className="font-mono text-xs">{a.scf_id}</span>
+                <span className="text-xs text-muted-foreground">
+                  {a.family} · {a.name}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <input
+        type="hidden"
+        data-testid="scf-anchor-claim-id"
+        value={claimId}
+        readOnly
+      />
     </div>
   );
 }

@@ -831,6 +831,13 @@ func (s *Server) httpHandler() http.Handler {
 	root.Post("/v1/oscal/component-claims/{id}:accept", oscalComponentsH.Accept)
 	root.Post("/v1/oscal/component-claims/{id}:reject", oscalComponentsH.Reject)
 	root.Post("/v1/oscal/component-claims/{id}:needs-info", oscalComponentsH.NeedsInfo)
+	// Slice 620: operator maps an UNMAPPED vendor claim (slice-512
+	// scf_anchor_id IS NULL) to a canonical SCF anchor. grc_engineer-gated;
+	// validates the anchor exists in the bundled catalog; sets the crosswalk +
+	// appends an append-only mapping-audit row. Requirement -> SCF anchor only
+	// (invariant #7); the claim stays a claim -- mapping NEVER writes
+	// control_evaluations (invariant #2 / P0-512-1).
+	root.Patch("/v1/oscal/component-claims/{id}/scf-anchor", oscalComponentsH.MapScfAnchor)
 	// Slice 016: evidence freshness + control drift read model. Two
 	// read-only endpoints over the slice-016 read-model tables
 	// (evidence_freshness, control_drift_snapshots). Routes appended per the
