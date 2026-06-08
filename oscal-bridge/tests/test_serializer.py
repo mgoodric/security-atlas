@@ -88,6 +88,107 @@ def test_serialize_ssp_rejects_empty_control_implementations():
         serialize_ssp(bad)
 
 
+def _ssp_input_with_vendor_claim() -> oscal_pb2.SspInput:
+    inp = _ssp_input()
+    inp.vendor_attested_implementations.append(
+        oscal_pb2.VendorAttestedImplementation(
+            claim_id="claim-aaaa",
+            control_id="AC-2",
+            scf_id="IAC-07",
+            component_uuid="vendor-uuid-1",
+            component_title="AcmeVault",
+            component_type="service",
+            statement="AcmeVault encrypts all secrets at rest with AES-256.",
+            accepted_by="operator@acme.com",
+            accepted_at="2026-05-01T00:00:00+00:00",
+            disposition_note="Reviewed vendor SOC 2 Type II report.",
+        )
+    )
+    return inp
+
+
+def test_serialize_ssp_renders_accepted_vendor_claim_as_by_component():
+    """Slice 619 — the hard constitutional boundary.
+
+    An operator-accepted vendor claim surfaces as a vendor-attested
+    by-component statement: attributed to a vendor SystemComponent (NOT the
+    this-system component), flagged vendor-attested + operator-credited with
+    accept-provenance, leading with the honesty label, and carrying NO
+    evaluation-result prop. It must NEVER read as platform-verified evidence.
+    """
+    data = serialize_ssp(_ssp_input_with_vendor_claim())
+    doc = json.loads(data)
+    ssp = doc["system-security-plan"]
+
+    # 1. A distinct vendor SystemComponent exists, separate from this-system.
+    comps = ssp["system-implementation"]["components"]
+    this_system = [c for c in comps if c["type"] == "this-system"]
+    vendor_comps = [
+        c
+        for c in comps
+        if any(p["name"] == "vendor-attested" and p["value"] == "true" for p in c.get("props", []))
+    ]
+    assert len(this_system) == 1
+    assert len(vendor_comps) == 1, "expected exactly one vendor component"
+    vendor_uuid = vendor_comps[0]["uuid"]
+    assert vendor_uuid != this_system[0]["uuid"]
+
+    # 2. The vendor implemented-requirement is a by-component statement
+    #    attributed to the vendor component, flagged vendor-attested, and
+    #    carries NO evaluation-result prop (the boundary).
+    impls = ssp["control-implementation"]["implemented-requirements"]
+    vendor_irs = [
+        ir
+        for ir in impls
+        if any(p["name"] == "vendor-attested" and p["value"] == "true" for p in ir.get("props", []))
+    ]
+    assert len(vendor_irs) == 1
+    vir = vendor_irs[0]
+    # No evaluation-result on a vendor claim — it is not a platform evaluation.
+    assert not any(p["name"] == "evaluation-result" for p in vir.get("props", []))
+    by_comps = vir["statements"][0]["by-components"]
+    assert len(by_comps) == 1
+    bc = by_comps[0]
+    assert bc["component-uuid"] == vendor_uuid
+    # Honesty label leads the by-component description.
+    assert bc["description"].startswith("[VENDOR-ATTESTED")
+    # Accept-provenance is present.
+    bc_props = {p["name"]: p["value"] for p in bc.get("props", [])}
+    assert bc_props["disposition"] == "accepted"
+    assert bc_props["accepted-by"] == "operator@acme.com"
+    assert bc_props["accepted-at"] == "2026-05-01T00:00:00+00:00"
+    assert bc_props["claim-id"] == "claim-aaaa"
+
+    # 3. The platform control-implementation is untouched and still carries its
+    #    evaluation-result — vendor claims did not pollute it.
+    platform_irs = [
+        ir for ir in impls if not any(p["name"] == "vendor-attested" for p in ir.get("props", []))
+    ]
+    assert len(platform_irs) == 1
+    assert any(
+        p["name"] == "evaluation-result" and p["value"] == "pass"
+        for p in platform_irs[0].get("props", [])
+    )
+
+    # 4. Round-trips through trestle.
+    valid, errors = round_trip_validate("system-security-plan", data)
+    assert valid, errors
+
+
+def test_serialize_ssp_excludes_rejected_and_needs_info_claims():
+    """Only ACCEPTED claims reach the proto; the Go aggregate filters on
+    claim_status = 'accepted'. With no vendor_attested_implementations the SSP
+    carries zero vendor components and zero vendor implemented-requirements —
+    a rejected / needs_info claim never appears as an implementation."""
+    data = serialize_ssp(_ssp_input())  # no vendor claims supplied
+    doc = json.loads(data)
+    ssp = doc["system-security-plan"]
+    comps = ssp["system-implementation"]["components"]
+    assert not any(any(p["name"] == "vendor-attested" for p in c.get("props", [])) for c in comps)
+    impls = ssp["control-implementation"]["implemented-requirements"]
+    assert not any(any(p["name"] == "vendor-attested" for p in ir.get("props", [])) for ir in impls)
+
+
 def test_serialize_assessment_emits_valid_ap_and_ar():
     inp = oscal_pb2.AssessmentInput(
         metadata=_metadata(),

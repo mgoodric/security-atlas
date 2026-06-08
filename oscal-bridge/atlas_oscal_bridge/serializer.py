@@ -48,6 +48,7 @@ from trestle.oscal.component import ComponentDefinition
 from trestle.oscal.poam import PlanOfActionAndMilestones, PoamItem
 from trestle.oscal.ssp import (
     AuthorizationBoundary,
+    ByComponent,
     ControlImplementation,
     ImplementedRequirement,
     ImportProfile,
@@ -122,6 +123,21 @@ def _oscal_token(raw: str) -> str:
     return cleaned
 
 
+# Leading honesty label for vendor-attested control-implementation statements
+# (slice 619). An accepted vendor claim surfaces in the SSP as a by-component
+# statement, but it is a vendor ASSERTION the operator chose to credit — NOT
+# platform-verified evidence (P0-619 / inherits P0-512-1 / invariant #2). The
+# label is front-loaded (mirrors the slice-493 fallback-statement convention):
+# an auditor skims the first words of each statement, so the honesty marker
+# must lead and be unmistakable.
+VENDOR_ATTESTED_LABEL = (
+    "[VENDOR-ATTESTED — operator-credited vendor claim, NOT platform-verified "
+    "evidence. This statement is the vendor's own assertion that the operator "
+    "chose to credit; it does not represent a control verified by "
+    "security-atlas.]"
+)
+
+
 # --------------------------------------------------------------------------
 # SSP
 # --------------------------------------------------------------------------
@@ -178,6 +194,43 @@ def serialize_ssp(pb_input) -> bytes:
                 ],
             )
         )
+    # Slice 619: one SystemComponent per distinct vendor component that has an
+    # operator-accepted claim. These are the OSCAL-native attribution target
+    # for the by-component statements below — an auditor sees the claim
+    # attributed to the vendor's product, never to the this-system component.
+    # The component is flagged vendor-attested so it is unmistakable in the SSP
+    # system-implementation block (the hard boundary: a vendor component is not
+    # the assessed system).
+    vendor_component_uuid_by_key: dict[str, str] = {}
+    for vai in getattr(pb_input, "vendor_attested_implementations", None) or []:
+        key = vai.component_uuid or vai.component_title or vai.claim_id
+        if key in vendor_component_uuid_by_key:
+            continue
+        comp_uuid = str(uuid.uuid4())
+        vendor_component_uuid_by_key[key] = comp_uuid
+        components.append(
+            SystemComponent(
+                uuid=comp_uuid,
+                # OSCAL component type from the vendor's component-definition
+                # (software | service | hardware | ...); default to "service".
+                type=vai.component_type or "service",
+                title=vai.component_title or "Vendor component",
+                description=(
+                    f"{VENDOR_ATTESTED_LABEL} Third-party vendor component "
+                    f"(OSCAL uuid {vai.component_uuid or 'unknown'}). "
+                    "Implementation statements attributed to this component are "
+                    "vendor assertions the operator credited, not platform "
+                    "evidence."
+                ),
+                status=CommonStatus(state=_COMP_STATE_ENUM.operational),
+                props=[
+                    _prop("vendor-attested", "true"),
+                    _prop("operator-credited", "true"),
+                    _prop("source-component-uuid", vai.component_uuid),
+                ],
+            )
+        )
+
     sys_impl = SystemImplementation(components=components)
 
     implemented = []
@@ -210,12 +263,81 @@ def serialize_ssp(pb_input) -> bytes:
                 statements=[statement],
             )
         )
+    # Slice 619: operator-accepted vendor claims, rendered as by-component
+    # implemented-requirements attributed to the vendor SystemComponent. These
+    # are SEPARATE implemented-requirements (never merged into a platform
+    # control-implementation) and are flagged vendor-attested so they can never
+    # be counted as platform coverage. The boundary is structural: the
+    # statement is a `by-component` entry pointing at the vendor component, the
+    # description leads with VENDOR_ATTESTED_LABEL, and there is NO
+    # evaluation-result prop (a vendor claim is not an evaluation).
+    for vai in getattr(pb_input, "vendor_attested_implementations", None) or []:
+        key = vai.component_uuid or vai.component_title or vai.claim_id
+        comp_uuid = vendor_component_uuid_by_key.get(key)
+        if comp_uuid is None:
+            # Should not happen — every claim seeded a component above — but be
+            # defensive: skip an un-attributable claim rather than emit a
+            # statement with no vendor component (which could read as platform
+            # evidence).
+            continue
+        control_token = _oscal_token(vai.scf_id or vai.control_id)
+        vendor_statement_text = (
+            f"{VENDOR_ATTESTED_LABEL} {vai.statement}".strip()
+            if vai.statement
+            else VENDOR_ATTESTED_LABEL
+        )
+        by_comp_props = [
+            _prop("vendor-attested", "true"),
+            _prop("operator-credited", "true"),
+            _prop("claim-id", vai.claim_id),
+            _prop("disposition", "accepted"),
+        ]
+        if vai.accepted_by:
+            by_comp_props.append(_prop("accepted-by", vai.accepted_by))
+        if vai.accepted_at:
+            by_comp_props.append(_prop("accepted-at", vai.accepted_at))
+        if vai.scf_id:
+            by_comp_props.append(_prop("scf-id", vai.scf_id))
+        by_component = ByComponent(
+            component_uuid=comp_uuid,
+            uuid=str(uuid.uuid4()),
+            description=vendor_statement_text,
+            props=by_comp_props,
+            remarks=(
+                vai.disposition_note
+                if vai.disposition_note
+                else "Operator credited this vendor assertion; no platform " "evidence backs it."
+            ),
+        )
+        statement = Statement(
+            statement_id=f"{control_token}_vendor_attested_stmt",
+            uuid=str(uuid.uuid4()),
+            by_components=[by_component],
+            remarks=VENDOR_ATTESTED_LABEL,
+        )
+        implemented.append(
+            ImplementedRequirement(
+                uuid=str(uuid.uuid4()),
+                control_id=control_token,
+                # NOTE: deliberately NO evaluation-result prop — a vendor claim
+                # is not a platform evaluation (the hard boundary).
+                props=[
+                    _prop("vendor-attested", "true"),
+                    _prop("operator-credited", "true"),
+                    _prop("claim-id", vai.claim_id),
+                ],
+                statements=[statement],
+            )
+        )
+
     if not implemented:
         raise SerializeError("SSP input has no control implementations")
 
     control_impl = ControlImplementation(
         description="Control implementations derived from the frozen audit "
-        "period's control bundles and evaluations.",
+        "period's control bundles and evaluations. Vendor-attested "
+        "by-component statements (operator-credited vendor claims) are "
+        "included for transparency and are NOT platform-verified evidence.",
         implemented_requirements=implemented,
     )
 
