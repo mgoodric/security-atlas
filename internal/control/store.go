@@ -343,6 +343,32 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries,
 	return nil
 }
 
+// WithReadOnlyTenantTx runs fn inside a READ-ONLY, tenant-scoped transaction
+// that is ALWAYS rolled back. It exists so the slice-574 upload gate can
+// evaluate a bundle's SQL-language test fixtures (which need a real Postgres
+// subtransaction — see internal/eval/sql.go) without ever writing: the tx is
+// opened `READ ONLY`, the tenant RLS context is applied, fn runs, and the tx is
+// discarded. This upholds constitutional invariant #2 — the gate evaluates, it
+// never mutates evidence or any source-of-truth row. fn receives the live
+// pgx.Tx; it must NOT attempt a write (the READ ONLY mode would reject one
+// anyway).
+func (s *Store) WithReadOnlyTenantTx(ctx context.Context, fn func(pgx.Tx) error) error {
+	if _, err := tenancy.TenantFromContext(ctx); err != nil {
+		return err
+	}
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return fmt.Errorf("control: begin read-only tx: %w", err)
+	}
+	// Always roll back — this path never commits (gate is read-only).
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		return err
+	}
+	return fn(tx)
+}
+
 func pgUUID(u uuid.UUID) pgtype.UUID {
 	return pgtype.UUID{Bytes: u, Valid: true}
 }

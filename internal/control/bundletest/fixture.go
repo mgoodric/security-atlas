@@ -53,7 +53,9 @@
 package bundletest
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -218,11 +220,29 @@ func parseTestFile(path string) (TestFile, error) {
 		return TestFile{}, fmt.Errorf("bundletest: %s exceeds %d bytes", path, maxTestFileBytes)
 	}
 
+	buf, err := io.ReadAll(io.LimitReader(f, maxTestFileBytes+1))
+	if err != nil {
+		return TestFile{}, fmt.Errorf("bundletest: read %s: %w", path, err)
+	}
+	return parseTestFileBytes(path, buf)
+}
+
+// parseTestFileBytes YAML-decodes one tests/*.yaml file already read into
+// memory — the seam the slice-574 upload gate uses, where the bundle's test
+// files arrive as bytes (control.Bundle.TestFiles) rather than a directory.
+// parseTestFile delegates here after a size-capped read, so the directory path
+// and the in-memory path share one decode + one set of decoder options
+// (KnownFields(true), so a typo'd key is a loud error in BOTH paths). name is
+// used only for error messages.
+func parseTestFileBytes(name string, data []byte) (TestFile, error) {
+	if int64(len(data)) > maxTestFileBytes {
+		return TestFile{}, fmt.Errorf("bundletest: %s exceeds %d bytes", name, maxTestFileBytes)
+	}
 	var tf TestFile
-	dec := yaml.NewDecoder(f)
+	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&tf); err != nil {
-		return TestFile{}, fmt.Errorf("bundletest: parse %s: %w", path, err)
+		return TestFile{}, fmt.Errorf("bundletest: parse %s: %w", name, err)
 	}
 	return tf, nil
 }
