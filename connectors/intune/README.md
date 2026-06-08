@@ -128,6 +128,14 @@ version` and `$expand`s `managedDevices($select=id)` (never `sizeInByte`,
 field for a path / usage / license key — a leak would be a compile error. The
 per-device list is bounded (`MaxSoftwarePerDevice = 500`).
 
+The read follows the Graph `@odata.nextLink` cursor (slice 590) so the FULL
+`detectedApps` catalog is gathered before the app-centric graph is inverted to
+the device-centric shape — without the walk, a device's apps that fall on later
+pages would be silently dropped. The walk is bounded by a max-page cap
+(`maxSoftwarePages = 50` at `$top = 200`) so a non-terminating nextLink chain
+cannot drive an unbounded loop. The field allow-list above is unchanged by
+pagination — only the page loop was added.
+
 ## Config-profile secret-redaction boundary (slice 556 — load-bearing)
 
 The `run-config-profiles` subcommand reads configuration-profile DETAIL (the
@@ -170,7 +178,6 @@ accuracy recheck:
 
 ## Follow-ons (out of v0 scope)
 
-- software-inventory cursor pagination for large fleets (slice 590);
 - config-profile per-setting enrichment (populate `settings[]` through the same
   allow-list, slice 595);
 - event-driven profile via MDM compliance-state-change webhooks (slice 557).

@@ -175,7 +175,19 @@ func (c *Client) ensureToken(ctx context.Context) error {
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, into any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.GraphBaseURL+path, nil)
+	return c.doGetJSON(ctx, c.GraphBaseURL+path, into)
+}
+
+// getJSONAbsolute issues a GET against a fully-qualified URL. It is used to
+// follow a Graph @odata.nextLink, which the server returns as an absolute URL
+// carrying an opaque skiptoken (the page cursor) — it must be requested verbatim,
+// not reconstructed from GraphBaseURL.
+func (c *Client) getJSONAbsolute(ctx context.Context, fullURL string, into any) error {
+	return c.doGetJSON(ctx, fullURL, into)
+}
+
+func (c *Client) doGetJSON(ctx context.Context, fullURL string, into any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 	if err != nil {
 		return err
 	}
@@ -190,7 +202,7 @@ func (c *Client) getJSON(ctx context.Context, path string, into any) error {
 		return &APIError{Status: res.StatusCode, Body: drain(res.Body)}
 	}
 	if err := json.NewDecoder(res.Body).Decode(into); err != nil {
-		return fmt.Errorf("decode %s: %w", path, err)
+		return fmt.Errorf("decode %s: %w", fullURL, err)
 	}
 	return nil
 }

@@ -88,6 +88,79 @@ func TestClient_ListDetectedApps_InvertsToDeviceCentricSoftwareOnly(t *testing.T
 	// no field for deviceName/userPrincipalName — a leak would be a compile error.
 }
 
+// TestClient_ListDetectedApps_WalksNextLink drives the @odata.nextLink cursor
+// across TWO pages and asserts the inverted device-centric result is the UNION
+// of both pages, including a device whose apps span BOTH pages (the exact bug
+// slice 555 left open), and that the loop terminates when nextLink is absent
+// (P0-590).
+func TestClient_ListDetectedApps_WalksNextLink(t *testing.T) {
+	t.Parallel()
+	var srv *httptest.Server
+	var pagesServed []string
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/oauth2/v2.0/token"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"fake-graph-bearer","expires_in":3600}`))
+		case strings.HasPrefix(r.URL.Path, "/v1.0/deviceManagement/detectedApps"):
+			if r.Method != http.MethodGet {
+				t.Errorf("detectedApps method = %s; want GET", r.Method)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if r.URL.Query().Get("$skiptoken") == "page2" {
+				pagesServed = append(pagesServed, "2")
+				// Page 2: app-2 on d-1 (so d-1 spans both pages) + app-3 on d-3.
+				// No nextLink -> loop terminates.
+				_, _ = w.Write([]byte(`{
+				  "value": [
+				    {"id":"app-2","displayName":"openssl","version":"3.0.13","managedDevices":[{"id":"d-1"}]},
+				    {"id":"app-3","displayName":"Slack","version":"4.0","managedDevices":[{"id":"d-3"}]}
+				  ]
+				}`))
+			} else {
+				pagesServed = append(pagesServed, "1")
+				// Page 1: app-1 on d-1 + d-2, with an absolute @odata.nextLink.
+				next := srv.URL + "/v1.0/deviceManagement/detectedApps?$skiptoken=page2"
+				_, _ = w.Write([]byte(`{
+				  "@odata.nextLink": "` + next + `",
+				  "value": [
+				    {"id":"app-1","displayName":"Google Chrome","version":"125","managedDevices":[{"id":"d-1"},{"id":"d-2"}]}
+				  ]
+				}`))
+			}
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(cfgFor(srv))
+	got, err := c.ListDetectedApps(context.Background())
+	if err != nil {
+		t.Fatalf("ListDetectedApps: %v", err)
+	}
+	if len(pagesServed) != 2 {
+		t.Fatalf("served %d pages (%v); want exactly 2 (nextLink walk + terminate)", len(pagesServed), pagesServed)
+	}
+
+	byID := map[string][]RawSoftwareItem{}
+	for _, d := range got {
+		byID[d.DeviceID] = d.Apps
+	}
+	// d-1 spans both pages: Chrome (page 1) + openssl (page 2) -> the union.
+	if len(byID["d-1"]) != 2 {
+		t.Errorf("d-1 apps = %d; want 2 (apps span both pages): %+v", len(byID["d-1"]), byID["d-1"])
+	}
+	if len(byID["d-2"]) != 1 || byID["d-2"][0].Name != "Google Chrome" {
+		t.Errorf("d-2 apps wrong: %+v", byID["d-2"])
+	}
+	// d-3 appears only on page 2 -> would be missed without the walk.
+	if len(byID["d-3"]) != 1 || byID["d-3"][0].Name != "Slack" {
+		t.Errorf("d-3 (page-2-only device) missing or wrong: %+v", byID["d-3"])
+	}
+}
+
 func TestClient_ListDetectedApps_TokenError(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
