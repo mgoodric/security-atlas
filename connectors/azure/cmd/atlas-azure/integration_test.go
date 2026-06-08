@@ -17,6 +17,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
+	"github.com/mgoodric/security-atlas/connectors/azure/internal/aks"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/azureauth"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/entra"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/storage"
@@ -82,8 +83,8 @@ func TestRegister_ListsConnector(t *testing.T) {
 	for _, h := range list.GetHandles() {
 		if h.GetName() == ConnectorName {
 			found = true
-			if len(h.GetSupportedKinds()) != 2 {
-				t.Errorf("supported_kinds = %d; want 2", len(h.GetSupportedKinds()))
+			if len(h.GetSupportedKinds()) != 3 {
+				t.Errorf("supported_kinds = %d; want 3", len(h.GetSupportedKinds()))
 			}
 			if strings.Join(h.GetProfilesSupported(), ",") != "pull" {
 				t.Errorf("profiles_supported = %v; want [pull]", h.GetProfilesSupported())
@@ -95,10 +96,11 @@ func TestRegister_ListsConnector(t *testing.T) {
 	}
 }
 
-// TestRun_PushesBothKinds verifies AC-2/AC-3/AC-5/AC-6/AC-9: collect from faked
-// Graph + ARM surfaces, build canonical records, push them through the
-// platform's single Push RPC, and assert the receipt (sha256 content hash).
-func TestRun_PushesBothKinds(t *testing.T) {
+// TestRun_PushesAllKinds verifies AC-2/AC-3/AC-5/AC-6/AC-9 (slice 486) + slice
+// 519 AC-1/AC-3: collect from faked Graph + ARM surfaces (Entra + Storage +
+// AKS), build canonical records, push them through the platform's single Push
+// RPC, and assert the receipt (sha256 content hash).
+func TestRun_PushesAllKinds(t *testing.T) {
 	_, conn, bearer := newBufconnPlatform(t)
 	client := sdk.NewClientFromConn(conn, bearer)
 	fixed := func() time.Time { return time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC) }
@@ -154,6 +156,39 @@ func TestRun_PushesBothKinds(t *testing.T) {
 	if got := scopeValue(storageRec.GetScope(), "cloud_account"); got != "azure:sub-1" {
 		t.Errorf("storage cloud_account = %q; want azure:sub-1", got)
 	}
+
+	// AKS (faked ARM surface — NO live Azure). Slice 519.
+	aksAPI := &fakeAKSForIntegration{clusters: []aks.RawCluster{
+		{ID: "/subscriptions/test-sub/resourceGroups/rg/providers/Microsoft.ContainerService/managedClusters/clu",
+			Name: "clu", ResourceGroup: "rg", Location: "eastus", KubernetesVersion: "1.29.2",
+			RBACEnabled: true, NetworkPolicy: "calico", PrivateCluster: true,
+			AuthorizedIPRanges: true, ManagedIdentity: true, LocalAccountsDisabled: true,
+			OIDCIssuerEnabled: true, NodePoolCount: 2},
+	}}
+	clusters, err := aks.Inspect(context.Background(), aksAPI, "test-sub", fixed)
+	if err != nil {
+		t.Fatalf("aks.Inspect: %v", err)
+	}
+	aksRec, err := buildAKSRecord(clusters[0], "prod", "scf:CFG-02")
+	if err != nil {
+		t.Fatalf("buildAKSRecord: %v", err)
+	}
+	aksReceipt, err := client.Push(context.Background(), aksRec)
+	if err != nil {
+		t.Fatalf("Push aks: %v", err)
+	}
+	if aksReceipt.GetHash() == "" {
+		t.Fatal("aks receipt hash empty (AC-3 sha256 content-hash)")
+	}
+	if aksRec.GetEvidenceKind() != "azure.aks_cluster_config.v1" {
+		t.Errorf("aks kind = %q", aksRec.GetEvidenceKind())
+	}
+	if clusters[0].Result != aks.ResultPass {
+		t.Errorf("hardened cluster should PASS; got %q", clusters[0].Result)
+	}
+	if !strings.HasPrefix(aksRec.GetSourceAttribution().GetActorId(), "connector:azure:aks@") {
+		t.Errorf("aks actor_id = %q", aksRec.GetSourceAttribution().GetActorId())
+	}
 }
 
 // TestRun_DedupesWithinHour verifies AC-6: two records from the same resource in
@@ -204,6 +239,12 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 	accts, _ := storage.Inspect(context.Background(), armAPI, "sub-1", fixed)
 	storageRec, _ := buildStorageRecord(accts[0], "prod", "scf:CRY-04")
 
+	aksAPI := &fakeAKSForIntegration{clusters: []aks.RawCluster{
+		{ID: "/sub/clu", Name: "clu", RBACEnabled: true, NetworkPolicy: "calico", PrivateCluster: true, AuthorizedIPRanges: true},
+	}}
+	clusters, _ := aks.Inspect(context.Background(), aksAPI, "sub-1", fixed)
+	aksRec, _ := buildAKSRecord(clusters[0], "prod", "scf:CFG-02")
+
 	// Allow-list of permitted payload keys per kind. Any key NOT in the
 	// allow-list is a leak and fails the test (config/assignment metadata only).
 	entraAllowed := map[string]bool{
@@ -218,8 +259,19 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 		"encryption_key_source": true, "https_traffic_only": true,
 		"minimum_tls_version": true, "allow_blob_public_access": true,
 	}
+	// AKS allow-list (slice 519): management-plane CONFIGURATION keys only —
+	// never admin kubeconfig, cluster credentials, secrets, or workload content.
+	aksAllowed := map[string]bool{
+		"cluster_id": true, "cluster_name": true, "subscription_id": true,
+		"resource_group": true, "location": true, "kubernetes_version": true,
+		"rbac_enabled": true, "network_policy": true, "private_cluster": true,
+		"authorized_ip_ranges": true, "managed_identity": true,
+		"local_accounts_disabled": true, "oidc_issuer_enabled": true,
+		"node_pool_count": true,
+	}
 	bannedSubstrings := []string{"key_value", "secret", "sas", "connection_string",
-		"access_key", "blob_content", "password", "mailbox", "email", "upn"}
+		"access_key", "blob_content", "password", "mailbox", "email", "upn",
+		"kubeconfig", "credential", "manifest", "container", "image"}
 
 	check := func(t *testing.T, rec *evidencev1.EvidenceRecord, allowed map[string]bool) {
 		for k, v := range rec.GetPayload().AsMap() {
@@ -240,6 +292,7 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 	}
 	check(t, entraRec, entraAllowed)
 	check(t, storageRec, storageAllowed)
+	check(t, aksRec, aksAllowed)
 }
 
 // TestCredential_NeverLogged verifies AC-11 + P0-486-4: the Azure credential's
@@ -277,4 +330,10 @@ type fakeARMForIntegration struct{ accounts []storage.RawAccount }
 
 func (f *fakeARMForIntegration) ListStorageAccounts(_ context.Context) ([]storage.RawAccount, error) {
 	return f.accounts, nil
+}
+
+type fakeAKSForIntegration struct{ clusters []aks.RawCluster }
+
+func (f *fakeAKSForIntegration) ListManagedClusters(_ context.Context) ([]aks.RawCluster, error) {
+	return f.clusters, nil
 }
