@@ -206,8 +206,17 @@ func TestActorID_Shape(t *testing.T) {
 }
 
 func TestSupportedKinds_DevicePosture(t *testing.T) {
-	if len(SupportedKinds) != 1 || SupportedKinds[0] != "endpoint.device_posture.v1" {
-		t.Errorf("SupportedKinds = %v", SupportedKinds)
+	want := map[string]bool{
+		"endpoint.device_posture.v1":     true, // slice 490
+		"endpoint.software_inventory.v1": true, // slice 555
+	}
+	if len(SupportedKinds) != len(want) {
+		t.Fatalf("SupportedKinds = %v; want %d kinds", SupportedKinds, len(want))
+	}
+	for _, k := range SupportedKinds {
+		if !want[k] {
+			t.Errorf("unexpected supported kind %q", k)
+		}
 	}
 }
 

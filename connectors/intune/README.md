@@ -6,15 +6,18 @@ ISO A.8 auditor demand ("prove Windows / cross-platform endpoints are
 disk-encrypted and compliant"), today a manual Intune export. It follows the
 locked connector pattern verbatim: register-per-run, a stable `actor_id`, an
 hour-truncated `observed_at`, scope minimums, and vendor-native read-only auth.
-It emits one evidence kind:
+It emits two evidence kinds:
 
-| Kind                         | Profile | Source                                                 |
-| ---------------------------- | ------- | ------------------------------------------------------ |
-| `endpoint.device_posture.v1` | pull    | Microsoft Graph `GET /deviceManagement/managedDevices` |
+| Kind                             | Profile | Source                                                 |
+| -------------------------------- | ------- | ------------------------------------------------------ |
+| `endpoint.device_posture.v1`     | pull    | Microsoft Graph `GET /deviceManagement/managedDevices` |
+| `endpoint.software_inventory.v1` | pull    | Microsoft Graph `GET /deviceManagement/detectedApps`   |
 
-The evidence shape is **shared** with the Jamf connector (the device-posture
-field set is identical at the posture-summary altitude); `source_mdm` preserves
-provenance.
+Both evidence shapes are **shared** with the Jamf connector (the field sets are
+identical at the summary altitude); `source_mdm` preserves provenance. The
+software-inventory kind (slice 555) is the deliberate slice-490 over-collection
+follow-on: the `detectedApps` inventory excluded from the posture summary is
+collected here as a separate, scoped kind for patch-/vulnerability-management.
 
 The connector is **API-based**, not an in-host agent — consistent with the "no
 closed proprietary collector agents on endpoints" anti-pattern. The on-device
@@ -98,7 +101,23 @@ export INTUNE_TENANT_ID=<entra tenant id>
 export INTUNE_CLIENT_ID=<app registration id>
 export INTUNE_CLIENT_SECRET=<app registration client secret>
 atlas-intune run --environment prod
+
+# Read detected-software inventory and push evidence (same read-only credential).
+atlas-intune run-software --environment prod
 ```
+
+## Software-inventory boundary (slice 555)
+
+The `run-software` subcommand reads the detected-software inventory (the
+`detectedApps` endpoint) for patch-/vulnerability-management evidence, using the
+SAME read-only `DeviceManagementManagedDevices.Read.All` permission. Each item
+carries the app **name** + **version** + Graph app **id** ONLY. It NEVER collects
+executable **file paths**, per-user **app-usage telemetry**, **license keys**,
+device contents, or owner contact detail. The read `$select`s `id,displayName,
+version` and `$expand`s `managedDevices($select=id)` (never `sizeInByte`,
+`deviceName`, or `userPrincipalName`), and the `RawSoftwareItem` struct has no
+field for a path / usage / license key — a leak would be a compile error. The
+per-device list is bounded (`MaxSoftwarePerDevice = 500`).
 
 ## Scope minimums
 
@@ -114,9 +133,12 @@ accuracy recheck:
 - `endpoint.device_posture.v1` → `END-04` (Endpoint Security), `CFG-02` (Secure
   Baseline Configurations) — consistent with the existing
   `osquery.host_posture.v1` anchors.
+- `endpoint.software_inventory.v1` → `VPM-04` (Vulnerability Remediation
+  Process), `AST-03` (Asset Inventory) — a deliberately different anchor set
+  (the kind answers a different control question than posture).
 
 ## Follow-ons (out of v0 scope)
 
-- software-inventory evidence (slice 555);
+- software-inventory cursor pagination for large fleets (slice 590);
 - configuration-profile detail evidence (slice 556);
 - event-driven profile via MDM compliance-state-change webhooks (slice 557).

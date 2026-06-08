@@ -21,11 +21,13 @@ import (
 // ConnectorName is logged in `connectors list`.
 const ConnectorName = "jamf-connector"
 
-// SupportedKinds is the canonical list of evidence kinds slice 490 emits from
-// the Jamf connector.
-//   - endpoint.device_posture.v1 (managed-computer posture summary, pull)
+// SupportedKinds is the canonical list of evidence kinds the Jamf connector
+// emits.
+//   - endpoint.device_posture.v1    (managed-computer posture summary, pull; slice 490)
+//   - endpoint.software_inventory.v1 (installed-software inventory, pull; slice 555)
 var SupportedKinds = []string{
 	"endpoint.device_posture.v1",
+	"endpoint.software_inventory.v1",
 }
 
 // PullInterval names the connector's pull cadence HONESTLY (P0-490-6). The
@@ -69,6 +71,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVar(&common.insecure, "insecure", false, "disable TLS to platform (loopback endpoints only)")
 	root.AddCommand(newRegisterCmd())
 	root.AddCommand(newRunCmd())
+	root.AddCommand(newRunSoftwareCmd())
 	root.AddCommand(newPermissionsCmd())
 	return root
 }
@@ -119,10 +122,11 @@ func sdkOpts() []sdk.Option {
 	return nil
 }
 
-const longDescription = `security-atlas Jamf Pro MDM endpoint-posture connector
+const longDescription = `security-atlas Jamf Pro MDM endpoint connector
 
-Emits one evidence kind:
-  - endpoint.device_posture.v1  (run subcommand, pull — managed-computer posture summary)
+Emits two evidence kinds:
+  - endpoint.device_posture.v1     (run subcommand, pull — managed-computer posture summary)
+  - endpoint.software_inventory.v1 (run-software subcommand, pull — installed-software inventory)
 
 Profile: pull. Each invocation is one bounded read-and-push pass on an
 operator-scheduled cadence (recommended 24h). This is NOT continuous
@@ -135,12 +139,18 @@ Least-privilege Jamf Pro access (read-only):
     can remote-wipe or push configuration to employee endpoints — that is a
     remote-wipe risk and must never be used.
 
-The connector reads device POSTURE SUMMARY only — disk-encryption state
+The 'run' subcommand reads device POSTURE SUMMARY only — disk-encryption state
 (FileVault), screen-lock/passcode-policy compliance, OS version, managed/
 supervised/enrollment state, and the device->owner ASSIGNMENT identity (opaque
 user id + display name). It NEVER collects device geolocation, installed-app
 inventory, device contents, browsing data, or owner personal contact detail
 (phone / personal email / address).
+
+The 'run-software' subcommand reads the installed-software INVENTORY (the
+APPLICATIONS section) for patch-/vulnerability-management evidence. Each item
+carries the app name + version + bundle id + install date ONLY. It NEVER
+collects executable file paths, per-user app-usage telemetry, license keys,
+device contents, or owner personal contact detail.
 
 Auth: set JAMF_BASE_URL + JAMF_CLIENT_ID + JAMF_CLIENT_SECRET. The client
 secret is read from the environment, never a CLI flag, and never logged or

@@ -6,15 +6,18 @@ A.8 auditor demand ("prove laptops are disk-encrypted, have a screen-lock
 policy, and are managed"), today a manual Jamf export. It follows the locked
 connector pattern verbatim: register-per-run, a stable `actor_id`, an
 hour-truncated `observed_at`, scope minimums, and vendor-native read-only auth.
-It emits one evidence kind:
+It emits two evidence kinds:
 
-| Kind                         | Profile | Source                                         |
-| ---------------------------- | ------- | ---------------------------------------------- |
-| `endpoint.device_posture.v1` | pull    | Jamf Pro API `GET /api/v1/computers-inventory` |
+| Kind                             | Profile | Source                                                            |
+| -------------------------------- | ------- | ----------------------------------------------------------------- |
+| `endpoint.device_posture.v1`     | pull    | Jamf Pro API `GET /api/v1/computers-inventory` (posture sections) |
+| `endpoint.software_inventory.v1` | pull    | Jamf Pro API `GET /api/v1/computers-inventory` (`APPLICATIONS`)   |
 
-The evidence shape is **shared** with the Intune connector (the device-posture
-field set is identical at the posture-summary altitude); `source_mdm` preserves
-provenance.
+Both evidence shapes are **shared** with the Intune connector (the field sets are
+identical at the summary altitude); `source_mdm` preserves provenance. The
+software-inventory kind (slice 555) is the deliberate slice-490 over-collection
+follow-on: the `APPLICATIONS` section excluded from the posture summary is
+collected here as a separate, scoped kind for patch-/vulnerability-management.
 
 The connector is **API-based**, not an in-host agent — consistent with the "no
 closed proprietary collector agents on endpoints" anti-pattern. The on-device
@@ -91,7 +94,22 @@ export JAMF_BASE_URL=https://yourorg.jamfcloud.com
 export JAMF_CLIENT_ID=<read-only API client id>
 export JAMF_CLIENT_SECRET=<read-only API client secret>
 atlas-jamf run --environment prod
+
+# Read installed-software inventory and push evidence (same read-only credential).
+atlas-jamf run-software --environment prod
 ```
+
+## Software-inventory boundary (slice 555)
+
+The `run-software` subcommand reads the installed-software inventory (the
+`APPLICATIONS` inventory section) for patch-/vulnerability-management evidence.
+Each item carries the app **name** + **version** + bundle **id** + **install
+date** ONLY. It NEVER collects executable **file paths**, per-user **app-usage
+telemetry**, **license keys**, device contents, or owner contact detail. The
+read requests ONLY the `GENERAL` + `APPLICATIONS` sections (never
+`USER_AND_LOCATION` or the GPS `location` section), and the `RawSoftwareItem`
+struct has no field for a path / usage / license key — a leak would be a compile
+error. The per-device list is bounded (`MaxSoftwarePerDevice = 500`).
 
 ## Scope minimums
 
@@ -107,9 +125,12 @@ accuracy recheck:
 - `endpoint.device_posture.v1` → `END-04` (Endpoint Security), `CFG-02` (Secure
   Baseline Configurations) — consistent with the existing
   `osquery.host_posture.v1` anchors.
+- `endpoint.software_inventory.v1` → `VPM-04` (Vulnerability Remediation
+  Process), `AST-03` (Asset Inventory) — a deliberately different anchor set
+  (the kind answers a different control question than posture).
 
 ## Follow-ons (out of v0 scope)
 
-- software-inventory evidence (slice 555);
+- software-inventory cursor pagination for large fleets (slice 590);
 - configuration-profile detail evidence (slice 556);
 - event-driven profile via MDM compliance-state-change webhooks (slice 557).
