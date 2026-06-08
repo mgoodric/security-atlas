@@ -87,6 +87,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/controls/{id}/history", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/history"},
 	{Method: "GET", Path: "/v1/controls/{id}/policies", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/policies"},
 	{Method: "GET", Path: "/v1/controls/{id}/risks", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/risks"},
+	{Method: "GET", Path: "/v1/oscal/imported-profiles/{id}/provenance", Tag: "oscal", Tier: "bearer", Internal: false, Summary: "GET /v1/oscal/imported-profiles/{id}/provenance"},
 	{Method: "GET", Path: "/v1/controls/{id}/state", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/state"},
 	{Method: "GET", Path: "/v1/dashboard/export", Tag: "dashboard", Tier: "bearer", Internal: false, Summary: "GET /v1/dashboard/export — snapshot of the six dashboard panels in json/csv/xlsx"},
 	{Method: "GET", Path: "/v1/decisions", Tag: "decisions", Tier: "bearer", Internal: false, Summary: "GET /v1/decisions"},

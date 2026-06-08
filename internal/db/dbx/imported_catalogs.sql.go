@@ -43,6 +43,71 @@ func (q *Queries) GetImportedCatalogByID(ctx context.Context, arg GetImportedCat
 	return i, err
 }
 
+const getProfileImportProvenance = `-- name: GetProfileImportProvenance :one
+
+SELECT
+    ic.id              AS baseline_id,
+    ic.profile_title   AS profile_title,
+    ic.source_label    AS source_label,
+    ic.oscal_version   AS oscal_version,
+    ic.imported_at     AS imported_at,
+    al.source_sha256   AS source_sha256,
+    al.occurred_at     AS occurred_at,
+    al.detail          AS detail
+FROM imported_catalogs ic
+JOIN imported_catalog_audit_log al
+    ON al.tenant_id = ic.tenant_id
+   AND al.catalog_id = ic.id
+   AND al.action = 'profile_imported'
+WHERE ic.tenant_id = $1
+  AND ic.id = $2
+  AND ic.kind = 'profile'
+ORDER BY al.occurred_at DESC
+LIMIT 1
+`
+
+type GetProfileImportProvenanceParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+type GetProfileImportProvenanceRow struct {
+	BaselineID   pgtype.UUID        `json:"baseline_id"`
+	ProfileTitle string             `json:"profile_title"`
+	SourceLabel  string             `json:"source_label"`
+	OscalVersion string             `json:"oscal_version"`
+	ImportedAt   pgtype.Timestamptz `json:"imported_at"`
+	SourceSha256 string             `json:"source_sha256"`
+	OccurredAt   pgtype.Timestamptz `json:"occurred_at"`
+	Detail       []byte             `json:"detail"`
+}
+
+// ===== slice 599: resolved-chain provenance read =====
+// Read the resolved-chain provenance for one imported PROFILE baseline. The
+// chain (the ordered {role, sha256, bytes} array slice 578 records) plus
+// chain_depth live in the `profile_imported` success-audit row's detail JSONB,
+// keyed by catalog_id = the baseline's imported_catalogs.id. The join to
+// imported_catalogs both confirms the id is a PROFILE baseline (kind =
+// 'profile') and carries the baseline's display metadata for the read surface.
+// RLS scopes both tables to the caller's tenant; the leading $1 tenant_id
+// predicate is defense-in-depth behind RLS. A cross-tenant or non-profile id,
+// or a baseline with no success-audit row, returns ErrNoRows.
+func (q *Queries) GetProfileImportProvenance(ctx context.Context, arg GetProfileImportProvenanceParams) (GetProfileImportProvenanceRow, error) {
+	row := q.db.QueryRow(ctx, getProfileImportProvenance, arg.TenantID, arg.ID)
+	var i GetProfileImportProvenanceRow
+	err := row.Scan(
+		&i.BaselineID,
+		&i.ProfileTitle,
+		&i.SourceLabel,
+		&i.OscalVersion,
+		&i.ImportedAt,
+		&i.SourceSha256,
+		&i.OccurredAt,
+		&i.Detail,
+	)
+	return i, err
+}
+
 const insertImportedCatalog = `-- name: InsertImportedCatalog :one
 
 INSERT INTO imported_catalogs

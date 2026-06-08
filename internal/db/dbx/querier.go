@@ -617,6 +617,17 @@ type Querier interface {
 	// 409 (vs 404) when the row exists but is not currently in force.
 	GetPolicyForAcknowledge(ctx context.Context, arg GetPolicyForAcknowledgeParams) (Policy, error)
 	GetPopulationByID(ctx context.Context, arg GetPopulationByIDParams) (Population, error)
+	// ===== slice 599: resolved-chain provenance read =====
+	// Read the resolved-chain provenance for one imported PROFILE baseline. The
+	// chain (the ordered {role, sha256, bytes} array slice 578 records) plus
+	// chain_depth live in the `profile_imported` success-audit row's detail JSONB,
+	// keyed by catalog_id = the baseline's imported_catalogs.id. The join to
+	// imported_catalogs both confirms the id is a PROFILE baseline (kind =
+	// 'profile') and carries the baseline's display metadata for the read surface.
+	// RLS scopes both tables to the caller's tenant; the leading $1 tenant_id
+	// predicate is defense-in-depth behind RLS. A cross-tenant or non-profile id,
+	// or a baseline with no success-audit row, returns ErrNoRows.
+	GetProfileImportProvenance(ctx context.Context, arg GetProfileImportProvenanceParams) (GetProfileImportProvenanceRow, error)
 	// Fetch one questionnaire by id. RLS scopes the lookup to the caller's
 	// tenant; a cross-tenant id returns ErrNoRows.
 	GetQuestionnaireByID(ctx context.Context, arg GetQuestionnaireByIDParams) (Questionnaire, error)
