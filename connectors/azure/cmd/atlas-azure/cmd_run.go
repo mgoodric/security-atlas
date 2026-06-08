@@ -18,6 +18,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/azureauth"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/entra"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/idem"
+	"github.com/mgoodric/security-atlas/connectors/azure/internal/keyvault"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/nsg"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/storage"
 )
@@ -31,6 +32,7 @@ var (
 	storageScan  = storage.Inspect
 	aksScan      = aks.Inspect
 	nsgScan      = nsg.Inspect
+	keyvaultScan = keyvault.Inspect
 	newSDKClient = func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error) {
 		return sdk.NewClient(endpoint, bearer, opts...)
 	}
@@ -52,6 +54,9 @@ var (
 	newNSGAPI = func(hc *http.Client, subscriptionID, token string) nsg.API {
 		return nsg.NewClient(hc, "", subscriptionID, token)
 	}
+	newKeyVaultAPI = func(hc *http.Client, subscriptionID, token string) keyvault.API {
+		return keyvault.NewClient(hc, "", subscriptionID, token)
+	}
 )
 
 // sdkPushClient is the narrow surface doRun consumes from sdk.Client.
@@ -61,29 +66,32 @@ type sdkPushClient interface {
 }
 
 type runFlags struct {
-	tenantID       string
-	subscriptionID string
-	environment    string
-	authMode       string
-	clientID       string
-	entraControl   string
-	storageControl string
-	aksControl     string
-	nsgControl     string
-	skipEntra      bool
-	skipStorage    bool
-	skipAKS        bool
-	skipNSG        bool
+	tenantID        string
+	subscriptionID  string
+	environment     string
+	authMode        string
+	clientID        string
+	entraControl    string
+	storageControl  string
+	aksControl      string
+	nsgControl      string
+	keyvaultControl string
+	skipEntra       bool
+	skipStorage     bool
+	skipAKS         bool
+	skipNSG         bool
+	skipKeyVault    bool
 }
 
 func newRunCmd() *cobra.Command {
 	var f runFlags
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "read Entra ID + Azure Storage + AKS + NSG and push evidence records",
+		Short: "read Entra ID + Azure Storage + AKS + NSG + Key Vault and push evidence records",
 		Long: `Read Microsoft Entra ID role assignments, Azure Storage account
-configuration, AKS managed-cluster configuration, and NSG firewall-rule posture,
-transform to evidence records, and push to the platform.
+configuration, AKS managed-cluster configuration, NSG firewall-rule posture, and
+Key-Vault access-policy / RBAC posture, transform to evidence records, and push
+to the platform.
 
 Profile: pull. One bounded read-and-push pass per invocation; operator-scheduled
 (recommended 24h). NOT continuous monitoring.
@@ -93,7 +101,12 @@ Least-privilege Azure permissions (read-only):
   - Microsoft Graph: Application.Read.All (gates azure.entra_role_assignment.v1)
   - Azure Resource Manager: Reader role   (gates azure.storage_account_config.v1
                                            + azure.aks_cluster_config.v1
-                                           + azure.nsg_rules.v1)
+                                           + azure.nsg_rules.v1
+                                           + azure.keyvault_access_config.v1)
+
+The Key-Vault kind reads the ARM management plane ONLY (vault config + access
+policies). It NEVER touches the Key-Vault data plane (secret/key/certificate
+values) and requires NO Key-Vault data-plane role.
 
 Auth: set AZURE_TENANT_ID + AZURE_CLIENT_ID + AZURE_CLIENT_SECRET (client-
 credentials), or pass --auth-mode managed-identity. The secret never appears in
@@ -116,6 +129,9 @@ a log line or an evidence record.`,
 			if !f.skipNSG && f.subscriptionID == "" {
 				return errors.New("--subscription-id is required for the NSG kind (or pass --skip-nsg)")
 			}
+			if !f.skipKeyVault && f.subscriptionID == "" {
+				return errors.New("--subscription-id is required for the Key-Vault kind (or pass --skip-keyvault)")
+			}
 			return resolveCommon()
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -131,10 +147,12 @@ a log line or an evidence record.`,
 	cmd.Flags().StringVar(&f.storageControl, "storage-control", "scf:CRY-04", "control_id to attach to azure.storage_account_config.v1 records")
 	cmd.Flags().StringVar(&f.aksControl, "aks-control", "scf:CFG-02", "control_id to attach to azure.aks_cluster_config.v1 records")
 	cmd.Flags().StringVar(&f.nsgControl, "nsg-control", "scf:NET-04", "control_id to attach to azure.nsg_rules.v1 records")
+	cmd.Flags().StringVar(&f.keyvaultControl, "keyvault-control", "scf:CRY-09", "control_id to attach to azure.keyvault_access_config.v1 records")
 	cmd.Flags().BoolVar(&f.skipEntra, "skip-entra", false, "skip azure.entra_role_assignment.v1 pull")
 	cmd.Flags().BoolVar(&f.skipStorage, "skip-storage", false, "skip azure.storage_account_config.v1 pull")
 	cmd.Flags().BoolVar(&f.skipAKS, "skip-aks", false, "skip azure.aks_cluster_config.v1 pull")
 	cmd.Flags().BoolVar(&f.skipNSG, "skip-nsg", false, "skip azure.nsg_rules.v1 pull")
+	cmd.Flags().BoolVar(&f.skipKeyVault, "skip-keyvault", false, "skip azure.keyvault_access_config.v1 pull")
 	return cmd
 }
 
@@ -242,6 +260,27 @@ func doRun(ctx context.Context, f runFlags) error {
 			}
 			if err := pushOne(ctx, sdkClient, rec); err != nil {
 				return fmt.Errorf("push nsg %s: %w", g.NSGName, err)
+			}
+			pushed++
+		}
+	}
+
+	if !f.skipKeyVault {
+		token, err := acquireToken(ctx, cred, httpClient, keyvault.ARMScope)
+		if err != nil {
+			return fmt.Errorf("arm token: %w", err)
+		}
+		vaults, err := keyvaultScan(ctx, newKeyVaultAPI(httpClient, f.subscriptionID, token), f.subscriptionID, nil)
+		if err != nil {
+			return fmt.Errorf("keyvault inspect: %w", err)
+		}
+		for _, v := range vaults {
+			rec, err := buildKeyVaultRecord(v, f.environment, f.keyvaultControl)
+			if err != nil {
+				return fmt.Errorf("build keyvault record %s: %w", v.VaultName, err)
+			}
+			if err := pushOne(ctx, sdkClient, rec); err != nil {
+				return fmt.Errorf("push keyvault %s: %w", v.VaultName, err)
 			}
 			pushed++
 		}
@@ -509,6 +548,100 @@ func mapNSGResult(r nsg.ConfigResult) evidencev1.Result {
 	case nsg.ResultFail:
 		return evidencev1.Result_RESULT_FAIL
 	case nsg.ResultInconclusive:
+		return evidencev1.Result_RESULT_INCONCLUSIVE
+	default:
+		return evidencev1.Result_RESULT_UNSPECIFIED
+	}
+}
+
+// buildKeyVaultRecord maps one Key-Vault's access posture into an evidence
+// record. The payload carries management-plane CONFIGURATION + access-policy /
+// role-assignment METADATA ONLY — never a secret, key, or certificate value
+// (the keyvault.VaultConfig / keyvault.AccessEntry structs have no field for
+// such data; this builder cannot emit what it cannot read, and the connector
+// never touches the Key-Vault data plane).
+func buildKeyVaultRecord(v keyvault.VaultConfig, env, controlID string) (*evidencev1.EvidenceRecord, error) {
+	now := v.ObservedAt.UTC().Truncate(time.Hour)
+	pm := map[string]any{
+		"vault_id":           v.VaultID,
+		"vault_name":         v.VaultName,
+		"subscription_id":    v.SubscriptionID,
+		"rbac_authorization": v.RBACAuthorization,
+	}
+	// Booleans always carry their value (false is signal, not absence).
+	pm["purge_protection"] = v.PurgeProtection
+	pm["soft_delete_enabled"] = v.SoftDeleteEnabled
+	if v.ResourceGroup != "" {
+		pm["resource_group"] = v.ResourceGroup
+	}
+	if v.Location != "" {
+		pm["location"] = v.Location
+	}
+	if v.PublicNetworkAccess != "" {
+		pm["public_network_access"] = v.PublicNetworkAccess
+	}
+	if v.NetworkACLDefault != "" {
+		pm["network_acl_default"] = v.NetworkACLDefault
+	}
+	if len(v.AccessEntries) > 0 {
+		pm["access_entries"] = keyVaultAccessPayload(v.AccessEntries)
+	}
+	payload, err := structpb.NewStruct(pm)
+	if err != nil {
+		return nil, err
+	}
+	return &evidencev1.EvidenceRecord{
+		IdempotencyKey: idem.KeyVaultAccessKey(v.VaultID, now),
+		EvidenceKind:   "azure.keyvault_access_config.v1",
+		SchemaVersion:  "1.0.0",
+		ControlId:      controlID,
+		Scope: []*evidencev1.ScopeDimension{
+			{Key: "cloud_account", Values: []string{"azure:" + v.SubscriptionID}},
+			{Key: "environment", Values: []string{env}},
+		},
+		ObservedAt: timestamppb.New(now),
+		Result:     mapKeyVaultResult(v.Result),
+		Payload:    payload,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "connector",
+			ActorId:   actorID("keyvault"),
+		},
+	}, nil
+}
+
+// keyVaultAccessPayload renders the access-entry list into a structpb-compatible
+// []any. Access METADATA only (principal id/type + permission verbs or role
+// name) — never a secret value; empty optional fields are omitted from each
+// item.
+func keyVaultAccessPayload(entries []keyvault.AccessEntry) []any {
+	out := make([]any, 0, len(entries))
+	for _, e := range entries {
+		item := map[string]any{
+			"principal_id":   e.PrincipalID,
+			"principal_type": e.PrincipalType,
+		}
+		if len(e.Permissions) > 0 {
+			perms := make([]any, 0, len(e.Permissions))
+			for _, p := range e.Permissions {
+				perms = append(perms, p)
+			}
+			item["permissions"] = perms
+		}
+		if e.RoleName != "" {
+			item["role_name"] = e.RoleName
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func mapKeyVaultResult(r keyvault.ConfigResult) evidencev1.Result {
+	switch r {
+	case keyvault.ResultPass:
+		return evidencev1.Result_RESULT_PASS
+	case keyvault.ResultFail:
+		return evidencev1.Result_RESULT_FAIL
+	case keyvault.ResultInconclusive:
 		return evidencev1.Result_RESULT_INCONCLUSIVE
 	default:
 		return evidencev1.Result_RESULT_UNSPECIFIED

@@ -20,6 +20,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/aks"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/azureauth"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/entra"
+	"github.com/mgoodric/security-atlas/connectors/azure/internal/keyvault"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/nsg"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/storage"
 )
@@ -84,8 +85,8 @@ func TestRegister_ListsConnector(t *testing.T) {
 	for _, h := range list.GetHandles() {
 		if h.GetName() == ConnectorName {
 			found = true
-			if len(h.GetSupportedKinds()) != 4 {
-				t.Errorf("supported_kinds = %d; want 4", len(h.GetSupportedKinds()))
+			if len(h.GetSupportedKinds()) != 5 {
+				t.Errorf("supported_kinds = %d; want 5", len(h.GetSupportedKinds()))
 			}
 			if strings.Join(h.GetProfilesSupported(), ",") != "pull" {
 				t.Errorf("profiles_supported = %v; want [pull]", h.GetProfilesSupported())
@@ -224,6 +225,40 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if !strings.HasPrefix(nsgRec.GetSourceAttribution().GetActorId(), "connector:azure:nsg@") {
 		t.Errorf("nsg actor_id = %q", nsgRec.GetSourceAttribution().GetActorId())
 	}
+
+	// Key Vault (faked ARM surface — NO live Azure). Slice 521.
+	kvAPI := &fakeKeyVaultForIntegration{vaults: []keyvault.RawVault{
+		{ID: "/subscriptions/test-sub/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv1",
+			Name: "kv1", ResourceGroup: "rg", Location: "eastus", RBACAuthorization: true,
+			PurgeProtection: true, SoftDeleteEnabled: true, PublicNetworkAccess: "Disabled",
+			AccessEntries: []keyvault.AccessEntry{
+				{PrincipalID: "p-1", PrincipalType: "access_policy", Permissions: []string{"secrets:get", "keys:list"}},
+			}},
+	}}
+	vaults, err := keyvault.Inspect(context.Background(), kvAPI, "test-sub", fixed)
+	if err != nil {
+		t.Fatalf("keyvault.Inspect: %v", err)
+	}
+	kvRec, err := buildKeyVaultRecord(vaults[0], "prod", "scf:CRY-09")
+	if err != nil {
+		t.Fatalf("buildKeyVaultRecord: %v", err)
+	}
+	kvReceipt, err := client.Push(context.Background(), kvRec)
+	if err != nil {
+		t.Fatalf("Push keyvault: %v", err)
+	}
+	if kvReceipt.GetHash() == "" {
+		t.Fatal("keyvault receipt hash empty (AC-3 sha256 content-hash)")
+	}
+	if kvRec.GetEvidenceKind() != "azure.keyvault_access_config.v1" {
+		t.Errorf("keyvault kind = %q", kvRec.GetEvidenceKind())
+	}
+	if vaults[0].Result != keyvault.ResultPass {
+		t.Errorf("hardened vault should PASS; got %q", vaults[0].Result)
+	}
+	if !strings.HasPrefix(kvRec.GetSourceAttribution().GetActorId(), "connector:azure:keyvault@") {
+		t.Errorf("keyvault actor_id = %q", kvRec.GetSourceAttribution().GetActorId())
+	}
 }
 
 // TestRun_DedupesWithinHour verifies AC-6: two records from the same resource in
@@ -290,6 +325,16 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 	nsgGroups, _ := nsg.Inspect(context.Background(), nsgAPI, "sub-1", fixed)
 	nsgRec, _ := buildNSGRecord(nsgGroups[0], "prod", "scf:NET-04")
 
+	kvAPI := &fakeKeyVaultForIntegration{vaults: []keyvault.RawVault{
+		{ID: "/sub/kv", Name: "kv", ResourceGroup: "rg", Location: "eastus", RBACAuthorization: false,
+			PurgeProtection: true, SoftDeleteEnabled: true, PublicNetworkAccess: "Disabled", NetworkACLDefault: "Deny",
+			AccessEntries: []keyvault.AccessEntry{
+				{PrincipalID: "p-1", PrincipalType: "access_policy", Permissions: []string{"secrets:get", "keys:list"}},
+			}},
+	}}
+	kvVaults, _ := keyvault.Inspect(context.Background(), kvAPI, "sub-1", fixed)
+	kvRec, _ := buildKeyVaultRecord(kvVaults[0], "prod", "scf:CRY-09")
+
 	// Allow-list of permitted payload keys per kind. Any key NOT in the
 	// allow-list is a leak and fails the test (config/assignment metadata only).
 	entraAllowed := map[string]bool{
@@ -327,6 +372,18 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 		"destination_address_prefix": true, "source_port_range": true,
 		"destination_port_range": true,
 	}
+	// Key-Vault allow-list (slice 521): management-plane CONFIGURATION + access
+	// METADATA keys only — never a secret/key/certificate VALUE.
+	kvAllowed := map[string]bool{
+		"vault_id": true, "vault_name": true, "subscription_id": true,
+		"resource_group": true, "location": true, "rbac_authorization": true,
+		"purge_protection": true, "soft_delete_enabled": true,
+		"public_network_access": true, "network_acl_default": true,
+		"access_entries": true,
+	}
+	kvAccessAllowed := map[string]bool{
+		"principal_id": true, "principal_type": true, "permissions": true, "role_name": true,
+	}
 	bannedSubstrings := []string{"key_value", "secret", "sas", "connection_string",
 		"access_key", "blob_content", "password", "mailbox", "email", "upn",
 		"kubeconfig", "credential", "manifest", "container", "image"}
@@ -356,6 +413,7 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 	check(t, storageRec, storageAllowed)
 	check(t, aksRec, aksAllowed)
 	check(t, nsgRec, nsgAllowed)
+	check(t, kvRec, kvAllowed)
 	for k := range nsgRec.GetPayload().AsMap() {
 		low := strings.ToLower(k)
 		for _, b := range nsgBannedSubstrings {
@@ -384,6 +442,35 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 			}
 			if s, ok := v.(string); ok && strings.Contains(s, secret) {
 				t.Errorf("nsg rule value for %q leaked the Azure secret", k)
+			}
+		}
+	}
+
+	// The Key-Vault `access_entries` payload is a nested list of access-entry
+	// items — descend into each item and apply the allow-list + the Azure-secret
+	// leak check. Each entry carries access METADATA only (principal id/type +
+	// permission VERBS or role name); the value-leak check pins that no
+	// secret/key/certificate VALUE rode along (P0-521-2 / AC-4).
+	for _, raw := range kvRec.GetPayload().AsMap()["access_entries"].([]any) {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("keyvault access entry is not a map: %T", raw)
+		}
+		for k, v := range item {
+			if !kvAccessAllowed[k] {
+				t.Errorf("keyvault access entry carries non-allow-listed key %q (possible secret leak)", k)
+			}
+			if s, ok := v.(string); ok && strings.Contains(s, secret) {
+				t.Errorf("keyvault access entry value for %q leaked the Azure secret", k)
+			}
+			// The permission verbs are a string list; assert none equals the
+			// Azure credential secret (no secret material rides in the verbs).
+			if list, ok := v.([]any); ok {
+				for _, lv := range list {
+					if s, ok := lv.(string); ok && strings.Contains(s, secret) {
+						t.Errorf("keyvault permission verb leaked the Azure secret")
+					}
+				}
 			}
 		}
 	}
@@ -436,4 +523,10 @@ type fakeNSGForIntegration struct{ groups []nsg.RawGroup }
 
 func (f *fakeNSGForIntegration) ListNetworkSecurityGroups(_ context.Context) ([]nsg.RawGroup, error) {
 	return f.groups, nil
+}
+
+type fakeKeyVaultForIntegration struct{ vaults []keyvault.RawVault }
+
+func (f *fakeKeyVaultForIntegration) ListVaults(_ context.Context) ([]keyvault.RawVault, error) {
+	return f.vaults, nil
 }
