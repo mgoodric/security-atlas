@@ -3,7 +3,14 @@
 > Live tracker. Companion to [`_INDEX.md`](./_INDEX.md) (static backlog spec).
 > Updated by `Plans/prompts/04-per-slice-template.md` (per-slice) and `Plans/prompts/05-parallel-batch.md` (parallel batch). Run `Plans/prompts/06-status-reconcile.md` when drift is suspected.
 
-**Last reconciled:** 2026-06-08 (batch 225 reconcile — 615 Azure KV RBAC role-assignment, 620 map-claim→SCF-anchor, **633 P0 evidence-integrity fix** ALL MERGED. Batch surfaced a pre-existing integrity regression: slice 474's ledger-verify failed for production records because `observed_at` (proto nanosecond) was truncated by Postgres `TIMESTAMPTZ` (microsecond); 474 merged with shard A RED, masked by path-filter skips + concurrency-cancelled main runs. Maintainer chose fix-first (Option B): slice 633 persists `observed_at_nanos` losslessly (mirrors 474's scope_canonical pattern), `HashRecord`/client receipt-hash contract unchanged. Spillovers 623 (Azure KV cursor pagination), 631 (CI guard: block merge on red required shard) ready.)
+**Last reconciled:** 2026-06-08 (batch 226 reconcile — 614 Azure Firewall rule-collection evidence + 631 CI fail-closed merge-gate MERGED. 631 directly closes the process hole that let the slice-474 integrity bug merge with shard A RED: a new `CI · merge-gate` aggregator (`if: always()`, needs all 9 required legs) fails closed when a Go PR has any leg failure/cancelled/skipped, short-circuits green on docs-only; plus a push-to-main canary (cancel-in-progress:false) for after-merge defense. Validated live: merge-gate green on the 614 Go PR AND on the 631 CI-only PR. **MAINTAINER HAND-OFF PENDING:** add `CI · merge-gate` to `.github/branch-protection.json` required-contexts + run `scripts/apply-branch-protection.sh` — until then the gate is advisory (reports, does not block). Spillover 634 (Azure Firewall rule-collection-group cursor pagination) ready.)
+
+## Reconcile — 2026-06-08 (batch 226 · 614 + 631 merged)
+
+Both merged. 631 (#1163, `7fee2bd2`) → 614 (#1164, `1706ccbe`); claim-stake #1162 (`78c8155f`).
+
+- **631** (CI fail-closed merge-gate) — **MERGED**. Mechanism (a) aggregator + narrow (c) canary. Additive only (no existing required job renamed). `CI · merge-gate` short-circuits green on docs-only PRs, requires every one of 9 required legs to be exactly `success` on a Go-affecting PR (failure/cancelled/skipped-while-needed → fail closed — the exact slice-474 hole). Matrix shard `result` is the aggregate so one RED shard ⇒ gate RED. `tests-integration-main-canary` re-runs the shard matrix on main pushes unconditionally with `cancel-in-progress:false`. **HAND-OFF:** maintainer must add `CI · merge-gate` to branch-protection required-contexts (advisory until then).
+- **614** (Azure Firewall rule-collection evidence) — **MERGED**. New sibling kind `azure.firewall_rules.v1` on `atlas-azure`: lists `Microsoft.Network/firewallPolicies` + bounded per-policy rule-collection-group read; anchors `[NET-04, NET-01]`. Structural over-collection guard (no field for flow logs/captures/traffic/NAT secrets/threat-intel/route tables; reflection test pins it); ARM Reader, GET-only. No migration (schemaregistry DefaultSeed). Spillover 634.
 
 ## Claim-stake — 2026-06-08 (batch 226 · 614 + 631 in-progress)
 
@@ -608,19 +615,19 @@ Solo batch — the second of the three gap-analysis real-defects (492). Merged c
 
 **Spillovers filed (docs on main, rows registered below):** the two remaining OSCAL ingest directions, each a meaningfully different model with its own resolution semantics, reusing 492's bridge-ingest direction:
 
-| Row | Transition    | Evidence                                                                                                                                                                         |
-| --- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 511 | `merged`      | OSCAL profile import (resolve import/merge/modify directives) · parent #492 · batch 216 · #1109 `57f085cf` · invariant-#8 resolve direction                                      |
-| 578 | `merged`      | OSCAL chained profile-over-profile resolution (depth-8 + cycle detection) · parent #511 · OSCAL · batch 219 · #1124 `4d30be12`                                                   |
-| 599 | `merged`      | OSCAL resolved-chain provenance read API · parent #578 · OSCAL · batch 220 · #1129 `c4167dee` · GET /v1/oscal/imported-profiles/{id}/provenance                                  |
-| 608 | `merged`      | per-tenant control-bundle gate-policy (bundle_gate_mode; default strict) · parent #574 · control-as-code · batch 221 · #1134 `4974fe06` · spillover 613                          |
-| 512 | `merged`      | OSCAL component-definition import (vendor claims as non-auto-satisfying evidence) · parent #492 · batch 217 · #1115 `3c3c62e3`                                                   |
-| 589 | `merged`      | vendor-claim read API + operator accept/reject/needs_info disposition (never auto-satisfies a control) · parent #512 · OSCAL · batch 223 · #1147 `21f66cba` · spillovers 619/620 |
-| 619 | `merged`      | accepted vendor claim → OSCAL SSP control-implementation evidence (vendor-attested, never platform-verified coverage) · parent #589 · OSCAL · batch 224 · #1150 `91442368`       |
-| 620 | `merged`      | map unmapped vendor claim → SCF anchor · OSCAL · #1155 `3d690943` · PATCH /v1/oscal/component-claims/{id}/scf-anchor; invariant #7; no fabricated coverage                       |
-| 633 | `merged`      | fix 474 ingest/verify hash round-trip (observed_at nanos) · evidence-integrity · #1160 `90b1416a` · spec #1156 · spillover 631                                                   |
-| 631 | `in-progress` | CI guard: block merge when a required integration shard is red · Quality/CI · parent #633 · `docs/issues/631-ci-guard-block-merge-on-red-required-shard.md`                      |
-| 623 | `ready`       | Azure Key-Vault role-assignment cursor pagination · Connectors · parent #615 · `docs/issues/623-azure-keyvault-roleassignment-cursor-pagination.md`                              |
+| Row | Transition | Evidence                                                                                                                                                                         |
+| --- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 511 | `merged`   | OSCAL profile import (resolve import/merge/modify directives) · parent #492 · batch 216 · #1109 `57f085cf` · invariant-#8 resolve direction                                      |
+| 578 | `merged`   | OSCAL chained profile-over-profile resolution (depth-8 + cycle detection) · parent #511 · OSCAL · batch 219 · #1124 `4d30be12`                                                   |
+| 599 | `merged`   | OSCAL resolved-chain provenance read API · parent #578 · OSCAL · batch 220 · #1129 `c4167dee` · GET /v1/oscal/imported-profiles/{id}/provenance                                  |
+| 608 | `merged`   | per-tenant control-bundle gate-policy (bundle_gate_mode; default strict) · parent #574 · control-as-code · batch 221 · #1134 `4974fe06` · spillover 613                          |
+| 512 | `merged`   | OSCAL component-definition import (vendor claims as non-auto-satisfying evidence) · parent #492 · batch 217 · #1115 `3c3c62e3`                                                   |
+| 589 | `merged`   | vendor-claim read API + operator accept/reject/needs_info disposition (never auto-satisfies a control) · parent #512 · OSCAL · batch 223 · #1147 `21f66cba` · spillovers 619/620 |
+| 619 | `merged`   | accepted vendor claim → OSCAL SSP control-implementation evidence (vendor-attested, never platform-verified coverage) · parent #589 · OSCAL · batch 224 · #1150 `91442368`       |
+| 620 | `merged`   | map unmapped vendor claim → SCF anchor · OSCAL · #1155 `3d690943` · PATCH /v1/oscal/component-claims/{id}/scf-anchor; invariant #7; no fabricated coverage                       |
+| 633 | `merged`   | fix 474 ingest/verify hash round-trip (observed_at nanos) · evidence-integrity · #1160 `90b1416a` · spec #1156 · spillover 631                                                   |
+| 631 | `merged`   | CI fail-closed merge-gate (block red/skipped-but-needed required shard) · Quality/CI · #1163 `7fee2bd2` · HAND-OFF: add `CI · merge-gate` to branch-protection required-contexts |
+| 623 | `ready`    | Azure Key-Vault role-assignment cursor pagination · Connectors · parent #615 · `docs/issues/623-azure-keyvault-roleassignment-cursor-pagination.md`                              |
 
 Backlog after batch 199: the remaining ready gap-slices — 480/481/482 (crosswalks · share soc2import+coverage) · 486-491 connectors (share schemaregistry+coverage; one per batch) · 493/494/496 (now buildable on 492's importer; 493/494 share internal/oscal) · 498 (LLM foundation — the last of the 3 real-defects) · 474 · 478 (user-mgmt API, LARGE) · 508/509/510 · 511/512 (new) · the older analysis tail. **498 (LLM foundation) is the next real-defect priority**; merging it flips 499-502 → ready. 478 merging flips 479 → ready. AI-assist 440/441/444/471 maintainer-sequenced; decision-gates 446/455/PCI-CDE out of the loop.
 
@@ -671,7 +678,8 @@ Maintainer-directed comprehensive gap analysis (5 parallel domain investigators:
 | 519 | `merged`            | Azure AKS workload-config evidence (azure.aks_cluster_config.v1; azure connector now 3 kinds) · parent #486 · Connectors · batch 221 · #1133 `64bbcb79`                          |
 | 613 | `merged`            | web Settings control for bundle_gate_mode (drives 608 PATCH; web-only) · parent #608 · Frontend · batch 222 · #1141 `b0f41c87`                                                   |
 | 520 | `merged`            | Azure NSG/firewall rule evidence (azure.nsg_rules.v1; azure connector now 4 kinds) · parent #486 · Connectors · batch 222 · #1143 `e91f9ed6` · spillover 614                     |
-| 614 | `in-progress`       | Azure Firewall rule-collection evidence · parent #520 (merged) · Connectors · `docs/issues/614-azure-firewall-rule-collection-evidence.md`                                       |
+| 614 | `merged`            | Azure Firewall rule-collection evidence (`azure.firewall_rules.v1`) · Connectors · #1164 `1706ccbe` · spillover 634                                                              |
+| 634 | `ready`             | Azure Firewall rule-collection-group cursor pagination · Connectors · parent #614 · `docs/issues/634-azure-firewall-rulecollectiongroup-pagination.md`                           |
 | 521 | `merged`            | Azure Key-Vault access-policy evidence (azure.keyvault_access_config.v1; mgmt-plane-only; azure connector now 5 kinds) · parent #486 · Connectors · batch 223 · #1146 `a8838f2e` |
 | 615 | `merged`            | Azure Key-Vault RBAC role-assignment enumeration · Connectors · #1154 `a6a173de` · spillover 623                                                                                 |
 | 522 | `ready`             | Azure event-driven profile (Event Grid / Activity-Log) · Connectors · parent #486 · #1070                                                                                        |
