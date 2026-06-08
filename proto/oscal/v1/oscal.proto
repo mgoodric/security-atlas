@@ -146,6 +146,42 @@ message Policy {
   string status = 4;
 }
 
+// VendorAttestedImplementation is one operator-ACCEPTED vendor claim
+// (slice 512 import + slice 589 disposition) surfaced in the SSP as a
+// vendor-attested control-implementation statement.
+//
+// HARD CONSTITUTIONAL BOUNDARY (slice 619, inherits P0-512-1 / invariant #2):
+// this is a vendor ASSERTION the operator chose to credit, NOT
+// platform-verified evidence. It is carried in a SEPARATE field from
+// control_implementations so it can NEVER be mistaken for, or counted toward,
+// platform control-satisfaction. It carries no evaluation_result. The bridge
+// renders it as a `by-component` statement attributed to the vendor component,
+// flagged `vendor-attested` + `operator-credited`, with the accept-provenance
+// (who accepted, when). An auditor reads "the vendor says X and the operator
+// credited it", never "the platform verified X".
+message VendorAttestedImplementation {
+  // The accepted claim's id (provenance anchor).
+  string claim_id = 1;
+  // The OSCAL control-id the vendor claim targets.
+  string control_id = 2;
+  // The SCF anchor the claim maps to (free-form scf_id), empty when unmapped.
+  string scf_id = 3;
+  // The vendor component's OSCAL uuid (attribution anchor).
+  string component_uuid = 4;
+  // The vendor component's title (e.g. the product name).
+  string component_title = 5;
+  // The vendor component's OSCAL type (software | service | hardware | ...).
+  string component_type = 6;
+  // The vendor's implementation narrative, verbatim (never AI-generated).
+  string statement = 7;
+  // The credential id of the operator who accepted (credited) the claim.
+  string accepted_by = 8;
+  // RFC-3339 instant the claim was accepted.
+  string accepted_at = 9;
+  // The operator's optional free-form note recorded at disposition time.
+  string disposition_note = 10;
+}
+
 // ----- SSP -----
 
 message SspInput {
@@ -159,6 +195,10 @@ message SspInput {
   repeated ScopeCell scope_cells = 6;
   repeated ControlImplementation control_implementations = 7;
   repeated Policy policies = 8;
+  // Operator-accepted vendor claims, rendered as vendor-attested by-component
+  // statements. SEPARATE from control_implementations by design (slice 619):
+  // a vendor claim never contributes to platform control-satisfaction.
+  repeated VendorAttestedImplementation vendor_attested_implementations = 9;
 }
 
 message SerializeSSPRequest {

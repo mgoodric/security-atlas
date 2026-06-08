@@ -968,6 +968,29 @@ type Querier interface {
 	// Active keys for a tenant. Excludes revoked rows; includes retired-but-not-yet-
 	// past-grace predecessors so the admin UI can show "rotating out — valid until X."
 	ListAPIKeysByTenant(ctx context.Context, tenantID pgtype.UUID) ([]ApiKey, error)
+	// ===== slice 619: accepted vendor claims -> SSP vendor-attested statements =====
+	// Every operator-ACCEPTED vendor claim across every imported
+	// component-definition for the tenant, joined to the owning component for
+	// attribution. The SSP export surfaces these as VENDOR-ATTESTED
+	// control-implementation statements (by-component), NEVER as platform-verified
+	// evidence (P0-619 / inherits P0-512-1 / invariant #2).
+	//
+	// HARD BOUNDARY: this is a READ over imported_component_claims. An accepted
+	// claim is a vendor ASSERTION the operator chose to credit; it is NOT a
+	// control_evaluations row and does not satisfy a control. The export renders
+	// it attributed to the vendor component with explicit accept-provenance
+	// (dispositioned_by / dispositioned_at) so an auditor reads "the vendor says X
+	// and the operator credited it", never "the platform verified X". Nothing in
+	// this query (or its caller) writes control_evaluations.
+	//
+	// claim_status = 'accepted' filters to the credited claims only — 'asserted'
+	// (undispositioned), 'rejected', and 'needs_info' claims are excluded from the
+	// export entirely. is_vendor_claim is constant TRUE (the slice-512 CHECK), so
+	// the predicate is documentary, not load-bearing — but it asserts intent.
+	//
+	// RLS scopes both tables to the caller's tenant; the leading $1 tenant_id
+	// predicate is defense-in-depth behind RLS (the slice-030 pattern).
+	ListAcceptedVendorClaimsForExport(ctx context.Context, tenantID pgtype.UUID) ([]ListAcceptedVendorClaimsForExportRow, error)
 	// The engine's hot path: every 'active' rule for the tenant. Runs on every
 	// risk write. Hits idx_aggregation_rules_tenant_status.
 	ListActiveAggregationRules(ctx context.Context, tenantID pgtype.UUID) ([]AggregationRule, error)

@@ -126,3 +126,48 @@ JOIN walkthroughs w
 WHERE wa.tenant_id = $1
   AND w.audit_period_id = $2
 ORDER BY wa.walkthrough_id ASC, wa.uploaded_at ASC, wa.id ASC;
+
+-- ===== slice 619: accepted vendor claims -> SSP vendor-attested statements =====
+
+-- name: ListAcceptedVendorClaimsForExport :many
+-- Every operator-ACCEPTED vendor claim across every imported
+-- component-definition for the tenant, joined to the owning component for
+-- attribution. The SSP export surfaces these as VENDOR-ATTESTED
+-- control-implementation statements (by-component), NEVER as platform-verified
+-- evidence (P0-619 / inherits P0-512-1 / invariant #2).
+--
+-- HARD BOUNDARY: this is a READ over imported_component_claims. An accepted
+-- claim is a vendor ASSERTION the operator chose to credit; it is NOT a
+-- control_evaluations row and does not satisfy a control. The export renders
+-- it attributed to the vendor component with explicit accept-provenance
+-- (dispositioned_by / dispositioned_at) so an auditor reads "the vendor says X
+-- and the operator credited it", never "the platform verified X". Nothing in
+-- this query (or its caller) writes control_evaluations.
+--
+-- claim_status = 'accepted' filters to the credited claims only — 'asserted'
+-- (undispositioned), 'rejected', and 'needs_info' claims are excluded from the
+-- export entirely. is_vendor_claim is constant TRUE (the slice-512 CHECK), so
+-- the predicate is documentary, not load-bearing — but it asserts intent.
+--
+-- RLS scopes both tables to the caller's tenant; the leading $1 tenant_id
+-- predicate is defense-in-depth behind RLS (the slice-030 pattern).
+SELECT
+    cc.id                    AS claim_id,
+    cmp.component_uuid       AS component_uuid,
+    cmp.title                AS component_title,
+    cmp.component_type       AS component_type,
+    cc.control_id            AS control_id,
+    cc.statement             AS statement,
+    cc.requirement_uuid      AS requirement_uuid,
+    cc.scf_anchor_id         AS scf_anchor_id,
+    cc.dispositioned_by      AS dispositioned_by,
+    cc.dispositioned_at      AS dispositioned_at,
+    cc.disposition_note      AS disposition_note
+FROM imported_component_claims cc
+JOIN imported_components cmp
+    ON cmp.id = cc.imported_component_id
+   AND cmp.tenant_id = cc.tenant_id
+WHERE cc.tenant_id = $1
+  AND cc.claim_status = 'accepted'
+  AND cc.is_vendor_claim = TRUE
+ORDER BY cmp.title ASC, cmp.component_uuid ASC, cc.control_id ASC, cc.requirement_uuid ASC;
