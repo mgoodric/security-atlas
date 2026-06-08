@@ -115,6 +115,10 @@ func DefaultSeed() []KindVersion {
 		// Slice 490: MDM connectors (Jamf + Intune) — shared managed-device
 		// endpoint-posture summary evidence kind (SOC 2 CC6.7 / CC6.8, ISO A.8).
 		{Kind: "endpoint.device_posture.v1", Version: "1.0.0"},
+		// Slice 491: HRIS connectors (Rippling + BambooHR) — shared
+		// worker-lifecycle (joiner/mover/leaver) evidence kind feeding the
+		// access-review + deprovisioning controls (SOC 2 CC6.1/CC6.2/CC6.3).
+		{Kind: "hris.worker_lifecycle.v1", Version: "1.0.0"},
 		// Slice 023: policy acknowledgment workflow. Each
 		// POST /v1/policies/{id}/acknowledge emits one record of this
 		// kind through the slice-013 evidence ledger.
