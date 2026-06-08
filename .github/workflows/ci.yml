@@ -3073,3 +3073,288 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "Non-PR push OR docs-only change — assertion-density advisory skipped (slice 393)."
+
+  # ====================================================================
+  # Slice 631 — fail-closed merge-gate aggregator (mechanism (a)).
+  #
+  # THE HOLE THIS CLOSES (slice 474 / parent slice 633 D6): a required
+  # check can be RED — or, worse, *never actually run* (path-filter
+  # skipped, or concurrency-cancelled mid-flight) — at merge time and the
+  # merge still completes. Branch protection's "require status checks to
+  # pass" reliably blocks a check that ran and reported RED, but it treats
+  # a required check that ended `skipped`/`cancelled`/`neutral`
+  # inconsistently across the skipped-vs-pending distinction. Slice 474
+  # merged with `Go · integration (shard A)` a real 10m21s FAIL; the
+  # regression then hid on `main` for ~3 weeks because every subsequent
+  # `main` commit either (1) path-filter-SKIPPED the shard legs
+  # (docs/status-only commits don't touch Go paths) or (2) had its `main`
+  # run CONCURRENCY-CANCELLED by the next merge before the shard leg
+  # completed. So no *completed* shard-A run on `main` re-caught it. This
+  # is the `CI path-filter as gap-multiplier` pattern (project memory):
+  # the first PR to exercise a filtered path to completion surfaces the
+  # accumulated breakage.
+  #
+  # FAIL-CLOSED LOGIC (the load-bearing part — read carefully):
+  #
+  #   * This job runs with `if: always()` and `needs:` every required,
+  #     path-filterable leg + the `changes` job. `always()` guarantees it
+  #     runs EVEN WHEN an upstream leg failed/was-cancelled/was-skipped —
+  #     without it, a failed `needs:` would SKIP this job, and a skipped
+  #     required check is exactly the hole we are closing.
+  #
+  #   * It distinguishes the two legitimate worlds via the path-filter
+  #     output `needs.changes.outputs.code`:
+  #       - code == 'false' (docs/status-only PR): the real legs are
+  #         legitimately `skipped` (their stub-twins post the green named
+  #         checks). The gate PASSES — we do NOT make docs-only PRs pay
+  #         the full matrix (preserves the slice-061 cost optimization).
+  #       - code == 'true' (Go-affecting PR — this very PR touches
+  #         `.github/workflows/**`, which is in the `code` filter): EVERY
+  #         required leg below MUST be `success`. Any leg that is
+  #         `failure`, `cancelled`, OR `skipped` fails this gate CLOSED.
+  #         `skipped`-while-needed is the exact slice-474 hole: a Go PR
+  #         whose shard leg never ran must NOT be mergeable.
+  #
+  #   * `tests-integration-shard` is a matrix (legs A/B1/B2/B3). A matrix
+  #     job's `result` in `needs` is the AGGREGATE: `success` only if every
+  #     leg succeeded; `failure` if any leg failed; `cancelled` if any was
+  #     cancelled. So one RED shard ⇒ aggregate `failure` ⇒ gate RED. This
+  #     is the precise signal slice 474 lacked at the branch-protection
+  #     layer (the per-leg `Go · integration (shard ...)` checks are NOT in
+  #     the required-contexts list; only the roll-up name was, and the
+  #     roll-up could be cancelled/skipped without blocking).
+  #
+  # WHY AN AGGREGATOR (mechanism a) RATHER THAN (b) PATHS-FILTER FIX OR
+  # (c) POST-MERGE CANARY ALONE: (b) cannot fix GitHub's skipped-vs-pending
+  # required-check treatment from inside a workflow; (c) only detects
+  # AFTER merge. The aggregator BLOCKS before merge and is the single name
+  # branch protection can require, collapsing the skipped/cancelled/failed
+  # ambiguity into one deterministic `success`-or-RED signal. See
+  # docs/audit-log/631-ci-red-shard-merge-guard-decisions.md.
+  #
+  # CONSERVATIVE-BY-DESIGN: a normal GREEN Go PR has every leg `success`,
+  # so the gate is GREEN. A docs-only PR has `code == 'false'`, so the
+  # gate short-circuits GREEN. The ONLY way this gate is RED is a real
+  # failed/cancelled/skipped-but-needed leg — which is exactly when the
+  # merge SHOULD be blocked. It adds no new failure mode for a clean PR.
+  #
+  # MAINTAINER HAND-OFF (cannot be done from a PR): add the check name
+  # `CI · merge-gate` to `.github/branch-protection.json`'s
+  # `required_status_checks.contexts` and apply it to live branch
+  # protection via `bash scripts/apply-branch-protection.sh`. Until that
+  # is done, this gate runs and reports but does NOT block — it is
+  # advisory. See the decisions log "branch-protection hand-off" section.
+  # ====================================================================
+  merge-gate:
+    name: CI · merge-gate
+    needs:
+      - changes
+      - build-go
+      - tests-integration-shard
+      - tests-integration
+      - lint-go
+      - sqlc-drift
+      - proto
+      - build-frontend
+      - frontend-playwright
+      - lint-python
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Evaluate fail-closed merge-gate
+        env:
+          # Whether this PR/push touches Go-affecting paths (dorny/paths-filter).
+          CODE: ${{ needs.changes.outputs.code }}
+          # Per-leg results. For the matrix `tests-integration-shard`, this
+          # is the AGGREGATE result across legs A/B1/B2/B3 (failure if any
+          # leg failed, cancelled if any was cancelled, success only if all
+          # legs succeeded).
+          R_BUILD_GO: ${{ needs.build-go.result }}
+          R_SHARDS: ${{ needs.tests-integration-shard.result }}
+          R_INTEGRATION: ${{ needs.tests-integration.result }}
+          R_LINT_GO: ${{ needs.lint-go.result }}
+          R_SQLC: ${{ needs.sqlc-drift.result }}
+          R_PROTO: ${{ needs.proto.result }}
+          R_FRONTEND_BUILD: ${{ needs.build-frontend.result }}
+          R_PLAYWRIGHT: ${{ needs.frontend-playwright.result }}
+          R_PYTHON: ${{ needs.lint-python.result }}
+        run: |
+          set -euo pipefail
+
+          # Docs/status-only PR: the real legs are legitimately `skipped`
+          # (their slice-061 stub-twins post the green named checks). Pass —
+          # we do NOT make a no-Go PR pay the full matrix (AC-2). This is
+          # the ONLY branch where a `skipped` leg is acceptable.
+          if [ "${CODE:-}" != "true" ]; then
+            echo "code='${CODE:-}' (no Go-affecting changes) — required legs legitimately skipped; merge-gate PASSES."
+            exit 0
+          fi
+
+          echo "code='true' (Go-affecting PR) — every required leg MUST be 'success'."
+          echo "A leg that is failure/cancelled/skipped fails this gate CLOSED (slice 474 hole)."
+          echo
+
+          fail=0
+          # require <leg-display-name> <result>
+          # PASS only on exactly 'success'. Anything else — failure,
+          # cancelled, or skipped-while-Go-changes-present — is fail-closed.
+          require() {
+            local name="$1" result="$2"
+            if [ "$result" = "success" ]; then
+              echo "  OK    ${name}: ${result}"
+            else
+              echo "  BLOCK ${name}: ${result}  <-- not 'success' on a Go-affecting PR" >&2
+              fail=1
+            fi
+          }
+
+          require "Go · build + test"                 "$R_BUILD_GO"
+          require "Go · integration (shard matrix)"    "$R_SHARDS"
+          require "Go · integration (Postgres RLS)"    "$R_INTEGRATION"
+          require "Go · lint"                          "$R_LINT_GO"
+          require "Go · sqlc generate diff"            "$R_SQLC"
+          require "Proto · lint + generate diff"       "$R_PROTO"
+          require "Frontend · install + build"         "$R_FRONTEND_BUILD"
+          require "Frontend · Playwright e2e"          "$R_PLAYWRIGHT"
+          require "Python · ruff"                      "$R_PYTHON"
+
+          if [ "$fail" -ne 0 ]; then
+            echo >&2
+            echo "merge-gate is RED: a required leg did not succeed on a Go-affecting PR." >&2
+            echo "This blocks the merge by design (slice 631). A RED/cancelled/skipped" >&2
+            echo "required integration shard cannot slip through (the slice 474 regression)." >&2
+            exit 1
+          fi
+          echo
+          echo "merge-gate PASSES: every required leg succeeded on this Go-affecting PR."
+
+  # ====================================================================
+  # Slice 631 — post-merge main-branch shard CANARY (mechanism (c),
+  # defense-in-depth alongside the merge-gate above).
+  #
+  # The merge-gate blocks BEFORE merge. This canary is the orthogonal
+  # AFTER-merge safety net for the second masking mechanism slice 474 fell
+  # through: a `main` run cancelled by the next merge's concurrency group
+  # before the shard leg completed. It re-runs the FULL shard matrix on
+  # `main` UNCANCELLABLY (its own concurrency group with
+  # cancel-in-progress: false) and UNCONDITIONALLY (no `changes.code` path
+  # filter), so a regression that somehow slipped past the gate — or a
+  # docs-only `main` push that would otherwise skip the shards — still gets
+  # a completed shard run on the next `main` push rather than weeks later.
+  #
+  # Scope discipline: this job runs ONLY on push-to-main (never on a PR),
+  # so it never sits on the merge-blocking critical path and never slows a
+  # PR. It is NOT a required check (it cannot be — it only exists on
+  # `main` pushes). A RED canary surfaces as a red `main` build + the next
+  # PR's branch (strict: true rebases onto main) inheriting the signal.
+  #
+  # It reuses scripts/run-integration-shard.sh — the SAME source-of-truth
+  # the PR-time `tests-integration-shard` job uses — so there is no second
+  # package list to drift (the slice-417 shard manifest stays canonical).
+  # ====================================================================
+  tests-integration-main-canary:
+    name: Go · integration canary (main, shard ${{ matrix.leg }})
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Own concurrency group with cancel-in-progress: false so a rapid
+    # sequence of main merges cannot cancel an in-flight canary leg before
+    # it completes — the exact masking mechanism (2) from slice 474. Keyed
+    # off the leg too so the four legs of one push don't cancel each other.
+    concurrency:
+      group: ci-main-canary-${{ github.sha }}-${{ matrix.leg }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: [A, B1, B2, B3]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: security_atlas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable
+      ATLAS_APP_PASSWORD: ${{ secrets.CI_ATLAS_APP_PASSWORD || 'ci-ephemeral' }}
+      MINIO_ENDPOINT: http://localhost:9000
+      MINIO_BUCKET: atlas-artifacts-test
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      NATS_URL: nats://localhost:4222
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: "v3.0.6"
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/live; then
+              echo "minio ready"; break
+            fi
+            sleep 2
+          done
+          docker run --rm --network host \
+            -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
+            minio/mc mb -p local/atlas-artifacts-test
+      - name: Start NATS JetStream
+        run: |
+          docker run -d --name nats \
+            -p 4222:4222 \
+            -p 8222:8222 \
+            nats:2.10-alpine -js -sd /data --http_port 8222
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8222/healthz; then
+              echo "nats ready"; break
+            fi
+            sleep 2
+          done
+      - name: Bootstrap roles
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
+      - name: Set role passwords (CI-scoped)
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
+      - name: Apply forward migrations
+        run: |
+          for f in migrations/sql/*.sql; do
+            case "$f" in
+              *.down.sql) ;;
+              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
+            esac
+          done
+      - name: Run integration shard (-p 1 within the leg)
+        run: |
+          GO_TEST_EXTRA="-race" \
+            bash scripts/run-integration-shard.sh "${{ matrix.leg }}" coverage.txt
