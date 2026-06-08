@@ -3526,7 +3526,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/tenants/{id}:
     patch:
-      summary: PATCH /v1/tenants/{id} — rename a tenant (per-tenant admin or super_admin)
+      summary: PATCH /v1/tenants/{id} — rename a tenant and/or set its control-bundle gate policy (per-tenant admin or super_admin)
       tags: [tenants]
       operationId: patch-v1-tenants-id
       security:
