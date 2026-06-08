@@ -814,6 +814,9 @@ type Querier interface {
 	// no DELETE. The schema enforces this at the RLS layer (no UPDATE /
 	// DELETE policy on the table); these queries enforce it at the sqlc
 	// surface (no UpdateEvidenceRecord, no DeleteEvidenceRecord exists).
+	// Slice 474: scope_canonical persists the canonical (sorted) wire scope the
+	// content-hash was computed over, so `atlas evidence verify` can reconstruct
+	// the exact record and recompute an identical hash.
 	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
 	InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error)
 	// Slice 492: OSCAL catalog-import queries.

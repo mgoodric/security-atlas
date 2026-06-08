@@ -23,7 +23,7 @@ func (q *Queries) CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgt
 }
 
 const getEvidenceRecordByID = `-- name: GetEvidenceRecordByID :one
-SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref
+SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical
 FROM evidence_records
 WHERE id = $1
   AND tenant_id = $2
@@ -60,12 +60,13 @@ func (q *Queries) GetEvidenceRecordByID(ctx context.Context, arg GetEvidenceReco
 		&i.IngestionPath,
 		&i.SourceAttribution,
 		&i.ControlRef,
+		&i.ScopeCanonical,
 	)
 	return i, err
 }
 
 const getEvidenceRecordByIdempotency = `-- name: GetEvidenceRecordByIdempotency :one
-SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref
+SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical
 FROM evidence_records
 WHERE tenant_id = $1
   AND idempotency_key = $2
@@ -106,6 +107,7 @@ func (q *Queries) GetEvidenceRecordByIdempotency(ctx context.Context, arg GetEvi
 		&i.IngestionPath,
 		&i.SourceAttribution,
 		&i.ControlRef,
+		&i.ScopeCanonical,
 	)
 	return i, err
 }
@@ -175,7 +177,8 @@ INSERT INTO evidence_records (
     payload, payload_uri,
     hash, freshness_class, valid_until,
     idempotency_key, evidence_kind, schema_version,
-    credential_id, ingestion_path, source_attribution
+    credential_id, ingestion_path, source_attribution,
+    scope_canonical
 ) VALUES (
     $1, $2,
     $3, $4, $5,
@@ -183,9 +186,10 @@ INSERT INTO evidence_records (
     $9, $10,
     $11, $12, $13,
     $14, $15, $16,
-    $17, $18, $19
+    $17, $18, $19,
+    $20
 )
-RETURNING id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref
+RETURNING id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical
 `
 
 type InsertEvidenceRecordParams struct {
@@ -208,6 +212,7 @@ type InsertEvidenceRecordParams struct {
 	CredentialID      *string                `json:"credential_id"`
 	IngestionPath     string                 `json:"ingestion_path"`
 	SourceAttribution []byte                 `json:"source_attribution"`
+	ScopeCanonical    []byte                 `json:"scope_canonical"`
 }
 
 // evidence_records + evidence_audit_log queries for slice 013.
@@ -216,6 +221,9 @@ type InsertEvidenceRecordParams struct {
 // no DELETE. The schema enforces this at the RLS layer (no UPDATE /
 // DELETE policy on the table); these queries enforce it at the sqlc
 // surface (no UpdateEvidenceRecord, no DeleteEvidenceRecord exists).
+// Slice 474: scope_canonical persists the canonical (sorted) wire scope the
+// content-hash was computed over, so `atlas evidence verify` can reconstruct
+// the exact record and recompute an identical hash.
 func (q *Queries) InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error) {
 	row := q.db.QueryRow(ctx, insertEvidenceRecord,
 		arg.ID,
@@ -237,6 +245,7 @@ func (q *Queries) InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRe
 		arg.CredentialID,
 		arg.IngestionPath,
 		arg.SourceAttribution,
+		arg.ScopeCanonical,
 	)
 	var i EvidenceRecord
 	err := row.Scan(
@@ -262,6 +271,7 @@ func (q *Queries) InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRe
 		&i.IngestionPath,
 		&i.SourceAttribution,
 		&i.ControlRef,
+		&i.ScopeCanonical,
 	)
 	return i, err
 }
@@ -318,7 +328,7 @@ func (q *Queries) ListEvidenceAuditEntriesByCredential(ctx context.Context, arg 
 }
 
 const listEvidenceRecordsByControl = `-- name: ListEvidenceRecordsByControl :many
-SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref
+SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical
 FROM evidence_records
 WHERE tenant_id = $1
   AND (control_id = $2 OR control_ref = $3)
@@ -375,6 +385,7 @@ func (q *Queries) ListEvidenceRecordsByControl(ctx context.Context, arg ListEvid
 			&i.IngestionPath,
 			&i.SourceAttribution,
 			&i.ControlRef,
+			&i.ScopeCanonical,
 		); err != nil {
 			return nil, err
 		}
@@ -387,7 +398,7 @@ func (q *Queries) ListEvidenceRecordsByControl(ctx context.Context, arg ListEvid
 }
 
 const walkEvidenceRecordsForVerify = `-- name: WalkEvidenceRecordsForVerify :many
-SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref
+SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical
 FROM evidence_records
 WHERE tenant_id = $1
   AND id > $2
@@ -440,6 +451,7 @@ func (q *Queries) WalkEvidenceRecordsForVerify(ctx context.Context, arg WalkEvid
 			&i.IngestionPath,
 			&i.SourceAttribution,
 			&i.ControlRef,
+			&i.ScopeCanonical,
 		); err != nil {
 			return nil, err
 		}

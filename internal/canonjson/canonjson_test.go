@@ -130,6 +130,106 @@ func TestHashRecord_DifferentContentDifferentHash(t *testing.T) {
 	}
 }
 
+// --- Slice 474: canonical-scope persistence round-trip ---
+
+// TestCanonicalScope_RoundTripPreservesHash is the unit-level proof of the
+// slice-474 fix: the scope persisted via MarshalCanonicalScope and rebuilt
+// via UnmarshalCanonicalScope yields a record whose HashRecord equals the
+// hash of the original scope-bearing record. This is exactly the ingest →
+// verify equality the ledger walk relies on, exercised without Postgres.
+func TestCanonicalScope_RoundTripPreservesHash(t *testing.T) {
+	t.Parallel()
+
+	orig := sampleRecord()
+	wantHash, err := canonjson.HashRecord(orig)
+	if err != nil {
+		t.Fatalf("HashRecord(orig): %v", err)
+	}
+
+	// Persist the canonical scope (what ingest writes to the column)...
+	raw, err := canonjson.MarshalCanonicalScope(orig.GetScope())
+	if err != nil {
+		t.Fatalf("MarshalCanonicalScope: %v", err)
+	}
+	// ...then rebuild it (what the verify walk reads back) and reconstruct
+	// a record with the rehydrated scope.
+	gotScope, err := canonjson.UnmarshalCanonicalScope(raw)
+	if err != nil {
+		t.Fatalf("UnmarshalCanonicalScope: %v", err)
+	}
+	rebuilt := sampleRecord()
+	rebuilt.Scope = gotScope
+
+	gotHash, err := canonjson.HashRecord(rebuilt)
+	if err != nil {
+		t.Fatalf("HashRecord(rebuilt): %v", err)
+	}
+	if gotHash != wantHash {
+		t.Fatalf("scope round-trip changed hash: want=%s got=%s", wantHash, gotHash)
+	}
+}
+
+// TestCanonicalScope_ClientOrderingNormalized proves the persisted bytes are
+// canonical regardless of client scope ordering — so two records that differ
+// only in wire scope order persist identical scope_canonical bytes and
+// recompute the same hash.
+func TestCanonicalScope_ClientOrderingNormalized(t *testing.T) {
+	t.Parallel()
+
+	a := sampleRecord()
+	b := sampleRecord()
+	b.Scope[0], b.Scope[1] = b.Scope[1], b.Scope[0]
+	b.Scope[1].Values = []string{"prod"} // already single-valued; explicit
+
+	ra, err := canonjson.MarshalCanonicalScope(a.GetScope())
+	if err != nil {
+		t.Fatalf("MarshalCanonicalScope(a): %v", err)
+	}
+	rb, err := canonjson.MarshalCanonicalScope(b.GetScope())
+	if err != nil {
+		t.Fatalf("MarshalCanonicalScope(b): %v", err)
+	}
+	if string(ra) != string(rb) {
+		t.Fatalf("canonical scope bytes differ by client ordering:\n a=%s\n b=%s", ra, rb)
+	}
+}
+
+// TestCanonicalScope_EmptyAndNull proves the NULL / legacy-row path: an
+// empty scope marshals to `null`, and `null` / empty / `[]` all rebuild to
+// a nil scope (the slice-464 scope-free reconstruction for pre-fix rows).
+func TestCanonicalScope_EmptyAndNull(t *testing.T) {
+	t.Parallel()
+
+	raw, err := canonjson.MarshalCanonicalScope(nil)
+	if err != nil {
+		t.Fatalf("MarshalCanonicalScope(nil): %v", err)
+	}
+	if string(raw) != "null" {
+		t.Fatalf("empty scope did not marshal to null: %s", raw)
+	}
+
+	for _, in := range [][]byte{nil, []byte("null"), []byte("[]")} {
+		got, err := canonjson.UnmarshalCanonicalScope(in)
+		if err != nil {
+			t.Fatalf("UnmarshalCanonicalScope(%q): %v", in, err)
+		}
+		if got != nil {
+			t.Fatalf("UnmarshalCanonicalScope(%q) = %v, want nil", in, got)
+		}
+	}
+}
+
+// TestCanonicalScope_DecodeErrorSurfaces proves a corrupt scope_canonical
+// column is an integrity signal, not a silent pass — the verify walk treats
+// the error as a mismatch.
+func TestCanonicalScope_DecodeErrorSurfaces(t *testing.T) {
+	t.Parallel()
+
+	if _, err := canonjson.UnmarshalCanonicalScope([]byte(`{not json`)); err == nil {
+		t.Fatal("expected decode error for malformed scope_canonical, got nil")
+	}
+}
+
 // maxPayloadRecord builds an EvidenceRecord whose serialized proto sits
 // right at the 1 MiB ceiling — the worst-case input HashRecord ever sees
 // on the ingest hot path (slice 015 rejects anything larger). The bulk is
