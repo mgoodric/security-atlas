@@ -5,6 +5,16 @@
 
 **Last reconciled:** 2026-06-08 (batch 221 reconcile — 519 Azure AKS workload-config evidence (azure connector now 3 kinds), 608 per-tenant control-bundle gate-policy ALL MERGED. Spillover 613 ready. Also corrected slice 476's stale `ready (reduced)` row → merged. A GitHub Actions infra-flake wave (cache-extract tar / service-container exit-22 / linter-download 504 / openapi missing-regen) hit the queue — all transient/mechanical, cleared by rerun + one openapi regen.)
 
+## Drift detected — 2026-06-08 (batch 222 claim-stake · 520 + 613 + 474; + 474 missing-row registration)
+
+3-slice batch, disjoint clusters. 520 (Azure NSG/firewall evidence — Connectors) + 613 (web Settings toggle for bundle*gate_mode — Frontend) + 474 (ingest evidence-hash alignment — Evidence integrity). Conflict-safe: `connectors/azure`+schemaregistry (520) vs `web/settings` (613, drives slice-608's existing PATCH — no new backend route) vs `internal/evidence/ingest` (474). Only 520 schemaregistry; only 613 web; only 474 evidence. Shared = CHANGELOG + maybe coverage-thresholds (keep-both). **DEP-check:** 520 dep #486 merged ✓; 613 dep #608 merged ✓; 474 no unmerged deps ✓. **OQ-check:** clears. Deferred the two web heavies 515/589 (would collide with 613 on web). Migration baseline AFTER `20260608030000*\*`(use`20260608040000+`). Spillover bands: eng-520 → 614-617, eng-613 → 618-621, eng-474 → 622-625.
+
+**Missing-row registration:** slice **474** (ingest evidence-hash alignment) has a `ready` slice doc + no unmerged deps but was NEVER registered in this status table (GUARD-1-invisible). Adding its row here (→ in-progress).
+
+- **520** (Azure NSG / firewall rule evidence) — Connectors · JUDGMENT · `ready` → **in-progress**. Branch `connectors/520-azure-nsg`. NSG/firewall rule posture on the slice-486 Azure connector; locked pattern + over-collection guard. 4th azure evidence kind.
+- **613** (web Settings toggle for `bundle_gate_mode`) — Frontend · `ready` → **in-progress**. Branch `web/613-gate-policy-toggle`. A tenant-admin settings control driving slice-608's `PATCH /v1/tenants/{id}` (strict/advisory/mandatory_tests). e2e must route-mock the BFF GET (b219 lesson).
+- **474** (align ingest evidence hash for ledger-wide verify walk) — Evidence integrity · JUDGMENT · `(unregistered) ready` → **in-progress**. Branch `evidence/474-ingest-hash-align`. Makes the ingest evidence hash align so the slice-464 ledger-wide verify walk validates production records (`internal/evidence/ingest`).
+
 ## Reconcile — 2026-06-08 (batch 221 · 519 + 608 merged)
 
 Both merged. 519 (#1133, `64bbcb79`) + 608 (#1134, `4974fe06`); claim-stake #1132 (`d99f1f79`).
@@ -553,74 +563,74 @@ First build batch off the gap-analysis backlog — anchors on the worst real-def
 
 Maintainer-directed comprehensive gap analysis (5 parallel domain investigators: frameworks · connectors · evidence/audit/OSCAL · AI-assist/reporting · risk/policy/privacy/platform), each filing genuine missing-functionality slices via the /idea-to-slice method (template + mandatory STRIDE). Filed in 5 themed PRs (#1035 frameworks 480-484 · #1034 connectors 486-491 · #1038 audit/OSCAL 492-496 · #1037 AI 498-502 · #1036 risk/platform 504-510); rows registered here in one batch (per-slice registration infeasible at 28-scale). Blocks 485/497/503 left unused (quality over quantity). **Three findings are real defects, not just gaps:** 495 (control-as-code accepts rego|sql|jsonpath at upload but only EVALUATES rego — SQL/JSONpath controls silently produce no state) · 492 (OSCAL import missing = direct invariant-#8 violation) · 498 (the shared internal/llm foundation that 440/441/444/471 all assume has no owner). Investigators VERIFIED much is already built (push-cred UX, freshness alerting, risk methodology, policy lifecycle + 5 templates, exceptions, FrameworkScope workflow, Helm, all 4 OSCAL exports). Deliberately NOT filed: NIST 800-53 (alt anchor catalog), GDPR crosswalk (privacy-decision-entangled), trust center (v3/vanity anti-pattern), linear/bitwarden/workday connectors (sibling-covered/upper-market).
 
-| Row | Transition          | Evidence                                                                                                                                                             |
-| --- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 480 | `merged`            | NIST CSF 2.0 crosswalk (4th framework) · #1035 spec · #1064 impl `67c1a71f` · batch 204 · 4-framework invariant-#1 proof                                             |
-| 514 | `merged`            | full CSF 2.0 Subcategory coverage (35→106) + low-confidence re-map · Catalog · parent #480 · batch 214 · #1100 `e19faf7a` · invariant #1 ×4 frameworks               |
-| 515 | `ready`             | CSF Tier/Profile assessment workflow (maturity construct) · parent #480 · #1064                                                                                      |
-| 481 | `merged`            | HIPAA Security Rule crosswalk (catalog-only) · #1035 spec · #1067 impl `ea45ba61` · batch 205 · completes §10.2 4-framework set (invariant #1 × 5)                   |
-| 516 | `merged`            | full HIPAA Security Rule coverage (31→67; §164.314/§164.316 + remaining) · Catalog · parent #481 · batch 215 · #1104 `06000d08` · invariant #1 ×5                    |
-| 567 | `not-ready`         | HIPAA finer-anchor re-map · blocked on full-SCF-catalog test-seed path · parent #516 · `docs/issues/567-hipaa-finer-anchor-remap-full-catalog.md`                    |
-| 517 | `not-ready`         | HIPAA covered-entity workflow (BAA / required-vs-addressable / breach) · DEFERRED canvas §10.3 phase-3 · parent #481 · #1067                                         |
-| 518 | `not-ready`         | HIPAA FrameworkScope ePHI-environment example · DEFERRED (pairs with #517) · parent #481 · #1067                                                                     |
-| 482 | `merged`            | coverage-strength rollup + confidence-band UI (canvas §3.2 promise) · #1035 spec · #1081 impl `daeff078` · batch 209                                                 |
-| 536 | `not-ready`         | crosswalk-review / conflict editing UI · DEFERRED · parent #482 · #1081                                                                                              |
-| 537 | `not-ready`         | cross-framework coverage-strength comparison matrix · DEFERRED · parent #482 · #1081                                                                                 |
-| 483 | (new) → `not-ready` | mapping-tier governance · needs ADR/decision · #1035                                                                                                                 |
-| 484 | (new) → `not-ready` | framework versioning capability · needs concrete 2nd version · #1035                                                                                                 |
-| 486 | `merged`            | Azure connector (Entra ID + Storage) · #1034 spec · #1070 impl `d4405209` · batch 206 · 8th connector / 3rd major cloud                                              |
-| 519 | `merged`            | Azure AKS workload-config evidence (azure.aks_cluster_config.v1; azure connector now 3 kinds) · parent #486 · Connectors · batch 221 · #1133 `64bbcb79`              |
-| 613 | `ready`             | web Settings toggle for bundle_gate_mode · parent #608 (merged) · Frontend · `docs/issues/613-web-bundle-gate-policy-toggle.md`                                      |
-| 520 | `ready`             | Azure NSG / firewall evidence · Connectors · parent #486 · #1070                                                                                                     |
-| 521 | `ready`             | Azure Key-Vault access-policy evidence · Connectors · parent #486 · #1070                                                                                            |
-| 522 | `ready`             | Azure event-driven profile (Event Grid / Activity-Log) · Connectors · parent #486 · #1070                                                                            |
-| 487 | `merged`            | Kubernetes connector (RBAC + workload config) · #1034 spec · #1073 impl `4f233e76` · batch 207 · 9th connector                                                       |
-| 523 | `ready`             | K8s NetworkPolicy coverage evidence · Connectors · parent #487 · #1073                                                                                               |
-| 524 | `ready`             | K8s Pod-Security-Standards admission-config evidence · Connectors · parent #487 · #1073                                                                              |
-| 525 | `ready`             | K8s Secret-inventory (metadata-only) evidence · Connectors · parent #487 · #1073                                                                                     |
-| 526 | `ready`             | K8s watch-based event-driven profile (audit log) · Connectors · parent #487 · #1073                                                                                  |
-| 527 | `merged`            | admin user-assign dialog user+tenant dropdowns · Frontend · maintainer UX req on 479 · #1074 spec · #1077 impl `fcd4fb8c` · batch 208                                |
-| 488 | `merged`            | Datadog + Grafana monitoring connectors (10th+11th) · #1034 spec · #1078 impl `9fe3db71` · batch 208                                                                 |
-| 528 | `not-ready`         | admin-assign searchable combobox (large-list scale) · DEFERRED · parent #527 · #1077                                                                                 |
-| 533 | `ready`             | Datadog Cloud-SIEM rule evidence · Connectors · parent #488 · #1078                                                                                                  |
-| 534 | `ready`             | Grafana SAML/RBAC config evidence · Connectors · parent #488 · #1078                                                                                                 |
-| 535 | `ready`             | monitoring alert-firing-history event-driven profile · Connectors · parent #488 · #1078                                                                              |
-| 489 | `merged`            | PagerDuty connector (incident evidence; 12th connector) · #1034 spec · #1084 impl `b86e3d1a` · batch 210                                                             |
-| 538 | `ready`             | PagerDuty postmortem/retrospective evidence · Connectors · parent #489 · #1084                                                                                       |
-| 539 | `ready`             | PagerDuty responder-performance metrics · Connectors · parent #489 · #1084                                                                                           |
-| 540 | `ready`             | PagerDuty event-driven webhook profile · Connectors · parent #489 · #1084                                                                                            |
-| 490 | `merged`            | Jamf + Intune MDM connectors · #1034 · batch 213 · #1095 `190b038e` · 14th connector                                                                                 |
-| 491 | `merged`            | Rippling + BambooHR HRIS connectors · #1034 · batch 215 · #1105 `f3abca7e` · 15th+16th connectors · structural PII over-collection guard                             |
-| 571 | `ready`             | HRIS manager-hierarchy evidence · parent #491 (merged) · Connectors · `docs/issues/571-hris-manager-hierarchy-evidence.md`                                           |
-| 573 | `ready`             | HRIS event-driven termination-webhook profile · parent #491 (merged) · Connectors · `docs/issues/573-hris-event-driven-termination-webhook-profile.md`               |
-| 492 | `merged`            | OSCAL import (catalog import) — invariant-#8 gap CLOSED · #1038 spec · #1047 impl `4e6ce46f` · batch 199                                                             |
-| 493 | `merged`            | SSP control-implementation narratives (authored, not placeholder) · #1038 spec · #1057 impl `6259c45a` · batch 202                                                   |
-| 494 | `merged`            | AR sampled-evidence IDs + walkthrough attachments · #1038 spec · #1061 impl `978a6320` · batch 203 · OSCAL audit-export story complete                               |
-| 495 | `merged`            | control-as-code SQL + JSON-path eval (silently-ignored bug) · #1038 spec · #1043 impl `f3f74bf4` · batch ~199 · (stale-row corrected b216)                           |
-| 496 | `merged`            | control-bundle test runner (fixture evidence → expected pass/fail) · #1038 · batch 216 · #1108 `6da529b6` · `controls test` CLI                                      |
-| 574 | `merged`            | control-bundle upload test-gate (hard-block on failing tests) · parent #496 · control-as-code · batch 220 · #1130 `39ed4ef4`                                         |
-| 498 | `merged`            | shared internal/llm inference foundation + ai_generations + DB enforcement · #1037 spec · #1050 impl `7ba9bd4b` · batch 200 · unblocks 440/441/444/471               |
-| 499 | `ready`             | cloud-LLM opt-in per-tenant + banner · dep 498 merged · #1037 (LLM infra follow-on)                                                                                  |
-| 500 | `ready`             | pgvector semantic-retrieval grounding · dep 498 merged · #1037 (LLM infra follow-on)                                                                                 |
-| 501 | `not-ready`         | full multi-section board narrative + numeric verification + banned-phrase wiring · dep 498 ✓ + 440 (unmerged) · #1037                                                |
-| 502 | `ready`             | AI evidence summarization v0 · dep 498 merged · #1037 (AI-assist v0 SURFACE — maintainer-sequencing caution)                                                         |
-| 513 | `merged`            | correct AI-assist-boundary canonical-adopter doc (QuestionnaireAnswer→mcp_write_proposals) · Docs · parent #498 · #1060 impl `1dfcdb2e` · batch 203                  |
-| 504 | (new) → `not-ready` | privacy v0: right-to-erasure (tombstone) · privacy-v0 greenlight · #1036                                                                                             |
-| 505 | (new) → `not-ready` | privacy v0: DSAR export · privacy-v0 greenlight · #1036                                                                                                              |
-| 506 | (new) → `not-ready` | privacy v0: RoPA (5 high-signal seeds, not 50) · privacy-v0 greenlight · #1036                                                                                       |
-| 507 | (new) → `not-ready` | breach-notification workflow impl · dep 446 decision · #1036                                                                                                         |
-| 508 | (new) → `ready`     | SCIM 2.0 user-lifecycle provisioning · #1036                                                                                                                         |
-| 509 | (new) → `ready`     | IdP group→role mapping + multi-IdP · #1036                                                                                                                           |
-| 510 | `merged`            | automated backup + scheduled restore-verification · #1036 spec · #1090 impl `a9cdbcee` · batch 212 · BCP/DR loop real                                                |
-| 544 | `not-ready`         | PITR / WAL archiving (sub-dump RPO) · DEFERRED · parent #510 · #1090                                                                                                 |
-| 545 | `not-ready`         | Helm/K8s-native backup operator · DEFERRED · parent #510 · #1090                                                                                                     |
-| 546 | `not-ready`         | cross-region backup replication · DEFERRED (OQ #03) · parent #510 · #1090                                                                                            |
-| 549 | `merged`            | edge-upgrade runbook "pull the compose, not just the image" · Docs · maintainer req · #1091 · batch 213 · #1094 `1fed76e8`                                           |
-| 555 | `merged`            | MDM software-inventory evidence (endpoint.software_inventory.v1) · parent #490 · Connectors · batch 218 · #1120 `4ebc39df` · 17th connector                          |
-| 590 | `merged`            | MDM software-inventory cursor pagination (Jamf page / Intune nextLink; reuse-unchanged kind) · parent #555 · Connectors · batch 220 · #1128 `83bc731c`               |
-| 556 | `merged`            | MDM config-profile-detail evidence (endpoint.config_profile.v1; 3-layer secret-redaction) · parent #490 · Connectors · batch 219 · #1125 `0059979c` · 18th connector |
-| 595 | `ready`             | MDM config-profile per-setting enrichment · parent #556 (merged) · Connectors · `docs/issues/595-mdm-config-profile-per-setting-enrichment.md`                       |
-| 557 | `ready`             | MDM event-driven webhook profile · parent #490 (merged) · Connectors · `docs/issues/557-mdm-event-driven-webhook-profile.md`                                         |
+| Row | Transition              | Evidence                                                                                                                                                             |
+| --- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 480 | `merged`                | NIST CSF 2.0 crosswalk (4th framework) · #1035 spec · #1064 impl `67c1a71f` · batch 204 · 4-framework invariant-#1 proof                                             |
+| 514 | `merged`                | full CSF 2.0 Subcategory coverage (35→106) + low-confidence re-map · Catalog · parent #480 · batch 214 · #1100 `e19faf7a` · invariant #1 ×4 frameworks               |
+| 515 | `ready`                 | CSF Tier/Profile assessment workflow (maturity construct) · parent #480 · #1064                                                                                      |
+| 481 | `merged`                | HIPAA Security Rule crosswalk (catalog-only) · #1035 spec · #1067 impl `ea45ba61` · batch 205 · completes §10.2 4-framework set (invariant #1 × 5)                   |
+| 516 | `merged`                | full HIPAA Security Rule coverage (31→67; §164.314/§164.316 + remaining) · Catalog · parent #481 · batch 215 · #1104 `06000d08` · invariant #1 ×5                    |
+| 567 | `not-ready`             | HIPAA finer-anchor re-map · blocked on full-SCF-catalog test-seed path · parent #516 · `docs/issues/567-hipaa-finer-anchor-remap-full-catalog.md`                    |
+| 517 | `not-ready`             | HIPAA covered-entity workflow (BAA / required-vs-addressable / breach) · DEFERRED canvas §10.3 phase-3 · parent #481 · #1067                                         |
+| 518 | `not-ready`             | HIPAA FrameworkScope ePHI-environment example · DEFERRED (pairs with #517) · parent #481 · #1067                                                                     |
+| 482 | `merged`                | coverage-strength rollup + confidence-band UI (canvas §3.2 promise) · #1035 spec · #1081 impl `daeff078` · batch 209                                                 |
+| 536 | `not-ready`             | crosswalk-review / conflict editing UI · DEFERRED · parent #482 · #1081                                                                                              |
+| 537 | `not-ready`             | cross-framework coverage-strength comparison matrix · DEFERRED · parent #482 · #1081                                                                                 |
+| 483 | (new) → `not-ready`     | mapping-tier governance · needs ADR/decision · #1035                                                                                                                 |
+| 484 | (new) → `not-ready`     | framework versioning capability · needs concrete 2nd version · #1035                                                                                                 |
+| 486 | `merged`                | Azure connector (Entra ID + Storage) · #1034 spec · #1070 impl `d4405209` · batch 206 · 8th connector / 3rd major cloud                                              |
+| 519 | `merged`                | Azure AKS workload-config evidence (azure.aks_cluster_config.v1; azure connector now 3 kinds) · parent #486 · Connectors · batch 221 · #1133 `64bbcb79`              |
+| 613 | `ready` → `in-progress` | web Settings toggle for bundle_gate_mode · parent #608 (merged) · Frontend · batch 222 `web/613-gate-policy-toggle`                                                  |
+| 520 | `ready` → `in-progress` | Azure NSG / firewall evidence · Connectors · parent #486 · #1070 · batch 222 `connectors/520-azure-nsg`                                                              |
+| 521 | `ready`                 | Azure Key-Vault access-policy evidence · Connectors · parent #486 · #1070                                                                                            |
+| 522 | `ready`                 | Azure event-driven profile (Event Grid / Activity-Log) · Connectors · parent #486 · #1070                                                                            |
+| 487 | `merged`                | Kubernetes connector (RBAC + workload config) · #1034 spec · #1073 impl `4f233e76` · batch 207 · 9th connector                                                       |
+| 523 | `ready`                 | K8s NetworkPolicy coverage evidence · Connectors · parent #487 · #1073                                                                                               |
+| 524 | `ready`                 | K8s Pod-Security-Standards admission-config evidence · Connectors · parent #487 · #1073                                                                              |
+| 525 | `ready`                 | K8s Secret-inventory (metadata-only) evidence · Connectors · parent #487 · #1073                                                                                     |
+| 526 | `ready`                 | K8s watch-based event-driven profile (audit log) · Connectors · parent #487 · #1073                                                                                  |
+| 527 | `merged`                | admin user-assign dialog user+tenant dropdowns · Frontend · maintainer UX req on 479 · #1074 spec · #1077 impl `fcd4fb8c` · batch 208                                |
+| 488 | `merged`                | Datadog + Grafana monitoring connectors (10th+11th) · #1034 spec · #1078 impl `9fe3db71` · batch 208                                                                 |
+| 528 | `not-ready`             | admin-assign searchable combobox (large-list scale) · DEFERRED · parent #527 · #1077                                                                                 |
+| 533 | `ready`                 | Datadog Cloud-SIEM rule evidence · Connectors · parent #488 · #1078                                                                                                  |
+| 534 | `ready`                 | Grafana SAML/RBAC config evidence · Connectors · parent #488 · #1078                                                                                                 |
+| 535 | `ready`                 | monitoring alert-firing-history event-driven profile · Connectors · parent #488 · #1078                                                                              |
+| 489 | `merged`                | PagerDuty connector (incident evidence; 12th connector) · #1034 spec · #1084 impl `b86e3d1a` · batch 210                                                             |
+| 538 | `ready`                 | PagerDuty postmortem/retrospective evidence · Connectors · parent #489 · #1084                                                                                       |
+| 539 | `ready`                 | PagerDuty responder-performance metrics · Connectors · parent #489 · #1084                                                                                           |
+| 540 | `ready`                 | PagerDuty event-driven webhook profile · Connectors · parent #489 · #1084                                                                                            |
+| 490 | `merged`                | Jamf + Intune MDM connectors · #1034 · batch 213 · #1095 `190b038e` · 14th connector                                                                                 |
+| 491 | `merged`                | Rippling + BambooHR HRIS connectors · #1034 · batch 215 · #1105 `f3abca7e` · 15th+16th connectors · structural PII over-collection guard                             |
+| 571 | `ready`                 | HRIS manager-hierarchy evidence · parent #491 (merged) · Connectors · `docs/issues/571-hris-manager-hierarchy-evidence.md`                                           |
+| 573 | `ready`                 | HRIS event-driven termination-webhook profile · parent #491 (merged) · Connectors · `docs/issues/573-hris-event-driven-termination-webhook-profile.md`               |
+| 492 | `merged`                | OSCAL import (catalog import) — invariant-#8 gap CLOSED · #1038 spec · #1047 impl `4e6ce46f` · batch 199                                                             |
+| 493 | `merged`                | SSP control-implementation narratives (authored, not placeholder) · #1038 spec · #1057 impl `6259c45a` · batch 202                                                   |
+| 494 | `merged`                | AR sampled-evidence IDs + walkthrough attachments · #1038 spec · #1061 impl `978a6320` · batch 203 · OSCAL audit-export story complete                               |
+| 495 | `merged`                | control-as-code SQL + JSON-path eval (silently-ignored bug) · #1038 spec · #1043 impl `f3f74bf4` · batch ~199 · (stale-row corrected b216)                           |
+| 496 | `merged`                | control-bundle test runner (fixture evidence → expected pass/fail) · #1038 · batch 216 · #1108 `6da529b6` · `controls test` CLI                                      |
+| 574 | `merged`                | control-bundle upload test-gate (hard-block on failing tests) · parent #496 · control-as-code · batch 220 · #1130 `39ed4ef4`                                         |
+| 498 | `merged`                | shared internal/llm inference foundation + ai_generations + DB enforcement · #1037 spec · #1050 impl `7ba9bd4b` · batch 200 · unblocks 440/441/444/471               |
+| 499 | `ready`                 | cloud-LLM opt-in per-tenant + banner · dep 498 merged · #1037 (LLM infra follow-on)                                                                                  |
+| 500 | `ready`                 | pgvector semantic-retrieval grounding · dep 498 merged · #1037 (LLM infra follow-on)                                                                                 |
+| 501 | `not-ready`             | full multi-section board narrative + numeric verification + banned-phrase wiring · dep 498 ✓ + 440 (unmerged) · #1037                                                |
+| 502 | `ready`                 | AI evidence summarization v0 · dep 498 merged · #1037 (AI-assist v0 SURFACE — maintainer-sequencing caution)                                                         |
+| 513 | `merged`                | correct AI-assist-boundary canonical-adopter doc (QuestionnaireAnswer→mcp_write_proposals) · Docs · parent #498 · #1060 impl `1dfcdb2e` · batch 203                  |
+| 504 | (new) → `not-ready`     | privacy v0: right-to-erasure (tombstone) · privacy-v0 greenlight · #1036                                                                                             |
+| 505 | (new) → `not-ready`     | privacy v0: DSAR export · privacy-v0 greenlight · #1036                                                                                                              |
+| 506 | (new) → `not-ready`     | privacy v0: RoPA (5 high-signal seeds, not 50) · privacy-v0 greenlight · #1036                                                                                       |
+| 507 | (new) → `not-ready`     | breach-notification workflow impl · dep 446 decision · #1036                                                                                                         |
+| 508 | (new) → `ready`         | SCIM 2.0 user-lifecycle provisioning · #1036                                                                                                                         |
+| 509 | (new) → `ready`         | IdP group→role mapping + multi-IdP · #1036                                                                                                                           |
+| 510 | `merged`                | automated backup + scheduled restore-verification · #1036 spec · #1090 impl `a9cdbcee` · batch 212 · BCP/DR loop real                                                |
+| 544 | `not-ready`             | PITR / WAL archiving (sub-dump RPO) · DEFERRED · parent #510 · #1090                                                                                                 |
+| 545 | `not-ready`             | Helm/K8s-native backup operator · DEFERRED · parent #510 · #1090                                                                                                     |
+| 546 | `not-ready`             | cross-region backup replication · DEFERRED (OQ #03) · parent #510 · #1090                                                                                            |
+| 549 | `merged`                | edge-upgrade runbook "pull the compose, not just the image" · Docs · maintainer req · #1091 · batch 213 · #1094 `1fed76e8`                                           |
+| 555 | `merged`                | MDM software-inventory evidence (endpoint.software_inventory.v1) · parent #490 · Connectors · batch 218 · #1120 `4ebc39df` · 17th connector                          |
+| 590 | `merged`                | MDM software-inventory cursor pagination (Jamf page / Intune nextLink; reuse-unchanged kind) · parent #555 · Connectors · batch 220 · #1128 `83bc731c`               |
+| 556 | `merged`                | MDM config-profile-detail evidence (endpoint.config_profile.v1; 3-layer secret-redaction) · parent #490 · Connectors · batch 219 · #1125 `0059979c` · 18th connector |
+| 595 | `ready`                 | MDM config-profile per-setting enrichment · parent #556 (merged) · Connectors · `docs/issues/595-mdm-config-profile-per-setting-enrichment.md`                       |
+| 557 | `ready`                 | MDM event-driven webhook profile · parent #490 (merged) · Connectors · `docs/issues/557-mdm-event-driven-webhook-profile.md`                                         |
 
 Ready now (20): 480,481,482,486,487,488,489,491,492,493,494,495,496,498,508,509,510,555,556,557. Not-ready (10): 483,484 (framework decisions) · 499,500,501,502 (dep 498) · 504,505,506 (privacy-v0 greenlight) · 507 (dep 446). The loop can pick the 18 ready (conflict-class discipline applies — connectors share schemaregistry; new-package slices share coverage-thresholds; 492/493/494 share internal/oscal). The 3 real-defect slices (495/492/498) are high-value priorities.
 
@@ -628,13 +638,14 @@ Ready now (20): 480,481,482,486,487,488,489,491,492,493,494,495,496,498,508,509,
 
 The maintainer approved + merged the demo-support-session spec PRs (#1023, #1029, #1031). Registering their rows. (475's impl already merged at `37155f96` in batch 197; its doc landed with #1029.)
 
-| Row | Transition       | Evidence                                                                                                                                                                           |
-| --- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 473 | (new) → `ready`  | `docs/issues/473-*.md` · migrate-on-upgrade (fail-closed) · spec PR #1023 merged · prod-confirmed gap                                                                              |
-| 475 | (new) → `merged` | `docs/issues/475-*.md` · PDF render degrades to 503 · impl merged `37155f96` (#1030); doc landed via #1029                                                                         |
-| 476 | `merged`         | `docs/issues/476-*.md` · demo-data reachability verification + CLI hint · batch 214 · #1098 `967d9afc`                                                                             |
-| 478 | `merged`         | `docs/issues/478-*.md` · super-admin user↔tenant↔role assignment API (incl self-assign) · #1031 spec · #1053 impl `8fe11520` · batch 201 · unblocks 479 + subsumes 476 mechanism |
-| 479 | `merged`         | `docs/issues/479-*.md` · admin user-mgmt UI · dep #478 merged · #1031 spec · #1056 impl `7b970cc7` · batch 202 · user-mgmt feature complete e2e                                    |
+| Row | Transition              | Evidence                                                                                                                                                                           |
+| --- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 473 | (new) → `ready`         | `docs/issues/473-*.md` · migrate-on-upgrade (fail-closed) · spec PR #1023 merged · prod-confirmed gap                                                                              |
+| 474 | `ready` → `in-progress` | `docs/issues/474-*.md` · ingest evidence-hash alignment for ledger-wide verify walk · Evidence integrity · was unregistered · batch 222 `evidence/474-ingest-hash-align`           |
+| 475 | (new) → `merged`        | `docs/issues/475-*.md` · PDF render degrades to 503 · impl merged `37155f96` (#1030); doc landed via #1029                                                                         |
+| 476 | `merged`                | `docs/issues/476-*.md` · demo-data reachability verification + CLI hint · batch 214 · #1098 `967d9afc`                                                                             |
+| 478 | `merged`                | `docs/issues/478-*.md` · super-admin user↔tenant↔role assignment API (incl self-assign) · #1031 spec · #1053 impl `8fe11520` · batch 201 · unblocks 479 + subsumes 476 mechanism |
+| 479 | `merged`                | `docs/issues/479-*.md` · admin user-mgmt UI · dep #478 merged · #1031 spec · #1056 impl `7b970cc7` · batch 202 · user-mgmt feature complete e2e                                    |
 
 These join the batch-197 spillovers 474 (ingest-hash) + 477 (walkthrough-PDF), both `ready`. 478 unblocks 479; once 478's IMPLEMENTATION lands (a future build, not the spec), 479 flips to `ready`. The AI-assist set (440/441/444/471) remains maintainer-sequenced.
 
