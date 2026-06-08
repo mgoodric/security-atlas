@@ -120,6 +120,13 @@ func DefaultSeed() []KindVersion {
 		// over-collection follow-on (patch-/vuln-mgmt + asset inventory:
 		// SCF VPM-04 / AST-03).
 		{Kind: "endpoint.software_inventory.v1", Version: "1.0.0"},
+		// Slice 556: MDM connectors (Jamf + Intune) — shared managed-device
+		// configuration-profile detail evidence kind (which compliance/config
+		// profiles are deployed + their compliance-relevant settings), evidence
+		// for configuration-management controls (SCF CFG-02 / CFG-04). Secrets
+		// embedded in profiles (Wi-Fi PSKs, VPN shared secrets, certificate
+		// private keys, SCEP challenges, payload blobs) are structurally redacted.
+		{Kind: "endpoint.config_profile.v1", Version: "1.0.0"},
 		// Slice 491: HRIS connectors (Rippling + BambooHR) — shared
 		// worker-lifecycle (joiner/mover/leaver) evidence kind feeding the
 		// access-review + deprovisioning controls (SOC 2 CC6.1/CC6.2/CC6.3).

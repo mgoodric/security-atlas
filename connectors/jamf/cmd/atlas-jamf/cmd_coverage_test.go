@@ -211,6 +211,7 @@ func TestSupportedKinds_DevicePosture(t *testing.T) {
 	want := map[string]bool{
 		"endpoint.device_posture.v1":     true, // slice 490
 		"endpoint.software_inventory.v1": true, // slice 555
+		"endpoint.config_profile.v1":     true, // slice 556
 	}
 	if len(SupportedKinds) != len(want) {
 		t.Fatalf("SupportedKinds = %v; want %d kinds", SupportedKinds, len(want))
