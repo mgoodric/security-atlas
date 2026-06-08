@@ -123,6 +123,8 @@
     "connectors/mdm/idem": 98,
     "connectors/mdm/swinventory": 94,
     "connectors/mdm/swrecord": 91,
+    "connectors/mdm/cfgprofile": 94,
+    "connectors/mdm/cfgrecord": 96,
     "connectors/jamf/cmd/atlas-jamf": 86,
     "connectors/jamf/internal/devices": 86,
     "connectors/jamf/internal/jamfauth": 98,

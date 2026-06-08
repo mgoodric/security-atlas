@@ -23,11 +23,13 @@ const ConnectorName = "jamf-connector"
 
 // SupportedKinds is the canonical list of evidence kinds the Jamf connector
 // emits.
-//   - endpoint.device_posture.v1    (managed-computer posture summary, pull; slice 490)
+//   - endpoint.device_posture.v1     (managed-computer posture summary, pull; slice 490)
 //   - endpoint.software_inventory.v1 (installed-software inventory, pull; slice 555)
+//   - endpoint.config_profile.v1     (configuration-profile detail, pull; slice 556)
 var SupportedKinds = []string{
 	"endpoint.device_posture.v1",
 	"endpoint.software_inventory.v1",
+	"endpoint.config_profile.v1",
 }
 
 // PullInterval names the connector's pull cadence HONESTLY (P0-490-6). The
@@ -72,6 +74,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newRegisterCmd())
 	root.AddCommand(newRunCmd())
 	root.AddCommand(newRunSoftwareCmd())
+	root.AddCommand(newRunConfigProfilesCmd())
 	root.AddCommand(newPermissionsCmd())
 	return root
 }
@@ -124,9 +127,10 @@ func sdkOpts() []sdk.Option {
 
 const longDescription = `security-atlas Jamf Pro MDM endpoint connector
 
-Emits two evidence kinds:
+Emits three evidence kinds:
   - endpoint.device_posture.v1     (run subcommand, pull — managed-computer posture summary)
   - endpoint.software_inventory.v1 (run-software subcommand, pull — installed-software inventory)
+  - endpoint.config_profile.v1     (run-config-profiles subcommand, pull — configuration-profile detail)
 
 Profile: pull. Each invocation is one bounded read-and-push pass on an
 operator-scheduled cadence (recommended 24h). This is NOT continuous
@@ -151,6 +155,15 @@ APPLICATIONS section) for patch-/vulnerability-management evidence. Each item
 carries the app name + version + bundle id + install date ONLY. It NEVER
 collects executable file paths, per-user app-usage telemetry, license keys,
 device contents, or owner personal contact detail.
+
+The 'run-config-profiles' subcommand reads the configuration-profile DETAIL (the
+CONFIGURATION_PROFILES section) for configuration-management evidence (SCF
+CFG-02 / CFG-04). Each profile carries the name + identifier + type + assigned
+scope + uuid + last-modified + a bounded list of compliance-relevant settings.
+It NEVER collects the secrets configuration profiles routinely embed — Wi-Fi
+PSKs, VPN shared secrets, certificate private keys, API tokens, SCEP challenges,
+or raw payload-content blobs: the read requests profile metadata only and the
+settings field is restricted to a non-secret compliance-relevant allow-list.
 
 Auth: set JAMF_BASE_URL + JAMF_CLIENT_ID + JAMF_CLIENT_SECRET. The client
 secret is read from the environment, never a CLI flag, and never logged or
