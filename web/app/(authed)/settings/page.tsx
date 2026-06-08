@@ -999,6 +999,34 @@ function NotificationsSection() {
       qc.invalidateQueries({ queryKey: ["settings-me-preferences"] });
     },
   });
+  // Slice 594: the per-kind slack/webhook columns reuse the slice-585
+  // `configured` PRESENCE signal so a per-kind cell for an unconfigured
+  // channel renders DISABLED (mirrors the master toggle's disabled state).
+  // The query keys match the ChannelMasterToggle keys below, so TanStack
+  // Query dedupes — no extra round-trip. While loading (data undefined) the
+  // cell stays interactive (matches the master toggle's loading-tolerant
+  // read: only an explicit configured===false disables). The OUTER runtime
+  // gate is still the master opt-in (the 583 filter); the per-kind grid
+  // mirrors the email column's independent-editability — a master-OFF state
+  // does NOT disable the per-kind cell, only an unconfigured channel does.
+  const slackChannelQuery = useQuery({
+    queryKey: ["settings-slack-channel"],
+    queryFn: getSlackChannelOptIn,
+    enabled:
+      !profileQuery.isLoading &&
+      !profileQuery.error &&
+      !isCredentialBearer(profileQuery.data),
+  });
+  const webhookChannelQuery = useQuery({
+    queryKey: ["settings-webhook-channel"],
+    queryFn: getWebhookChannelOptIn,
+    enabled:
+      !profileQuery.isLoading &&
+      !profileQuery.error &&
+      !isCredentialBearer(profileQuery.data),
+  });
+  const slackUnconfigured = slackChannelQuery.data?.configured === false;
+  const webhookUnconfigured = webhookChannelQuery.data?.configured === false;
   const mode = notificationsRenderMode({
     profileLoading: profileQuery.isLoading,
     profileError: !!profileQuery.error,
@@ -1071,6 +1099,8 @@ function NotificationsSection() {
                 key={ev.key}
                 event={ev}
                 prefs={prefsQuery.data ?? {}}
+                slackUnconfigured={slackUnconfigured}
+                webhookUnconfigured={webhookUnconfigured}
                 onChange={(channel, next) =>
                   patchMut.mutate({ [ev.key]: { [channel]: next } })
                 }
@@ -1086,17 +1116,33 @@ function NotificationsSection() {
 function NotificationRow({
   event,
   prefs,
+  slackUnconfigured,
+  webhookUnconfigured,
   onChange,
 }: {
   event: { key: NotifEvent; label: string; description: string };
   prefs: MePreferences;
-  onChange: (channel: "in_app" | "email", next: boolean) => void;
+  // Slice 594: when the operator has not configured a channel (slice-585
+  // configured===false), that channel's per-kind cell renders disabled —
+  // setting a per-kind opt-out is meaningless if the channel can never
+  // deliver. Defaults to false (interactive) so a missing/undefined
+  // configured signal preserves the always-interactive behavior.
+  slackUnconfigured?: boolean;
+  webhookUnconfigured?: boolean;
+  onChange: (
+    channel: "in_app" | "email" | "slack" | "webhook",
+    next: boolean,
+  ) => void;
 }) {
   // Server is the source of truth; defaults to true when the row is missing
-  // (server-side default-on-missing-row policy in userprefs.Get).
+  // (server-side default-on-missing-row policy in userprefs.Get). Slice 594
+  // extends the same default-on-missing-row read to the slice-583 slack +
+  // webhook channels (583 widened userprefs.Channels to admit them).
   const row = prefs[event.key] ?? {};
   const inApp = row.in_app !== false;
   const email = row.email !== false;
+  const slack = row.slack !== false;
+  const webhook = row.webhook !== false;
   return (
     <div
       className="flex items-start justify-between gap-3 py-3"
@@ -1126,6 +1172,28 @@ function NotificationRow({
             data-testid={`settings-notif-${event.key}-email`}
           />
           email
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input
+            type="checkbox"
+            checked={slack}
+            disabled={slackUnconfigured}
+            onChange={(e) => onChange("slack", e.target.checked)}
+            className="h-4 w-4"
+            data-testid={`settings-notif-${event.key}-slack`}
+          />
+          Slack
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input
+            type="checkbox"
+            checked={webhook}
+            disabled={webhookUnconfigured}
+            onChange={(e) => onChange("webhook", e.target.checked)}
+            className="h-4 w-4"
+            data-testid={`settings-notif-${event.key}-webhook`}
+          />
+          webhook
         </label>
       </div>
     </div>
