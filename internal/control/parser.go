@@ -22,7 +22,34 @@ type Bundle struct {
 	ManifestYAMLRaw []byte // verbatim YAML bytes — what we hash and store.
 	ManifestHashHex string // sha256 of ManifestYAMLRaw, lowercase hex.
 	DescriptionMD   string // contents of optional description.md (empty if absent).
+
+	// TestFiles holds the verbatim bytes of every tests/*.yaml file found in
+	// the archive, keyed by the file's basename (e.g. "mfa.yaml"). It is the
+	// in-memory analogue of the on-disk tests/ directory the slice-496 runner
+	// reads from a filesystem path, captured here so the slice-574 upload gate
+	// can run a bundle's declared tests WITHOUT writing the archive to disk.
+	//
+	// Populated only by ParseTarball (the only ingest path that carries a
+	// tests/ tree). ParseDirectory leaves it nil — a directory upload feeds the
+	// runner the directory directly. The inline-JSON path (manifest-only)
+	// likewise leaves it nil: an inline manifest cannot carry fixtures.
+	TestFiles map[string][]byte
 }
+
+// testsDirPrefix is the in-archive directory, beside control.yaml, that holds a
+// bundle's test-case files (slice 496 bundletest.TestsDirName). Captured by
+// ParseTarball so the slice-574 upload gate can run them in memory.
+const testsDirPrefix = "tests/"
+
+// maxTestFilesPerBundle bounds how many tests/*.yaml files ParseTarball will
+// retain. Generous relative to any realistic bundle; the maxArchiveEntries cap
+// already bounds total entries, this just bounds the retained-in-memory subset.
+const maxTestFilesPerBundle = 200
+
+// maxTestFileBytes caps a single retained tests/*.yaml file. Mirrors the
+// runner's own per-file cap (bundletest.maxTestFileBytes) so the gate rejects a
+// pathological fixture file at capture time, before it reaches the evaluator.
+const maxTestFileBytes = 4 * 1024 * 1024 // 4 MB
 
 // Limits guarding decompression bombs and accidental large uploads. See
 // docs/spec/control-bundle.md §1.
@@ -98,10 +125,11 @@ func ParseTarball(r io.Reader) (*Bundle, error) {
 	tr := tar.NewReader(io.LimitReader(gz, maxUncompressedBytes+1))
 
 	var (
-		rawYAML []byte
-		descMD  string
-		entries int
-		totalUn int64
+		rawYAML   []byte
+		descMD    string
+		testFiles map[string][]byte
+		entries   int
+		totalUn   int64
 	)
 	for {
 		hdr, err := tr.Next()
@@ -166,6 +194,34 @@ func ParseTarball(r io.Reader) (*Bundle, error) {
 			}
 			descMD = string(buf)
 		default:
+			// tests/*.yaml — capture so the slice-574 upload gate can run the
+			// bundle's declared test cases in memory. Everything else is
+			// streamed and discarded (we still count its bytes toward the
+			// uncompressed-total guard).
+			if base, ok := testFileBasename(clean); ok {
+				fileBuf, err := io.ReadAll(io.LimitReader(tr, maxTestFileBytes+1))
+				if err != nil {
+					return nil, ErrBundleMalformed{Detail: fmt.Sprintf("read %s: %v", clean, err)}
+				}
+				if int64(len(fileBuf)) > maxTestFileBytes {
+					return nil, ErrBundleMalformed{Detail: fmt.Sprintf("%s exceeds %d bytes", clean, maxTestFileBytes)}
+				}
+				if testFiles == nil {
+					testFiles = make(map[string][]byte)
+				}
+				if len(testFiles) >= maxTestFilesPerBundle {
+					return nil, ErrBundleMalformed{Detail: fmt.Sprintf("archive declares more than %d tests/*.yaml files", maxTestFilesPerBundle)}
+				}
+				if _, dup := testFiles[base]; dup {
+					return nil, ErrBundleMalformed{Detail: fmt.Sprintf("archive declares duplicate test file %q", base)}
+				}
+				testFiles[base] = fileBuf
+				totalUn += int64(len(fileBuf))
+				if totalUn > maxUncompressedBytes {
+					return nil, ErrBundleMalformed{Detail: fmt.Sprintf("archive exceeds %d uncompressed bytes", maxUncompressedBytes)}
+				}
+				continue
+			}
 			// Stream and discard so the uncompressed-total guard counts every
 			// byte; do not retain.
 			n, err := io.Copy(io.Discard, tr)
@@ -190,7 +246,32 @@ func ParseTarball(r io.Reader) (*Bundle, error) {
 		return nil, ErrBundleMalformed{Detail: fmt.Sprintf("archive missing required %s at root", manifestFilename)}
 	}
 
-	return finalizeBundle(rawYAML, descMD)
+	b, err := finalizeBundle(rawYAML, descMD)
+	if err != nil {
+		return nil, err
+	}
+	b.TestFiles = testFiles
+	return b, nil
+}
+
+// testFileBasename reports whether a cleaned in-archive path is a tests/*.yaml
+// (or *.yml) file at the top level of the tests/ directory, and returns its
+// basename. A nested path (tests/foo/bar.yaml) or a non-YAML file is not a test
+// file. The bundletest loader reads only top-level tests/*.yaml, so the gate
+// captures exactly that set.
+func testFileBasename(clean string) (string, bool) {
+	if !strings.HasPrefix(clean, testsDirPrefix) {
+		return "", false
+	}
+	rel := strings.TrimPrefix(clean, testsDirPrefix)
+	if rel == "" || strings.Contains(rel, "/") {
+		return "", false // a directory marker or a nested file
+	}
+	low := strings.ToLower(rel)
+	if !strings.HasSuffix(low, ".yaml") && !strings.HasSuffix(low, ".yml") {
+		return "", false
+	}
+	return rel, true
 }
 
 // FinalizeBundleForHTTP is the inline-YAML entry point used by the JSON

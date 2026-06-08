@@ -211,6 +211,31 @@ func renderTestReportText(out io.Writer, rep *bundletest.Report) {
 		rep.Passed, rep.Failed, rep.Errored, len(rep.Cases))
 }
 
+// gateRejectionBody mirrors the controls API gateRejectionResp shape so the CLI
+// can decode a 400 from the slice-574 upload test-gate and render its per-case
+// report (AC-5).
+type gateRejectionBody struct {
+	Error  string             `json:"error"`
+	Reason string             `json:"reason"`
+	Report *bundletest.Report `json:"test_report"`
+}
+
+// renderGateRejection decodes an upload-gate 400 body and renders its per-case
+// test report as text. Returns ("", false) when the body is not a gate
+// rejection (no test_report), so the caller falls back to the raw message.
+func renderGateRejection(body []byte) (string, bool) {
+	var gr gateRejectionBody
+	if err := json.Unmarshal(body, &gr); err != nil || gr.Report == nil {
+		return "", false
+	}
+	var sb strings.Builder
+	if gr.Error != "" {
+		_, _ = fmt.Fprintf(&sb, "%s\n", gr.Error)
+	}
+	renderTestReportText(&sb, gr.Report)
+	return strings.TrimRight(sb.String(), "\n"), true
+}
+
 func newControlsValidateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "validate <path>",
@@ -343,6 +368,12 @@ func uploadBundleHTTP(path string) error {
 	rspBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 
 	if resp.StatusCode >= 400 {
+		// Slice 574: when the upload test-gate rejects the bundle, the body is a
+		// structured per-case report. Render it readably (AC-5) so the author
+		// sees which fixture failed, not just a JSON blob.
+		if msg, ok := renderGateRejection(rspBody); ok {
+			return fmt.Errorf("upload failed: HTTP %d: bundle rejected by the upload test-gate\n%s", resp.StatusCode, msg)
+		}
 		return fmt.Errorf("upload failed: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(rspBody)))
 	}
 
