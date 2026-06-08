@@ -39,17 +39,22 @@
 #   separately by the operator (slice 006); this file ships only the HIPAA→SCF
 #   edge data (P0-481-6 — no pre-built SCF data bundled).
 #
-# SCOPE DISCIPLINE (binding — slice 481 narrative):
-#   This is a CURATED high-signal subset (32 standards + implementation specs),
-#   NOT full Security Rule coverage. The subset deliberately spans ALL THREE
-#   safeguard categories — Administrative (§164.308), Physical (§164.310), and
-#   Technical (§164.312) — with emphasis on the SOC 2 / ISO / PCI / CSF overlap
-#   zone (identity, encryption, monitoring, contingency, training) so shared SCF
-#   anchors demonstrate invariant #1 at FIVE frameworks. Full Security Rule
-#   coverage (including §164.314 organizational + §164.316 documentation), the
-#   phase-3 covered-entity workflow, and the HIPAA FrameworkScope ePHI example
-#   are follow-on slices (see decisions log "Revisit once in use"), NOT catalog
-#   scope.
+# SCOPE — FULL Security Rule coverage (slice 516; was a curated subset in 481):
+#   Slice 481 shipped a CURATED high-signal subset (31 standards + implementation
+#   specs) spanning all three safeguard categories. Slice 516 EXTENDS this file to
+#   FULL 45 CFR Part 164 Subpart C coverage: the remaining standards /
+#   implementation specifications across Administrative (§164.308), Physical
+#   (§164.310), and Technical (§164.312) safeguards, PLUS the two sections 481
+#   deliberately deferred — Organizational Requirements (§164.314) and Policies /
+#   Procedures / Documentation (§164.316). A HIPAA covered entity or business
+#   associate can now run a FULL Security Rule self-assessment out of the catalog,
+#   not just the high-signal subset. Slice 516 mirrors slice 514's CSF extension:
+#   pure data + tests + a decisions log, ZERO loader change. The five-framework
+#   shared-anchor proof (IAC-01) is preserved (AC-4). The phase-3 covered-entity
+#   workflow (BAA tracking, required-vs-addressable DECISION flow, breach
+#   risk-assessment §164.402, HIPAA FrameworkScope ePHI example) remains OUT of
+#   scope (canvas §10.3; P0-516 anti-criteria) — this is CATALOG edges only.
+#   See docs/audit-log/516-hipaa-full-coverage-decisions.md.
 #
 # Source basis (methodology, not copied text):
 #   - 45 CFR §§164.308 / 164.310 / 164.312 section identifiers + short titles
@@ -89,30 +94,54 @@ requirements:
   - code: "164.308(a)(1)(ii)(B)"
     title: "Risk Management"
     body: "Implement security measures sufficient to reduce risks and vulnerabilities to a reasonable and appropriate level." # Implementation spec (R)
+  - code: "164.308(a)(1)(ii)(C)"
+    title: "Sanction Policy"
+    body: "Apply appropriate sanctions against workforce members who fail to comply with the security policies and procedures." # Implementation spec (R)
+  - code: "164.308(a)(1)(ii)(D)"
+    title: "Information System Activity Review"
+    body: "Implement procedures to regularly review records of information system activity, such as audit logs, access reports, and security incident tracking reports." # Implementation spec (R)
   - code: "164.308(a)(2)"
     title: "Assigned Security Responsibility"
     body: "Identify the security official responsible for developing and implementing the required security policies and procedures." # Standard (R)
   - code: "164.308(a)(3)(i)"
     title: "Workforce Security"
     body: "Implement policies ensuring workforce members have appropriate access to electronic protected health information and preventing unauthorized access." # Standard (R)
+  - code: "164.308(a)(3)(ii)(A)"
+    title: "Authorization and/or Supervision"
+    body: "Implement procedures for the authorization and supervision of workforce members who work with electronic protected health information or in locations where it might be accessed." # Implementation spec (A)
+  - code: "164.308(a)(3)(ii)(B)"
+    title: "Workforce Clearance Procedure"
+    body: "Implement procedures to determine that the access of a workforce member to electronic protected health information is appropriate." # Implementation spec (A)
   - code: "164.308(a)(3)(ii)(C)"
     title: "Termination Procedures"
     body: "Implement procedures for terminating access to electronic protected health information when employment ends or access is no longer required." # Implementation spec (A)
   - code: "164.308(a)(4)(i)"
     title: "Information Access Management"
     body: "Implement policies and procedures for authorizing access to electronic protected health information." # Standard (R)
+  - code: "164.308(a)(4)(ii)(A)"
+    title: "Isolating Health Care Clearinghouse Functions"
+    body: "If a health care clearinghouse is part of a larger organization, implement policies and procedures that protect electronic protected health information from unauthorized access by the larger organization." # Implementation spec (R)
+  - code: "164.308(a)(4)(ii)(B)"
+    title: "Access Authorization"
+    body: "Implement policies and procedures for granting access to electronic protected health information, for example through access to a workstation, transaction, program, or process." # Implementation spec (A)
   - code: "164.308(a)(4)(ii)(C)"
     title: "Access Establishment and Modification"
     body: "Implement policies that establish, document, review, and modify a user's right of access to systems holding electronic protected health information." # Implementation spec (A)
   - code: "164.308(a)(5)(i)"
     title: "Security Awareness and Training"
     body: "Implement a security awareness and training program for all members of the workforce." # Standard (R)
+  - code: "164.308(a)(5)(ii)(A)"
+    title: "Security Reminders"
+    body: "Provide periodic security updates and reminders to workforce members." # Implementation spec (A)
   - code: "164.308(a)(5)(ii)(B)"
     title: "Protection from Malicious Software"
     body: "Implement procedures for guarding against, detecting, and reporting malicious software." # Implementation spec (A)
   - code: "164.308(a)(5)(ii)(C)"
     title: "Log-in Monitoring"
     body: "Implement procedures for monitoring log-in attempts and reporting discrepancies." # Implementation spec (A)
+  - code: "164.308(a)(5)(ii)(D)"
+    title: "Password Management"
+    body: "Implement procedures for creating, changing, and safeguarding passwords." # Implementation spec (A)
   - code: "164.308(a)(6)(i)"
     title: "Security Incident Procedures"
     body: "Implement policies and procedures to address security incidents." # Standard (R)
@@ -125,20 +154,44 @@ requirements:
   - code: "164.308(a)(7)(ii)(A)"
     title: "Data Backup Plan"
     body: "Establish and implement procedures to create and maintain retrievable exact copies of electronic protected health information." # Implementation spec (R)
+  - code: "164.308(a)(7)(ii)(B)"
+    title: "Disaster Recovery Plan"
+    body: "Establish and implement procedures to restore any loss of data following an emergency or other occurrence that damages systems containing electronic protected health information." # Implementation spec (R)
+  - code: "164.308(a)(7)(ii)(C)"
+    title: "Emergency Mode Operation Plan"
+    body: "Establish and implement procedures to enable continuation of critical business processes for protection of electronic protected health information while operating in emergency mode." # Implementation spec (R)
   - code: "164.308(a)(7)(ii)(D)"
     title: "Testing and Revision Procedures"
     body: "Implement procedures for periodic testing and revision of contingency plans." # Implementation spec (A)
+  - code: "164.308(a)(7)(ii)(E)"
+    title: "Applications and Data Criticality Analysis"
+    body: "Assess the relative criticality of specific applications and data in support of other contingency plan components." # Implementation spec (A)
   - code: "164.308(a)(8)"
     title: "Evaluation"
     body: "Perform periodic technical and nontechnical evaluation of how well security policies and procedures meet the Security Rule requirements." # Standard (R)
   - code: "164.308(b)(1)"
     title: "Business Associate Contracts"
     body: "Obtain satisfactory assurances that a business associate will appropriately safeguard electronic protected health information it handles." # Standard (R)
+  - code: "164.308(b)(4)"
+    title: "Written Contract or Other Arrangement"
+    body: "Document the satisfactory assurances required from a business associate through a written contract or other arrangement that meets the applicable requirements." # Implementation spec (R)
 
   # ===== PHYSICAL SAFEGUARDS (§164.310) =====
   - code: "164.310(a)(1)"
     title: "Facility Access Controls"
     body: "Implement policies and procedures to limit physical access to electronic information systems and the facilities housing them while ensuring authorized access." # Standard (R)
+  - code: "164.310(a)(2)(i)"
+    title: "Contingency Operations"
+    body: "Establish procedures that allow facility access in support of restoration of lost data under the disaster recovery and emergency mode operations plans in the event of an emergency." # Implementation spec (A)
+  - code: "164.310(a)(2)(ii)"
+    title: "Facility Security Plan"
+    body: "Implement policies and procedures to safeguard the facility and its equipment from unauthorized physical access, tampering, and theft." # Implementation spec (A)
+  - code: "164.310(a)(2)(iii)"
+    title: "Access Control and Validation Procedures"
+    body: "Implement procedures to control and validate a person's access to facilities based on their role or function, including visitor control and access to software programs for testing and revision." # Implementation spec (A)
+  - code: "164.310(a)(2)(iv)"
+    title: "Maintenance Records"
+    body: "Implement policies and procedures to document repairs and modifications to the physical components of a facility related to security, such as hardware, walls, doors, and locks." # Implementation spec (A)
   - code: "164.310(b)"
     title: "Workstation Use"
     body: "Implement policies specifying the proper functions, manner of use, and physical surroundings of workstations that access electronic protected health information." # Standard (R)
@@ -151,6 +204,15 @@ requirements:
   - code: "164.310(d)(2)(i)"
     title: "Media Disposal"
     body: "Implement policies and procedures to address the final disposition of electronic protected health information and the hardware or media on which it is stored." # Implementation spec (R)
+  - code: "164.310(d)(2)(ii)"
+    title: "Media Re-use"
+    body: "Implement procedures for removal of electronic protected health information from electronic media before the media are made available for re-use." # Implementation spec (R)
+  - code: "164.310(d)(2)(iii)"
+    title: "Accountability"
+    body: "Maintain a record of the movements of hardware and electronic media and the person responsible for them." # Implementation spec (A)
+  - code: "164.310(d)(2)(iv)"
+    title: "Data Backup and Storage"
+    body: "Create a retrievable exact copy of electronic protected health information, when needed, before moving equipment." # Implementation spec (A)
 
   # ===== TECHNICAL SAFEGUARDS (§164.312) =====
   # 164.312(a)(1) Access Control is the FIVE-FRAMEWORK shared anchor (invariant
@@ -162,6 +224,12 @@ requirements:
   - code: "164.312(a)(2)(i)"
     title: "Unique User Identification"
     body: "Assign a unique name or number for identifying and tracking user identity." # Implementation spec (R)
+  - code: "164.312(a)(2)(ii)"
+    title: "Emergency Access Procedure"
+    body: "Establish and implement procedures for obtaining necessary electronic protected health information during an emergency." # Implementation spec (R)
+  - code: "164.312(a)(2)(iii)"
+    title: "Automatic Logoff"
+    body: "Implement electronic procedures that terminate an electronic session after a predetermined time of inactivity." # Implementation spec (A)
   - code: "164.312(a)(2)(iv)"
     title: "Encryption and Decryption"
     body: "Implement a mechanism to encrypt and decrypt electronic protected health information at rest." # Implementation spec (A)
@@ -171,15 +239,74 @@ requirements:
   - code: "164.312(c)(1)"
     title: "Integrity"
     body: "Implement policies and procedures to protect electronic protected health information from improper alteration or destruction." # Standard (R)
+  - code: "164.312(c)(2)"
+    title: "Mechanism to Authenticate ePHI"
+    body: "Implement electronic mechanisms to corroborate that electronic protected health information has not been altered or destroyed in an unauthorized manner." # Implementation spec (A)
   - code: "164.312(d)"
     title: "Person or Entity Authentication"
     body: "Implement procedures to verify that a person or entity seeking access to electronic protected health information is the one claimed." # Standard (R)
   - code: "164.312(e)(1)"
     title: "Transmission Security"
     body: "Implement technical security measures to guard against unauthorized access to electronic protected health information transmitted over an electronic communications network." # Standard (R)
+  - code: "164.312(e)(2)(i)"
+    title: "Integrity Controls (Transmission)"
+    body: "Implement security measures to ensure that electronically transmitted electronic protected health information is not improperly modified without detection until disposed of." # Implementation spec (A)
   - code: "164.312(e)(2)(ii)"
     title: "Encryption (Transmission)"
     body: "Implement a mechanism to encrypt electronic protected health information whenever deemed appropriate during transmission." # Implementation spec (A)
+
+  # ===== ORGANIZATIONAL REQUIREMENTS (§164.314) =====
+  # New in slice 516 (481 deferred these). Organizational requirements bind the
+  # covered entity / business associate / group-health-plan contracting and
+  # documentation relationships; in the SCF palette they resolve to the
+  # Third-Party Management family (TPM-*). The covered-entity BAA WORKFLOW (the
+  # decision/tracking surface) remains the deferred phase-3 slice 517 — these are
+  # CATALOG requirement nodes only.
+  - code: "164.314(a)(1)"
+    title: "Business Associate Contracts or Other Arrangements"
+    body: "The contract or other arrangement between the covered entity and its business associate must meet the applicable requirements depending on whether the arrangement is a business associate contract or another arrangement permitted by the rule." # Standard (R)
+  - code: "164.314(a)(2)(i)"
+    title: "Business Associate Contracts"
+    body: "Provide that the business associate will comply with the applicable Security Rule requirements, ensure subcontractors that create or receive electronic protected health information agree to the same safeguards, and report security incidents to the covered entity." # Implementation spec (R)
+  - code: "164.314(a)(2)(ii)"
+    title: "Other Arrangements"
+    body: "Where a covered entity and its business associate are both governmental entities, satisfy the contracting requirements through a memorandum of understanding or other law or regulation that accomplishes the objectives." # Implementation spec (R)
+  - code: "164.314(a)(2)(iii)"
+    title: "Business Associate Contracts with Subcontractors"
+    body: "Require a business associate to obtain satisfactory assurances from a subcontractor that creates or receives electronic protected health information on its behalf, to the same extent the covered entity requires of the business associate." # Implementation spec (R)
+  - code: "164.314(b)(1)"
+    title: "Requirements for Group Health Plans"
+    body: "Except where the only ePHI disclosed is enrollment/disenrollment or summary information, ensure plan documents of the group health plan require the plan sponsor to reasonably and appropriately safeguard electronic protected health information." # Standard (R)
+  - code: "164.314(b)(2)(i)"
+    title: "Plan Document Safeguards (Implement Reasonable Safeguards)"
+    body: "Require the plan sponsor to implement administrative, physical, and technical safeguards that reasonably and appropriately protect the confidentiality, integrity, and availability of the electronic protected health information it creates, receives, maintains, or transmits on behalf of the group health plan." # Implementation spec (R)
+  - code: "164.314(b)(2)(ii)"
+    title: "Plan Document Safeguards (Ensure Adequate Separation)"
+    body: "Require the plan sponsor to ensure that the adequate separation between the group health plan and the plan sponsor is supported by reasonable and appropriate security measures." # Implementation spec (R)
+  - code: "164.314(b)(2)(iii)"
+    title: "Plan Document Safeguards (Ensure Agents Safeguard)"
+    body: "Require the plan sponsor to ensure that any agent to whom it provides electronic protected health information agrees to implement reasonable and appropriate security measures to protect it." # Implementation spec (R)
+
+  # ===== POLICIES, PROCEDURES, AND DOCUMENTATION (§164.316) =====
+  # New in slice 516 (481 deferred these). These bind the program-governance and
+  # documentation-retention obligations; in the SCF palette they resolve to the
+  # Governance (GOV-*), Compliance-management (CPL-*), and Data-retention (DCH-*)
+  # families.
+  - code: "164.316(a)"
+    title: "Policies and Procedures"
+    body: "Implement reasonable and appropriate policies and procedures to comply with the standards, implementation specifications, and other requirements of the Security Rule." # Standard (R)
+  - code: "164.316(b)(1)"
+    title: "Documentation"
+    body: "Maintain the policies and procedures implemented to comply with the Security Rule in written (which may be electronic) form, and document any action, activity, or assessment required to be documented." # Standard (R)
+  - code: "164.316(b)(2)(i)"
+    title: "Time Limit"
+    body: "Retain the required documentation for six years from the date of its creation or the date when it last was in effect, whichever is later." # Implementation spec (R)
+  - code: "164.316(b)(2)(ii)"
+    title: "Availability"
+    body: "Make documentation available to those persons responsible for implementing the procedures to which the documentation pertains." # Implementation spec (R)
+  - code: "164.316(b)(2)(iii)"
+    title: "Updates"
+    body: "Review documentation periodically and update it as needed in response to environmental or operational changes affecting the security of electronic protected health information." # Implementation spec (R)
 
 mappings:
   # ===== ADMINISTRATIVE SAFEGUARDS (§164.308) → SCF =====
@@ -198,6 +325,16 @@ mappings:
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "HIPAA Risk Management (reduce risks to reasonable level) is governed by the SCF Risk Management Program."
+  - requirement_code: "164.308(a)(1)(ii)(C)"
+    scf_anchor: "HRS-01"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Sanction Policy (sanctions for non-compliant workforce) overlaps SCF Human Resources Security; the disciplinary-process facet is narrower than HR security and no dedicated sanctions anchor exists in the sample palette (LOW)."
+  - requirement_code: "164.308(a)(1)(ii)(D)"
+    scf_anchor: "AAA-12"
+    relationship_type: "equal"
+    strength: 0.85
+    rationale: "Information System Activity Review (regularly review audit logs, access reports, incident tracking) maps directly to SCF Audit Log Review."
   - requirement_code: "164.308(a)(2)"
     scf_anchor: "GOV-04"
     relationship_type: "equal"
@@ -208,6 +345,16 @@ mappings:
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Workforce Security (appropriate access, prevent unauthorized access) is covered by SCF Human Resources Security."
+  - requirement_code: "164.308(a)(3)(ii)(A)"
+    scf_anchor: "IAC-07"
+    relationship_type: "intersects_with"
+    strength: 0.7
+    rationale: "Authorization and/or Supervision (authorize and supervise workforce that handles ePHI) overlaps SCF User Provisioning & Lifecycle; the supervision facet is broader than provisioning (MEDIUM)."
+  - requirement_code: "164.308(a)(3)(ii)(B)"
+    scf_anchor: "HRS-01"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Workforce Clearance Procedure (determine workforce access is appropriate) is covered by SCF Human Resources Security."
   - requirement_code: "164.308(a)(3)(ii)(C)"
     scf_anchor: "HRS-09"
     relationship_type: "equal"
@@ -218,6 +365,16 @@ mappings:
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Information Access Management (authorizing access) is covered by SCF User Provisioning & Lifecycle."
+  - requirement_code: "164.308(a)(4)(ii)(A)"
+    scf_anchor: "DCH-01"
+    relationship_type: "intersects_with"
+    strength: 0.55
+    rationale: "Isolating Health Care Clearinghouse Functions (protect ePHI from the larger org) overlaps SCF Data Classification & Handling for the segregation concept; the clearinghouse-isolation control has no dedicated anchor in the sample palette (LOW)."
+  - requirement_code: "164.308(a)(4)(ii)(B)"
+    scf_anchor: "IAC-07"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Access Authorization (granting access to a workstation/transaction/program/process) is covered by SCF User Provisioning & Lifecycle."
   - requirement_code: "164.308(a)(4)(ii)(C)"
     scf_anchor: "IAC-15"
     relationship_type: "intersects_with"
@@ -228,6 +385,11 @@ mappings:
     relationship_type: "equal"
     strength: 0.9
     rationale: "Security Awareness and Training maps directly to SCF Security Awareness Training."
+  - requirement_code: "164.308(a)(5)(ii)(A)"
+    scf_anchor: "HRS-04"
+    relationship_type: "subset_of"
+    strength: 0.7
+    rationale: "Security Reminders (periodic updates/reminders) are an ongoing-reinforcement facet of SCF Security Awareness Training."
   - requirement_code: "164.308(a)(5)(ii)(B)"
     scf_anchor: "END-07"
     relationship_type: "equal"
@@ -238,6 +400,11 @@ mappings:
     relationship_type: "intersects_with"
     strength: 0.7
     rationale: "Log-in Monitoring (monitor log-in attempts, report discrepancies) overlaps SCF Anomalous Behavior Detection; broader correlation gap (MEDIUM)."
+  - requirement_code: "164.308(a)(5)(ii)(D)"
+    scf_anchor: "IAC-01"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Password Management (create/change/safeguard passwords) overlaps SCF Identification & Authentication Policy; the sample palette has no dedicated authenticator/password-management anchor, so this is the closest covering anchor (LOW)."
   - requirement_code: "164.308(a)(6)(i)"
     scf_anchor: "IRO-04"
     relationship_type: "subset_of"
@@ -258,21 +425,41 @@ mappings:
     relationship_type: "equal"
     strength: 0.9
     rationale: "Data Backup Plan (retrievable exact copies) maps directly to SCF Backups."
+  - requirement_code: "164.308(a)(7)(ii)(B)"
+    scf_anchor: "BCD-02"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Disaster Recovery Plan (restore data after an emergency) is the recovery facet of the SCF Business Continuity Plan."
+  - requirement_code: "164.308(a)(7)(ii)(C)"
+    scf_anchor: "BCD-02"
+    relationship_type: "subset_of"
+    strength: 0.7
+    rationale: "Emergency Mode Operation Plan (continue critical processes in emergency mode) is the continuity-operations facet of the SCF Business Continuity Plan."
   - requirement_code: "164.308(a)(7)(ii)(D)"
     scf_anchor: "BCD-11"
     relationship_type: "equal"
     strength: 0.85
     rationale: "Testing and Revision Procedures (periodic contingency testing) map directly to SCF Backup Testing."
-  - requirement_code: "164.308(a)(8)"
-    scf_anchor: "CPL-03"
+  - requirement_code: "164.308(a)(7)(ii)(E)"
+    scf_anchor: "BCD-02"
     relationship_type: "intersects_with"
-    strength: 0.65
-    rationale: "Periodic Evaluation overlaps the SCF Internal Audit Function; the nontechnical-evaluation facet is broader than internal audit (LOW)."
+    strength: 0.6
+    rationale: "Applications and Data Criticality Analysis (assess relative criticality) overlaps SCF Business Continuity Plan; a dedicated business-impact-analysis anchor is absent from the sample palette (LOW)."
+  - requirement_code: "164.308(a)(8)"
+    scf_anchor: "CPL-01"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Slice 516 D7 re-map (was CPL-03 @ 0.65 in slice 481). Periodic technical AND nontechnical Evaluation of how well policies/procedures meet the Security Rule is the self-assessment facet of SCF Compliance Management — a closer covering anchor in the palette than Internal Audit (CPL-03), whose scope is narrower than the nontechnical-evaluation requirement. Lift 0.65 -> 0.75 (LOW -> MEDIUM)."
   - requirement_code: "164.308(b)(1)"
     scf_anchor: "TPM-01"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Business Associate Contracts (satisfactory-assurance safeguards) are governed by SCF Third-Party Management."
+  - requirement_code: "164.308(b)(4)"
+    scf_anchor: "TPM-01"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Written Contract or Other Arrangement (document the BA satisfactory assurances) is the contracting facet of SCF Third-Party Management."
 
   # ===== PHYSICAL SAFEGUARDS (§164.310) → SCF =====
   - requirement_code: "164.310(a)(1)"
@@ -280,6 +467,26 @@ mappings:
     relationship_type: "equal"
     strength: 0.9
     rationale: "Facility Access Controls map directly to SCF Physical Access Control."
+  - requirement_code: "164.310(a)(2)(i)"
+    scf_anchor: "BCD-02"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Contingency Operations (facility access supporting data restoration in an emergency) overlaps SCF Business Continuity Plan; the physical-access-in-emergency facet straddles continuity and physical-access controls (LOW)."
+  - requirement_code: "164.310(a)(2)(ii)"
+    scf_anchor: "PES-04"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Facility Security Plan (safeguard facility/equipment from unauthorized access, tampering, theft) is the planning facet of SCF Physical Access Control."
+  - requirement_code: "164.310(a)(2)(iii)"
+    scf_anchor: "PES-04"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Access Control and Validation Procedures (control/validate person access by role, visitor control) are covered by SCF Physical Access Control."
+  - requirement_code: "164.310(a)(2)(iv)"
+    scf_anchor: "PES-04"
+    relationship_type: "intersects_with"
+    strength: 0.55
+    rationale: "Maintenance Records (document security-related facility repairs/modifications) overlaps SCF Physical Access Control; a dedicated physical-maintenance-records anchor is absent from the sample palette (LOW)."
   - requirement_code: "164.310(b)"
     scf_anchor: "PES-04"
     relationship_type: "intersects_with"
@@ -300,6 +507,21 @@ mappings:
     relationship_type: "equal"
     strength: 0.85
     rationale: "Media Disposal (final disposition of ePHI and storage media) maps directly to SCF Asset Disposal."
+  - requirement_code: "164.310(d)(2)(ii)"
+    scf_anchor: "AST-09"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Media Re-use (remove ePHI from media before re-use) is the sanitization facet of SCF Asset Disposal."
+  - requirement_code: "164.310(d)(2)(iii)"
+    scf_anchor: "AST-01"
+    relationship_type: "intersects_with"
+    strength: 0.65
+    rationale: "Accountability (record movements of hardware/media and the responsible person) overlaps SCF Asset Management Policy; the chain-of-custody facet is narrower than the asset-management policy (LOW)."
+  - requirement_code: "164.310(d)(2)(iv)"
+    scf_anchor: "BCD-09"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Data Backup and Storage (retrievable exact copy before moving equipment) is the pre-move-backup facet of SCF Backups."
 
   # ===== TECHNICAL SAFEGUARDS (§164.312) → SCF =====
   # 164.312(a)(1) → IAC-01 is the FIVE-FRAMEWORK shared anchor (invariant #1, AC-4).
@@ -313,6 +535,16 @@ mappings:
     relationship_type: "intersects_with"
     strength: 0.75
     rationale: "Unique User Identification strongly overlaps SCF User Provisioning & Lifecycle (unique identity is a provisioning outcome)."
+  - requirement_code: "164.312(a)(2)(ii)"
+    scf_anchor: "IAC-21"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Emergency Access Procedure (obtain necessary ePHI during an emergency, e.g. break-glass) overlaps SCF Privileged Account Management; a dedicated break-glass anchor is absent from the sample palette (LOW)."
+  - requirement_code: "164.312(a)(2)(iii)"
+    scf_anchor: "IAC-01"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Automatic Logoff (terminate session after inactivity) overlaps SCF Identification & Authentication Policy; a dedicated session-management anchor is absent from the sample palette (LOW)."
   - requirement_code: "164.312(a)(2)(iv)"
     scf_anchor: "CRY-04"
     relationship_type: "equal"
@@ -327,7 +559,12 @@ mappings:
     scf_anchor: "DCH-01"
     relationship_type: "intersects_with"
     strength: 0.65
-    rationale: "Integrity (protect ePHI from improper alteration/destruction) overlaps SCF Data Classification & Handling; a dedicated data-integrity anchor is absent from the sample fixture (LOW)."
+    rationale: "Slice 516 D7 re-confirm. Integrity (protect ePHI from improper alteration/destruction) overlaps SCF Data Classification & Handling; a dedicated data-integrity anchor is STILL absent from the 53-anchor sample fixture, so DCH-01 remains the closest covering anchor. The operator's full SCF catalog (slice 006) carries a finer data-integrity anchor; this row should be re-pointed there once that catalog is imported. Held at 0.65 (LOW) — palette-bound, see decisions log D5."
+  - requirement_code: "164.312(c)(2)"
+    scf_anchor: "DCH-01"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Mechanism to Authenticate ePHI (corroborate ePHI not altered/destroyed) overlaps SCF Data Classification & Handling for the integrity-verification concept; no dedicated cryptographic-integrity anchor exists in the sample palette (LOW)."
   - requirement_code: "164.312(d)"
     scf_anchor: "IAC-01"
     relationship_type: "subset_of"
@@ -338,8 +575,87 @@ mappings:
     relationship_type: "intersects_with"
     strength: 0.7
     rationale: "Transmission Security (guard against unauthorized access to ePHI in transit) overlaps SCF Boundary Protection; the cryptographic facet sits in 164.312(e)(2)(ii) (MEDIUM)."
+  - requirement_code: "164.312(e)(2)(i)"
+    scf_anchor: "NET-04"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Integrity Controls (Transmission) (ensure transmitted ePHI is not improperly modified without detection) overlaps SCF Boundary Protection; the transmission-integrity facet is narrower than boundary protection and no dedicated transmission-integrity anchor exists in the sample palette (LOW)."
   - requirement_code: "164.312(e)(2)(ii)"
     scf_anchor: "CRY-08"
     relationship_type: "equal"
     strength: 0.85
     rationale: "Encryption (Transmission) maps directly to SCF Encryption In Transit."
+
+  # ===== ORGANIZATIONAL REQUIREMENTS (§164.314) → SCF =====
+  # New in slice 516. All resolve to the Third-Party Management family (TPM-*) —
+  # the organizational requirements are contracting/assurance obligations that the
+  # SCF expresses as third-party management. CATALOG nodes only; the BAA workflow
+  # is the deferred slice 517.
+  - requirement_code: "164.314(a)(1)"
+    scf_anchor: "TPM-01"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Business Associate Contracts or Other Arrangements (the contract/arrangement must meet applicable requirements) is governed by SCF Third-Party Management."
+  - requirement_code: "164.314(a)(2)(i)"
+    scf_anchor: "TPM-01"
+    relationship_type: "equal"
+    strength: 0.8
+    rationale: "Business Associate Contracts (BA complies, binds subcontractors, reports incidents) map directly to the SCF Third-Party Management contracting requirements."
+  - requirement_code: "164.314(a)(2)(ii)"
+    scf_anchor: "TPM-01"
+    relationship_type: "intersects_with"
+    strength: 0.65
+    rationale: "Other Arrangements (governmental-entity MOU alternative to a BAC) overlaps SCF Third-Party Management; the alternative-instrument facet is narrower than the general third-party-management program (LOW)."
+  - requirement_code: "164.314(a)(2)(iii)"
+    scf_anchor: "TPM-04"
+    relationship_type: "subset_of"
+    strength: 0.7
+    rationale: "Business Associate Contracts with Subcontractors (flow-down satisfactory assurances) is the subcontractor-assurance facet of SCF Third-Party Risk Assessments."
+  - requirement_code: "164.314(b)(1)"
+    scf_anchor: "TPM-01"
+    relationship_type: "intersects_with"
+    strength: 0.55
+    rationale: "Requirements for Group Health Plans (plan documents require the plan sponsor to safeguard ePHI) overlaps SCF Third-Party Management; the group-health-plan/plan-sponsor relationship is a HIPAA-specific arrangement with no dedicated anchor in the sample palette (LOW)."
+  - requirement_code: "164.314(b)(2)(i)"
+    scf_anchor: "TPM-01"
+    relationship_type: "intersects_with"
+    strength: 0.55
+    rationale: "Plan Document Safeguards / Implement Reasonable Safeguards (plan sponsor implements admin/physical/technical safeguards) overlaps SCF Third-Party Management; the plan-sponsor obligation has no dedicated anchor in the sample palette (LOW)."
+  - requirement_code: "164.314(b)(2)(ii)"
+    scf_anchor: "TPM-01"
+    relationship_type: "intersects_with"
+    strength: 0.55
+    rationale: "Plan Document Safeguards / Ensure Adequate Separation (separation between plan and plan sponsor supported by security measures) overlaps SCF Third-Party Management; segregation-of-the-plan-sponsor has no dedicated anchor in the sample palette (LOW)."
+  - requirement_code: "164.314(b)(2)(iii)"
+    scf_anchor: "TPM-04"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Plan Document Safeguards / Ensure Agents Safeguard (plan sponsor ensures its agents safeguard ePHI) overlaps SCF Third-Party Risk Assessments for the flow-down-to-agents concept (LOW)."
+
+  # ===== POLICIES, PROCEDURES, AND DOCUMENTATION (§164.316) → SCF =====
+  # New in slice 516. Program-governance + documentation-retention obligations.
+  - requirement_code: "164.316(a)"
+    scf_anchor: "GOV-01"
+    relationship_type: "subset_of"
+    strength: 0.7
+    rationale: "Policies and Procedures (implement policies/procedures to comply with the Security Rule) is the policy-framework facet of SCF Information Security Governance."
+  - requirement_code: "164.316(b)(1)"
+    scf_anchor: "CPL-01"
+    relationship_type: "subset_of"
+    strength: 0.7
+    rationale: "Documentation (maintain policies/procedures and document required actions/assessments in writing) is the recordkeeping facet of SCF Compliance Management."
+  - requirement_code: "164.316(b)(2)(i)"
+    scf_anchor: "DCH-03"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Time Limit (retain documentation six years) overlaps SCF Data Retention; the compliance-document-retention facet is narrower than the general data-retention policy (LOW)."
+  - requirement_code: "164.316(b)(2)(ii)"
+    scf_anchor: "CPL-01"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Availability (make documentation available to those implementing the procedures) overlaps SCF Compliance Management; the document-availability facet is narrower than the compliance-management program (LOW)."
+  - requirement_code: "164.316(b)(2)(iii)"
+    scf_anchor: "GOV-01"
+    relationship_type: "intersects_with"
+    strength: 0.6
+    rationale: "Updates (review/update documentation in response to environmental/operational change) overlaps SCF Information Security Governance; the periodic-policy-review facet is narrower than the governance program (LOW)."

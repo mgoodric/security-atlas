@@ -38,13 +38,16 @@ func TestLoad_ShippedHIPAACrosswalkParses(t *testing.T) {
 	if cw.FrameworkVersion != "2013-01-25" {
 		t.Fatalf("framework_version = %q; want 2013-01-25", cw.FrameworkVersion)
 	}
-	// Curated subset spanning all three safeguard categories, NOT full Security
-	// Rule coverage (scope discipline — P0-481-1 catalog-only framing).
-	if n := len(cw.Requirements); n < 25 || n > 35 {
-		t.Fatalf("HIPAA requirements = %d; want curated subset in [25,35]", n)
+	// Slice 516 — FULL Security Rule coverage (incl. §164.314 organizational +
+	// §164.316 documentation), no longer the slice-481 curated 31-row subset.
+	// The exact-count assertion (AC-1) lives in TestLoad_HIPAAFullCoverage below;
+	// here we assert the file is at full-coverage scale (a regression to the thin
+	// subset would fail this).
+	if n := len(cw.Requirements); n < 60 {
+		t.Fatalf("HIPAA requirements = %d; want full Security Rule coverage (>=60)", n)
 	}
-	if len(cw.Mappings) < 25 {
-		t.Fatalf("expected >=25 HIPAA mappings; got %d", len(cw.Mappings))
+	if len(cw.Mappings) < 60 {
+		t.Fatalf("expected >=60 HIPAA mappings (full coverage); got %d", len(cw.Mappings))
 	}
 	if cw.SourceAttribution != "community_draft" {
 		t.Fatalf("crosswalk-level source_attribution = %q; want community_draft", cw.SourceAttribution)
@@ -59,18 +62,19 @@ func TestLoad_ShippedHIPAACrosswalkParses(t *testing.T) {
 	}
 }
 
-// AC-1 — the HIPAA subset spans ALL THREE safeguard categories: Administrative
-// (§164.308), Physical (§164.310), and Technical (§164.312). This is the
-// scope-discipline guarantee the slice narrative binds: every safeguard
-// category must be represented so the catalog covers the full Security Rule
-// shape (not just the technical safeguards an engineer reaches for first).
-func TestLoad_HIPAASpansAllThreeSafeguardCategories(t *testing.T) {
+// AC-1 — full Security Rule coverage spans ALL FIVE Subpart C sections:
+// Administrative (§164.308), Physical (§164.310), Technical (§164.312),
+// Organizational (§164.314 — new in slice 516), and Policies/Documentation
+// (§164.316 — new in slice 516). Every requirement code must fall under one of
+// these five sections so the catalog covers the full Security Rule shape (not
+// just the three safeguard categories the slice-481 subset carried).
+func TestLoad_HIPAASpansAllSecurityRuleSections(t *testing.T) {
 	t.Parallel()
 	cw, err := soc2import.Load(hipaaPath())
 	if err != nil {
 		t.Fatalf("Load HIPAA: %v", err)
 	}
-	var admin, physical, technical int
+	var admin, physical, technical, organizational, documentation int
 	for _, r := range cw.Requirements {
 		switch {
 		case strings.HasPrefix(r.Code, "164.308"):
@@ -79,18 +83,96 @@ func TestLoad_HIPAASpansAllThreeSafeguardCategories(t *testing.T) {
 			physical++
 		case strings.HasPrefix(r.Code, "164.312"):
 			technical++
+		case strings.HasPrefix(r.Code, "164.314"):
+			organizational++
+		case strings.HasPrefix(r.Code, "164.316"):
+			documentation++
 		default:
-			t.Fatalf("HIPAA requirement code %q is not under §164.308/310/312 — unexpected safeguard section", r.Code)
+			t.Fatalf("HIPAA requirement code %q is not under §164.308/310/312/314/316 — unexpected Security Rule section", r.Code)
 		}
 	}
 	if admin == 0 {
-		t.Fatal("HIPAA subset is missing Administrative safeguards (§164.308)")
+		t.Fatal("HIPAA coverage is missing Administrative safeguards (§164.308)")
 	}
 	if physical == 0 {
-		t.Fatal("HIPAA subset is missing Physical safeguards (§164.310)")
+		t.Fatal("HIPAA coverage is missing Physical safeguards (§164.310)")
 	}
 	if technical == 0 {
-		t.Fatal("HIPAA subset is missing Technical safeguards (§164.312)")
+		t.Fatal("HIPAA coverage is missing Technical safeguards (§164.312)")
+	}
+	if organizational == 0 {
+		t.Fatal("HIPAA coverage is missing Organizational requirements (§164.314) — slice 516 must add them")
+	}
+	if documentation == 0 {
+		t.Fatal("HIPAA coverage is missing Policies/Procedures/Documentation (§164.316) — slice 516 must add them")
+	}
+}
+
+// Slice 516 AC-1 — FULL HIPAA Security Rule coverage. The shipped crosswalk
+// covers all 67 standards + implementation specifications across the five
+// Subpart C sections, each with exactly one STRM-typed SCF-anchor edge. This
+// asserts the exact full count (a row added or dropped fails loudly so the count
+// stays deliberate) and the per-section distribution, retaining all-five-section
+// coverage. Mirrors slice 514's TestLoad_CSFFullSubcategoryCoverage.
+func TestLoad_HIPAAFullCoverage(t *testing.T) {
+	t.Parallel()
+	cw, err := soc2import.Load(hipaaPath())
+	if err != nil {
+		t.Fatalf("Load HIPAA: %v", err)
+	}
+
+	// 45 CFR Part 164 Subpart C — full standard + implementation-specification
+	// coverage at the grain this catalog ships (see decisions log D2).
+	const wantRequirements = 67
+	if n := len(cw.Requirements); n != wantRequirements {
+		t.Fatalf("HIPAA requirements = %d; want full coverage = %d", n, wantRequirements)
+	}
+	// One STRM edge per requirement (1:1 — no requirement left unmapped, none
+	// mapped twice).
+	if n := len(cw.Mappings); n != wantRequirements {
+		t.Fatalf("HIPAA mappings = %d; want one edge per requirement = %d", n, wantRequirements)
+	}
+
+	// Per-section distribution across the five Subpart C sections.
+	perSection := map[string]int{}
+	for _, r := range cw.Requirements {
+		sec, _, _ := strings.Cut(r.Code, "(")
+		perSection[sec]++
+	}
+	want := map[string]int{
+		"164.308": 30, // Administrative safeguards
+		"164.310": 12, // Physical safeguards
+		"164.312": 12, // Technical safeguards
+		"164.314": 8,  // Organizational requirements (new in slice 516)
+		"164.316": 5,  // Policies, procedures, and documentation (new in slice 516)
+	}
+	for sec, n := range want {
+		if perSection[sec] != n {
+			t.Fatalf("HIPAA section %s has %d requirements; want %d", sec, perSection[sec], n)
+		}
+	}
+
+	// Every requirement code is unique and every mapping resolves to a declared
+	// requirement (guards against a typo'd requirement_code in the data file).
+	reqSet := map[string]struct{}{}
+	for _, r := range cw.Requirements {
+		if _, dup := reqSet[r.Code]; dup {
+			t.Fatalf("duplicate HIPAA requirement code %q", r.Code)
+		}
+		reqSet[r.Code] = struct{}{}
+	}
+	mapped := map[string]struct{}{}
+	for _, m := range cw.Mappings {
+		if _, ok := reqSet[m.RequirementCode]; !ok {
+			t.Fatalf("mapping references undeclared requirement %q", m.RequirementCode)
+		}
+		if _, dup := mapped[m.RequirementCode]; dup {
+			t.Fatalf("requirement %q mapped more than once", m.RequirementCode)
+		}
+		mapped[m.RequirementCode] = struct{}{}
+	}
+	if len(mapped) != len(reqSet) {
+		t.Fatalf("mapped requirements = %d; want every one of %d mapped", len(mapped), len(reqSet))
 	}
 }
 
