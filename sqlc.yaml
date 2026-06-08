@@ -69,6 +69,7 @@ sql:
       - "migrations/sql/20260608040000_evidence_scope_canonical.sql"
       - "migrations/sql/20260608050000_oscal_component_claim_disposition.sql"
       - "migrations/sql/20260608060000_oscal_component_claim_scf_mapping.sql"
+      - "migrations/sql/20260608070000_evidence_observed_at_nanos.sql"
     queries: "internal/db/queries"
     gen:
       go:
