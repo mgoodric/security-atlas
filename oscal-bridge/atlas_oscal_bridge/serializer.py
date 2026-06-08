@@ -658,6 +658,13 @@ def import_catalog(oscal_json: bytes, source_label: str = "") -> ImportResult:
 MAX_PROFILE_BYTES = 16 * 1024 * 1024  # 16 MiB
 MAX_RESOLVED_CONTROLS = 10_000
 
+# Slice 578: the maximum profile-over-profile import chain depth. MUST match
+# the Go-side MaxChainDepth (internal/oscal/profileimport/chain.go) so the
+# bridge's defense-in-depth check and the Go-side gate agree. The Go side is
+# the primary enforcer; this is belt-and-braces in case the bridge is ever
+# called outside the Go pipeline.
+MAX_CHAIN_DEPTH = 8
+
 # A trestle:// href is the ONLY href form the resolver may follow after the
 # bridge rewrites imports; it resolves to a LocalFetcher read inside our
 # sandbox (see slice-511 D2). Every other scheme (https / sftp / file / a
@@ -700,38 +707,38 @@ def _catalog_slug(raw: str) -> str:
     return cleaned or "catalog"
 
 
-def _supplied_catalog_keys(catalogs) -> tuple[list[dict], list[str]]:
-    """Parse + validate the supplied catalogs into match descriptors.
+def _supplied_doc_keys(docs, kind: str) -> tuple[list[dict], list[str]]:
+    """Parse + validate supplied catalogs OR profiles into match descriptors.
 
-    Returns ``(descriptors, errors)``. Each descriptor carries the parsed
-    document, a unique sandbox key, and the identity tokens an import.href
-    may match against (the catalog uuid + the title slug). No href is read
-    or fetched here — only the bytes the caller supplied are parsed.
+    ``kind`` is ``"catalog"`` or ``"profile"`` — the top-level key the document
+    must carry. Returns ``(descriptors, errors)``. Each descriptor carries the
+    parsed document, a unique sandbox key, the identity tokens an import.href
+    may match against (uuid + title slug), and the kind. No href is read or
+    fetched here — only the bytes the caller supplied are parsed.
     """
     descriptors: list[dict] = []
     errors: list[str] = []
     seen_keys: set[str] = set()
-    for idx, sc in enumerate(catalogs):
+    for idx, sc in enumerate(docs):
         raw = bytes(sc.oscal_json)
         if len(raw) > MAX_PROFILE_BYTES:
             errors.append(
-                f"supplied catalog #{idx} is {len(raw)} bytes, "
-                f"over the {MAX_PROFILE_BYTES}-byte cap"
+                f"supplied {kind} #{idx} is {len(raw)} bytes, over the {MAX_PROFILE_BYTES}-byte cap"
             )
             continue
         try:
             doc = json.loads(raw)
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            errors.append(f"supplied catalog #{idx}: invalid JSON: {exc}")
+            errors.append(f"supplied {kind} #{idx}: invalid JSON: {exc}")
             continue
-        if not isinstance(doc, dict) or "catalog" not in doc:
-            errors.append(f"supplied catalog #{idx}: missing top-level key 'catalog'")
+        if not isinstance(doc, dict) or kind not in doc:
+            errors.append(f"supplied {kind} #{idx}: missing top-level key '{kind}'")
             continue
-        cat = doc["catalog"]
-        meta = cat.get("metadata", {}) if isinstance(cat, dict) else {}
+        body = doc[kind]
+        meta = body.get("metadata", {}) if isinstance(body, dict) else {}
         title = str(meta.get("title", "")) if isinstance(meta, dict) else ""
-        cat_uuid = str(cat.get("uuid", "")) if isinstance(cat, dict) else ""
-        base_key = _catalog_slug(title or cat_uuid or f"catalog-{idx}")
+        doc_uuid = str(body.get("uuid", "")) if isinstance(body, dict) else ""
+        base_key = _catalog_slug(title or doc_uuid or f"{kind}-{idx}")
         key = base_key
         bump = 1
         while key in seen_keys:
@@ -742,22 +749,22 @@ def _supplied_catalog_keys(catalogs) -> tuple[list[dict], list[str]]:
             {
                 "doc": doc,
                 "key": key,
-                "uuid": cat_uuid,
+                "uuid": doc_uuid,
                 "title_slug": _catalog_slug(title),
+                "kind": kind,
             }
         )
     return descriptors, errors
 
 
 def _match_import_href(href: str, descriptors: list[dict]) -> dict | None:
-    """Map a profile ``import.href`` to a supplied catalog WITHOUT fetching.
+    """Map a profile ``import.href`` to a supplied document WITHOUT fetching.
 
-    Matching rules (slice-511 D2 — conservative; a non-match errors, never
-    fetches):
-      * single import + single catalog -> positional match (handled by caller).
+    Matching rules (slice-511 D2, extended for chained profiles in slice 578 —
+    conservative; a non-match errors, never fetches):
       * fragment / uuid match: an href like ``#<uuid>`` or one containing the
-        catalog uuid matches that catalog.
-      * trailing-segment slug match against the catalog title slug.
+        document uuid matches that document (catalog OR profile).
+      * trailing-segment slug match against the document title slug.
     Returns the matched descriptor or ``None``.
     """
     h = href.strip()
@@ -775,41 +782,169 @@ def _match_import_href(href: str, descriptors: list[dict]) -> dict | None:
     return None
 
 
-def _write_sandbox(root: pathlib.Path, descriptors: list[dict], profile_doc: dict) -> pathlib.Path:
-    """Lay out an isolated trestle workspace and return the profile path.
+def _trestle_path(descriptor: dict) -> str:
+    """The in-sandbox trestle:// path for a supplied document descriptor."""
+    if descriptor["kind"] == "catalog":
+        return f"{_TRESTLE_HREF_PREFIX}catalogs/{descriptor['key']}/catalog.json"
+    return f"{_TRESTLE_HREF_PREFIX}profiles/{descriptor['key']}/profile.json"
 
-    The workspace holds only the supplied catalogs + the (href-rewritten)
-    profile. trestle resolves every import as a LocalFetcher read inside
-    this dir; no external fetch is reachable (slice-511 D2).
+
+def _rewrite_profile_imports(
+    profile_doc: dict,
+    descriptor_id: str,
+    all_descriptors: list[dict],
+) -> list[str]:
+    """Rewrite one profile's import hrefs to sandboxed trestle:// paths.
+
+    Returns a list of structured error strings (empty on success). An external
+    href, or one that maps to no supplied document, is an error and NO fetch is
+    attempted (P0-578-1 / P0-511-1). The single-import positional shortcut only
+    fires for the slice-511 single-catalog case and never overrides the
+    external-href gate.
+    """
+    profile = profile_doc.get("profile")
+    if not isinstance(profile, dict):
+        return [f"{descriptor_id}: 'profile' is not an object"]
+    imports = profile.get("imports") or []
+    if not isinstance(imports, list) or not imports:
+        return [f"{descriptor_id}: profile has no 'imports' to resolve"]
+
+    # Positional shortcut only applies when exactly one catalog descriptor and
+    # one import exist (the FedRAMP baseline-over-catalog single-level case).
+    catalog_descs = [d for d in all_descriptors if d["kind"] == "catalog"]
+    positional = (
+        catalog_descs[0]
+        if (len(all_descriptors) == 1 == len(imports) and len(catalog_descs) == 1)
+        else None
+    )
+    errors: list[str] = []
+    for i, imp in enumerate(imports):
+        if not isinstance(imp, dict):
+            errors.append(f"{descriptor_id}: import #{i} is not an object")
+            continue
+        href = str(imp.get("href", "")).strip()
+        if not href:
+            errors.append(f"{descriptor_id}: import #{i} has no href")
+            continue
+        if _is_external_href(href):
+            errors.append(
+                f"{descriptor_id}: import #{i} href {href!r} is an external reference; "
+                "external resources are never dereferenced"
+            )
+            continue
+        matched = positional or _match_import_href(href, all_descriptors)
+        if matched is None:
+            errors.append(
+                f"{descriptor_id}: import #{i} href {href!r} does not map to any supplied "
+                "document; external/unknown references are never dereferenced"
+            )
+            continue
+        imp["href"] = _trestle_path(matched)
+    return errors
+
+
+def _check_chain(
+    entry_desc: dict,
+    descriptors_by_key: dict[str, dict],
+) -> list[str]:
+    """Walk the (pre-rewrite) import graph for cycles + depth (defense-in-depth).
+
+    Run BEFORE rewriting so the original hrefs can be matched to supplied
+    documents. Mirrors the Go-side validateChain. Returns structured errors
+    (empty when the chain is safe). The Go side is the primary enforcer; this
+    keeps the bridge safe if it is ever driven outside the Go pipeline.
+    """
+    errors: list[str] = []
+
+    def imports_of(desc: dict) -> list[str]:
+        prof = desc["doc"].get("profile", {})
+        imps = prof.get("imports") or [] if isinstance(prof, dict) else []
+        return [str(imp.get("href", "")).strip() for imp in imps if isinstance(imp, dict)]
+
+    all_descs = list(descriptors_by_key.values())
+
+    def walk(desc: dict, depth: int, on_path: set[str]) -> None:
+        if desc["kind"] != "profile":
+            return
+        if depth > MAX_CHAIN_DEPTH:
+            errors.append(
+                f"import chain exceeds the maximum depth of {MAX_CHAIN_DEPTH} "
+                f"(at profile {desc['key']!r})"
+            )
+            return
+        if desc["key"] in on_path:
+            errors.append(f"import chain contains a cycle (profile {desc['key']!r} revisited)")
+            return
+        on_path = on_path | {desc["key"]}
+        for href in imports_of(desc):
+            if not href or _is_external_href(href):
+                # External / empty hrefs are caught by _rewrite_profile_imports;
+                # the chain walk only concerns cycle + depth.
+                continue
+            matched = _match_import_href(href, all_descs)
+            if matched is None:
+                continue
+            next_depth = depth + 1 if matched["kind"] == "profile" else depth
+            walk(matched, next_depth, on_path)
+
+    walk(entry_desc, 1, set())
+    return errors
+
+
+def _write_sandbox(
+    root: pathlib.Path,
+    catalog_descs: list[dict],
+    profile_descs: list[dict],
+    entry_profile_doc: dict,
+) -> pathlib.Path:
+    """Lay out an isolated trestle workspace and return the entry profile path.
+
+    The workspace holds the supplied catalogs + every supplied (href-rewritten)
+    profile + the (href-rewritten) entry profile. trestle resolves every import
+    as a LocalFetcher read inside this dir; no external fetch is reachable
+    (slice-511 D2 / slice-578 chained extension).
     """
     (root / ".trestle").mkdir()
     (root / ".trestle" / "cache").mkdir()
-    for d in descriptors:
+    for d in catalog_descs:
         cat_dir = root / "catalogs" / d["key"]
         cat_dir.mkdir(parents=True)
         (cat_dir / "catalog.json").write_text(json.dumps(d["doc"]))
-    prof_dir = root / "profiles" / "imported"
-    prof_dir.mkdir(parents=True)
-    prof_path = prof_dir / "profile.json"
-    prof_path.write_text(json.dumps(profile_doc))
-    return prof_path
+    for d in profile_descs:
+        prof_dir = root / "profiles" / d["key"]
+        prof_dir.mkdir(parents=True)
+        (prof_dir / "profile.json").write_text(json.dumps(d["doc"]))
+    entry_dir = root / "profiles" / "imported"
+    entry_dir.mkdir(parents=True)
+    entry_path = entry_dir / "profile.json"
+    entry_path.write_text(json.dumps(entry_profile_doc))
+    return entry_path
 
 
-def import_profile(profile_json: bytes, catalogs, source_label: str = "") -> ProfileImportResult:
-    """Resolve an inbound OSCAL profile against SUPPLIED catalogs.
+def import_profile(
+    profile_json: bytes, catalogs, source_label: str = "", profiles=None
+) -> ProfileImportResult:
+    """Resolve an inbound OSCAL profile against SUPPLIED catalogs and profiles.
 
     Returns a ``ProfileImportResult``. ``valid=False`` carries a structured
     error and an empty control list — the Go side persists NOTHING in that
-    case (AC-5 / P0-511-3). The resolver NEVER dereferences an external
-    ``import.href`` (P0-511-1): every href is rewritten to a sandboxed
-    ``trestle://`` path before resolution, and an href that maps to no
-    supplied catalog is a structured error, not a fetch. A document over the
-    byte cap, a resolved set over the control cap, or a chained
-    profile-over-profile import is rejected (threat-model D / AC-3).
+    case (AC-5 / P0-511-3 / P0-578-3). The resolver NEVER dereferences an
+    external ``import.href`` (P0-511-1 / P0-578-1): every href is rewritten to
+    a sandboxed ``trestle://`` path before resolution, and an href that maps to
+    no supplied document is a structured error, not a fetch.
 
-    ``catalogs`` is an iterable of objects exposing ``.oscal_json`` (the
-    protobuf ``SuppliedCatalog`` shape) — declared structurally so the
-    function is unit-testable without the generated stubs.
+    Slice 578: ``profiles`` is an OPTIONAL iterable of supplied INTERMEDIATE
+    profiles (same ``.oscal_json`` shape). A profile may import another supplied
+    profile (a chain); the chain is bounded by ``MAX_CHAIN_DEPTH`` and rejected
+    on a cycle (defense-in-depth — the Go side is the primary enforcer). A
+    document over the byte cap, a resolved set over the control cap, a chain
+    deeper than the bound, or a cyclic chain is rejected (threat-model D /
+    AC-3).
+
+    ``catalogs`` / ``profiles`` are iterables of objects exposing
+    ``.oscal_json`` (the protobuf ``SuppliedCatalog`` / ``SuppliedProfile``
+    shape) — declared structurally so the function is unit-testable without the
+    generated stubs.
     """
     if len(profile_json) > MAX_PROFILE_BYTES:
         return _profile_reject(
@@ -819,6 +954,7 @@ def import_profile(profile_json: bytes, catalogs, source_label: str = "") -> Pro
             ]
         )
     catalogs = list(catalogs)
+    profiles = list(profiles or [])
     if not catalogs:
         return _profile_reject(["at least one catalog must be supplied to resolve the profile"])
 
@@ -836,46 +972,50 @@ def import_profile(profile_json: bytes, catalogs, source_label: str = "") -> Pro
     if not isinstance(imports, list) or not imports:
         return _profile_reject(["profile has no 'imports' to resolve"])
 
-    descriptors, cat_errors = _supplied_catalog_keys(catalogs)
+    catalog_descs, cat_errors = _supplied_doc_keys(catalogs, "catalog")
     if cat_errors:
         return _profile_reject(cat_errors)
+    profile_descs, prof_errors = _supplied_doc_keys(profiles, "profile")
+    if prof_errors:
+        return _profile_reject(prof_errors)
 
-    # Rewrite every import.href to a sandboxed trestle:// path. An href that
-    # maps to no supplied catalog is rejected WITHOUT a fetch (P0-511-1).
-    #
-    # The positional shortcut (single import + single catalog — the FedRAMP
-    # baseline-over-catalog common case) only applies AFTER the external-href
-    # gate, so it can never smuggle an external reference through (the
-    # security bug an unconditional positional match would introduce).
-    positional = descriptors[0] if (len(descriptors) == 1 and len(imports) == 1) else None
-    for i, imp in enumerate(imports):
-        if not isinstance(imp, dict):
-            return _profile_reject([f"import #{i} is not an object"])
-        href = str(imp.get("href", "")).strip()
-        if not href:
-            return _profile_reject([f"import #{i} has no href"])
-        # PRIMARY guard: an explicit external/host reference is rejected with
-        # no fetch and no positional fallback (P0-511-1 / threat-model I).
-        if _is_external_href(href):
-            return _profile_reject(
-                [
-                    f"import #{i} href {href!r} is an external reference; "
-                    "external resources are never dereferenced"
-                ]
-            )
-        matched = positional or _match_import_href(href, descriptors)
-        if matched is None:
-            return _profile_reject(
-                [
-                    f"import #{i} href {href!r} does not map to any supplied catalog; "
-                    "external/unknown references are never dereferenced"
-                ]
-            )
-        imp["href"] = f"{_TRESTLE_HREF_PREFIX}catalogs/{matched['key']}/catalog.json"
+    # The entry profile is a profile descriptor too (so the chain walk + href
+    # rewrite treat it uniformly). It is keyed "imported" — the sandbox path
+    # the resolver is pointed at.
+    entry_desc = {
+        "doc": profile_doc,
+        "key": "imported",
+        "uuid": str(profile.get("uuid", "")),
+        "title_slug": _catalog_slug(
+            str((profile.get("metadata") or {}).get("title", ""))
+            if isinstance(profile.get("metadata"), dict)
+            else ""
+        ),
+        "kind": "profile",
+    }
+    descriptors_by_key = {d["key"]: d for d in [entry_desc, *profile_descs, *catalog_descs]}
+
+    # Cycle + depth check BEFORE rewriting (needs original hrefs to match).
+    chain_errors = _check_chain(entry_desc, descriptors_by_key)
+    if chain_errors:
+        return _profile_reject(chain_errors)
+
+    # Rewrite the entry profile + every supplied profile's import hrefs to
+    # sandboxed trestle:// paths. An external / unresolvable href is rejected
+    # WITHOUT a fetch (P0-578-1 / P0-511-1).
+    all_descs = [entry_desc, *profile_descs, *catalog_descs]
+    rewrite_errors: list[str] = []
+    rewrite_errors.extend(_rewrite_profile_imports(entry_desc["doc"], "entry profile", all_descs))
+    for d in profile_descs:
+        rewrite_errors.extend(
+            _rewrite_profile_imports(d["doc"], f"profile {d['key']!r}", all_descs)
+        )
+    if rewrite_errors:
+        return _profile_reject(rewrite_errors)
 
     root = pathlib.Path(tempfile.mkdtemp(prefix="atlas_profile_ws_"))
     try:
-        prof_path = _write_sandbox(root, descriptors, profile_doc)
+        prof_path = _write_sandbox(root, catalog_descs, profile_descs, entry_desc["doc"])
         try:
             # VALUE_OR_LABEL_OR_CHOICES substitutes an assigned parameter
             # value into the prose (so modify.set-parameters is reflected in

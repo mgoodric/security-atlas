@@ -35,13 +35,15 @@ type fakeBridge struct {
 	called         bool
 	gotProfile     []byte
 	gotCatalogs    [][]byte
+	gotProfiles    [][]byte
 	gotSourceLabel string
 }
 
-func (f *fakeBridge) ImportProfile(_ context.Context, profileJSON []byte, catalogs [][]byte, sourceLabel string) (*oscalv1.ImportProfileResponse, error) {
+func (f *fakeBridge) ImportProfile(_ context.Context, profileJSON []byte, catalogs [][]byte, profiles [][]byte, sourceLabel string) (*oscalv1.ImportProfileResponse, error) {
 	f.called = true
 	f.gotProfile = profileJSON
 	f.gotCatalogs = catalogs
+	f.gotProfiles = profiles
 	f.gotSourceLabel = sourceLabel
 	if f.err != nil {
 		return nil, f.err
@@ -67,11 +69,15 @@ func tenantCtx(t *testing.T) context.Context {
 	return ctx
 }
 
-// okReq is a minimal authorized request used by the gate tests.
+// okReq is a minimal authorized request used by the gate tests. The profile
+// imports the single supplied catalog by uuid, so it PASSES the slice-578
+// Go-side chain validation (which now runs before the bridge call); the gate
+// tests that drive the bridge-error / rejection branches need a chain-valid
+// request so they reach the bridge.
 func okReq() Request {
 	return Request{
-		ProfileJSON: []byte(`{"profile":{}}`),
-		Catalogs:    [][]byte{[]byte(`{"catalog":{}}`)},
+		ProfileJSON: []byte(`{"profile":{"uuid":"p-entry","imports":[{"href":"#cat-1"}]}}`),
+		Catalogs:    [][]byte{[]byte(`{"catalog":{"uuid":"cat-1"}}`)},
 		ImportedBy:  "tester",
 		Role:        authz.RoleGRCEngineer,
 	}
@@ -233,7 +239,10 @@ func TestImport_PassesProfileAndCatalogsToBridge(t *testing.T) {
 	bridge := &fakeBridge{resp: &oscalv1.ImportProfileResponse{Valid: false, Errors: []string{"stop before persist"}}}
 	im := NewImporter(&nilBeginner{}, bridge)
 	req := okReq()
-	req.Catalogs = [][]byte{[]byte(`{"catalog":{"a":1}}`), []byte(`{"catalog":{"b":2}}`)}
+	// A two-catalog request whose entry profile imports the first catalog by
+	// uuid — chain-valid so it reaches the bridge.
+	req.ProfileJSON = []byte(`{"profile":{"uuid":"p-entry","imports":[{"href":"#cat-a"}]}}`)
+	req.Catalogs = [][]byte{[]byte(`{"catalog":{"uuid":"cat-a"}}`), []byte(`{"catalog":{"uuid":"cat-b"}}`)}
 	req.SourceLabel = "FedRAMP Moderate"
 	_, _ = im.Import(tenantCtx(t), req)
 	if string(bridge.gotProfile) != string(req.ProfileJSON) {

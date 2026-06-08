@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -406,6 +407,130 @@ func TestImportProfile_MalformedPersistsNothing(t *testing.T) {
 	}
 	if baseCount != 0 {
 		t.Errorf("malformed profile must persist nothing, got %d baselines", baseCount)
+	}
+}
+
+// ===== AC-4 (slice 578): a two-level chain resolves end-to-end =====
+
+func TestImportProfile_ChainedResolvesEndToEnd(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	seedCurrentSCFAnchor(t, admin, "IAC-06")
+
+	addr, stop := startBridge(t)
+	defer stop()
+	bridge, err := oscal.DialBridge(addr)
+	if err != nil {
+		t.Fatalf("DialBridge: %v", err)
+	}
+	defer func() { _ = bridge.Close() }()
+
+	im := profileimport.NewImporter(app, bridge)
+	report, err := im.Import(ctxFor(t, tenant), profileimport.Request{
+		// entry profile -> intermediate profile -> base catalog.
+		ProfileJSON: loadFixture(t, "profile_chained_entry.json"),
+		Profiles:    [][]byte{loadFixture(t, "profile_intermediate.json")},
+		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
+		SourceLabel: "Chained baseline test",
+		ImportedBy:  "grc-tester",
+		Role:        authz.RoleGRCEngineer,
+	})
+	if err != nil {
+		t.Fatalf("Import (chained): %v", err)
+	}
+	// The entry narrowed the intermediate (ac-1, ac-2, ac-3, IAC-06) down to
+	// ac-1, ac-2, IAC-06.
+	if report.ControlCount != 3 {
+		t.Errorf("ControlCount = %d, want 3 (entry narrowed the chain)", report.ControlCount)
+	}
+	if report.MappedCount != 1 {
+		t.Errorf("MappedCount = %d, want 1 (IAC-06 -> SCF anchor)", report.MappedCount)
+	}
+
+	ctx := context.Background()
+	var kind string
+	if err := admin.QueryRow(ctx,
+		`SELECT kind FROM imported_catalogs WHERE id = $1 AND tenant_id = $2`,
+		report.ProfileID, tenant).Scan(&kind); err != nil {
+		t.Fatalf("read imported_catalogs: %v", err)
+	}
+	if kind != "profile" {
+		t.Errorf("kind = %q, want profile", kind)
+	}
+
+	// The success-audit detail records the resolved chain provenance (slice
+	// 578): entry-profile + intermediate profile + catalog, each with a hash.
+	var detail []byte
+	if err := admin.QueryRow(ctx,
+		`SELECT detail FROM imported_catalog_audit_log
+		 WHERE tenant_id = $1 AND catalog_id = $2 AND action = 'profile_imported'`,
+		tenant, report.ProfileID).Scan(&detail); err != nil {
+		t.Fatalf("read audit detail: %v", err)
+	}
+	if !strings.Contains(string(detail), `"chain"`) ||
+		!strings.Contains(string(detail), `"entry-profile"`) ||
+		!strings.Contains(string(detail), `"catalog"`) {
+		t.Errorf("audit detail missing chain provenance: %s", detail)
+	}
+}
+
+// ===== AC-4 (slice 578): a cyclic chain errors WITHOUT looping or fetching =====
+
+func TestImportProfile_CyclicChainRejected(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+
+	// A -> B -> A. The Go-side chain validator rejects this BEFORE the bridge
+	// is ever dialed, so this is provable even without the bridge — but we
+	// still start it to prove nothing is fetched / looped end-to-end.
+	addr, stop := startBridge(t)
+	defer stop()
+	bridge, err := oscal.DialBridge(addr)
+	if err != nil {
+		t.Fatalf("DialBridge: %v", err)
+	}
+	defer func() { _ = bridge.Close() }()
+
+	im := profileimport.NewImporter(app, bridge)
+	done := make(chan error, 1)
+	go func() {
+		_, ierr := im.Import(ctxFor(t, tenant), profileimport.Request{
+			ProfileJSON: loadFixture(t, "profile_cycle_a.json"),
+			Profiles:    [][]byte{loadFixture(t, "profile_cycle_b.json")},
+			Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
+			SourceLabel: "cyclic",
+			ImportedBy:  "grc-tester",
+			Role:        authz.RoleGRCEngineer,
+		})
+		done <- ierr
+	}()
+	select {
+	case ierr := <-done:
+		if !errors.Is(ierr, profileimport.ErrChainCycle) {
+			t.Fatalf("expected ErrChainCycle for A->B->A, got %v", ierr)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("cyclic chain did not terminate within 15s (P0-578-2 — possible loop)")
+	}
+
+	// Nothing persisted (P0-578-3); a rejection audit row WAS written.
+	ctx := context.Background()
+	var baseCount, rejectCount int
+	if err := admin.QueryRow(ctx, `SELECT count(*) FROM imported_catalogs WHERE tenant_id = $1`, tenant).Scan(&baseCount); err != nil {
+		t.Fatalf("count baselines: %v", err)
+	}
+	if baseCount != 0 {
+		t.Errorf("a cyclic chain must persist nothing, got %d baselines", baseCount)
+	}
+	if err := admin.QueryRow(ctx,
+		`SELECT count(*) FROM imported_catalog_audit_log
+		 WHERE tenant_id = $1 AND action = 'profile_import_rejected'`, tenant).Scan(&rejectCount); err != nil {
+		t.Fatalf("count rejections: %v", err)
+	}
+	if rejectCount != 1 {
+		t.Errorf("profile_import_rejected audit rows = %d, want 1", rejectCount)
 	}
 }
 

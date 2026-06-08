@@ -109,7 +109,12 @@ class OscalBridgeServicer(oscal_pb2_grpc.OscalBridgeServiceServicer):
         # Go side inspects to decide rollback. An external/unknown
         # import.href is rejected WITHOUT a fetch (P0-511-1).
         try:
-            result = import_profile(request.profile_json, request.catalogs, request.source_label)
+            result = import_profile(
+                request.profile_json,
+                request.catalogs,
+                request.source_label,
+                request.profiles,
+            )
         except Exception as exc:  # noqa: BLE001 — defensive: never crash the bridge
             context.abort(grpc.StatusCode.INTERNAL, f"profile import failed: {exc}")
         controls = [
