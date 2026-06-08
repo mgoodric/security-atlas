@@ -4,22 +4,25 @@ The third major-cloud connector (slice 486), bringing Azure to parity with the
 AWS (slice 004) and the planned GCP (slice 442) connectors. It follows the
 locked connector pattern verbatim: register-per-run, a stable `actor_id`, an
 hour-truncated `observed_at`, scope minimums, and vendor-native read-only auth.
-It emits three evidence kinds:
+It emits four evidence kinds:
 
 | Kind                              | Profile | Source                                                                                                    |
 | --------------------------------- | ------- | --------------------------------------------------------------------------------------------------------- |
 | `azure.entra_role_assignment.v1`  | pull    | Microsoft Graph `roleManagement/directory/roleAssignments` (`Directory.Read.All`, `Application.Read.All`) |
 | `azure.storage_account_config.v1` | pull    | Azure Resource Manager `Microsoft.Storage/storageAccounts` (ARM **Reader** role)                          |
 | `azure.aks_cluster_config.v1`     | pull    | Azure Resource Manager `Microsoft.ContainerService/managedClusters` (ARM **Reader** role) — slice 519     |
+| `azure.nsg_rules.v1`              | pull    | Azure Resource Manager `Microsoft.Network/networkSecurityGroups` (ARM **Reader** role) — slice 520        |
 
 The connector reads **configuration + role-assignment metadata only**. It never
 reads blob/object contents, Key-Vault secret values, storage access keys, SAS
 tokens, user mailbox/profile PII beyond the display name needed to name an
 assignment, or — for AKS — admin kubeconfig / cluster-admin credentials,
 service-principal secrets, or workload/pod manifests (the AKS read calls only
-the managed-cluster **list** surface, never `listClusterAdminCredential`). The
-Azure credential stays source-side and never enters an evidence record or a
-platform push (canvas invariant #3).
+the managed-cluster **list** surface, never `listClusterAdminCredential`), or —
+for NSGs — flow logs, packet captures, or traffic contents (the NSG read calls
+only the NSG **list** surface and never mutates a network resource). The Azure
+credential stays source-side and never enters an evidence record or a platform
+push (canvas invariant #3).
 
 ## Profile + interval — honest, not "continuous monitoring"
 
@@ -40,16 +43,18 @@ new auth scheme.
 Create a dedicated read-only app-registration / managed identity and grant it
 **exactly** the permissions below. Every call the connector makes is a read.
 
-| Surface                | Permission                           | Access | Gates                                                                                                                                       |
-| ---------------------- | ------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Microsoft Graph        | `Directory.Read.All` (application)   | Read   | `azure.entra_role_assignment.v1` (directory-role / RBAC assignments)                                                                        |
-| Microsoft Graph        | `Application.Read.All` (application) | Read   | `azure.entra_role_assignment.v1` (service-principal / app inventory)                                                                        |
-| Azure Resource Manager | **Reader** (built-in role)           | Read   | `azure.storage_account_config.v1` (storage account configuration) **and** `azure.aks_cluster_config.v1` (AKS managed-cluster configuration) |
+| Surface                | Permission                           | Access | Gates                                                                                                                                                                                         |
+| ---------------------- | ------------------------------------ | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Microsoft Graph        | `Directory.Read.All` (application)   | Read   | `azure.entra_role_assignment.v1` (directory-role / RBAC assignments)                                                                                                                          |
+| Microsoft Graph        | `Application.Read.All` (application) | Read   | `azure.entra_role_assignment.v1` (service-principal / app inventory)                                                                                                                          |
+| Azure Resource Manager | **Reader** (built-in role)           | Read   | `azure.storage_account_config.v1` (storage account configuration), `azure.aks_cluster_config.v1` (AKS managed-cluster configuration) **and** `azure.nsg_rules.v1` (NSG firewall-rule posture) |
 
-The **same** ARM **Reader** role gates both ARM-sourced kinds — the AKS kind
-(slice 519) adds **no** new Azure scope (P0-519-2). Reader cannot call
-`listClusterAdminCredential` (the privilege-escalating admin-kubeconfig API), so
-admin credentials are unreachable by construction (P0-519-1).
+The **same** ARM **Reader** role gates every ARM-sourced kind — the AKS kind
+(slice 519) and the NSG kind (slice 520) add **no** new Azure scope (P0-519-2 /
+P0-520-1). Reader cannot call `listClusterAdminCredential` (the
+privilege-escalating admin-kubeconfig API), so admin credentials are unreachable
+by construction (P0-519-1); Reader cannot mutate a network resource, so NSG rule
+changes are unreachable by construction (P0-520-3).
 
 Run `atlas-azure permissions` to print this list.
 
@@ -60,15 +65,16 @@ on the subscription. Do **not** use the broad **Global Administrator** /
 `Application.Read.All` application permissions suffice — least privilege prefers
 the narrower set. The connector has no write code path; the only Graph/ARM
 operations it issues are reads (`GET .../roleAssignments`,
-`GET .../storageAccounts`, `GET .../managedClusters`). It never issues the
+`GET .../storageAccounts`, `GET .../managedClusters`,
+`GET .../networkSecurityGroups`). It never issues the
 `listClusterAdminCredential` / `listClusterUserCredential` POSTs that return
-kubeconfig credentials.
+kubeconfig credentials, and it never issues any NSG write / mutate call.
 
 The Graph-permission vs ARM-role split is the scope-minimum subtlety: identity
-evidence needs the two Graph application permissions; storage **and** AKS
-evidence both need only the single ARM Reader role. Grant only the set for the
-kinds you run (use `--skip-entra` / `--skip-storage` / `--skip-aks` to run a
-subset of surfaces).
+evidence needs the two Graph application permissions; storage, AKS **and** NSG
+evidence all need only the single ARM Reader role. Grant only the set for the
+kinds you run (use `--skip-entra` / `--skip-storage` / `--skip-aks` /
+`--skip-nsg` to run a subset of surfaces).
 
 ## Subcommands
 
@@ -78,7 +84,7 @@ atlas-azure register \
   --endpoint platform.example.com:443 \
   --token "$SECURITY_ATLAS_TOKEN"
 
-# Read Entra ID + Azure Storage + AKS, push evidence records.
+# Read Entra ID + Azure Storage + AKS + NSG, push evidence records.
 # Azure credentials are read from the environment (never the CLI, so the
 # secret stays out of shell history):
 export AZURE_TENANT_ID=<tenant-guid>
@@ -95,22 +101,24 @@ atlas-azure run \
 atlas-azure permissions
 ```
 
-| Flag                | Subcommand | Required | Default                       | Notes                                                                                      |
-| ------------------- | ---------- | -------- | ----------------------------- | ------------------------------------------------------------------------------------------ |
-| `--endpoint`        | both       | yes      | env `SECURITY_ATLAS_ENDPOINT` | platform gRPC endpoint                                                                     |
-| `--token`           | both       | yes      | env `SECURITY_ATLAS_TOKEN`    | security-atlas bearer token                                                                |
-| `--insecure`        | both       | no       | `false`                       | disables TLS; loopback endpoints only                                                      |
-| `--tenant-id`       | `run`      | no\*     | env `AZURE_TENANT_ID`         | Entra tenant id (\*required, via flag or env)                                              |
-| `--client-id`       | `run`      | no\*     | env `AZURE_CLIENT_ID`         | app-registration client id (client-credentials mode)                                       |
-| `--subscription-id` | `run`      | yes†     | —                             | subscription for the storage + AKS kinds († unless both `--skip-storage` and `--skip-aks`) |
-| `--environment`     | `run`      | yes      | —                             | environment scope tag; records are never emitted un-scoped                                 |
-| `--auth-mode`       | `run`      | no       | `client-credentials`          | `client-credentials` or `managed-identity`                                                 |
-| `--entra-control`   | `run`      | no       | `scf:IAC-21`                  | control id attached to entra records                                                       |
-| `--storage-control` | `run`      | no       | `scf:CRY-04`                  | control id attached to storage records                                                     |
-| `--aks-control`     | `run`      | no       | `scf:CFG-02`                  | control id attached to AKS records                                                         |
-| `--skip-entra`      | `run`      | no       | `false`                       | skip the `azure.entra_role_assignment.v1` pull                                             |
-| `--skip-storage`    | `run`      | no       | `false`                       | skip the `azure.storage_account_config.v1` pull                                            |
-| `--skip-aks`        | `run`      | no       | `false`                       | skip the `azure.aks_cluster_config.v1` pull                                                |
+| Flag                | Subcommand | Required | Default                       | Notes                                                                                                     |
+| ------------------- | ---------- | -------- | ----------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `--endpoint`        | both       | yes      | env `SECURITY_ATLAS_ENDPOINT` | platform gRPC endpoint                                                                                    |
+| `--token`           | both       | yes      | env `SECURITY_ATLAS_TOKEN`    | security-atlas bearer token                                                                               |
+| `--insecure`        | both       | no       | `false`                       | disables TLS; loopback endpoints only                                                                     |
+| `--tenant-id`       | `run`      | no\*     | env `AZURE_TENANT_ID`         | Entra tenant id (\*required, via flag or env)                                                             |
+| `--client-id`       | `run`      | no\*     | env `AZURE_CLIENT_ID`         | app-registration client id (client-credentials mode)                                                      |
+| `--subscription-id` | `run`      | yes†     | —                             | subscription for the storage + AKS + NSG kinds († unless `--skip-storage`, `--skip-aks` and `--skip-nsg`) |
+| `--environment`     | `run`      | yes      | —                             | environment scope tag; records are never emitted un-scoped                                                |
+| `--auth-mode`       | `run`      | no       | `client-credentials`          | `client-credentials` or `managed-identity`                                                                |
+| `--entra-control`   | `run`      | no       | `scf:IAC-21`                  | control id attached to entra records                                                                      |
+| `--storage-control` | `run`      | no       | `scf:CRY-04`                  | control id attached to storage records                                                                    |
+| `--aks-control`     | `run`      | no       | `scf:CFG-02`                  | control id attached to AKS records                                                                        |
+| `--nsg-control`     | `run`      | no       | `scf:NET-04`                  | control id attached to NSG records                                                                        |
+| `--skip-entra`      | `run`      | no       | `false`                       | skip the `azure.entra_role_assignment.v1` pull                                                            |
+| `--skip-storage`    | `run`      | no       | `false`                       | skip the `azure.storage_account_config.v1` pull                                                           |
+| `--skip-aks`        | `run`      | no       | `false`                       | skip the `azure.aks_cluster_config.v1` pull                                                               |
+| `--skip-nsg`        | `run`      | no       | `false`                       | skip the `azure.nsg_rules.v1` pull                                                                        |
 
 The client secret is **only** read from `AZURE_CLIENT_SECRET` — never a CLI flag
 — so it never lands in shell history. It is never logged and never enters an
@@ -118,7 +126,7 @@ evidence record (the resolved credential redacts its secret on every format
 path).
 
 `register` announces `name=azure-connector`,
-`supported_kinds=[azure.entra_role_assignment.v1, azure.storage_account_config.v1, azure.aks_cluster_config.v1]`,
+`supported_kinds=[azure.entra_role_assignment.v1, azure.storage_account_config.v1, azure.aks_cluster_config.v1, azure.nsg_rules.v1]`,
 and `profiles_supported=[pull]` to `ConnectorRegistryService.Register`. The
 `profiles_supported` value describes how the connector retrieves data **from
 Azure** (a scheduled pull); the platform-side wire is always push (invariant #3).
@@ -128,19 +136,20 @@ Azure** (a scheduled pull); the platform-side wire is always push (invariant #3)
 Every emitted record sets the minimum scope dimensions the connector-pattern
 convention requires:
 
-| Scope key       | Entra value              | Storage / AKS value       | Source                         |
+| Scope key       | Entra value              | Storage / AKS / NSG value | Source                         |
 | --------------- | ------------------------ | ------------------------- | ------------------------------ |
 | `cloud_account` | `azure:<tenant_id>`      | `azure:<subscription_id>` | the resolved credential / flag |
 | `environment`   | the `--environment` flag | the `--environment` flag  | the `--environment` flag       |
 
-For Entra the account-equivalent is the **tenant**; for Storage and AKS it is the
-**subscription** (ARM resources are subscription-scoped). `run` fails loudly when
-`--environment` is unset rather than pushing an un-scoped record.
+For Entra the account-equivalent is the **tenant**; for Storage, AKS and NSG it is
+the **subscription** (ARM resources are subscription-scoped). `run` fails loudly
+when `--environment` is unset rather than pushing an un-scoped record.
 
 `source_attribution.actor_id` follows the cross-connector convention
 `connector:<vendor>:<service>@<version>` — `connector:azure:entra@<version>` for
-identity records, `connector:azure:storage@<version>` for storage records, and
-`connector:azure:aks@<version>` for AKS records, where `<version>` is the build's
+identity records, `connector:azure:storage@<version>` for storage records,
+`connector:azure:aks@<version>` for AKS records, and
+`connector:azure:nsg@<version>` for NSG records, where `<version>` is the build's
 module version (or `dev` under `go run`).
 
 ## Idempotency
@@ -173,15 +182,26 @@ change the record's canonical hash between dedup retries.
   `local_accounts_disabled`, `oidc_issuer_enabled`, `kubernetes_version`, and
   `node_pool_count` facts the platform evaluator can read; the final pass/fail
   per (control, cluster) is the evaluator's.
+- **`azure.nsg_rules.v1` → `PASS` / `FAIL` / `INCONCLUSIVE`.** The connector
+  verdicts the deterministic network-segmentation posture: `FAIL` when any rule
+  allows inbound from the whole Internet (`*` / `0.0.0.0/0` / `Internet`) to a
+  management port (SSH 22 / RDP 3389); `INCONCLUSIVE` when a per-NSG read
+  errored; `PASS` otherwise. The full rule set (direction, access, protocol,
+  source/dest prefix, port range, priority) plus the subnet / NIC association
+  counts ride in the payload for the platform evaluator; the final pass/fail per
+  (control, NSG) is the evaluator's.
 
 ## Not in v0 (follow-ons)
 
-The connector ships three evidence surfaces. It does **not** ship:
+The connector ships four evidence surfaces. It does **not** ship:
 
 - AKS workload / pod-level evidence — the AKS kind reads **cluster-level**
   management-plane configuration only; pod manifests, secrets, and container
   images are osquery / a Kubernetes-native connector's job
-- Network-Security-Group / firewall evidence
+- NSG flow logs / packet captures / traffic contents — the NSG kind reads the
+  security-**rule** posture only; traffic telemetry is out of scope
+- Azure Firewall policy rule collections (a sibling follow-on to the NSG kind)
+- route tables / VNet peering topology
 - Key-Vault access-policy evidence
 - Azure-Policy / Activity-Log evidence
 - an event-driven (subscribe) profile via Azure Event Grid
@@ -199,16 +219,19 @@ go test ./connectors/azure/...
 ```
 
 Unit tests fake the Microsoft Graph + Azure Resource Manager surfaces (no live
-Azure, no real credentials) and pin the normalization, the storage **and** AKS
-hardening verdict matrices, the credential redaction, the read-only permission
-contract, and the `idem` hour-window behavior. A structural over-collection test
-(`internal/aks`) reflects over the `ClusterConfig` / `RawCluster` struct field
-names and fails the build if any field even hints at a secret / credential /
-kubeconfig / workload-content surface, and the AKS client test asserts the read
-issues only a `GET` to the managed-cluster list endpoint (never a `credential`
-endpoint). The integration test (in-package, bufconn platform — no Postgres)
-exercises the full collect → build → SDK `Push` → push-receipt round-trip for all
-three kinds and asserts two same-hour pushes collapse to one `record_id`, that
-emitted payloads carry config/assignment metadata only (no PII / secrets / admin
-kubeconfig — a per-kind allow-list), and that the credential never surfaces in a
-formatted log.
+Azure, no real credentials) and pin the normalization, the storage, AKS **and**
+NSG hardening verdict matrices, the credential redaction, the read-only
+permission contract, and the `idem` hour-window behavior. Structural
+over-collection tests (`internal/aks`, `internal/nsg`) reflect over the
+collector structs' field names and fail the build if any field even hints at a
+secret / credential / kubeconfig / workload-content (AKS) or flow-log / packet /
+traffic-content (NSG) surface; the AKS client test asserts the read issues only a
+`GET` to the managed-cluster list endpoint (never a `credential` endpoint), and
+the NSG client test asserts the read issues only a `GET` to the
+networkSecurityGroups list endpoint (never a mutate). The integration test
+(in-package, bufconn platform — no Postgres) exercises the full collect → build →
+SDK `Push` → push-receipt round-trip for all four kinds and asserts two same-hour
+pushes collapse to one `record_id`, that emitted payloads carry
+config/assignment/rule metadata only (no PII / secrets / admin kubeconfig / flow
+logs — a per-kind allow-list, descending into the NSG rule list), and that the
+credential never surfaces in a formatted log.

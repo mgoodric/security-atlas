@@ -20,6 +20,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/aks"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/azureauth"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/entra"
+	"github.com/mgoodric/security-atlas/connectors/azure/internal/nsg"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/storage"
 )
 
@@ -83,8 +84,8 @@ func TestRegister_ListsConnector(t *testing.T) {
 	for _, h := range list.GetHandles() {
 		if h.GetName() == ConnectorName {
 			found = true
-			if len(h.GetSupportedKinds()) != 3 {
-				t.Errorf("supported_kinds = %d; want 3", len(h.GetSupportedKinds()))
+			if len(h.GetSupportedKinds()) != 4 {
+				t.Errorf("supported_kinds = %d; want 4", len(h.GetSupportedKinds()))
 			}
 			if strings.Join(h.GetProfilesSupported(), ",") != "pull" {
 				t.Errorf("profiles_supported = %v; want [pull]", h.GetProfilesSupported())
@@ -189,6 +190,40 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if !strings.HasPrefix(aksRec.GetSourceAttribution().GetActorId(), "connector:azure:aks@") {
 		t.Errorf("aks actor_id = %q", aksRec.GetSourceAttribution().GetActorId())
 	}
+
+	// NSG (faked ARM surface — NO live Azure). Slice 520.
+	nsgAPI := &fakeNSGForIntegration{groups: []nsg.RawGroup{
+		{ID: "/subscriptions/test-sub/resourceGroups/rg/providers/Microsoft.Network/networkSecurityGroups/nsg1",
+			Name: "nsg1", ResourceGroup: "rg", Location: "eastus", AssociatedSubnets: 1,
+			Rules: []nsg.SecurityRule{
+				{Name: "allow-ssh-corp", Direction: "inbound", Access: "allow", Protocol: "tcp",
+					Priority: 100, SourceAddressPrefix: "203.0.113.0/24", DestinationPortRange: "22"},
+			}},
+	}}
+	groups, err := nsg.Inspect(context.Background(), nsgAPI, "test-sub", fixed)
+	if err != nil {
+		t.Fatalf("nsg.Inspect: %v", err)
+	}
+	nsgRec, err := buildNSGRecord(groups[0], "prod", "scf:NET-04")
+	if err != nil {
+		t.Fatalf("buildNSGRecord: %v", err)
+	}
+	nsgReceipt, err := client.Push(context.Background(), nsgRec)
+	if err != nil {
+		t.Fatalf("Push nsg: %v", err)
+	}
+	if nsgReceipt.GetHash() == "" {
+		t.Fatal("nsg receipt hash empty (AC-3 sha256 content-hash)")
+	}
+	if nsgRec.GetEvidenceKind() != "azure.nsg_rules.v1" {
+		t.Errorf("nsg kind = %q", nsgRec.GetEvidenceKind())
+	}
+	if groups[0].Result != nsg.ResultPass {
+		t.Errorf("segmented NSG should PASS; got %q", groups[0].Result)
+	}
+	if !strings.HasPrefix(nsgRec.GetSourceAttribution().GetActorId(), "connector:azure:nsg@") {
+		t.Errorf("nsg actor_id = %q", nsgRec.GetSourceAttribution().GetActorId())
+	}
 }
 
 // TestRun_DedupesWithinHour verifies AC-6: two records from the same resource in
@@ -245,6 +280,16 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 	clusters, _ := aks.Inspect(context.Background(), aksAPI, "sub-1", fixed)
 	aksRec, _ := buildAKSRecord(clusters[0], "prod", "scf:CFG-02")
 
+	nsgAPI := &fakeNSGForIntegration{groups: []nsg.RawGroup{
+		{ID: "/sub/nsg", Name: "nsg", ResourceGroup: "rg", Location: "eastus", AssociatedSubnets: 1,
+			Rules: []nsg.SecurityRule{
+				{Name: "allow-ssh-corp", Direction: "inbound", Access: "allow", Protocol: "tcp",
+					Priority: 100, SourceAddressPrefix: "203.0.113.0/24", DestinationPortRange: "22"},
+			}},
+	}}
+	nsgGroups, _ := nsg.Inspect(context.Background(), nsgAPI, "sub-1", fixed)
+	nsgRec, _ := buildNSGRecord(nsgGroups[0], "prod", "scf:NET-04")
+
 	// Allow-list of permitted payload keys per kind. Any key NOT in the
 	// allow-list is a leak and fails the test (config/assignment metadata only).
 	entraAllowed := map[string]bool{
@@ -269,9 +314,26 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 		"local_accounts_disabled": true, "oidc_issuer_enabled": true,
 		"node_pool_count": true,
 	}
+	// NSG allow-list (slice 520): network security-RULE keys only — never flow
+	// logs, packet captures, traffic contents, secrets, or PII.
+	nsgAllowed := map[string]bool{
+		"nsg_id": true, "nsg_name": true, "subscription_id": true,
+		"resource_group": true, "location": true, "associated_subnets": true,
+		"associated_nics": true, "rules": true,
+	}
+	nsgRuleAllowed := map[string]bool{
+		"name": true, "direction": true, "access": true, "protocol": true,
+		"priority": true, "source_address_prefix": true,
+		"destination_address_prefix": true, "source_port_range": true,
+		"destination_port_range": true,
+	}
 	bannedSubstrings := []string{"key_value", "secret", "sas", "connection_string",
 		"access_key", "blob_content", "password", "mailbox", "email", "upn",
 		"kubeconfig", "credential", "manifest", "container", "image"}
+	// NSG-specific over-collection bans (P0-520-2): flow-log / packet /
+	// traffic-content surfaces. Kept separate from the shared list because the
+	// storage kind legitimately uses "https_traffic_only".
+	nsgBannedSubstrings := []string{"flowlog", "flow_log", "packet", "capture", "payload", "traffic_content"}
 
 	check := func(t *testing.T, rec *evidencev1.EvidenceRecord, allowed map[string]bool) {
 		for k, v := range rec.GetPayload().AsMap() {
@@ -293,6 +355,38 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 	check(t, entraRec, entraAllowed)
 	check(t, storageRec, storageAllowed)
 	check(t, aksRec, aksAllowed)
+	check(t, nsgRec, nsgAllowed)
+	for k := range nsgRec.GetPayload().AsMap() {
+		low := strings.ToLower(k)
+		for _, b := range nsgBannedSubstrings {
+			if strings.Contains(low, b) {
+				t.Errorf("nsg payload key %q contains NSG-banned substring %q", k, b)
+			}
+		}
+	}
+
+	// The NSG `rules` payload is a nested list of rule items — descend into each
+	// item and apply the same allow-list + banned-substring discipline.
+	for _, raw := range nsgRec.GetPayload().AsMap()["rules"].([]any) {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("nsg rule item is not a map: %T", raw)
+		}
+		for k, v := range item {
+			if !nsgRuleAllowed[k] {
+				t.Errorf("nsg rule carries non-allow-listed key %q (possible leak)", k)
+			}
+			low := strings.ToLower(k)
+			for _, b := range append(append([]string{}, bannedSubstrings...), nsgBannedSubstrings...) {
+				if strings.Contains(low, b) {
+					t.Errorf("nsg rule key %q contains banned substring %q", k, b)
+				}
+			}
+			if s, ok := v.(string); ok && strings.Contains(s, secret) {
+				t.Errorf("nsg rule value for %q leaked the Azure secret", k)
+			}
+		}
+	}
 }
 
 // TestCredential_NeverLogged verifies AC-11 + P0-486-4: the Azure credential's
@@ -336,4 +430,10 @@ type fakeAKSForIntegration struct{ clusters []aks.RawCluster }
 
 func (f *fakeAKSForIntegration) ListManagedClusters(_ context.Context) ([]aks.RawCluster, error) {
 	return f.clusters, nil
+}
+
+type fakeNSGForIntegration struct{ groups []nsg.RawGroup }
+
+func (f *fakeNSGForIntegration) ListNetworkSecurityGroups(_ context.Context) ([]nsg.RawGroup, error) {
+	return f.groups, nil
 }

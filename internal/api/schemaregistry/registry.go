@@ -106,6 +106,11 @@ func DefaultSeed() []KindVersion {
 		// (cloud-config / network controls: SCF CFG-02 / NET-04). ARM Reader
 		// only — never admin kubeconfig, secrets, or workload manifests.
 		{Kind: "azure.aks_cluster_config.v1", Version: "1.0.0"},
+		// Slice 520: Azure connector NSG / firewall security-rule posture
+		// (network-segmentation controls: SCF NET-04 / NET-01). ARM Reader only
+		// — RULE configuration only, never flow logs, packet captures, or
+		// traffic contents; read-only (never mutates a network resource).
+		{Kind: "azure.nsg_rules.v1", Version: "1.0.0"},
 		// Slice 487: Kubernetes connector (RBAC + workload security-context).
 		{Kind: "k8s.rbac_binding.v1", Version: "1.0.0"},
 		{Kind: "k8s.workload_security_context.v1", Version: "1.0.0"},

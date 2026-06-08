@@ -7,6 +7,7 @@
 //   - EntraRoleAssignmentKey: sha256("azure.entra_role_assignment|<assignment_id>|<hour>")
 //   - StorageAccountKey:      sha256("azure.storage_account_config|<account_id>|<hour>")
 //   - AKSClusterConfigKey:    sha256("azure.aks_cluster_config|<cluster_id>|<hour>")
+//   - NSGRulesKey:            sha256("azure.nsg_rules|<nsg_id>|<hour>")
 //
 // Anti-criterion: every push from this connector derives its idempotency_key
 // here. The cmd layer never invents one ad-hoc and never pushes with an empty
@@ -36,6 +37,11 @@ func StorageAccountKey(accountID string, observedAt time.Time) string {
 // observed_at) pair.
 func AKSClusterConfigKey(clusterID string, observedAt time.Time) string {
 	return hashKey("azure.aks_cluster_config", clusterID, observedAt)
+}
+
+// NSGRulesKey returns the idempotency key for one (nsg_id, observed_at) pair.
+func NSGRulesKey(nsgID string, observedAt time.Time) string {
+	return hashKey("azure.nsg_rules", nsgID, observedAt)
 }
 
 func hashKey(prefix, id string, observedAt time.Time) string {
