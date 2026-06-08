@@ -44,6 +44,7 @@ from trestle.oscal.common import (
 from trestle.oscal.common import (
     Status as CommonStatus,
 )
+from trestle.oscal.component import ComponentDefinition
 from trestle.oscal.poam import PlanOfActionAndMilestones, PoamItem
 from trestle.oscal.ssp import (
     AuthorizationBoundary,
@@ -913,3 +914,184 @@ def import_profile(profile_json: bytes, catalogs, source_label: str = "") -> Pro
         return ProfileImportResult(True, [], controls, oscal_version, profile_title)
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+# --------------------------------------------------------------------------
+# component-definition import (vendor-claim ingest — slice 512)
+# --------------------------------------------------------------------------
+
+# Bounds on the inbound document (threat-model D / I — see slice-512 D5).
+# Enforced here in the bridge (the parser) as defense-in-depth; the Go side
+# enforces the same byte cap BEFORE the bytes cross the wire.
+MAX_COMPONENT_DEF_BYTES = 16 * 1024 * 1024  # 16 MiB
+MAX_COMPONENTS = 1_000
+MAX_VENDOR_CLAIMS = 50_000
+
+
+class VendorClaim:
+    """One implemented-requirement — a vendor's control-implementation CLAIM.
+
+    Plain attribute holder (not a protobuf) so ``import_component_definition``
+    is unit testable without the generated stubs. The server maps these onto
+    the ``VendorClaim`` protobuf message. A claim is the vendor's ASSERTION,
+    never platform-verified evidence (P0-512-1).
+    """
+
+    __slots__ = ("control_id", "statement", "requirement_uuid")
+
+    def __init__(self, control_id: str, statement: str, requirement_uuid: str):
+        self.control_id = control_id
+        self.statement = statement
+        self.requirement_uuid = requirement_uuid
+
+
+class VendorComponent:
+    """One defined-component + the vendor claims it asserts."""
+
+    __slots__ = ("component_uuid", "component_type", "title", "description", "claims")
+
+    def __init__(self, component_uuid, component_type, title, description, claims):
+        self.component_uuid = component_uuid
+        self.component_type = component_type
+        self.title = title
+        self.description = description
+        self.claims = claims
+
+
+class ComponentImportResult:
+    """Result of ``import_component_definition`` — mirrors the response proto."""
+
+    __slots__ = (
+        "valid",
+        "errors",
+        "components",
+        "oscal_version",
+        "component_definition_title",
+    )
+
+    def __init__(self, valid, errors, components, oscal_version, component_definition_title):
+        self.valid = valid
+        self.errors = errors
+        self.components = components
+        self.oscal_version = oscal_version
+        self.component_definition_title = component_definition_title
+
+
+def _component_reject(errors: list[str]) -> ComponentImportResult:
+    return ComponentImportResult(False, errors, [], "", "")
+
+
+def _claim_statement(impl_req) -> str:
+    """Flatten an implemented-requirement into a vendor implementation string.
+
+    Combines the requirement-level ``description`` with the prose of any
+    nested ``statements`` (each statement's ``description`` / parts prose).
+    Only in-document prose is read — no ``href`` / ``link`` is ever
+    dereferenced (P0-512-2 / threat-model I).
+    """
+    chunks: list[str] = []
+    desc = getattr(impl_req, "description", None)
+    if desc:
+        chunks.append(str(desc).strip())
+    for stmt in getattr(impl_req, "statements", None) or []:
+        sdesc = getattr(stmt, "description", None)
+        if sdesc:
+            chunks.append(str(sdesc).strip())
+        nested = _flatten_prose(getattr(stmt, "parts", None))
+        if nested:
+            chunks.append(nested)
+    return "\n\n".join(c for c in chunks if c)
+
+
+def import_component_definition(oscal_json: bytes, source_label: str = "") -> ComponentImportResult:
+    """Deserialize + validate an inbound OSCAL component-definition document.
+
+    Returns a ``ComponentImportResult``. ``valid=False`` carries a structured
+    error and an empty component list — the Go side persists NOTHING in that
+    case (AC-5 / P0-512-4). No ``href`` / external resource is dereferenced
+    (P0-512-2 / threat-model I). A document over ``MAX_COMPONENT_DEF_BYTES``,
+    with more than ``MAX_COMPONENTS`` components, or more than
+    ``MAX_VENDOR_CLAIMS`` total claims is rejected (threat-model D / AC-3).
+
+    Each component's implemented-requirements are surfaced as vendor CLAIMS;
+    the bridge performs NO reconciliation and asserts NOTHING about whether
+    the claim is true — that is the Go side's vendor-attributed persistence
+    plus the operator's existing review (P0-512-1).
+    """
+    if len(oscal_json) > MAX_COMPONENT_DEF_BYTES:
+        return _component_reject(
+            [
+                f"component-definition document is {len(oscal_json)} bytes, "
+                f"over the {MAX_COMPONENT_DEF_BYTES}-byte import cap"
+            ]
+        )
+
+    try:
+        doc = json.loads(oscal_json)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return _component_reject([f"invalid JSON: {exc}"])
+
+    if not isinstance(doc, dict) or "component-definition" not in doc:
+        return _component_reject(["document missing top-level key 'component-definition'"])
+
+    try:
+        comp_def = ComponentDefinition(**doc["component-definition"])
+    except Exception as exc:  # noqa: BLE001 — trestle raises pydantic + ValueError
+        return _component_reject([f"component-definition failed OSCAL v1.1.x validation: {exc}"])
+
+    defined = getattr(comp_def, "components", None) or []
+    if len(defined) > MAX_COMPONENTS:
+        return _component_reject(
+            [
+                f"component-definition has {len(defined)} components, "
+                f"over the {MAX_COMPONENTS}-component import cap"
+            ]
+        )
+
+    components: list[VendorComponent] = []
+    total_claims = 0
+    for comp in defined:
+        claims: list[VendorClaim] = []
+        for ctrl_impl in getattr(comp, "control_implementations", None) or []:
+            for impl_req in getattr(ctrl_impl, "implemented_requirements", None) or []:
+                control_id = getattr(impl_req, "control_id", "") or ""
+                if not control_id:
+                    # A requirement with no target control-id is unusable as a
+                    # claim; skip it rather than fabricate a target.
+                    continue
+                claims.append(
+                    VendorClaim(
+                        control_id=str(control_id),
+                        statement=_claim_statement(impl_req),
+                        requirement_uuid=str(getattr(impl_req, "uuid", "") or ""),
+                    )
+                )
+        total_claims += len(claims)
+        if total_claims > MAX_VENDOR_CLAIMS:
+            return _component_reject(
+                [
+                    f"component-definition has over {MAX_VENDOR_CLAIMS} total "
+                    "vendor claims, over the import cap"
+                ]
+            )
+        components.append(
+            VendorComponent(
+                component_uuid=str(getattr(comp, "uuid", "") or ""),
+                component_type=str(getattr(comp, "type", "") or ""),
+                title=str(getattr(comp, "title", "") or ""),
+                description=str(getattr(comp, "description", "") or ""),
+                claims=claims,
+            )
+        )
+
+    if not components:
+        return _component_reject(["component-definition contains zero components"])
+    if total_claims == 0:
+        return _component_reject(
+            ["component-definition contains zero implemented-requirements (no vendor claims)"]
+        )
+
+    meta = comp_def.metadata
+    oscal_version = str(getattr(meta, "oscal_version", "") or "")
+    title = str(getattr(meta, "title", "") or "")
+    return ComponentImportResult(True, [], components, oscal_version, title)

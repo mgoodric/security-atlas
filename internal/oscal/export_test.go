@@ -68,6 +68,11 @@ func (f *fakeBridge) ImportProfile(_ context.Context, _ []byte, _ [][]byte, _ st
 	return &oscalv1.ImportProfileResponse{Valid: true}, nil
 }
 
+func (f *fakeBridge) ImportComponentDefinition(_ context.Context, _ []byte, _ string) (*oscalv1.ImportComponentDefinitionResponse, error) {
+	f.calls = append(f.calls, "import-component-definition")
+	return &oscalv1.ImportComponentDefinitionResponse{Valid: true}, nil
+}
+
 func (f *fakeBridge) Close() error { return nil }
 
 // minimalAggregate builds an aggregate sufficient for the proto-conversion

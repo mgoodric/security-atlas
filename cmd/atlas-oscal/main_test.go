@@ -144,3 +144,28 @@ func TestRunImportProfile_RequiresTenant(t *testing.T) {
 		t.Fatal("expected an error when --tenant-id is missing")
 	}
 }
+
+func TestRunImportComponentDefinition_RequiresTenant(t *testing.T) {
+	t.Parallel()
+	// With a DSN supplied via flag but no --tenant-id, the command errors
+	// before any bridge / DB contact (the Go-side gate).
+	err := runImportComponentDefinition([]string{
+		"compdef.json",
+		"--dsn", "postgres://x",
+	})
+	if err == nil {
+		t.Fatal("expected an error when --tenant-id is missing")
+	}
+}
+
+func TestRunImportComponentDefinition_RequiresFile(t *testing.T) {
+	t.Parallel()
+	// No positional <file> argument — splitPositional rejects it.
+	err := runImportComponentDefinition([]string{
+		"--dsn", "postgres://x",
+		"--tenant-id", "11111111-1111-4111-8111-111111111111",
+	})
+	if err == nil {
+		t.Fatal("expected an error when no <file> argument is supplied")
+	}
+}

@@ -1,0 +1,45 @@
+{
+  "component-definition": {
+    "uuid": "12121212-1212-4121-8121-121212121212",
+    "metadata": {
+      "title": "Component Definition With External Link",
+      "last-modified": "2026-06-07T00:00:00+00:00",
+      "version": "1.0",
+      "oscal-version": "1.1.2"
+    },
+    "components": [
+      {
+        "uuid": "34343434-3434-4343-8343-343434343434",
+        "type": "service",
+        "title": "Externally-Linked Service",
+        "description": "A component whose links point at an external host.",
+        "links": [
+          {
+            "href": "https://attacker.example.com/evidence.json",
+            "rel": "reference"
+          }
+        ],
+        "control-implementations": [
+          {
+            "uuid": "56565656-5656-4565-8565-565656565656",
+            "source": "https://attacker.example.com/catalog.json",
+            "description": "Implementation referencing an external catalog source.",
+            "implemented-requirements": [
+              {
+                "uuid": "78787878-7878-4787-8787-787878787878",
+                "control-id": "IAC-06",
+                "description": "Claims to implement MFA; references an external catalog source.",
+                "links": [
+                  {
+                    "href": "https://attacker.example.com/proof.pdf",
+                    "rel": "evidence"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

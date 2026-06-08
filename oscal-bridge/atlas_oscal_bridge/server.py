@@ -24,6 +24,7 @@ from . import oscal_pb2, oscal_pb2_grpc
 from .serializer import (
     SerializeError,
     import_catalog,
+    import_component_definition,
     import_profile,
     round_trip_validate,
     serialize_assessment,
@@ -126,6 +127,43 @@ class OscalBridgeServicer(oscal_pb2_grpc.OscalBridgeServiceServicer):
             controls=controls,
             oscal_version=result.oscal_version,
             profile_title=result.profile_title,
+            source_label=request.source_label,
+        )
+
+    def ImportComponentDefinition(self, request, context):  # noqa: N802
+        # Like ImportCatalog, the bridge never raises out of
+        # import_component_definition for an invalid document: a structured
+        # (valid=False, errors=[...]) result is the normal failure mode the Go
+        # side inspects to decide rollback. No href is ever dereferenced
+        # (P0-512-2). The bridge asserts NOTHING about a claim's truth — it
+        # surfaces the vendor's raw implemented-requirements as claims.
+        try:
+            result = import_component_definition(request.oscal_json, request.source_label)
+        except Exception as exc:  # noqa: BLE001 — defensive: never crash the bridge
+            context.abort(grpc.StatusCode.INTERNAL, f"component-definition import failed: {exc}")
+        components = [
+            oscal_pb2.VendorComponent(
+                component_uuid=comp.component_uuid,
+                component_type=comp.component_type,
+                title=comp.title,
+                description=comp.description,
+                claims=[
+                    oscal_pb2.VendorClaim(
+                        control_id=cl.control_id,
+                        statement=cl.statement,
+                        requirement_uuid=cl.requirement_uuid,
+                    )
+                    for cl in comp.claims
+                ],
+            )
+            for comp in result.components
+        ]
+        return oscal_pb2.ImportComponentDefinitionResponse(
+            valid=result.valid,
+            errors=result.errors,
+            components=components,
+            oscal_version=result.oscal_version,
+            component_definition_title=result.component_definition_title,
             source_label=request.source_label,
         )
 

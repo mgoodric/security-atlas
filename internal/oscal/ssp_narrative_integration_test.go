@@ -74,6 +74,10 @@ func (b *captureBridge) ImportProfile(_ context.Context, _ []byte, _ [][]byte, _
 	return &oscalv1.ImportProfileResponse{}, nil
 }
 
+func (b *captureBridge) ImportComponentDefinition(_ context.Context, _ []byte, _ string) (*oscalv1.ImportComponentDefinitionResponse, error) {
+	return &oscalv1.ImportComponentDefinitionResponse{}, nil
+}
+
 func (b *captureBridge) Close() error { return nil }
 
 // seedControlWithDescription seeds a control with an explicit authored

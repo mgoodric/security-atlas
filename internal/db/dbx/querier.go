@@ -817,6 +817,23 @@ type Querier interface {
 	// SCF anchor. The (imported_catalog_id, source_control_id) UNIQUE
 	// constraint rejects a duplicate control within one catalog.
 	InsertImportedCatalogControl(ctx context.Context, arg InsertImportedCatalogControlParams) (ImportedCatalogControl, error)
+	// Append one defined-component for an imported component-definition. The
+	// (imported_catalog_id, component_uuid) UNIQUE constraint rejects a duplicate
+	// component within one import.
+	InsertImportedComponent(ctx context.Context, arg InsertImportedComponentParams) (ImportedComponent, error)
+	// Append one vendor-attributed CLAIM (an implemented-requirement) mapped (or
+	// flagged NULL for mapping) to an SCF anchor. is_vendor_claim defaults TRUE
+	// and claim_status defaults 'asserted' (the table defaults) — the import never
+	// writes anything else (P0-512-1).
+	InsertImportedComponentClaim(ctx context.Context, arg InsertImportedComponentClaimParams) (ImportedComponentClaim, error)
+	// ===== slice 512: component-definition import (vendor-claim ingest) =====
+	// Create one imported-COMPONENT-DEFINITION provenance row: source
+	// 'oscal-component-import', kind 'component_definition'. The vendor/product
+	// label rides in source_label and the document title in catalog_title; the
+	// per-component + per-claim rows live in imported_components +
+	// imported_component_claims (slice-512 D1/D2). control_count carries the
+	// TOTAL vendor-claim count across all components (for provenance display).
+	InsertImportedComponentDefinition(ctx context.Context, arg InsertImportedComponentDefinitionParams) (ImportedCatalog, error)
 	// ===== slice 511: profile import (resolve direction) =====
 	// Create one imported-PROFILE provenance row: source 'oscal-profile-import',
 	// kind 'profile', carrying the resolved profile's declared title. The
@@ -1494,6 +1511,15 @@ type Querier interface {
 	ListImportedCatalogControls(ctx context.Context, arg ListImportedCatalogControlsParams) ([]ImportedCatalogControl, error)
 	// Enumerate every imported catalog for the tenant, most recent first.
 	ListImportedCatalogs(ctx context.Context, tenantID pgtype.UUID) ([]ImportedCatalog, error)
+	// Every vendor claim for one imported component, ordered for stable
+	// rendering.
+	ListImportedComponentClaims(ctx context.Context, arg ListImportedComponentClaimsParams) ([]ImportedComponentClaim, error)
+	// Enumerate every imported component-definition for the tenant, most recent
+	// first (index-served by idx_imported_catalogs_tenant_components).
+	ListImportedComponentDefinitions(ctx context.Context, tenantID pgtype.UUID) ([]ImportedCatalog, error)
+	// Every defined-component for one imported component-definition, ordered for
+	// stable rendering.
+	ListImportedComponentsForDefinition(ctx context.Context, arg ListImportedComponentsForDefinitionParams) ([]ImportedComponent, error)
 	// Enumerate every resolved profile baseline for the tenant, most recent
 	// first (index-served by idx_imported_catalogs_tenant_profiles).
 	ListImportedProfiles(ctx context.Context, tenantID pgtype.UUID) ([]ImportedCatalog, error)

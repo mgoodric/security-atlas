@@ -36,12 +36,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	OscalBridgeService_SerializeSSP_FullMethodName        = "/oscal.v1.OscalBridgeService/SerializeSSP"
-	OscalBridgeService_SerializeAssessment_FullMethodName = "/oscal.v1.OscalBridgeService/SerializeAssessment"
-	OscalBridgeService_SerializePOAM_FullMethodName       = "/oscal.v1.OscalBridgeService/SerializePOAM"
-	OscalBridgeService_RoundTripValidate_FullMethodName   = "/oscal.v1.OscalBridgeService/RoundTripValidate"
-	OscalBridgeService_ImportCatalog_FullMethodName       = "/oscal.v1.OscalBridgeService/ImportCatalog"
-	OscalBridgeService_ImportProfile_FullMethodName       = "/oscal.v1.OscalBridgeService/ImportProfile"
+	OscalBridgeService_SerializeSSP_FullMethodName              = "/oscal.v1.OscalBridgeService/SerializeSSP"
+	OscalBridgeService_SerializeAssessment_FullMethodName       = "/oscal.v1.OscalBridgeService/SerializeAssessment"
+	OscalBridgeService_SerializePOAM_FullMethodName             = "/oscal.v1.OscalBridgeService/SerializePOAM"
+	OscalBridgeService_RoundTripValidate_FullMethodName         = "/oscal.v1.OscalBridgeService/RoundTripValidate"
+	OscalBridgeService_ImportCatalog_FullMethodName             = "/oscal.v1.OscalBridgeService/ImportCatalog"
+	OscalBridgeService_ImportProfile_FullMethodName             = "/oscal.v1.OscalBridgeService/ImportProfile"
+	OscalBridgeService_ImportComponentDefinition_FullMethodName = "/oscal.v1.OscalBridgeService/ImportComponentDefinition"
 )
 
 // OscalBridgeServiceClient is the client API for OscalBridgeService service.
@@ -88,6 +89,21 @@ type OscalBridgeServiceClient interface {
 	// returned. Caps (document size, resolved-control count, single import
 	// level) bound the expansion-attack surface (threat-model D / AC-3).
 	ImportProfile(ctx context.Context, in *ImportProfileRequest, opts ...grpc.CallOption) (*ImportProfileResponse, error)
+	// ImportComponentDefinition deserializes an inbound OSCAL
+	// `component-definition` JSON document via compliance-trestle, validates it
+	// against OSCAL v1.1.x, and returns a normalized projection of the defined
+	// components + their implemented-requirements — the VENDOR'S
+	// control-implementation CLAIMS (slice 512). A component-definition is the
+	// vendor-side artifact: a product vendor ships it to assert "this product
+	// implements control X this way". The Go side persists each
+	// implemented-requirement as a vendor-attributed CLAIM (NOT
+	// platform-verified evidence; never auto-satisfies a control — the
+	// load-bearing P0-512-1). Like ImportCatalog the bridge NEVER dereferences
+	// any `href` / external resource the document references (P0-512-2 /
+	// threat-model I): links / back-matter resources are opaque metadata. A
+	// document-size cap + component-count + requirement-count cap bound the
+	// expansion-attack surface (threat-model D / AC-3).
+	ImportComponentDefinition(ctx context.Context, in *ImportComponentDefinitionRequest, opts ...grpc.CallOption) (*ImportComponentDefinitionResponse, error)
 }
 
 type oscalBridgeServiceClient struct {
@@ -158,6 +174,16 @@ func (c *oscalBridgeServiceClient) ImportProfile(ctx context.Context, in *Import
 	return out, nil
 }
 
+func (c *oscalBridgeServiceClient) ImportComponentDefinition(ctx context.Context, in *ImportComponentDefinitionRequest, opts ...grpc.CallOption) (*ImportComponentDefinitionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ImportComponentDefinitionResponse)
+	err := c.cc.Invoke(ctx, OscalBridgeService_ImportComponentDefinition_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OscalBridgeServiceServer is the server API for OscalBridgeService service.
 // All implementations must embed UnimplementedOscalBridgeServiceServer
 // for forward compatibility.
@@ -202,6 +228,21 @@ type OscalBridgeServiceServer interface {
 	// returned. Caps (document size, resolved-control count, single import
 	// level) bound the expansion-attack surface (threat-model D / AC-3).
 	ImportProfile(context.Context, *ImportProfileRequest) (*ImportProfileResponse, error)
+	// ImportComponentDefinition deserializes an inbound OSCAL
+	// `component-definition` JSON document via compliance-trestle, validates it
+	// against OSCAL v1.1.x, and returns a normalized projection of the defined
+	// components + their implemented-requirements — the VENDOR'S
+	// control-implementation CLAIMS (slice 512). A component-definition is the
+	// vendor-side artifact: a product vendor ships it to assert "this product
+	// implements control X this way". The Go side persists each
+	// implemented-requirement as a vendor-attributed CLAIM (NOT
+	// platform-verified evidence; never auto-satisfies a control — the
+	// load-bearing P0-512-1). Like ImportCatalog the bridge NEVER dereferences
+	// any `href` / external resource the document references (P0-512-2 /
+	// threat-model I): links / back-matter resources are opaque metadata. A
+	// document-size cap + component-count + requirement-count cap bound the
+	// expansion-attack surface (threat-model D / AC-3).
+	ImportComponentDefinition(context.Context, *ImportComponentDefinitionRequest) (*ImportComponentDefinitionResponse, error)
 	mustEmbedUnimplementedOscalBridgeServiceServer()
 }
 
@@ -229,6 +270,9 @@ func (UnimplementedOscalBridgeServiceServer) ImportCatalog(context.Context, *Imp
 }
 func (UnimplementedOscalBridgeServiceServer) ImportProfile(context.Context, *ImportProfileRequest) (*ImportProfileResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ImportProfile not implemented")
+}
+func (UnimplementedOscalBridgeServiceServer) ImportComponentDefinition(context.Context, *ImportComponentDefinitionRequest) (*ImportComponentDefinitionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ImportComponentDefinition not implemented")
 }
 func (UnimplementedOscalBridgeServiceServer) mustEmbedUnimplementedOscalBridgeServiceServer() {}
 func (UnimplementedOscalBridgeServiceServer) testEmbeddedByValue()                            {}
@@ -359,6 +403,24 @@ func _OscalBridgeService_ImportProfile_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OscalBridgeService_ImportComponentDefinition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ImportComponentDefinitionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OscalBridgeServiceServer).ImportComponentDefinition(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OscalBridgeService_ImportComponentDefinition_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OscalBridgeServiceServer).ImportComponentDefinition(ctx, req.(*ImportComponentDefinitionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OscalBridgeService_ServiceDesc is the grpc.ServiceDesc for OscalBridgeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -389,6 +451,10 @@ var OscalBridgeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ImportProfile",
 			Handler:    _OscalBridgeService_ImportProfile_Handler,
+		},
+		{
+			MethodName: "ImportComponentDefinition",
+			Handler:    _OscalBridgeService_ImportComponentDefinition_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
