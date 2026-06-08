@@ -66,7 +66,12 @@ mutate a network resource, so NSG rule changes are unreachable by construction
 reads the ARM **management plane** only: vault configuration (RBAC-vs-access-
 policy mode, purge protection, soft-delete, public-network-access, network ACLs)
 and the **access-policy / role-assignment metadata** (which principal has which
-permission verbs / role on the vault). It **never** reads a secret, key, or
+permission verbs / role on the vault). For a legacy access-policy vault those
+principals come from the vault's `accessPolicies`; for an RBAC vault they come
+from a second read-only ARM read of `Microsoft.Authorization/roleAssignments`
+scoped to the vault resource id (principal object id + role definition name —
+slice 615), with role names resolved via a bounded read-only `roleDefinitions`
+lookup. Reader suffices for both reads. It **never** reads a secret, key, or
 certificate **value** — those live on the Key-Vault **data plane**
 (`vault.azure.net`), which the connector never calls. Do **not** grant this
 connector any Key-Vault **data-plane** role (`Key Vault Secrets User`,
@@ -240,11 +245,12 @@ The connector ships five evidence surfaces. It does **not** ship:
 - Key-Vault secret / key / certificate **values** — the Key-Vault kind reads
   the management-plane access posture only; secret material lives on the data
   plane and is never read
-- Key-Vault **RBAC role-assignment enumeration** — for an RBAC-authorization
-  vault the v0 read reports the access **model** (RBAC on) + vault config but
-  does not enumerate the per-vault `Microsoft.Authorization/roleAssignments`
-  (legacy access-policy entries are reported in full). Role-assignment
-  enumeration is a documented follow-on (filed as a spillover slice)
+- Key-Vault **role-assignment cursor pagination** — for an RBAC-authorization
+  vault the connector now enumerates the per-vault
+  `Microsoft.Authorization/roleAssignments` (slice 615, symmetric with the
+  legacy access-policy read), but the per-vault read is a single **bounded**
+  page (capped defensively) — a vault with more role assignments than the cap
+  needs the shared cursor-pagination follow-on (filed as spillover slice 623)
 - Azure Firewall policy rule collections (a sibling follow-on to the NSG kind)
 - route tables / VNet peering topology
 - Azure-Policy / Activity-Log evidence
