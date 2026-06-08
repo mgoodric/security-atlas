@@ -302,6 +302,45 @@ test.describe("/settings user-facing page", () => {
     await expect(webhookRow.locator('input[type="url"]')).toHaveCount(0);
   });
 
+  test("slice 585: unconfigured channel renders disabled toggle + operator note", async ({
+    authedPage: page,
+  }) => {
+    // Slice 585: when the backend reports configured=false (the operator has
+    // not set the channel's delivery env), the toggle renders DISABLED with a
+    // muted "not configured by your administrator" note. The live
+    // docker-compose backend's channel-env state is not deterministic here, so
+    // we intercept the BFF GET and inject configured=false to assert the
+    // unconfigured branch deterministically (the slice spec's "route-level
+    // assertion" option). The injected body carries ONLY the booleans — no
+    // target/secret — matching the P0-585 wire contract.
+    await page.route("**/api/me/slack-channel", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ enabled: false, configured: false }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto("/settings");
+    await expect(
+      page.getByTestId("settings-section-notifications"),
+    ).toBeVisible();
+
+    const slackToggle = page.getByTestId("settings-slack-channel-toggle");
+    await expect(slackToggle).toBeVisible();
+    // The unconfigured channel's toggle is disabled and stays unchecked.
+    await expect(slackToggle).toBeDisabled();
+    await expect(slackToggle).not.toBeChecked();
+    // The explanatory note is shown.
+    const note = page.getByTestId("settings-slack-channel-unconfigured-note");
+    await expect(note).toBeVisible();
+    await expect(note).toContainText("not configured by your administrator");
+  });
+
   test("AC-8: time-zone <select> reflects current value + PATCH wires", async ({
     authedPage: page,
   }) => {

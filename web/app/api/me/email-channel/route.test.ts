@@ -58,6 +58,32 @@ describe("GET /api/me/email-channel", () => {
     const body = (await res.json()) as { enabled: boolean };
     expect(body.enabled).toBe(true);
   });
+
+  test("passes the slice-585 configured field through (configured=true)", async () => {
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response('{"enabled":false,"configured":true}', { status: 200 }),
+    );
+    const res = await GET();
+    const body = (await res.json()) as {
+      enabled: boolean;
+      configured: boolean;
+    };
+    expect(body.configured).toBe(true);
+  });
+
+  test("passes the slice-585 configured field through (configured=false)", async () => {
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response('{"enabled":false,"configured":false}', { status: 200 }),
+    );
+    const res = await GET();
+    const body = (await res.json()) as {
+      enabled: boolean;
+      configured: boolean;
+    };
+    expect(body.configured).toBe(false);
+  });
 });
 
 describe("PUT /api/me/email-channel", () => {

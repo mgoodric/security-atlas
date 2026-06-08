@@ -29,7 +29,7 @@ func TestChannelOptInHandler_IdentityRejection(t *testing.T) {
 		t.Error("set reached on a deny path")
 		return nil
 	}
-	h := NewChannelOptIn("slack", getNever, setNever)
+	h := NewChannelOptIn("slack", true, getNever, setNever)
 
 	t.Run("GET no auth → 401", func(t *testing.T) {
 		t.Parallel()
@@ -94,7 +94,7 @@ func TestChannelOptInHandler_HappyPath(t *testing.T) {
 		setTenant, setUser, setEnabled = tn, u, enabled
 		return nil
 	}
-	h := NewChannelOptIn("webhook", get, set)
+	h := NewChannelOptIn("webhook", true, get, set)
 
 	// GET → 200 echoing get's value.
 	base := httptest.NewRequest(http.MethodGet, "/v1/me/webhook-channel", nil)
@@ -108,6 +108,10 @@ func TestChannelOptInHandler_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"enabled":true`) {
 		t.Fatalf("GET body = %s", rec.Body.String())
+	}
+	// Slice 585: configured=true must be carried on the GET wire.
+	if !strings.Contains(rec.Body.String(), `"configured":true`) {
+		t.Fatalf("GET body missing configured=true: %s", rec.Body.String())
 	}
 
 	// PUT → 200; set receives the parsed identity + flag.
@@ -123,5 +127,71 @@ func TestChannelOptInHandler_HappyPath(t *testing.T) {
 	}
 	if setTenant.String() != tenant || setUser.String() != user || !setEnabled {
 		t.Fatalf("set got (%s,%s,%v); want (%s,%s,true)", setTenant, setUser, setEnabled, tenant, user)
+	}
+}
+
+// Slice 585: the GET (and PUT) wire carries `configured` mirroring the
+// operator-config-presence boolean passed at construction — true when the
+// operator env is set, false when unset. The boolean is the ONLY signal;
+// no secret target value is ever emitted (P0-585 / P0-543-2).
+func TestChannelOptInHandler_ConfiguredSignal(t *testing.T) {
+	t.Parallel()
+
+	// A sentinel secret an over-eager implementation might leak. The
+	// handler never sees it (the config-presence boolean is decoupled from
+	// the target), so this is a belt-and-suspenders assertion that the
+	// response body contains only the boolean, never a URL/token shape.
+	const secretSentinel = "https://hooks.example.test/T000/B000/xxxxsecretxxxx"
+
+	cases := []struct {
+		name       string
+		configured bool
+		wantField  string
+	}{
+		{"env set → configured true", true, `"configured":true`},
+		{"env unset → configured false", false, `"configured":false`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tenant := uuid.NewString()
+			user := uuid.NewString()
+			get := func(context.Context, uuid.UUID, uuid.UUID) (bool, error) { return false, nil }
+			set := func(context.Context, uuid.UUID, uuid.UUID, bool) error { return nil }
+			h := NewChannelOptIn("webhook", tc.configured, get, set)
+
+			base := httptest.NewRequest(http.MethodGet, "/v1/me/webhook-channel", nil)
+			ctx := authctx.WithCredential(base.Context(),
+				credstore.Credential{ID: "k", TenantID: tenant, UserID: user})
+			ctx = mustTenant(t, ctx, tenant)
+			rec := httptest.NewRecorder()
+			h.Get(rec, base.WithContext(ctx))
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET = %d, want 200", rec.Code)
+			}
+			body := rec.Body.String()
+			if !strings.Contains(body, tc.wantField) {
+				t.Fatalf("GET body = %s, want %s", body, tc.wantField)
+			}
+			// The secret target must NEVER appear in the response.
+			if strings.Contains(body, secretSentinel) || strings.Contains(body, "hooks.example") {
+				t.Fatalf("GET body leaked a target value: %s", body)
+			}
+			// PUT echoes configured too.
+			putBase := httptest.NewRequest(http.MethodPut, "/v1/me/webhook-channel",
+				strings.NewReader(`{"enabled":false}`))
+			pctx := authctx.WithCredential(putBase.Context(),
+				credstore.Credential{ID: "k", TenantID: tenant, UserID: user})
+			pctx = mustTenant(t, pctx, tenant)
+			prec := httptest.NewRecorder()
+			h.Put(prec, putBase.WithContext(pctx))
+			if prec.Code != http.StatusOK {
+				t.Fatalf("PUT = %d, want 200", prec.Code)
+			}
+			if !strings.Contains(prec.Body.String(), tc.wantField) {
+				t.Fatalf("PUT body = %s, want %s", prec.Body.String(), tc.wantField)
+			}
+		})
 	}
 }
