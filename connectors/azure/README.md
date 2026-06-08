@@ -4,7 +4,7 @@ The third major-cloud connector (slice 486), bringing Azure to parity with the
 AWS (slice 004) and the planned GCP (slice 442) connectors. It follows the
 locked connector pattern verbatim: register-per-run, a stable `actor_id`, an
 hour-truncated `observed_at`, scope minimums, and vendor-native read-only auth.
-It emits four evidence kinds:
+It emits five evidence kinds:
 
 | Kind                              | Profile | Source                                                                                                    |
 | --------------------------------- | ------- | --------------------------------------------------------------------------------------------------------- |
@@ -12,17 +12,22 @@ It emits four evidence kinds:
 | `azure.storage_account_config.v1` | pull    | Azure Resource Manager `Microsoft.Storage/storageAccounts` (ARM **Reader** role)                          |
 | `azure.aks_cluster_config.v1`     | pull    | Azure Resource Manager `Microsoft.ContainerService/managedClusters` (ARM **Reader** role) — slice 519     |
 | `azure.nsg_rules.v1`              | pull    | Azure Resource Manager `Microsoft.Network/networkSecurityGroups` (ARM **Reader** role) — slice 520        |
+| `azure.keyvault_access_config.v1` | pull    | Azure Resource Manager `Microsoft.KeyVault/vaults` (ARM **Reader** role) — slice 521                      |
 
 The connector reads **configuration + role-assignment metadata only**. It never
-reads blob/object contents, Key-Vault secret values, storage access keys, SAS
-tokens, user mailbox/profile PII beyond the display name needed to name an
-assignment, or — for AKS — admin kubeconfig / cluster-admin credentials,
-service-principal secrets, or workload/pod manifests (the AKS read calls only
-the managed-cluster **list** surface, never `listClusterAdminCredential`), or —
-for NSGs — flow logs, packet captures, or traffic contents (the NSG read calls
-only the NSG **list** surface and never mutates a network resource). The Azure
-credential stays source-side and never enters an evidence record or a platform
-push (canvas invariant #3).
+reads blob/object contents, Key-Vault secret/key/certificate values, storage
+access keys, SAS tokens, user mailbox/profile PII beyond the display name needed
+to name an assignment, or — for AKS — admin kubeconfig / cluster-admin
+credentials, service-principal secrets, or workload/pod manifests (the AKS read
+calls only the managed-cluster **list** surface, never
+`listClusterAdminCredential`), or — for NSGs — flow logs, packet captures, or
+traffic contents (the NSG read calls only the NSG **list** surface and never
+mutates a network resource), or — for Key Vaults — any secret, key, or
+certificate **value** (the Key-Vault read calls only the ARM management-plane
+vault **list** surface — vault config + access policies — and **never** the
+Key-Vault data plane `vault.azure.net`; it requires **no** Key-Vault data-plane
+role). The Azure credential stays source-side and never enters an evidence
+record or a platform push (canvas invariant #3).
 
 ## Profile + interval — honest, not "continuous monitoring"
 
@@ -43,18 +48,34 @@ new auth scheme.
 Create a dedicated read-only app-registration / managed identity and grant it
 **exactly** the permissions below. Every call the connector makes is a read.
 
-| Surface                | Permission                           | Access | Gates                                                                                                                                                                                         |
-| ---------------------- | ------------------------------------ | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Microsoft Graph        | `Directory.Read.All` (application)   | Read   | `azure.entra_role_assignment.v1` (directory-role / RBAC assignments)                                                                                                                          |
-| Microsoft Graph        | `Application.Read.All` (application) | Read   | `azure.entra_role_assignment.v1` (service-principal / app inventory)                                                                                                                          |
-| Azure Resource Manager | **Reader** (built-in role)           | Read   | `azure.storage_account_config.v1` (storage account configuration), `azure.aks_cluster_config.v1` (AKS managed-cluster configuration) **and** `azure.nsg_rules.v1` (NSG firewall-rule posture) |
+| Surface                | Permission                           | Access | Gates                                                                                                                                                                                                                                                                     |
+| ---------------------- | ------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Microsoft Graph        | `Directory.Read.All` (application)   | Read   | `azure.entra_role_assignment.v1` (directory-role / RBAC assignments)                                                                                                                                                                                                      |
+| Microsoft Graph        | `Application.Read.All` (application) | Read   | `azure.entra_role_assignment.v1` (service-principal / app inventory)                                                                                                                                                                                                      |
+| Azure Resource Manager | **Reader** (built-in role)           | Read   | `azure.storage_account_config.v1` (storage account configuration), `azure.aks_cluster_config.v1` (AKS managed-cluster configuration), `azure.nsg_rules.v1` (NSG firewall-rule posture) **and** `azure.keyvault_access_config.v1` (Key-Vault access-policy / RBAC posture) |
 
 The **same** ARM **Reader** role gates every ARM-sourced kind — the AKS kind
-(slice 519) and the NSG kind (slice 520) add **no** new Azure scope (P0-519-2 /
-P0-520-1). Reader cannot call `listClusterAdminCredential` (the
-privilege-escalating admin-kubeconfig API), so admin credentials are unreachable
-by construction (P0-519-1); Reader cannot mutate a network resource, so NSG rule
-changes are unreachable by construction (P0-520-3).
+(slice 519), the NSG kind (slice 520), and the Key-Vault kind (slice 521) add
+**no** new Azure scope (P0-519-2 / P0-520-1 / P0-521-3). Reader cannot call
+`listClusterAdminCredential` (the privilege-escalating admin-kubeconfig API), so
+admin credentials are unreachable by construction (P0-519-1); Reader cannot
+mutate a network resource, so NSG rule changes are unreachable by construction
+(P0-520-3).
+
+**Key Vault — the over-privilege trap (P0-521-1, hard).** The Key-Vault kind
+reads the ARM **management plane** only: vault configuration (RBAC-vs-access-
+policy mode, purge protection, soft-delete, public-network-access, network ACLs)
+and the **access-policy / role-assignment metadata** (which principal has which
+permission verbs / role on the vault). It **never** reads a secret, key, or
+certificate **value** — those live on the Key-Vault **data plane**
+(`vault.azure.net`), which the connector never calls. Do **not** grant this
+connector any Key-Vault **data-plane** role (`Key Vault Secrets User`,
+`Key Vault Crypto User`, `Key Vault Certificates Officer`, `Key Vault
+Administrator`, the legacy `get`/`list` access policies on secrets, etc.) to
+"let it read the vault" — that is the over-privilege trap and is **not**
+required. ARM **Reader** alone suffices, and a secret value is unreachable by
+construction (the connector has no data-plane code path and the collector struct
+has no field to hold secret material).
 
 Run `atlas-azure permissions` to print this list.
 
@@ -66,15 +87,17 @@ on the subscription. Do **not** use the broad **Global Administrator** /
 the narrower set. The connector has no write code path; the only Graph/ARM
 operations it issues are reads (`GET .../roleAssignments`,
 `GET .../storageAccounts`, `GET .../managedClusters`,
-`GET .../networkSecurityGroups`). It never issues the
-`listClusterAdminCredential` / `listClusterUserCredential` POSTs that return
-kubeconfig credentials, and it never issues any NSG write / mutate call.
+`GET .../networkSecurityGroups`, `GET .../Microsoft.KeyVault/vaults`). It never
+issues the `listClusterAdminCredential` / `listClusterUserCredential` POSTs that
+return kubeconfig credentials, it never issues any NSG write / mutate call, and
+it never issues any Key-Vault **data-plane** (`vault.azure.net`) secret/key/
+certificate `GET`.
 
 The Graph-permission vs ARM-role split is the scope-minimum subtlety: identity
-evidence needs the two Graph application permissions; storage, AKS **and** NSG
-evidence all need only the single ARM Reader role. Grant only the set for the
-kinds you run (use `--skip-entra` / `--skip-storage` / `--skip-aks` /
-`--skip-nsg` to run a subset of surfaces).
+evidence needs the two Graph application permissions; storage, AKS, NSG **and**
+Key-Vault evidence all need only the single ARM Reader role. Grant only the set
+for the kinds you run (use `--skip-entra` / `--skip-storage` / `--skip-aks` /
+`--skip-nsg` / `--skip-keyvault` to run a subset of surfaces).
 
 ## Subcommands
 
@@ -84,7 +107,7 @@ atlas-azure register \
   --endpoint platform.example.com:443 \
   --token "$SECURITY_ATLAS_TOKEN"
 
-# Read Entra ID + Azure Storage + AKS + NSG, push evidence records.
+# Read Entra ID + Azure Storage + AKS + NSG + Key Vault, push evidence records.
 # Azure credentials are read from the environment (never the CLI, so the
 # secret stays out of shell history):
 export AZURE_TENANT_ID=<tenant-guid>
@@ -101,24 +124,26 @@ atlas-azure run \
 atlas-azure permissions
 ```
 
-| Flag                | Subcommand | Required | Default                       | Notes                                                                                                     |
-| ------------------- | ---------- | -------- | ----------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `--endpoint`        | both       | yes      | env `SECURITY_ATLAS_ENDPOINT` | platform gRPC endpoint                                                                                    |
-| `--token`           | both       | yes      | env `SECURITY_ATLAS_TOKEN`    | security-atlas bearer token                                                                               |
-| `--insecure`        | both       | no       | `false`                       | disables TLS; loopback endpoints only                                                                     |
-| `--tenant-id`       | `run`      | no\*     | env `AZURE_TENANT_ID`         | Entra tenant id (\*required, via flag or env)                                                             |
-| `--client-id`       | `run`      | no\*     | env `AZURE_CLIENT_ID`         | app-registration client id (client-credentials mode)                                                      |
-| `--subscription-id` | `run`      | yes†     | —                             | subscription for the storage + AKS + NSG kinds († unless `--skip-storage`, `--skip-aks` and `--skip-nsg`) |
-| `--environment`     | `run`      | yes      | —                             | environment scope tag; records are never emitted un-scoped                                                |
-| `--auth-mode`       | `run`      | no       | `client-credentials`          | `client-credentials` or `managed-identity`                                                                |
-| `--entra-control`   | `run`      | no       | `scf:IAC-21`                  | control id attached to entra records                                                                      |
-| `--storage-control` | `run`      | no       | `scf:CRY-04`                  | control id attached to storage records                                                                    |
-| `--aks-control`     | `run`      | no       | `scf:CFG-02`                  | control id attached to AKS records                                                                        |
-| `--nsg-control`     | `run`      | no       | `scf:NET-04`                  | control id attached to NSG records                                                                        |
-| `--skip-entra`      | `run`      | no       | `false`                       | skip the `azure.entra_role_assignment.v1` pull                                                            |
-| `--skip-storage`    | `run`      | no       | `false`                       | skip the `azure.storage_account_config.v1` pull                                                           |
-| `--skip-aks`        | `run`      | no       | `false`                       | skip the `azure.aks_cluster_config.v1` pull                                                               |
-| `--skip-nsg`        | `run`      | no       | `false`                       | skip the `azure.nsg_rules.v1` pull                                                                        |
+| Flag                 | Subcommand | Required | Default                       | Notes                                                                                                                                           |
+| -------------------- | ---------- | -------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--endpoint`         | both       | yes      | env `SECURITY_ATLAS_ENDPOINT` | platform gRPC endpoint                                                                                                                          |
+| `--token`            | both       | yes      | env `SECURITY_ATLAS_TOKEN`    | security-atlas bearer token                                                                                                                     |
+| `--insecure`         | both       | no       | `false`                       | disables TLS; loopback endpoints only                                                                                                           |
+| `--tenant-id`        | `run`      | no\*     | env `AZURE_TENANT_ID`         | Entra tenant id (\*required, via flag or env)                                                                                                   |
+| `--client-id`        | `run`      | no\*     | env `AZURE_CLIENT_ID`         | app-registration client id (client-credentials mode)                                                                                            |
+| `--subscription-id`  | `run`      | yes†     | —                             | subscription for the storage + AKS + NSG + Key-Vault kinds († unless all of `--skip-storage`, `--skip-aks`, `--skip-nsg` and `--skip-keyvault`) |
+| `--environment`      | `run`      | yes      | —                             | environment scope tag; records are never emitted un-scoped                                                                                      |
+| `--auth-mode`        | `run`      | no       | `client-credentials`          | `client-credentials` or `managed-identity`                                                                                                      |
+| `--entra-control`    | `run`      | no       | `scf:IAC-21`                  | control id attached to entra records                                                                                                            |
+| `--storage-control`  | `run`      | no       | `scf:CRY-04`                  | control id attached to storage records                                                                                                          |
+| `--aks-control`      | `run`      | no       | `scf:CFG-02`                  | control id attached to AKS records                                                                                                              |
+| `--nsg-control`      | `run`      | no       | `scf:NET-04`                  | control id attached to NSG records                                                                                                              |
+| `--keyvault-control` | `run`      | no       | `scf:CRY-09`                  | control id attached to Key-Vault records                                                                                                        |
+| `--skip-entra`       | `run`      | no       | `false`                       | skip the `azure.entra_role_assignment.v1` pull                                                                                                  |
+| `--skip-storage`     | `run`      | no       | `false`                       | skip the `azure.storage_account_config.v1` pull                                                                                                 |
+| `--skip-aks`         | `run`      | no       | `false`                       | skip the `azure.aks_cluster_config.v1` pull                                                                                                     |
+| `--skip-nsg`         | `run`      | no       | `false`                       | skip the `azure.nsg_rules.v1` pull                                                                                                              |
+| `--skip-keyvault`    | `run`      | no       | `false`                       | skip the `azure.keyvault_access_config.v1` pull                                                                                                 |
 
 The client secret is **only** read from `AZURE_CLIENT_SECRET` — never a CLI flag
 — so it never lands in shell history. It is never logged and never enters an
@@ -126,7 +151,7 @@ evidence record (the resolved credential redacts its secret on every format
 path).
 
 `register` announces `name=azure-connector`,
-`supported_kinds=[azure.entra_role_assignment.v1, azure.storage_account_config.v1, azure.aks_cluster_config.v1, azure.nsg_rules.v1]`,
+`supported_kinds=[azure.entra_role_assignment.v1, azure.storage_account_config.v1, azure.aks_cluster_config.v1, azure.nsg_rules.v1, azure.keyvault_access_config.v1]`,
 and `profiles_supported=[pull]` to `ConnectorRegistryService.Register`. The
 `profiles_supported` value describes how the connector retrieves data **from
 Azure** (a scheduled pull); the platform-side wire is always push (invariant #3).
@@ -136,29 +161,30 @@ Azure** (a scheduled pull); the platform-side wire is always push (invariant #3)
 Every emitted record sets the minimum scope dimensions the connector-pattern
 convention requires:
 
-| Scope key       | Entra value              | Storage / AKS / NSG value | Source                         |
-| --------------- | ------------------------ | ------------------------- | ------------------------------ |
-| `cloud_account` | `azure:<tenant_id>`      | `azure:<subscription_id>` | the resolved credential / flag |
-| `environment`   | the `--environment` flag | the `--environment` flag  | the `--environment` flag       |
+| Scope key       | Entra value              | Storage / AKS / NSG / Key-Vault value | Source                         |
+| --------------- | ------------------------ | ------------------------------------- | ------------------------------ |
+| `cloud_account` | `azure:<tenant_id>`      | `azure:<subscription_id>`             | the resolved credential / flag |
+| `environment`   | the `--environment` flag | the `--environment` flag              | the `--environment` flag       |
 
-For Entra the account-equivalent is the **tenant**; for Storage, AKS and NSG it is
-the **subscription** (ARM resources are subscription-scoped). `run` fails loudly
-when `--environment` is unset rather than pushing an un-scoped record.
+For Entra the account-equivalent is the **tenant**; for Storage, AKS, NSG and
+Key Vault it is the **subscription** (ARM resources are subscription-scoped).
+`run` fails loudly when `--environment` is unset rather than pushing an un-scoped
+record.
 
 `source_attribution.actor_id` follows the cross-connector convention
 `connector:<vendor>:<service>@<version>` — `connector:azure:entra@<version>` for
 identity records, `connector:azure:storage@<version>` for storage records,
-`connector:azure:aks@<version>` for AKS records, and
-`connector:azure:nsg@<version>` for NSG records, where `<version>` is the build's
-module version (or `dev` under `go run`).
+`connector:azure:aks@<version>` for AKS records, `connector:azure:nsg@<version>`
+for NSG records, and `connector:azure:keyvault@<version>` for Key-Vault records,
+where `<version>` is the build's module version (or `dev` under `go run`).
 
 ## Idempotency
 
 Each record's `idempotency_key` is
 `sha256("<kind>|<resource_id>|<hour_truncated_observed_at>")` (see
 `internal/idem`). `observed_at` is truncated to the UTC hour, so two runs within
-the same hour for the same assignment / storage account collapse to one ledger
-row; a run that crosses an hour boundary writes a fresh record.
+the same hour for the same assignment / storage account / vault collapse to one
+ledger row; a run that crosses an hour boundary writes a fresh record.
 `source_attribution.session_id` is left empty on purpose: a per-call UUID would
 change the record's canonical hash between dedup retries.
 
@@ -190,19 +216,37 @@ change the record's canonical hash between dedup retries.
   source/dest prefix, port range, priority) plus the subnet / NIC association
   counts ride in the payload for the platform evaluator; the final pass/fail per
   (control, NSG) is the evaluator's.
+- **`azure.keyvault_access_config.v1` → `PASS` / `FAIL` / `INCONCLUSIVE`.** The
+  connector verdicts the deterministic secrets-management posture: `FAIL` when
+  soft-delete is off, purge protection is off, or the vault is reachable from
+  the public network with no default-Deny network ACL; `INCONCLUSIVE` when a
+  per-vault read errored; `PASS` otherwise. The payload carries the access model
+  (RBAC vs access-policy), purge-protection / soft-delete / public-network-access
+  / network-ACL-default posture, and the access-policy / role-assignment
+  **metadata** (principal id/type + granted permission verbs or role name) for
+  the platform evaluator; the final pass/fail per (control, vault) is the
+  evaluator's. Secret/key/certificate **values** are never read and never ride
+  in the payload.
 
 ## Not in v0 (follow-ons)
 
-The connector ships four evidence surfaces. It does **not** ship:
+The connector ships five evidence surfaces. It does **not** ship:
 
 - AKS workload / pod-level evidence — the AKS kind reads **cluster-level**
   management-plane configuration only; pod manifests, secrets, and container
   images are osquery / a Kubernetes-native connector's job
 - NSG flow logs / packet captures / traffic contents — the NSG kind reads the
   security-**rule** posture only; traffic telemetry is out of scope
+- Key-Vault secret / key / certificate **values** — the Key-Vault kind reads
+  the management-plane access posture only; secret material lives on the data
+  plane and is never read
+- Key-Vault **RBAC role-assignment enumeration** — for an RBAC-authorization
+  vault the v0 read reports the access **model** (RBAC on) + vault config but
+  does not enumerate the per-vault `Microsoft.Authorization/roleAssignments`
+  (legacy access-policy entries are reported in full). Role-assignment
+  enumeration is a documented follow-on (filed as a spillover slice)
 - Azure Firewall policy rule collections (a sibling follow-on to the NSG kind)
 - route tables / VNet peering topology
-- Key-Vault access-policy evidence
 - Azure-Policy / Activity-Log evidence
 - an event-driven (subscribe) profile via Azure Event Grid
 - cursor pagination / multi-subscription auto-enumeration (v0 reads a bounded
@@ -219,19 +263,23 @@ go test ./connectors/azure/...
 ```
 
 Unit tests fake the Microsoft Graph + Azure Resource Manager surfaces (no live
-Azure, no real credentials) and pin the normalization, the storage, AKS **and**
-NSG hardening verdict matrices, the credential redaction, the read-only
-permission contract, and the `idem` hour-window behavior. Structural
-over-collection tests (`internal/aks`, `internal/nsg`) reflect over the
-collector structs' field names and fail the build if any field even hints at a
-secret / credential / kubeconfig / workload-content (AKS) or flow-log / packet /
-traffic-content (NSG) surface; the AKS client test asserts the read issues only a
-`GET` to the managed-cluster list endpoint (never a `credential` endpoint), and
-the NSG client test asserts the read issues only a `GET` to the
-networkSecurityGroups list endpoint (never a mutate). The integration test
-(in-package, bufconn platform — no Postgres) exercises the full collect → build →
-SDK `Push` → push-receipt round-trip for all four kinds and asserts two same-hour
-pushes collapse to one `record_id`, that emitted payloads carry
-config/assignment/rule metadata only (no PII / secrets / admin kubeconfig / flow
-logs — a per-kind allow-list, descending into the NSG rule list), and that the
-credential never surfaces in a formatted log.
+Azure, no real credentials) and pin the normalization, the storage, AKS, NSG
+**and** Key-Vault hardening verdict matrices, the credential redaction, the
+read-only permission contract, and the `idem` hour-window behavior. Structural
+over-collection tests (`internal/aks`, `internal/nsg`, `internal/keyvault`)
+reflect over the collector structs' field names and fail the build if any field
+even hints at a secret / credential / kubeconfig / workload-content (AKS),
+flow-log / packet / traffic-content (NSG), or secret/key/certificate-value
+(Key Vault) surface; the AKS client test asserts the read issues only a `GET` to
+the managed-cluster list endpoint (never a `credential` endpoint), the NSG client
+test asserts the read issues only a `GET` to the networkSecurityGroups list
+endpoint (never a mutate), and the Key-Vault client test asserts the read issues
+only a `GET` to the `Microsoft.KeyVault/vaults` management-plane list endpoint
+(never a `vault.azure.net` data-plane call). The integration test (in-package,
+bufconn platform — no Postgres) exercises the full collect → build → SDK `Push` →
+push-receipt round-trip for all five kinds and asserts two same-hour pushes
+collapse to one `record_id`, that emitted payloads carry config / assignment /
+rule / access-policy metadata only (no PII / secrets / admin kubeconfig / flow
+logs / secret values — a per-kind allow-list, descending into the NSG rule list
+and the Key-Vault access-entry list), and that the credential never surfaces in
+a formatted log.

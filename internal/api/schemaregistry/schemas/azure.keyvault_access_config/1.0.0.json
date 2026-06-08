@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/azure.keyvault_access_config/1.0.0.json",
+  "x-evidence-kind": "azure.keyvault_access_config.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IAC-21", "CRY-09"],
+  "title": "Azure Key-Vault access-policy / RBAC posture",
+  "description": "Per-Key-Vault secrets-management + least-privilege posture captured read-only from Azure Resource Manager (ARM Reader role): the access model (legacy access policies vs Azure RBAC authorization), purge-protection + soft-delete state, public-network-access posture, the network-ACL default action, and the principals entitled to the vault (legacy access-policy entries with their granted keys/secrets/certificates permission VERBS, or RBAC role-assignment principals with their role name). The minimum that demonstrates secrets-management / least-privilege posture (e.g. the vault enforces purge protection and grants no over-broad secret access). Management-plane CONFIGURATION + access-policy / role-assignment METADATA only — NEVER a secret, key, or certificate VALUE: the connector reads only the ARM management plane (vault list + access policies) and NEVER the Key-Vault data plane (vault.azure.net secret/key/certificate get); it is never granted any data-plane permission. The platform evaluator decides pass/fail per (control, vault); the connector emits a descriptive default verdict. x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "vault_id",
+    "vault_name",
+    "subscription_id",
+    "rbac_authorization"
+  ],
+  "properties": {
+    "vault_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ARM resource id of the Key Vault."
+    },
+    "vault_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Key-Vault name."
+    },
+    "subscription_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Subscription the vault lives in."
+    },
+    "resource_group": {
+      "type": "string",
+      "description": "Resource group containing the vault."
+    },
+    "location": {
+      "type": "string",
+      "description": "Azure region of the vault."
+    },
+    "rbac_authorization": {
+      "type": "boolean",
+      "description": "Vault uses Azure RBAC authorization (true) rather than legacy access policies (false)."
+    },
+    "purge_protection": {
+      "type": "boolean",
+      "description": "Purge protection is enabled (a soft-deleted vault/secret cannot be permanently purged before the retention period elapses)."
+    },
+    "soft_delete_enabled": {
+      "type": "boolean",
+      "description": "Soft-delete is enabled (deleted vaults/secrets are recoverable within the retention period)."
+    },
+    "public_network_access": {
+      "type": "string",
+      "description": "Public-network-access posture (Enabled | Disabled); empty when the ARM resource did not report it."
+    },
+    "network_acl_default": {
+      "type": "string",
+      "description": "Network-ACL default action (Allow | Deny); empty when no network ACLs are configured."
+    },
+    "access_entries": {
+      "type": "array",
+      "description": "Principals entitled to the vault. For a legacy-access-policy vault each entry is an access policy (principal_id + the granted permission VERBS); for an RBAC vault each entry is a role assignment (principal_id + role_name). Access METADATA only — never a secret/key/certificate value.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["principal_id", "principal_type"],
+        "properties": {
+          "principal_id": {
+            "type": "string",
+            "description": "Object id of the entitled principal."
+          },
+          "principal_type": {
+            "type": "string",
+            "enum": ["access_policy", "rbac_role_assignment"],
+            "description": "Whether this entitlement is a legacy access-policy entry or an Azure RBAC role assignment."
+          },
+          "permissions": {
+            "type": "array",
+            "description": "Granted access-policy permission verbs, namespaced as '<area>:<verb>' (e.g. secrets:get, keys:list). Empty for an RBAC role assignment. Permission NAMES only — never a secret value.",
+            "items": { "type": "string" }
+          },
+          "role_name": {
+            "type": "string",
+            "description": "RBAC role definition name (e.g. Key Vault Reader). Empty for a legacy access-policy entry."
+          }
+        }
+      }
+    }
+  }
+}
