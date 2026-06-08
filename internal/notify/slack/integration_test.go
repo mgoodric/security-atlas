@@ -103,6 +103,38 @@ func seedUser(t *testing.T, admin *pgxpool.Pool, email string, withUnread bool) 
 	return tenantID, userID
 }
 
+// seedNotification inserts one unread notification of the given type for the
+// user. Used by the slice-583 per-kind filter tests to build a multi-kind
+// digest the filter then narrows.
+func seedNotification(t *testing.T, admin *pgxpool.Pool, tenantID, userID uuid.UUID, ntype string) {
+	t.Helper()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO notifications (id, tenant_id, recipient_user_id, type, payload, created_at)
+		VALUES ($1, $2, $3, $4, '{}'::jsonb, now())
+	`, uuid.New(), tenantID, userID.String(), ntype); err != nil {
+		t.Fatalf("seed notification %q: %v", ntype, err)
+	}
+}
+
+// setPref writes one explicit slice-108 per-(event, channel) preference row for
+// the user. enabled=false is the per-kind opt-out the slice-583 filter honors.
+// Written as the admin (BYPASSRLS) with an explicit tenant_id so the row lands
+// under the right tenant regardless of GUC.
+func setPref(t *testing.T, admin *pgxpool.Pool, tenantID, userID uuid.UUID, event, channel string, enabled bool) {
+	t.Helper()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO user_notification_preferences (tenant_id, user_id, event, channel, enabled)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (tenant_id, user_id, event, channel) DO UPDATE SET enabled = EXCLUDED.enabled
+	`, tenantID, userID, event, channel, enabled); err != nil {
+		t.Fatalf("set pref %s/%s=%v: %v", event, channel, enabled, err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(),
+			`DELETE FROM user_notification_preferences WHERE tenant_id = $1`, tenantID)
+	})
+}
+
 func tenantCtx(t *testing.T, tenantID uuid.UUID) context.Context {
 	t.Helper()
 	ctx, err := tenancy.WithTenant(context.Background(), tenantID.String())
@@ -209,5 +241,97 @@ func TestSlackDeliver_NoCrossTenant(t *testing.T) {
 	}
 	if trA.count() != 0 {
 		t.Fatalf("cross-tenant leak: tenant A posted for tenant B's user")
+	}
+}
+
+// TestSlackDeliver_PerKindFilter_MutesOneKeepsOther proves the slice-583
+// per-kind filter narrows the Slack digest: with the master opt-in ON, a kind
+// whose `slack` channel pref is explicitly false is muted, while a sibling kind
+// with no pref row is delivered (default-on). The muted kind's count must NOT
+// appear in the posted body.
+func TestSlackDeliver_PerKindFilter_MutesOneKeepsOther(t *testing.T) {
+	app, admin := openPools(t)
+	tr := &fakeTransport{}
+	ch := slack.NewChannel(app, tr, "https://atlas.example.test")
+
+	// seedUser already seeds one control.drift; add a policy_ack_due sibling.
+	tenantID, userID := seedUser(t, admin, "slack-pk1@example.test", true)
+	seedNotification(t, admin, tenantID, userID, "policy_ack_due")
+	ctx := tenantCtx(t, tenantID)
+	if err := ch.SetOptIn(ctx, tenantID, userID, true); err != nil {
+		t.Fatalf("SetOptIn: %v", err)
+	}
+	// Mute control.drift for SLACK only (master-on + kind-off -> mute).
+	setPref(t, admin, tenantID, userID, "control_drift", "slack", false)
+
+	res, err := ch.DeliverDigest(ctx, userID, userID.String())
+	if err != nil {
+		t.Fatalf("DeliverDigest: %v", err)
+	}
+	if !res.Sent {
+		t.Fatalf("expected Sent (policy_ack_due survives): %+v", res)
+	}
+	body := string(tr.sent[0])
+	if strings.Contains(body, "Control-drift alerts") {
+		t.Errorf("muted kind (control.drift) leaked into Slack body:\n%s", body)
+	}
+	if !strings.Contains(body, "Policy acknowledgments due") {
+		t.Errorf("default-on sibling (policy_ack_due) missing from body:\n%s", body)
+	}
+}
+
+// TestSlackDeliver_PerKindFilter_EmailOptOutDoesNotMuteSlack proves the filter
+// is per-CHANNEL: an explicit EMAIL opt-out for a kind does NOT mute that kind
+// on SLACK (channel isolation — the slice-583 generalization). master-on +
+// no SLACK row -> default-on deliver, even though an email row says false.
+func TestSlackDeliver_PerKindFilter_EmailOptOutDoesNotMuteSlack(t *testing.T) {
+	app, admin := openPools(t)
+	tr := &fakeTransport{}
+	ch := slack.NewChannel(app, tr, "https://atlas.example.test")
+
+	tenantID, userID := seedUser(t, admin, "slack-pk2@example.test", true) // control.drift
+	ctx := tenantCtx(t, tenantID)
+	if err := ch.SetOptIn(ctx, tenantID, userID, true); err != nil {
+		t.Fatalf("SetOptIn: %v", err)
+	}
+	// Opt OUT of control.drift on EMAIL only; SLACK has no row -> default-on.
+	setPref(t, admin, tenantID, userID, "control_drift", "email", false)
+
+	res, err := ch.DeliverDigest(ctx, userID, userID.String())
+	if err != nil {
+		t.Fatalf("DeliverDigest: %v", err)
+	}
+	if !res.Sent {
+		t.Fatalf("email opt-out must not mute slack; expected Sent: %+v", res)
+	}
+	if !strings.Contains(string(tr.sent[0]), "Control-drift alerts") {
+		t.Errorf("control.drift wrongly muted on slack by an EMAIL opt-out:\n%s", string(tr.sent[0]))
+	}
+}
+
+// TestSlackDeliver_PerKindFilter_AllMutedSkips proves that muting EVERY unread
+// kind on slack collapses the digest to zero -> the delivery is skipped (no
+// post), mirroring the email all-muted case.
+func TestSlackDeliver_PerKindFilter_AllMutedSkips(t *testing.T) {
+	app, admin := openPools(t)
+	tr := &fakeTransport{}
+	ch := slack.NewChannel(app, tr, "https://atlas.example.test")
+
+	tenantID, userID := seedUser(t, admin, "slack-pk3@example.test", true) // control.drift
+	ctx := tenantCtx(t, tenantID)
+	if err := ch.SetOptIn(ctx, tenantID, userID, true); err != nil {
+		t.Fatalf("SetOptIn: %v", err)
+	}
+	setPref(t, admin, tenantID, userID, "control_drift", "slack", false)
+
+	res, err := ch.DeliverDigest(ctx, userID, userID.String())
+	if err != nil {
+		t.Fatalf("DeliverDigest: %v", err)
+	}
+	if res.Sent {
+		t.Fatalf("all kinds muted on slack must skip, got Sent: %+v", res)
+	}
+	if tr.count() != 0 {
+		t.Fatalf("all-muted slack digest still posted")
 	}
 }
