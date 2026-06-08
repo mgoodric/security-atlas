@@ -179,6 +179,7 @@
     "internal/api/metrics": 85,
     "internal/api/oauth": 87,
     "internal/api/openapi": 71,
+    "internal/api/oscalcomponents": 78,
     "internal/api/oscalexport": 98,
     "internal/api/oscalprovenance": 88,
     "internal/api/policies": 49,

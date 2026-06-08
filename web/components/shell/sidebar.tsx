@@ -88,6 +88,11 @@ const NAV_BASE: NavItem[] = [
   // write authz is enforced at the API layer (slice 155).
   { href: "/questionnaires", label: "Questionnaires" },
   { href: "/board-packs", label: "Board Packs" },
+  // Slice 589 — operator review of imported vendor component-definition
+  // CLAIMS (OSCAL component-definition import, slice 512). A vendor claim is
+  // an assertion, not platform-verified evidence; the operator accepts /
+  // rejects / parks each claim. Read + disposition authz enforced at the API.
+  { href: "/oscal/component-definitions", label: "Vendor Claims" },
   { href: "/catalog/scf", label: "Catalog · SCF" },
   { href: "/settings", label: "Settings" },
 ];

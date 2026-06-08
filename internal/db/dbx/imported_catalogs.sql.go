@@ -11,6 +11,57 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const dispositionImportedComponentClaim = `-- name: DispositionImportedComponentClaim :one
+UPDATE imported_component_claims
+SET claim_status      = $3,
+    dispositioned_by  = $4,
+    dispositioned_at  = now(),
+    disposition_note  = $5
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at, dispositioned_by, dispositioned_at, disposition_note
+`
+
+type DispositionImportedComponentClaimParams struct {
+	TenantID        pgtype.UUID `json:"tenant_id"`
+	ID              pgtype.UUID `json:"id"`
+	ClaimStatus     string      `json:"claim_status"`
+	DispositionedBy *string     `json:"dispositioned_by"`
+	DispositionNote string      `json:"disposition_note"`
+}
+
+// Record an operator disposition on one vendor claim: set claim_status to one
+// of 'accepted' / 'rejected' / 'needs_info', the disposing actor, the time,
+// and an optional note. is_vendor_claim is NOT touched (a claim is always a
+// claim — P0-512-1 / P0-589). This NEVER writes to control_evaluations: the
+// disposition is metadata on the claim, not a control satisfaction
+// (invariant #2). RLS rides the slice-512 tenant_update policy.
+func (q *Queries) DispositionImportedComponentClaim(ctx context.Context, arg DispositionImportedComponentClaimParams) (ImportedComponentClaim, error) {
+	row := q.db.QueryRow(ctx, dispositionImportedComponentClaim,
+		arg.TenantID,
+		arg.ID,
+		arg.ClaimStatus,
+		arg.DispositionedBy,
+		arg.DispositionNote,
+	)
+	var i ImportedComponentClaim
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ImportedComponentID,
+		&i.ControlID,
+		&i.Statement,
+		&i.RequirementUuid,
+		&i.ScfAnchorID,
+		&i.IsVendorClaim,
+		&i.ClaimStatus,
+		&i.CreatedAt,
+		&i.DispositionedBy,
+		&i.DispositionedAt,
+		&i.DispositionNote,
+	)
+	return i, err
+}
+
 const getImportedCatalogByID = `-- name: GetImportedCatalogByID :one
 SELECT id, tenant_id, source, imported_by, source_sha256, source_label, oscal_version, catalog_title, control_count, imported_at, kind, profile_title FROM imported_catalogs
 WHERE tenant_id = $1 AND id = $2
@@ -25,6 +76,76 @@ type GetImportedCatalogByIDParams struct {
 // cross-tenant id returns ErrNoRows.
 func (q *Queries) GetImportedCatalogByID(ctx context.Context, arg GetImportedCatalogByIDParams) (ImportedCatalog, error) {
 	row := q.db.QueryRow(ctx, getImportedCatalogByID, arg.TenantID, arg.ID)
+	var i ImportedCatalog
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Source,
+		&i.ImportedBy,
+		&i.SourceSha256,
+		&i.SourceLabel,
+		&i.OscalVersion,
+		&i.CatalogTitle,
+		&i.ControlCount,
+		&i.ImportedAt,
+		&i.Kind,
+		&i.ProfileTitle,
+	)
+	return i, err
+}
+
+const getImportedComponentClaimByID = `-- name: GetImportedComponentClaimByID :one
+SELECT id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at, dispositioned_by, dispositioned_at, disposition_note FROM imported_component_claims
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetImportedComponentClaimByIDParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// Fetch one vendor claim by id (for disposition pre-read: existence + the
+// current claim_status drives the from_status audit field). RLS scopes to the
+// caller's tenant; a cross-tenant id returns ErrNoRows.
+func (q *Queries) GetImportedComponentClaimByID(ctx context.Context, arg GetImportedComponentClaimByIDParams) (ImportedComponentClaim, error) {
+	row := q.db.QueryRow(ctx, getImportedComponentClaimByID, arg.TenantID, arg.ID)
+	var i ImportedComponentClaim
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ImportedComponentID,
+		&i.ControlID,
+		&i.Statement,
+		&i.RequirementUuid,
+		&i.ScfAnchorID,
+		&i.IsVendorClaim,
+		&i.ClaimStatus,
+		&i.CreatedAt,
+		&i.DispositionedBy,
+		&i.DispositionedAt,
+		&i.DispositionNote,
+	)
+	return i, err
+}
+
+const getImportedComponentDefinitionByID = `-- name: GetImportedComponentDefinitionByID :one
+
+SELECT id, tenant_id, source, imported_by, source_sha256, source_label, oscal_version, catalog_title, control_count, imported_at, kind, profile_title FROM imported_catalogs
+WHERE tenant_id = $1 AND id = $2 AND kind = 'component_definition'
+`
+
+type GetImportedComponentDefinitionByIDParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// ===== slice 589: vendor-claim read + operator disposition =====
+// Fetch one imported component-definition provenance row by id, confirming it
+// is a component-definition (kind = 'component_definition'). RLS scopes to the
+// caller's tenant; a cross-tenant or non-component-definition id returns
+// ErrNoRows.
+func (q *Queries) GetImportedComponentDefinitionByID(ctx context.Context, arg GetImportedComponentDefinitionByIDParams) (ImportedCatalog, error) {
+	row := q.db.QueryRow(ctx, getImportedComponentDefinitionByID, arg.TenantID, arg.ID)
 	var i ImportedCatalog
 	err := row.Scan(
 		&i.ID,
@@ -310,7 +431,7 @@ const insertImportedComponentClaim = `-- name: InsertImportedComponentClaim :one
 INSERT INTO imported_component_claims
     (id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at
+RETURNING id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at, dispositioned_by, dispositioned_at, disposition_note
 `
 
 type InsertImportedComponentClaimParams struct {
@@ -349,6 +470,52 @@ func (q *Queries) InsertImportedComponentClaim(ctx context.Context, arg InsertIm
 		&i.IsVendorClaim,
 		&i.ClaimStatus,
 		&i.CreatedAt,
+		&i.DispositionedBy,
+		&i.DispositionedAt,
+		&i.DispositionNote,
+	)
+	return i, err
+}
+
+const insertImportedComponentClaimDisposition = `-- name: InsertImportedComponentClaimDisposition :one
+INSERT INTO imported_component_claim_dispositions
+    (id, tenant_id, claim_id, from_status, to_status, actor, note)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, tenant_id, claim_id, from_status, to_status, actor, note, occurred_at
+`
+
+type InsertImportedComponentClaimDispositionParams struct {
+	ID         pgtype.UUID `json:"id"`
+	TenantID   pgtype.UUID `json:"tenant_id"`
+	ClaimID    pgtype.UUID `json:"claim_id"`
+	FromStatus string      `json:"from_status"`
+	ToStatus   string      `json:"to_status"`
+	Actor      string      `json:"actor"`
+	Note       string      `json:"note"`
+}
+
+// Append one append-only disposition-audit row recording the
+// from_status -> to_status transition, the actor, and an optional note.
+func (q *Queries) InsertImportedComponentClaimDisposition(ctx context.Context, arg InsertImportedComponentClaimDispositionParams) (ImportedComponentClaimDisposition, error) {
+	row := q.db.QueryRow(ctx, insertImportedComponentClaimDisposition,
+		arg.ID,
+		arg.TenantID,
+		arg.ClaimID,
+		arg.FromStatus,
+		arg.ToStatus,
+		arg.Actor,
+		arg.Note,
+	)
+	var i ImportedComponentClaimDisposition
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ClaimID,
+		&i.FromStatus,
+		&i.ToStatus,
+		&i.Actor,
+		&i.Note,
+		&i.OccurredAt,
 	)
 	return i, err
 }
@@ -547,8 +714,50 @@ func (q *Queries) ListImportedCatalogs(ctx context.Context, tenantID pgtype.UUID
 	return items, nil
 }
 
+const listImportedComponentClaimDispositions = `-- name: ListImportedComponentClaimDispositions :many
+SELECT id, tenant_id, claim_id, from_status, to_status, actor, note, occurred_at FROM imported_component_claim_dispositions
+WHERE tenant_id = $1 AND claim_id = $2
+ORDER BY occurred_at DESC, id ASC
+`
+
+type ListImportedComponentClaimDispositionsParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ClaimID  pgtype.UUID `json:"claim_id"`
+}
+
+// The append-only disposition history for one vendor claim, most recent
+// first.
+func (q *Queries) ListImportedComponentClaimDispositions(ctx context.Context, arg ListImportedComponentClaimDispositionsParams) ([]ImportedComponentClaimDisposition, error) {
+	rows, err := q.db.Query(ctx, listImportedComponentClaimDispositions, arg.TenantID, arg.ClaimID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ImportedComponentClaimDisposition
+	for rows.Next() {
+		var i ImportedComponentClaimDisposition
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ClaimID,
+			&i.FromStatus,
+			&i.ToStatus,
+			&i.Actor,
+			&i.Note,
+			&i.OccurredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listImportedComponentClaims = `-- name: ListImportedComponentClaims :many
-SELECT id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at FROM imported_component_claims
+SELECT id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at, dispositioned_by, dispositioned_at, disposition_note FROM imported_component_claims
 WHERE tenant_id = $1 AND imported_component_id = $2
 ORDER BY control_id ASC, requirement_uuid ASC
 `
@@ -579,6 +788,98 @@ func (q *Queries) ListImportedComponentClaims(ctx context.Context, arg ListImpor
 			&i.ScfAnchorID,
 			&i.IsVendorClaim,
 			&i.ClaimStatus,
+			&i.CreatedAt,
+			&i.DispositionedBy,
+			&i.DispositionedAt,
+			&i.DispositionNote,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listImportedComponentClaimsForDefinition = `-- name: ListImportedComponentClaimsForDefinition :many
+SELECT
+    cc.id                    AS claim_id,
+    cc.imported_component_id AS imported_component_id,
+    cmp.component_uuid       AS component_uuid,
+    cmp.title                AS component_title,
+    cmp.component_type       AS component_type,
+    cc.control_id            AS control_id,
+    cc.statement             AS statement,
+    cc.requirement_uuid      AS requirement_uuid,
+    cc.scf_anchor_id         AS scf_anchor_id,
+    cc.is_vendor_claim       AS is_vendor_claim,
+    cc.claim_status          AS claim_status,
+    cc.dispositioned_by      AS dispositioned_by,
+    cc.dispositioned_at      AS dispositioned_at,
+    cc.disposition_note      AS disposition_note,
+    cc.created_at            AS created_at
+FROM imported_component_claims cc
+JOIN imported_components cmp
+    ON cmp.id = cc.imported_component_id
+   AND cmp.tenant_id = cc.tenant_id
+WHERE cc.tenant_id = $1
+  AND cmp.imported_catalog_id = $2
+ORDER BY cmp.title ASC, cmp.component_uuid ASC, cc.control_id ASC, cc.requirement_uuid ASC
+`
+
+type ListImportedComponentClaimsForDefinitionParams struct {
+	TenantID          pgtype.UUID `json:"tenant_id"`
+	ImportedCatalogID pgtype.UUID `json:"imported_catalog_id"`
+}
+
+type ListImportedComponentClaimsForDefinitionRow struct {
+	ClaimID             pgtype.UUID        `json:"claim_id"`
+	ImportedComponentID pgtype.UUID        `json:"imported_component_id"`
+	ComponentUuid       string             `json:"component_uuid"`
+	ComponentTitle      string             `json:"component_title"`
+	ComponentType       string             `json:"component_type"`
+	ControlID           string             `json:"control_id"`
+	Statement           string             `json:"statement"`
+	RequirementUuid     string             `json:"requirement_uuid"`
+	ScfAnchorID         *string            `json:"scf_anchor_id"`
+	IsVendorClaim       bool               `json:"is_vendor_claim"`
+	ClaimStatus         string             `json:"claim_status"`
+	DispositionedBy     *string            `json:"dispositioned_by"`
+	DispositionedAt     pgtype.Timestamptz `json:"dispositioned_at"`
+	DispositionNote     string             `json:"disposition_note"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+}
+
+// Every vendor claim across every component of one imported
+// component-definition, joined to the component for display. Ordered for
+// stable rendering. RLS scopes both tables to the caller's tenant; the
+// leading $1 tenant_id predicate is defense-in-depth behind RLS.
+func (q *Queries) ListImportedComponentClaimsForDefinition(ctx context.Context, arg ListImportedComponentClaimsForDefinitionParams) ([]ListImportedComponentClaimsForDefinitionRow, error) {
+	rows, err := q.db.Query(ctx, listImportedComponentClaimsForDefinition, arg.TenantID, arg.ImportedCatalogID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListImportedComponentClaimsForDefinitionRow
+	for rows.Next() {
+		var i ListImportedComponentClaimsForDefinitionRow
+		if err := rows.Scan(
+			&i.ClaimID,
+			&i.ImportedComponentID,
+			&i.ComponentUuid,
+			&i.ComponentTitle,
+			&i.ComponentType,
+			&i.ControlID,
+			&i.Statement,
+			&i.RequirementUuid,
+			&i.ScfAnchorID,
+			&i.IsVendorClaim,
+			&i.ClaimStatus,
+			&i.DispositionedBy,
+			&i.DispositionedAt,
+			&i.DispositionNote,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err

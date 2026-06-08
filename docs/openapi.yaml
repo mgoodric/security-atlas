@@ -2744,6 +2744,100 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/oscal/component-claims/{id}:accept:
+    post:
+      summary: POST /v1/oscal/component-claims/{id}:accept — operator credits a vendor claim
+      tags: [oscal]
+      operationId: post-v1-oscal-component-claims-id_accept
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/oscal/component-claims/{id}:needs-info:
+    post:
+      summary: POST /v1/oscal/component-claims/{id}:needs-info — operator parks a vendor claim
+      tags: [oscal]
+      operationId: post-v1-oscal-component-claims-id_needs-info
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/oscal/component-claims/{id}:reject:
+    post:
+      summary: POST /v1/oscal/component-claims/{id}:reject — operator declines a vendor claim
+      tags: [oscal]
+      operationId: post-v1-oscal-component-claims-id_reject
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/oscal/component-definitions:
+    get:
+      summary: GET /v1/oscal/component-definitions — list imported vendor component-definitions
+      tags: [oscal]
+      operationId: get-v1-oscal-component-definitions
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/oscal/component-definitions/{id}:
+    get:
+      summary: GET /v1/oscal/component-definitions/{id} — one import's components + vendor claims
+      tags: [oscal]
+      operationId: get-v1-oscal-component-definitions-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/oscal/imported-profiles/{id}/provenance:
     get:
       summary: GET /v1/oscal/imported-profiles/{id}/provenance
