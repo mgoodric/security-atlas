@@ -102,6 +102,10 @@ func DefaultSeed() []KindVersion {
 		// Slice 486: Azure connector (Entra ID + Storage).
 		{Kind: "azure.entra_role_assignment.v1", Version: "1.0.0"},
 		{Kind: "azure.storage_account_config.v1", Version: "1.0.0"},
+		// Slice 519: Azure connector AKS managed-cluster hardening posture
+		// (cloud-config / network controls: SCF CFG-02 / NET-04). ARM Reader
+		// only — never admin kubeconfig, secrets, or workload manifests.
+		{Kind: "azure.aks_cluster_config.v1", Version: "1.0.0"},
 		// Slice 487: Kubernetes connector (RBAC + workload security-context).
 		{Kind: "k8s.rbac_binding.v1", Version: "1.0.0"},
 		{Kind: "k8s.workload_security_context.v1", Version: "1.0.0"},

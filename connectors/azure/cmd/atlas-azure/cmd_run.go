@@ -14,6 +14,7 @@ import (
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
+	"github.com/mgoodric/security-atlas/connectors/azure/internal/aks"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/azureauth"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/entra"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/idem"
@@ -27,6 +28,7 @@ import (
 var (
 	entraPull    = entra.Pull
 	storageScan  = storage.Inspect
+	aksScan      = aks.Inspect
 	newSDKClient = func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error) {
 		return sdk.NewClient(endpoint, bearer, opts...)
 	}
@@ -34,13 +36,16 @@ var (
 	acquireToken = func(ctx context.Context, cred azureauth.Credential, hc *http.Client, scope string) (string, error) {
 		return cred.AcquireToken(ctx, hc, scope)
 	}
-	// newEntraAPI / newStorageAPI build the live read-only HTTP clients; seamed
-	// so tests inject fakes.
+	// newEntraAPI / newStorageAPI / newAKSAPI build the live read-only HTTP
+	// clients; seamed so tests inject fakes.
 	newEntraAPI = func(hc *http.Client, token string) entra.API {
 		return entra.NewClient(hc, "", token)
 	}
 	newStorageAPI = func(hc *http.Client, subscriptionID, token string) storage.API {
 		return storage.NewClient(hc, "", subscriptionID, token)
+	}
+	newAKSAPI = func(hc *http.Client, subscriptionID, token string) aks.API {
+		return aks.NewClient(hc, "", subscriptionID, token)
 	}
 )
 
@@ -58,17 +63,20 @@ type runFlags struct {
 	clientID       string
 	entraControl   string
 	storageControl string
+	aksControl     string
 	skipEntra      bool
 	skipStorage    bool
+	skipAKS        bool
 }
 
 func newRunCmd() *cobra.Command {
 	var f runFlags
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "read Entra ID + Azure Storage and push evidence records",
-		Long: `Read Microsoft Entra ID role assignments and Azure Storage account
-configuration, transform to evidence records, and push to the platform.
+		Short: "read Entra ID + Azure Storage + AKS and push evidence records",
+		Long: `Read Microsoft Entra ID role assignments, Azure Storage account
+configuration, and AKS managed-cluster configuration, transform to evidence
+records, and push to the platform.
 
 Profile: pull. One bounded read-and-push pass per invocation; operator-scheduled
 (recommended 24h). NOT continuous monitoring.
@@ -76,7 +84,8 @@ Profile: pull. One bounded read-and-push pass per invocation; operator-scheduled
 Least-privilege Azure permissions (read-only):
   - Microsoft Graph: Directory.Read.All  (gates azure.entra_role_assignment.v1)
   - Microsoft Graph: Application.Read.All (gates azure.entra_role_assignment.v1)
-  - Azure Resource Manager: Reader role   (gates azure.storage_account_config.v1)
+  - Azure Resource Manager: Reader role   (gates azure.storage_account_config.v1
+                                           + azure.aks_cluster_config.v1)
 
 Auth: set AZURE_TENANT_ID + AZURE_CLIENT_ID + AZURE_CLIENT_SECRET (client-
 credentials), or pass --auth-mode managed-identity. The secret never appears in
@@ -93,6 +102,9 @@ a log line or an evidence record.`,
 			if !f.skipStorage && f.subscriptionID == "" {
 				return errors.New("--subscription-id is required for the storage kind (or pass --skip-storage)")
 			}
+			if !f.skipAKS && f.subscriptionID == "" {
+				return errors.New("--subscription-id is required for the AKS kind (or pass --skip-aks)")
+			}
 			return resolveCommon()
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -106,8 +118,10 @@ a log line or an evidence record.`,
 	cmd.Flags().StringVar(&f.clientID, "client-id", "", "Entra app-registration client id (env: AZURE_CLIENT_ID)")
 	cmd.Flags().StringVar(&f.entraControl, "entra-control", "scf:IAC-21", "control_id to attach to azure.entra_role_assignment.v1 records")
 	cmd.Flags().StringVar(&f.storageControl, "storage-control", "scf:CRY-04", "control_id to attach to azure.storage_account_config.v1 records")
+	cmd.Flags().StringVar(&f.aksControl, "aks-control", "scf:CFG-02", "control_id to attach to azure.aks_cluster_config.v1 records")
 	cmd.Flags().BoolVar(&f.skipEntra, "skip-entra", false, "skip azure.entra_role_assignment.v1 pull")
 	cmd.Flags().BoolVar(&f.skipStorage, "skip-storage", false, "skip azure.storage_account_config.v1 pull")
+	cmd.Flags().BoolVar(&f.skipAKS, "skip-aks", false, "skip azure.aks_cluster_config.v1 pull")
 	return cmd
 }
 
@@ -173,6 +187,27 @@ func doRun(ctx context.Context, f runFlags) error {
 			}
 			if err := pushOne(ctx, sdkClient, rec); err != nil {
 				return fmt.Errorf("push storage %s: %w", acct.AccountName, err)
+			}
+			pushed++
+		}
+	}
+
+	if !f.skipAKS {
+		token, err := acquireToken(ctx, cred, httpClient, aks.ARMScope)
+		if err != nil {
+			return fmt.Errorf("arm token: %w", err)
+		}
+		clusters, err := aksScan(ctx, newAKSAPI(httpClient, f.subscriptionID, token), f.subscriptionID, nil)
+		if err != nil {
+			return fmt.Errorf("aks inspect: %w", err)
+		}
+		for _, c := range clusters {
+			rec, err := buildAKSRecord(c, f.environment, f.aksControl)
+			if err != nil {
+				return fmt.Errorf("build aks record %s: %w", c.ClusterName, err)
+			}
+			if err := pushOne(ctx, sdkClient, rec); err != nil {
+				return fmt.Errorf("push aks %s: %w", c.ClusterName, err)
 			}
 			pushed++
 		}
@@ -286,6 +321,73 @@ func mapStorageResult(r storage.ConfigResult) evidencev1.Result {
 	case storage.ResultFail:
 		return evidencev1.Result_RESULT_FAIL
 	case storage.ResultInconclusive:
+		return evidencev1.Result_RESULT_INCONCLUSIVE
+	default:
+		return evidencev1.Result_RESULT_UNSPECIFIED
+	}
+}
+
+// buildAKSRecord maps one AKS managed-cluster config into an evidence record.
+// The payload carries management-plane CONFIGURATION flags ONLY — never admin
+// kubeconfig, secrets, or workload manifests (the aks.ClusterConfig struct has
+// no field for such data; this builder cannot emit what it cannot read).
+func buildAKSRecord(c aks.ClusterConfig, env, controlID string) (*evidencev1.EvidenceRecord, error) {
+	now := c.ObservedAt.UTC().Truncate(time.Hour)
+	pm := map[string]any{
+		"cluster_id":           c.ClusterID,
+		"cluster_name":         c.ClusterName,
+		"subscription_id":      c.SubscriptionID,
+		"rbac_enabled":         c.RBACEnabled,
+		"private_cluster":      c.PrivateCluster,
+		"authorized_ip_ranges": c.AuthorizedIPRanges,
+	}
+	if c.ResourceGroup != "" {
+		pm["resource_group"] = c.ResourceGroup
+	}
+	if c.Location != "" {
+		pm["location"] = c.Location
+	}
+	if c.KubernetesVersion != "" {
+		pm["kubernetes_version"] = c.KubernetesVersion
+	}
+	if c.NetworkPolicy != "" {
+		pm["network_policy"] = c.NetworkPolicy
+	}
+	// Booleans always carry their value (false is signal, not absence).
+	pm["managed_identity"] = c.ManagedIdentity
+	pm["local_accounts_disabled"] = c.LocalAccountsDisabled
+	pm["oidc_issuer_enabled"] = c.OIDCIssuerEnabled
+	pm["node_pool_count"] = c.NodePoolCount
+	payload, err := structpb.NewStruct(pm)
+	if err != nil {
+		return nil, err
+	}
+	return &evidencev1.EvidenceRecord{
+		IdempotencyKey: idem.AKSClusterConfigKey(c.ClusterID, now),
+		EvidenceKind:   "azure.aks_cluster_config.v1",
+		SchemaVersion:  "1.0.0",
+		ControlId:      controlID,
+		Scope: []*evidencev1.ScopeDimension{
+			{Key: "cloud_account", Values: []string{"azure:" + c.SubscriptionID}},
+			{Key: "environment", Values: []string{env}},
+		},
+		ObservedAt: timestamppb.New(now),
+		Result:     mapAKSResult(c.Result),
+		Payload:    payload,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "connector",
+			ActorId:   actorID("aks"),
+		},
+	}, nil
+}
+
+func mapAKSResult(r aks.ConfigResult) evidencev1.Result {
+	switch r {
+	case aks.ResultPass:
+		return evidencev1.Result_RESULT_PASS
+	case aks.ResultFail:
+		return evidencev1.Result_RESULT_FAIL
+	case aks.ResultInconclusive:
 		return evidencev1.Result_RESULT_INCONCLUSIVE
 	default:
 		return evidencev1.Result_RESULT_UNSPECIFIED

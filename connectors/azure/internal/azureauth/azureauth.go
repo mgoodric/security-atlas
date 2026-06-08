@@ -146,7 +146,11 @@ func DocumentedPermissions() []Permission {
 			Surface: "Azure Resource Manager",
 			Name:    "Reader (built-in role)",
 			Access:  "Read",
-			Gates:   "azure.storage_account_config.v1 (storage account configuration)",
+			// The SAME ARM Reader role gates both ARM-sourced kinds — slice 519
+			// adds the AKS managed-cluster kind WITHOUT widening the scope
+			// (P0-519-2). Reader cannot call listClusterAdminCredential
+			// (P0-519-1), so admin kubeconfig is unreachable by construction.
+			Gates: "azure.storage_account_config.v1 (storage account configuration) + azure.aks_cluster_config.v1 (AKS managed-cluster configuration)",
 		},
 	}
 }

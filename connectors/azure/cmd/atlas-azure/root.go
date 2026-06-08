@@ -22,12 +22,14 @@ import (
 // SupportedKinds list is what AC-1 references.
 const ConnectorName = "azure-connector"
 
-// SupportedKinds is the canonical list of evidence kinds slice 486 emits.
-//   - azure.entra_role_assignment.v1   (Microsoft Graph, pull)
-//   - azure.storage_account_config.v1  (Azure Resource Manager, pull)
+// SupportedKinds is the canonical list of evidence kinds the connector emits.
+//   - azure.entra_role_assignment.v1   (Microsoft Graph, pull)        — slice 486
+//   - azure.storage_account_config.v1  (Azure Resource Manager, pull) — slice 486
+//   - azure.aks_cluster_config.v1      (Azure Resource Manager, pull) — slice 519
 var SupportedKinds = []string{
 	"azure.entra_role_assignment.v1",
 	"azure.storage_account_config.v1",
+	"azure.aks_cluster_config.v1",
 }
 
 // PullInterval names the connector's pull cadence HONESTLY (P0-486-6). The
@@ -124,9 +126,10 @@ func sdkOpts() []sdk.Option {
 
 const longDescription = `security-atlas Azure connector
 
-Emits two evidence kinds:
+Emits three evidence kinds:
   - azure.entra_role_assignment.v1   (run subcommand, pull — Microsoft Graph)
   - azure.storage_account_config.v1  (run subcommand, pull — Azure Resource Manager)
+  - azure.aks_cluster_config.v1      (run subcommand, pull — Azure Resource Manager)
 
 Profile: pull. Each invocation is one bounded read-and-push pass on an
 operator-scheduled cadence (recommended 24h). This is NOT continuous
