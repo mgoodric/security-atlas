@@ -1151,6 +1151,9 @@ function EmailChannelMasterToggle() {
   // Default to false while loading and on error (fail-closed display):
   // never imply the user is opted in when we are unsure.
   const enabled = optInQuery.data?.enabled === true;
+  // Slice 585: disable + note when the operator has not configured SMTP
+  // (configured === false). Missing/undefined is treated as configured.
+  const unconfigured = optInQuery.data?.configured === false;
   return (
     <div
       className="flex items-start justify-between gap-3 py-3"
@@ -1163,12 +1166,20 @@ function EmailChannelMasterToggle() {
           email. Off by default; the email carries summary counts and a link
           back into the app, never the notification details.
         </div>
+        {unconfigured && (
+          <div
+            className="mt-1 text-xs text-muted-foreground italic"
+            data-testid="settings-email-channel-unconfigured-note"
+          >
+            This channel is not configured by your administrator.
+          </div>
+        )}
       </div>
       <label className="flex items-center gap-1.5 text-xs">
         <input
           type="checkbox"
           checked={enabled}
-          disabled={optInQuery.isLoading || optInMut.isPending}
+          disabled={optInQuery.isLoading || optInMut.isPending || unconfigured}
           onChange={(e) => optInMut.mutate(e.target.checked)}
           className="h-4 w-4"
           data-testid="settings-email-channel-toggle"
@@ -1185,6 +1196,13 @@ function EmailChannelMasterToggle() {
 // webhook rows behave identically to the email row. Default opted-OUT
 // (P0-543-3). The channel target is operator-configured env, never
 // user-supplied (P0-543-2) — this is a boolean toggle, not a URL field.
+//
+// Slice 585: when the GET wire reports `configured === false` (the operator
+// has not set the channel's delivery env), the toggle renders DISABLED with
+// a muted "not configured by your administrator" note. A missing/undefined
+// `configured` is treated as configured (backward-tolerant — preserves the
+// prior always-interactive behavior). `configured` is a boolean PRESENCE
+// signal only; no secret target reaches the client (P0-585).
 function ChannelMasterToggle({
   testidPrefix,
   label,
@@ -1197,8 +1215,10 @@ function ChannelMasterToggle({
   label: string;
   description: string;
   queryKey: string;
-  getOptIn: () => Promise<{ enabled: boolean }>;
-  setOptIn: (enabled: boolean) => Promise<{ enabled: boolean }>;
+  getOptIn: () => Promise<{ enabled: boolean; configured?: boolean }>;
+  setOptIn: (
+    enabled: boolean,
+  ) => Promise<{ enabled: boolean; configured?: boolean }>;
 }) {
   const qc = useQueryClient();
   const optInQuery = useQuery({
@@ -1214,6 +1234,11 @@ function ChannelMasterToggle({
   // Default to false while loading and on error (fail-closed display):
   // never imply the user is opted in when we are unsure.
   const enabled = optInQuery.data?.enabled === true;
+  // Slice 585: only treat the channel as unconfigured once we have a
+  // settled response that explicitly says configured === false. While
+  // loading (data undefined), keep the toggle in its loading-disabled state
+  // rather than flashing the unconfigured note.
+  const unconfigured = optInQuery.data?.configured === false;
   return (
     <div
       className="flex items-start justify-between gap-3 py-3"
@@ -1222,12 +1247,20 @@ function ChannelMasterToggle({
       <div>
         <div className="text-sm font-medium">{label}</div>
         <div className="text-xs text-muted-foreground">{description}</div>
+        {unconfigured && (
+          <div
+            className="mt-1 text-xs text-muted-foreground italic"
+            data-testid={`${testidPrefix}-unconfigured-note`}
+          >
+            This channel is not configured by your administrator.
+          </div>
+        )}
       </div>
       <label className="flex items-center gap-1.5 text-xs">
         <input
           type="checkbox"
           checked={enabled}
-          disabled={optInQuery.isLoading || optInMut.isPending}
+          disabled={optInQuery.isLoading || optInMut.isPending || unconfigured}
           onChange={(e) => optInMut.mutate(e.target.checked)}
           className="h-4 w-4"
           data-testid={`${testidPrefix}-toggle`}
