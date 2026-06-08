@@ -277,10 +277,54 @@ test.describe("/settings user-facing page", () => {
   }) => {
     // Slice 594 AC-2: a per-kind slack/webhook checkbox drives the existing
     // /v1/me/preferences PATCH endpoint with the {event:{channel:bool}}
-    // shape (583 already accepts slack/webhook channel values). Default-on
-    // display means the slack cell renders checked for the seed user (no
-    // stored opt-out row); unchecking it sends slack=false for that event.
+    // shape (583 already accepts slack/webhook channel values).
     //
+    // This test is HERMETIC on the GET side. The Notifications matrix reads
+    // its cell states from `getMyPreferences()` -> `fetch('/api/me/preferences')`
+    // (web/lib/api/me.ts), which unwraps `{ preferences: MePreferences }` and
+    // returns `body.preferences` (MePreferences = Record<event,
+    // Record<channel, boolean>>). The render reads `row.slack !== false` per
+    // cell. We cannot rely on the live shared docker-compose Postgres for the
+    // control_drift/slack initial state: the seed, sibling specs, and this
+    // test's OWN prior-run uncheck() all mutate that row, so the loaded state
+    // is non-deterministic (the failure that landed on PR #1123). Instead we
+    // route-mock the GET to return a full deterministic matrix with
+    // control_drift.slack = true, so the cell renders CHECKED every run. The
+    // PATCH (and any non-GET) falls through to the REAL backend via
+    // route.continue(), so the uncheck() still fires the real round-trip and
+    // the waitForResponse + postData() assertion exercises the live endpoint.
+    const ALL_EVENTS = [
+      "audit_period_assignment",
+      "policy_ack_due",
+      "risk_review_overdue",
+      "control_drift",
+      "audit_note_reply",
+      "evidence_staleness",
+    ];
+    // Full default-on matrix across every event × {in_app,email,slack,webhook}.
+    const preferences: Record<string, Record<string, boolean>> = {};
+    for (const ev of ALL_EVENTS) {
+      preferences[ev] = {
+        in_app: true,
+        email: true,
+        slack: true,
+        webhook: true,
+      };
+    }
+    await page.route("**/api/me/preferences", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ preferences }),
+        });
+        return;
+      }
+      // PATCH (and anything non-GET) hits the real backend so the
+      // waitForResponse + postData() assertion below is a genuine round-trip.
+      await route.continue();
+    });
+
     // Slice 585: the per-kind slack cell is DISABLED when the channel is
     // unconfigured (configured===false). The live docker-compose
     // slack-channel env state is non-deterministic in CI, so — mirroring
@@ -307,7 +351,7 @@ test.describe("/settings user-facing page", () => {
 
     const slackCell = page.getByTestId("settings-notif-control_drift-slack");
     await expect(slackCell).toBeVisible();
-    // Default-on-missing-row: the cell renders checked + interactive
+    // Checked from the mocked GET (control_drift.slack=true) + interactive
     // (configured=true injected above).
     await expect(slackCell).toBeChecked();
     await expect(slackCell).toBeEnabled();
@@ -317,9 +361,18 @@ test.describe("/settings user-facing page", () => {
         r.url().includes("/api/me/preferences") &&
         r.request().method() === "PATCH",
     );
-    await slackCell.uncheck();
+    // Slice 171 (H4) pattern: the cell is a React-controlled `<input
+    // checked={slack}>` bound to TanStack-Query data. After the click,
+    // React re-renders against the still-true mocked `prefsQuery.data` and
+    // snaps the DOM `checked` back to true before the PATCH onSuccess
+    // re-fetch. `locator.uncheck()` auto-verifies post-state and would throw
+    // on that snap-back; `locator.click()` skips the post-state assertion —
+    // the truthful invariant lives in the server round-trip below (the same
+    // remedy AC-3 uses for the email cell).
+    await slackCell.click();
     const resp = await patchResponse;
-    // The PATCH carried the per-kind slack opt-out for this event.
+    // The PATCH carried the per-kind slack opt-out for this event
+    // (control_drift.slack=false, since the cell started checked).
     expect(resp.request().postData()).toContain("slack");
   });
 

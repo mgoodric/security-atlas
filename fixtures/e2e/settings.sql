@@ -124,29 +124,6 @@ VALUES (
 ON CONFLICT (tenant_id, user_id, event, channel) DO UPDATE
 SET enabled = EXCLUDED.enabled;
 
--- Slice 594: pin (control_drift, slack) = true so the per-kind slack
--- toggle test opens with a CHECKED cell deterministically. Default-on-
--- missing-row WOULD render this checked, but that test then UNCHECKS the
--- cell (PATCH control_drift.slack=false). On the shared docker-compose
--- Postgres the slice-168 stale-row problem applies: the seed's
--- audit_period_assignment upsert does NOT reset a control_drift/slack row
--- the prior run wrote, so a retry (or a later run) would open UNCHECKED
--- and `uncheck()` would be a no-op (the exact failure that landed on PR
--- #1123). The explicit upsert with DO UPDATE = true restores the known
--- checked state every run, mirroring the slice-168 AC-3 remedy above.
-INSERT INTO user_notification_preferences (
-    tenant_id, user_id, event, channel, enabled
-)
-VALUES (
-    '00000000-0000-0000-0000-00000000d3a0',
-    '44444444-4444-4444-4444-444444440001',
-    'control_drift',
-    'slack',
-    true
-)
-ON CONFLICT (tenant_id, user_id, event, channel) DO UPDATE
-SET enabled = EXCLUDED.enabled;
-
 -- ============================================================
 -- sessions — augmented row + bare row
 -- ============================================================
