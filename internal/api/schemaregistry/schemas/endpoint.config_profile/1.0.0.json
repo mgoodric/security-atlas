@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/endpoint.config_profile/1.0.0.json",
+  "x-evidence-kind": "endpoint.config_profile.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["CFG-02", "CFG-04"],
+  "title": "Managed-device configuration-profile detail",
+  "description": "One record per managed device across an MDM (Jamf Pro managed Mac, Microsoft Intune managed device): the bounded list of configuration / compliance profiles deployed to the device, each carrying the profile name, identifier, type/category, assigned device-group scope, UUID, last-modified/deployed timestamp, and a bounded list of compliance-relevant settings reported as non-secret summary values (e.g. 'passcode_required: true', 'disk_encryption_enforced: true', 'firewall_enabled: on'). This evidence answers the configuration-management control question ('show the screen-lock policy that is enforced', 'show the disk-encryption configuration profile') at a finer grain than the endpoint.device_posture.v1 posture verdict; it is therefore a SEPARATE evidence kind, sibling to endpoint.device_posture.v1 (slice 490) and endpoint.software_inventory.v1 (slice 555), not an extension of either. Pulled read-only from the MDM API (Jamf configuration-profiles + computer config-profile assignments; Intune deviceConfigurations / deviceCompliancePolicies). THE LOAD-BEARING SECRET-REDACTION BOUNDARY (P0-556): configuration profiles routinely embed SECRETS — Wi-Fi PSKs, VPN shared secrets, certificate private keys, API tokens, SCEP challenges, and arbitrary password / <data> / PayloadContent payload values. NONE of these ever enters an evidence record. The per-profile settings field is restricted to a compliance-relevant ALLOW-LIST whose values are non-secret summaries (booleans / enums / small integers); the vendor clients request only profile metadata + a settings summary at the API boundary, never the raw payload-content blob; and the record builder re-applies the allow-list. The connector reports a descriptive configuration baseline; the platform evaluator owns the final pass/fail per (control, scope). Shared across the Jamf + Intune connectors because the two MDMs' configuration-profile field set is identical at the detail-summary altitude; the source_mdm field preserves provenance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_mdm", "device_id", "profile_count", "profiles"],
+  "properties": {
+    "source_mdm": {
+      "type": "string",
+      "enum": ["jamf", "intune"],
+      "description": "MDM the record was collected from."
+    },
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "MDM-native stable identifier of the managed device (opaque, non-secret). Joins to the device's endpoint.device_posture.v1 record."
+    },
+    "profile_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of configuration / compliance profiles emitted for this device (length of the profiles array, after the per-device bound is applied)."
+    },
+    "profiles": {
+      "type": "array",
+      "description": "Bounded list of configuration / compliance profiles deployed to the device.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "settings"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Profile display name (e.g. 'Passcode Policy', 'FileVault Configuration')."
+          },
+          "identifier": {
+            "type": "string",
+            "description": "Optional profile identifier (Jamf payload identifier / Intune policy id). Opaque, non-secret."
+          },
+          "profile_type": {
+            "type": "string",
+            "description": "Optional profile type / category (e.g. 'configuration', 'compliance', 'Restrictions', 'FileVault'). Descriptive metadata."
+          },
+          "scope": {
+            "type": "array",
+            "description": "Optional assigned device-group / assignment NAMES the profile is deployed to. Group names only — NEVER owner personal contact detail.",
+            "items": { "type": "string" }
+          },
+          "uuid": {
+            "type": "string",
+            "description": "Optional profile UUID the source reports. Opaque, non-secret."
+          },
+          "last_modified": {
+            "type": "string",
+            "description": "Optional last-modified / deployed timestamp the source reports (RFC3339 or the source's own date form). Descriptive."
+          },
+          "settings": {
+            "type": "array",
+            "description": "Bounded list of compliance-relevant settings the profile enforces, reported as non-secret summary key/value pairs. Restricted to a compliance-relevant ALLOW-LIST: keys that could carry a credential (Wi-Fi password, VPN shared secret, certificate private key, SCEP challenge, API token, raw payload-content blob) are NEVER present (P0-556).",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["key", "value"],
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Compliance-relevant setting key from the connector allow-list (e.g. 'passcode_required', 'disk_encryption_enforced', 'firewall_enabled', 'screen_lock_enforced')."
+                },
+                "value": {
+                  "type": "string",
+                  "description": "Non-secret summary value for the setting (e.g. 'true', 'enforced', '8'). NEVER a credential value."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
