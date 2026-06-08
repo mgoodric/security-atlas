@@ -1,0 +1,6 @@
+{
+  "profile": {
+    "uuid": "44444444-4444-4444-8444-444444444444",
+    "imports": "this-should-be-an-array-not-a-string"
+  }
+}

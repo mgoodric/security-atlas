@@ -26,6 +26,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/oscal"
 	"github.com/mgoodric/security-atlas/internal/oscal/catalogimport"
+	"github.com/mgoodric/security-atlas/internal/oscal/profileimport"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -59,6 +60,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "%s: import-catalog: %v\n", binary, err)
 			os.Exit(1)
 		}
+	case "import-profile":
+		if err := runImportProfile(args[1:]); err != nil {
+			fmt.Fprintf(os.Stderr, "%s: import-profile: %v\n", binary, err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "%s: unknown command %q\n", binary, args[0])
 		usage()
@@ -87,12 +93,30 @@ Commands:
                     --imported-by  operator id recorded as provenance (default atlas-oscal)
                     --role         caller role: grc_engineer (default) or admin
                     --json         emit a JSON report instead of text
+  import-profile <profile-file> --catalog <file> [--catalog <file>...] [flags]
+                  resolve an inbound OSCAL profile against the supplied
+                  catalog(s) and persist the resolved baseline as a
+                  provenance-labeled imported set mapped to SCF anchors
+                  (slice 511). The profile's import/merge/modify directives
+                  are resolved via compliance-trestle; an import.href that
+                  names no supplied catalog is a structured error, NEVER an
+                  external fetch.
+                  Flags:
+                    --catalog     catalog JSON the profile resolves against
+                                  (repeatable; at least one required)
+                    --dsn         Postgres DSN (atlas_app role); env DATABASE_URL_APP
+                    --tenant-id   tenant UUID to import under (required)
+                    --bridge-addr oscal-bridge gRPC address (default %s)
+                    --source-label declared baseline label (e.g. "FedRAMP Moderate")
+                    --imported-by  operator id recorded as provenance (default atlas-oscal)
+                    --role         caller role: grc_engineer (default) or admin
+                    --json         emit a JSON report instead of text
   help            show this message
 
-  NOTE: profile import and component-definition import are FOLLOW-ON
-  slices (see docs/issues for 511 + 512); this command imports CATALOGS
-  only.
-`, binary, defaultBridgeAddr, defaultBridgeAddr, defaultBridgeAddr)
+  NOTE: component-definition import is a FOLLOW-ON slice (see docs/issues
+  for 512); this binary imports CATALOGS (import-catalog) and PROFILES
+  (import-profile) only.
+`, binary, defaultBridgeAddr, defaultBridgeAddr, defaultBridgeAddr, defaultBridgeAddr)
 }
 
 // splitPositional separates the single positional <file> argument from the
@@ -237,6 +261,142 @@ func runImportCatalog(args []string) error {
 	fmt.Printf("  source label:   %s\n", report.SourceLabel)
 	fmt.Printf("  source sha256:  %s\n", report.SourceSha256)
 	fmt.Printf("  controls:       %d imported (%d mapped to SCF anchors, %d need operator mapping)\n",
+		report.ControlCount, report.MappedCount, report.ControlCount-report.MappedCount)
+	return nil
+}
+
+// stringSlice is a repeatable string flag (one --catalog per supplied
+// catalog file).
+type stringSlice []string
+
+func (s *stringSlice) String() string { return fmt.Sprintf("%v", []string(*s)) }
+func (s *stringSlice) Set(v string) error {
+	*s = append(*s, v)
+	return nil
+}
+
+// runImportProfile implements `atlas-oscal import-profile <profile-file>
+// --catalog <file>... [flags]` (AC-8). It reads an OSCAL profile JSON file
+// plus the catalog file(s) it resolves against, resolves + validates the
+// profile via the bridge, persists the resolved baseline transactionally
+// under the given tenant, and prints a text or --json report.
+func runImportProfile(args []string) error {
+	fs := flag.NewFlagSet("import-profile", flag.ContinueOnError)
+	var catalogs stringSlice
+	fs.Var(&catalogs, "catalog", "catalog JSON the profile resolves against (repeatable)")
+	dsn := fs.String("dsn", "", "Postgres DSN (atlas_app role); env DATABASE_URL_APP")
+	tenantID := fs.String("tenant-id", "", "tenant UUID to import under (required)")
+	bridgeAddr := fs.String("bridge-addr", defaultBridgeAddr, "oscal-bridge gRPC address")
+	sourceLabel := fs.String("source-label", "", "declared baseline label")
+	importedBy := fs.String("imported-by", binary, "operator id recorded as provenance")
+	roleStr := fs.String("role", string(authz.RoleGRCEngineer), "caller role: grc_engineer or admin")
+	asJSON := fs.Bool("json", false, "emit a JSON report instead of text")
+
+	// Pull the single positional <profile-file> out (it may appear anywhere)
+	// and parse the remaining flags. Unlike import-catalog, import-profile
+	// has a repeatable value flag (--catalog), so splitPositional's
+	// "consume the value after a non-boolean flag" rule covers it.
+	file, flagArgs, err := splitPositional(args)
+	if err != nil {
+		return err
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return err
+	}
+	if len(fs.Args()) != 0 {
+		return fmt.Errorf("unexpected extra arguments: %v", fs.Args())
+	}
+
+	if *dsn == "" {
+		*dsn = os.Getenv("DATABASE_URL_APP")
+	}
+	if *dsn == "" {
+		return errors.New("--dsn or DATABASE_URL_APP is required (use the atlas_app role)")
+	}
+	if *tenantID == "" {
+		return errors.New("--tenant-id is required")
+	}
+	if len(catalogs) == 0 {
+		return errors.New("at least one --catalog <file> is required (the catalog the profile resolves against)")
+	}
+
+	profileData, err := os.ReadFile(file)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", file, err)
+	}
+	catalogData := make([][]byte, 0, len(catalogs))
+	for _, cf := range catalogs {
+		data, rerr := os.ReadFile(cf)
+		if rerr != nil {
+			return fmt.Errorf("read catalog %s: %w", cf, rerr)
+		}
+		catalogData = append(catalogData, data)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, *dsn)
+	if err != nil {
+		return fmt.Errorf("pgxpool: %w", err)
+	}
+	defer pool.Close()
+
+	bridge, err := oscal.DialBridge(*bridgeAddr)
+	if err != nil {
+		return fmt.Errorf("connect to oscal-bridge at %s: %w", *bridgeAddr, err)
+	}
+	defer func() { _ = bridge.Close() }()
+
+	tenantCtx, err := tenancy.WithTenant(ctx, *tenantID)
+	if err != nil {
+		return fmt.Errorf("tenancy context: %w", err)
+	}
+
+	importer := profileimport.NewImporter(pool, bridge)
+	report, err := importer.Import(tenantCtx, profileimport.Request{
+		ProfileJSON: profileData,
+		Catalogs:    catalogData,
+		SourceLabel: *sourceLabel,
+		ImportedBy:  *importedBy,
+		Role:        authz.Role(*roleStr),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, profileimport.ErrUnauthorizedRole):
+			return fmt.Errorf("role %q may not import profiles (requires grc_engineer or admin)", *roleStr)
+		case errors.Is(err, profileimport.ErrResolutionFailed):
+			return fmt.Errorf("the profile failed to resolve; NOTHING was persisted: %w", err)
+		case errors.Is(err, profileimport.ErrDocumentTooLarge):
+			return fmt.Errorf("a document is too large: %w", err)
+		case errors.Is(err, profileimport.ErrNoCatalogs):
+			return fmt.Errorf("supply at least one --catalog: %w", err)
+		default:
+			return err
+		}
+	}
+
+	if *asJSON {
+		out, _ := json.MarshalIndent(map[string]any{
+			"profile_id":    report.ProfileID.String(),
+			"source_sha256": report.SourceSha256,
+			"oscal_version": report.OSCALVersion,
+			"profile_title": report.ProfileTitle,
+			"source_label":  report.SourceLabel,
+			"control_count": report.ControlCount,
+			"mapped_count":  report.MappedCount,
+		}, "", "  ")
+		fmt.Println(string(out))
+		return nil
+	}
+
+	fmt.Printf("OSCAL profile resolved + imported\n")
+	fmt.Printf("  profile id:     %s\n", report.ProfileID)
+	fmt.Printf("  profile title:  %s\n", report.ProfileTitle)
+	fmt.Printf("  OSCAL version:  %s\n", report.OSCALVersion)
+	fmt.Printf("  source label:   %s\n", report.SourceLabel)
+	fmt.Printf("  source sha256:  %s\n", report.SourceSha256)
+	fmt.Printf("  controls:       %d resolved (%d mapped to SCF anchors, %d need operator mapping)\n",
 		report.ControlCount, report.MappedCount, report.ControlCount-report.MappedCount)
 	return nil
 }

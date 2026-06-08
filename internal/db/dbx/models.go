@@ -1335,6 +1335,8 @@ type ImportedCatalog struct {
 	CatalogTitle string             `json:"catalog_title"`
 	ControlCount int32              `json:"control_count"`
 	ImportedAt   pgtype.Timestamptz `json:"imported_at"`
+	Kind         string             `json:"kind"`
+	ProfileTitle string             `json:"profile_title"`
 }
 
 type ImportedCatalogAuditLog struct {
