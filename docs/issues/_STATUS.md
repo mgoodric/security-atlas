@@ -5,6 +5,15 @@
 
 **Last reconciled:** 2026-06-08 (batch 224 reconcile — 523 K8s NetworkPolicy coverage evidence, 619 accepted-vendor-claim → OSCAL SSP control-implementation evidence ALL MERGED. Spillovers 621/622 ready. 619 held the hard constitutional boundary — an accepted claim renders as a vendor-attested by-component SSP statement, NEVER platform-verified coverage (control_evaluations unchanged, proven by integration test). Clean 2-slice batch.)
 
+## Claim-stake — 2026-06-08 (batch 225 · 615 + 620 in-progress)
+
+Clean 2-slice batch: {ONE connector + ONE OSCAL/web}. Disjoint file footprint (only CHANGELOG shared → keep-all).
+
+| Row | Transition              | Evidence                                                                                                                                                                                                                                                                      |
+| --- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 615 | `ready` → `in-progress` | Azure Key-Vault RBAC role-assignment enumeration (closes the slice-521 RBAC-mode gap; `connectors/azure/internal/keyvault` second ARM read against Authorization RP; no schema change; metadata-only over-collection guard). parent #521 merged.                              |
+| 620 | `ready` → `in-progress` | map an unmapped vendor claim → SCF anchor (operator mapping UX; `PATCH /v1/oscal/component-claims/{id}/scf-anchor`, grc_engineer-gated, RLS; requirement→anchor only per invariant #7; never fabricates coverage). parent #589 merged. Route change → openapi regen required. |
+
 ## Reconcile — 2026-06-08 (batch 224 · 523 + 619 merged)
 
 Both merged. 523 (#1151, `62c2c11b`) + 619 (#1150, `91442368`); claim-stake #1149 (`9ec2a683`).
@@ -582,16 +591,16 @@ Solo batch — the second of the three gap-analysis real-defects (492). Merged c
 
 **Spillovers filed (docs on main, rows registered below):** the two remaining OSCAL ingest directions, each a meaningfully different model with its own resolution semantics, reusing 492's bridge-ingest direction:
 
-| Row | Transition | Evidence                                                                                                                                                                         |
-| --- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 511 | `merged`   | OSCAL profile import (resolve import/merge/modify directives) · parent #492 · batch 216 · #1109 `57f085cf` · invariant-#8 resolve direction                                      |
-| 578 | `merged`   | OSCAL chained profile-over-profile resolution (depth-8 + cycle detection) · parent #511 · OSCAL · batch 219 · #1124 `4d30be12`                                                   |
-| 599 | `merged`   | OSCAL resolved-chain provenance read API · parent #578 · OSCAL · batch 220 · #1129 `c4167dee` · GET /v1/oscal/imported-profiles/{id}/provenance                                  |
-| 608 | `merged`   | per-tenant control-bundle gate-policy (bundle_gate_mode; default strict) · parent #574 · control-as-code · batch 221 · #1134 `4974fe06` · spillover 613                          |
-| 512 | `merged`   | OSCAL component-definition import (vendor claims as non-auto-satisfying evidence) · parent #492 · batch 217 · #1115 `3c3c62e3`                                                   |
-| 589 | `merged`   | vendor-claim read API + operator accept/reject/needs_info disposition (never auto-satisfies a control) · parent #512 · OSCAL · batch 223 · #1147 `21f66cba` · spillovers 619/620 |
-| 619 | `merged`   | accepted vendor claim → OSCAL SSP control-implementation evidence (vendor-attested, never platform-verified coverage) · parent #589 · OSCAL · batch 224 · #1150 `91442368`       |
-| 620 | `ready`    | map an unmapped vendor claim to an SCF anchor · parent #589 (merged) · OSCAL · `docs/issues/620-map-unmapped-claim-to-scf-anchor.md`                                             |
+| Row | Transition    | Evidence                                                                                                                                                                         |
+| --- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 511 | `merged`      | OSCAL profile import (resolve import/merge/modify directives) · parent #492 · batch 216 · #1109 `57f085cf` · invariant-#8 resolve direction                                      |
+| 578 | `merged`      | OSCAL chained profile-over-profile resolution (depth-8 + cycle detection) · parent #511 · OSCAL · batch 219 · #1124 `4d30be12`                                                   |
+| 599 | `merged`      | OSCAL resolved-chain provenance read API · parent #578 · OSCAL · batch 220 · #1129 `c4167dee` · GET /v1/oscal/imported-profiles/{id}/provenance                                  |
+| 608 | `merged`      | per-tenant control-bundle gate-policy (bundle_gate_mode; default strict) · parent #574 · control-as-code · batch 221 · #1134 `4974fe06` · spillover 613                          |
+| 512 | `merged`      | OSCAL component-definition import (vendor claims as non-auto-satisfying evidence) · parent #492 · batch 217 · #1115 `3c3c62e3`                                                   |
+| 589 | `merged`      | vendor-claim read API + operator accept/reject/needs_info disposition (never auto-satisfies a control) · parent #512 · OSCAL · batch 223 · #1147 `21f66cba` · spillovers 619/620 |
+| 619 | `merged`      | accepted vendor claim → OSCAL SSP control-implementation evidence (vendor-attested, never platform-verified coverage) · parent #589 · OSCAL · batch 224 · #1150 `91442368`       |
+| 620 | `in-progress` | map an unmapped vendor claim to an SCF anchor · parent #589 (merged) · OSCAL · `docs/issues/620-map-unmapped-claim-to-scf-anchor.md`                                             |
 
 Backlog after batch 199: the remaining ready gap-slices — 480/481/482 (crosswalks · share soc2import+coverage) · 486-491 connectors (share schemaregistry+coverage; one per batch) · 493/494/496 (now buildable on 492's importer; 493/494 share internal/oscal) · 498 (LLM foundation — the last of the 3 real-defects) · 474 · 478 (user-mgmt API, LARGE) · 508/509/510 · 511/512 (new) · the older analysis tail. **498 (LLM foundation) is the next real-defect priority**; merging it flips 499-502 → ready. 478 merging flips 479 → ready. AI-assist 440/441/444/471 maintainer-sequenced; decision-gates 446/455/PCI-CDE out of the loop.
 
@@ -644,7 +653,7 @@ Maintainer-directed comprehensive gap analysis (5 parallel domain investigators:
 | 520 | `merged`            | Azure NSG/firewall rule evidence (azure.nsg_rules.v1; azure connector now 4 kinds) · parent #486 · Connectors · batch 222 · #1143 `e91f9ed6` · spillover 614                     |
 | 614 | `ready`             | Azure Firewall rule-collection evidence · parent #520 (merged) · Connectors · `docs/issues/614-azure-firewall-rule-collection-evidence.md`                                       |
 | 521 | `merged`            | Azure Key-Vault access-policy evidence (azure.keyvault_access_config.v1; mgmt-plane-only; azure connector now 5 kinds) · parent #486 · Connectors · batch 223 · #1146 `a8838f2e` |
-| 615 | `ready`             | Azure Key-Vault RBAC role-assignment enumeration · parent #521 (merged) · Connectors · `docs/issues/615-azure-keyvault-rbac-role-assignment-enumeration.md`                      |
+| 615 | `in-progress`       | Azure Key-Vault RBAC role-assignment enumeration · parent #521 (merged) · Connectors · `docs/issues/615-azure-keyvault-rbac-role-assignment-enumeration.md`                      |
 | 522 | `ready`             | Azure event-driven profile (Event Grid / Activity-Log) · Connectors · parent #486 · #1070                                                                                        |
 | 487 | `merged`            | Kubernetes connector (RBAC + workload config) · #1034 spec · #1073 impl `4f233e76` · batch 207 · 9th connector                                                                   |
 | 523 | `merged`            | K8s NetworkPolicy coverage evidence (k8s.networkpolicy_coverage.v1) · parent #487 · Connectors · batch 224 · #1151 `62c2c11b` · spillovers 621/622                               |
