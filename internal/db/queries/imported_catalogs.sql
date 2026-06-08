@@ -156,3 +156,79 @@ ORDER BY title ASC, component_uuid ASC;
 SELECT * FROM imported_component_claims
 WHERE tenant_id = $1 AND imported_component_id = $2
 ORDER BY control_id ASC, requirement_uuid ASC;
+
+-- ===== slice 589: vendor-claim read + operator disposition =====
+
+-- name: GetImportedComponentDefinitionByID :one
+-- Fetch one imported component-definition provenance row by id, confirming it
+-- is a component-definition (kind = 'component_definition'). RLS scopes to the
+-- caller's tenant; a cross-tenant or non-component-definition id returns
+-- ErrNoRows.
+SELECT * FROM imported_catalogs
+WHERE tenant_id = $1 AND id = $2 AND kind = 'component_definition';
+
+-- name: ListImportedComponentClaimsForDefinition :many
+-- Every vendor claim across every component of one imported
+-- component-definition, joined to the component for display. Ordered for
+-- stable rendering. RLS scopes both tables to the caller's tenant; the
+-- leading $1 tenant_id predicate is defense-in-depth behind RLS.
+SELECT
+    cc.id                    AS claim_id,
+    cc.imported_component_id AS imported_component_id,
+    cmp.component_uuid       AS component_uuid,
+    cmp.title                AS component_title,
+    cmp.component_type       AS component_type,
+    cc.control_id            AS control_id,
+    cc.statement             AS statement,
+    cc.requirement_uuid      AS requirement_uuid,
+    cc.scf_anchor_id         AS scf_anchor_id,
+    cc.is_vendor_claim       AS is_vendor_claim,
+    cc.claim_status          AS claim_status,
+    cc.dispositioned_by      AS dispositioned_by,
+    cc.dispositioned_at      AS dispositioned_at,
+    cc.disposition_note      AS disposition_note,
+    cc.created_at            AS created_at
+FROM imported_component_claims cc
+JOIN imported_components cmp
+    ON cmp.id = cc.imported_component_id
+   AND cmp.tenant_id = cc.tenant_id
+WHERE cc.tenant_id = $1
+  AND cmp.imported_catalog_id = $2
+ORDER BY cmp.title ASC, cmp.component_uuid ASC, cc.control_id ASC, cc.requirement_uuid ASC;
+
+-- name: GetImportedComponentClaimByID :one
+-- Fetch one vendor claim by id (for disposition pre-read: existence + the
+-- current claim_status drives the from_status audit field). RLS scopes to the
+-- caller's tenant; a cross-tenant id returns ErrNoRows.
+SELECT * FROM imported_component_claims
+WHERE tenant_id = $1 AND id = $2;
+
+-- name: DispositionImportedComponentClaim :one
+-- Record an operator disposition on one vendor claim: set claim_status to one
+-- of 'accepted' / 'rejected' / 'needs_info', the disposing actor, the time,
+-- and an optional note. is_vendor_claim is NOT touched (a claim is always a
+-- claim — P0-512-1 / P0-589). This NEVER writes to control_evaluations: the
+-- disposition is metadata on the claim, not a control satisfaction
+-- (invariant #2). RLS rides the slice-512 tenant_update policy.
+UPDATE imported_component_claims
+SET claim_status      = $3,
+    dispositioned_by  = $4,
+    dispositioned_at  = now(),
+    disposition_note  = $5
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
+-- name: InsertImportedComponentClaimDisposition :one
+-- Append one append-only disposition-audit row recording the
+-- from_status -> to_status transition, the actor, and an optional note.
+INSERT INTO imported_component_claim_dispositions
+    (id, tenant_id, claim_id, from_status, to_status, actor, note)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING *;
+
+-- name: ListImportedComponentClaimDispositions :many
+-- The append-only disposition history for one vendor claim, most recent
+-- first.
+SELECT * FROM imported_component_claim_dispositions
+WHERE tenant_id = $1 AND claim_id = $2
+ORDER BY occurred_at DESC, id ASC;

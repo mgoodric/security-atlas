@@ -355,6 +355,13 @@ type Querier interface {
 	DemoteCurrentFrameworkVersions(ctx context.Context, frameworkID pgtype.UUID) error
 	// AC-3 transition: requested -> denied (terminal). Same guards as Approve.
 	DenyException(ctx context.Context, arg DenyExceptionParams) (Exception, error)
+	// Record an operator disposition on one vendor claim: set claim_status to one
+	// of 'accepted' / 'rejected' / 'needs_info', the disposing actor, the time,
+	// and an optional note. is_vendor_claim is NOT touched (a claim is always a
+	// claim — P0-512-1 / P0-589). This NEVER writes to control_evaluations: the
+	// disposition is metadata on the claim, not a control satisfaction
+	// (invariant #2). RLS rides the slice-512 tenant_update policy.
+	DispositionImportedComponentClaim(ctx context.Context, arg DispositionImportedComponentClaimParams) (ImportedComponentClaim, error)
 	// AC-5 auto-expiry: marks active rows whose expires_at < threshold as
 	// expired. Returns the affected rows so the cron can write one
 	// exception_audit_log row per expired exception (anti-criterion P0: no
@@ -588,6 +595,16 @@ type Querier interface {
 	// Fetch one imported catalog by id. RLS scopes to the caller's tenant; a
 	// cross-tenant id returns ErrNoRows.
 	GetImportedCatalogByID(ctx context.Context, arg GetImportedCatalogByIDParams) (ImportedCatalog, error)
+	// Fetch one vendor claim by id (for disposition pre-read: existence + the
+	// current claim_status drives the from_status audit field). RLS scopes to the
+	// caller's tenant; a cross-tenant id returns ErrNoRows.
+	GetImportedComponentClaimByID(ctx context.Context, arg GetImportedComponentClaimByIDParams) (ImportedComponentClaim, error)
+	// ===== slice 589: vendor-claim read + operator disposition =====
+	// Fetch one imported component-definition provenance row by id, confirming it
+	// is a component-definition (kind = 'component_definition'). RLS scopes to the
+	// caller's tenant; a cross-tenant or non-component-definition id returns
+	// ErrNoRows.
+	GetImportedComponentDefinitionByID(ctx context.Context, arg GetImportedComponentDefinitionByIDParams) (ImportedCatalog, error)
 	// The engine's "when did this rule last fire, and into which window"
 	// lookup. Used to decide whether the current write falls inside an
 	// existing window. Returns the most recent 'fired' row for the rule.
@@ -846,6 +863,9 @@ type Querier interface {
 	// and claim_status defaults 'asserted' (the table defaults) — the import never
 	// writes anything else (P0-512-1).
 	InsertImportedComponentClaim(ctx context.Context, arg InsertImportedComponentClaimParams) (ImportedComponentClaim, error)
+	// Append one append-only disposition-audit row recording the
+	// from_status -> to_status transition, the actor, and an optional note.
+	InsertImportedComponentClaimDisposition(ctx context.Context, arg InsertImportedComponentClaimDispositionParams) (ImportedComponentClaimDisposition, error)
 	// ===== slice 512: component-definition import (vendor-claim ingest) =====
 	// Create one imported-COMPONENT-DEFINITION provenance row: source
 	// 'oscal-component-import', kind 'component_definition'. The vendor/product
@@ -1531,9 +1551,17 @@ type Querier interface {
 	ListImportedCatalogControls(ctx context.Context, arg ListImportedCatalogControlsParams) ([]ImportedCatalogControl, error)
 	// Enumerate every imported catalog for the tenant, most recent first.
 	ListImportedCatalogs(ctx context.Context, tenantID pgtype.UUID) ([]ImportedCatalog, error)
+	// The append-only disposition history for one vendor claim, most recent
+	// first.
+	ListImportedComponentClaimDispositions(ctx context.Context, arg ListImportedComponentClaimDispositionsParams) ([]ImportedComponentClaimDisposition, error)
 	// Every vendor claim for one imported component, ordered for stable
 	// rendering.
 	ListImportedComponentClaims(ctx context.Context, arg ListImportedComponentClaimsParams) ([]ImportedComponentClaim, error)
+	// Every vendor claim across every component of one imported
+	// component-definition, joined to the component for display. Ordered for
+	// stable rendering. RLS scopes both tables to the caller's tenant; the
+	// leading $1 tenant_id predicate is defense-in-depth behind RLS.
+	ListImportedComponentClaimsForDefinition(ctx context.Context, arg ListImportedComponentClaimsForDefinitionParams) ([]ListImportedComponentClaimsForDefinitionRow, error)
 	// Enumerate every imported component-definition for the tenant, most recent
 	// first (index-served by idx_imported_catalogs_tenant_components).
 	ListImportedComponentDefinitions(ctx context.Context, tenantID pgtype.UUID) ([]ImportedCatalog, error)

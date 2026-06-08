@@ -67,6 +67,7 @@ sql:
       - "migrations/sql/20260608010000_oscal_component_definitions.sql"
       - "migrations/sql/20260608030000_tenant_bundle_gate_mode.sql"
       - "migrations/sql/20260608040000_evidence_scope_canonical.sql"
+      - "migrations/sql/20260608050000_oscal_component_claim_disposition.sql"
     queries: "internal/db/queries"
     gen:
       go:

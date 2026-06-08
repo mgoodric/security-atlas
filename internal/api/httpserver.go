@@ -49,6 +49,7 @@ import (
 	meapi "github.com/mgoodric/security-atlas/internal/api/me"
 	metricsapi "github.com/mgoodric/security-atlas/internal/api/metrics"
 	orgunitsapi "github.com/mgoodric/security-atlas/internal/api/orgunits"
+	oscalcomponentsapi "github.com/mgoodric/security-atlas/internal/api/oscalcomponents"
 	oscalexportapi "github.com/mgoodric/security-atlas/internal/api/oscalexport"
 	oscalprovenanceapi "github.com/mgoodric/security-atlas/internal/api/oscalprovenance"
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
@@ -813,6 +814,23 @@ func (s *Server) httpHandler() http.Handler {
 	// provenance is already in Postgres, so the read is bridge-free.
 	oscalProvenanceH := oscalprovenanceapi.New(oscalprovenanceapi.NewStore(s.dbPool))
 	root.Get("/v1/oscal/imported-profiles/{id}/provenance", oscalProvenanceH.Provenance)
+	// Slice 589: OSCAL vendor-claim read API + operator disposition. Pure
+	// reads over the slice-512 imported component-definitions + the
+	// accept/reject/needs-info disposition write. A vendor claim is an
+	// ASSERTION, not platform-verified evidence: the disposition records the
+	// human decision and NEVER auto-satisfies a control (canvas invariant #2,
+	// P0-512-1). The Store writes ONLY the claim's disposition metadata + an
+	// append-only audit row -- it never touches control_evaluations or the
+	// evidence ledger, and never the oscal-bridge (the read path is over
+	// persisted Postgres rows). Routes appended per the parallel-batch
+	// convention (chi rejects two Mounts at "/"). The {id}:verb shape mirrors
+	// the slice-025 walkthroughs /{id}:finalize precedent.
+	oscalComponentsH := oscalcomponentsapi.New(oscalcomponentsapi.NewStore(s.dbPool))
+	root.Get("/v1/oscal/component-definitions", oscalComponentsH.ListDefinitions)
+	root.Get("/v1/oscal/component-definitions/{id}", oscalComponentsH.GetDefinition)
+	root.Post("/v1/oscal/component-claims/{id}:accept", oscalComponentsH.Accept)
+	root.Post("/v1/oscal/component-claims/{id}:reject", oscalComponentsH.Reject)
+	root.Post("/v1/oscal/component-claims/{id}:needs-info", oscalComponentsH.NeedsInfo)
 	// Slice 016: evidence freshness + control drift read model. Two
 	// read-only endpoints over the slice-016 read-model tables
 	// (evidence_freshness, control_drift_snapshots). Routes appended per the

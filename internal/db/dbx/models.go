@@ -1401,6 +1401,20 @@ type ImportedComponentClaim struct {
 	IsVendorClaim       bool               `json:"is_vendor_claim"`
 	ClaimStatus         string             `json:"claim_status"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	DispositionedBy     *string            `json:"dispositioned_by"`
+	DispositionedAt     pgtype.Timestamptz `json:"dispositioned_at"`
+	DispositionNote     string             `json:"disposition_note"`
+}
+
+type ImportedComponentClaimDisposition struct {
+	ID         pgtype.UUID        `json:"id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	ClaimID    pgtype.UUID        `json:"claim_id"`
+	FromStatus string             `json:"from_status"`
+	ToStatus   string             `json:"to_status"`
+	Actor      string             `json:"actor"`
+	Note       string             `json:"note"`
+	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
 }
 
 type LocalCredential struct {
