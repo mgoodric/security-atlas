@@ -95,10 +95,13 @@ type RawVault struct {
 }
 
 // API is the narrow surface Inspect depends on. The concrete implementation
-// wraps the read-only Azure Resource Manager vaults list; tests pass a fake. v0
-// lists the first bounded page for one subscription; cursor pagination +
-// multi-subscription enumeration are documented follow-ons (threat-model D,
-// shared with slice 486 R3).
+// wraps the read-only Azure Resource Manager vaults list (and, for an
+// RBAC-authorization vault, a SECOND scoped read against
+// Microsoft.Authorization/roleAssignments — slice 615 — merged into the vault's
+// AccessEntries before it is returned). Tests pass a fake. v0 lists the first
+// bounded page for one subscription; cursor pagination + multi-subscription
+// enumeration are documented follow-ons (threat-model D, shared with slice 486
+// R3).
 type API interface {
 	ListVaults(ctx context.Context) ([]RawVault, error)
 }

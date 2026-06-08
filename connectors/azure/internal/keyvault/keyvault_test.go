@@ -186,6 +186,39 @@ func TestStructs_MetadataOnly_NoSecretValueFields(t *testing.T) {
 	check(reflect.TypeOf(keyvault.RawVault{}))
 }
 
+// TestRBACRoleAssignment_MetadataOnly_PinsNewPath (slice 615) pins the RBAC
+// second-read path through the SAME metadata-only struct as the access-policy
+// path: an rbac_role_assignment entry carries a principal id + a role NAME and
+// nothing else. The AccessEntry struct has no field capable of holding a
+// secret/key/certificate value, so the RBAC path cannot over-collect by
+// construction (the structural guard above covers the type; this pins the path
+// that now populates it). The merge is exercised end-to-end through Inspect.
+func TestRBACRoleAssignment_MetadataOnly_PinsNewPath(t *testing.T) {
+	v := keyvault.RawVault{
+		ID: "/sub/kv", Name: "kv", ResourceGroup: "rg", Location: "eastus",
+		RBACAuthorization: true, PurgeProtection: true, SoftDeleteEnabled: true,
+		PublicNetworkAccess: "Disabled",
+		AccessEntries: []keyvault.AccessEntry{
+			{PrincipalID: "00000000-0000-0000-0000-000000000001", PrincipalType: "rbac_role_assignment", RoleName: "Key Vault Reader"},
+			{PrincipalID: "00000000-0000-0000-0000-000000000002", PrincipalType: "rbac_role_assignment", RoleName: "Key Vault Secrets User"},
+		},
+	}
+	got, _ := keyvault.Inspect(context.Background(), &fakeARM{vaults: []keyvault.RawVault{v}}, "sub", fixedNow)
+	if len(got) != 1 || len(got[0].AccessEntries) != 2 {
+		t.Fatalf("RBAC role assignments not preserved through Inspect: %+v", got)
+	}
+	for _, e := range got[0].AccessEntries {
+		if e.PrincipalType != "rbac_role_assignment" || e.RoleName == "" {
+			t.Errorf("rbac entry malformed: %+v", e)
+		}
+		// An RBAC role assignment carries NO access-policy permission verbs —
+		// the metadata is principal + role name only.
+		if len(e.Permissions) != 0 {
+			t.Errorf("rbac entry must carry no permission verbs: %+v", e)
+		}
+	}
+}
+
 // TestMetadataOnly_AccessFieldsPreserved pins that the documented access /
 // config fields survive the Inspect transform (the positive companion to the
 // structural guard).
