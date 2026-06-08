@@ -52,6 +52,20 @@ service OscalBridgeService {
   // are opaque metadata). A document-size cap + parse timeout bound the
   // expansion-attack surface (threat-model D/I).
   rpc ImportCatalog(ImportCatalogRequest) returns (ImportCatalogResponse);
+
+  // ImportProfile resolves an inbound OSCAL `profile` JSON document against
+  // one or more SUPPLIED catalog documents and returns the resolved control
+  // projection (slice 511). The bridge applies the profile's import / merge /
+  // modify directives via compliance-trestle's profile-resolver inside an
+  // ISOLATED, ephemeral trestle workspace whose only catalogs are the ones
+  // the caller supplied. It NEVER dereferences an external `import.href`:
+  // every href is rewritten to point at a supplied catalog, and an href that
+  // names no supplied catalog is a structured error, not a fetch (P0-511-1 /
+  // threat-model I — the load-bearing difference from ImportCatalog). The
+  // resolved output is re-validated against OSCAL v1.1.x before it is
+  // returned. Caps (document size, resolved-control count, single import
+  // level) bound the expansion-attack surface (threat-model D / AC-3).
+  rpc ImportProfile(ImportProfileRequest) returns (ImportProfileResponse);
 }
 
 // ----- shared -----
@@ -299,6 +313,50 @@ message ImportCatalogResponse {
   string oscal_version = 4;
   // The catalog metadata title (echoed for provenance / display).
   string catalog_title = 5;
+  // Echo of the request source_label.
+  string source_label = 6;
+}
+
+// ----- profile import (ingest / resolve) -----
+
+// SuppliedCatalog is one catalog document the caller supplies for the
+// profile to resolve against. The bridge resolves `import.href` references
+// ONLY against these supplied catalogs (never an external fetch). The
+// optional title / uuid help the bridge match an `import.href` to the right
+// supplied catalog when several are provided.
+message SuppliedCatalog {
+  // The raw OSCAL catalog JSON document bytes.
+  bytes oscal_json = 1;
+  // Optional operator label for this catalog (diagnostic only).
+  string label = 2;
+}
+
+message ImportProfileRequest {
+  // The raw inbound OSCAL profile JSON document bytes.
+  bytes profile_json = 1;
+  // The catalog(s) the profile resolves against. At least one is required;
+  // an `import.href` that maps to none of these is a structured error.
+  repeated SuppliedCatalog catalogs = 2;
+  // Operator-declared source label (e.g. "FedRAMP Moderate baseline").
+  // Carried into the provenance record on the Go side; echoed back.
+  string source_label = 3;
+}
+
+message ImportProfileResponse {
+  // True when the profile resolved AND the resolved output validated as an
+  // OSCAL v1.1.x catalog. When false, controls is empty and errors is set.
+  bool valid = 1;
+  // Human-readable errors when valid=false: a validation failure, an
+  // unresolvable / external `import.href`, or a size/count/depth cap
+  // rejection.
+  repeated string errors = 2;
+  // The resolved control projection (empty when valid=false). These are the
+  // controls the profile's import/merge/modify directives produced.
+  repeated ImportedControl controls = 3;
+  // The resolved catalog's declared OSCAL version (echoed for provenance).
+  string oscal_version = 4;
+  // The profile's declared metadata title (echoed for provenance / display).
+  string profile_title = 5;
   // Echo of the request source_label.
   string source_label = 6;
 }

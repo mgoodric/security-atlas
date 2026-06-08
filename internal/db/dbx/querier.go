@@ -810,12 +810,19 @@ type Querier interface {
 	// 'oscal-import' (the table default) and is not set here.
 	InsertImportedCatalog(ctx context.Context, arg InsertImportedCatalogParams) (ImportedCatalog, error)
 	// Append one append-only import audit row (AC-7). Written on success
-	// ('catalog_imported') and on rejection ('import_rejected').
+	// ('catalog_imported' / 'profile_imported') and on rejection
+	// ('import_rejected' / 'profile_import_rejected').
 	InsertImportedCatalogAuditLog(ctx context.Context, arg InsertImportedCatalogAuditLogParams) (ImportedCatalogAuditLog, error)
 	// Append one imported control mapped (or flagged NULL for mapping) to an
 	// SCF anchor. The (imported_catalog_id, source_control_id) UNIQUE
 	// constraint rejects a duplicate control within one catalog.
 	InsertImportedCatalogControl(ctx context.Context, arg InsertImportedCatalogControlParams) (ImportedCatalogControl, error)
+	// ===== slice 511: profile import (resolve direction) =====
+	// Create one imported-PROFILE provenance row: source 'oscal-profile-import',
+	// kind 'profile', carrying the resolved profile's declared title. The
+	// resolved baseline is, structurally, an imported control set distinguished
+	// from a catalog import by (source, kind) — slice-511 D4.
+	InsertImportedProfile(ctx context.Context, arg InsertImportedProfileParams) (ImportedCatalog, error)
 	// Append a row to the slice 108 audit ledger. before / after are JSONB; the handler
 	// builds them from the wire shape minus any redacted fields. Gated by handler logic on
 	// non-empty diff (anti-criterion ISC-A5).
@@ -1479,6 +1486,9 @@ type Querier interface {
 	ListImportedCatalogControls(ctx context.Context, arg ListImportedCatalogControlsParams) ([]ImportedCatalogControl, error)
 	// Enumerate every imported catalog for the tenant, most recent first.
 	ListImportedCatalogs(ctx context.Context, tenantID pgtype.UUID) ([]ImportedCatalog, error)
+	// Enumerate every resolved profile baseline for the tenant, most recent
+	// first (index-served by idx_imported_catalogs_tenant_profiles).
+	ListImportedProfiles(ctx context.Context, tenantID pgtype.UUID) ([]ImportedCatalog, error)
 	// Every (control, scope_cell)'s latest state for one control. DISTINCT ON
 	// collapses the append-only history to the current row per cell. Used by
 	// GET /v1/controls/:id/state when no scope filter is supplied.

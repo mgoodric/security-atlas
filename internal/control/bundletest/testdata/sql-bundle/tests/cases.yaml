@@ -1,0 +1,31 @@
+cases:
+  # AC-4: drives the slice-495 SQL evaluator end to end. bool_and over an
+  # all-encrypted payload set is true -> pass.
+  - name: all-encrypted-pass
+    description: "Every payload encrypted: true -> control passes."
+    expected_state: pass
+    evaluated_at: 2026-06-01T12:00:00Z
+    records:
+      - result: pass
+        observed_at: 2026-05-20T00:00:00Z
+        payload:
+          encrypted: true
+      - result: pass
+        observed_at: 2026-05-25T00:00:00Z
+        payload:
+          encrypted: true
+
+  # One unencrypted payload -> bool_and is false -> fail (expected).
+  - name: one-unencrypted-fail
+    description: "One payload encrypted: false -> control fails."
+    expected_state: fail
+    evaluated_at: 2026-06-01T12:00:00Z
+    records:
+      - result: pass
+        observed_at: 2026-05-20T00:00:00Z
+        payload:
+          encrypted: true
+      - result: pass
+        observed_at: 2026-05-25T00:00:00Z
+        payload:
+          encrypted: false

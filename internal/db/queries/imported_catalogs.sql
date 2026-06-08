@@ -43,8 +43,29 @@ ORDER BY group_path ASC, source_control_id ASC;
 
 -- name: InsertImportedCatalogAuditLog :one
 -- Append one append-only import audit row (AC-7). Written on success
--- ('catalog_imported') and on rejection ('import_rejected').
+-- ('catalog_imported' / 'profile_imported') and on rejection
+-- ('import_rejected' / 'profile_import_rejected').
 INSERT INTO imported_catalog_audit_log
     (id, tenant_id, catalog_id, action, actor, source_sha256, source_label, control_count, detail)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
+
+-- ===== slice 511: profile import (resolve direction) =====
+
+-- name: InsertImportedProfile :one
+-- Create one imported-PROFILE provenance row: source 'oscal-profile-import',
+-- kind 'profile', carrying the resolved profile's declared title. The
+-- resolved baseline is, structurally, an imported control set distinguished
+-- from a catalog import by (source, kind) — slice-511 D4.
+INSERT INTO imported_catalogs
+    (id, tenant_id, source, kind, imported_by, source_sha256, source_label,
+     oscal_version, catalog_title, profile_title, control_count)
+VALUES ($1, $2, 'oscal-profile-import', 'profile', $3, $4, $5, $6, $7, $8, $9)
+RETURNING *;
+
+-- name: ListImportedProfiles :many
+-- Enumerate every resolved profile baseline for the tenant, most recent
+-- first (index-served by idx_imported_catalogs_tenant_profiles).
+SELECT * FROM imported_catalogs
+WHERE tenant_id = $1 AND kind = 'profile'
+ORDER BY imported_at DESC, id ASC;

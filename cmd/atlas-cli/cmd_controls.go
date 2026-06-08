@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mgoodric/security-atlas/internal/control"
+	"github.com/mgoodric/security-atlas/internal/control/bundletest"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 	"github.com/mgoodric/security-atlas/pkg/sdk-go/oauth"
 )
@@ -128,7 +129,86 @@ func newControlsCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newControlsValidateCmd())
 	cmd.AddCommand(newControlsUploadCmd())
+	cmd.AddCommand(newControlsTestCmd())
 	return cmd
+}
+
+// newControlsTestCmd registers `controls test <bundle-dir>` — the slice-496
+// control-bundle test runner. It is local-only: no network, no auth. It loads
+// the bundle's tests/ directory, feeds each test case's fixture evidence
+// through the SAME evaluation engine the live path uses (internal/eval), and
+// reports per-case pass/fail. Exit code is non-zero on any failure or error so
+// it slots into CI for community-contributed bundles (AC-5 / P0-496-6).
+//
+// The runner uses NO live database for Rego/JSON-path bundles (AC-9); a SQL
+// query reports an actionable "needs a database" error rather than a false
+// pass.
+func newControlsTestCmd() *cobra.Command {
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "test <bundle-dir>",
+		Short: "run a control bundle's test cases locally (fixture evidence -> expected pass/fail)",
+		Long: "Execute the test cases in a control bundle's tests/ directory. Each case " +
+			"declares fixture evidence records and an expected_state (pass|fail|na|inconclusive); " +
+			"the runner feeds the fixtures through the live evaluation engine and asserts the " +
+			"produced state matches. Exits non-zero on any failing or errored case.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runControlsTest(cmd, args[0], jsonOut)
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit the test report as JSON")
+	return cmd
+}
+
+// runControlsTest executes the runner and renders the report. Returns a
+// non-nil error (so cobra exits non-zero) when any case failed or errored.
+func runControlsTest(cmd *cobra.Command, bundleDir string, jsonOut bool) error {
+	rep, err := bundletest.Run(cmd.Context(), bundleDir, bundletest.Options{})
+	if err != nil {
+		return err
+	}
+
+	out := cmd.OutOrStdout()
+	if jsonOut {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(rep); err != nil {
+			return fmt.Errorf("encode report: %w", err)
+		}
+	} else {
+		renderTestReportText(out, rep)
+	}
+
+	if len(rep.Cases) == 0 {
+		// No tests is a warning, not a failure: a bundle may legitimately ship
+		// without tests yet. Surface it on stderr so CI logs flag it.
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: bundle %q declares no test cases (tests/ is absent or empty)\n", rep.BundleID)
+		return nil
+	}
+	if !rep.AllPassed() {
+		// A plain error so cobra exits non-zero (AC-5 / P0-496-6). SilenceUsage
+		// + SilenceErrors are set on root, so this prints nothing extra.
+		return fmt.Errorf("%d failed, %d errored of %d test case(s)", rep.Failed, rep.Errored, len(rep.Cases))
+	}
+	return nil
+}
+
+// renderTestReportText prints a human-readable per-case report.
+func renderTestReportText(out io.Writer, rep *bundletest.Report) {
+	_, _ = fmt.Fprintf(out, "bundle: %s\n", rep.BundleID)
+	for _, c := range rep.Cases {
+		switch {
+		case c.Err != "":
+			_, _ = fmt.Fprintf(out, "  ERROR %s — %s\n", c.Name, c.Err)
+		case c.Passed:
+			_, _ = fmt.Fprintf(out, "  PASS  %s (state=%s)\n", c.Name, c.ActualState)
+		default:
+			_, _ = fmt.Fprintf(out, "  FAIL  %s (expected=%s actual=%s)\n", c.Name, c.ExpectedState, c.ActualState)
+		}
+	}
+	_, _ = fmt.Fprintf(out, "%d passed, %d failed, %d errored of %d\n",
+		rep.Passed, rep.Failed, rep.Errored, len(rep.Cases))
 }
 
 func newControlsValidateCmd() *cobra.Command {

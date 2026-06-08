@@ -18,9 +18,15 @@ Go side passed — human-authored control-bundle descriptions.
 from __future__ import annotations
 
 import json
+import pathlib
+import re
+import shutil
+import tempfile
 import uuid
 from datetime import UTC, datetime
 
+from trestle.core.control_interface import ParameterRep
+from trestle.core.profile_resolver import ProfileResolver
 from trestle.oscal.assessment_plan import AssessmentPlan
 from trestle.oscal.assessment_results import AssessmentResults, ImportAp, Result
 from trestle.oscal.catalog import Catalog
@@ -639,3 +645,271 @@ def import_catalog(oscal_json: bytes, source_label: str = "") -> ImportResult:
     oscal_version = getattr(meta, "oscal_version", "") or ""
     catalog_title = getattr(meta, "title", "") or ""
     return ImportResult(True, [], controls, str(oscal_version), str(catalog_title))
+
+
+# --------------------------------------------------------------------------
+# profile import (resolve direction — slice 511)
+# --------------------------------------------------------------------------
+
+# Bounds on the inbound documents (threat-model D / I — see slice-511 D5).
+# Enforced here in the bridge as defense-in-depth; the Go side enforces the
+# same byte cap on every document BEFORE the bytes cross the wire.
+MAX_PROFILE_BYTES = 16 * 1024 * 1024  # 16 MiB
+MAX_RESOLVED_CONTROLS = 10_000
+
+# A trestle:// href is the ONLY href form the resolver may follow after the
+# bridge rewrites imports; it resolves to a LocalFetcher read inside our
+# sandbox (see slice-511 D2). Every other scheme (https / sftp / file / a
+# bare relative path) is an external/host dereference and is rejected.
+_TRESTLE_HREF_PREFIX = "trestle://"
+
+# Any href beginning with one of these is an explicit external/host
+# reference the bridge MUST NOT dereference (P0-511-1). It is rejected
+# BEFORE any catalog matching — a positional match never overrides this
+# check, so a single-catalog import cannot smuggle an external fetch.
+_EXTERNAL_HREF_PREFIXES = ("https://", "http://", "sftp://", "ftp://", "file:", "//")
+
+
+def _is_external_href(href: str) -> bool:
+    """Report whether ``href`` names an external/host resource to never fetch."""
+    h = href.strip().lower()
+    return h.startswith(_EXTERNAL_HREF_PREFIXES)
+
+
+class ProfileImportResult:
+    """Result of ``import_profile`` — mirrors ``ImportProfileResponse``."""
+
+    __slots__ = ("valid", "errors", "controls", "oscal_version", "profile_title")
+
+    def __init__(self, valid, errors, controls, oscal_version, profile_title):
+        self.valid = valid
+        self.errors = errors
+        self.controls = controls
+        self.oscal_version = oscal_version
+        self.profile_title = profile_title
+
+
+def _profile_reject(errors: list[str]) -> ProfileImportResult:
+    return ProfileImportResult(False, errors, [], "", "")
+
+
+def _catalog_slug(raw: str) -> str:
+    """Lowercase a string into a filesystem-safe sandbox directory token."""
+    cleaned = re.sub(r"[^a-z0-9]+", "-", (raw or "").lower()).strip("-")
+    return cleaned or "catalog"
+
+
+def _supplied_catalog_keys(catalogs) -> tuple[list[dict], list[str]]:
+    """Parse + validate the supplied catalogs into match descriptors.
+
+    Returns ``(descriptors, errors)``. Each descriptor carries the parsed
+    document, a unique sandbox key, and the identity tokens an import.href
+    may match against (the catalog uuid + the title slug). No href is read
+    or fetched here — only the bytes the caller supplied are parsed.
+    """
+    descriptors: list[dict] = []
+    errors: list[str] = []
+    seen_keys: set[str] = set()
+    for idx, sc in enumerate(catalogs):
+        raw = bytes(sc.oscal_json)
+        if len(raw) > MAX_PROFILE_BYTES:
+            errors.append(
+                f"supplied catalog #{idx} is {len(raw)} bytes, "
+                f"over the {MAX_PROFILE_BYTES}-byte cap"
+            )
+            continue
+        try:
+            doc = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            errors.append(f"supplied catalog #{idx}: invalid JSON: {exc}")
+            continue
+        if not isinstance(doc, dict) or "catalog" not in doc:
+            errors.append(f"supplied catalog #{idx}: missing top-level key 'catalog'")
+            continue
+        cat = doc["catalog"]
+        meta = cat.get("metadata", {}) if isinstance(cat, dict) else {}
+        title = str(meta.get("title", "")) if isinstance(meta, dict) else ""
+        cat_uuid = str(cat.get("uuid", "")) if isinstance(cat, dict) else ""
+        base_key = _catalog_slug(title or cat_uuid or f"catalog-{idx}")
+        key = base_key
+        bump = 1
+        while key in seen_keys:
+            key = f"{base_key}-{bump}"
+            bump += 1
+        seen_keys.add(key)
+        descriptors.append(
+            {
+                "doc": doc,
+                "key": key,
+                "uuid": cat_uuid,
+                "title_slug": _catalog_slug(title),
+            }
+        )
+    return descriptors, errors
+
+
+def _match_import_href(href: str, descriptors: list[dict]) -> dict | None:
+    """Map a profile ``import.href`` to a supplied catalog WITHOUT fetching.
+
+    Matching rules (slice-511 D2 — conservative; a non-match errors, never
+    fetches):
+      * single import + single catalog -> positional match (handled by caller).
+      * fragment / uuid match: an href like ``#<uuid>`` or one containing the
+        catalog uuid matches that catalog.
+      * trailing-segment slug match against the catalog title slug.
+    Returns the matched descriptor or ``None``.
+    """
+    h = href.strip()
+    # Strip a leading fragment marker; OSCAL back-matter resolution uses
+    # ``#<resource-uuid>`` but we never resolve back-matter — only the raw
+    # token is compared against supplied identities.
+    token = h[1:] if h.startswith("#") else h
+    trailing = token.rstrip("/").rsplit("/", 1)[-1]
+    trailing_slug = _catalog_slug(trailing.removesuffix(".json"))
+    for d in descriptors:
+        if d["uuid"] and (token == d["uuid"] or d["uuid"] in token):
+            return d
+        if d["title_slug"] and trailing_slug == d["title_slug"]:
+            return d
+    return None
+
+
+def _write_sandbox(root: pathlib.Path, descriptors: list[dict], profile_doc: dict) -> pathlib.Path:
+    """Lay out an isolated trestle workspace and return the profile path.
+
+    The workspace holds only the supplied catalogs + the (href-rewritten)
+    profile. trestle resolves every import as a LocalFetcher read inside
+    this dir; no external fetch is reachable (slice-511 D2).
+    """
+    (root / ".trestle").mkdir()
+    (root / ".trestle" / "cache").mkdir()
+    for d in descriptors:
+        cat_dir = root / "catalogs" / d["key"]
+        cat_dir.mkdir(parents=True)
+        (cat_dir / "catalog.json").write_text(json.dumps(d["doc"]))
+    prof_dir = root / "profiles" / "imported"
+    prof_dir.mkdir(parents=True)
+    prof_path = prof_dir / "profile.json"
+    prof_path.write_text(json.dumps(profile_doc))
+    return prof_path
+
+
+def import_profile(profile_json: bytes, catalogs, source_label: str = "") -> ProfileImportResult:
+    """Resolve an inbound OSCAL profile against SUPPLIED catalogs.
+
+    Returns a ``ProfileImportResult``. ``valid=False`` carries a structured
+    error and an empty control list — the Go side persists NOTHING in that
+    case (AC-5 / P0-511-3). The resolver NEVER dereferences an external
+    ``import.href`` (P0-511-1): every href is rewritten to a sandboxed
+    ``trestle://`` path before resolution, and an href that maps to no
+    supplied catalog is a structured error, not a fetch. A document over the
+    byte cap, a resolved set over the control cap, or a chained
+    profile-over-profile import is rejected (threat-model D / AC-3).
+
+    ``catalogs`` is an iterable of objects exposing ``.oscal_json`` (the
+    protobuf ``SuppliedCatalog`` shape) — declared structurally so the
+    function is unit-testable without the generated stubs.
+    """
+    if len(profile_json) > MAX_PROFILE_BYTES:
+        return _profile_reject(
+            [
+                f"profile document is {len(profile_json)} bytes, "
+                f"over the {MAX_PROFILE_BYTES}-byte cap"
+            ]
+        )
+    catalogs = list(catalogs)
+    if not catalogs:
+        return _profile_reject(["at least one catalog must be supplied to resolve the profile"])
+
+    try:
+        profile_doc = json.loads(profile_json)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return _profile_reject([f"invalid JSON: {exc}"])
+    if not isinstance(profile_doc, dict) or "profile" not in profile_doc:
+        return _profile_reject(["document missing top-level key 'profile'"])
+
+    profile = profile_doc["profile"]
+    if not isinstance(profile, dict):
+        return _profile_reject(["'profile' is not an object"])
+    imports = profile.get("imports") or []
+    if not isinstance(imports, list) or not imports:
+        return _profile_reject(["profile has no 'imports' to resolve"])
+
+    descriptors, cat_errors = _supplied_catalog_keys(catalogs)
+    if cat_errors:
+        return _profile_reject(cat_errors)
+
+    # Rewrite every import.href to a sandboxed trestle:// path. An href that
+    # maps to no supplied catalog is rejected WITHOUT a fetch (P0-511-1).
+    #
+    # The positional shortcut (single import + single catalog — the FedRAMP
+    # baseline-over-catalog common case) only applies AFTER the external-href
+    # gate, so it can never smuggle an external reference through (the
+    # security bug an unconditional positional match would introduce).
+    positional = descriptors[0] if (len(descriptors) == 1 and len(imports) == 1) else None
+    for i, imp in enumerate(imports):
+        if not isinstance(imp, dict):
+            return _profile_reject([f"import #{i} is not an object"])
+        href = str(imp.get("href", "")).strip()
+        if not href:
+            return _profile_reject([f"import #{i} has no href"])
+        # PRIMARY guard: an explicit external/host reference is rejected with
+        # no fetch and no positional fallback (P0-511-1 / threat-model I).
+        if _is_external_href(href):
+            return _profile_reject(
+                [
+                    f"import #{i} href {href!r} is an external reference; "
+                    "external resources are never dereferenced"
+                ]
+            )
+        matched = positional or _match_import_href(href, descriptors)
+        if matched is None:
+            return _profile_reject(
+                [
+                    f"import #{i} href {href!r} does not map to any supplied catalog; "
+                    "external/unknown references are never dereferenced"
+                ]
+            )
+        imp["href"] = f"{_TRESTLE_HREF_PREFIX}catalogs/{matched['key']}/catalog.json"
+
+    root = pathlib.Path(tempfile.mkdtemp(prefix="atlas_profile_ws_"))
+    try:
+        prof_path = _write_sandbox(root, descriptors, profile_doc)
+        try:
+            # VALUE_OR_LABEL_OR_CHOICES substitutes an assigned parameter
+            # value into the prose (so modify.set-parameters is reflected in
+            # the resolved statement) and falls back to the label/choices when
+            # a value was not assigned — the resolved prose never carries a
+            # raw {{ insert: param }} moustache.
+            resolved = ProfileResolver.get_resolved_profile_catalog(
+                root,
+                str(prof_path),
+                param_rep=ParameterRep.VALUE_OR_LABEL_OR_CHOICES,
+            )
+        except Exception as exc:  # noqa: BLE001 — trestle raises pydantic + ValueError
+            return _profile_reject([f"profile resolution failed: {exc}"])
+
+        controls: list[ImportedControl] = []
+        _collect_controls(getattr(resolved, "controls", None), "", controls)
+        _collect_groups(getattr(resolved, "groups", None), "", controls)
+
+        if len(controls) > MAX_RESOLVED_CONTROLS:
+            return _profile_reject(
+                [
+                    f"resolved profile has {len(controls)} controls, "
+                    f"over the {MAX_RESOLVED_CONTROLS}-control cap"
+                ]
+            )
+        if not controls:
+            return _profile_reject(["resolved profile contains zero controls"])
+
+        rmeta = resolved.metadata
+        oscal_version = str(getattr(rmeta, "oscal_version", "") or "")
+        # The profile's OWN declared title is the provenance label, not the
+        # resolved catalog's (trestle stamps the resolved catalog with the
+        # profile's metadata, so this is the same value either way).
+        pmeta = profile.get("metadata", {}) if isinstance(profile, dict) else {}
+        profile_title = str(pmeta.get("title", "")) if isinstance(pmeta, dict) else ""
+        return ProfileImportResult(True, [], controls, oscal_version, profile_title)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)

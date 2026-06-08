@@ -7,7 +7,7 @@ A **control bundle** is the unit of authorship for a security-atlas control. It 
 - **Metadata** — what the control is, which SCF anchor it claims, who owns it, where it applies.
 - **Evidence queries** (optional) — Rego, SQL, or JSON-path expressions that read the evidence ledger and produce a pass/fail signal. _Stored only in slice 009 — execution lives in slice 012._
 - **Manual evidence schema** (optional) — JSON Schema for manual attestation forms when `implementation_type` is `manual_periodic` or `manual_attested`.
-- **Tests** (optional) — fixture evidence + expected pass/fail (slice 012 will execute these).
+- **Tests** (optional) — fixture evidence + expected pass/fail, executed by `controls test` (slice 496; see §4a).
 
 Anyone can author a control bundle in their editor of choice, run `security-atlas-cli controls validate ./my-control/` to check schema correctness, and `security-atlas-cli controls upload ./my-control/` to push it to the catalog. Re-uploading the same `bundle_id` creates a new version row that supersedes the prior — the supersession chain is preserved for auditability.
 
@@ -212,6 +212,105 @@ Responses:
 
 ---
 
+## 4a. Testing a bundle (`controls test`) — slice 496
+
+A control bundle can ship its own **tests**: fixture evidence records plus the control state you expect them to produce. `security-atlas-cli controls test ./my-control/` feeds each fixture through the **same evaluation engine** the platform uses live, so a bundle that passes its tests behaves identically once uploaded. This is the control-as-code analogue of "tests before code" — verify your evidence query locally before you ship it.
+
+### Fixture layout
+
+Test cases live in `*.yaml` files inside the bundle's `tests/` directory:
+
+```
+my-control/
+├── control.yaml
+└── tests/
+    └── cases.yaml        # one or more test cases
+```
+
+Every `*.yaml` (or `*.yml`) file in `tests/` is read in lexical order; case order within a file is preserved. Case names must be unique across the whole `tests/` directory.
+
+### Test-case schema
+
+```yaml
+cases:
+  - name: all-users-have-mfa # required, unique
+    description: "optional human context"
+    expected_state: pass # required: pass | fail | na | inconclusive
+    evaluated_at: 2026-06-01T12:00:00Z # optional: pins the freshness "now"
+    records: # fixture evidence records
+      - result: pass # required: pass | fail | na | inconclusive
+        observed_at: 2026-06-01T00:00:00Z # optional, defaults to evaluated_at
+        payload: # optional; read by SQL + JSON-path queries
+          iam_users:
+            - { mfa_enabled: true }
+```
+
+- **`expected_state`** is the control state you assert the query produces. An **expected-fail is a passing test**: a case that declares `expected_state: fail` passes when the query correctly returns `fail`.
+- **`observed_at`** defaults to the case's evaluation instant, so a record is in-window by default — you only set it when you are testing freshness/staleness behaviour.
+- **`payload`** is the evidence record's JSON body; the Rego path ignores it (it sees only `result`), while the SQL and JSON-path query languages read it.
+
+### Worked example — the MFA control
+
+`control.yaml` (Rego evidence query):
+
+```yaml
+bundle_schema_version: "1"
+bundle_id: aws_iam_mfa_prod
+title: "MFA on every prod IAM user"
+scf_anchor_id: IAC-06
+implementation_type: automated
+freshness_class: daily
+evidence_queries:
+  - id: all_records_pass
+    language: rego
+    expression: |
+      package evidence.query
+      default result := "fail"
+      result := "pass" if {
+        count(input.records) > 0
+        every r in input.records { r.result == "pass" }
+      }
+```
+
+`tests/cases.yaml`:
+
+```yaml
+cases:
+  - name: all-users-have-mfa # passing fixture
+    expected_state: pass
+    evaluated_at: 2026-06-01T12:00:00Z
+    records:
+      - result: pass
+        observed_at: 2026-06-01T00:00:00Z
+  - name: one-user-without-mfa # failing fixture (expected-fail = passing test)
+    expected_state: fail
+    evaluated_at: 2026-06-01T12:00:00Z
+    records:
+      - result: pass
+        observed_at: 2026-06-01T00:00:00Z
+      - result: fail
+        observed_at: 2026-06-01T06:00:00Z
+```
+
+Run it:
+
+```
+$ security-atlas-cli controls test ./aws-iam-mfa/
+bundle: aws_iam_mfa_prod
+  PASS  all-users-have-mfa (state=pass)
+  PASS  one-user-without-mfa (state=fail)
+2 passed, 0 failed, 0 errored of 2
+```
+
+### Behaviour + flags
+
+- **Local, no network, no DB for Rego/JSON-path.** `controls test` runs entirely in-process for Rego and JSON-path queries — no Postgres required, no live evidence touched. A `sql`-language query needs a database connection; without one the SQL cases are reported as errors (never false passes).
+- **`--json`** emits the full report as JSON for CI consumption.
+- **Exit code.** The CLI exits **non-zero** on any failing or errored case, so it slots straight into a CI gate for community-contributed bundles. A bundle with no `tests/` directory is a warning, not a failure.
+- **Freshness is faithful.** Records that exist but have aged out of the bundle's freshness window are `stale` (the freshness gate), so the query evaluates over an empty in-window set and returns its default branch. Zero records at all is `no_evidence` → `inconclusive` ("absence of evidence is not failure"). The runner reproduces the live engine exactly.
+
+---
+
 ## 5. Anti-criteria (rejected at upload, never stored)
 
 | Reject                                                                  | Reason                                                        |
@@ -232,4 +331,4 @@ Responses:
 - **Bundle signing.** v1 stores plaintext YAML. Slice 010 (or later) introduces optional cosign signatures on the bundle bytes.
 - **Marketplace / public bundles.** Canvas open-question #13 covers community-contributed bundles. Slice 009 is per-tenant only.
 - **Bundle export.** Round-trip (upload → export → re-upload) is implicit (the manifest YAML is stored verbatim) but no CLI subcommand for it lands in slice 009.
-- **Test execution.** The `tests/` directory is parsed and stored as part of the bundle but not yet executed; slice 012's evaluation engine consumes it.
+- ~~**Test execution.**~~ **Resolved (slice 496).** The `tests/` directory is now executed locally by `security-atlas-cli controls test` against the live evaluation engine — see §4a. Wiring bundle tests into the upload API as a hard gate ("tests must pass to upload") remains a follow-on.
