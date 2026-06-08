@@ -30,6 +30,71 @@ import (
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
 
+// TestEvidenceVerify_ProductionRecordValidates_474 is the load-bearing
+// slice-474 proof (AC-1 + AC-2). A record pushed through the REAL ingest
+// `Process` — with NO baseline-stamp workaround — verifies clean, because
+// ingest now persists the canonical wire scope (`scope_canonical`) the hash
+// was computed over and the verify walk reconstructs it. Then corrupting a
+// hash-contributing column is still detected (tamper-evidence preserved).
+func TestEvidenceVerify_ProductionRecordValidates_474(t *testing.T) {
+	svc, _, _ := boot(t)
+	adminPool := openPool(t, envOrSkip(t, "DATABASE_URL"))
+	defer adminPool.Close()
+	cred := mkCred(tenantA, nil, "")
+
+	// Push a real, scope-bearing record through ingest.
+	receipt, decision, err := svc.Process(context.Background(), record(t), cred)
+	if err != nil {
+		t.Fatalf("Process: %v (decision=%s)", err, decision)
+	}
+
+	// AC-1: the freshly-ingested record verifies clean against its OWN
+	// stored hash — no baseline stamp. This is the production-record case
+	// slice 464 could not validate.
+	row := getEvidenceRowByID(t, adminPool, receipt.RecordID)
+	if len(row.ScopeCanonical) == 0 || string(row.ScopeCanonical) == "null" {
+		t.Fatalf("scope_canonical not persisted on production record: %q", string(row.ScopeCanonical))
+	}
+	ok, recomputed, err := ingest.VerifyLedgerRow(row)
+	if err != nil {
+		t.Fatalf("VerifyLedgerRow (production clean): %v", err)
+	}
+	if !ok {
+		t.Fatalf("production record did NOT verify against its ingest hash: stored=%s recomputed=%s", row.Hash, recomputed)
+	}
+	if recomputed != receipt.Hash {
+		t.Fatalf("verify recomputed hash != ingest receipt hash: receipt=%s recomputed=%s", receipt.Hash, recomputed)
+	}
+	t.Logf("AC-1: production record verifies clean — hash=%s", short12(row.Hash))
+
+	// AC-2 (tamper still detected): mutate the payload column out-of-band.
+	corrupt := []byte(`{"tool":"semgrep-TAMPERED","tool_version":"1.96.0","ruleset":"p/owasp-top-ten","findings_count":999,"scanned_files":1247}`)
+	updateEvidenceJSONB(t, adminPool, receipt.RecordID, "payload", corrupt)
+	if ok, recomputed, err = ingest.VerifyLedgerRow(getEvidenceRowByID(t, adminPool, receipt.RecordID)); err != nil {
+		t.Fatalf("VerifyLedgerRow (payload corrupt): %v", err)
+	} else if ok {
+		t.Fatalf("payload corruption NOT detected on production record")
+	}
+	t.Logf("AC-2 (payload): corruption detected — recomputed=%s", short12(recomputed))
+
+	// AC-2 (scope tamper): a fresh record, then corrupt the scope_canonical
+	// column. The scope is now inside the per-record hash envelope, so
+	// tampering with it must be detected — this is the tamper-evidence the
+	// scope-free option (rejected) would have dropped.
+	receipt2, _, err := svc.Process(context.Background(), record(t), cred)
+	if err != nil {
+		t.Fatalf("Process (scope-tamper case): %v", err)
+	}
+	tampered := []byte(`[{"key":"environment","values":["TAMPERED"]}]`)
+	updateEvidenceJSONB(t, adminPool, receipt2.RecordID, "scope_canonical", tampered)
+	if ok, recomputed, err = ingest.VerifyLedgerRow(getEvidenceRowByID(t, adminPool, receipt2.RecordID)); err != nil {
+		t.Fatalf("VerifyLedgerRow (scope corrupt): %v", err)
+	} else if ok {
+		t.Fatalf("scope_canonical tamper NOT detected — scope is not covered by the hash")
+	}
+	t.Logf("AC-2 (scope): tamper detected — recomputed=%s", short12(recomputed))
+}
+
 func TestEvidenceVerify_DetectsCorruption_AC3(t *testing.T) {
 	svc, appPool, _ := boot(t)
 	adminPool := openPool(t, envOrSkip(t, "DATABASE_URL"))
@@ -102,14 +167,14 @@ func getEvidenceRowByID(t *testing.T, pool *pgxpool.Pool, id string) dbx.Evidenc
 		        observed_at, ingested_at, provenance, result, payload,
 		        payload_uri, hash, freshness_class, valid_until, created_at,
 		        idempotency_key, evidence_kind, schema_version, credential_id,
-		        ingestion_path, source_attribution, control_ref
+		        ingestion_path, source_attribution, control_ref, scope_canonical
 		   FROM evidence_records WHERE id = $1`, id,
 	).Scan(
 		&r.ID, &r.TenantID, &r.EvidenceQueryID, &r.ControlID, &r.ScopeID,
 		&r.ObservedAt, &r.IngestedAt, &r.Provenance, &r.Result, &r.Payload,
 		&r.PayloadUri, &r.Hash, &r.FreshnessClass, &r.ValidUntil, &r.CreatedAt,
 		&r.IdempotencyKey, &r.EvidenceKind, &r.SchemaVersion, &r.CredentialID,
-		&r.IngestionPath, &r.SourceAttribution, &r.ControlRef,
+		&r.IngestionPath, &r.SourceAttribution, &r.ControlRef, &r.ScopeCanonical,
 	)
 	if err != nil {
 		t.Fatalf("getEvidenceRowByID(%s): %v", id, err)

@@ -1210,6 +1210,8 @@ type EvidenceRecord struct {
 	IngestionPath     string                 `json:"ingestion_path"`
 	SourceAttribution []byte                 `json:"source_attribution"`
 	ControlRef        string                 `json:"control_ref"`
+	// Slice 474: canonical (sorted) wire scope the ingest content-hash was computed over, so the `atlas evidence verify` walk can reconstruct the exact record and recompute an identical hash. NULL = pre-slice-474 legacy row (verify reconstructs scope-free). Append-only; never mutated post-insert.
+	ScopeCanonical []byte `json:"scope_canonical"`
 }
 
 type Exception struct {

@@ -437,11 +437,26 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	}
 
 	// Hash the canonicalized record (canonjson handles deterministic
-	// proto serialization).
+	// proto serialization). The hash covers the FULL proto including the
+	// wire `scope` — this is the EVIDENCE_SDK receipt-hash contract clients
+	// reproduce, and it is unchanged by slice 474.
 	hash, err := canonjson.HashRecord(rec)
 	if err != nil {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, "canonjson: "+err.Error(), pgtype.UUID{})
 		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: hash: %w", err)
+	}
+
+	// Slice 474: persist the canonical (sorted) wire scope the hash was
+	// computed over so `atlas evidence verify` (slice 464) can reconstruct
+	// the exact record and recompute an identical hash. The ledger
+	// previously dropped the wire scope (only an empty scope_id column),
+	// which is precisely why a freshly-ingested record failed the verify
+	// walk. This does NOT change the hash semantics — it only records the
+	// input so the verify is faithful.
+	scopeCanonical, err := canonjson.MarshalCanonicalScope(rec.GetScope())
+	if err != nil {
+		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, "canonjson scope: "+err.Error(), pgtype.UUID{})
+		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: canonical scope: %w", err)
 	}
 
 	// Provenance JSONB. EVIDENCE_SDK §4.7 lists the canonical fields. We
@@ -542,6 +557,7 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 			CredentialID:      ptrStr(cred.ID),
 			IngestionPath:     s.path,
 			SourceAttribution: sourceAttribJSON,
+			ScopeCanonical:    scopeCanonical,
 		}
 		inserted, ierr := q.InsertEvidenceRecord(tenantCtx, params)
 		if ierr != nil {
