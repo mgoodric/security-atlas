@@ -16,6 +16,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/idem"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/k8sauth"
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/netpol"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/rbac"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/workload"
 )
@@ -27,16 +28,20 @@ import (
 var (
 	rbacPull     = rbac.Pull
 	workloadScan = workload.Inspect
+	netpolScan   = netpol.Assess
 	newSDKClient = func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error) {
 		return sdk.NewClient(endpoint, bearer, opts...)
 	}
-	// newRBACAPI / newWorkloadAPI build the live read-only HTTP clients; seamed
-	// so tests inject fakes.
+	// newRBACAPI / newWorkloadAPI / newNetpolAPI build the live read-only HTTP
+	// clients; seamed so tests inject fakes.
 	newRBACAPI = func(hc *http.Client, baseURL, token string) rbac.API {
 		return rbac.NewClient(hc, baseURL, token)
 	}
 	newWorkloadAPI = func(hc *http.Client, baseURL, token string) workload.API {
 		return workload.NewClient(hc, baseURL, token)
+	}
+	newNetpolAPI = func(hc *http.Client, baseURL, token string) netpol.API {
+		return netpol.NewClient(hc, baseURL, token)
 	}
 )
 
@@ -53,18 +58,20 @@ type runFlags struct {
 	apiServer       string
 	rbacControl     string
 	workloadControl string
+	netpolControl   string
 	skipRBAC        bool
 	skipWorkload    bool
+	skipNetpol      bool
 }
 
 func newRunCmd() *cobra.Command {
 	var f runFlags
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "read Kubernetes RBAC + workload security contexts and push evidence records",
-		Long: `Read Kubernetes RBAC roles + bindings and workload security contexts via
-the read-only Kubernetes API, transform to evidence records, and push to the
-platform.
+		Short: "read Kubernetes RBAC + workload security contexts + NetworkPolicy coverage and push evidence records",
+		Long: `Read Kubernetes RBAC roles + bindings, workload security contexts, and
+NetworkPolicy coverage via the read-only Kubernetes API, transform to evidence
+records, and push to the platform.
 
 Profile: pull. One bounded read-and-push pass per invocation; operator-scheduled
 (recommended 24h). NOT continuous monitoring.
@@ -72,6 +79,7 @@ Profile: pull. One bounded read-and-push pass per invocation; operator-scheduled
 Least-privilege Kubernetes access (read-only ClusterRole — verbs get,list only):
   - rbac.authorization.k8s.io: roles/clusterroles/rolebindings/clusterrolebindings
   - apps: deployments/daemonsets/statefulsets
+  - networking.k8s.io: networkpolicies
   - core: namespaces
 NEVER 'secrets', NEVER write verbs, NEVER cluster-admin / wildcards.
 
@@ -102,8 +110,10 @@ record.`,
 	cmd.Flags().StringVar(&f.apiServer, "api-server", "", "Kubernetes API server URL (env: KUBERNETES_API_SERVER)")
 	cmd.Flags().StringVar(&f.rbacControl, "rbac-control", "scf:IAC-21", "control_id to attach to k8s.rbac_binding.v1 records")
 	cmd.Flags().StringVar(&f.workloadControl, "workload-control", "scf:CFG-02", "control_id to attach to k8s.workload_security_context.v1 records")
+	cmd.Flags().StringVar(&f.netpolControl, "netpol-control", "scf:NET-04", "control_id to attach to k8s.networkpolicy_coverage.v1 records")
 	cmd.Flags().BoolVar(&f.skipRBAC, "skip-rbac", false, "skip k8s.rbac_binding.v1 pull")
 	cmd.Flags().BoolVar(&f.skipWorkload, "skip-workload", false, "skip k8s.workload_security_context.v1 pull")
+	cmd.Flags().BoolVar(&f.skipNetpol, "skip-netpol", false, "skip k8s.networkpolicy_coverage.v1 pull")
 	return cmd
 }
 
@@ -160,6 +170,23 @@ func doRun(ctx context.Context, f runFlags) error {
 			}
 			if err := pushOne(ctx, sdkClient, rec); err != nil {
 				return fmt.Errorf("push workload %s: %w", w.WorkloadName, err)
+			}
+			pushed++
+		}
+	}
+
+	if !f.skipNetpol {
+		coverage, err := netpolScan(ctx, newNetpolAPI(httpClient, cred.APIServer(), cred.Token()), nil)
+		if err != nil {
+			return fmt.Errorf("netpol assess: %w", err)
+		}
+		for _, c := range coverage {
+			rec, err := buildNetpolRecord(c, f.cluster, f.environment, f.netpolControl)
+			if err != nil {
+				return fmt.Errorf("build netpol record %s: %w", c.Namespace, err)
+			}
+			if err := pushOne(ctx, sdkClient, rec); err != nil {
+				return fmt.Errorf("push netpol %s: %w", c.Namespace, err)
 			}
 			pushed++
 		}
@@ -269,6 +296,67 @@ func buildWorkloadRecord(w workload.SecurityContext, cluster, env, controlID str
 			ActorId:   actorID("workload"),
 		},
 	}, nil
+}
+
+func buildNetpolRecord(c netpol.Coverage, cluster, env, controlID string) (*evidencev1.EvidenceRecord, error) {
+	now := c.ObservedAt.UTC().Truncate(time.Hour)
+	pm := map[string]any{
+		"namespace":            c.Namespace,
+		"policy_count":         float64(c.PolicyCount),
+		"default_deny_ingress": c.DefaultDenyIngress,
+		"default_deny_egress":  c.DefaultDenyEgress,
+	}
+	if len(c.Policies) > 0 {
+		policies := make([]any, 0, len(c.Policies))
+		for _, p := range c.Policies {
+			m := map[string]any{
+				"name":               p.Name,
+				"selects_all_pods":   p.SelectsAllPods,
+				"ingress_rule_count": float64(p.IngressRuleCount),
+				"egress_rule_count":  float64(p.EgressRuleCount),
+			}
+			if len(p.PolicyTypes) > 0 {
+				m["policy_types"] = toAnySlice(p.PolicyTypes)
+			}
+			policies = append(policies, m)
+		}
+		pm["policies"] = policies
+	}
+	payload, err := structpb.NewStruct(pm)
+	if err != nil {
+		return nil, err
+	}
+	return &evidencev1.EvidenceRecord{
+		IdempotencyKey: idem.NetpolCoverageKey(c.Namespace, now),
+		EvidenceKind:   "k8s.networkpolicy_coverage.v1",
+		SchemaVersion:  "1.0.0",
+		ControlId:      controlID,
+		Scope: []*evidencev1.ScopeDimension{
+			{Key: "cluster", Values: []string{cluster}},
+			{Key: "environment", Values: []string{env}},
+			{Key: "namespace", Values: []string{c.Namespace}},
+		},
+		ObservedAt: timestamppb.New(now),
+		Result:     mapNetpolResult(c.Result),
+		Payload:    payload,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "connector",
+			ActorId:   actorID("netpol"),
+		},
+	}, nil
+}
+
+func mapNetpolResult(r netpol.CoverageResult) evidencev1.Result {
+	switch r {
+	case netpol.ResultPass:
+		return evidencev1.Result_RESULT_PASS
+	case netpol.ResultFail:
+		return evidencev1.Result_RESULT_FAIL
+	case netpol.ResultInconclusive:
+		return evidencev1.Result_RESULT_INCONCLUSIVE
+	default:
+		return evidencev1.Result_RESULT_UNSPECIFIED
+	}
 }
 
 func mapWorkloadResult(r workload.ConfigResult) evidencev1.Result {
