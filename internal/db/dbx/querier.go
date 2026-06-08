@@ -1318,6 +1318,14 @@ type Querier interface {
 	// The 10 built-in themes (canvas §6.5). Visible to every tenant via the
 	// `tenant_or_catalog_read` policy.
 	ListDefaultThemes(ctx context.Context) ([]OrgTheme, error)
+	// Slice 582 — the digest scheduler's enumeration query for the email
+	// channel: every (tenant, user) pair that has OPTED IN. Runs through the
+	// BYPASSRLS migrator pool so the scheduler can walk all tenants in one
+	// pass; the actual per-user delivery then re-reads under the user's own
+	// tenant GUC (RLS). enabled = false / no-row are excluded (default
+	// opted-OUT, P0-445-7). No PII is returned — only the (tenant, user) keys
+	// the driver needs to call DeliverDigest.
+	ListEmailOptInUsers(ctx context.Context) ([]ListEmailOptInUsersRow, error)
 	// AC-2: paginated read model over the evidence-ingest event archive. Reads
 	// the slice-062 admin_audit_log_v view filtered to the evidence_audit_log
 	// branch — that branch IS the slice-013/015 evidence-ingest event archive,
@@ -1870,6 +1878,12 @@ type Querier interface {
 	// Slice 108: GET /v1/me/sessions. Returns the caller's currently-valid sessions
 	// (revoked_at IS NULL AND expires_at > now()). Tenant scoped via RLS + explicit filter.
 	ListSessionsForUser(ctx context.Context, arg ListSessionsForUserParams) ([]Session, error)
+	// Slice 582 — digest-scheduler enumeration for the Slack channel: every
+	// (tenant, user) pair that has OPTED IN. Walked from the BYPASSRLS migrator
+	// pool (all tenants in one pass); per-user delivery re-reads under the
+	// user's own tenant GUC (RLS). enabled = false / no-row excluded (default
+	// opted-OUT, P0-543-3). Returns only the (tenant, user) keys — no PII.
+	ListSlackOptInUsers(ctx context.Context) ([]ListSlackOptInUsersRow, error)
 	// Tenant-private themes only. Caller composes with ListDefaultThemes when a
 	// full visible vocabulary is needed.
 	ListTenantThemes(ctx context.Context, tenantID pgtype.UUID) ([]OrgTheme, error)
@@ -2073,6 +2087,11 @@ type Querier interface {
 	// Walkthroughs pinned to one audit period (slice 027). The export emits
 	// each as an OSCAL assessment-results observation.
 	ListWalkthroughsForPeriod(ctx context.Context, arg ListWalkthroughsForPeriodParams) ([]Walkthrough, error)
+	// Slice 582 — digest-scheduler enumeration for the webhook channel: every
+	// (tenant, user) pair that has OPTED IN. Same shape + guarantees as
+	// ListSlackOptInUsers. enabled = false / no-row excluded (default
+	// opted-OUT). Returns only the (tenant, user) keys — no PII.
+	ListWebhookOptInUsers(ctx context.Context) ([]ListWebhookOptInUsersRow, error)
 	// Append a row to the access log. Action is enforced by CHECK
 	// ('upload' | 'download'). Caller passes tenant_id + artifact_id + actor.
 	LogArtifactAccess(ctx context.Context, arg LogArtifactAccessParams) error

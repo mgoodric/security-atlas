@@ -5,7 +5,7 @@ import warnings
 
 from . import oscal_pb2 as oscal__pb2
 
-GRPC_GENERATED_VERSION = '1.81.0'
+GRPC_GENERATED_VERSION = '1.80.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -25,7 +25,7 @@ if _version_not_supported:
     )
 
 
-class OscalBridgeServiceStub:
+class OscalBridgeServiceStub(object):
     """OscalBridgeService serializes platform aggregates into OSCAL JSON
     v1.1.x and validates them via compliance-trestle round-trip.
     """
@@ -73,7 +73,7 @@ class OscalBridgeServiceStub:
                 _registered_method=True)
 
 
-class OscalBridgeServiceServicer:
+class OscalBridgeServiceServicer(object):
     """OscalBridgeService serializes platform aggregates into OSCAL JSON
     v1.1.x and validates them via compliance-trestle round-trip.
     """
@@ -211,7 +211,7 @@ def add_OscalBridgeServiceServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class OscalBridgeService:
+class OscalBridgeService(object):
     """OscalBridgeService serializes platform aggregates into OSCAL JSON
     v1.1.x and validates them via compliance-trestle round-trip.
     """

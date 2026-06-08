@@ -55,3 +55,16 @@ WHERE tenant_id = $1 AND id = $2;
 -- Read a delivery-log row by id (tests + outcome inspection).
 SELECT * FROM email_delivery_log
 WHERE tenant_id = $1 AND id = $2;
+
+-- name: ListEmailOptInUsers :many
+-- Slice 582 — the digest scheduler's enumeration query for the email
+-- channel: every (tenant, user) pair that has OPTED IN. Runs through the
+-- BYPASSRLS migrator pool so the scheduler can walk all tenants in one
+-- pass; the actual per-user delivery then re-reads under the user's own
+-- tenant GUC (RLS). enabled = false / no-row are excluded (default
+-- opted-OUT, P0-445-7). No PII is returned — only the (tenant, user) keys
+-- the driver needs to call DeliverDigest.
+SELECT tenant_id, user_id
+FROM email_channel_optin
+WHERE enabled = true
+ORDER BY tenant_id, user_id;
