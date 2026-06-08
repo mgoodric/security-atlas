@@ -42,6 +42,15 @@ type aggregate struct {
 	controlOwner map[uuid.UUID]string
 	// controlTitle maps control_id -> title for POA&M item titles.
 	controlTitle map[uuid.UUID]string
+	// acceptedVendorClaims are operator-ACCEPTED vendor claims (slice 512
+	// import + slice 589 disposition) surfaced in the SSP as VENDOR-ATTESTED
+	// by-component statements (slice 619). HARD BOUNDARY (P0-619 / inherits
+	// P0-512-1 / invariant #2): these are vendor ASSERTIONS the operator chose
+	// to credit, NOT platform-verified evidence. They are carried in a SEPARATE
+	// field from `controls`, never contribute to control-satisfaction/coverage,
+	// and nothing here writes control_evaluations (the read is pure SELECT over
+	// imported_component_claims).
+	acceptedVendorClaims []dbx.ListAcceptedVendorClaimsForExportRow
 	// sampledEvidence maps population_id -> the DRAWN sample evidence ids,
 	// in shuffle order (slice 494, AC-1/AC-2). Read from the persisted
 	// sample_evidence rows, which were materialized at draw-time over the
@@ -145,6 +154,22 @@ func (e *Exporter) Aggregate(ctx context.Context, in ExportInput) (*aggregate, e
 		return nil, fmt.Errorf("oscal: list policies: %w", err)
 	}
 	agg.policies = policies
+
+	// 4b. Operator-ACCEPTED vendor claims (slice 619). Surfaced in the SSP as
+	//     VENDOR-ATTESTED by-component statements — clearly attributed to the
+	//     vendor component, never as platform-verified evidence (P0-619 /
+	//     inherits P0-512-1 / invariant #2). This is a pure READ over
+	//     imported_component_claims (claim_status = 'accepted'); it writes
+	//     NOTHING (no control_evaluations, no evidence ledger) and contributes
+	//     ZERO to control-satisfaction/coverage. Tenant-scoped via RLS + the
+	//     leading tenant predicate (invariant #6). Claims are tenant-wide, not
+	//     period-scoped: an accepted vendor attestation is a standing fact
+	//     about the operator's program, not a frozen-period sample.
+	acceptedClaims, err := q.ListAcceptedVendorClaimsForExport(ctx, pgUUID(tenantID))
+	if err != nil {
+		return nil, fmt.Errorf("oscal: list accepted vendor claims: %w", err)
+	}
+	agg.acceptedVendorClaims = acceptedClaims
 
 	// 5. Sample populations attached to this period (AP).
 	populations, err := q.ListPopulationsForPeriod(ctx, dbx.ListPopulationsForPeriodParams{
@@ -332,7 +357,54 @@ func (a *aggregate) sspInput() *oscalv1.SspInput {
 		ScopeCells:             cells,
 		ControlImplementations: impls,
 		Policies:               pols,
+		// Operator-accepted vendor claims, carried in a SEPARATE field
+		// (slice 619). They are rendered as vendor-attested by-component
+		// statements and NEVER merged into ControlImplementations — a vendor
+		// claim never contributes to platform control-satisfaction (the hard
+		// boundary). The list is empty when no claim has been accepted.
+		VendorAttestedImplementations: a.vendorAttestedImplementations(),
 	}
+}
+
+// vendorAttestedImplementations converts the operator-accepted vendor claims
+// into proto messages for the SSP (slice 619).
+//
+// HARD CONSTITUTIONAL BOUNDARY (P0-619 / inherits P0-512-1 / invariant #2):
+// every value here originates from imported_component_claims — a vendor
+// ASSERTION the operator chose to credit, NOT platform-verified evidence. The
+// proto carries no evaluation_result and the bridge renders these as
+// `by-component` statements attributed to the vendor component, flagged
+// vendor-attested + operator-credited, with the accept-provenance. They are
+// NEVER folded into ControlImplementations and contribute ZERO to coverage.
+func (a *aggregate) vendorAttestedImplementations() []*oscalv1.VendorAttestedImplementation {
+	out := make([]*oscalv1.VendorAttestedImplementation, 0, len(a.acceptedVendorClaims))
+	for _, c := range a.acceptedVendorClaims {
+		scfID := ""
+		if c.ScfAnchorID != nil {
+			scfID = *c.ScfAnchorID
+		}
+		acceptedBy := ""
+		if c.DispositionedBy != nil {
+			acceptedBy = *c.DispositionedBy
+		}
+		acceptedAt := ""
+		if c.DispositionedAt.Valid {
+			acceptedAt = c.DispositionedAt.Time.UTC().Format(time.RFC3339)
+		}
+		out = append(out, &oscalv1.VendorAttestedImplementation{
+			ClaimId:         uuid.UUID(c.ClaimID.Bytes).String(),
+			ControlId:       c.ControlID,
+			ScfId:           scfID,
+			ComponentUuid:   c.ComponentUuid,
+			ComponentTitle:  c.ComponentTitle,
+			ComponentType:   c.ComponentType,
+			Statement:       c.Statement,
+			AcceptedBy:      acceptedBy,
+			AcceptedAt:      acceptedAt,
+			DispositionNote: c.DispositionNote,
+		})
+	}
+	return out
 }
 
 // assessmentInput converts the aggregate into the AP/AR proto input.

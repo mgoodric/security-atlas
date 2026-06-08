@@ -277,6 +277,111 @@ func TestSSPInput_EmptySlicesProduceEmptyOutput(t *testing.T) {
 	}
 }
 
+// TestSSPInput_AcceptedVendorClaims_AreSeparateAndNeverControlImplementations
+// is the slice-619 hard-boundary unit test (no DB, no bridge).
+//
+// An operator-ACCEPTED vendor claim must map to the SEPARATE
+// VendorAttestedImplementations field — carrying the vendor attribution +
+// accept-provenance — and must NEVER appear in ControlImplementations (where
+// it could be counted as platform control-satisfaction). This proves the
+// boundary at the proto-conversion layer, which is the only place a vendor
+// claim could leak into the platform's control-implementation surface.
+func TestSSPInput_AcceptedVendorClaims_AreSeparateAndNeverControlImplementations(t *testing.T) {
+	claimID := uuid.New()
+	acceptedAt := time.Date(2026, 5, 2, 9, 0, 0, 0, time.UTC)
+	scf := "IAC-07"
+	by := "operator@acme.com"
+
+	// One platform control (real coverage) + one accepted vendor claim.
+	ctrlID := uuid.New()
+	controls := []dbx.ListActiveControlsWithDescriptionRow{
+		{
+			ID:            pgUUID(ctrlID),
+			ScfID:         nil,
+			Title:         "Platform-owned control",
+			Description:   "Platform implementation narrative.",
+			ControlFamily: "IAC",
+			OwnerRole:     "infra_security",
+		},
+	}
+
+	agg := makeAggregate(t, ExportInput{}, nil, controls, nil, nil, nil, nil, nil)
+	agg.acceptedVendorClaims = []dbx.ListAcceptedVendorClaimsForExportRow{
+		{
+			ClaimID:         pgUUID(claimID),
+			ComponentUuid:   "vendor-uuid-1",
+			ComponentTitle:  "AcmeVault",
+			ComponentType:   "service",
+			ControlID:       "AC-2",
+			Statement:       "AcmeVault encrypts secrets at rest.",
+			RequirementUuid: "req-1",
+			ScfAnchorID:     &scf,
+			DispositionedBy: &by,
+			DispositionedAt: pgtype.Timestamptz{Time: acceptedAt, Valid: true},
+			DispositionNote: "Reviewed vendor SOC 2.",
+		},
+	}
+
+	out := agg.sspInput()
+
+	// 1. The accepted claim does NOT appear in ControlImplementations: that
+	//    list contains ONLY the platform control. (The boundary.)
+	if len(out.ControlImplementations) != 1 {
+		t.Fatalf("ControlImplementations len = %d, want 1 (platform control only)", len(out.ControlImplementations))
+	}
+	if out.ControlImplementations[0].ControlId != ctrlID.String() {
+		t.Errorf("ControlImplementations[0] = %q, want the platform control id %q", out.ControlImplementations[0].ControlId, ctrlID.String())
+	}
+	for _, ci := range out.ControlImplementations {
+		if ci.ControlId == "AC-2" {
+			t.Fatal("vendor claim AC-2 leaked into ControlImplementations — constitutional boundary violated")
+		}
+	}
+
+	// 2. The accepted claim DOES appear in the separate vendor-attested field,
+	//    with the vendor attribution + accept-provenance.
+	if len(out.VendorAttestedImplementations) != 1 {
+		t.Fatalf("VendorAttestedImplementations len = %d, want 1", len(out.VendorAttestedImplementations))
+	}
+	v := out.VendorAttestedImplementations[0]
+	if v.ClaimId != claimID.String() {
+		t.Errorf("ClaimId = %q, want %q", v.ClaimId, claimID.String())
+	}
+	if v.ControlId != "AC-2" {
+		t.Errorf("ControlId = %q, want AC-2", v.ControlId)
+	}
+	if v.ScfId != "IAC-07" {
+		t.Errorf("ScfId = %q, want IAC-07", v.ScfId)
+	}
+	if v.ComponentUuid != "vendor-uuid-1" || v.ComponentTitle != "AcmeVault" || v.ComponentType != "service" {
+		t.Errorf("vendor attribution mismatch: %+v", v)
+	}
+	if v.Statement != "AcmeVault encrypts secrets at rest." {
+		t.Errorf("Statement = %q", v.Statement)
+	}
+	if v.AcceptedBy != "operator@acme.com" {
+		t.Errorf("AcceptedBy = %q, want operator@acme.com", v.AcceptedBy)
+	}
+	if v.AcceptedAt != acceptedAt.UTC().Format(time.RFC3339) {
+		t.Errorf("AcceptedAt = %q, want %q", v.AcceptedAt, acceptedAt.UTC().Format(time.RFC3339))
+	}
+	if v.DispositionNote != "Reviewed vendor SOC 2." {
+		t.Errorf("DispositionNote = %q", v.DispositionNote)
+	}
+}
+
+// TestSSPInput_NoAcceptedVendorClaims_ProducesEmptyVendorField proves the
+// vendor field is empty (never nil-panicking) when nothing was accepted —
+// the rejected / needs_info / asserted case never reaches the export because
+// the aggregate query filters on claim_status = 'accepted'.
+func TestSSPInput_NoAcceptedVendorClaims_ProducesEmptyVendorField(t *testing.T) {
+	agg := makeAggregate(t, ExportInput{}, nil, nil, nil, nil, nil, nil, nil)
+	out := agg.sspInput()
+	if len(out.VendorAttestedImplementations) != 0 {
+		t.Errorf("VendorAttestedImplementations = %d, want 0", len(out.VendorAttestedImplementations))
+	}
+}
+
 func TestAssessmentInput_PopulatesPopulationsWalkthroughsAndNotes(t *testing.T) {
 	popIDWithFrozen := uuid.New()
 	popIDNoFrozen := uuid.New()
