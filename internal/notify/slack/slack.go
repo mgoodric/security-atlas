@@ -241,14 +241,28 @@ func (c *Channel) DeliverDigest(ctx context.Context, userID uuid.UUID, recipient
 			return fmt.Errorf("slack: list notifications: %w", err)
 		}
 		counts := map[string]int{}
-		total := 0
 		for _, r := range rows {
 			if r.ReadAt.Valid {
 				continue
 			}
 			counts[r.Type]++
-			total++
 		}
+
+		// Per-notification-kind filter (slice 583, generalizing slice 542).
+		// The master Slack opt-in is already confirmed ON above; here we
+		// narrow WHICH kinds appear by consulting the slice-108 per-event
+		// `slack` channel pref. Absent row / unmapped kind defaults to
+		// included (default-on, backward-compatible — no silent suppression).
+		// This operates purely on the in-memory, already-RLS-scoped count map;
+		// the recipient + tenant path are untouched (slice 542 P0-542-2,
+		// threat-model I).
+		prefs, err := q.ListUserNotificationPreferences(ctx, dbx.ListUserNotificationPreferencesParams{
+			TenantID: pgUUID(tenantID), UserID: pgUUID(userID),
+		})
+		if err != nil {
+			return fmt.Errorf("slack: list notification preferences: %w", err)
+		}
+		counts, total := notify.FilterCountsByChannelPref(counts, channelPrefMap(prefs, channelName))
 		if total == 0 {
 			result = DeliveryResult{Skipped: true, Reason: "no unread notifications"}
 			return nil
@@ -336,6 +350,17 @@ func tenantFromCtx(ctx context.Context) (uuid.UUID, error) {
 }
 
 func pgUUID(u uuid.UUID) pgtype.UUID { return pgtype.UUID{Bytes: u, Valid: true} }
+
+// channelPrefMap adapts the slice-108 dbx preference rows to the shared
+// notify.ChannelPrefMap projector (event -> enabled for ONE channel). It is the
+// one-line bridge that keeps internal/notify decoupled from dbx (slice 583).
+func channelPrefMap(prefs []dbx.UserNotificationPreference, channel string) map[string]bool {
+	rows := make([]notify.ChannelPrefRow, 0, len(prefs))
+	for _, p := range prefs {
+		rows = append(rows, notify.ChannelPrefRow{Event: p.Event, Channel: p.Channel, Enabled: p.Enabled})
+	}
+	return notify.ChannelPrefMap(rows, channel)
+}
 
 // truncErr bounds the persisted last_error and strips control chars. It is
 // called on the transport error, which is already secret-scrubbed by the
