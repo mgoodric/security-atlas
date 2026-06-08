@@ -20,6 +20,7 @@ import (
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
+	"github.com/mgoodric/security-atlas/connectors/azure/internal/aks"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/entra"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/storage"
 )
@@ -248,8 +249,28 @@ func TestConnectorVersion_NonEmpty(t *testing.T) {
 	}
 }
 
+func TestMapAKSResult(t *testing.T) {
+	cases := []struct {
+		name string
+		in   aks.ConfigResult
+		want evidencev1.Result
+	}{
+		{"pass", aks.ResultPass, evidencev1.Result_RESULT_PASS},
+		{"fail", aks.ResultFail, evidencev1.Result_RESULT_FAIL},
+		{"inconclusive", aks.ResultInconclusive, evidencev1.Result_RESULT_INCONCLUSIVE},
+		{"default", aks.ConfigResult("unknown"), evidencev1.Result_RESULT_UNSPECIFIED},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mapAKSResult(tc.in); got != tc.want {
+				t.Errorf("mapAKSResult(%q) = %v; want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestActorID_Shape(t *testing.T) {
-	for _, svc := range []string{"entra", "storage"} {
+	for _, svc := range []string{"entra", "storage", "aks"} {
 		id := actorID(svc)
 		if !strings.HasPrefix(id, "connector:azure:"+svc+"@") {
 			t.Errorf("actorID(%q) = %q", svc, id)
@@ -347,6 +368,84 @@ func TestBuildStorageRecord_OmitsEmptyOptionals(t *testing.T) {
 	for _, k := range []string{"resource_group", "location", "encryption_key_source", "minimum_tls_version"} {
 		if _, ok := pl[k]; ok {
 			t.Errorf("empty optional %q should be omitted", k)
+		}
+	}
+}
+
+func TestBuildAKSRecord_Shape(t *testing.T) {
+	c := aks.ClusterConfig{
+		ClusterID: "/sub/clu", ClusterName: "clu", SubscriptionID: "sub-1",
+		ResourceGroup: "rg", Location: "eastus", KubernetesVersion: "1.29.2",
+		RBACEnabled: true, NetworkPolicy: "calico", PrivateCluster: true,
+		AuthorizedIPRanges: true, ManagedIdentity: true, LocalAccountsDisabled: true,
+		OIDCIssuerEnabled: true, NodePoolCount: 2,
+		Result: aks.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
+	}
+	rec, err := buildAKSRecord(c, "prod", "scf:CFG-02")
+	if err != nil {
+		t.Fatalf("buildAKSRecord: %v", err)
+	}
+	if rec.EvidenceKind != "azure.aks_cluster_config.v1" {
+		t.Errorf("kind = %q", rec.EvidenceKind)
+	}
+	if rec.SchemaVersion != "1.0.0" {
+		t.Errorf("schema version = %q; want 1.0.0", rec.SchemaVersion)
+	}
+	if rec.Result != evidencev1.Result_RESULT_PASS {
+		t.Errorf("result = %v; want PASS", rec.Result)
+	}
+	if rec.IdempotencyKey == "" {
+		t.Error("empty idempotency key")
+	}
+	if !strings.HasPrefix(rec.GetSourceAttribution().GetActorId(), "connector:azure:aks@") {
+		t.Errorf("aks actor_id = %q", rec.GetSourceAttribution().GetActorId())
+	}
+	if got := scopeValue(rec.GetScope(), "cloud_account"); got != "azure:sub-1" {
+		t.Errorf("cloud_account = %q; want azure:sub-1", got)
+	}
+	if got := scopeValue(rec.GetScope(), "environment"); got != "prod" {
+		t.Errorf("environment = %q; want prod", got)
+	}
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{
+		"cluster_id", "cluster_name", "subscription_id", "rbac_enabled",
+		"private_cluster", "authorized_ip_ranges", "resource_group", "location",
+		"kubernetes_version", "network_policy", "managed_identity",
+		"local_accounts_disabled", "oidc_issuer_enabled", "node_pool_count",
+	} {
+		if _, ok := pl[k]; !ok {
+			t.Errorf("payload missing %q; got %v", k, pl)
+		}
+	}
+	// Structural over-collection guard at the record layer (P0-519-1/3): no
+	// payload key may name a secret / credential / kubeconfig / workload surface.
+	for k := range pl {
+		low := strings.ToLower(k)
+		for _, banned := range []string{"secret", "credential", "kubeconfig", "password", "token", "manifest", "container", "image"} {
+			if strings.Contains(low, banned) {
+				t.Errorf("aks payload key %q contains banned over-collection token %q", k, banned)
+			}
+		}
+	}
+}
+
+func TestBuildAKSRecord_OmitsEmptyOptionals(t *testing.T) {
+	c := aks.ClusterConfig{
+		ClusterID: "/sub/c", ClusterName: "c", SubscriptionID: "s",
+		RBACEnabled: true, PrivateCluster: true, AuthorizedIPRanges: true,
+		Result: aks.ResultPass, ObservedAt: time.Now().UTC(),
+	}
+	rec, _ := buildAKSRecord(c, "prod", "scf:CFG-02")
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{"resource_group", "location", "kubernetes_version", "network_policy"} {
+		if _, ok := pl[k]; ok {
+			t.Errorf("empty optional %q should be omitted", k)
+		}
+	}
+	// Booleans + count always present (false / 0 is signal, not absence).
+	for _, k := range []string{"managed_identity", "local_accounts_disabled", "oidc_issuer_enabled", "node_pool_count"} {
+		if _, ok := pl[k]; !ok {
+			t.Errorf("boolean/count field %q must always be present", k)
 		}
 	}
 }

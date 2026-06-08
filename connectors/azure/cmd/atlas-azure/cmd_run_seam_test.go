@@ -17,6 +17,7 @@ import (
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
+	"github.com/mgoodric/security-atlas/connectors/azure/internal/aks"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/azureauth"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/entra"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/storage"
@@ -42,6 +43,7 @@ func (f *fakeSDKClient) Close() error { f.closeCalled = true; return nil }
 type seamOverrides struct {
 	entraPull   func(ctx context.Context, api entra.API, tenantID string, now func() time.Time) ([]entra.Assignment, error)
 	storageScan func(ctx context.Context, api storage.API, subscriptionID string, now func() time.Time) ([]storage.AccountConfig, error)
+	aksScan     func(ctx context.Context, api aks.API, subscriptionID string, now func() time.Time) ([]aks.ClusterConfig, error)
 	acquire     func(ctx context.Context, cred azureauth.Credential, hc *http.Client, scope string) (string, error)
 	newClient   func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error)
 }
@@ -68,6 +70,17 @@ func installSeams(t *testing.T, o seamOverrides) {
 		storageScan = o.storageScan
 		t.Cleanup(func() { storageScan = prev })
 	}
+	// aksScan: default to a no-op empty pull so an unset AKS seam never reaches
+	// the live ARM client (the AKS kind is on-by-default). Tests that exercise
+	// the AKS path override this.
+	prevAKS := aksScan
+	aksScan = func(_ context.Context, _ aks.API, _ string, _ func() time.Time) ([]aks.ClusterConfig, error) {
+		return nil, nil
+	}
+	t.Cleanup(func() { aksScan = prevAKS })
+	if o.aksScan != nil {
+		aksScan = o.aksScan
+	}
 	if o.newClient != nil {
 		prev := newSDKClient
 		newSDKClient = o.newClient
@@ -89,10 +102,11 @@ func okFlags() runFlags {
 		subscriptionID: "sub-1",
 		entraControl:   "scf:IAC-21",
 		storageControl: "scf:CRY-04",
+		aksControl:     "scf:CFG-02",
 	}
 }
 
-func TestDoRun_PushSuccessBothKinds(t *testing.T) {
+func TestDoRun_PushSuccessAllKinds(t *testing.T) {
 	resetCommon(t)
 	common.endpoint = "127.0.0.1:1"
 	common.token = "test-bearer"
@@ -111,17 +125,95 @@ func TestDoRun_PushSuccessBothKinds(t *testing.T) {
 				{AccountID: "/sub/a", AccountName: "a", SubscriptionID: sub, EncryptionEnabled: true, HTTPSTrafficOnly: true, Result: storage.ResultPass, ObservedAt: time.Now().UTC()},
 			}, nil
 		},
+		aksScan: func(_ context.Context, _ aks.API, sub string, _ func() time.Time) ([]aks.ClusterConfig, error) {
+			return []aks.ClusterConfig{
+				{ClusterID: "/sub/c", ClusterName: "c", SubscriptionID: sub, RBACEnabled: true, NetworkPolicy: "calico", PrivateCluster: true, AuthorizedIPRanges: true, Result: aks.ResultPass, ObservedAt: time.Now().UTC()},
+			}, nil
+		},
 		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
 	})
 
 	if err := doRun(context.Background(), okFlags()); err != nil {
 		t.Fatalf("doRun: %v", err)
 	}
-	if fake.pushed != 2 {
-		t.Errorf("pushed = %d; want 2 (one entra + one storage)", fake.pushed)
+	if fake.pushed != 3 {
+		t.Errorf("pushed = %d; want 3 (one entra + one storage + one aks)", fake.pushed)
 	}
 	if !fake.closeCalled {
 		t.Error("Close not called")
+	}
+}
+
+func TestDoRun_SkipAKS(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		storageScan: func(_ context.Context, _ storage.API, sub string, _ func() time.Time) ([]storage.AccountConfig, error) {
+			return []storage.AccountConfig{{AccountID: "/a", AccountName: "a", SubscriptionID: sub, Result: storage.ResultPass, ObservedAt: time.Now().UTC()}}, nil
+		},
+		aksScan: func(_ context.Context, _ aks.API, _ string, _ func() time.Time) ([]aks.ClusterConfig, error) {
+			t.Fatal("aksScan must not be called when --skip-aks is set")
+			return nil, nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipEntra = true
+	f.skipAKS = true
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 1 {
+		t.Errorf("pushed = %d; want 1 (storage only)", fake.pushed)
+	}
+}
+
+func TestDoRun_AKSInspectError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("arm 403")
+	installSeams(t, seamOverrides{
+		aksScan: func(_ context.Context, _ aks.API, _ string, _ func() time.Time) ([]aks.ClusterConfig, error) {
+			return nil, sentinel
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	f := okFlags()
+	f.skipEntra = true
+	f.skipStorage = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "aks inspect: ") {
+		t.Fatalf("want wrapped aks inspect error; got %v", err)
+	}
+}
+
+func TestDoRun_AKSPushError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("push rejected")
+	fake := &fakeSDKClient{pushErr: sentinel}
+	installSeams(t, seamOverrides{
+		aksScan: func(_ context.Context, _ aks.API, sub string, _ func() time.Time) ([]aks.ClusterConfig, error) {
+			return []aks.ClusterConfig{{ClusterID: "/c", ClusterName: "c", SubscriptionID: sub, RBACEnabled: true, NetworkPolicy: "calico", PrivateCluster: true, Result: aks.ResultPass, ObservedAt: time.Now().UTC()}}, nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipEntra = true
+	f.skipStorage = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "push aks ") {
+		t.Fatalf("want wrapped push aks error; got %v", err)
 	}
 }
 
