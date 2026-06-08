@@ -6,6 +6,9 @@
 -- surface (no UpdateEvidenceRecord, no DeleteEvidenceRecord exists).
 
 -- name: InsertEvidenceRecord :one
+-- Slice 474: scope_canonical persists the canonical (sorted) wire scope the
+-- content-hash was computed over, so `atlas evidence verify` can reconstruct
+-- the exact record and recompute an identical hash.
 INSERT INTO evidence_records (
     id, tenant_id,
     control_id, control_ref, scope_id,
@@ -13,7 +16,8 @@ INSERT INTO evidence_records (
     payload, payload_uri,
     hash, freshness_class, valid_until,
     idempotency_key, evidence_kind, schema_version,
-    credential_id, ingestion_path, source_attribution
+    credential_id, ingestion_path, source_attribution,
+    scope_canonical
 ) VALUES (
     $1, $2,
     $3, $4, $5,
@@ -21,7 +25,8 @@ INSERT INTO evidence_records (
     $9, $10,
     $11, $12, $13,
     $14, $15, $16,
-    $17, $18, $19
+    $17, $18, $19,
+    $20
 )
 RETURNING *;
 

@@ -28,17 +28,21 @@ import (
 // touch the database. Constitutional invariant #2 (append-only ledger,
 // point-in-time replay) is preserved — verify only re-derives and compares.
 //
-// Reconstruction fidelity (load-bearing — see slice 464 decisions log D1):
-// the ingest write path stores the record's fields across columns and
-// discards the original wire `scope` (only `scope_id` is a column, and the
-// push path leaves it empty). The canonical hash that this helper produces
-// is therefore the hash of the record reconstructed from the persisted
-// columns; `RecordFromLedgerRow` reconstructs `scope` from the persisted
-// representation. The CLI compares THIS recomputed hash against the stored
-// `hash` column, so the contract is "the stored hash equals the canonical
-// hash of the record as reconstructable from the ledger". The corruption
-// AC-3 introduces (mutating the `payload` column in place) changes the
-// recomputed hash and is reported.
+// Reconstruction fidelity (load-bearing — slice 464 decisions log D1, closed
+// by slice 474): the ingest write path stores the record's fields across
+// columns. Before slice 474 it discarded the original wire `scope` (only the
+// empty `scope_id` column existed), so the verify could not reproduce the
+// ingest scope-inclusive hash for a production record. Slice 474 adds the
+// `scope_canonical` JSONB column: ingest now persists the canonical (sorted)
+// wire scope the hash was computed over, and `RecordFromLedgerRow` rehydrates
+// it. For a record ingested AFTER slice 474, the reconstructed record is
+// byte-identical (under canonical normalization) to what ingest hashed, so
+// the verify walk validates production records cleanly. For a legacy
+// (pre-slice-474) row, `scope_canonical` is NULL; the reconstruction falls
+// back to scope-free, preserving the slice-464 baseline contract for those
+// rows. The CLI compares THIS recomputed hash against the stored `hash`
+// column. The corruption AC-3 introduces (mutating the `payload` column in
+// place) still changes the recomputed hash and is reported.
 
 // RecordFromLedgerRow reconstructs the canonical EvidenceRecord proto from a
 // persisted ledger row. Used by the verify walk to recompute the canonical
@@ -67,6 +71,18 @@ func RecordFromLedgerRow(row dbx.EvidenceRecord) (*evidencev1.EvidenceRecord, er
 	}
 	if row.PayloadUri != nil {
 		rec.PayloadUri = row.PayloadUri
+	}
+
+	// Slice 474: rehydrate the canonical wire scope persisted at ingest so
+	// the recomputed hash matches the scope-inclusive ingest hash. A NULL /
+	// empty column (a pre-slice-474 legacy row) yields a nil scope — the
+	// slice-464 scope-free reconstruction.
+	if len(row.ScopeCanonical) > 0 {
+		scope, err := canonjson.UnmarshalCanonicalScope(row.ScopeCanonical)
+		if err != nil {
+			return nil, fmt.Errorf("ingest: decode scope_canonical column: %w", err)
+		}
+		rec.Scope = scope
 	}
 
 	// Payload column holds the protojson-marshaled Struct bytes that landed
