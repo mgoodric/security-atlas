@@ -65,3 +65,24 @@ WHERE tenant_id = $1 AND id = $2;
 -- Read a delivery-log row by id (tests + outcome inspection).
 SELECT * FROM channel_delivery_log
 WHERE tenant_id = $1 AND id = $2;
+
+-- name: ListSlackOptInUsers :many
+-- Slice 582 — digest-scheduler enumeration for the Slack channel: every
+-- (tenant, user) pair that has OPTED IN. Walked from the BYPASSRLS migrator
+-- pool (all tenants in one pass); per-user delivery re-reads under the
+-- user's own tenant GUC (RLS). enabled = false / no-row excluded (default
+-- opted-OUT, P0-543-3). Returns only the (tenant, user) keys — no PII.
+SELECT tenant_id, user_id
+FROM slack_channel_optin
+WHERE enabled = true
+ORDER BY tenant_id, user_id;
+
+-- name: ListWebhookOptInUsers :many
+-- Slice 582 — digest-scheduler enumeration for the webhook channel: every
+-- (tenant, user) pair that has OPTED IN. Same shape + guarantees as
+-- ListSlackOptInUsers. enabled = false / no-row excluded (default
+-- opted-OUT). Returns only the (tenant, user) keys — no PII.
+SELECT tenant_id, user_id
+FROM webhook_channel_optin
+WHERE enabled = true
+ORDER BY tenant_id, user_id;

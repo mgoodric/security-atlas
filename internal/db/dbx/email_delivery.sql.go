@@ -94,6 +94,45 @@ func (q *Queries) GetEmailOptIn(ctx context.Context, arg GetEmailOptInParams) (b
 	return enabled, err
 }
 
+const listEmailOptInUsers = `-- name: ListEmailOptInUsers :many
+SELECT tenant_id, user_id
+FROM email_channel_optin
+WHERE enabled = true
+ORDER BY tenant_id, user_id
+`
+
+type ListEmailOptInUsersRow struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+// Slice 582 — the digest scheduler's enumeration query for the email
+// channel: every (tenant, user) pair that has OPTED IN. Runs through the
+// BYPASSRLS migrator pool so the scheduler can walk all tenants in one
+// pass; the actual per-user delivery then re-reads under the user's own
+// tenant GUC (RLS). enabled = false / no-row are excluded (default
+// opted-OUT, P0-445-7). No PII is returned — only the (tenant, user) keys
+// the driver needs to call DeliverDigest.
+func (q *Queries) ListEmailOptInUsers(ctx context.Context) ([]ListEmailOptInUsersRow, error) {
+	rows, err := q.db.Query(ctx, listEmailOptInUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEmailOptInUsersRow
+	for rows.Next() {
+		var i ListEmailOptInUsersRow
+		if err := rows.Scan(&i.TenantID, &i.UserID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markEmailDigestFailed = `-- name: MarkEmailDigestFailed :exec
 UPDATE email_delivery_log
 SET outcome = 'failed', attempts = attempts + 1, last_error = $3
