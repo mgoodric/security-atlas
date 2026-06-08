@@ -120,6 +120,12 @@ read requests ONLY the `GENERAL` + `APPLICATIONS` sections (never
 struct has no field for a path / usage / license key — a leak would be a compile
 error. The per-device list is bounded (`MaxSoftwarePerDevice = 500`).
 
+The read walks the Jamf `page` / `page-size` / `totalCount` cursor (slice 590)
+so a fleet larger than one page is fully gathered, bounded by a max-page cap
+(`maxSoftwarePages = 50` at `page-size = 200`) so a runaway `totalCount` cannot
+drive an unbounded loop. The field allow-list above is unchanged by pagination —
+only the page loop was added.
+
 ## Config-profile secret-redaction boundary (slice 556 — load-bearing)
 
 The `run-config-profiles` subcommand reads configuration-profile DETAIL (the
@@ -160,7 +166,6 @@ accuracy recheck:
 
 ## Follow-ons (out of v0 scope)
 
-- software-inventory cursor pagination for large fleets (slice 590);
 - config-profile per-setting enrichment (populate `settings[]` through the same
   allow-list, slice 595);
 - event-driven profile via MDM compliance-state-change webhooks (slice 557).
