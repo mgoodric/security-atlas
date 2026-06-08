@@ -678,6 +678,12 @@ type Querier interface {
 	// Read a user's Slack-channel master opt-in. A missing row (pgx.ErrNoRows)
 	// means OPTED-OUT (P0-543-3).
 	GetSlackOptIn(ctx context.Context, arg GetSlackOptInParams) (bool, error)
+	// Slice 608: read the caller-tenant's control-bundle upload gate policy.
+	// RLS scopes the row to the current tenant; the WHERE clause exists only so
+	// the query returns at most one row. Returns ErrNoRows when no tenants row
+	// exists for the caller (e.g. a bare-UUID tenant that predates slice 144) —
+	// the resolver maps that absence to the 'strict' default.
+	GetTenantBundleGateMode(ctx context.Context, id pgtype.UUID) (string, error)
 	// Slice 144 — tenant identity queries.
 	//
 	// The `tenants` table was added in slice 144 (migration
@@ -691,7 +697,7 @@ type Querier interface {
 	// Read a single tenant row by id under the caller's tenant context.
 	// Returns ErrNoRows when the caller's tenant_id GUC does not match
 	// the requested id (RLS filters the row out).
-	GetTenantByID(ctx context.Context, id pgtype.UUID) (Tenant, error)
+	GetTenantByID(ctx context.Context, id pgtype.UUID) (GetTenantByIDRow, error)
 	// Lookup by case-insensitive email within a tenant. Used by /auth/local/login.
 	GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) (User, error)
 	GetUserByID(ctx context.Context, arg GetUserByIDParams) (User, error)
@@ -2338,13 +2344,18 @@ type Querier interface {
 	// Update an existing anchor in place. Touches updated_at; the caller
 	// decides whether to call this based on a content-equality check.
 	UpdateSCFAnchor(ctx context.Context, arg UpdateSCFAnchorParams) (ScfAnchor, error)
+	// Slice 608: set the caller-tenant's control-bundle upload gate policy.
+	// RLS gates this to the caller's own row. The CHECK constraint
+	// `tenants_bundle_gate_mode_chk` rejects an out-of-enum value at the DB
+	// layer (defense in depth atop the handler's allow-list).
+	UpdateTenantBundleGateMode(ctx context.Context, arg UpdateTenantBundleGateModeParams) (UpdateTenantBundleGateModeRow, error)
 	// Update a tenant's name. RLS gates this to the caller's own row.
 	// Returns the post-update row so the handler can emit the new value
 	// on the wire (and serialize before/after for the audit log).
 	//
 	// The case-insensitive UNIQUE expression index on LOWER(name) raises
 	// `unique_violation` on duplicate; the handler maps to 409.
-	UpdateTenantName(ctx context.Context, arg UpdateTenantNameParams) (Tenant, error)
+	UpdateTenantName(ctx context.Context, arg UpdateTenantNameParams) (UpdateTenantNameRow, error)
 	// Slice 108: PATCH /v1/me. Updates display_name + time_zone only (email + idp_subject
 	// are read-only — managed by the IdP). Empty-string sentinel pattern: pass the existing
 	// value to leave the column unchanged. The handler builds the diff from the request

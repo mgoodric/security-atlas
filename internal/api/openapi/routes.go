@@ -178,7 +178,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "PATCH", Path: "/v1/policies/{id}/approve", Tag: "policies", Tier: "bearer", Internal: false, Summary: "PATCH /v1/policies/{id}/approve"},
 	{Method: "PATCH", Path: "/v1/policies/{id}/submit", Tag: "policies", Tier: "bearer", Internal: false, Summary: "PATCH /v1/policies/{id}/submit"},
 	{Method: "PATCH", Path: "/v1/questionnaires/{id}/answers/{qid}", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "PATCH /v1/questionnaires/{id}/answers/{qid}"},
-	{Method: "PATCH", Path: "/v1/tenants/{id}", Tag: "tenants", Tier: "bearer", Internal: false, Summary: "PATCH /v1/tenants/{id} — rename a tenant (per-tenant admin or super_admin)"},
+	{Method: "PATCH", Path: "/v1/tenants/{id}", Tag: "tenants", Tier: "bearer", Internal: false, Summary: "PATCH /v1/tenants/{id} — rename a tenant and/or set its control-bundle gate policy (per-tenant admin or super_admin)"},
 	{Method: "PATCH", Path: "/v1/vendors/{id}", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "PATCH /v1/vendors/{id}"},
 	{Method: "POST", Path: "/auth/local/login", Tag: "auth", Tier: "none", Internal: false, Summary: "POST /auth/local/login"},
 	{Method: "POST", Path: "/auth/logout", Tag: "auth", Tier: "none", Internal: false, Summary: "POST /auth/logout"},

@@ -17,8 +17,19 @@ SELECT
     id,
     name,
     is_bootstrap_tenant,
+    bundle_gate_mode,
     created_at,
     updated_at
+FROM tenants
+WHERE id = $1;
+
+-- name: GetTenantBundleGateMode :one
+-- Slice 608: read the caller-tenant's control-bundle upload gate policy.
+-- RLS scopes the row to the current tenant; the WHERE clause exists only so
+-- the query returns at most one row. Returns ErrNoRows when no tenants row
+-- exists for the caller (e.g. a bare-UUID tenant that predates slice 144) —
+-- the resolver maps that absence to the 'strict' default.
+SELECT bundle_gate_mode
 FROM tenants
 WHERE id = $1;
 
@@ -36,5 +47,22 @@ RETURNING
     id,
     name,
     is_bootstrap_tenant,
+    bundle_gate_mode,
+    created_at,
+    updated_at;
+
+-- name: UpdateTenantBundleGateMode :one
+-- Slice 608: set the caller-tenant's control-bundle upload gate policy.
+-- RLS gates this to the caller's own row. The CHECK constraint
+-- `tenants_bundle_gate_mode_chk` rejects an out-of-enum value at the DB
+-- layer (defense in depth atop the handler's allow-list).
+UPDATE tenants
+SET bundle_gate_mode = $2
+WHERE id = $1
+RETURNING
+    id,
+    name,
+    is_bootstrap_tenant,
+    bundle_gate_mode,
     created_at,
     updated_at;

@@ -1785,6 +1785,8 @@ type Tenant struct {
 	IsBootstrapTenant bool               `json:"is_bootstrap_tenant"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	// Slice 608: per-tenant control-bundle upload test-gate policy. strict (default, = slice-574 global behaviour) | advisory (red tests warn, not block) | mandatory_tests (a bundle with no tests/ is rejected). Set via PATCH /v1/tenants/{id}.
+	BundleGateMode string `json:"bundle_gate_mode"`
 }
 
 type User struct {

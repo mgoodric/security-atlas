@@ -22,6 +22,11 @@ import (
 	"mime/multipart"
 	"net/http"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/mgoodric/security-atlas/internal/control"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // gateTarball builds a gzip-tar bundle with control.yaml + tests/<name> files.
@@ -91,6 +96,160 @@ evidence_queries:
     language: jsonpath
     expression: "$.encrypted"
 `
+
+// setTenantGateMode upserts a tenants row for the given tenant id with the
+// requested bundle_gate_mode, via an admin (BYPASSRLS-capable) pool. The
+// upload handler does not create the tenants row, so a test that wants a
+// non-default policy must seed it directly. Cleans up the row afterwards.
+func setTenantGateMode(t *testing.T, tenant, mode string) {
+	t.Helper()
+	ctx := context.Background()
+	admin, err := pgxpool.New(ctx, adminDSN(t))
+	if err != nil {
+		t.Fatalf("admin pool: %v", err)
+	}
+	defer admin.Close()
+	if _, err := admin.Exec(ctx,
+		`INSERT INTO tenants (id, name, bundle_gate_mode)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (id) DO UPDATE SET bundle_gate_mode = EXCLUDED.bundle_gate_mode`,
+		tenant, "gate-it-"+tenant[:8], mode); err != nil {
+		t.Fatalf("seed tenant gate mode: %v", err)
+	}
+	t.Cleanup(func() {
+		c := context.Background()
+		a, e := pgxpool.New(c, adminDSN(t))
+		if e != nil {
+			t.Logf("cleanup admin pool: %v", e)
+			return
+		}
+		defer a.Close()
+		if _, e := a.Exec(c, `DELETE FROM tenants WHERE id = $1`, tenant); e != nil {
+			t.Logf("cleanup tenants row: %v", e)
+		}
+	})
+}
+
+// TestGate_DefaultTenantStrictRejectsRed proves the slice-574 default is
+// preserved per-tenant: a tenant with NO tenants row (the freshTenant case)
+// resolves to strict, so a red bundle is rejected 400. (This is the absence =
+// default hard-block path of slice 608 AC-2.)
+func TestGate_DefaultTenantStrictRejectsRed(t *testing.T) {
+	s := setupHTTP(t)
+	// No setTenantGateMode call — s.tenant has no tenants row → strict default.
+	tests := `cases:
+  - name: encrypted-wrong
+    expected_state: pass
+    evaluated_at: 2026-06-01T12:00:00Z
+    records:
+      - result: pass
+        observed_at: 2026-06-01T00:00:00Z
+        payload: { bucket: dev, encrypted: false }
+`
+	tarBytes := gateTarball(t, gateJSONPathManifest, map[string]string{"t.yaml": tests})
+	code, raw := postGateTarball(t, s, tarBytes)
+	if code != http.StatusBadRequest {
+		t.Fatalf("default (no policy row) tenant must hard-block a red bundle; got %d body=%s", code, raw)
+	}
+}
+
+// TestGate_AdvisoryTenantAcceptsRed proves slice 608 AC-3/AC-6: a tenant set to
+// advisory accepts the SAME red bundle with a warning + gate_test_report,
+// instead of the 400 the default tenant gets.
+func TestGate_AdvisoryTenantAcceptsRed(t *testing.T) {
+	s := setupHTTP(t)
+	setTenantGateMode(t, s.tenant, "advisory")
+	tests := `cases:
+  - name: encrypted-wrong
+    expected_state: pass
+    evaluated_at: 2026-06-01T12:00:00Z
+    records:
+      - result: pass
+        observed_at: 2026-06-01T00:00:00Z
+        payload: { bucket: dev, encrypted: false }
+`
+	tarBytes := gateTarball(t, gateJSONPathManifest, map[string]string{"t.yaml": tests})
+	code, raw := postGateTarball(t, s, tarBytes)
+	if code != http.StatusCreated && code != http.StatusOK {
+		t.Fatalf("advisory tenant must ACCEPT a red bundle; got %d body=%s", code, raw)
+	}
+	var up struct {
+		ControlID      string `json:"control_id"`
+		GateWarning    string `json:"gate_warning"`
+		GateTestReport *struct {
+			Failed int `json:"failed"`
+		} `json:"gate_test_report"`
+	}
+	if err := json.Unmarshal(raw, &up); err != nil {
+		t.Fatalf("decode: %v body=%s", err, raw)
+	}
+	if up.ControlID == "" {
+		t.Fatalf("advisory upload must still persist the control; body=%s", raw)
+	}
+	if up.GateWarning == "" {
+		t.Fatalf("advisory upload must carry a warning; body=%s", raw)
+	}
+	if up.GateTestReport == nil || up.GateTestReport.Failed != 1 {
+		t.Fatalf("advisory upload must carry the red report; body=%s", raw)
+	}
+}
+
+// TestGate_MandatoryTestsTenantRejectsNoTests proves slice 608 AC-4: a tenant
+// set to mandatory_tests rejects a bundle that ships NO tests/, where the
+// default tenant would accept it with a warning.
+func TestGate_MandatoryTestsTenantRejectsNoTests(t *testing.T) {
+	s := setupHTTP(t)
+	setTenantGateMode(t, s.tenant, "mandatory_tests")
+	tarBytes := gateTarball(t, gateJSONPathManifest, nil) // no tests
+	code, raw := postGateTarball(t, s, tarBytes)
+	if code != http.StatusBadRequest {
+		t.Fatalf("mandatory_tests tenant must reject a no-tests bundle; got %d body=%s", code, raw)
+	}
+}
+
+// TestGate_TenantIsolation proves one tenant's policy does not affect another.
+// Tenant A is set to advisory; tenant B has no policy row. Under each tenant's
+// own RLS context the resolver returns the tenant's own policy: A → advisory,
+// B → the strict default. RLS scopes the row read, so A's setting is invisible
+// to B. Asserted at the control.Store.BundleGateMode resolver (the same code
+// path the HTTP handler uses to resolve the per-tenant mode), mirroring the
+// Store-level isolation proof in TestList_TenantIsolation.
+func TestGate_TenantIsolation(t *testing.T) {
+	t.Parallel()
+	admin := adminPool(t)
+	app := appPool(t)
+
+	tenantA := freshTenantList(t, admin)
+	tenantB := freshTenantList(t, admin)
+	setTenantGateMode(t, tenantA, "advisory")
+	// tenantB: deliberately no tenants row → strict default.
+
+	store := control.NewStore(app)
+
+	ctxA, err := tenancy.WithTenant(context.Background(), tenantA)
+	if err != nil {
+		t.Fatalf("WithTenant A: %v", err)
+	}
+	modeA, err := store.BundleGateMode(ctxA)
+	if err != nil {
+		t.Fatalf("BundleGateMode A: %v", err)
+	}
+	if modeA != "advisory" {
+		t.Fatalf("tenant A resolved mode = %q; want advisory", modeA)
+	}
+
+	ctxB, err := tenancy.WithTenant(context.Background(), tenantB)
+	if err != nil {
+		t.Fatalf("WithTenant B: %v", err)
+	}
+	modeB, err := store.BundleGateMode(ctxB)
+	if err != nil {
+		t.Fatalf("BundleGateMode B: %v", err)
+	}
+	if modeB != control.DefaultBundleGateMode {
+		t.Fatalf("tenant B resolved mode = %q; want the strict default (isolation: A's advisory must not leak to B)", modeB)
+	}
+}
 
 func TestGate_PassingTestsAccepted(t *testing.T) {
 	s := setupHTTP(t)

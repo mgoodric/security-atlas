@@ -65,6 +65,7 @@ sql:
       - "migrations/sql/20260607030000_backup_runs.sql"
       - "migrations/sql/20260608000000_slack_webhook_channels.sql"
       - "migrations/sql/20260608010000_oscal_component_definitions.sql"
+      - "migrations/sql/20260608030000_tenant_bundle_gate_mode.sql"
     queries: "internal/db/queries"
     gen:
       go:
