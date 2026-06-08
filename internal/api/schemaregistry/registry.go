@@ -118,6 +118,14 @@ func DefaultSeed() []KindVersion {
 		// (the connector never touches the Key-Vault data plane and is never
 		// granted any data-plane permission).
 		{Kind: "azure.keyvault_access_config.v1", Version: "1.0.0"},
+		// Slice 614: Azure connector Azure-Firewall rule-collection posture
+		// (network-segmentation / boundary-protection controls: SCF NET-04 /
+		// NET-01 — the SAME anchors as the NSG kind). ARM Reader only — RULE
+		// configuration only (network + application rule collections + the
+		// rule-collection-group priority ordering), never flow logs, packet
+		// captures, traffic contents, NAT-rule secrets, threat-intel feeds, or
+		// route tables; read-only (never mutates a network resource).
+		{Kind: "azure.firewall_rules.v1", Version: "1.0.0"},
 		// Slice 487: Kubernetes connector (RBAC + workload security-context).
 		{Kind: "k8s.rbac_binding.v1", Version: "1.0.0"},
 		{Kind: "k8s.workload_security_context.v1", Version: "1.0.0"},

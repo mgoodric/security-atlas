@@ -148,14 +148,16 @@ func DocumentedPermissions() []Permission {
 			Access:  "Read",
 			// The SAME ARM Reader role gates every ARM-sourced kind — slice 519
 			// added the AKS managed-cluster kind, slice 520 added the NSG
-			// firewall-rule kind, and slice 521 adds the Key-Vault access-policy
-			// kind WITHOUT widening the scope (P0-519-2 / P0-520-1 / P0-521-3).
-			// Reader cannot call listClusterAdminCredential (P0-519-1), cannot
-			// mutate a network resource (P0-520-3), and is NEVER granted any
-			// Key-Vault DATA-plane permission (P0-521-1) — so admin kubeconfig,
-			// rule mutation, and secret/key/certificate values are unreachable by
-			// construction.
-			Gates: "azure.storage_account_config.v1 (storage account configuration) + azure.aks_cluster_config.v1 (AKS managed-cluster configuration) + azure.nsg_rules.v1 (NSG firewall-rule posture) + azure.keyvault_access_config.v1 (Key-Vault access-policy / RBAC posture)",
+			// firewall-rule kind, slice 521 added the Key-Vault access-policy
+			// kind, and slice 614 adds the Azure-Firewall rule-collection kind
+			// WITHOUT widening the scope (P0-519-2 / P0-520-1 / P0-521-3 /
+			// P0-614-1). Reader cannot call listClusterAdminCredential
+			// (P0-519-1), cannot mutate a network resource (P0-520-3 / P0-614-3),
+			// and is NEVER granted any Key-Vault DATA-plane permission (P0-521-1)
+			// — so admin kubeconfig, rule mutation, secret/key/certificate
+			// values, and firewall flow-log / NAT-secret / threat-intel surfaces
+			// are unreachable by construction.
+			Gates: "azure.storage_account_config.v1 (storage account configuration) + azure.aks_cluster_config.v1 (AKS managed-cluster configuration) + azure.nsg_rules.v1 (NSG firewall-rule posture) + azure.keyvault_access_config.v1 (Key-Vault access-policy / RBAC posture) + azure.firewall_rules.v1 (Azure Firewall rule-collection posture)",
 		},
 	}
 }
