@@ -63,6 +63,22 @@ func TestNSGRulesKey_DiffersAcrossHour(t *testing.T) {
 	}
 }
 
+func TestKeyVaultAccessKey_StableWithinHour(t *testing.T) {
+	a := time.Date(2026, 6, 7, 12, 5, 0, 0, time.UTC)
+	b := time.Date(2026, 6, 7, 12, 55, 0, 0, time.UTC)
+	if idem.KeyVaultAccessKey("kv-1", a) != idem.KeyVaultAccessKey("kv-1", b) {
+		t.Error("same hour should yield same key")
+	}
+}
+
+func TestKeyVaultAccessKey_DiffersAcrossHour(t *testing.T) {
+	a := time.Date(2026, 6, 7, 12, 5, 0, 0, time.UTC)
+	c := time.Date(2026, 6, 7, 13, 5, 0, 0, time.UTC)
+	if idem.KeyVaultAccessKey("kv-1", a) == idem.KeyVaultAccessKey("kv-1", c) {
+		t.Error("different hour should yield different key")
+	}
+}
+
 func TestKeys_DistinctAcrossKinds(t *testing.T) {
 	at := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
 	// Same id string, different kind prefix → different key.
@@ -81,12 +97,19 @@ func TestKeys_DistinctAcrossKinds(t *testing.T) {
 	if idem.NSGRulesKey("x", at) == idem.StorageAccountKey("x", at) {
 		t.Error("nsg vs storage must not collide on the same id")
 	}
+	if idem.KeyVaultAccessKey("x", at) == idem.NSGRulesKey("x", at) {
+		t.Error("keyvault vs nsg must not collide on the same id")
+	}
+	if idem.KeyVaultAccessKey("x", at) == idem.StorageAccountKey("x", at) {
+		t.Error("keyvault vs storage must not collide on the same id")
+	}
 }
 
 func TestKeys_NonEmpty(t *testing.T) {
 	at := time.Now()
 	if idem.EntraRoleAssignmentKey("a", at) == "" || idem.StorageAccountKey("b", at) == "" ||
-		idem.AKSClusterConfigKey("c", at) == "" || idem.NSGRulesKey("d", at) == "" {
+		idem.AKSClusterConfigKey("c", at) == "" || idem.NSGRulesKey("d", at) == "" ||
+		idem.KeyVaultAccessKey("e", at) == "" {
 		t.Fatal("idempotency keys must be non-empty")
 	}
 }

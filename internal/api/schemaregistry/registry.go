@@ -111,6 +111,13 @@ func DefaultSeed() []KindVersion {
 		// — RULE configuration only, never flow logs, packet captures, or
 		// traffic contents; read-only (never mutates a network resource).
 		{Kind: "azure.nsg_rules.v1", Version: "1.0.0"},
+		// Slice 521: Azure connector Key-Vault access-policy / RBAC posture
+		// (secrets-management / least-privilege controls: SCF IAC-21 / CRY-09).
+		// ARM Reader only — management-plane CONFIGURATION + access-policy /
+		// role-assignment METADATA only, NEVER a secret/key/certificate VALUE
+		// (the connector never touches the Key-Vault data plane and is never
+		// granted any data-plane permission).
+		{Kind: "azure.keyvault_access_config.v1", Version: "1.0.0"},
 		// Slice 487: Kubernetes connector (RBAC + workload security-context).
 		{Kind: "k8s.rbac_binding.v1", Version: "1.0.0"},
 		{Kind: "k8s.workload_security_context.v1", Version: "1.0.0"},
