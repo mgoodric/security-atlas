@@ -1212,6 +1212,8 @@ type EvidenceRecord struct {
 	ControlRef        string                 `json:"control_ref"`
 	// Slice 474: canonical (sorted) wire scope the ingest content-hash was computed over, so the `atlas evidence verify` walk can reconstruct the exact record and recompute an identical hash. NULL = pre-slice-474 legacy row (verify reconstructs scope-free). Append-only; never mutated post-insert.
 	ScopeCanonical []byte `json:"scope_canonical"`
+	// Slice 633: lossless Unix-nanosecond value of the wire observed_at the ingest content-hash was computed over, so the `atlas evidence verify` walk can reconstruct the exact nanosecond timestamp (the observed_at TIMESTAMPTZ column is microsecond-precision and truncates sub-us nanos). NULL = pre-slice-633 legacy row (verify reconstructs from the lossy TIMESTAMPTZ column). Append-only; never mutated post-insert.
+	ObservedAtNanos *int64 `json:"observed_at_nanos"`
 }
 
 type Exception struct {

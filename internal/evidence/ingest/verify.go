@@ -3,6 +3,7 @@ package ingest
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -43,6 +44,17 @@ import (
 // rows. The CLI compares THIS recomputed hash against the stored `hash`
 // column. The corruption AC-3 introduces (mutating the `payload` column in
 // place) still changes the recomputed hash and is reported.
+//
+// Slice 633 closes the SAME divergence class for `observed_at`. The hash
+// covers a nanosecond-precision proto Timestamp, but the `observed_at`
+// TIMESTAMPTZ column is microsecond-precision and truncates sub-us nanos —
+// so reconstructing from it diverged from the ingest hash for any record
+// whose observed_at carried sub-microsecond nanoseconds (the CI-Linux case;
+// slice 474 missed it because macOS time.Now() is often us-aligned). Ingest
+// now also persists `observed_at_nanos BIGINT` (lossless UnixNano), and
+// `RecordFromLedgerRow` reconstructs observed_at from it when present,
+// falling back to the lossy TIMESTAMPTZ column for legacy (pre-633, NULL)
+// rows — the same legacy-fallback shape 474 used for scope.
 
 // RecordFromLedgerRow reconstructs the canonical EvidenceRecord proto from a
 // persisted ledger row. Used by the verify walk to recompute the canonical
@@ -66,7 +78,17 @@ func RecordFromLedgerRow(row dbx.EvidenceRecord) (*evidencev1.EvidenceRecord, er
 	if row.IdempotencyKey != nil {
 		rec.IdempotencyKey = *row.IdempotencyKey
 	}
-	if row.ObservedAt.Valid {
+	// Slice 633: reconstruct observed_at from the LOSSLESS nanosecond column
+	// when present, so the recomputed hash matches the ingest hash (which
+	// covered the full nanosecond proto Timestamp). The `observed_at`
+	// TIMESTAMPTZ column is microsecond-precision and truncates sub-us nanos;
+	// rebuilding from it would diverge from the ingest hash for any record
+	// whose observed_at carried sub-microsecond nanoseconds. A NULL
+	// observed_at_nanos (a pre-slice-633 legacy row) falls back to the lossy
+	// TIMESTAMPTZ column — the slice-464/474 baseline for those rows.
+	if row.ObservedAtNanos != nil {
+		rec.ObservedAt = timestamppb.New(time.Unix(0, *row.ObservedAtNanos).UTC())
+	} else if row.ObservedAt.Valid {
 		rec.ObservedAt = timestamppb.New(row.ObservedAt.Time)
 	}
 	if row.PayloadUri != nil {

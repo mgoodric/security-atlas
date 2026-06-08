@@ -834,6 +834,10 @@ type Querier interface {
 	// Slice 474: scope_canonical persists the canonical (sorted) wire scope the
 	// content-hash was computed over, so `atlas evidence verify` can reconstruct
 	// the exact record and recompute an identical hash.
+	// Slice 633: observed_at_nanos persists the LOSSLESS Unix-nanosecond value of
+	// the wire observed_at (the observed_at TIMESTAMPTZ column is microsecond
+	// precision and truncates sub-us nanos), so the verify walk reconstructs the
+	// exact nanosecond timestamp the hash covered.
 	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
 	InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error)
 	// Slice 492: OSCAL catalog-import queries.
