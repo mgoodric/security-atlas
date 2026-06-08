@@ -22,7 +22,9 @@ package ingest_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -93,6 +95,29 @@ func TestEvidenceVerify_ProductionRecordValidates_474(t *testing.T) {
 		t.Fatalf("scope_canonical tamper NOT detected — scope is not covered by the hash")
 	}
 	t.Logf("AC-2 (scope): tamper detected — recomputed=%s", short12(recomputed))
+
+	// AC-2 (slice 633: observed_at_nanos tamper): a fresh record, then corrupt
+	// the new lossless observed-at column. observed_at is inside the per-record
+	// hash envelope and the verify walk now reconstructs it from this column,
+	// so tampering with the column must change the recomputed hash and be
+	// detected. This proves the new faithful column did not open a tamper hole.
+	receipt3, _, err := svc.Process(context.Background(), record(t), cred)
+	if err != nil {
+		t.Fatalf("Process (observed_at_nanos-tamper case): %v", err)
+	}
+	rowBefore := getEvidenceRowByID(t, adminPool, receipt3.RecordID)
+	if rowBefore.ObservedAtNanos == nil {
+		t.Fatalf("observed_at_nanos not persisted on production record")
+	}
+	// Shift the nanosecond value by one second — a neutral out-of-band mutation.
+	updateEvidenceText(t, adminPool, receipt3.RecordID, "observed_at_nanos",
+		fmt.Sprintf("%d", *rowBefore.ObservedAtNanos+int64(time.Second)))
+	if ok, recomputed, err = ingest.VerifyLedgerRow(getEvidenceRowByID(t, adminPool, receipt3.RecordID)); err != nil {
+		t.Fatalf("VerifyLedgerRow (observed_at_nanos corrupt): %v", err)
+	} else if ok {
+		t.Fatalf("observed_at_nanos tamper NOT detected — observed_at is not covered by the hash")
+	}
+	t.Logf("AC-2 (observed_at_nanos): tamper detected — recomputed=%s", short12(recomputed))
 }
 
 func TestEvidenceVerify_DetectsCorruption_AC3(t *testing.T) {
@@ -167,7 +192,8 @@ func getEvidenceRowByID(t *testing.T, pool *pgxpool.Pool, id string) dbx.Evidenc
 		        observed_at, ingested_at, provenance, result, payload,
 		        payload_uri, hash, freshness_class, valid_until, created_at,
 		        idempotency_key, evidence_kind, schema_version, credential_id,
-		        ingestion_path, source_attribution, control_ref, scope_canonical
+		        ingestion_path, source_attribution, control_ref, scope_canonical,
+		        observed_at_nanos
 		   FROM evidence_records WHERE id = $1`, id,
 	).Scan(
 		&r.ID, &r.TenantID, &r.EvidenceQueryID, &r.ControlID, &r.ScopeID,
@@ -175,6 +201,7 @@ func getEvidenceRowByID(t *testing.T, pool *pgxpool.Pool, id string) dbx.Evidenc
 		&r.PayloadUri, &r.Hash, &r.FreshnessClass, &r.ValidUntil, &r.CreatedAt,
 		&r.IdempotencyKey, &r.EvidenceKind, &r.SchemaVersion, &r.CredentialID,
 		&r.IngestionPath, &r.SourceAttribution, &r.ControlRef, &r.ScopeCanonical,
+		&r.ObservedAtNanos,
 	)
 	if err != nil {
 		t.Fatalf("getEvidenceRowByID(%s): %v", id, err)

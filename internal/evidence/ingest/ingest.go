@@ -459,6 +459,17 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: canonical scope: %w", err)
 	}
 
+	// Slice 633: persist the LOSSLESS wire observed_at as a nanosecond
+	// integer. The `observed_at` TIMESTAMPTZ column below is microsecond
+	// precision (Postgres) and truncates sub-microsecond nanoseconds, but
+	// the content-hash covered the full nanosecond proto Timestamp. Without
+	// a lossless column the verify walk reconstructs a microsecond-truncated
+	// observed_at and recomputes a divergent hash (the slice-474 residual
+	// regression this slice closes — scope was the field 474 fixed,
+	// observed_at is the field it missed). This does NOT change the hash:
+	// it records the hash's timestamp input so verify is faithful.
+	observedAtNanos := observed.UnixNano()
+
 	// Provenance JSONB. EVIDENCE_SDK §4.7 lists the canonical fields. We
 	// record what the server observed, not what the client claimed (the
 	// client claim is on rec.SourceAttribution and is preserved separately).
@@ -558,6 +569,7 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 			IngestionPath:     s.path,
 			SourceAttribution: sourceAttribJSON,
 			ScopeCanonical:    scopeCanonical,
+			ObservedAtNanos:   &observedAtNanos,
 		}
 		inserted, ierr := q.InsertEvidenceRecord(tenantCtx, params)
 		if ierr != nil {

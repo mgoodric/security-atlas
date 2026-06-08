@@ -68,6 +68,7 @@ sql:
       - "migrations/sql/20260608030000_tenant_bundle_gate_mode.sql"
       - "migrations/sql/20260608040000_evidence_scope_canonical.sql"
       - "migrations/sql/20260608050000_oscal_component_claim_disposition.sql"
+      - "migrations/sql/20260608070000_evidence_observed_at_nanos.sql"
     queries: "internal/db/queries"
     gen:
       go:
