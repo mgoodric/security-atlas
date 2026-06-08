@@ -63,8 +63,18 @@ service OscalBridgeService {
   // names no supplied catalog is a structured error, not a fetch (P0-511-1 /
   // threat-model I — the load-bearing difference from ImportCatalog). The
   // resolved output is re-validated against OSCAL v1.1.x before it is
-  // returned. Caps (document size, resolved-control count, single import
-  // level) bound the expansion-attack surface (threat-model D / AC-3).
+  // returned. Caps (document size, resolved-control count, import-chain
+  // depth) bound the expansion-attack surface (threat-model D / AC-3).
+  //
+  // Slice 578 extends ImportProfile to CHAINED profile-over-profile
+  // resolution: a profile whose `import.href` names another SUPPLIED profile
+  // (not only a catalog) is resolved recursively until the chain bottoms out
+  // at a supplied catalog. The chain is bounded by a maximum depth and is
+  // rejected on a cycle (a profile that imports itself directly or
+  // transitively) — never an infinite loop / fetch. Every link's href is
+  // still rewritten to a sandboxed `trestle://` path pointing at a supplied
+  // document; an href that names no supplied document is a structured error,
+  // not a fetch (P0-578-1, carrying forward P0-511-1).
   rpc ImportProfile(ImportProfileRequest) returns (ImportProfileResponse);
 
   // ImportComponentDefinition deserializes an inbound OSCAL
@@ -347,15 +357,36 @@ message SuppliedCatalog {
   string label = 2;
 }
 
+// SuppliedProfile is one INTERMEDIATE profile document the caller supplies so
+// a chained profile-over-profile import can resolve against it (slice 578).
+// A profile's `import.href` may name another supplied profile; the bridge
+// rewrites the href to a sandboxed `trestle://` path pointing at that profile
+// and lets compliance-trestle's ProfileResolver descend the chain. The bridge
+// NEVER fetches an external profile — an href that names no supplied profile
+// (and no supplied catalog) is a structured error, not a fetch.
+message SuppliedProfile {
+  // The raw OSCAL profile JSON document bytes.
+  bytes oscal_json = 1;
+  // Optional operator label for this profile (diagnostic only).
+  string label = 2;
+}
+
 message ImportProfileRequest {
-  // The raw inbound OSCAL profile JSON document bytes.
+  // The raw inbound OSCAL profile JSON document bytes. This is the ENTRY
+  // profile of the chain — its imports may name supplied catalogs or
+  // supplied profiles.
   bytes profile_json = 1;
-  // The catalog(s) the profile resolves against. At least one is required;
-  // an `import.href` that maps to none of these is a structured error.
+  // The catalog(s) the chain ultimately resolves against. At least one is
+  // required; a chain that never bottoms out at one of these is an error.
   repeated SuppliedCatalog catalogs = 2;
   // Operator-declared source label (e.g. "FedRAMP Moderate baseline").
   // Carried into the provenance record on the Go side; echoed back.
   string source_label = 3;
+  // Optional INTERMEDIATE profiles the entry profile (or a deeper profile)
+  // may import (slice 578 — chained profile-over-profile resolution). An
+  // `import.href` that names neither a supplied profile nor a supplied
+  // catalog is a structured error, never an external fetch.
+  repeated SuppliedProfile profiles = 4;
 }
 
 message ImportProfileResponse {
@@ -363,8 +394,8 @@ message ImportProfileResponse {
   // OSCAL v1.1.x catalog. When false, controls is empty and errors is set.
   bool valid = 1;
   // Human-readable errors when valid=false: a validation failure, an
-  // unresolvable / external `import.href`, or a size/count/depth cap
-  // rejection.
+  // unresolvable / external `import.href`, a cyclic chain, a chain deeper
+  // than the depth bound, or a size/count cap rejection.
   repeated string errors = 2;
   // The resolved control projection (empty when valid=false). These are the
   // controls the profile's import/merge/modify directives produced.

@@ -107,9 +107,15 @@ Commands:
                   are resolved via compliance-trestle; an import.href that
                   names no supplied catalog is a structured error, NEVER an
                   external fetch.
+                  A profile may import another SUPPLIED profile (chained
+                  profile-over-profile resolution, slice 578); supply each
+                  intermediate profile with --profile. The chain is bounded by
+                  a maximum depth and rejected on a cycle.
                   Flags:
-                    --catalog     catalog JSON the profile resolves against
+                    --catalog     catalog JSON the chain resolves against
                                   (repeatable; at least one required)
+                    --profile     intermediate profile JSON the chain may
+                                  import (repeatable; slice 578)
                     --dsn         Postgres DSN (atlas_app role); env DATABASE_URL_APP
                     --tenant-id   tenant UUID to import under (required)
                     --bridge-addr oscal-bridge gRPC address (default %s)
@@ -301,7 +307,9 @@ func (s *stringSlice) Set(v string) error {
 func runImportProfile(args []string) error {
 	fs := flag.NewFlagSet("import-profile", flag.ContinueOnError)
 	var catalogs stringSlice
-	fs.Var(&catalogs, "catalog", "catalog JSON the profile resolves against (repeatable)")
+	fs.Var(&catalogs, "catalog", "catalog JSON the chain resolves against (repeatable)")
+	var profiles stringSlice
+	fs.Var(&profiles, "profile", "intermediate profile JSON the chain may import (repeatable; slice 578)")
 	dsn := fs.String("dsn", "", "Postgres DSN (atlas_app role); env DATABASE_URL_APP")
 	tenantID := fs.String("tenant-id", "", "tenant UUID to import under (required)")
 	bridgeAddr := fs.String("bridge-addr", defaultBridgeAddr, "oscal-bridge gRPC address")
@@ -350,6 +358,14 @@ func runImportProfile(args []string) error {
 		}
 		catalogData = append(catalogData, data)
 	}
+	profileData2 := make([][]byte, 0, len(profiles))
+	for _, pf := range profiles {
+		data, rerr := os.ReadFile(pf)
+		if rerr != nil {
+			return fmt.Errorf("read intermediate profile %s: %w", pf, rerr)
+		}
+		profileData2 = append(profileData2, data)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -375,6 +391,7 @@ func runImportProfile(args []string) error {
 	report, err := importer.Import(tenantCtx, profileimport.Request{
 		ProfileJSON: profileData,
 		Catalogs:    catalogData,
+		Profiles:    profileData2,
 		SourceLabel: *sourceLabel,
 		ImportedBy:  *importedBy,
 		Role:        authz.Role(*roleStr),

@@ -1,0 +1,13 @@
+{
+  "profile": {
+    "uuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "metadata": {
+      "title": "Cycle Profile A",
+      "last-modified": "2026-06-07T00:00:00+00:00",
+      "version": "1.0",
+      "oscal-version": "1.1.2"
+    },
+    "imports": [{ "href": "#bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }],
+    "merge": { "as-is": true }
+  }
+}

@@ -93,7 +93,7 @@ func authorizedRole(role authz.Role) bool {
 // (not imported from internal/oscal) so the importer can be unit tested with
 // a fake and to avoid a dependency cycle.
 type Bridge interface {
-	ImportProfile(ctx context.Context, profileJSON []byte, catalogs [][]byte, sourceLabel string) (*oscalv1.ImportProfileResponse, error)
+	ImportProfile(ctx context.Context, profileJSON []byte, catalogs [][]byte, profiles [][]byte, sourceLabel string) (*oscalv1.ImportProfileResponse, error)
 }
 
 // txBeginner is the minimum pool surface the importer needs (a *pgxpool.Pool
@@ -119,10 +119,16 @@ func NewImporter(pool txBeginner, bridge Bridge) *Importer {
 type Request struct {
 	// ProfileJSON is the raw inbound OSCAL profile document bytes.
 	ProfileJSON []byte
-	// Catalogs are the catalog document(s) the profile resolves against. At
-	// least one is required. The bridge resolves import.href references ONLY
-	// against these (never an external fetch).
+	// Catalogs are the catalog document(s) the chain ultimately resolves
+	// against. At least one is required. The bridge resolves import.href
+	// references ONLY against the supplied documents (never an external fetch).
 	Catalogs [][]byte
+	// Profiles are OPTIONAL intermediate profile document(s) the entry profile
+	// (or a deeper profile) may import — chained profile-over-profile
+	// resolution (slice 578). Empty for the slice-511 single-level case
+	// (profile -> catalog). An import.href that names neither a supplied
+	// profile nor a supplied catalog is a structured error, never a fetch.
+	Profiles [][]byte
 	// SourceLabel is the operator-declared baseline label (provenance).
 	SourceLabel string
 	// ImportedBy is the operator/credential performing the import (AC-4).
@@ -176,14 +182,47 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 			return Report{}, fmt.Errorf("%w (catalog #%d %d bytes > %d)", ErrDocumentTooLarge, i, len(c), MaxCatalogBytes)
 		}
 	}
+	if len(req.Profiles) > MaxSuppliedProfiles {
+		return Report{}, fmt.Errorf("%w (%d > %d)", ErrTooManyProfiles, len(req.Profiles), MaxSuppliedProfiles)
+	}
+	for i, p := range req.Profiles {
+		if len(p) == 0 {
+			return Report{}, fmt.Errorf("%w: supplied profile #%d is empty", ErrEmptyDocument, i)
+		}
+		if len(p) > MaxProfileBytes {
+			return Report{}, fmt.Errorf("%w (profile #%d %d bytes > %d)", ErrDocumentTooLarge, i, len(p), MaxProfileBytes)
+		}
+	}
+
+	// --- Go-side chain validation (slice 578) ---
+	// Build the import graph over the supplied documents and prove the two
+	// load-bearing safety properties BEFORE the bytes touch the bridge: no
+	// external / unresolvable href (P0-578-1), cycle detection (P0-578-2), and
+	// the depth bound (AC-3). This is pure-Go, bridge-free, and persists
+	// NOTHING on a violation (P0-578-3). The bridge still performs the actual
+	// import/merge/modify resolution once the chain is proven safe (slice 511
+	// D1). A rejection writes a best-effort rejection-audit row, mirroring the
+	// bridge-rejection branch.
+	docs, err := buildChainDocs(req.ProfileJSON, req.Profiles, req.Catalogs)
+	if err != nil {
+		sum := sha256.Sum256(req.ProfileJSON)
+		_ = im.writeAuditRejected(ctx, req, hex.EncodeToString(sum[:]), []string{err.Error()})
+		return Report{}, err
+	}
+	if err := validateChain(docs); err != nil {
+		sum := sha256.Sum256(req.ProfileJSON)
+		_ = im.writeAuditRejected(ctx, req, hex.EncodeToString(sum[:]), []string{err.Error()})
+		return Report{}, err
+	}
 
 	// Provenance hash is over the PROFILE bytes (the imported artifact); the
-	// supplied catalogs are inputs to resolution, not the imported document.
+	// supplied catalogs / intermediate profiles are inputs to resolution, not
+	// the imported document.
 	sum := sha256.Sum256(req.ProfileJSON)
 	sourceSha := hex.EncodeToString(sum[:])
 
 	// --- Bridge resolve + validate ---
-	resp, err := im.bridge.ImportProfile(ctx, req.ProfileJSON, req.Catalogs, req.SourceLabel)
+	resp, err := im.bridge.ImportProfile(ctx, req.ProfileJSON, req.Catalogs, req.Profiles, req.SourceLabel)
 	if err != nil {
 		return Report{}, fmt.Errorf("profileimport: bridge ImportProfile: %w", err)
 	}
@@ -196,7 +235,7 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 	}
 
 	// --- Transactional persistence (AC-5) ---
-	report, err := im.persist(ctx, req, sourceSha, resp)
+	report, err := im.persist(ctx, req, sourceSha, resp, chainProvenance(req))
 	if err != nil {
 		// A persistence failure rolls the baseline back; record rejection.
 		_ = im.writeAuditRejected(ctx, req, sourceSha, []string{err.Error()})
@@ -209,7 +248,7 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 // ONE transaction under app.current_tenant. RLS scopes every write to the
 // caller's tenant (P0-511-5 / AC-12). The audit row is written in the SAME
 // transaction on success so the success record is atomic with the baseline.
-func (im *Importer) persist(ctx context.Context, req Request, sourceSha string, resp *oscalv1.ImportProfileResponse) (Report, error) {
+func (im *Importer) persist(ctx context.Context, req Request, sourceSha string, resp *oscalv1.ImportProfileResponse, chain []chainLink) (Report, error) {
 	tx, err := im.pool.Begin(ctx)
 	if err != nil {
 		return Report{}, fmt.Errorf("profileimport: begin tx: %w", err)
@@ -274,11 +313,16 @@ func (im *Importer) persist(ctx context.Context, req Request, sourceSha string, 
 		}
 	}
 
-	// Success audit row, atomic with the baseline (AC-7).
+	// Success audit row, atomic with the baseline (AC-7). The resolved chain
+	// is recorded as provenance: each supplied document in the chain with its
+	// sha256 (slice 578 — "record the resolved chain, their hashes"). For a
+	// slice-511 single-level import the chain is just [entry-profile, catalog].
 	detail, _ := json.Marshal(map[string]any{
-		"mapped":   mapped,
-		"unmapped": len(controls) - mapped,
-		"kind":     "profile",
+		"mapped":      mapped,
+		"unmapped":    len(controls) - mapped,
+		"kind":        "profile",
+		"chain":       chain,
+		"chain_depth": chainProfileDepth(chain),
 	})
 	if _, err := q.InsertImportedCatalogAuditLog(ctx, dbx.InsertImportedCatalogAuditLogParams{
 		ID:           pgUUID(uuid.New()),

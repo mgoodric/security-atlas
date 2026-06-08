@@ -70,7 +70,7 @@ func (b *captureBridge) ImportCatalog(_ context.Context, _ []byte, _ string) (*o
 	return &oscalv1.ImportCatalogResponse{}, nil
 }
 
-func (b *captureBridge) ImportProfile(_ context.Context, _ []byte, _ [][]byte, _ string) (*oscalv1.ImportProfileResponse, error) {
+func (b *captureBridge) ImportProfile(_ context.Context, _ []byte, _ [][]byte, _ [][]byte, _ string) (*oscalv1.ImportProfileResponse, error) {
 	return &oscalv1.ImportProfileResponse{}, nil
 }
 
