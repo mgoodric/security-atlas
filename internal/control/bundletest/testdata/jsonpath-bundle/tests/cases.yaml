@@ -1,0 +1,36 @@
+cases:
+  # AC-4: drives the slice-495 JSON-path evaluator end to end over fixture
+  # payloads. A truthy $.encrypted resolves each record to pass -> control pass.
+  - name: all-encrypted-pass
+    description: "Every record payload has encrypted: true -> control passes."
+    expected_state: pass
+    evaluated_at: 2026-06-01T12:00:00Z
+    records:
+      - result: pass
+        observed_at: 2026-06-01T00:00:00Z
+        payload:
+          bucket: prod-logs
+          encrypted: true
+      - result: pass
+        observed_at: 2026-06-01T06:00:00Z
+        payload:
+          bucket: prod-backups
+          encrypted: true
+
+  # AC-4 / AC-7: one record's payload reports encrypted: false -> that record is
+  # a non-match (fail) -> the rollup is fail. Expected-fail is a passing test.
+  - name: one-unencrypted-fail
+    description: "One record payload has encrypted: false -> control fails."
+    expected_state: fail
+    evaluated_at: 2026-06-01T12:00:00Z
+    records:
+      - result: pass
+        observed_at: 2026-06-01T00:00:00Z
+        payload:
+          bucket: prod-logs
+          encrypted: true
+      - result: pass
+        observed_at: 2026-06-01T06:00:00Z
+        payload:
+          bucket: dev-scratch
+          encrypted: false
