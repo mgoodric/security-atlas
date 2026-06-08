@@ -212,6 +212,7 @@
     "internal/catalog/metrics": 76,
     "internal/control": 76,
     "internal/control/attestation": 86,
+    "internal/control/bundletest": 85,
     "internal/decision": 70,
     "internal/demoseed": 81,
     "internal/drift": 84,

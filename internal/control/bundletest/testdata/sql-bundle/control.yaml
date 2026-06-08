@@ -1,0 +1,17 @@
+bundle_schema_version: "1"
+bundle_id: sql_encrypted_test
+title: "Every record payload reports encrypted=true (SQL)"
+description: "A SQL evidence query over the in-window evidence relation."
+scf_anchor_id: IAC-06
+implementation_type: automated
+control_family: IAC
+owner_role: security-engineering
+lifecycle_state: proposed
+freshness_class: monthly
+
+evidence_queries:
+  - id: all_encrypted
+    language: sql
+    evidence_kind: aws.s3.bucket_encryption_state
+    description: "Pass iff every in-window record's payload reports encrypted=true."
+    expression: "SELECT bool_and((payload->>'encrypted')::boolean) FROM evidence"
