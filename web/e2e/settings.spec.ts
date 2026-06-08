@@ -226,13 +226,18 @@ test.describe("/settings user-facing page", () => {
     await expect(page.getByTestId("settings-admin-cross-link")).toBeVisible();
   });
 
-  test("AC-7: notifications section renders four event rows with 8 toggles", async ({
+  test("AC-7: notifications section renders six event rows with per-channel toggles", async ({
     authedPage: page,
   }) => {
-    // Slice 154: section coverage parity with the mockup. The four
-    // NOTIF_EVENTS keys hard-coded in page.tsx must each render a row
-    // with one in-app + one email toggle (8 inputs total). The toggle
-    // states reflect the GET /v1/me/preferences response.
+    // Slice 154: section coverage parity with the mockup. Each
+    // NOTIF_EVENTS key hard-coded in page.tsx must render a row with a
+    // per-channel toggle. The toggle states reflect the GET
+    // /v1/me/preferences response.
+    //
+    // Slice 594: the per-event matrix gains a `slack` + `webhook` column
+    // alongside `in_app` + `email`, mirroring the slice-583 widened
+    // channel whitelist. Every event row now carries four channel
+    // checkboxes (in-app, email, Slack, webhook).
     await page.goto("/settings");
     await expect(
       page.getByTestId("settings-section-notifications"),
@@ -253,11 +258,69 @@ test.describe("/settings user-facing page", () => {
       await expect(
         page.getByTestId(`settings-notif-${key}-email`),
       ).toBeVisible();
+      // Slice 594: slack + webhook per-kind columns.
+      await expect(
+        page.getByTestId(`settings-notif-${key}-slack`),
+      ).toBeVisible();
+      await expect(
+        page.getByTestId(`settings-notif-${key}-webhook`),
+      ).toBeVisible();
     }
     // Mockup F5 copy delta: the in-progress qualifier is present.
     await expect(
       page.getByTestId("settings-notif-row-audit_period_assignment"),
     ).toContainText("in-progress period");
+  });
+
+  test("slice 594: toggling a slack per-kind cell PATCHes /v1/me/preferences", async ({
+    authedPage: page,
+  }) => {
+    // Slice 594 AC-2: a per-kind slack/webhook checkbox drives the existing
+    // /v1/me/preferences PATCH endpoint with the {event:{channel:bool}}
+    // shape (583 already accepts slack/webhook channel values). Default-on
+    // display means the slack cell renders checked for the seed user (no
+    // stored opt-out row); unchecking it sends slack=false for that event.
+    //
+    // Slice 585: the per-kind slack cell is DISABLED when the channel is
+    // unconfigured (configured===false). The live docker-compose
+    // slack-channel env state is non-deterministic in CI, so — mirroring
+    // the slice-585 unconfigured test's route-level-assertion option — we
+    // intercept the BFF GET and inject configured=true to assert the
+    // INTERACTIVE branch deterministically. The injected body carries ONLY
+    // the booleans (no target/secret), matching the P0-585 wire contract.
+    await page.route("**/api/me/slack-channel", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ enabled: false, configured: true }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto("/settings");
+    await expect(
+      page.getByTestId("settings-section-notifications"),
+    ).toBeVisible();
+
+    const slackCell = page.getByTestId("settings-notif-control_drift-slack");
+    await expect(slackCell).toBeVisible();
+    // Default-on-missing-row: the cell renders checked + interactive
+    // (configured=true injected above).
+    await expect(slackCell).toBeChecked();
+    await expect(slackCell).toBeEnabled();
+
+    const patchResponse = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/me/preferences") &&
+        r.request().method() === "PATCH",
+    );
+    await slackCell.uncheck();
+    const resp = await patchResponse;
+    // The PATCH carried the per-kind slack opt-out for this event.
+    expect(resp.request().postData()).toContain("slack");
   });
 
   test("AC-15 (slice 584): Slack + webhook master toggles render opted-out by default", async ({
