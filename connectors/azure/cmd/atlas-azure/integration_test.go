@@ -20,6 +20,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/aks"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/azureauth"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/entra"
+	"github.com/mgoodric/security-atlas/connectors/azure/internal/firewall"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/keyvault"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/nsg"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/storage"
@@ -85,8 +86,8 @@ func TestRegister_ListsConnector(t *testing.T) {
 	for _, h := range list.GetHandles() {
 		if h.GetName() == ConnectorName {
 			found = true
-			if len(h.GetSupportedKinds()) != 5 {
-				t.Errorf("supported_kinds = %d; want 5", len(h.GetSupportedKinds()))
+			if len(h.GetSupportedKinds()) != 6 {
+				t.Errorf("supported_kinds = %d; want 6", len(h.GetSupportedKinds()))
 			}
 			if strings.Join(h.GetProfilesSupported(), ",") != "pull" {
 				t.Errorf("profiles_supported = %v; want [pull]", h.GetProfilesSupported())
@@ -259,6 +260,41 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if !strings.HasPrefix(kvRec.GetSourceAttribution().GetActorId(), "connector:azure:keyvault@") {
 		t.Errorf("keyvault actor_id = %q", kvRec.GetSourceAttribution().GetActorId())
 	}
+
+	// Azure Firewall (faked ARM surface — NO live Azure). Slice 614.
+	fwAPI := &fakeFirewallForIntegration{policies: []firewall.RawPolicy{
+		{ID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg/providers/Microsoft.Network/firewallPolicies/fw1",
+			Name: "fw1", ResourceGroup: "rg", Location: "eastus",
+			RuleCollectionGroups: []firewall.RuleCollectionGroup{
+				{Name: "DefaultNetworkRuleCollectionGroup", Priority: 200, RuleCollections: []firewall.RuleCollection{
+					{Name: "allow-corp", Type: "network", Action: "allow", Priority: 100, Rules: []firewall.Rule{
+						{Name: "ssh-corp", Protocols: []string{"tcp"}, SourceAddresses: []string{"203.0.113.0/24"}, DestinationPorts: []string{"22"}}}}}},
+			}},
+	}}
+	policies, err := firewall.Inspect(context.Background(), fwAPI, "test-sub", fixed)
+	if err != nil {
+		t.Fatalf("firewall.Inspect: %v", err)
+	}
+	fwRec, err := buildFirewallRecord(policies[0], "prod", "scf:NET-04")
+	if err != nil {
+		t.Fatalf("buildFirewallRecord: %v", err)
+	}
+	fwReceipt, err := client.Push(context.Background(), fwRec)
+	if err != nil {
+		t.Fatalf("Push firewall: %v", err)
+	}
+	if fwReceipt.GetHash() == "" {
+		t.Fatal("firewall receipt hash empty (AC-3 sha256 content-hash)")
+	}
+	if fwRec.GetEvidenceKind() != "azure.firewall_rules.v1" {
+		t.Errorf("firewall kind = %q", fwRec.GetEvidenceKind())
+	}
+	if policies[0].Result != firewall.ResultPass {
+		t.Errorf("segmented firewall policy should PASS; got %q", policies[0].Result)
+	}
+	if !strings.HasPrefix(fwRec.GetSourceAttribution().GetActorId(), "connector:azure:firewall@") {
+		t.Errorf("firewall actor_id = %q", fwRec.GetSourceAttribution().GetActorId())
+	}
 }
 
 // TestRun_DedupesWithinHour verifies AC-6: two records from the same resource in
@@ -335,6 +371,17 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 	kvVaults, _ := keyvault.Inspect(context.Background(), kvAPI, "sub-1", fixed)
 	kvRec, _ := buildKeyVaultRecord(kvVaults[0], "prod", "scf:CRY-09")
 
+	fwAPI := &fakeFirewallForIntegration{policies: []firewall.RawPolicy{
+		{ID: "/sub/fw", Name: "fw", ResourceGroup: "rg", Location: "eastus",
+			RuleCollectionGroups: []firewall.RuleCollectionGroup{
+				{Name: "g", Priority: 200, RuleCollections: []firewall.RuleCollection{
+					{Name: "c", Type: "network", Action: "allow", Priority: 100, Rules: []firewall.Rule{
+						{Name: "ssh-corp", Protocols: []string{"tcp"}, SourceAddresses: []string{"203.0.113.0/24"}, DestinationPorts: []string{"22"}}}}}},
+			}},
+	}}
+	fwPolicies, _ := firewall.Inspect(context.Background(), fwAPI, "sub-1", fixed)
+	fwRec, _ := buildFirewallRecord(fwPolicies[0], "prod", "scf:NET-04")
+
 	// Allow-list of permitted payload keys per kind. Any key NOT in the
 	// allow-list is a leak and fails the test (config/assignment metadata only).
 	entraAllowed := map[string]bool{
@@ -384,6 +431,19 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 	kvAccessAllowed := map[string]bool{
 		"principal_id": true, "principal_type": true, "permissions": true, "role_name": true,
 	}
+	// Azure-Firewall allow-list (slice 614): network-perimeter rule CONFIGURATION
+	// keys only — never flow logs, packet captures, traffic contents, NAT-rule
+	// secrets, threat-intel feeds, or route tables.
+	fwAllowed := map[string]bool{
+		"policy_id": true, "policy_name": true, "subscription_id": true,
+		"resource_group": true, "location": true, "rule_collection_groups": true,
+	}
+	fwGroupAllowed := map[string]bool{"name": true, "priority": true, "rule_collections": true}
+	fwCollectionAllowed := map[string]bool{"name": true, "type": true, "action": true, "priority": true, "rules": true}
+	fwRuleAllowed := map[string]bool{
+		"name": true, "protocols": true, "source_addresses": true,
+		"destination_addresses": true, "destination_ports": true, "destination_fqdns": true,
+	}
 	bannedSubstrings := []string{"key_value", "secret", "sas", "connection_string",
 		"access_key", "blob_content", "password", "mailbox", "email", "upn",
 		"kubeconfig", "credential", "manifest", "container", "image"}
@@ -391,6 +451,10 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 	// traffic-content surfaces. Kept separate from the shared list because the
 	// storage kind legitimately uses "https_traffic_only".
 	nsgBannedSubstrings := []string{"flowlog", "flow_log", "packet", "capture", "payload", "traffic_content"}
+	// Azure-Firewall-specific over-collection bans (P0-614-2): flow-log / packet /
+	// traffic / NAT-secret / threat-intel / route-table surfaces.
+	fwBannedSubstrings := []string{"flowlog", "flow_log", "packet", "capture", "payload",
+		"traffic_content", "nat_secret", "threat_intel", "threatintel", "route_table", "routetable"}
 
 	check := func(t *testing.T, rec *evidencev1.EvidenceRecord, allowed map[string]bool) {
 		for k, v := range rec.GetPayload().AsMap() {
@@ -414,6 +478,7 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 	check(t, aksRec, aksAllowed)
 	check(t, nsgRec, nsgAllowed)
 	check(t, kvRec, kvAllowed)
+	check(t, fwRec, fwAllowed)
 	for k := range nsgRec.GetPayload().AsMap() {
 		low := strings.ToLower(k)
 		for _, b := range nsgBannedSubstrings {
@@ -474,6 +539,62 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 			}
 		}
 	}
+
+	// The Azure-Firewall `rule_collection_groups` payload is a nested
+	// group -> collection -> rule tree — descend through each level applying the
+	// per-level allow-list + the firewall over-collection ban list. This pins
+	// P0-614-2 / AC-4: no flow-log / packet / traffic / NAT-secret / threat-intel /
+	// route-table key rode along, and no value leaked the Azure secret.
+	for _, rawGroup := range fwRec.GetPayload().AsMap()["rule_collection_groups"].([]any) {
+		group, ok := rawGroup.(map[string]any)
+		if !ok {
+			t.Fatalf("firewall group is not a map: %T", rawGroup)
+		}
+		checkFirewallItem(t, "group", group, fwGroupAllowed, fwBannedSubstrings, secret)
+		rawCols, ok := group["rule_collections"].([]any)
+		if !ok {
+			continue
+		}
+		for _, rawCol := range rawCols {
+			col := rawCol.(map[string]any)
+			checkFirewallItem(t, "collection", col, fwCollectionAllowed, fwBannedSubstrings, secret)
+			rawRules, ok := col["rules"].([]any)
+			if !ok {
+				continue
+			}
+			for _, rawRule := range rawRules {
+				checkFirewallItem(t, "rule", rawRule.(map[string]any), fwRuleAllowed, fwBannedSubstrings, secret)
+			}
+		}
+	}
+}
+
+// checkFirewallItem applies the allow-list + banned-substring + secret-leak
+// discipline to one firewall payload item (a group / collection / rule map),
+// descending into any string-list value to scan for a leaked secret.
+func checkFirewallItem(t *testing.T, level string, item map[string]any, allowed map[string]bool, banned []string, secret string) {
+	t.Helper()
+	for k, v := range item {
+		if !allowed[k] {
+			t.Errorf("firewall %s carries non-allow-listed key %q (possible leak)", level, k)
+		}
+		low := strings.ToLower(k)
+		for _, b := range banned {
+			if strings.Contains(low, b) {
+				t.Errorf("firewall %s key %q contains banned substring %q", level, k, b)
+			}
+		}
+		if s, ok := v.(string); ok && strings.Contains(s, secret) {
+			t.Errorf("firewall %s value for %q leaked the Azure secret", level, k)
+		}
+		if list, ok := v.([]any); ok {
+			for _, lv := range list {
+				if s, ok := lv.(string); ok && strings.Contains(s, secret) {
+					t.Errorf("firewall %s list value for %q leaked the Azure secret", level, k)
+				}
+			}
+		}
+	}
 }
 
 // TestCredential_NeverLogged verifies AC-11 + P0-486-4: the Azure credential's
@@ -529,4 +650,10 @@ type fakeKeyVaultForIntegration struct{ vaults []keyvault.RawVault }
 
 func (f *fakeKeyVaultForIntegration) ListVaults(_ context.Context) ([]keyvault.RawVault, error) {
 	return f.vaults, nil
+}
+
+type fakeFirewallForIntegration struct{ policies []firewall.RawPolicy }
+
+func (f *fakeFirewallForIntegration) ListFirewallPolicies(_ context.Context) ([]firewall.RawPolicy, error) {
+	return f.policies, nil
 }

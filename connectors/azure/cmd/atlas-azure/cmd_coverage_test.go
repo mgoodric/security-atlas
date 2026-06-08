@@ -22,6 +22,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/aks"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/entra"
+	"github.com/mgoodric/security-atlas/connectors/azure/internal/firewall"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/nsg"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/storage"
 )
@@ -290,8 +291,28 @@ func TestMapNSGResult(t *testing.T) {
 	}
 }
 
+func TestMapFirewallResult(t *testing.T) {
+	cases := []struct {
+		name string
+		in   firewall.ConfigResult
+		want evidencev1.Result
+	}{
+		{"pass", firewall.ResultPass, evidencev1.Result_RESULT_PASS},
+		{"fail", firewall.ResultFail, evidencev1.Result_RESULT_FAIL},
+		{"inconclusive", firewall.ResultInconclusive, evidencev1.Result_RESULT_INCONCLUSIVE},
+		{"default", firewall.ConfigResult("unknown"), evidencev1.Result_RESULT_UNSPECIFIED},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mapFirewallResult(tc.in); got != tc.want {
+				t.Errorf("mapFirewallResult(%q) = %v; want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestActorID_Shape(t *testing.T) {
-	for _, svc := range []string{"entra", "storage", "aks", "nsg"} {
+	for _, svc := range []string{"entra", "storage", "aks", "nsg", "keyvault", "firewall"} {
 		id := actorID(svc)
 		if !strings.HasPrefix(id, "connector:azure:"+svc+"@") {
 			t.Errorf("actorID(%q) = %q", svc, id)
@@ -564,6 +585,130 @@ func TestBuildNSGRecord_OmitsEmptyOptionals(t *testing.T) {
 	for _, k := range []string{"protocol", "source_address_prefix", "destination_port_range"} {
 		if _, ok := rule[k]; ok {
 			t.Errorf("empty rule optional %q should be omitted", k)
+		}
+	}
+}
+
+func TestBuildFirewallRecord_Shape(t *testing.T) {
+	p := firewall.PolicyConfig{
+		PolicyID: "/sub/fw", PolicyName: "fw", SubscriptionID: "sub-1",
+		ResourceGroup: "rg", Location: "eastus",
+		RuleCollectionGroups: []firewall.RuleCollectionGroup{
+			{Name: "DefaultNetworkRuleCollectionGroup", Priority: 200, RuleCollections: []firewall.RuleCollection{
+				{Name: "allow-corp", Type: "network", Action: "allow", Priority: 100, Rules: []firewall.Rule{
+					{Name: "ssh", Protocols: []string{"tcp"}, SourceAddresses: []string{"203.0.113.0/24"},
+						DestinationAddresses: []string{"10.0.0.0/8"}, DestinationPorts: []string{"22"}}}},
+			}},
+			{Name: "DefaultApplicationRuleCollectionGroup", Priority: 300, RuleCollections: []firewall.RuleCollection{
+				{Name: "allow-fqdn", Type: "application", Action: "allow", Priority: 100, Rules: []firewall.Rule{
+					{Name: "to-updates", Protocols: []string{"https"}, SourceAddresses: []string{"10.0.0.0/8"},
+						DestinationFQDNs: []string{"updates.example.com"}}}},
+			}},
+		},
+		Result: firewall.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
+	}
+	rec, err := buildFirewallRecord(p, "prod", "scf:NET-04")
+	if err != nil {
+		t.Fatalf("buildFirewallRecord: %v", err)
+	}
+	if rec.EvidenceKind != "azure.firewall_rules.v1" {
+		t.Errorf("kind = %q", rec.EvidenceKind)
+	}
+	if rec.SchemaVersion != "1.0.0" {
+		t.Errorf("schema version = %q; want 1.0.0", rec.SchemaVersion)
+	}
+	if rec.Result != evidencev1.Result_RESULT_PASS {
+		t.Errorf("result = %v; want PASS", rec.Result)
+	}
+	if rec.IdempotencyKey == "" {
+		t.Error("empty idempotency key")
+	}
+	if !strings.HasPrefix(rec.GetSourceAttribution().GetActorId(), "connector:azure:firewall@") {
+		t.Errorf("firewall actor_id = %q", rec.GetSourceAttribution().GetActorId())
+	}
+	if got := scopeValue(rec.GetScope(), "cloud_account"); got != "azure:sub-1" {
+		t.Errorf("cloud_account = %q; want azure:sub-1", got)
+	}
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{"policy_id", "policy_name", "subscription_id", "resource_group", "location", "rule_collection_groups"} {
+		if _, ok := pl[k]; !ok {
+			t.Errorf("payload missing %q; got %v", k, pl)
+		}
+	}
+	groups, ok := pl["rule_collection_groups"].([]any)
+	if !ok || len(groups) != 2 {
+		t.Fatalf("rule_collection_groups payload not a 2-item list: %v", pl["rule_collection_groups"])
+	}
+	g0 := groups[0].(map[string]any)
+	if g0["priority"].(float64) != 200 {
+		t.Errorf("group priority not preserved: %v", g0["priority"])
+	}
+	cols := g0["rule_collections"].([]any)
+	col := cols[0].(map[string]any)
+	for _, k := range []string{"name", "type", "action", "priority", "rules"} {
+		if _, ok := col[k]; !ok {
+			t.Errorf("collection payload missing %q; got %v", k, col)
+		}
+	}
+	rule := col["rules"].([]any)[0].(map[string]any)
+	for _, k := range []string{"name", "protocols", "source_addresses", "destination_addresses", "destination_ports"} {
+		if _, ok := rule[k]; !ok {
+			t.Errorf("rule payload missing %q; got %v", k, rule)
+		}
+	}
+	// Structural over-collection guard at the record layer (P0-614-2): no payload
+	// key may name a flow-log / packet / traffic / NAT-secret / threat-intel /
+	// route-table surface.
+	assertNoFirewallOverCollection(t, pl)
+	for _, raw := range groups {
+		for _, rawCol := range raw.(map[string]any)["rule_collections"].([]any) {
+			assertNoFirewallOverCollection(t, rawCol.(map[string]any))
+			for _, rawRule := range rawCol.(map[string]any)["rules"].([]any) {
+				assertNoFirewallOverCollection(t, rawRule.(map[string]any))
+			}
+		}
+	}
+}
+
+func assertNoFirewallOverCollection(t *testing.T, m map[string]any) {
+	t.Helper()
+	banned := []string{"flowlog", "flow_log", "packet", "capture", "traffic", "secret",
+		"credential", "password", "token", "threatintel", "threat_intel", "routetable", "route_table"}
+	for k := range m {
+		low := strings.ToLower(k)
+		for _, b := range banned {
+			if strings.Contains(low, b) {
+				t.Errorf("firewall payload key %q contains banned over-collection token %q", k, b)
+			}
+		}
+	}
+}
+
+func TestBuildFirewallRecord_OmitsEmptyOptionals(t *testing.T) {
+	p := firewall.PolicyConfig{
+		PolicyID: "/sub/fw", PolicyName: "fw", SubscriptionID: "s",
+		RuleCollectionGroups: []firewall.RuleCollectionGroup{
+			{Name: "g", Priority: 100, RuleCollections: []firewall.RuleCollection{
+				{Name: "deny", Type: "network", Action: "deny", Priority: 4096, Rules: []firewall.Rule{
+					{Name: "r"}}}}},
+		},
+		Result: firewall.ResultPass, ObservedAt: time.Now().UTC(),
+	}
+	rec, _ := buildFirewallRecord(p, "prod", "scf:NET-04")
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{"resource_group", "location"} {
+		if _, ok := pl[k]; ok {
+			t.Errorf("empty optional %q should be omitted", k)
+		}
+	}
+	// A rule with no list fields omits all of them but keeps its name.
+	rule := pl["rule_collection_groups"].([]any)[0].(map[string]any)["rule_collections"].([]any)[0].(map[string]any)["rules"].([]any)[0].(map[string]any)
+	if _, ok := rule["name"]; !ok {
+		t.Error("rule name must always be present")
+	}
+	for _, k := range []string{"protocols", "source_addresses", "destination_ports", "destination_fqdns"} {
+		if _, ok := rule[k]; ok {
+			t.Errorf("empty rule list field %q should be omitted", k)
 		}
 	}
 }

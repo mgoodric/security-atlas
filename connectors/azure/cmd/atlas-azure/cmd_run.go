@@ -17,6 +17,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/aks"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/azureauth"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/entra"
+	"github.com/mgoodric/security-atlas/connectors/azure/internal/firewall"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/idem"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/keyvault"
 	"github.com/mgoodric/security-atlas/connectors/azure/internal/nsg"
@@ -33,6 +34,7 @@ var (
 	aksScan      = aks.Inspect
 	nsgScan      = nsg.Inspect
 	keyvaultScan = keyvault.Inspect
+	firewallScan = firewall.Inspect
 	newSDKClient = func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error) {
 		return sdk.NewClient(endpoint, bearer, opts...)
 	}
@@ -57,6 +59,9 @@ var (
 	newKeyVaultAPI = func(hc *http.Client, subscriptionID, token string) keyvault.API {
 		return keyvault.NewClient(hc, "", subscriptionID, token)
 	}
+	newFirewallAPI = func(hc *http.Client, subscriptionID, token string) firewall.API {
+		return firewall.NewClient(hc, "", subscriptionID, token)
+	}
 )
 
 // sdkPushClient is the narrow surface doRun consumes from sdk.Client.
@@ -76,22 +81,24 @@ type runFlags struct {
 	aksControl      string
 	nsgControl      string
 	keyvaultControl string
+	firewallControl string
 	skipEntra       bool
 	skipStorage     bool
 	skipAKS         bool
 	skipNSG         bool
 	skipKeyVault    bool
+	skipFirewall    bool
 }
 
 func newRunCmd() *cobra.Command {
 	var f runFlags
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "read Entra ID + Azure Storage + AKS + NSG + Key Vault and push evidence records",
+		Short: "read Entra ID + Azure Storage + AKS + NSG + Key Vault + Azure Firewall and push evidence records",
 		Long: `Read Microsoft Entra ID role assignments, Azure Storage account
-configuration, AKS managed-cluster configuration, NSG firewall-rule posture, and
-Key-Vault access-policy / RBAC posture, transform to evidence records, and push
-to the platform.
+configuration, AKS managed-cluster configuration, NSG firewall-rule posture,
+Key-Vault access-policy / RBAC posture, and Azure Firewall rule-collection
+posture, transform to evidence records, and push to the platform.
 
 Profile: pull. One bounded read-and-push pass per invocation; operator-scheduled
 (recommended 24h). NOT continuous monitoring.
@@ -102,7 +109,8 @@ Least-privilege Azure permissions (read-only):
   - Azure Resource Manager: Reader role   (gates azure.storage_account_config.v1
                                            + azure.aks_cluster_config.v1
                                            + azure.nsg_rules.v1
-                                           + azure.keyvault_access_config.v1)
+                                           + azure.keyvault_access_config.v1
+                                           + azure.firewall_rules.v1)
 
 The Key-Vault kind reads the ARM management plane ONLY (vault config + access
 policies). It NEVER touches the Key-Vault data plane (secret/key/certificate
@@ -132,6 +140,9 @@ a log line or an evidence record.`,
 			if !f.skipKeyVault && f.subscriptionID == "" {
 				return errors.New("--subscription-id is required for the Key-Vault kind (or pass --skip-keyvault)")
 			}
+			if !f.skipFirewall && f.subscriptionID == "" {
+				return errors.New("--subscription-id is required for the Azure-Firewall kind (or pass --skip-firewall)")
+			}
 			return resolveCommon()
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -148,11 +159,13 @@ a log line or an evidence record.`,
 	cmd.Flags().StringVar(&f.aksControl, "aks-control", "scf:CFG-02", "control_id to attach to azure.aks_cluster_config.v1 records")
 	cmd.Flags().StringVar(&f.nsgControl, "nsg-control", "scf:NET-04", "control_id to attach to azure.nsg_rules.v1 records")
 	cmd.Flags().StringVar(&f.keyvaultControl, "keyvault-control", "scf:CRY-09", "control_id to attach to azure.keyvault_access_config.v1 records")
+	cmd.Flags().StringVar(&f.firewallControl, "firewall-control", "scf:NET-04", "control_id to attach to azure.firewall_rules.v1 records")
 	cmd.Flags().BoolVar(&f.skipEntra, "skip-entra", false, "skip azure.entra_role_assignment.v1 pull")
 	cmd.Flags().BoolVar(&f.skipStorage, "skip-storage", false, "skip azure.storage_account_config.v1 pull")
 	cmd.Flags().BoolVar(&f.skipAKS, "skip-aks", false, "skip azure.aks_cluster_config.v1 pull")
 	cmd.Flags().BoolVar(&f.skipNSG, "skip-nsg", false, "skip azure.nsg_rules.v1 pull")
 	cmd.Flags().BoolVar(&f.skipKeyVault, "skip-keyvault", false, "skip azure.keyvault_access_config.v1 pull")
+	cmd.Flags().BoolVar(&f.skipFirewall, "skip-firewall", false, "skip azure.firewall_rules.v1 pull")
 	return cmd
 }
 
@@ -281,6 +294,27 @@ func doRun(ctx context.Context, f runFlags) error {
 			}
 			if err := pushOne(ctx, sdkClient, rec); err != nil {
 				return fmt.Errorf("push keyvault %s: %w", v.VaultName, err)
+			}
+			pushed++
+		}
+	}
+
+	if !f.skipFirewall {
+		token, err := acquireToken(ctx, cred, httpClient, firewall.ARMScope)
+		if err != nil {
+			return fmt.Errorf("arm token: %w", err)
+		}
+		policies, err := firewallScan(ctx, newFirewallAPI(httpClient, f.subscriptionID, token), f.subscriptionID, nil)
+		if err != nil {
+			return fmt.Errorf("firewall inspect: %w", err)
+		}
+		for _, p := range policies {
+			rec, err := buildFirewallRecord(p, f.environment, f.firewallControl)
+			if err != nil {
+				return fmt.Errorf("build firewall record %s: %w", p.PolicyName, err)
+			}
+			if err := pushOne(ctx, sdkClient, rec); err != nil {
+				return fmt.Errorf("push firewall %s: %w", p.PolicyName, err)
 			}
 			pushed++
 		}
@@ -642,6 +676,130 @@ func mapKeyVaultResult(r keyvault.ConfigResult) evidencev1.Result {
 	case keyvault.ResultFail:
 		return evidencev1.Result_RESULT_FAIL
 	case keyvault.ResultInconclusive:
+		return evidencev1.Result_RESULT_INCONCLUSIVE
+	default:
+		return evidencev1.Result_RESULT_UNSPECIFIED
+	}
+}
+
+// buildFirewallRecord maps one Azure Firewall policy's rule-collection posture
+// into an evidence record. The payload carries rule CONFIGURATION metadata ONLY
+// — never flow logs, packet captures, traffic contents, NAT-rule secrets,
+// threat-intel feeds, or route tables (the firewall.PolicyConfig /
+// RuleCollectionGroup / RuleCollection / Rule structs have no field for such
+// data; this builder cannot emit what it cannot read).
+func buildFirewallRecord(p firewall.PolicyConfig, env, controlID string) (*evidencev1.EvidenceRecord, error) {
+	now := p.ObservedAt.UTC().Truncate(time.Hour)
+	pm := map[string]any{
+		"policy_id":              p.PolicyID,
+		"policy_name":            p.PolicyName,
+		"subscription_id":        p.SubscriptionID,
+		"rule_collection_groups": firewallGroupPayload(p.RuleCollectionGroups),
+	}
+	if p.ResourceGroup != "" {
+		pm["resource_group"] = p.ResourceGroup
+	}
+	if p.Location != "" {
+		pm["location"] = p.Location
+	}
+	payload, err := structpb.NewStruct(pm)
+	if err != nil {
+		return nil, err
+	}
+	return &evidencev1.EvidenceRecord{
+		IdempotencyKey: idem.FirewallRulesKey(p.PolicyID, now),
+		EvidenceKind:   "azure.firewall_rules.v1",
+		SchemaVersion:  "1.0.0",
+		ControlId:      controlID,
+		Scope: []*evidencev1.ScopeDimension{
+			{Key: "cloud_account", Values: []string{"azure:" + p.SubscriptionID}},
+			{Key: "environment", Values: []string{env}},
+		},
+		ObservedAt: timestamppb.New(now),
+		Result:     mapFirewallResult(p.Result),
+		Payload:    payload,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "connector",
+			ActorId:   actorID("firewall"),
+		},
+	}, nil
+}
+
+// firewallGroupPayload renders the rule-collection-group list into a
+// structpb-compatible []any. CONFIGURATION metadata only — the group priority
+// (the ordering signal) plus its rule collections.
+func firewallGroupPayload(groups []firewall.RuleCollectionGroup) []any {
+	out := make([]any, 0, len(groups))
+	for _, g := range groups {
+		item := map[string]any{
+			"name":     g.Name,
+			"priority": g.Priority,
+		}
+		if len(g.RuleCollections) > 0 {
+			item["rule_collections"] = firewallCollectionPayload(g.RuleCollections)
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+// firewallCollectionPayload renders the rule-collection list. CONFIGURATION
+// metadata only — empty optional fields are omitted from each item.
+func firewallCollectionPayload(collections []firewall.RuleCollection) []any {
+	out := make([]any, 0, len(collections))
+	for _, c := range collections {
+		item := map[string]any{
+			"name":   c.Name,
+			"action": c.Action,
+		}
+		if c.Type != "" {
+			item["type"] = c.Type
+		}
+		item["priority"] = c.Priority
+		if len(c.Rules) > 0 {
+			item["rules"] = firewallRulePayload(c.Rules)
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+// firewallRulePayload renders the rule list. RULE metadata only — empty optional
+// list fields are omitted from each item.
+func firewallRulePayload(rules []firewall.Rule) []any {
+	out := make([]any, 0, len(rules))
+	for _, r := range rules {
+		item := map[string]any{"name": r.Name}
+		addStringList(item, "protocols", r.Protocols)
+		addStringList(item, "source_addresses", r.SourceAddresses)
+		addStringList(item, "destination_addresses", r.DestinationAddresses)
+		addStringList(item, "destination_ports", r.DestinationPorts)
+		addStringList(item, "destination_fqdns", r.DestinationFQDNs)
+		out = append(out, item)
+	}
+	return out
+}
+
+// addStringList sets key to a structpb-compatible []any when the list is
+// non-empty; it omits empty lists.
+func addStringList(item map[string]any, key string, vals []string) {
+	if len(vals) == 0 {
+		return
+	}
+	out := make([]any, 0, len(vals))
+	for _, v := range vals {
+		out = append(out, v)
+	}
+	item[key] = out
+}
+
+func mapFirewallResult(r firewall.ConfigResult) evidencev1.Result {
+	switch r {
+	case firewall.ResultPass:
+		return evidencev1.Result_RESULT_PASS
+	case firewall.ResultFail:
+		return evidencev1.Result_RESULT_FAIL
+	case firewall.ResultInconclusive:
 		return evidencev1.Result_RESULT_INCONCLUSIVE
 	default:
 		return evidencev1.Result_RESULT_UNSPECIFIED

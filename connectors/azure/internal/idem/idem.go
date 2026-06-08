@@ -9,6 +9,7 @@
 //   - AKSClusterConfigKey:    sha256("azure.aks_cluster_config|<cluster_id>|<hour>")
 //   - NSGRulesKey:            sha256("azure.nsg_rules|<nsg_id>|<hour>")
 //   - KeyVaultAccessKey:      sha256("azure.keyvault_access_config|<vault_id>|<hour>")
+//   - FirewallRulesKey:       sha256("azure.firewall_rules|<policy_id>|<hour>")
 //
 // Anti-criterion: every push from this connector derives its idempotency_key
 // here. The cmd layer never invents one ad-hoc and never pushes with an empty
@@ -49,6 +50,12 @@ func NSGRulesKey(nsgID string, observedAt time.Time) string {
 // pair.
 func KeyVaultAccessKey(vaultID string, observedAt time.Time) string {
 	return hashKey("azure.keyvault_access_config", vaultID, observedAt)
+}
+
+// FirewallRulesKey returns the idempotency key for one (policy_id, observed_at)
+// pair.
+func FirewallRulesKey(policyID string, observedAt time.Time) string {
+	return hashKey("azure.firewall_rules", policyID, observedAt)
 }
 
 func hashKey(prefix, id string, observedAt time.Time) string {
