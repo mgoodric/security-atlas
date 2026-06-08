@@ -236,6 +236,7 @@
     "internal/oscal": 69,
     "internal/oscal/catalogimport": 28,
     "internal/oscal/cosign": 88,
+    "internal/oscal/profileimport": 36,
     "internal/platform": 76,
     "internal/policy": 70,
     "internal/policy/pdf": 68,

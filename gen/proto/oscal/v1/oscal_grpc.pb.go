@@ -41,6 +41,7 @@ const (
 	OscalBridgeService_SerializePOAM_FullMethodName       = "/oscal.v1.OscalBridgeService/SerializePOAM"
 	OscalBridgeService_RoundTripValidate_FullMethodName   = "/oscal.v1.OscalBridgeService/RoundTripValidate"
 	OscalBridgeService_ImportCatalog_FullMethodName       = "/oscal.v1.OscalBridgeService/ImportCatalog"
+	OscalBridgeService_ImportProfile_FullMethodName       = "/oscal.v1.OscalBridgeService/ImportProfile"
 )
 
 // OscalBridgeServiceClient is the client API for OscalBridgeService service.
@@ -74,6 +75,19 @@ type OscalBridgeServiceClient interface {
 	// are opaque metadata). A document-size cap + parse timeout bound the
 	// expansion-attack surface (threat-model D/I).
 	ImportCatalog(ctx context.Context, in *ImportCatalogRequest, opts ...grpc.CallOption) (*ImportCatalogResponse, error)
+	// ImportProfile resolves an inbound OSCAL `profile` JSON document against
+	// one or more SUPPLIED catalog documents and returns the resolved control
+	// projection (slice 511). The bridge applies the profile's import / merge /
+	// modify directives via compliance-trestle's profile-resolver inside an
+	// ISOLATED, ephemeral trestle workspace whose only catalogs are the ones
+	// the caller supplied. It NEVER dereferences an external `import.href`:
+	// every href is rewritten to point at a supplied catalog, and an href that
+	// names no supplied catalog is a structured error, not a fetch (P0-511-1 /
+	// threat-model I — the load-bearing difference from ImportCatalog). The
+	// resolved output is re-validated against OSCAL v1.1.x before it is
+	// returned. Caps (document size, resolved-control count, single import
+	// level) bound the expansion-attack surface (threat-model D / AC-3).
+	ImportProfile(ctx context.Context, in *ImportProfileRequest, opts ...grpc.CallOption) (*ImportProfileResponse, error)
 }
 
 type oscalBridgeServiceClient struct {
@@ -134,6 +148,16 @@ func (c *oscalBridgeServiceClient) ImportCatalog(ctx context.Context, in *Import
 	return out, nil
 }
 
+func (c *oscalBridgeServiceClient) ImportProfile(ctx context.Context, in *ImportProfileRequest, opts ...grpc.CallOption) (*ImportProfileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ImportProfileResponse)
+	err := c.cc.Invoke(ctx, OscalBridgeService_ImportProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OscalBridgeServiceServer is the server API for OscalBridgeService service.
 // All implementations must embed UnimplementedOscalBridgeServiceServer
 // for forward compatibility.
@@ -165,6 +189,19 @@ type OscalBridgeServiceServer interface {
 	// are opaque metadata). A document-size cap + parse timeout bound the
 	// expansion-attack surface (threat-model D/I).
 	ImportCatalog(context.Context, *ImportCatalogRequest) (*ImportCatalogResponse, error)
+	// ImportProfile resolves an inbound OSCAL `profile` JSON document against
+	// one or more SUPPLIED catalog documents and returns the resolved control
+	// projection (slice 511). The bridge applies the profile's import / merge /
+	// modify directives via compliance-trestle's profile-resolver inside an
+	// ISOLATED, ephemeral trestle workspace whose only catalogs are the ones
+	// the caller supplied. It NEVER dereferences an external `import.href`:
+	// every href is rewritten to point at a supplied catalog, and an href that
+	// names no supplied catalog is a structured error, not a fetch (P0-511-1 /
+	// threat-model I — the load-bearing difference from ImportCatalog). The
+	// resolved output is re-validated against OSCAL v1.1.x before it is
+	// returned. Caps (document size, resolved-control count, single import
+	// level) bound the expansion-attack surface (threat-model D / AC-3).
+	ImportProfile(context.Context, *ImportProfileRequest) (*ImportProfileResponse, error)
 	mustEmbedUnimplementedOscalBridgeServiceServer()
 }
 
@@ -189,6 +226,9 @@ func (UnimplementedOscalBridgeServiceServer) RoundTripValidate(context.Context, 
 }
 func (UnimplementedOscalBridgeServiceServer) ImportCatalog(context.Context, *ImportCatalogRequest) (*ImportCatalogResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ImportCatalog not implemented")
+}
+func (UnimplementedOscalBridgeServiceServer) ImportProfile(context.Context, *ImportProfileRequest) (*ImportProfileResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ImportProfile not implemented")
 }
 func (UnimplementedOscalBridgeServiceServer) mustEmbedUnimplementedOscalBridgeServiceServer() {}
 func (UnimplementedOscalBridgeServiceServer) testEmbeddedByValue()                            {}
@@ -301,6 +341,24 @@ func _OscalBridgeService_ImportCatalog_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OscalBridgeService_ImportProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ImportProfileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OscalBridgeServiceServer).ImportProfile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OscalBridgeService_ImportProfile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OscalBridgeServiceServer).ImportProfile(ctx, req.(*ImportProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OscalBridgeService_ServiceDesc is the grpc.ServiceDesc for OscalBridgeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -327,6 +385,10 @@ var OscalBridgeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ImportCatalog",
 			Handler:    _OscalBridgeService_ImportCatalog_Handler,
+		},
+		{
+			MethodName: "ImportProfile",
+			Handler:    _OscalBridgeService_ImportProfile_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

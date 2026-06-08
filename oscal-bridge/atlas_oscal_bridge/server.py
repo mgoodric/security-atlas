@@ -24,6 +24,7 @@ from . import oscal_pb2, oscal_pb2_grpc
 from .serializer import (
     SerializeError,
     import_catalog,
+    import_profile,
     round_trip_validate,
     serialize_assessment,
     serialize_poam,
@@ -97,6 +98,34 @@ class OscalBridgeServicer(oscal_pb2_grpc.OscalBridgeServiceServicer):
             controls=controls,
             oscal_version=result.oscal_version,
             catalog_title=result.catalog_title,
+            source_label=request.source_label,
+        )
+
+    def ImportProfile(self, request, context):  # noqa: N802
+        # Like ImportCatalog, the bridge never raises out of import_profile
+        # for an invalid / unresolvable document: a structured
+        # (valid=False, errors=[...]) result is the normal failure mode the
+        # Go side inspects to decide rollback. An external/unknown
+        # import.href is rejected WITHOUT a fetch (P0-511-1).
+        try:
+            result = import_profile(request.profile_json, request.catalogs, request.source_label)
+        except Exception as exc:  # noqa: BLE001 — defensive: never crash the bridge
+            context.abort(grpc.StatusCode.INTERNAL, f"profile import failed: {exc}")
+        controls = [
+            oscal_pb2.ImportedControl(
+                control_id=c.control_id,
+                title=c.title,
+                statement=c.statement,
+                group_path=c.group_path,
+            )
+            for c in result.controls
+        ]
+        return oscal_pb2.ImportProfileResponse(
+            valid=result.valid,
+            errors=result.errors,
+            controls=controls,
+            oscal_version=result.oscal_version,
+            profile_title=result.profile_title,
             source_label=request.source_label,
         )
 

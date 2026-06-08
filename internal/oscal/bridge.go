@@ -31,6 +31,13 @@ type BridgeClient interface {
 	// invariant #8 (slice 492). The bridge never dereferences any href the
 	// document references.
 	ImportCatalog(ctx context.Context, oscalJSON []byte, sourceLabel string) (*oscalv1.ImportCatalogResponse, error)
+	// ImportProfile resolves an inbound OSCAL profile JSON document against
+	// one or more SUPPLIED catalog documents, returning the resolved control
+	// projection (or a structured error in the response). The resolve
+	// direction of invariant #8 (slice 511). The bridge resolves
+	// import.href references ONLY against the supplied catalogs and NEVER
+	// dereferences an external href (P0-511-1).
+	ImportProfile(ctx context.Context, profileJSON []byte, catalogs [][]byte, sourceLabel string) (*oscalv1.ImportProfileResponse, error)
 	// Close releases the underlying gRPC connection.
 	Close() error
 }
@@ -108,6 +115,24 @@ func (b *grpcBridge) ImportCatalog(ctx context.Context, oscalJSON []byte, source
 	defer cancel()
 	resp, err := b.client.ImportCatalog(ctx, &oscalv1.ImportCatalogRequest{
 		OscalJson:   oscalJSON,
+		SourceLabel: sourceLabel,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (b *grpcBridge) ImportProfile(ctx context.Context, profileJSON []byte, catalogs [][]byte, sourceLabel string) (*oscalv1.ImportProfileResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, bridgeRPCTimeout)
+	defer cancel()
+	supplied := make([]*oscalv1.SuppliedCatalog, 0, len(catalogs))
+	for _, c := range catalogs {
+		supplied = append(supplied, &oscalv1.SuppliedCatalog{OscalJson: c})
+	}
+	resp, err := b.client.ImportProfile(ctx, &oscalv1.ImportProfileRequest{
+		ProfileJson: profileJSON,
+		Catalogs:    supplied,
 		SourceLabel: sourceLabel,
 	})
 	if err != nil {

@@ -12,7 +12,7 @@ import (
 )
 
 const getImportedCatalogByID = `-- name: GetImportedCatalogByID :one
-SELECT id, tenant_id, source, imported_by, source_sha256, source_label, oscal_version, catalog_title, control_count, imported_at FROM imported_catalogs
+SELECT id, tenant_id, source, imported_by, source_sha256, source_label, oscal_version, catalog_title, control_count, imported_at, kind, profile_title FROM imported_catalogs
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -37,6 +37,8 @@ func (q *Queries) GetImportedCatalogByID(ctx context.Context, arg GetImportedCat
 		&i.CatalogTitle,
 		&i.ControlCount,
 		&i.ImportedAt,
+		&i.Kind,
+		&i.ProfileTitle,
 	)
 	return i, err
 }
@@ -46,7 +48,7 @@ const insertImportedCatalog = `-- name: InsertImportedCatalog :one
 INSERT INTO imported_catalogs
     (id, tenant_id, imported_by, source_sha256, source_label, oscal_version, catalog_title, control_count)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, tenant_id, source, imported_by, source_sha256, source_label, oscal_version, catalog_title, control_count, imported_at
+RETURNING id, tenant_id, source, imported_by, source_sha256, source_label, oscal_version, catalog_title, control_count, imported_at, kind, profile_title
 `
 
 type InsertImportedCatalogParams struct {
@@ -92,6 +94,8 @@ func (q *Queries) InsertImportedCatalog(ctx context.Context, arg InsertImportedC
 		&i.CatalogTitle,
 		&i.ControlCount,
 		&i.ImportedAt,
+		&i.Kind,
+		&i.ProfileTitle,
 	)
 	return i, err
 }
@@ -116,7 +120,8 @@ type InsertImportedCatalogAuditLogParams struct {
 }
 
 // Append one append-only import audit row (AC-7). Written on success
-// ('catalog_imported') and on rejection ('import_rejected').
+// ('catalog_imported' / 'profile_imported') and on rejection
+// ('import_rejected' / 'profile_import_rejected').
 func (q *Queries) InsertImportedCatalogAuditLog(ctx context.Context, arg InsertImportedCatalogAuditLogParams) (ImportedCatalogAuditLog, error) {
 	row := q.db.QueryRow(ctx, insertImportedCatalogAuditLog,
 		arg.ID,
@@ -192,6 +197,62 @@ func (q *Queries) InsertImportedCatalogControl(ctx context.Context, arg InsertIm
 	return i, err
 }
 
+const insertImportedProfile = `-- name: InsertImportedProfile :one
+
+INSERT INTO imported_catalogs
+    (id, tenant_id, source, kind, imported_by, source_sha256, source_label,
+     oscal_version, catalog_title, profile_title, control_count)
+VALUES ($1, $2, 'oscal-profile-import', 'profile', $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, tenant_id, source, imported_by, source_sha256, source_label, oscal_version, catalog_title, control_count, imported_at, kind, profile_title
+`
+
+type InsertImportedProfileParams struct {
+	ID           pgtype.UUID `json:"id"`
+	TenantID     pgtype.UUID `json:"tenant_id"`
+	ImportedBy   string      `json:"imported_by"`
+	SourceSha256 string      `json:"source_sha256"`
+	SourceLabel  string      `json:"source_label"`
+	OscalVersion string      `json:"oscal_version"`
+	CatalogTitle string      `json:"catalog_title"`
+	ProfileTitle string      `json:"profile_title"`
+	ControlCount int32       `json:"control_count"`
+}
+
+// ===== slice 511: profile import (resolve direction) =====
+// Create one imported-PROFILE provenance row: source 'oscal-profile-import',
+// kind 'profile', carrying the resolved profile's declared title. The
+// resolved baseline is, structurally, an imported control set distinguished
+// from a catalog import by (source, kind) — slice-511 D4.
+func (q *Queries) InsertImportedProfile(ctx context.Context, arg InsertImportedProfileParams) (ImportedCatalog, error) {
+	row := q.db.QueryRow(ctx, insertImportedProfile,
+		arg.ID,
+		arg.TenantID,
+		arg.ImportedBy,
+		arg.SourceSha256,
+		arg.SourceLabel,
+		arg.OscalVersion,
+		arg.CatalogTitle,
+		arg.ProfileTitle,
+		arg.ControlCount,
+	)
+	var i ImportedCatalog
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Source,
+		&i.ImportedBy,
+		&i.SourceSha256,
+		&i.SourceLabel,
+		&i.OscalVersion,
+		&i.CatalogTitle,
+		&i.ControlCount,
+		&i.ImportedAt,
+		&i.Kind,
+		&i.ProfileTitle,
+	)
+	return i, err
+}
+
 const listImportedCatalogControls = `-- name: ListImportedCatalogControls :many
 SELECT id, tenant_id, imported_catalog_id, source_control_id, title, statement, group_path, scf_anchor_id, created_at FROM imported_catalog_controls
 WHERE tenant_id = $1 AND imported_catalog_id = $2
@@ -235,7 +296,7 @@ func (q *Queries) ListImportedCatalogControls(ctx context.Context, arg ListImpor
 }
 
 const listImportedCatalogs = `-- name: ListImportedCatalogs :many
-SELECT id, tenant_id, source, imported_by, source_sha256, source_label, oscal_version, catalog_title, control_count, imported_at FROM imported_catalogs
+SELECT id, tenant_id, source, imported_by, source_sha256, source_label, oscal_version, catalog_title, control_count, imported_at, kind, profile_title FROM imported_catalogs
 WHERE tenant_id = $1
 ORDER BY imported_at DESC, id ASC
 `
@@ -261,6 +322,49 @@ func (q *Queries) ListImportedCatalogs(ctx context.Context, tenantID pgtype.UUID
 			&i.CatalogTitle,
 			&i.ControlCount,
 			&i.ImportedAt,
+			&i.Kind,
+			&i.ProfileTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listImportedProfiles = `-- name: ListImportedProfiles :many
+SELECT id, tenant_id, source, imported_by, source_sha256, source_label, oscal_version, catalog_title, control_count, imported_at, kind, profile_title FROM imported_catalogs
+WHERE tenant_id = $1 AND kind = 'profile'
+ORDER BY imported_at DESC, id ASC
+`
+
+// Enumerate every resolved profile baseline for the tenant, most recent
+// first (index-served by idx_imported_catalogs_tenant_profiles).
+func (q *Queries) ListImportedProfiles(ctx context.Context, tenantID pgtype.UUID) ([]ImportedCatalog, error) {
+	rows, err := q.db.Query(ctx, listImportedProfiles, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ImportedCatalog
+	for rows.Next() {
+		var i ImportedCatalog
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Source,
+			&i.ImportedBy,
+			&i.SourceSha256,
+			&i.SourceLabel,
+			&i.OscalVersion,
+			&i.CatalogTitle,
+			&i.ControlCount,
+			&i.ImportedAt,
+			&i.Kind,
+			&i.ProfileTitle,
 		); err != nil {
 			return nil, err
 		}
