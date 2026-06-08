@@ -481,7 +481,7 @@ const insertImportedComponentClaimDisposition = `-- name: InsertImportedComponen
 INSERT INTO imported_component_claim_dispositions
     (id, tenant_id, claim_id, from_status, to_status, actor, note)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, tenant_id, claim_id, from_status, to_status, actor, note, occurred_at
+RETURNING id, tenant_id, claim_id, from_status, to_status, actor, note, occurred_at, event_kind, from_scf_anchor_id, to_scf_anchor_id
 `
 
 type InsertImportedComponentClaimDispositionParams struct {
@@ -516,6 +516,60 @@ func (q *Queries) InsertImportedComponentClaimDisposition(ctx context.Context, a
 		&i.Actor,
 		&i.Note,
 		&i.OccurredAt,
+		&i.EventKind,
+		&i.FromScfAnchorID,
+		&i.ToScfAnchorID,
+	)
+	return i, err
+}
+
+const insertImportedComponentClaimScfMapping = `-- name: InsertImportedComponentClaimScfMapping :one
+INSERT INTO imported_component_claim_dispositions
+    (id, tenant_id, claim_id, event_kind, from_status, to_status,
+     from_scf_anchor_id, to_scf_anchor_id, actor, note)
+VALUES ($1, $2, $3, 'scf_mapping', '', '', $4, $5, $6, $7)
+RETURNING id, tenant_id, claim_id, from_status, to_status, actor, note, occurred_at, event_kind, from_scf_anchor_id, to_scf_anchor_id
+`
+
+type InsertImportedComponentClaimScfMappingParams struct {
+	ID              pgtype.UUID `json:"id"`
+	TenantID        pgtype.UUID `json:"tenant_id"`
+	ClaimID         pgtype.UUID `json:"claim_id"`
+	FromScfAnchorID *string     `json:"from_scf_anchor_id"`
+	ToScfAnchorID   *string     `json:"to_scf_anchor_id"`
+	Actor           string      `json:"actor"`
+	Note            string      `json:"note"`
+}
+
+// Append one append-only mapping-audit row recording the
+// from_scf_anchor_id -> to_scf_anchor_id transition, the actor, and an
+// optional note. REUSES the slice-589 imported_component_claim_dispositions
+// table generalized into a claim EVENT log (event_kind='scf_mapping'); the
+// status columns are ” sentinels for a mapping event (the slice-620
+// iccd_to_status_chk only constrains them for 'disposition' events).
+func (q *Queries) InsertImportedComponentClaimScfMapping(ctx context.Context, arg InsertImportedComponentClaimScfMappingParams) (ImportedComponentClaimDisposition, error) {
+	row := q.db.QueryRow(ctx, insertImportedComponentClaimScfMapping,
+		arg.ID,
+		arg.TenantID,
+		arg.ClaimID,
+		arg.FromScfAnchorID,
+		arg.ToScfAnchorID,
+		arg.Actor,
+		arg.Note,
+	)
+	var i ImportedComponentClaimDisposition
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ClaimID,
+		&i.FromStatus,
+		&i.ToStatus,
+		&i.Actor,
+		&i.Note,
+		&i.OccurredAt,
+		&i.EventKind,
+		&i.FromScfAnchorID,
+		&i.ToScfAnchorID,
 	)
 	return i, err
 }
@@ -715,7 +769,7 @@ func (q *Queries) ListImportedCatalogs(ctx context.Context, tenantID pgtype.UUID
 }
 
 const listImportedComponentClaimDispositions = `-- name: ListImportedComponentClaimDispositions :many
-SELECT id, tenant_id, claim_id, from_status, to_status, actor, note, occurred_at FROM imported_component_claim_dispositions
+SELECT id, tenant_id, claim_id, from_status, to_status, actor, note, occurred_at, event_kind, from_scf_anchor_id, to_scf_anchor_id FROM imported_component_claim_dispositions
 WHERE tenant_id = $1 AND claim_id = $2
 ORDER BY occurred_at DESC, id ASC
 `
@@ -745,6 +799,9 @@ func (q *Queries) ListImportedComponentClaimDispositions(ctx context.Context, ar
 			&i.Actor,
 			&i.Note,
 			&i.OccurredAt,
+			&i.EventKind,
+			&i.FromScfAnchorID,
+			&i.ToScfAnchorID,
 		); err != nil {
 			return nil, err
 		}
@@ -1014,4 +1071,47 @@ func (q *Queries) ListImportedProfiles(ctx context.Context, tenantID pgtype.UUID
 		return nil, err
 	}
 	return items, nil
+}
+
+const mapImportedComponentClaimScfAnchor = `-- name: MapImportedComponentClaimScfAnchor :one
+
+UPDATE imported_component_claims
+SET scf_anchor_id = $3
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at, dispositioned_by, dispositioned_at, disposition_note
+`
+
+type MapImportedComponentClaimScfAnchorParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	ID          pgtype.UUID `json:"id"`
+	ScfAnchorID *string     `json:"scf_anchor_id"`
+}
+
+// ===== slice 620: operator maps an unmapped claim to an SCF anchor =====
+// Set one vendor claim's scf_anchor_id (the human-approved crosswalk). This
+// maps a claim's target requirement TO an SCF anchor's scf_id (requirement ->
+// SCF anchor only, invariant #7) — it is NOT a claim -> claim mapping and does
+// NOT touch control_evaluations or the evidence ledger (the claim stays a
+// claim; mapping only sets the crosswalk — invariant #2 / P0-512-1).
+// is_vendor_claim + claim_status are NOT touched. RLS rides the slice-512
+// tenant_update policy.
+func (q *Queries) MapImportedComponentClaimScfAnchor(ctx context.Context, arg MapImportedComponentClaimScfAnchorParams) (ImportedComponentClaim, error) {
+	row := q.db.QueryRow(ctx, mapImportedComponentClaimScfAnchor, arg.TenantID, arg.ID, arg.ScfAnchorID)
+	var i ImportedComponentClaim
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ImportedComponentID,
+		&i.ControlID,
+		&i.Statement,
+		&i.RequirementUuid,
+		&i.ScfAnchorID,
+		&i.IsVendorClaim,
+		&i.ClaimStatus,
+		&i.CreatedAt,
+		&i.DispositionedBy,
+		&i.DispositionedAt,
+		&i.DispositionNote,
+	)
+	return i, err
 }

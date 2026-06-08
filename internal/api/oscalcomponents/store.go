@@ -41,10 +41,17 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-// ErrClaimNotFound is returned when a disposition targets a claim id that does
-// not resolve within the caller's tenant (cross-tenant or unknown). The
-// handler maps it to 404.
+// ErrClaimNotFound is returned when a disposition or mapping targets a claim
+// id that does not resolve within the caller's tenant (cross-tenant or
+// unknown). The handler maps it to 404.
 var ErrClaimNotFound = errors.New("oscalcomponents: component claim not found")
+
+// ErrAnchorNotFound is returned when an SCF-anchor mapping targets an scf_id
+// that does not resolve to a bundled SCF anchor in the current SCF framework
+// version. The handler maps it to 422 — the request is well-formed but the
+// referenced anchor does not exist (invariant #7: a mapping must target a real
+// SCF anchor, never a free-form string the operator typed).
+var ErrAnchorNotFound = errors.New("oscalcomponents: scf anchor not found")
 
 // Store is the OSCAL component-claim read + disposition layer over the
 // application pgx pool.
@@ -188,6 +195,71 @@ func (s *Store) Disposition(ctx context.Context, claimID uuid.UUID, toStatus, ac
 			ToStatus:   toStatus,
 			Actor:      actor,
 			Note:       note,
+		}); qerr != nil {
+			return qerr
+		}
+		return nil
+	})
+	return updated, err
+}
+
+// MapScfAnchor maps one unmapped (or re-maps) vendor claim to a canonical SCF
+// anchor. It validates the target scf_id resolves to a bundled SCF anchor in
+// the current SCF framework version, reads the claim's current scf_anchor_id
+// (the from_anchor of the audit trail), sets the new scf_anchor_id, and
+// appends an append-only mapping-audit row — all in one RLS-scoped
+// transaction.
+//
+// THE LOAD-BEARING BOUNDARY: this NEVER touches control_evaluations or the
+// evidence ledger. The claim stays a claim (is_vendor_claim + claim_status are
+// untouched); mapping only sets the crosswalk (invariant #2 / #7 / P0-512-1).
+//
+// scfAnchorID is the SCF code (e.g. "IAC-06"), validated against the bundled
+// catalog. actor is the mapping operator's credential id. A claim id that does
+// not resolve in the tenant returns ErrClaimNotFound; an scf_id that does not
+// resolve to a bundled anchor returns ErrAnchorNotFound.
+func (s *Store) MapScfAnchor(ctx context.Context, claimID uuid.UUID, scfAnchorID, actor string) (dbx.ImportedComponentClaim, error) {
+	var updated dbx.ImportedComponentClaim
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		// Validate the target anchor exists in the bundled SCF catalog. The
+		// scf_anchors spine is catalog-global (tenant_id IS NULL); a bad
+		// scf_id must NOT silently set a dangling crosswalk (invariant #7).
+		if _, qerr := q.GetSCFAnchorBySCFID(ctx, scfAnchorID); qerr != nil {
+			if errors.Is(qerr, pgx.ErrNoRows) {
+				return ErrAnchorNotFound
+			}
+			return qerr
+		}
+
+		current, qerr := q.GetImportedComponentClaimByID(ctx, dbx.GetImportedComponentClaimByIDParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(claimID),
+		})
+		if qerr != nil {
+			if errors.Is(qerr, pgx.ErrNoRows) {
+				return ErrClaimNotFound
+			}
+			return qerr
+		}
+
+		anchorCopy := scfAnchorID
+		updated, qerr = q.MapImportedComponentClaimScfAnchor(ctx, dbx.MapImportedComponentClaimScfAnchorParams{
+			TenantID:    pgUUID(tenantID),
+			ID:          pgUUID(claimID),
+			ScfAnchorID: &anchorCopy,
+		})
+		if qerr != nil {
+			return qerr
+		}
+
+		if _, qerr = q.InsertImportedComponentClaimScfMapping(ctx, dbx.InsertImportedComponentClaimScfMappingParams{
+			ID:              pgUUID(s.newID()),
+			TenantID:        pgUUID(tenantID),
+			ClaimID:         pgUUID(claimID),
+			FromScfAnchorID: current.ScfAnchorID, // nil when the claim was unmapped
+			ToScfAnchorID:   &anchorCopy,
+			Actor:           actor,
+			Note:            "",
 		}); qerr != nil {
 			return qerr
 		}

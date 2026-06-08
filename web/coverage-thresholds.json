@@ -439,6 +439,12 @@
       "functions": 98,
       "lines": 88
     },
+    "app/api/oscal/component-claims/[id]/scf-anchor/route.ts": {
+      "statements": 98,
+      "branches": 74,
+      "functions": 98,
+      "lines": 98
+    },
     "app/api/policies/route.ts": {
       "statements": 98,
       "branches": 69,

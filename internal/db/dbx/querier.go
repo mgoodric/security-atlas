@@ -866,6 +866,13 @@ type Querier interface {
 	// Append one append-only disposition-audit row recording the
 	// from_status -> to_status transition, the actor, and an optional note.
 	InsertImportedComponentClaimDisposition(ctx context.Context, arg InsertImportedComponentClaimDispositionParams) (ImportedComponentClaimDisposition, error)
+	// Append one append-only mapping-audit row recording the
+	// from_scf_anchor_id -> to_scf_anchor_id transition, the actor, and an
+	// optional note. REUSES the slice-589 imported_component_claim_dispositions
+	// table generalized into a claim EVENT log (event_kind='scf_mapping'); the
+	// status columns are '' sentinels for a mapping event (the slice-620
+	// iccd_to_status_chk only constrains them for 'disposition' events).
+	InsertImportedComponentClaimScfMapping(ctx context.Context, arg InsertImportedComponentClaimScfMappingParams) (ImportedComponentClaimDisposition, error)
 	// ===== slice 512: component-definition import (vendor-claim ingest) =====
 	// Create one imported-COMPONENT-DEFINITION provenance row: source
 	// 'oscal-component-import', kind 'component_definition'. The vendor/product
@@ -2166,6 +2173,15 @@ type Querier interface {
 	// Append a row to the access log. Action is enforced by CHECK
 	// ('upload' | 'download'). Caller passes tenant_id + artifact_id + actor.
 	LogArtifactAccess(ctx context.Context, arg LogArtifactAccessParams) error
+	// ===== slice 620: operator maps an unmapped claim to an SCF anchor =====
+	// Set one vendor claim's scf_anchor_id (the human-approved crosswalk). This
+	// maps a claim's target requirement TO an SCF anchor's scf_id (requirement ->
+	// SCF anchor only, invariant #7) — it is NOT a claim -> claim mapping and does
+	// NOT touch control_evaluations or the evidence ledger (the claim stays a
+	// claim; mapping only sets the crosswalk — invariant #2 / P0-512-1).
+	// is_vendor_claim + claim_status are NOT touched. RLS rides the slice-512
+	// tenant_update policy.
+	MapImportedComponentClaimScfAnchor(ctx context.Context, arg MapImportedComponentClaimScfAnchorParams) (ImportedComponentClaim, error)
 	// Record a failed delivery. outcome=failed + last_error + attempts++. The
 	// digest_key is NOT released — the next tick can re-attempt (D8 analog).
 	MarkChannelDigestFailed(ctx context.Context, arg MarkChannelDigestFailedParams) error

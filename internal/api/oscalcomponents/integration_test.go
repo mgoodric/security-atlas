@@ -157,6 +157,61 @@ func seedComponentDef(t *testing.T, admin *pgxpool.Pool, tenant string) (uuid.UU
 	return defID, claims
 }
 
+// ensureCurrentSCFAnchor guarantees the bundled SCF catalog has at least one
+// anchor in its current framework_version and returns a valid scf_id the
+// mapping endpoint can target (the GetSCFAnchorBySCFID validation joins
+// slug='scf' AND status='current'). If the test DB already carries a current
+// SCF version (the normal case once the catalog is imported), it reuses a real
+// anchor; otherwise it seeds a minimal SCF framework + current version + one
+// anchor. The seeded scf_id is NEUTRAL ('TST-01'), not a real-looking SCF code.
+func ensureCurrentSCFAnchor(t *testing.T, admin *pgxpool.Pool) string {
+	t.Helper()
+	ctx := context.Background()
+
+	var scfID string
+	err := admin.QueryRow(ctx, `
+		SELECT a.scf_id
+		FROM scf_anchors a
+		JOIN framework_versions fv ON fv.id = a.framework_version_id
+		JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'scf' AND fv.status = 'current' AND f.tenant_id IS NULL
+		ORDER BY a.scf_id
+		LIMIT 1
+	`).Scan(&scfID)
+	if err == nil && scfID != "" {
+		return scfID
+	}
+
+	// No current SCF anchor present — seed a minimal one. Use the existing SCF
+	// framework row if present (slug is globally unique among tenant-null
+	// frameworks); else create it.
+	var fwID string
+	if qerr := admin.QueryRow(ctx,
+		`SELECT id::text FROM frameworks WHERE slug = 'scf' AND tenant_id IS NULL LIMIT 1`).Scan(&fwID); qerr != nil {
+		fwID = uuid.NewString()
+		if _, eerr := admin.Exec(ctx,
+			`INSERT INTO frameworks (id, tenant_id, name, slug, issuer)
+			 VALUES ($1, NULL, 'Secure Controls Framework', 'scf', 'SCF Council')`, fwID); eerr != nil {
+			t.Fatalf("seed scf framework: %v", eerr)
+		}
+	}
+	verID := uuid.NewString()
+	if _, eerr := admin.Exec(ctx,
+		`INSERT INTO framework_versions (id, tenant_id, framework_id, version, status)
+		 VALUES ($1, NULL, $2, 'test-2026', 'current')`, verID, fwID); eerr != nil {
+		t.Fatalf("seed scf framework_version: %v", eerr)
+	}
+	scfID = "TST-01"
+	if _, eerr := admin.Exec(ctx,
+		`INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title)
+		 VALUES ($1, $2, $3, 'TST', 'Test Anchor')
+		 ON CONFLICT (framework_version_id, scf_id) DO NOTHING`,
+		uuid.NewString(), verID, scfID); eerr != nil {
+		t.Fatalf("seed scf anchor: %v", eerr)
+	}
+	return scfID
+}
+
 type testEnv struct {
 	server *httptest.Server
 	bearer string
@@ -440,5 +495,186 @@ func TestGet_UnknownID404(t *testing.T) {
 	resp, _ := do(t, env, http.MethodGet, "/v1/oscal/component-definitions/"+uuid.New().String(), "")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+// ===== slice 620: map an unmapped claim to an SCF anchor =====
+
+// TestMapScfAnchor_MapsClaimAndAudits exercises the full PATCH path: an
+// unmapped claim is mapped to a bundled SCF anchor; the claim's scf_anchor_id
+// is set, the unmapped flag clears, an append-only mapping-audit row is
+// written, and — the load-bearing boundary — NOTHING is written to
+// control_evaluations.
+func TestMapScfAnchor_MapsClaimAndAudits(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	_, claims := seedComponentDef(t, admin, tenant)
+	scfID := ensureCurrentSCFAnchor(t, admin)
+	// claims[1] (ac-3) was seeded with a NULL scf_anchor_id — the unmapped one.
+	unmapped := claims[1]
+	if unmapped.scfAnchor != nil {
+		t.Fatalf("precondition: claims[1] should be unmapped")
+	}
+	env := approverServer(t, app, tenant)
+
+	resp, body := do(t, env, http.MethodPatch,
+		"/v1/oscal/component-claims/"+unmapped.claimID.String()+"/scf-anchor",
+		`{"scf_anchor_id":"`+scfID+`"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%v", resp.StatusCode, body)
+	}
+	if body["scf_anchor_id"] != scfID {
+		t.Fatalf("scf_anchor_id = %v, want %s", body["scf_anchor_id"], scfID)
+	}
+	if body["unmapped"] != false {
+		t.Fatalf("unmapped = %v, want false", body["unmapped"])
+	}
+	if body["is_vendor_claim"] != true {
+		t.Fatalf("is_vendor_claim = %v, want true (claim stays a claim)", body["is_vendor_claim"])
+	}
+	// claim_status is untouched (mapping is not a disposition).
+	if body["claim_status"] != "asserted" {
+		t.Fatalf("claim_status = %v, want asserted", body["claim_status"])
+	}
+
+	ctx := context.Background()
+	// The claim row now carries the crosswalk.
+	var gotAnchor *string
+	var status string
+	var isClaim bool
+	if err := admin.QueryRow(ctx,
+		`SELECT scf_anchor_id, claim_status, is_vendor_claim FROM imported_component_claims WHERE id = $1`,
+		unmapped.claimID).Scan(&gotAnchor, &status, &isClaim); err != nil {
+		t.Fatalf("read claim: %v", err)
+	}
+	if gotAnchor == nil || *gotAnchor != scfID {
+		t.Fatalf("claim scf_anchor_id = %v, want %s", gotAnchor, scfID)
+	}
+	if status != "asserted" {
+		t.Fatalf("claim_status mutated: %s — mapping must not disposition", status)
+	}
+	if !isClaim {
+		t.Fatal("is_vendor_claim flipped — a claim must always be a claim")
+	}
+
+	// An append-only mapping-audit row records the from(NULL) -> to(scfID)
+	// transition with event_kind='scf_mapping'.
+	var auditCount int
+	var eventKind string
+	var fromAnchor, toAnchor *string
+	if err := admin.QueryRow(ctx,
+		`SELECT count(*), max(event_kind), max(from_scf_anchor_id), max(to_scf_anchor_id)
+		 FROM imported_component_claim_dispositions
+		 WHERE claim_id = $1 AND event_kind = 'scf_mapping'`,
+		unmapped.claimID).Scan(&auditCount, &eventKind, &fromAnchor, &toAnchor); err != nil {
+		t.Fatalf("read mapping audit: %v", err)
+	}
+	if auditCount != 1 || eventKind != "scf_mapping" {
+		t.Fatalf("mapping audit wrong: count=%d kind=%s", auditCount, eventKind)
+	}
+	if fromAnchor != nil {
+		t.Fatalf("from_scf_anchor_id = %v, want NULL (claim was unmapped)", *fromAnchor)
+	}
+	if toAnchor == nil || *toAnchor != scfID {
+		t.Fatalf("to_scf_anchor_id = %v, want %s", toAnchor, scfID)
+	}
+
+	// THE LOAD-BEARING BOUNDARY: mapping wrote NOTHING to control_evaluations.
+	// Setting a crosswalk does not manufacture control coverage.
+	var evalCount int
+	if err := admin.QueryRow(ctx,
+		`SELECT count(*) FROM control_evaluations WHERE tenant_id = $1`, tenant).Scan(&evalCount); err != nil {
+		t.Fatalf("read control_evaluations: %v", err)
+	}
+	if evalCount != 0 {
+		t.Fatalf("control_evaluations rows = %d, want 0 — mapping must not satisfy a control", evalCount)
+	}
+}
+
+// TestMapScfAnchor_UnknownAnchor422 asserts a well-formed request that names an
+// scf_id with no bundled anchor is rejected 422 — a mapping must target a real
+// SCF anchor (invariant #7), never a free-form string.
+func TestMapScfAnchor_UnknownAnchor422(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	_, claims := seedComponentDef(t, admin, tenant)
+	env := approverServer(t, app, tenant)
+
+	resp, _ := do(t, env, http.MethodPatch,
+		"/v1/oscal/component-claims/"+claims[1].claimID.String()+"/scf-anchor",
+		`{"scf_anchor_id":"NO-SUCH-ANCHOR-99"}`)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", resp.StatusCode)
+	}
+	// The claim is untouched (still unmapped).
+	var anchor *string
+	if err := admin.QueryRow(context.Background(),
+		`SELECT scf_anchor_id FROM imported_component_claims WHERE id = $1`, claims[1].claimID).Scan(&anchor); err != nil {
+		t.Fatalf("read claim: %v", err)
+	}
+	if anchor != nil {
+		t.Fatalf("claim was mapped to a non-existent anchor: %v", *anchor)
+	}
+}
+
+// TestMapScfAnchor_UnknownClaim404 asserts an unknown claim id 404s.
+func TestMapScfAnchor_UnknownClaim404(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	scfID := ensureCurrentSCFAnchor(t, admin)
+	env := approverServer(t, app, tenant)
+	resp, _ := do(t, env, http.MethodPatch,
+		"/v1/oscal/component-claims/"+uuid.New().String()+"/scf-anchor",
+		`{"scf_anchor_id":"`+scfID+`"}`)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+// TestMapScfAnchor_NonApproverForbidden asserts an owner (read role) cannot map.
+func TestMapScfAnchor_NonApproverForbidden(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	_, claims := seedComponentDef(t, admin, tenant)
+	scfID := ensureCurrentSCFAnchor(t, admin)
+	env := ownerServer(t, app, tenant)
+	resp, _ := do(t, env, http.MethodPatch,
+		"/v1/oscal/component-claims/"+claims[1].claimID.String()+"/scf-anchor",
+		`{"scf_anchor_id":"`+scfID+`"}`)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+}
+
+// TestMapScfAnchor_RLSCrossTenantDenied asserts tenant B (approver) cannot map
+// tenant A's claim — the cross-tenant claim id resolves to 404 under RLS, and
+// tenant A's claim stays unmapped.
+func TestMapScfAnchor_RLSCrossTenantDenied(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenantA := freshTenant(t, admin)
+	tenantB := freshTenant(t, admin)
+	_, claimsA := seedComponentDef(t, admin, tenantA)
+	scfID := ensureCurrentSCFAnchor(t, admin)
+
+	envB := approverServer(t, app, tenantB)
+	resp, _ := do(t, envB, http.MethodPatch,
+		"/v1/oscal/component-claims/"+claimsA[1].claimID.String()+"/scf-anchor",
+		`{"scf_anchor_id":"`+scfID+`"}`)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-tenant map: status = %d, want 404", resp.StatusCode)
+	}
+	// Tenant A's claim is untouched (still unmapped).
+	var anchor *string
+	if err := admin.QueryRow(context.Background(),
+		`SELECT scf_anchor_id FROM imported_component_claims WHERE id = $1`, claimsA[1].claimID).Scan(&anchor); err != nil {
+		t.Fatalf("read claim: %v", err)
+	}
+	if anchor != nil {
+		t.Fatalf("tenant A claim mapped cross-tenant: %v", *anchor)
 	}
 }

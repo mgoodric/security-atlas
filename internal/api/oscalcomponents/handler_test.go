@@ -33,6 +33,13 @@ type stubStore struct {
 	gotDispStatus  string
 	gotDispActor   string
 	gotDispNote    string
+
+	mapResult dbx.ImportedComponentClaim
+	mapErr    error
+
+	gotMapClaimID uuid.UUID
+	gotMapAnchor  string
+	gotMapActor   string
 }
 
 func (s *stubStore) ListDefinitions(_ context.Context) ([]dbx.ImportedCatalog, error) {
@@ -49,6 +56,13 @@ func (s *stubStore) Disposition(_ context.Context, claimID uuid.UUID, toStatus, 
 	s.gotDispActor = actor
 	s.gotDispNote = note
 	return s.dispResult, s.dispErr
+}
+
+func (s *stubStore) MapScfAnchor(_ context.Context, claimID uuid.UUID, scfAnchorID, actor string) (dbx.ImportedComponentClaim, error) {
+	s.gotMapClaimID = claimID
+	s.gotMapAnchor = scfAnchorID
+	s.gotMapActor = actor
+	return s.mapResult, s.mapErr
 }
 
 // ----- helpers -----
@@ -95,6 +109,8 @@ func route(h *Handler, method, pattern, target string, r *http.Request) *httptes
 		router.Get(pattern, h.routeFor(pattern))
 	case http.MethodPost:
 		router.Post(pattern, h.routeFor(pattern))
+	case http.MethodPatch:
+		router.Patch(pattern, h.routeFor(pattern))
 	}
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, r)
@@ -114,6 +130,8 @@ func (h *Handler) routeFor(pattern string) http.HandlerFunc {
 		return h.Reject
 	case "/v1/oscal/component-claims/{id}:needs-info":
 		return h.NeedsInfo
+	case "/v1/oscal/component-claims/{id}/scf-anchor":
+		return h.MapScfAnchor
 	}
 	return nil
 }
@@ -321,6 +339,148 @@ func TestDisposition_BadUUID(t *testing.T) {
 	rec := route(h, http.MethodPost, "/v1/oscal/component-claims/{id}:accept", "/v1/oscal/component-claims/nope:accept", r)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+// ----- map scf-anchor -----
+
+const scfAnchorTarget = "IAC-06"
+
+func mapReq(claimID uuid.UUID, body string, cred credstore.Credential) *http.Request {
+	return reqWithCred(http.MethodPatch,
+		"/v1/oscal/component-claims/"+claimID.String()+"/scf-anchor", body, cred)
+}
+
+func routeMap(h *Handler, r *http.Request, claimID uuid.UUID) *httptest.ResponseRecorder {
+	return route(h, http.MethodPatch, "/v1/oscal/component-claims/{id}/scf-anchor",
+		"/v1/oscal/component-claims/"+claimID.String()+"/scf-anchor", r)
+}
+
+func TestMapScfAnchor_OK(t *testing.T) {
+	t.Parallel()
+	claimID := uuid.New()
+	mapped := scfAnchorTarget
+	st := &stubStore{mapResult: dbx.ImportedComponentClaim{
+		ID: pgID(claimID), ControlID: "ac-3", IsVendorClaim: true, ClaimStatus: "asserted",
+		ScfAnchorID: &mapped,
+	}}
+	h := newHandlerWithStore(st)
+	r := mapReq(claimID, `{"scf_anchor_id":"IAC-06"}`, approverCred(testTenant))
+	rec := routeMap(h, r, claimID)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if st.gotMapClaimID != claimID {
+		t.Fatalf("claimID = %v, want %v", st.gotMapClaimID, claimID)
+	}
+	if st.gotMapAnchor != "IAC-06" {
+		t.Fatalf("anchor = %q, want IAC-06", st.gotMapAnchor)
+	}
+	if st.gotMapActor != "grc-1" {
+		t.Fatalf("actor = %q, want grc-1", st.gotMapActor)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["scf_anchor_id"] != "IAC-06" {
+		t.Fatalf("scf_anchor_id = %v, want IAC-06", out["scf_anchor_id"])
+	}
+	if out["unmapped"] != false {
+		t.Fatalf("unmapped = %v, want false (claim now mapped)", out["unmapped"])
+	}
+	// Boundary: mapping still reports is_vendor_claim=true; claim_status is
+	// untouched (mapping is not a disposition).
+	if out["is_vendor_claim"] != true {
+		t.Fatalf("is_vendor_claim = %v, want true", out["is_vendor_claim"])
+	}
+	if out["claim_status"] != "asserted" {
+		t.Fatalf("claim_status = %v, want asserted (mapping does not disposition)", out["claim_status"])
+	}
+}
+
+func TestMapScfAnchor_TrimsWhitespace(t *testing.T) {
+	t.Parallel()
+	claimID := uuid.New()
+	mapped := scfAnchorTarget
+	st := &stubStore{mapResult: dbx.ImportedComponentClaim{ID: pgID(claimID), IsVendorClaim: true, ClaimStatus: "asserted", ScfAnchorID: &mapped}}
+	h := newHandlerWithStore(st)
+	r := mapReq(claimID, `{"scf_anchor_id":"  IAC-06  "}`, approverCred(testTenant))
+	rec := routeMap(h, r, claimID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if st.gotMapAnchor != "IAC-06" {
+		t.Fatalf("anchor = %q, want trimmed IAC-06", st.gotMapAnchor)
+	}
+}
+
+func TestMapScfAnchor_Forbidden_NonApprover(t *testing.T) {
+	t.Parallel()
+	claimID := uuid.New()
+	h := newHandlerWithStore(&stubStore{})
+	// An owner (read-capable) cannot map — mapping is a write needing approver/admin.
+	r := mapReq(claimID, `{"scf_anchor_id":"IAC-06"}`, ownerCred(testTenant))
+	rec := routeMap(h, r, claimID)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+}
+
+func TestMapScfAnchor_EmptyAnchor_BadRequest(t *testing.T) {
+	t.Parallel()
+	claimID := uuid.New()
+	h := newHandlerWithStore(&stubStore{})
+	r := mapReq(claimID, `{"scf_anchor_id":"   "}`, approverCred(testTenant))
+	rec := routeMap(h, r, claimID)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestMapScfAnchor_BadJSON_BadRequest(t *testing.T) {
+	t.Parallel()
+	claimID := uuid.New()
+	h := newHandlerWithStore(&stubStore{})
+	r := mapReq(claimID, `not-json`, approverCred(testTenant))
+	rec := routeMap(h, r, claimID)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestMapScfAnchor_BadUUID_BadRequest(t *testing.T) {
+	t.Parallel()
+	h := newHandlerWithStore(&stubStore{})
+	r := reqWithCred(http.MethodPatch, "/v1/oscal/component-claims/nope/scf-anchor", `{"scf_anchor_id":"IAC-06"}`, approverCred(testTenant))
+	rec := route(h, http.MethodPatch, "/v1/oscal/component-claims/{id}/scf-anchor", "/v1/oscal/component-claims/nope/scf-anchor", r)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestMapScfAnchor_ClaimNotFound(t *testing.T) {
+	t.Parallel()
+	claimID := uuid.New()
+	st := &stubStore{mapErr: ErrClaimNotFound}
+	h := newHandlerWithStore(st)
+	r := mapReq(claimID, `{"scf_anchor_id":"IAC-06"}`, approverCred(testTenant))
+	rec := routeMap(h, r, claimID)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestMapScfAnchor_AnchorNotFound_Unprocessable(t *testing.T) {
+	t.Parallel()
+	claimID := uuid.New()
+	st := &stubStore{mapErr: ErrAnchorNotFound}
+	h := newHandlerWithStore(st)
+	r := mapReq(claimID, `{"scf_anchor_id":"NOPE-99"}`, approverCred(testTenant))
+	rec := routeMap(h, r, claimID)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", rec.Code)
 	}
 }
 

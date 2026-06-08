@@ -67,6 +67,18 @@ export type DispositionResult = {
   disposition_note: string;
 };
 
+// Slice 620 — the result of mapping an unmapped claim to an SCF anchor. The
+// claim stays a claim (is_vendor_claim=true, claim_status untouched); mapping
+// only sets the crosswalk (scf_anchor_id) + clears the unmapped flag.
+export type MapScfAnchorResult = {
+  id: string;
+  control_id: string;
+  is_vendor_claim: boolean;
+  claim_status: ClaimStatus;
+  scf_anchor_id: string;
+  unmapped: boolean;
+};
+
 // ----- server-side (BFF) callers — bearer from session cookie -----
 
 export async function listComponentDefinitions(
@@ -110,4 +122,39 @@ export async function dispositionClaim(
     throw new APIError(res.status, `${res.status} ${res.statusText}`);
   }
   return (await res.json()) as DispositionResult;
+}
+
+// Slice 620 — map an unmapped vendor claim to a canonical SCF anchor. The
+// scf_anchor_id is the SCF code (e.g. "IAC-06"); the platform validates it
+// against the bundled catalog. Requirement -> SCF anchor only (invariant #7);
+// this only sets the crosswalk and NEVER fabricates control coverage.
+export async function mapClaimScfAnchor(
+  bearer: string,
+  claimID: string,
+  scfAnchorID: string,
+): Promise<MapScfAnchorResult> {
+  const res = await fetch(
+    `${apiBaseURL()}/v1/oscal/component-claims/${encodeURIComponent(
+      claimID,
+    )}/scf-anchor`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${bearer}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ scf_anchor_id: scfAnchorID }),
+    },
+  );
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // keep status line
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as MapScfAnchorResult;
 }

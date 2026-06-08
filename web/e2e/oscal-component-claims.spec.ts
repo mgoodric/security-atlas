@@ -165,6 +165,154 @@ test.describe("OSCAL vendor-claims view", () => {
       .toEqual({ disposition: "accept", note: "looks good" });
   });
 
+  // ===== Slice 620: map an unmapped claim to an SCF anchor =====
+
+  const anchorsBody = {
+    anchors: [
+      {
+        id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        scf_id: "TST-01",
+        family: "TST",
+        name: "Test Anchor One",
+        description: "first test anchor",
+      },
+      {
+        id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        scf_id: "TST-02",
+        family: "TST",
+        name: "Test Anchor Two",
+        description: "second test anchor",
+      },
+    ],
+  };
+
+  test("AC-5 (slice 620): the unmapped claim shows the SCF-anchor picker; the mapped claim does not", async ({
+    authedPage: page,
+  }) => {
+    await page.route(`**/api/oscal/component-definitions/${DEF_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(detailBody),
+      }),
+    );
+    await page.route("**/api/anchors", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(anchorsBody),
+      }),
+    );
+    await page.goto(`/oscal/component-definitions/${DEF_ID}`);
+    await expect(page.getByTestId("claim-row")).toHaveCount(2);
+    // Exactly one claim (the unmapped one) renders the picker.
+    await expect(page.getByTestId("scf-anchor-picker")).toHaveCount(1);
+    await expect(page.getByTestId("claim-unmapped-badge")).toHaveCount(1);
+  });
+
+  test("AC-6 (slice 620): mapping an unmapped claim PATCHes the BFF + clears the unmapped badge", async ({
+    authedPage: page,
+  }) => {
+    // The BFF GET is route-mocked (hermetic — slice-594 b219). First load
+    // returns the unmapped claim; after the PATCH, the invalidated refetch
+    // returns the now-mapped claim so the badge clears.
+    const mappedDetail = JSON.parse(
+      JSON.stringify(detailBody),
+    ) as typeof detailBody;
+    mappedDetail.claims[1].scf_anchor_id = "TST-02";
+    mappedDetail.claims[1].unmapped = false;
+
+    let mapped = false;
+    await page.route(`**/api/oscal/component-definitions/${DEF_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(mapped ? mappedDetail : detailBody),
+      }),
+    );
+    await page.route("**/api/anchors", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(anchorsBody),
+      }),
+    );
+
+    let patchBody: { scf_anchor_id?: string } | null = null;
+    await page.route(
+      `**/api/oscal/component-claims/${CLAIM_UNMAPPED}/scf-anchor`,
+      async (route) => {
+        patchBody = JSON.parse(route.request().postData() ?? "{}") as {
+          scf_anchor_id?: string;
+        };
+        mapped = true;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: CLAIM_UNMAPPED,
+            control_id: "ac-3",
+            is_vendor_claim: true,
+            claim_status: "asserted",
+            scf_anchor_id: "TST-02",
+            unmapped: false,
+          }),
+        });
+      },
+    );
+
+    await page.goto(`/oscal/component-definitions/${DEF_ID}`);
+    await expect(page.getByTestId("scf-anchor-picker")).toBeVisible();
+    // Filter the picker to TST-02 and click the option.
+    await page.getByTestId("scf-anchor-search").fill("TST-02");
+    await page
+      .getByTestId("scf-anchor-option")
+      .filter({ hasText: "TST-02" })
+      .click();
+
+    // The PATCH carried the chosen anchor code.
+    await expect.poll(() => patchBody).toEqual({ scf_anchor_id: "TST-02" });
+    // After the invalidated refetch returns the mapped claim, the unmapped
+    // badge is gone and the picker no longer renders for that claim.
+    await expect(page.getByTestId("claim-unmapped-badge")).toHaveCount(0);
+    await expect(page.getByTestId("scf-anchor-picker")).toHaveCount(0);
+  });
+
+  test("AC-7 (slice 620): a mapping error (422 unknown anchor) surfaces in the UI", async ({
+    authedPage: page,
+  }) => {
+    await page.route(`**/api/oscal/component-definitions/${DEF_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(detailBody),
+      }),
+    );
+    await page.route("**/api/anchors", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(anchorsBody),
+      }),
+    );
+    await page.route(
+      `**/api/oscal/component-claims/${CLAIM_UNMAPPED}/scf-anchor`,
+      (route) =>
+        route.fulfill({
+          status: 422,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: "scf_anchor_id does not resolve to a bundled SCF anchor",
+          }),
+        }),
+    );
+    await page.goto(`/oscal/component-definitions/${DEF_ID}`);
+    await page.getByTestId("scf-anchor-option").first().click();
+    await expect(page.getByTestId("disposition-error")).toContainText(
+      "bundled SCF anchor",
+    );
+  });
+
   test("AC-4: a disposition error surfaces in the UI", async ({
     authedPage: page,
   }) => {

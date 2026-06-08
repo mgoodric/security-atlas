@@ -2744,6 +2744,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/oscal/component-claims/{id}/scf-anchor:
+    patch:
+      summary: PATCH /v1/oscal/component-claims/{id}/scf-anchor — operator maps an unmapped vendor claim to a canonical SCF anchor
+      tags: [oscal]
+      operationId: patch-v1-oscal-component-claims-id-scf-anchor
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/oscal/component-claims/{id}:accept:
     post:
       summary: POST /v1/oscal/component-claims/{id}:accept — operator credits a vendor claim

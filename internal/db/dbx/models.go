@@ -1407,14 +1407,17 @@ type ImportedComponentClaim struct {
 }
 
 type ImportedComponentClaimDisposition struct {
-	ID         pgtype.UUID        `json:"id"`
-	TenantID   pgtype.UUID        `json:"tenant_id"`
-	ClaimID    pgtype.UUID        `json:"claim_id"`
-	FromStatus string             `json:"from_status"`
-	ToStatus   string             `json:"to_status"`
-	Actor      string             `json:"actor"`
-	Note       string             `json:"note"`
-	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	ClaimID         pgtype.UUID        `json:"claim_id"`
+	FromStatus      string             `json:"from_status"`
+	ToStatus        string             `json:"to_status"`
+	Actor           string             `json:"actor"`
+	Note            string             `json:"note"`
+	OccurredAt      pgtype.Timestamptz `json:"occurred_at"`
+	EventKind       string             `json:"event_kind"`
+	FromScfAnchorID *string            `json:"from_scf_anchor_id"`
+	ToScfAnchorID   *string            `json:"to_scf_anchor_id"`
 }
 
 type LocalCredential struct {
