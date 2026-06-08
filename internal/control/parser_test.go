@@ -73,6 +73,75 @@ func TestParseTarball_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestParseTarball_CapturesTestFiles(t *testing.T) {
+	t.Parallel()
+	tarBytes := mustBuildTarball(t, map[string][]byte{
+		"control.yaml":        []byte(minimalManifestYAML),
+		"tests/mfa.yaml":      []byte("cases:\n  - name: a\n    expected_state: pass\n"),
+		"tests/access.yml":    []byte("cases:\n  - name: b\n    expected_state: fail\n"),
+		"tests/notes.txt":     []byte("not a yaml test file"),
+		"tests/sub/deep.yaml": []byte("cases: []\n"),
+		"README.md":           []byte("ignored"),
+	})
+	b, err := ParseTarball(bytes.NewReader(tarBytes))
+	if err != nil {
+		t.Fatalf("parse tarball: %v", err)
+	}
+	if len(b.TestFiles) != 2 {
+		t.Fatalf("expected 2 captured top-level tests/*.yaml files, got %d: %v", len(b.TestFiles), keysOf(b.TestFiles))
+	}
+	if _, ok := b.TestFiles["mfa.yaml"]; !ok {
+		t.Fatalf("expected mfa.yaml captured; got %v", keysOf(b.TestFiles))
+	}
+	if _, ok := b.TestFiles["access.yml"]; !ok {
+		t.Fatalf("expected access.yml captured; got %v", keysOf(b.TestFiles))
+	}
+	// Non-yaml and nested files must NOT be captured.
+	if _, ok := b.TestFiles["notes.txt"]; ok {
+		t.Fatalf("non-yaml tests/notes.txt should not be captured")
+	}
+	if _, ok := b.TestFiles["deep.yaml"]; ok {
+		t.Fatalf("nested tests/sub/deep.yaml should not be captured")
+	}
+}
+
+func TestParseTarball_NoTestsLeavesMapNil(t *testing.T) {
+	t.Parallel()
+	tarBytes := mustBuildTarball(t, map[string][]byte{
+		"control.yaml": []byte(minimalManifestYAML),
+	})
+	b, err := ParseTarball(bytes.NewReader(tarBytes))
+	if err != nil {
+		t.Fatalf("parse tarball: %v", err)
+	}
+	if len(b.TestFiles) != 0 {
+		t.Fatalf("expected no captured test files, got %v", keysOf(b.TestFiles))
+	}
+}
+
+func TestParseDirectory_LeavesTestFilesNil(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "control.yaml"), []byte(minimalManifestYAML), 0o644); err != nil {
+		t.Fatalf("write control.yaml: %v", err)
+	}
+	b, err := ParseDirectory(dir)
+	if err != nil {
+		t.Fatalf("parse directory: %v", err)
+	}
+	if b.TestFiles != nil {
+		t.Fatalf("ParseDirectory must leave TestFiles nil (directory path feeds the runner directly); got %v", keysOf(b.TestFiles))
+	}
+}
+
+func keysOf(m map[string][]byte) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 func TestParseTarball_RejectsAbsolutePath(t *testing.T) {
 	t.Parallel()
 	tarBytes := mustBuildTarball(t, map[string][]byte{

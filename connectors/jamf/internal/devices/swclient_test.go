@@ -9,7 +9,11 @@ import (
 )
 
 // jamfSoftwareTestServer stands up a fake Jamf Pro that handles the token
-// exchange and the computers-inventory software read. NO live Jamf.
+// exchange and the computers-inventory software read. NO live Jamf. It is
+// page-aware: the supplied fixture is served for page=0, and a terminating empty
+// page is served for any later page (mirroring the real Jamf page cursor, which
+// stops yielding results past the population). Single-page fixtures therefore
+// drive exactly one data page plus one empty terminator.
 func jamfSoftwareTestServer(t *testing.T, inventoryJSON string) (*httptest.Server, *requestLog) {
 	t.Helper()
 	log := &requestLog{}
@@ -25,7 +29,11 @@ func jamfSoftwareTestServer(t *testing.T, inventoryJSON string) (*httptest.Serve
 			log.authHeader = r.Header.Get("Authorization")
 			log.rawQuery = r.URL.RawQuery
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(inventoryJSON))
+			if r.URL.Query().Get("page") == "0" {
+				_, _ = w.Write([]byte(inventoryJSON))
+			} else {
+				_, _ = w.Write([]byte(`{"results":[]}`))
+			}
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -98,6 +106,63 @@ func TestClient_ListSoftware_SkipsMissingComputerID(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ComputerID != "keep" {
 		t.Fatalf("got %+v; want only keep", got)
+	}
+}
+
+// TestClient_ListSoftware_WalksAllPages drives the page cursor across TWO data
+// pages plus the totalCount terminator and asserts the result is the UNION of
+// both pages (P0-590). Page 0 and page 1 each carry a distinct computer; the
+// loop must stop once gathered >= totalCount.
+func TestClient_ListSoftware_WalksAllPages(t *testing.T) {
+	t.Parallel()
+	page0 := `{"totalCount":2,"results":[{"id":"501","applications":[{"name":"Google Chrome","version":"125"}]}]}`
+	page1 := `{"totalCount":2,"results":[{"id":"502","applications":[{"name":"Slack","version":"4.0"}]}]}`
+
+	var pagesServed []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/oauth/token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"fake-jamf-bearer","expires_in":1200}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/computers-inventory"):
+			p := r.URL.Query().Get("page")
+			pagesServed = append(pagesServed, p)
+			w.Header().Set("Content-Type", "application/json")
+			switch p {
+			case "0":
+				_, _ = w.Write([]byte(page0))
+			case "1":
+				_, _ = w.Write([]byte(page1))
+			default:
+				t.Errorf("loop did not terminate: requested page %q past totalCount", p)
+				_, _ = w.Write([]byte(`{"totalCount":2,"results":[]}`))
+			}
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.Client(), srv.URL, "c", "fake-secret")
+	got, err := c.ListSoftware(context.Background())
+	if err != nil {
+		t.Fatalf("ListSoftware: %v", err)
+	}
+	// Both pages must be emitted (union), and the loop must terminate after
+	// exactly the two data pages.
+	if len(got) != 2 {
+		t.Fatalf("device count = %d; want 2 (union of both pages): %+v", len(got), got)
+	}
+	ids := map[string]bool{}
+	for _, d := range got {
+		ids[d.ComputerID] = true
+	}
+	if !ids["501"] || !ids["502"] {
+		t.Errorf("missing a page's device: got ids %v; want 501 + 502", ids)
+	}
+	if len(pagesServed) != 2 {
+		t.Errorf("served %d pages (%v); want exactly 2 (loop must terminate on totalCount)", len(pagesServed), pagesServed)
 	}
 }
 
