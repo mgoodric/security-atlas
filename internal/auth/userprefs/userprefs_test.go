@@ -48,7 +48,9 @@ func TestIsAllowedChannel(t *testing.T) {
 			t.Errorf("isAllowedChannel(%q) = false; want true", ch)
 		}
 	}
-	for _, bad := range []string{"", "IN_APP", "sms", "push", "webhook"} {
+	// Slice 583 added `slack` + `webhook` to the whitelist (accepted by the
+	// loop above). `sms`/`push` remain unsupported; case-variants are rejected.
+	for _, bad := range []string{"", "IN_APP", "WEBHOOK", "sms", "push"} {
 		if isAllowedChannel(bad) {
 			t.Errorf("isAllowedChannel(%q) = true; want false", bad)
 		}

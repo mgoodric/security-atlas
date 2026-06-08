@@ -19,7 +19,7 @@ import (
 
 func TestEmailChannelHandler_IdentityRejection(t *testing.T) {
 	t.Parallel()
-	h := NewEmailChannel(nil) // nil *email.Channel; deny branches return first
+	h := NewEmailChannel(nil, false) // nil *email.Channel; deny branches return first
 
 	t.Run("GET no auth context → 401", func(t *testing.T) {
 		t.Parallel()

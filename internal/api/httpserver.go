@@ -625,7 +625,11 @@ func (s *Server) httpHandler() http.Handler {
 	// public base URL for the digest deep-link.
 	emailCfg := email.ConfigFromEnv()
 	emailCh := email.NewChannel(s.dbPool, email.NewSMTPProvider(emailCfg), emailCfg.BaseURL)
-	meEmailH := meapi.NewEmailChannel(emailCh)
+	// Slice 585: surface whether the OPERATOR has configured the SMTP target
+	// (env present) so the settings toggle can render disabled + "not
+	// configured by your administrator". Config.Enabled() is a presence check
+	// only — the SMTP host/credentials never reach the wire (P0-585).
+	meEmailH := meapi.NewEmailChannel(emailCh, emailCfg.Enabled())
 	root.Get("/v1/me/email-channel", meEmailH.Get)
 	root.Put("/v1/me/email-channel", meEmailH.Put)
 	// Slice 543: GET/PUT /v1/me/slack-channel + /v1/me/webhook-channel —
@@ -636,7 +640,10 @@ func (s *Server) httpHandler() http.Handler {
 	// (P0-543-4) — the toggle just records the per-user opt-in.
 	slackCfg := slack.ConfigFromEnv()
 	slackCh := slack.NewChannel(s.dbPool, slack.NewHTTPTransport(slackCfg), slackCfg.BaseURL)
-	meSlackH := meapi.NewChannelOptIn("slack", slackCh.GetOptIn, slackCh.SetOptIn)
+	// Slice 585: slackCfg.Enabled() reports whether the operator-configured
+	// Slack webhook URL env is present (presence only — the URL/token never
+	// reaches the wire, P0-585 / P0-543-2). Drives the disabled toggle state.
+	meSlackH := meapi.NewChannelOptIn("slack", slackCfg.Enabled(), slackCh.GetOptIn, slackCh.SetOptIn)
 	root.Get("/v1/me/slack-channel", meSlackH.Get)
 	root.Put("/v1/me/slack-channel", meSlackH.Put)
 	webhookCfg := webhook.ConfigFromEnv()
@@ -651,7 +658,14 @@ func (s *Server) httpHandler() http.Handler {
 		webhookTransport, _ = webhook.NewHTTPTransport(webhook.Config{}, webhook.SSRFPolicy())
 	}
 	webhookCh := webhook.NewChannel(s.dbPool, webhookTransport, webhookCfg.BaseURL)
-	meWebhookH := meapi.NewChannelOptIn("webhook", webhookCh.GetOptIn, webhookCh.SetOptIn)
+	// Slice 585: the webhook is "configured" only when the env URL is present
+	// AND it passed SSRF validation at construction. A present-but-invalid
+	// (internal-target) URL fell back to an inert transport above, so it is
+	// NOT usable — report configured=false so the toggle stays disabled.
+	// Enabled() is a presence check only; the URL never reaches the wire
+	// (P0-585 / P0-543-2).
+	webhookConfigured := webhookCfg.Enabled() && webhookErr == nil
+	meWebhookH := meapi.NewChannelOptIn("webhook", webhookConfigured, webhookCh.GetOptIn, webhookCh.SetOptIn)
 	root.Get("/v1/me/webhook-channel", meWebhookH.Get)
 	root.Put("/v1/me/webhook-channel", meWebhookH.Put)
 	root.Get("/v1/me/sessions", meSessionsH.ListSessions)

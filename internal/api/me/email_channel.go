@@ -23,16 +23,24 @@ import (
 // the slice-445 email.Channel.
 type EmailChannelHandler struct {
 	ch *email.Channel
+	// configured reports whether the OPERATOR has configured the SMTP
+	// delivery target via env (slice 585). Captured at construction from the
+	// email Config.Enabled() presence check; a boolean PRESENCE signal only,
+	// never the SMTP host/credentials (P0-585 / threat-model S).
+	configured bool
 }
 
-// NewEmailChannel constructs an EmailChannelHandler.
-func NewEmailChannel(ch *email.Channel) *EmailChannelHandler {
-	return &EmailChannelHandler{ch: ch}
+// NewEmailChannel constructs an EmailChannelHandler. configured is the
+// operator-config-presence boolean (see field doc).
+func NewEmailChannel(ch *email.Channel, configured bool) *EmailChannelHandler {
+	return &EmailChannelHandler{ch: ch, configured: configured}
 }
 
-// emailChannelWire is the JSON shape for both GET and PUT.
+// emailChannelWire is the JSON shape for both GET and PUT. Slice 585 adds
+// `configured` (operator-config presence; never the SMTP secret).
 type emailChannelWire struct {
-	Enabled bool `json:"enabled"`
+	Enabled    bool `json:"enabled"`
+	Configured bool `json:"configured"`
 }
 
 // Get handles GET /v1/me/email-channel. Returns the caller's master opt-in
@@ -52,7 +60,7 @@ func (h *EmailChannelHandler) Get(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "get email-channel opt-in", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, emailChannelWire{Enabled: enabled})
+	httpresp.WriteJSON(w, http.StatusOK, emailChannelWire{Enabled: enabled, Configured: h.configured})
 }
 
 // Put handles PUT /v1/me/email-channel. Sets the caller's master opt-in.
@@ -82,7 +90,7 @@ func (h *EmailChannelHandler) Put(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "set email-channel opt-in", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, emailChannelWire{Enabled: in.Enabled})
+	httpresp.WriteJSON(w, http.StatusOK, emailChannelWire{Enabled: in.Enabled, Configured: h.configured})
 }
 
 // parseCredIDs resolves the (tenant, user) UUIDs from the credential,

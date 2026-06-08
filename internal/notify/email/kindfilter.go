@@ -1,100 +1,67 @@
 package email
 
-// Per-notification-kind email filtering (slice 542).
+import "github.com/mgoodric/security-atlas/internal/notify"
+
+// Per-notification-kind email filtering (slice 542; generalized in slice 583).
 //
 // Slice 445 shipped a MASTER email opt-in (one toggle: email delivery on/off
-// for the whole user) and deferred per-kind filtering (445 D7). This file
-// layers the slice-108 per-event `email` channel ON TOP of that master gate:
+// for the whole user) and deferred per-kind filtering (445 D7). Slice 542
+// layered the slice-108 per-event `email` channel ON TOP of that master gate:
 // the digest includes a notification kind only if (master opt-in is ON) AND
 // (that kind's `email` channel pref is enabled).
 //
-// Composition semantics (slice 542 JUDGMENT): master AND per-kind. The master
-// switch is the OUTER gate (default off, enforced in DeliverDigest BEFORE this
-// filter runs); the per-kind prefs are the INNER filter. A user must opt in
-// once at the master level before any per-kind pref matters. This is the safe
-// composition: it cannot start delivering email to a user who never opted in.
+// Slice 583 lifted the implementation into the shared internal/notify package
+// (notify.EnabledForKind / notify.FilterCountsByChannelPref /
+// notify.KindToEvent) so all three channels (email, slack, webhook) share ONE
+// filter. The functions below are thin email-channel-specialized delegates that
+// keep email's call sites byte-identical (slice 543 D1) while routing through
+// the single source of truth.
 //
-// Default-on-missing-row (slice 542 JUDGMENT, inheriting slice-108 D3): when a
-// user has NO preference row for a kind's mapped event, the kind is INCLUDED
-// (the master opt-in governs). This is backward-compatible: an opted-in user
-// keeps receiving every kind they get today unless they set an explicit
-// per-kind `email=false` opt-out. The filter never SILENTLY suppresses a kind.
-
-// kindToEvent maps a notification `type` constant (as it appears on the
-// notifications row and in BuildDigest's TypeCounts) to the slice-108
-// `user_notification_preferences.event` key. The two taxonomies are NOT 1:1:
+// Composition semantics (slice 542 JUDGMENT, unchanged): master AND per-kind.
+// The master switch is the OUTER gate (default off, enforced in DeliverDigest
+// BEFORE this filter runs); the per-kind prefs are the INNER filter.
 //
-//   - The names differ by punctuation: notification `control.drift` (dot) maps
-//     to slice-108 event `control_drift` (underscore). Slice 566 adds the same
-//     dot→underscore normalization for `audit_note.reply` →
-//     `audit_note_reply` and `evidence.staleness` → `evidence_staleness`.
-//   - A kind that has NO slice-108 event row (absent from this map) is
-//     UNMAPPED and defaults to included-when-master-on. Slice 566 closed the
-//     last two such kinds (`audit_note.reply`, `evidence.staleness`); a future
-//     slice that adds a slice-108 event row for a new kind MUST also add the
-//     mapping here, mirroring the schema-CHECK-and-whitelist-move-together
-//     discipline from slice 108.
-//
-// The slice-108 event whitelist (internal/auth/userprefs.Events) is:
-//
-//	audit_period_assignment, policy_ack_due, risk_review_overdue, control_drift,
-//	audit_note_reply, evidence_staleness
-var kindToEvent = map[string]string{
-	"audit_period_assignment": "audit_period_assignment",
-	"policy_ack_due":          "policy_ack_due",
-	"risk_review_overdue":     "risk_review_overdue",
-	"control.drift":           "control_drift",
-	// Slice 566: previously UNMAPPED (default-on, no opt-out surface); now
-	// per-kind controllable via the slice-108 event whitelist. Default-on-
-	// missing-row still holds — an opted-in user keeps receiving both kinds
-	// until they set an explicit per-kind email=false (no silent suppression).
-	"audit_note.reply":   "audit_note_reply",
-	"evidence.staleness": "evidence_staleness",
-}
+// Default-on-missing-row (slice 542 JUDGMENT, inheriting slice-108 D3): a kind
+// with NO `email`-channel pref row is INCLUDED. Backward-compatible; the filter
+// never SILENTLY suppresses a kind.
 
 // emailEnabledForKind decides whether a single notification kind should appear
-// in the digest, GIVEN the master opt-in is already ON (the caller has gated on
-// that). It consults the per-event `email` channel preference:
-//
-//   - kind is UNMAPPED (no slice-108 event)        -> true  (default-on)
-//   - mapped event has NO row for the email channel -> true  (default-on, 108 D3)
-//   - mapped event's email channel pref is true     -> true  (explicit opt-in)
-//   - mapped event's email channel pref is false    -> false (explicit opt-out)
-//
-// emailChannelByEvent is event -> (email-channel enabled?), with presence
-// indicating an explicit row exists. An absent event means default-on.
+// in the digest, GIVEN the master opt-in is already ON. It delegates to the
+// shared notify.EnabledForKind (slice 583); behavior is identical to the
+// slice-542 implementation it replaced.
 func emailEnabledForKind(kind string, emailChannelByEvent map[string]bool) bool {
-	event, mapped := kindToEvent[kind]
-	if !mapped {
-		// No per-kind opt-out surface for this kind yet: master governs.
-		return true
-	}
-	enabled, hasRow := emailChannelByEvent[event]
-	if !hasRow {
-		// Default-on-missing-row (slice-108 D3): master governs.
-		return true
-	}
-	return enabled
+	return notify.EnabledForKind(kind, emailChannelByEvent)
 }
 
 // filterCountsByEmailPref drops, from the in-memory type-count map, every kind
-// whose per-kind `email` preference is disabled. It returns the filtered counts
-// map and the recomputed total. It NEVER mutates recipient resolution or tenant
-// scoping (P0-542-2): it operates purely on the already-RLS-scoped count map
-// (threat-model I mitigation). The master opt-in must already be confirmed ON
-// by the caller (P0-542-1) — this function only narrows WHICH kinds appear.
+// whose per-kind `email` preference is disabled, returning the filtered map and
+// recomputed total. Delegates to the shared notify.FilterCountsByChannelPref
+// (slice 583). It NEVER mutates recipient resolution or tenant scoping
+// (P0-542-2): it operates purely on the already-RLS-scoped count map. The
+// master opt-in must already be confirmed ON by the caller (P0-542-1).
 func filterCountsByEmailPref(counts map[string]int, emailChannelByEvent map[string]bool) (map[string]int, int) {
-	out := make(map[string]int, len(counts))
-	total := 0
-	for kind, n := range counts {
-		if n <= 0 {
-			continue
+	return notify.FilterCountsByChannelPref(counts, emailChannelByEvent)
+}
+
+// kindToEvent is retained as a package-local view over the shared
+// notify.KindToEvent map so the existing slice-542 unit test
+// (TestKindToEventMapping) keeps pinning the taxonomy. It is rebuilt from the
+// shared source of truth, so it cannot drift from the canonical map.
+var kindToEvent = buildKindToEvent()
+
+func buildKindToEvent() map[string]string {
+	out := make(map[string]string)
+	for _, kind := range []string{
+		"audit_period_assignment",
+		"policy_ack_due",
+		"risk_review_overdue",
+		"control.drift",
+		"audit_note.reply",
+		"evidence.staleness",
+	} {
+		if ev, ok := notify.KindToEvent(kind); ok {
+			out[kind] = ev
 		}
-		if !emailEnabledForKind(kind, emailChannelByEvent) {
-			continue // muted: per-kind email pref is explicitly off
-		}
-		out[kind] = n
-		total += n
 	}
-	return out, total
+	return out
 }
