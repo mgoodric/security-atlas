@@ -90,24 +90,29 @@ func TestNewRootCmd_HasSubcommands(t *testing.T) {
 	}
 }
 
-func TestSupportedKinds_AreThreePagerDutyKinds(t *testing.T) {
-	if len(SupportedKinds) != 3 {
-		t.Fatalf("SupportedKinds = %v; want 3", SupportedKinds)
+func TestSupportedKinds_AreFourPagerDutyKinds(t *testing.T) {
+	if len(SupportedKinds) != 4 {
+		t.Fatalf("SupportedKinds = %v; want 4", SupportedKinds)
 	}
 	for _, k := range SupportedKinds {
 		if !strings.HasPrefix(k, "pagerduty.") {
 			t.Errorf("kind %q not a pagerduty kind", k)
 		}
 	}
-	// Slice 538 adds the postmortem-summary kind.
-	var hasPostmortem bool
+	// Slice 538 adds the postmortem-summary kind; slice 539 adds response-metrics.
+	want := map[string]bool{
+		"pagerduty.postmortem_summary.v1": false,
+		"pagerduty.response_metrics.v1":   false,
+	}
 	for _, k := range SupportedKinds {
-		if k == "pagerduty.postmortem_summary.v1" {
-			hasPostmortem = true
+		if _, ok := want[k]; ok {
+			want[k] = true
 		}
 	}
-	if !hasPostmortem {
-		t.Errorf("SupportedKinds missing pagerduty.postmortem_summary.v1: %v", SupportedKinds)
+	for k, seen := range want {
+		if !seen {
+			t.Errorf("SupportedKinds missing %s: %v", k, SupportedKinds)
+		}
 	}
 }
 

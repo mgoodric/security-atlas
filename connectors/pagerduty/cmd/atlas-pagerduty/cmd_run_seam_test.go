@@ -16,6 +16,7 @@ import (
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/incidents"
+	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/metrics"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/oncall"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/postmortems"
 )
@@ -40,6 +41,7 @@ type seamOverrides struct {
 	oncall     func(ctx context.Context, api oncall.API) ([]oncall.Policy, error)
 	incidents  func(ctx context.Context, api incidents.API, since, until time.Time) ([]incidents.Incident, error)
 	postmortem func(ctx context.Context, api postmortems.API, since, until time.Time) ([]postmortems.Postmortem, error)
+	metrics    func(ctx context.Context, api metrics.API, since, until time.Time) ([]metrics.ServiceMetrics, error)
 	newClient  func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error)
 }
 
@@ -47,6 +49,12 @@ type seamOverrides struct {
 // the postmortem path: it returns nothing so the real collector is never
 // reached. Tests that exercise the postmortem path override it.
 func noPostmortems(_ context.Context, _ postmortems.API, _, _ time.Time) ([]postmortems.Postmortem, error) {
+	return nil, nil
+}
+
+// noMetrics is the default metrics seam for tests that do not assert on the
+// metrics path: it returns nothing so the real collector is never reached.
+func noMetrics(_ context.Context, _ metrics.API, _, _ time.Time) ([]metrics.ServiceMetrics, error) {
 	return nil, nil
 }
 
@@ -71,6 +79,14 @@ func installSeams(t *testing.T, o seamOverrides) {
 		postmortemCollect = noPostmortems
 	}
 	t.Cleanup(func() { postmortemCollect = prevPM })
+	// Same for the metrics seam.
+	prevM := metricsCollect
+	if o.metrics != nil {
+		metricsCollect = o.metrics
+	} else {
+		metricsCollect = noMetrics
+	}
+	t.Cleanup(func() { metricsCollect = prevM })
 	if o.newClient != nil {
 		prev := newSDKClient
 		newSDKClient = o.newClient
@@ -84,7 +100,13 @@ func okEnv(t *testing.T) {
 }
 
 func okFlags() runFlags {
-	return runFlags{environment: "prod", service: "pagerduty", onCallControl: "scf:IRO-04", incidentControl: "scf:IRO-02", postmortemControl: "scf:IRO-13", lookbackDays: 90}
+	return runFlags{environment: "prod", service: "pagerduty", onCallControl: "scf:IRO-04", incidentControl: "scf:IRO-02", postmortemControl: "scf:IRO-13", metricsControl: "scf:IRO-02", lookbackDays: 90}
+}
+
+func oneServiceMetric() []metrics.ServiceMetrics {
+	return []metrics.ServiceMetrics{
+		{ServiceID: "SVCA", IncidentCount: 3, AcknowledgedCount: 3, ResolvedCount: 2, MTTASecondsMean: 90, MTTRSecondsMean: 600},
+	}
 }
 
 func onePostmortem() []postmortems.Postmortem {
@@ -122,13 +144,16 @@ func TestDoRun_PushSuccess(t *testing.T) {
 		postmortem: func(_ context.Context, _ postmortems.API, _, _ time.Time) ([]postmortems.Postmortem, error) {
 			return onePostmortem(), nil
 		},
+		metrics: func(_ context.Context, _ metrics.API, _, _ time.Time) ([]metrics.ServiceMetrics, error) {
+			return oneServiceMetric(), nil
+		},
 		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
 	})
 	if err := doRun(context.Background(), okFlags()); err != nil {
 		t.Fatalf("doRun: %v", err)
 	}
-	if fake.pushed != 4 {
-		t.Errorf("pushed = %d; want 4 (2 policies + 1 incident + 1 postmortem)", fake.pushed)
+	if fake.pushed != 5 {
+		t.Errorf("pushed = %d; want 5 (2 policies + 1 incident + 1 postmortem + 1 service metric)", fake.pushed)
 	}
 	if !fake.closeCalled {
 		t.Error("Close not called")
@@ -247,6 +272,53 @@ func TestDoRun_PostmortemPushError(t *testing.T) {
 	}
 }
 
+func TestDoRun_MetricsCollectError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("metrics 500")
+	installSeams(t, seamOverrides{
+		oncall: func(_ context.Context, _ oncall.API) ([]oncall.Policy, error) { return nil, nil },
+		incidents: func(_ context.Context, _ incidents.API, _, _ time.Time) ([]incidents.Incident, error) {
+			return nil, nil
+		},
+		metrics: func(_ context.Context, _ metrics.API, _, _ time.Time) ([]metrics.ServiceMetrics, error) {
+			return nil, sentinel
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	err := doRun(context.Background(), okFlags())
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "pagerduty metrics collect: ") {
+		t.Fatalf("want wrapped metrics collect error; got %v", err)
+	}
+}
+
+func TestDoRun_MetricsPushError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("push rejected")
+	fake := &fakeSDKClient{pushErr: sentinel}
+	installSeams(t, seamOverrides{
+		oncall: func(_ context.Context, _ oncall.API) ([]oncall.Policy, error) { return nil, nil },
+		incidents: func(_ context.Context, _ incidents.API, _, _ time.Time) ([]incidents.Incident, error) {
+			return nil, nil
+		},
+		metrics: func(_ context.Context, _ metrics.API, _, _ time.Time) ([]metrics.ServiceMetrics, error) {
+			return oneServiceMetric(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	err := doRun(context.Background(), okFlags())
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "push metrics ") {
+		t.Fatalf("want wrapped metrics push error; got %v", err)
+	}
+}
+
 func TestDoRun_PushError(t *testing.T) {
 	resetCommon(t)
 	common.endpoint = "127.0.0.1:1"
@@ -308,5 +380,8 @@ func TestNewAPIConstructors(t *testing.T) {
 	}
 	if newPostmortemsAPI(nil, "https://api.pagerduty.com", "test-pagerduty-token") == nil {
 		t.Error("newPostmortemsAPI returned nil")
+	}
+	if newMetricsAPI(nil, "https://api.pagerduty.com", "test-pagerduty-token") == nil {
+		t.Error("newMetricsAPI returned nil")
 	}
 }
