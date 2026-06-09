@@ -100,10 +100,17 @@ func TestLoad_CSFFullSubcategoryCoverage(t *testing.T) {
 	if n := len(cw.Requirements); n != wantSubcategories {
 		t.Fatalf("CSF Subcategories = %d; want full coverage = %d", n, wantSubcategories)
 	}
-	// One STRM edge per Subcategory (1:1 — no Subcategory is left unmapped and
-	// none is mapped twice).
-	if n := len(cw.Mappings); n != wantSubcategories {
-		t.Fatalf("CSF mappings = %d; want one edge per Subcategory = %d", n, wantSubcategories)
+	// Every Subcategory carries at least one STRM edge, and a small set of
+	// threat-related Subcategories carry a SECOND edge to a finer SCF
+	// Threat-Management anchor (slice 646). The base is one edge per
+	// Subcategory (1:1); the THR finer-crosswalk pass adds extra anchors to
+	// the requirements that have a genuine STRM relationship to THR-01/03/09/10
+	// (invariant #1 — N anchors per requirement). The exact total is asserted
+	// so a row added or dropped fails loudly.
+	const wantTHRExtraEdges = 4 // ID.RA-02->THR-03, ID.RA-03->THR-09, ID.RA-03->THR-10, DE.AE-07->THR-01 (slice 646)
+	if n := len(cw.Mappings); n != wantSubcategories+wantTHRExtraEdges {
+		t.Fatalf("CSF mappings = %d; want %d (one base edge per Subcategory + %d finer-THR edges)",
+			n, wantSubcategories+wantTHRExtraEdges, wantTHRExtraEdges)
 	}
 
 	// Per-Function distribution (the CSF 2.0 Category structure).
@@ -133,13 +140,14 @@ func TestLoad_CSFFullSubcategoryCoverage(t *testing.T) {
 		if _, ok := reqSet[m.RequirementCode]; !ok {
 			t.Fatalf("mapping references undeclared Subcategory %q", m.RequirementCode)
 		}
-		if _, dup := mapped[m.RequirementCode]; dup {
-			t.Fatalf("Subcategory %q mapped more than once", m.RequirementCode)
-		}
+		// A Subcategory MAY now be mapped more than once (invariant #1 — N
+		// anchors per requirement); the finer-THR pass (slice 646) adds second
+		// anchors to ID.RA-02/ID.RA-03/DE.AE-07. We assert full coverage (every
+		// Subcategory mapped at least once) rather than exactly-once.
 		mapped[m.RequirementCode] = struct{}{}
 	}
 	if len(mapped) != len(reqSet) {
-		t.Fatalf("mapped Subcategories = %d; want every one of %d mapped", len(mapped), len(reqSet))
+		t.Fatalf("mapped Subcategories = %d; want every one of %d mapped at least once", len(mapped), len(reqSet))
 	}
 }
 
