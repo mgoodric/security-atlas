@@ -43,14 +43,16 @@ func TestClient_ListConfigProfiles_DecodesMetadataOnly_NoSecrets(t *testing.T) {
 	  "results": [
 	    {
 	      "id": "501",
-	      "general": {"name": "ENG-MBP-014"},
+	      "general": {"name": "ENG-MBP-014", "supervised": true, "managed": true},
 	      "configurationProfiles": [
 	        {"displayName": "Passcode Policy", "profileIdentifier": "com.acme.passcode",
 	         "uuid": "AAAA-BBBB", "lastInstalled": "2026-01-02T00:00:00Z",
 	         "payloadContent": "<data>c2VjcmV0</data>", "wifiPassword": "hunter2",
 	         "certificatePrivateKey": "FAKE-PRIVKEY-MATERIAL-FIXTURE"},
 	        {"displayName": "FileVault Configuration", "profileIdentifier": "com.acme.fv2"}
-	      ]
+	      ],
+	      "diskEncryption": {"fileVault2Status": "ENCRYPTED"},
+	      "security": {"gatekeeperStatus": "App Store and identified developers", "screenLockGracePeriodEnforced": "ALWAYS"}
 	    }
 	  ]
 	}`
@@ -68,6 +70,8 @@ func TestClient_ListConfigProfiles_DecodesMetadataOnly_NoSecrets(t *testing.T) {
 	if !strings.Contains(log.rawQuery, "CONFIGURATION_PROFILES") {
 		t.Errorf("query missing CONFIGURATION_PROFILES section: %q", log.rawQuery)
 	}
+	// The enrichment read also requests the posture sections (same read-only role,
+	// no new scope) but NEVER the owner-contact / GPS / APPLICATIONS sections.
 	for _, banned := range []string{"USER_AND_LOCATION", "LOCATION", "APPLICATIONS"} {
 		if strings.Contains(log.rawQuery, banned) {
 			t.Errorf("query requested %q section (P0-556): %q", banned, log.rawQuery)
@@ -77,18 +81,97 @@ func TestClient_ListConfigProfiles_DecodesMetadataOnly_NoSecrets(t *testing.T) {
 		t.Fatalf("device len = %d; want 1", len(got))
 	}
 	profiles := got[0].Profiles
-	if len(profiles) != 2 {
-		t.Fatalf("profiles len = %d; want 2", len(profiles))
+	// Two literal profiles + one synthetic "Enforced Configuration Summary" profile.
+	if len(profiles) != 3 {
+		t.Fatalf("profiles len = %d; want 3 (2 literal + 1 enforced summary)", len(profiles))
 	}
 	if profiles[0].Name != "Passcode Policy" || profiles[0].Identifier != "com.acme.passcode" ||
 		profiles[0].UUID != "AAAA-BBBB" || profiles[0].LastModified != "2026-01-02T00:00:00Z" {
 		t.Errorf("profile decode wrong: %+v", profiles[0])
 	}
+	// Literal profiles carry no settings (CONFIGURATION_PROFILES is metadata-only).
+	if len(profiles[0].Settings) != 0 {
+		t.Errorf("literal profile settings should be empty (metadata-only): %+v", profiles[0].Settings)
+	}
+	// The synthetic summary profile carries the enforced hardening facts.
+	summary := profiles[len(profiles)-1]
+	if summary.Name != enforcedSummaryProfileName {
+		t.Fatalf("last profile = %q; want %q", summary.Name, enforcedSummaryProfileName)
+	}
+	want := map[string]string{
+		"disk_encryption_enforced": "true",
+		"gatekeeper_enabled":       "true",
+		"screen_lock_enforced":     "true",
+		"device_supervised":        "true",
+		"device_managed":           "true",
+	}
+	if len(summary.Settings) != len(want) {
+		t.Fatalf("summary settings = %+v; want %v", summary.Settings, want)
+	}
+	for _, s := range summary.Settings {
+		if want[s.Key] != s.Value {
+			t.Errorf("summary setting %q = %q; want %q", s.Key, s.Value, want[s.Key])
+		}
+	}
 	// RawConfigProfile has no field for payloadContent / wifiPassword /
 	// certificatePrivateKey, so they could not have been decoded — the struct shape
-	// is the first guard. Settings is empty at v0 for Jamf (metadata-only section).
-	if len(profiles[0].Settings) != 0 {
-		t.Errorf("Jamf v0 settings should be empty (metadata-only): %+v", profiles[0].Settings)
+	// is the first guard.
+}
+
+// TestClient_ListConfigProfiles_NoSecretValueLeaks is the load-bearing
+// secret-drop guard at the Jamf client: even with a payload that places fake
+// secret values right next to the posture fields, no RawConfigSetting value ever
+// equals a secret marker — the enrichment derives ONLY booleans from
+// enforced-state fields, never copies a payload value.
+func TestClient_ListConfigProfiles_NoSecretValueLeaks(t *testing.T) {
+	t.Parallel()
+	inv := `{
+	  "results": [
+	    {
+	      "id": "777",
+	      "general": {"supervised": false, "managed": true},
+	      "configurationProfiles": [
+	        {"displayName": "WiFi-Corp", "profileIdentifier": "com.acme.wifi",
+	         "payloadContent": "<data>FAKE-SECRET-BLOB</data>", "wifiPassword": "FAKE-PSK-FIXTURE",
+	         "vpnSharedSecret": "FAKE-SHARED-SECRET", "certificatePrivateKey": "FAKE-PRIVKEY"}
+	      ],
+	      "diskEncryption": {"fileVault2Status": "ENCRYPTED"},
+	      "security": {"gatekeeperStatus": "Anywhere", "screenLockGracePeriodEnforced": "NOT_ENFORCED"}
+	    }
+	  ]
+	}`
+	srv, _ := jamfConfigProfileTestServer(t, inv)
+	c := NewClient(srv.Client(), srv.URL, "c", "fake-secret")
+	got, err := c.ListConfigProfiles(context.Background())
+	if err != nil {
+		t.Fatalf("ListConfigProfiles: %v", err)
+	}
+	secrets := []string{"FAKE-SECRET-BLOB", "FAKE-PSK-FIXTURE", "FAKE-SHARED-SECRET", "FAKE-PRIVKEY"}
+	for _, dev := range got {
+		for _, p := range dev.Profiles {
+			for _, s := range p.Settings {
+				for _, secret := range secrets {
+					if strings.Contains(s.Value, secret) {
+						t.Fatalf("secret value %q leaked into setting %q", secret, s.Key)
+					}
+				}
+			}
+		}
+	}
+	// The enforced summary reflects the disabled state honestly (Gatekeeper off,
+	// screen-lock not enforced, not supervised).
+	summary := got[0].Profiles[len(got[0].Profiles)-1]
+	want := map[string]string{
+		"disk_encryption_enforced": "true",
+		"gatekeeper_enabled":       "false",
+		"screen_lock_enforced":     "false",
+		"device_supervised":        "false",
+		"device_managed":           "true",
+	}
+	for _, s := range summary.Settings {
+		if want[s.Key] != s.Value {
+			t.Errorf("summary setting %q = %q; want %q", s.Key, s.Value, want[s.Key])
+		}
 	}
 }
 

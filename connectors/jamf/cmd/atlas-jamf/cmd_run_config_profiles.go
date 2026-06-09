@@ -38,29 +38,38 @@ func newRunConfigProfilesCmd() *cobra.Command {
 		Use:   "run-config-profiles",
 		Short: "read Jamf managed-computer configuration-profile detail and push evidence records",
 		Long: `Read Jamf managed-computer configuration-profile detail via the read-only Jamf
-Pro API (GET /api/v1/computers-inventory, GENERAL + CONFIGURATION_PROFILES
-sections only), transform to endpoint.config_profile.v1 records, and push to the
-platform.
+Pro API (GET /api/v1/computers-inventory, GENERAL + CONFIGURATION_PROFILES +
+posture sections OPERATING_SYSTEM / DISK_ENCRYPTION / SECURITY), transform to
+endpoint.config_profile.v1 records, and push to the platform.
 
 This reports WHICH configuration / compliance profiles are deployed to a managed
 computer and what compliance-relevant settings they enforce — evidence for
 configuration-management controls (SCF CFG-02 Secure Baseline Configurations /
 CFG-04 Configuration Change Control) at a finer grain than the posture verdict.
 
+Per-setting enrichment (slice 595): each device carries a synthetic "Enforced
+Configuration Summary" profile whose settings are the effective enforced
+hardening state (disk_encryption_enforced, gatekeeper_enabled,
+screen_lock_enforced, device_supervised, device_managed) derived from the
+posture inventory sections — non-secret booleans, NEVER the raw profile payload.
+
 Profile: pull. One bounded read-and-push pass per invocation; operator-scheduled
 (recommended 24h). NOT continuous monitoring.
 
 Auth: identical read-only credential to 'run' (JAMF_BASE_URL + JAMF_CLIENT_ID +
 JAMF_CLIENT_SECRET; the API client must be bound to a read-only API role). The
-secret never appears in a log line or an evidence record.
+posture sections are covered by the SAME read-only "Read Computers" role the
+posture 'run' uses — NO new scope. The secret never appears in a log line or an
+evidence record.
 
 SECRET-REDACTION BOUNDARY (P0-556): configuration profiles routinely embed
 secrets — Wi-Fi PSKs, VPN shared secrets, certificate private keys, API tokens,
 SCEP challenges, and raw payload-content blobs. NONE of these ever enters an
-evidence record. The read requests profile METADATA only (the Jamf
-CONFIGURATION_PROFILES inventory section does not carry the raw payload blob),
-and the per-profile settings field is restricted to a compliance-relevant
-allow-list whose values are non-secret summaries.`,
+evidence record. No requested section carries the raw payload blob (the
+CONFIGURATION_PROFILES section is metadata-only; the posture sections report
+effective enforced-state summaries only), and the per-profile settings field is
+restricted to a compliance-relevant allow-list whose values are non-secret
+summaries.`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		PreRunE: func(_ *cobra.Command, _ []string) error {

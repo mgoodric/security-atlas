@@ -139,21 +139,26 @@ pagination — only the page loop was added.
 ## Config-profile secret-redaction boundary (slice 556 — load-bearing)
 
 The `run-config-profiles` subcommand reads configuration-profile DETAIL (the
-`deviceConfigurationStates` expansion) for configuration-management evidence (SCF
+`deviceConfigurationStates` expansion, plus the device `$select` of
+`isEncrypted` + `complianceState`) for configuration-management evidence (SCF
 `CFG-02` / `CFG-04`), using the SAME read-only
 `DeviceManagementManagedDevices.Read.All` permission. Each profile carries the
 **name** + **identifier** + **type** + assigned **scope** + **uuid** +
-**last-modified** + a bounded list of compliance-relevant **settings**. It NEVER
+**last-modified**; per-setting enrichment (slice 595) adds each profile's
+allow-listed `profile_assignment_state` (compliant / nonCompliant / conflict /
+error) and a synthetic **Enforced Configuration Summary** profile whose `settings`
+are the device-level enforced facts (`disk_encryption_enforced` from
+`isEncrypted`, `device_compliant` from `complianceState`) — non-secret summaries,
+NEVER the raw configuration payload. The `isEncrypted` + `complianceState`
+properties are covered by that SAME read-only permission — no new scope. It NEVER
 collects the secrets profiles routinely embed — Wi-Fi PSKs, VPN shared secrets,
 certificate private keys, API tokens, SCEP challenges, or raw payload blobs.
-Enforcement is structural at three layers: the read requests profile ASSIGNMENT
-METADATA only (`$expand=deviceConfigurationStates($select=id,displayName,state)`,
-never the raw setting payload, never `deviceName` / `userPrincipalName`); the
-`RawConfigSetting` struct has no field for a credential — a leak would be a
-compile error; and the settings allow-list (`cfgprofile.AllowedSettingKeys`) plus
-a credential deny-list drop any secret-bearing key at both the normalizer and the
-record builder. v0 emits per-profile metadata only; per-setting enrichment
-(through the same allow-list) is follow-on slice 595.
+Enforcement is structural at three layers: neither the device `$select` nor the
+`deviceConfigurationStates` expansion carries the raw setting payload (never
+`deviceName` / `userPrincipalName`); the `RawConfigSetting` struct has no field
+for a credential — a leak would be a compile error; and the settings allow-list
+(`cfgprofile.AllowedSettingKeys`) plus a credential deny-list drop any
+secret-bearing key at both the normalizer and the record builder.
 
 ## Scope minimums
 

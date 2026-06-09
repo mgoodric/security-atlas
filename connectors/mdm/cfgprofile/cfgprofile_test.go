@@ -171,6 +171,73 @@ func TestAllowListHasNoBannedKey(t *testing.T) {
 	}
 }
 
+// TestNormalize_AllowsSlice595EnrichmentKeys asserts every per-setting key the
+// slice-595 enrichment read surfaces is on the allow-list and survives
+// normalization with its non-secret summary value intact.
+func TestNormalize_AllowsSlice595EnrichmentKeys(t *testing.T) {
+	t.Parallel()
+	keys := []RawSetting{
+		{Key: "device_compliant", Value: "true"},
+		{Key: "device_supervised", Value: "false"},
+		{Key: "device_managed", Value: "true"},
+		{Key: "profile_assignment_state", Value: "compliant"},
+		// also the pre-existing hardening keys the read populates
+		{Key: "disk_encryption_enforced", Value: "true"},
+		{Key: "gatekeeper_enabled", Value: "true"},
+		{Key: "screen_lock_enforced", Value: "true"},
+	}
+	devs := Normalize(devposture.MDMJamf, []RawDeviceProfiles{
+		{DeviceID: "d", Profiles: []RawProfile{{Name: "Enforced Summary", Settings: keys}}},
+	}, fixedNow)
+	got := devs[0].Profiles[0].Settings
+	if len(got) != len(keys) {
+		t.Fatalf("settings = %d; want %d (every enrichment key survives): %+v", len(got), len(keys), got)
+	}
+	for _, want := range keys {
+		found := false
+		for _, g := range got {
+			if g.Key == want.Key && g.Value == want.Value {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("enrichment key %q=%q did not survive normalization", want.Key, want.Value)
+		}
+	}
+}
+
+// TestNormalize_ValueSanitization_DropsSecretSiblingNextToAllowedKey is the
+// load-bearing secret-drop guard for the slice-595 enrichment: a profile payload
+// carries BOTH an allowed hardening key AND a secret-bearing sibling key (a fake
+// Wi-Fi password right next to an allowed disk-encryption flag). Only the allowed
+// key reaches settings[]; the secret key and its value are provably dropped.
+func TestNormalize_ValueSanitization_DropsSecretSiblingNextToAllowedKey(t *testing.T) {
+	t.Parallel()
+	raw := []RawDeviceProfiles{{
+		DeviceID: "d",
+		Profiles: []RawProfile{{
+			Name: "WiFi-Corp",
+			Settings: []RawSetting{
+				{Key: "disk_encryption_enforced", Value: "true"},  // allowed hardening key — survives
+				{Key: "wifi_password", Value: "FAKE-PSK-FIXTURE"}, // secret sibling — dropped
+				{Key: "wifi_ssid", Value: "CorpNet"},              // off-list (not banned) — dropped
+			},
+		}},
+	}}
+	devs := Normalize(devposture.MDMJamf, raw, fixedNow)
+	got := devs[0].Profiles[0].Settings
+	if len(got) != 1 || got[0].Key != "disk_encryption_enforced" || got[0].Value != "true" {
+		t.Fatalf("settings = %+v; want only disk_encryption_enforced=true", got)
+	}
+	// Belt-and-braces: the secret VALUE must appear nowhere in the surviving set.
+	for _, s := range got {
+		if s.Value == "FAKE-PSK-FIXTURE" {
+			t.Fatalf("secret value leaked into settings: %+v", s)
+		}
+	}
+}
+
 func TestNormalize_NilNowUsesWallClock(t *testing.T) {
 	t.Parallel()
 	before := time.Now().UTC().Truncate(time.Hour)

@@ -129,19 +129,25 @@ only the page loop was added.
 ## Config-profile secret-redaction boundary (slice 556 — load-bearing)
 
 The `run-config-profiles` subcommand reads configuration-profile DETAIL (the
-`CONFIGURATION_PROFILES` inventory section) for configuration-management evidence
-(SCF `CFG-02` / `CFG-04`). Each profile carries the **name** + **identifier** +
-**type** + assigned **scope** + **uuid** + **last-modified** + a bounded list of
-compliance-relevant **settings**. It NEVER collects the secrets profiles routinely
-embed — Wi-Fi PSKs, VPN shared secrets, certificate private keys, API tokens, SCEP
-challenges, or raw payload-content blobs. Enforcement is structural at three
-layers: the read requests profile METADATA only (the `CONFIGURATION_PROFILES`
-section carries no raw payload blob); the `RawConfigSetting` struct has no field
-for a credential — a leak would be a compile error; and the settings allow-list
-(`cfgprofile.AllowedSettingKeys`) plus a credential deny-list drop any
-secret-bearing key at both the normalizer and the record builder. v0 emits
-per-profile metadata only; per-setting enrichment (through the same allow-list) is
-follow-on slice 595.
+`CONFIGURATION_PROFILES` inventory section, plus the posture sections
+`OPERATING_SYSTEM` / `DISK_ENCRYPTION` / `SECURITY`) for configuration-management
+evidence (SCF `CFG-02` / `CFG-04`). Each literal profile carries the **name** +
+**identifier** + **type** + assigned **scope** + **uuid** + **last-modified**;
+per-setting enrichment (slice 595) adds a synthetic **Enforced Configuration
+Summary** profile whose `settings` are the device's effective enforced hardening
+state (`disk_encryption_enforced`, `gatekeeper_enabled`, `screen_lock_enforced`,
+`device_supervised`, `device_managed`) — non-secret booleans derived from the
+posture inventory fields, NEVER the raw profile payload. The posture sections are
+covered by the SAME read-only "Read Computers" role the posture `run` uses — no
+new scope. It NEVER collects the secrets profiles routinely embed — Wi-Fi PSKs,
+VPN shared secrets, certificate private keys, API tokens, SCEP challenges, or raw
+payload-content blobs. Enforcement is structural at three layers: no requested
+section carries the raw payload blob (`CONFIGURATION_PROFILES` is metadata-only,
+the posture sections are effective enforced-state summaries); the
+`RawConfigSetting` struct has no field for a credential — a leak would be a compile
+error; and the settings allow-list (`cfgprofile.AllowedSettingKeys`) plus a
+credential deny-list drop any secret-bearing key at both the normalizer and the
+record builder.
 
 ## Scope minimums
 
@@ -166,6 +172,4 @@ accuracy recheck:
 
 ## Follow-ons (out of v0 scope)
 
-- config-profile per-setting enrichment (populate `settings[]` through the same
-  allow-list, slice 595);
 - event-driven profile via MDM compliance-state-change webhooks (slice 557).
