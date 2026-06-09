@@ -150,6 +150,17 @@ func DefaultSeed() []KindVersion {
 		// on-call coverage + bounded-window incident summaries.
 		{Kind: "pagerduty.oncall_coverage.v1", Version: "1.0.0"},
 		{Kind: "pagerduty.incident_summary.v1", Version: "1.0.0"},
+		// Slice 538: PagerDuty connector postmortem / retrospective METADATA —
+		// the deliberate slice-489 over-collection follow-on (P0-489-7). Proves
+		// incidents are reviewed + corrective actions tracked (SOC 2 CC7.5; the
+		// slice-372 IR continuous-improvement loop): SCF IRO-13 Root-Cause
+		// Analysis / IRO-09 Incident Reporting. META-ONLY — existence, status,
+		// timestamps, and the corrective-action COUNT + completed/open rollup;
+		// NEVER the postmortem narrative / timeline / root-cause prose, an
+		// action-item title, customer data, or responder PII (the struct has no
+		// field that can hold it; a reflection guard fails the build if one is
+		// added).
+		{Kind: "pagerduty.postmortem_summary.v1", Version: "1.0.0"},
 		// Slice 490: MDM connectors (Jamf + Intune) — shared managed-device
 		// endpoint-posture summary evidence kind (SOC 2 CC6.7 / CC6.8, ISO A.8).
 		{Kind: "endpoint.device_posture.v1", Version: "1.0.0"},

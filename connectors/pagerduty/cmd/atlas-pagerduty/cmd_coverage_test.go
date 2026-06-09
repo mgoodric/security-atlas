@@ -90,14 +90,24 @@ func TestNewRootCmd_HasSubcommands(t *testing.T) {
 	}
 }
 
-func TestSupportedKinds_AreTwoPagerDutyKinds(t *testing.T) {
-	if len(SupportedKinds) != 2 {
-		t.Fatalf("SupportedKinds = %v; want 2", SupportedKinds)
+func TestSupportedKinds_AreThreePagerDutyKinds(t *testing.T) {
+	if len(SupportedKinds) != 3 {
+		t.Fatalf("SupportedKinds = %v; want 3", SupportedKinds)
 	}
 	for _, k := range SupportedKinds {
 		if !strings.HasPrefix(k, "pagerduty.") {
 			t.Errorf("kind %q not a pagerduty kind", k)
 		}
+	}
+	// Slice 538 adds the postmortem-summary kind.
+	var hasPostmortem bool
+	for _, k := range SupportedKinds {
+		if k == "pagerduty.postmortem_summary.v1" {
+			hasPostmortem = true
+		}
+	}
+	if !hasPostmortem {
+		t.Errorf("SupportedKinds missing pagerduty.postmortem_summary.v1: %v", SupportedKinds)
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/incidents"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/oncall"
+	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/postmortems"
 )
 
 type fakeSDKClient struct {
@@ -36,9 +37,17 @@ func (f *fakeSDKClient) Push(_ context.Context, _ *evidencev1.EvidenceRecord) (*
 func (f *fakeSDKClient) Close() error { f.closeCalled = true; return nil }
 
 type seamOverrides struct {
-	oncall    func(ctx context.Context, api oncall.API) ([]oncall.Policy, error)
-	incidents func(ctx context.Context, api incidents.API, since, until time.Time) ([]incidents.Incident, error)
-	newClient func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error)
+	oncall     func(ctx context.Context, api oncall.API) ([]oncall.Policy, error)
+	incidents  func(ctx context.Context, api incidents.API, since, until time.Time) ([]incidents.Incident, error)
+	postmortem func(ctx context.Context, api postmortems.API, since, until time.Time) ([]postmortems.Postmortem, error)
+	newClient  func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error)
+}
+
+// noPostmortems is the default postmortem seam for tests that do not assert on
+// the postmortem path: it returns nothing so the real collector is never
+// reached. Tests that exercise the postmortem path override it.
+func noPostmortems(_ context.Context, _ postmortems.API, _, _ time.Time) ([]postmortems.Postmortem, error) {
+	return nil, nil
 }
 
 func installSeams(t *testing.T, o seamOverrides) {
@@ -53,6 +62,15 @@ func installSeams(t *testing.T, o seamOverrides) {
 		incidentsCollect = o.incidents
 		t.Cleanup(func() { incidentsCollect = prev })
 	}
+	// Always pin the postmortem seam (default no-op) so a test that does not set
+	// it never accidentally hits the real collector / live API.
+	prevPM := postmortemCollect
+	if o.postmortem != nil {
+		postmortemCollect = o.postmortem
+	} else {
+		postmortemCollect = noPostmortems
+	}
+	t.Cleanup(func() { postmortemCollect = prevPM })
 	if o.newClient != nil {
 		prev := newSDKClient
 		newSDKClient = o.newClient
@@ -66,7 +84,13 @@ func okEnv(t *testing.T) {
 }
 
 func okFlags() runFlags {
-	return runFlags{environment: "prod", service: "pagerduty", onCallControl: "scf:IRO-04", incidentControl: "scf:IRO-02", lookbackDays: 90}
+	return runFlags{environment: "prod", service: "pagerduty", onCallControl: "scf:IRO-04", incidentControl: "scf:IRO-02", postmortemControl: "scf:IRO-13", lookbackDays: 90}
+}
+
+func onePostmortem() []postmortems.Postmortem {
+	return []postmortems.Postmortem{
+		{ID: "PM1", IncidentID: "INC1", Status: "published", ActionItemCount: 2, ActionItemsDone: 1, ActionItemsOpen: 1, CreatedAt: time.Now()},
+	}
 }
 
 func twoPolicies() []oncall.Policy {
@@ -95,13 +119,16 @@ func TestDoRun_PushSuccess(t *testing.T) {
 		incidents: func(_ context.Context, _ incidents.API, _, _ time.Time) ([]incidents.Incident, error) {
 			return oneIncident(), nil
 		},
+		postmortem: func(_ context.Context, _ postmortems.API, _, _ time.Time) ([]postmortems.Postmortem, error) {
+			return onePostmortem(), nil
+		},
 		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
 	})
 	if err := doRun(context.Background(), okFlags()); err != nil {
 		t.Fatalf("doRun: %v", err)
 	}
-	if fake.pushed != 3 {
-		t.Errorf("pushed = %d; want 3 (2 policies + 1 incident)", fake.pushed)
+	if fake.pushed != 4 {
+		t.Errorf("pushed = %d; want 4 (2 policies + 1 incident + 1 postmortem)", fake.pushed)
 	}
 	if !fake.closeCalled {
 		t.Error("Close not called")
@@ -173,6 +200,53 @@ func TestDoRun_IncidentsCollectError(t *testing.T) {
 	}
 }
 
+func TestDoRun_PostmortemCollectError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("502")
+	installSeams(t, seamOverrides{
+		oncall: func(_ context.Context, _ oncall.API) ([]oncall.Policy, error) { return nil, nil },
+		incidents: func(_ context.Context, _ incidents.API, _, _ time.Time) ([]incidents.Incident, error) {
+			return nil, nil
+		},
+		postmortem: func(_ context.Context, _ postmortems.API, _, _ time.Time) ([]postmortems.Postmortem, error) {
+			return nil, sentinel
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	err := doRun(context.Background(), okFlags())
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "pagerduty postmortems collect: ") {
+		t.Fatalf("want wrapped postmortems collect error; got %v", err)
+	}
+}
+
+func TestDoRun_PostmortemPushError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("push rejected")
+	fake := &fakeSDKClient{pushErr: sentinel}
+	installSeams(t, seamOverrides{
+		oncall: func(_ context.Context, _ oncall.API) ([]oncall.Policy, error) { return nil, nil },
+		incidents: func(_ context.Context, _ incidents.API, _, _ time.Time) ([]incidents.Incident, error) {
+			return nil, nil
+		},
+		postmortem: func(_ context.Context, _ postmortems.API, _, _ time.Time) ([]postmortems.Postmortem, error) {
+			return onePostmortem(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	err := doRun(context.Background(), okFlags())
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "push postmortem ") {
+		t.Fatalf("want wrapped postmortem push error; got %v", err)
+	}
+}
+
 func TestDoRun_PushError(t *testing.T) {
 	resetCommon(t)
 	common.endpoint = "127.0.0.1:1"
@@ -231,5 +305,8 @@ func TestNewAPIConstructors(t *testing.T) {
 	}
 	if newIncidentsAPI(nil, "https://api.pagerduty.com", "test-pagerduty-token") == nil {
 		t.Error("newIncidentsAPI returned nil")
+	}
+	if newPostmortemsAPI(nil, "https://api.pagerduty.com", "test-pagerduty-token") == nil {
+		t.Error("newPostmortemsAPI returned nil")
 	}
 }
