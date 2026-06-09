@@ -5,6 +5,15 @@
 
 **Last reconciled:** 2026-06-08 (batch 226 reconcile — 614 Azure Firewall rule-collection evidence + 631 CI fail-closed merge-gate MERGED. 631 directly closes the process hole that let the slice-474 integrity bug merge with shard A RED: a new `CI · merge-gate` aggregator (`if: always()`, needs all 9 required legs) fails closed when a Go PR has any leg failure/cancelled/skipped, short-circuits green on docs-only; plus a push-to-main canary (cancel-in-progress:false) for after-merge defense. Validated live: merge-gate green on the 614 Go PR AND on the 631 CI-only PR. **MAINTAINER HAND-OFF PENDING:** add `CI · merge-gate` to `.github/branch-protection.json` required-contexts + run `scripts/apply-branch-protection.sh` — until then the gate is advisory (reports, does not block). Spillover 634 (Azure Firewall rule-collection-group cursor pagination) ready.)
 
+## Claim-stake — 2026-06-08 (batch 227 · 515 + 634 in-progress)
+
+{ONE heavy non-connector + ONE tiny disjoint connector}. Disjoint trees (web/+catalog vs connectors/azure); only CHANGELOG (+ keep-both coverage-thresholds.json) shared. 515 doc-header `blocked` is STALE — deps #480 (`67c1a71f`) + #514 (`e19faf7a`) both merged; canonical row is `ready`.
+
+| Row | Transition              | Evidence                                                                                                                                                                                                                                                                                                                                                                     |
+| --- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 515 | `ready` → `in-progress` | CSF 2.0 Tier/Profile assessment workflow (maturity construct deferred by P0-480-6) — Profiles (current/target) + Tier (1-4) + gap view; new migration + routes (openapi regen) + sqlc + web + RLS isolation test (invariant #6, tenant-confidential). JUDGMENT: CSF-specific tables vs generalized maturity primitive (engineer decides + records). deps #480 + #514 merged. |
+| 634 | `ready` → `in-progress` | Azure Firewall rule-collection-group cursor pagination — follow ARM `nextLink` on firewallPolicies list + per-policy rule-collection-group reads; extends `connectors/azure/internal/firewall`. parent #614 merged.                                                                                                                                                          |
+
 ## Reconcile — 2026-06-08 (batch 226 · 614 + 631 merged)
 
 Both merged. 631 (#1163, `7fee2bd2`) → 614 (#1164, `1706ccbe`); claim-stake #1162 (`78c8155f`).
@@ -663,7 +672,7 @@ Maintainer-directed comprehensive gap analysis (5 parallel domain investigators:
 | --- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 480 | `merged`            | NIST CSF 2.0 crosswalk (4th framework) · #1035 spec · #1064 impl `67c1a71f` · batch 204 · 4-framework invariant-#1 proof                                                         |
 | 514 | `merged`            | full CSF 2.0 Subcategory coverage (35→106) + low-confidence re-map · Catalog · parent #480 · batch 214 · #1100 `e19faf7a` · invariant #1 ×4 frameworks                           |
-| 515 | `ready`             | CSF Tier/Profile assessment workflow (maturity construct) · parent #480 · #1064                                                                                                  |
+| 515 | `in-progress`       | CSF Tier/Profile assessment workflow (maturity construct) · parent #480 · #1064                                                                                                  |
 | 481 | `merged`            | HIPAA Security Rule crosswalk (catalog-only) · #1035 spec · #1067 impl `ea45ba61` · batch 205 · completes §10.2 4-framework set (invariant #1 × 5)                               |
 | 516 | `merged`            | full HIPAA Security Rule coverage (31→67; §164.314/§164.316 + remaining) · Catalog · parent #481 · batch 215 · #1104 `06000d08` · invariant #1 ×5                                |
 | 567 | `not-ready`         | HIPAA finer-anchor re-map · blocked on full-SCF-catalog test-seed path · parent #516 · `docs/issues/567-hipaa-finer-anchor-remap-full-catalog.md`                                |
@@ -679,7 +688,7 @@ Maintainer-directed comprehensive gap analysis (5 parallel domain investigators:
 | 613 | `merged`            | web Settings control for bundle_gate_mode (drives 608 PATCH; web-only) · parent #608 · Frontend · batch 222 · #1141 `b0f41c87`                                                   |
 | 520 | `merged`            | Azure NSG/firewall rule evidence (azure.nsg_rules.v1; azure connector now 4 kinds) · parent #486 · Connectors · batch 222 · #1143 `e91f9ed6` · spillover 614                     |
 | 614 | `merged`            | Azure Firewall rule-collection evidence (`azure.firewall_rules.v1`) · Connectors · #1164 `1706ccbe` · spillover 634                                                              |
-| 634 | `ready`             | Azure Firewall rule-collection-group cursor pagination · Connectors · parent #614 · `docs/issues/634-azure-firewall-rulecollectiongroup-pagination.md`                           |
+| 634 | `in-progress`       | Azure Firewall rule-collection-group cursor pagination · Connectors · parent #614 · `docs/issues/634-azure-firewall-rulecollectiongroup-pagination.md`                           |
 | 521 | `merged`            | Azure Key-Vault access-policy evidence (azure.keyvault_access_config.v1; mgmt-plane-only; azure connector now 5 kinds) · parent #486 · Connectors · batch 223 · #1146 `a8838f2e` |
 | 615 | `merged`            | Azure Key-Vault RBAC role-assignment enumeration · Connectors · #1154 `a6a173de` · spillover 623                                                                                 |
 | 522 | `ready`             | Azure event-driven profile (Event Grid / Activity-Log) · Connectors · parent #486 · #1070                                                                                        |
