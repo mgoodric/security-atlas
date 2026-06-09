@@ -22,7 +22,7 @@ func newPermissionsCmd() *cobra.Command {
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
 			_, _ = fmt.Fprintln(tw, "CREDENTIAL\tSCOPE\tGATES")
 			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n",
-				"API key", bamboohrauth.RequiredScope, "hris.worker_lifecycle.v1 (worker roster + employment status)")
+				"API key", bamboohrauth.RequiredScope, "hris.worker_lifecycle.v1 + hris.manager_hierarchy.v1 (worker roster + employment status; the hierarchy is DERIVED from the same read — no extra scope)")
 			_ = tw.Flush()
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(),
 				strings.TrimSpace(`

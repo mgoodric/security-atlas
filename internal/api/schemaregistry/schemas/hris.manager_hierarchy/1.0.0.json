@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/hris.manager_hierarchy/1.0.0.json",
+  "x-evidence-kind": "hris.manager_hierarchy.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IAC-22", "IAC-09"],
+  "title": "HRIS manager reporting-hierarchy edge",
+  "description": "One record per worker describing the worker's place in the manager reporting tree, derived from the slice-491 worker roster's manager ASSIGNMENT id (each worker already carries their direct manager's opaque worker id). The reporting tree feeds access-review routing: the manager_assignment_id chain is the approver chain an entitlement review is auto-routed up, and the orphaned_report flag surfaces a worker whose manager is terminated or absent (a broken approver chain that must be repaired before the review can route). Derived purely from the same read-only directory read as hris.worker_lifecycle.v1 — it reads NOTHING new from the HRIS source. Like the lifecycle kind, this kind carries OPAQUE assignment ids ONLY and DELIBERATELY EXCLUDES every PII field: NEVER a manager's (or any worker's) name, email, phone, address, or any personal-contact / SSN / compensation / benefits / performance / protected-class detail — the only identities are opaque worker/manager assignment ids, and the rest of the record is derived booleans/ints. The connector reports descriptive reporting-tree facts; the platform evaluator owns the access-review routing decision per (control, scope). A manager cycle (A reports to B reports to A) is detected during derivation and flagged via cycle_member with an undefined depth (-1) rather than looping. Shared across the Rippling + BambooHR connectors because the reporting tree is vendor-independent; the source_hris field preserves provenance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source_hris",
+    "worker_assignment_id",
+    "depth",
+    "orphaned_report",
+    "cycle_member"
+  ],
+  "properties": {
+    "source_hris": {
+      "type": "string",
+      "enum": ["rippling", "bamboohr"],
+      "description": "HRIS the roster (and thus the derived tree) was collected from."
+    },
+    "worker_assignment_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "OPAQUE worker id (the roster's stable key) — the subject of this hierarchy edge."
+    },
+    "manager_assignment_id": {
+      "type": "string",
+      "description": "Optional OPAQUE worker id of this worker's DIRECT manager (the next link in the approver chain). Absent for a tree root (e.g. the CEO). NEVER the manager's personal contact detail."
+    },
+    "depth": {
+      "type": "integer",
+      "description": "Distance from a tree root (root = 0). A worker on a manager cycle, or whose chain enters one, has depth -1 (undefined)."
+    },
+    "orphaned_report": {
+      "type": "boolean",
+      "description": "True when manager_assignment_id is set but resolves to a manager that is absent from the roster OR is present but terminated — the access-review approver chain is broken and the worker's review cannot route until repaired."
+    },
+    "cycle_member": {
+      "type": "boolean",
+      "description": "True when the worker sits on a manager cycle (including a self-manager edge). Such a worker has no well-defined approver chain; routing must surface it for manual repair."
+    }
+  }
+}

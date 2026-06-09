@@ -169,6 +169,13 @@ func DefaultSeed() []KindVersion {
 		// worker-lifecycle (joiner/mover/leaver) evidence kind feeding the
 		// access-review + deprovisioning controls (SOC 2 CC6.1/CC6.2/CC6.3).
 		{Kind: "hris.worker_lifecycle.v1", Version: "1.0.0"},
+		// Slice 571: HRIS connectors (Rippling + BambooHR) — shared
+		// manager-hierarchy evidence kind derived from the same roster's manager
+		// ASSIGNMENT id. Feeds access-review approver-chain routing + orphaned-report
+		// detection (terminated/absent manager): SCF IAC-22 / IAC-09. Opaque
+		// assignment ids only — NEVER manager personal contact detail (the slice-491
+		// identity boundary).
+		{Kind: "hris.manager_hierarchy.v1", Version: "1.0.0"},
 		// Slice 023: policy acknowledgment workflow. Each
 		// POST /v1/policies/{id}/acknowledge emits one record of this
 		// kind through the slice-013 evidence ledger.
