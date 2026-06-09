@@ -24,9 +24,36 @@ const (
 	// EnvToken carries the read-only (Viewer-role) service-account token.
 	EnvToken = "GRAFANA_TOKEN"
 
-	// RequiredRole is the single read-only Grafana role the connector needs.
+	// RequiredRole is the single read-only Grafana role the alert-rule + contact-
+	// point inventory surface (slice 488) needs.
 	RequiredRole = "Viewer"
+
+	// SSOSettingsReadPermission is the PRECISE additional fixed-role permission the
+	// access-config surface (slice 534) needs beyond the Viewer baseline:
+	// reading `GET /api/v1/sso-settings` requires the `settings:read` action
+	// scoped to `settings:auth.*` — carried by Grafana's built-in fixed role
+	// `fixed:settings:reader`. This is strictly read-only and is NOT the Admin
+	// (org-admin / grafana-admin) basic role. Granting Admin "to be safe" is an
+	// over-privilege the connector explicitly warns against (P0-534 / threat-model E).
+	SSOSettingsReadPermission = "settings:read (scope settings:auth.*) — fixed:settings:reader"
+
+	// AccessControlReadPermission is the read-only permission needed to enumerate
+	// RBAC role assignments via `GET /api/access-control/...`: the
+	// `roles:read` + `users.roles:read` + `teams.roles:read` actions, carried by
+	// the built-in fixed role `fixed:roles:reader`. Read-only; never a write
+	// action (`roles:write`, `users.roles:add`, etc.).
+	AccessControlReadPermission = "roles:read + users.roles:read + teams.roles:read — fixed:roles:reader"
 )
+
+// RequiredAccessConfigScopes returns the precise least-privilege read-only
+// permission set the slice-534 access-config surface requires BEYOND the Viewer
+// baseline. The list is documentation-grade: it names the exact fixed-role
+// read permissions an operator must grant so they do NOT reach for Admin. NEVER
+// grant a write/admin action — read-only is sufficient for every API this
+// surface calls.
+func RequiredAccessConfigScopes() []string {
+	return []string{SSOSettingsReadPermission, AccessControlReadPermission}
+}
 
 // Credential is the resolved Grafana auth material. The token is kept off
 // String() so accidental %v / %+v formatting paths cannot leak it.

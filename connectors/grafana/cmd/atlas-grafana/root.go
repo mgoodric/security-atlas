@@ -21,11 +21,13 @@ import (
 // ConnectorName is logged in `connectors list`.
 const ConnectorName = "grafana-connector"
 
-// SupportedKinds is the canonical list of evidence kinds slice 488 emits from
-// the Grafana connector.
-//   - monitoring.alert_config.v1 (Grafana alert-rule + contact-point inventory, pull)
+// SupportedKinds is the canonical list of evidence kinds the Grafana connector
+// emits.
+//   - monitoring.alert_config.v1 (Grafana alert-rule + contact-point inventory, pull) — slice 488
+//   - grafana.access_config.v1   (Grafana SSO + RBAC configuration evidence, pull) — slice 534
 var SupportedKinds = []string{
 	"monitoring.alert_config.v1",
+	"grafana.access_config.v1",
 }
 
 // PullInterval names the connector's pull cadence HONESTLY (P0-488-6). The
@@ -119,25 +121,36 @@ func sdkOpts() []sdk.Option {
 	return nil
 }
 
-const longDescription = `security-atlas Grafana monitoring connector
+const longDescription = `security-atlas Grafana connector
 
-Emits one evidence kind:
+Emits two evidence kinds:
   - monitoring.alert_config.v1  (run subcommand, pull — Grafana alert-rule +
     contact-point inventory)
+  - grafana.access_config.v1    (run subcommand, pull — Grafana SSO + RBAC
+    configuration: SSO enabled state, provider types, org-role mapping rules,
+    team membership COUNTS, RBAC role-assignment COUNTS)
 
 Profile: pull. Each invocation is one bounded read-and-push pass on an
 operator-scheduled cadence (recommended 24h). This is NOT continuous
 monitoring — the interval is named honestly.
 
 Least-privilege Grafana access (read-only):
-  - a service-account token with the Viewer role.
-  - NEVER grant Editor or Admin.
+  - the alert-config surface needs a service-account token with the Viewer role.
+  - the access-config surface needs, IN ADDITION to Viewer, two read-only
+    fixed-role permissions: settings:read (scope settings:auth.*, via
+    fixed:settings:reader) to read SSO settings, and roles:read +
+    users.roles:read + teams.roles:read (via fixed:roles:reader) to enumerate
+    RBAC assignments.
+  - NEVER grant Editor or Admin "to be safe" — read-only is sufficient.
 
-The connector reads alert-rule + notification-policy CONFIGURATION only — rule
-title, type, enabled (not paused) state, folder, and the NAME of the contact
-point each rule routes to. It NEVER collects a contact point's settings (where
-the secret webhook URL / integration token / recipient email live), dashboard
-JSON, metric time-series, or query results.
+The connector reads CONFIGURATION + COUNTS only. For the alert-config surface:
+rule title, type, enabled (not paused) state, folder, and the NAME of the
+contact point each rule routes to. For the access-config surface: SSO enabled
+state, provider types, org-role mapping rule names, team membership COUNTS, and
+RBAC role-assignment COUNTS. It NEVER collects a contact point's secret
+settings, a SAML private key, an OAuth client secret, an LDAP bind password, a
+signing certificate, dashboard JSON, metric time-series, query results, or any
+individual user / team-member / role-assignment identity (name / email / login).
 
 Auth: set GRAFANA_URL + GRAFANA_TOKEN. The token is read from the environment,
 never a CLI flag, and never logged or placed into an evidence record.`

@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/grafana.access_config/1.0.0.json",
+  "x-evidence-kind": "grafana.access_config.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IAC-06", "IAC-22"],
+  "title": "Grafana SSO / RBAC access configuration",
+  "description": "One record per Grafana instance/org summarizing its authentication / authorization CONFIGURATION: whether SSO is enabled, the per-provider SSO posture (provider type + enabled state + org-role mapping RULE names), aggregate team counts (team count + total team-membership COUNT), and the RBAC role-assignment COUNTS rolled up by scope (user / team / built-in). Pulled read-only from the Grafana API (GET /api/v1/sso-settings, GET /api/teams/search, GET /api/access-control/assignments). This is the slice-534 sibling of monitoring.alert_config.v1 (slice 488 deferred the authn/authz surface, P0-488-7): SSO enforcement + RBAC posture is an IAM surface, not a monitoring surface, so it gets its own kind (IAC-06 Authenticator Management + IAC-22 Least Privilege; SOC 2 CC6.1/CC6.2/CC6.3). CONFIGURATION + COUNTS only — NEVER a SAML private key, an OAuth client secret, an LDAP bind password, a signing certificate, a user name/email/login, or any individual team-member or role-assignment principal identity. The connector reports a descriptive enabled/posture/count summary; the platform evaluator owns the final pass/fail per (control, scope).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sso_enabled",
+    "team_count",
+    "total_team_memberships",
+    "user_role_assignments",
+    "team_role_assignments",
+    "builtin_role_assignments"
+  ],
+  "properties": {
+    "sso_enabled": {
+      "type": "boolean",
+      "description": "True if ANY SSO provider is enabled — the CC6.1 'is SSO enforced' headline. A descriptive flag, never a credential."
+    },
+    "team_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of teams configured. A COUNT, never the team member identities."
+    },
+    "total_team_memberships": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Sum of team memberships across all teams. A COUNT, never the member identities (no name / email / login is collected)."
+    },
+    "user_role_assignments": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of RBAC role assignments scoped to individual users. A COUNT, never the assigned principals."
+    },
+    "team_role_assignments": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of RBAC role assignments scoped to teams. A COUNT, never the assigned principals."
+    },
+    "builtin_role_assignments": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of RBAC role assignments scoped to built-in roles. A COUNT, never the assigned principals."
+    },
+    "sso_providers": {
+      "type": "array",
+      "description": "Per-provider SSO configuration — provider TYPE + enabled state + org-role mapping RULE names only. NEVER the SAML private key, OAuth client secret, LDAP bind password, signing certificate, or any identity.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["provider_type", "enabled"],
+        "properties": {
+          "provider_type": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The SSO provider type (e.g. 'saml', 'oauth', 'oidc', 'ldap', 'github', 'google'). The TYPE, never a secret."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether this SSO provider is currently enabled."
+          },
+          "role_mappings": {
+            "type": "array",
+            "description": "The org-role mapping RULE strings the provider applies (role names / attribute->role expressions, e.g. 'Editor', 'Admin', 'GrafanaAdmin'). Role NAMES / rule strings only — never an identity, never a secret.",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -146,6 +146,18 @@ func DefaultSeed() []KindVersion {
 		// signals, raw log samples, matched-event payloads, secret notification
 		// targets, recipient PII, or the raw detection query.
 		{Kind: "datadog.siem_rule.v1", Version: "1.0.0"},
+		// Slice 534: Grafana connector authn/authz CONFIG evidence — the
+		// deliberate slice-488 deferred authn/authz surface (P0-488-7). Proves
+		// SSO is enforced + access is role-based (SOC 2 CC6.1/CC6.2/CC6.3): SCF
+		// IAC-06 Authenticator Management / IAC-22 Least Privilege. A SIBLING
+		// kind to monitoring.alert_config.v1 because this is an IAM surface, not
+		// a monitoring surface. Read-only (sso-settings + access-control reads);
+		// CONFIGURATION + COUNTS only — never a SAML private key, an OAuth client
+		// secret, an LDAP bind password, a signing certificate, or any individual
+		// user / team-member / role-assignment identity (the record struct has no
+		// field that can hold them; a reflection guard fails the build if one is
+		// added).
+		{Kind: "grafana.access_config.v1", Version: "1.0.0"},
 		// Slice 489: PagerDuty connector (incident-response evidence) —
 		// on-call coverage + bounded-window incident summaries.
 		{Kind: "pagerduty.oncall_coverage.v1", Version: "1.0.0"},

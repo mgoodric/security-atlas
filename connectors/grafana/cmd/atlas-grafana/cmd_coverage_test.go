@@ -133,12 +133,15 @@ func TestNewPermissionsCmd_RendersRole(t *testing.T) {
 	cmd.SetOut(&buf)
 	cmd.Run(cmd, nil)
 	out := buf.String()
-	for _, want := range []string{"CREDENTIAL", "Viewer", "Service-account token"} {
+	for _, want := range []string{
+		"SURFACE", "Viewer", "alert-config", "access-config",
+		"fixed:settings:reader", "fixed:roles:reader",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("permissions output missing %q; got %q", want, out)
 		}
 	}
-	// P0-488-2: the warning bans Editor/Admin.
+	// P0-488-2 / P0-534: the warning bans Editor/Admin (incl. "to be safe").
 	if !strings.Contains(out, "NEVER grant Editor or Admin") {
 		t.Errorf("permissions output missing the read-only warning; got %q", out)
 	}
