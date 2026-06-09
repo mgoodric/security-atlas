@@ -176,10 +176,10 @@ mappings:
     strength: 0.9
     rationale: "Roles & responsibilities allocation aligns with SCF GOV-04."
   - requirement_code: A.5.7
-    scf_anchor: MON-08
-    relationship_type: intersects_with
-    strength: 0.5
-    rationale: "Threat intelligence partially covered by Anomalous Behavior Detection; SCF has no dedicated threat-intel anchor in the sample catalog (LOW CONFIDENCE)."
+    scf_anchor: THR-01
+    relationship_type: equal
+    strength: 1.0
+    rationale: "Threat Intelligence Program (THR-01) is the dedicated SCF threat-intel anchor and the direct STRM equivalent of A.5.7 Threat intelligence. Upgraded from the slice-438 placeholder MON-08 (intersects_with/0.5, LOW CONFIDENCE) once slice 635 seeded the THR domain into the sample catalog."
   - requirement_code: A.5.8
     scf_anchor: SEA-01
     relationship_type: intersects_with
@@ -331,6 +331,11 @@ mappings:
     relationship_type: equal
     strength: 0.9
     rationale: "Monitoring activities maps to SCF Continuous Monitoring — shared with SOC 2 CC7.2."
+  - requirement_code: A.8.16
+    scf_anchor: THR-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "A.8.16 'appropriate actions are taken to evaluate potential information security incidents' is informed by the Threat Intelligence Program; the SIEM detection-rule evidence family (datadog.siem_rule.v1, slice 533) anchors at THR-01."
   - requirement_code: A.8.20
     scf_anchor: NET-04
     relationship_type: equal

@@ -382,11 +382,21 @@ mappings:
     relationship_type: equal
     strength: 1.0
     rationale: "Anomalous Behavior Detection is the direct STRM equivalent of CC7.2's anomaly-detection language."
+  - tsc_code: CC7.2
+    scf_anchor: THR-01
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Threat Intelligence Program informs the detection rules that monitor system components for anomalies indicative of malicious acts; the SIEM detection-rule evidence family (datadog.siem_rule.v1, slice 533) anchors here."
   - tsc_code: CC7.3
     scf_anchor: AAA-01
     relationship_type: intersects_with
     strength: 0.7
     rationale: "Auditing & Accountability supports event evaluation."
+  - tsc_code: CC7.3
+    scf_anchor: THR-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Threat Intelligence Program provides the context an entity uses to evaluate whether a detected security event could result in a failure to meet its objectives."
   - tsc_code: CC7.3
     scf_anchor: IRO-04
     relationship_type: intersects_with
