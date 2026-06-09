@@ -76,6 +76,15 @@ var AllowedSettingKeys = map[string]bool{
 	"remote_lock_enabled":        true,
 	"usb_restricted":             true,
 	"bluetooth_sharing_disabled": true,
+	// slice 595 — keys surfaced by the per-setting enrichment read. Each is a
+	// compliance-relevant hardening fact derived from a metadata-grade,
+	// already-scoped MDM inventory field (NEVER a raw profile payload blob). Each
+	// value is a non-secret summary (a boolean rendered "true"/"false", or a small
+	// enum/integer string). See docs/audit-log/595-*.
+	"device_compliant":         true, // Intune complianceState == "compliant"
+	"device_supervised":        true, // Jamf GENERAL.supervised
+	"device_managed":           true, // Jamf GENERAL.managed / remoteManagement
+	"profile_assignment_state": true, // Intune deviceConfigurationState.state (enum: compliant/nonCompliant/conflict/error)
 }
 
 // bannedSettingSubstrings names substrings that, if present in a setting key,

@@ -45,10 +45,11 @@ func TestClient_ListConfigProfiles_DecodesMetadataOnly_NoSecrets(t *testing.T) {
 	  "value": [
 	    {
 	      "id": "d-1", "deviceName": "ENG-PC-014", "userPrincipalName": "secret@fixture.invalid",
+	      "isEncrypted": true, "complianceState": "compliant",
 	      "deviceConfigurationStates": [
 	        {"id": "cfg-1", "displayName": "Windows Compliance", "state": "compliant",
 	         "settingPayload": "FAKE-SECRET-BLOB-FIXTURE", "wifiPassword": "hunter2", "certificate": "FAKE-CERT-MATERIAL-FIXTURE"},
-	        {"id": "cfg-2", "displayName": "BitLocker Policy", "state": "compliant"},
+	        {"id": "cfg-2", "displayName": "BitLocker Policy", "state": "nonCompliant"},
 	        {"id": "cfg-3", "displayName": "", "state": "error"}
 	      ]
 	    }
@@ -77,17 +78,84 @@ func TestClient_ListConfigProfiles_DecodesMetadataOnly_NoSecrets(t *testing.T) {
 		t.Fatalf("device len = %d; want 1", len(got))
 	}
 	profiles := got[0].Profiles
-	// cfg-3 has an empty displayName and is dropped.
-	if len(profiles) != 2 {
-		t.Fatalf("profiles len = %d; want 2", len(profiles))
+	// cfg-1 + cfg-2 (cfg-3 has an empty displayName and is dropped) + 1 synthetic
+	// enforced-summary profile = 3.
+	if len(profiles) != 3 {
+		t.Fatalf("profiles len = %d; want 3 (2 literal + 1 enforced summary)", len(profiles))
 	}
 	if profiles[0].Name != "Windows Compliance" || profiles[0].Identifier != "cfg-1" {
 		t.Errorf("profile decode wrong: %+v", profiles[0])
 	}
-	// RawConfigProfile has no field for settingPayload / wifiPassword /
-	// certificate, so they could not have been decoded. Settings is empty at v0.
-	if len(profiles[0].Settings) != 0 {
-		t.Errorf("Intune v0 settings should be empty (metadata-only): %+v", profiles[0].Settings)
+	// The assignment state is surfaced as the allow-listed profile_assignment_state
+	// setting; nothing else (no settingPayload / wifiPassword / certificate — the
+	// struct has no field for them).
+	if len(profiles[0].Settings) != 1 ||
+		profiles[0].Settings[0].Key != "profile_assignment_state" ||
+		profiles[0].Settings[0].Value != "compliant" {
+		t.Errorf("cfg-1 settings = %+v; want only profile_assignment_state=compliant", profiles[0].Settings)
+	}
+	if profiles[1].Settings[0].Value != "nonCompliant" {
+		t.Errorf("cfg-2 assignment state = %q; want nonCompliant", profiles[1].Settings[0].Value)
+	}
+	// The synthetic summary profile carries the device-level enforced facts.
+	summary := profiles[len(profiles)-1]
+	if summary.Name != enforcedSummaryProfileName {
+		t.Fatalf("last profile = %q; want %q", summary.Name, enforcedSummaryProfileName)
+	}
+	want := map[string]string{"disk_encryption_enforced": "true", "device_compliant": "true"}
+	if len(summary.Settings) != len(want) {
+		t.Fatalf("summary settings = %+v; want %v", summary.Settings, want)
+	}
+	for _, s := range summary.Settings {
+		if want[s.Key] != s.Value {
+			t.Errorf("summary setting %q = %q; want %q", s.Key, s.Value, want[s.Key])
+		}
+	}
+}
+
+// TestClient_ListConfigProfiles_NoSecretValueLeaks is the load-bearing
+// secret-drop guard at the Intune client: even with a payload that places fake
+// secret values right next to the assignment state, no RawConfigSetting value
+// ever equals a secret marker — the enrichment derives ONLY enums/booleans from
+// enforced-state metadata, never copies a payload value.
+func TestClient_ListConfigProfiles_NoSecretValueLeaks(t *testing.T) {
+	t.Parallel()
+	payload := `{
+	  "value": [
+	    {
+	      "id": "d-9", "isEncrypted": false, "complianceState": "nonCompliant",
+	      "deviceConfigurationStates": [
+	        {"id": "cfg-x", "displayName": "WiFi-Corp", "state": "conflict",
+	         "settingPayload": "FAKE-SECRET-BLOB", "wifiPassword": "FAKE-PSK-FIXTURE",
+	         "vpnSharedSecret": "FAKE-SHARED-SECRET", "certificate": "FAKE-CERT"}
+	      ]
+	    }
+	  ]
+	}`
+	srv, _ := graphConfigProfileTestServer(t, payload)
+	c := NewClient(cfgFor(srv))
+	got, err := c.ListConfigProfiles(context.Background())
+	if err != nil {
+		t.Fatalf("ListConfigProfiles: %v", err)
+	}
+	secrets := []string{"FAKE-SECRET-BLOB", "FAKE-PSK-FIXTURE", "FAKE-SHARED-SECRET", "FAKE-CERT"}
+	for _, dev := range got {
+		for _, p := range dev.Profiles {
+			for _, s := range p.Settings {
+				for _, secret := range secrets {
+					if strings.Contains(s.Value, secret) {
+						t.Fatalf("secret value %q leaked into setting %q", secret, s.Key)
+					}
+				}
+			}
+		}
+	}
+	summary := got[0].Profiles[len(got[0].Profiles)-1]
+	want := map[string]string{"disk_encryption_enforced": "false", "device_compliant": "false"}
+	for _, s := range summary.Settings {
+		if want[s.Key] != s.Value {
+			t.Errorf("summary setting %q = %q; want %q", s.Key, s.Value, want[s.Key])
+		}
 	}
 }
 

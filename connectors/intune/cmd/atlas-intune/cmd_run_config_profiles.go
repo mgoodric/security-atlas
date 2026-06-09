@@ -38,29 +38,38 @@ func newRunConfigProfilesCmd() *cobra.Command {
 		Use:   "run-config-profiles",
 		Short: "read Intune managed-device configuration-profile detail and push evidence records",
 		Long: `Read Intune managed-device configuration-profile detail via the read-only
-Microsoft Graph device-management API (GET /deviceManagement/managedDevices with
-deviceConfigurationStates expanded to id + displayName + state only), transform
-to endpoint.config_profile.v1 records, and push to the platform.
+Microsoft Graph device-management API (GET /deviceManagement/managedDevices
+$select=id,isEncrypted,complianceState with deviceConfigurationStates expanded to
+id + displayName + state only), transform to endpoint.config_profile.v1 records,
+and push to the platform.
 
 This reports WHICH configuration / compliance profiles are deployed to a managed
 device and what compliance-relevant settings they enforce — evidence for
 configuration-management controls (SCF CFG-02 Secure Baseline Configurations /
 CFG-04 Configuration Change Control) at a finer grain than the posture verdict.
 
+Per-setting enrichment (slice 595): each assigned profile carries its allow-listed
+profile_assignment_state (compliant / nonCompliant / conflict / error), and each
+device carries a synthetic "Enforced Configuration Summary" profile whose settings
+are the device-level enforced facts (disk_encryption_enforced from isEncrypted,
+device_compliant from complianceState) — non-secret summaries, NEVER the raw
+configuration payload.
+
 Profile: pull. One bounded read-and-push pass per invocation; operator-scheduled
 (recommended 24h). NOT continuous monitoring.
 
 Auth: identical read-only credential to 'run' (INTUNE_TENANT_ID +
 INTUNE_CLIENT_ID + INTUNE_CLIENT_SECRET; the Entra app must hold ONLY
-DeviceManagementManagedDevices.Read.All). The secret never appears in a log line
-or an evidence record.
+DeviceManagementManagedDevices.Read.All). The isEncrypted + complianceState
+properties are covered by that SAME read-only permission the posture 'run' uses —
+NO new scope. The secret never appears in a log line or an evidence record.
 
 SECRET-REDACTION BOUNDARY (P0-556): configuration profiles routinely embed
 secrets — Wi-Fi PSKs, VPN shared secrets, certificate private keys, API tokens,
 SCEP challenges, and raw payload blobs. NONE of these ever enters an evidence
-record. The read requests profile ASSIGNMENT METADATA only (the
-deviceConfigurationStates expansion does not carry the configuration's raw
-setting payload), and the per-profile settings field is restricted to a
+record. Neither the device $select nor the deviceConfigurationStates expansion
+carries the configuration's raw setting payload (only enforced-state metadata +
+assignment state), and the per-profile settings field is restricted to a
 compliance-relevant allow-list whose values are non-secret summaries.`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
