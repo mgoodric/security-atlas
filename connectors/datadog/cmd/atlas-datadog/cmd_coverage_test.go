@@ -139,7 +139,7 @@ func TestNewPermissionsCmd_RendersScope(t *testing.T) {
 	cmd.SetOut(&buf)
 	cmd.Run(cmd, nil)
 	out := buf.String()
-	for _, want := range []string{"CREDENTIAL", "monitors_read", "Application key"} {
+	for _, want := range []string{"CREDENTIAL", "monitors_read", "security_monitoring_rules_read", "Application key"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("permissions output missing %q; got %q", want, out)
 		}

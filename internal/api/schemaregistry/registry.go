@@ -138,6 +138,14 @@ func DefaultSeed() []KindVersion {
 		// Slice 488: monitoring connectors (Datadog + Grafana) — shared
 		// alert/monitor configuration-inventory evidence kind.
 		{Kind: "monitoring.alert_config.v1", Version: "1.0.0"},
+		// Slice 533: Datadog Cloud-SIEM / Security-Monitoring detection-rule
+		// inventory — the deliberate slice-488 D1 sibling-kind SPLIT (a detection
+		// rule carries a severity + detection-class field monitoring.alert_config
+		// lacks, so it gets its own kind: MON-01 + THR-01). Read-only
+		// (security_monitoring_rules_read); RULE configuration only — never firing
+		// signals, raw log samples, matched-event payloads, secret notification
+		// targets, recipient PII, or the raw detection query.
+		{Kind: "datadog.siem_rule.v1", Version: "1.0.0"},
 		// Slice 489: PagerDuty connector (incident-response evidence) —
 		// on-call coverage + bounded-window incident summaries.
 		{Kind: "pagerduty.oncall_coverage.v1", Version: "1.0.0"},

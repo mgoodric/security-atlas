@@ -89,3 +89,44 @@ func TestRequiredScope_IsReadOnly(t *testing.T) {
 		t.Errorf("RequiredScope must not grant write/admin: %q", RequiredScope)
 	}
 }
+
+// TestRequiredSIEMScope_IsReadOnly pins the slice-533 SIEM scope to the
+// least-privilege read-only value (no write/admin).
+func TestRequiredSIEMScope_IsReadOnly(t *testing.T) {
+	t.Parallel()
+	if RequiredSIEMScope != "security_monitoring_rules_read" {
+		t.Errorf("RequiredSIEMScope = %q; want security_monitoring_rules_read (read-only)", RequiredSIEMScope)
+	}
+	if strings.Contains(RequiredSIEMScope, "write") || strings.Contains(RequiredSIEMScope, "admin") {
+		t.Errorf("RequiredSIEMScope must not grant write/admin: %q", RequiredSIEMScope)
+	}
+}
+
+// TestRequiredScopes_FullReadOnlySet exercises the slice-533 RequiredScopes
+// helper: it returns exactly the two read-only scopes the connector needs
+// across both evidence surfaces, in order, and never a write/admin scope.
+func TestRequiredScopes_FullReadOnlySet(t *testing.T) {
+	t.Parallel()
+	got := RequiredScopes()
+	want := []string{"monitors_read", "security_monitoring_rules_read"}
+	if len(got) != len(want) {
+		t.Fatalf("RequiredScopes() = %v; want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("RequiredScopes()[%d] = %q; want %q", i, got[i], want[i])
+		}
+	}
+	for _, s := range got {
+		if strings.Contains(s, "write") || strings.Contains(s, "admin") {
+			t.Errorf("RequiredScopes must not include a write/admin scope: %q", s)
+		}
+		if !strings.HasSuffix(s, "_read") {
+			t.Errorf("scope %q is not a read-only (_read-suffixed) scope", s)
+		}
+	}
+	// The helper composes the two exported constants.
+	if got[0] != RequiredScope || got[1] != RequiredSIEMScope {
+		t.Errorf("RequiredScopes() must compose RequiredScope + RequiredSIEMScope; got %v", got)
+	}
+}

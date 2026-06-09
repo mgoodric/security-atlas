@@ -98,6 +98,7 @@
     "connectors/datadog/cmd/atlas-datadog": 87,
     "connectors/datadog/internal/datadogauth": 98,
     "connectors/datadog/internal/monitors": 86,
+    "connectors/datadog/internal/siemrules": 88,
     "connectors/grafana/cmd/atlas-grafana": 86,
     "connectors/grafana/internal/alertrules": 87,
     "connectors/grafana/internal/grafanaauth": 98,
