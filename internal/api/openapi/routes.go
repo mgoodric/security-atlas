@@ -23,6 +23,7 @@ type RouteSpec struct {
 // RouteSpecs is the canonical route list. See package doc.
 var RouteSpecs = []RouteSpec{
 	{Method: "DELETE", Path: "/v1/admin/super-admins/{user_id}", Tag: "admin-super-admins", Tier: "adminBearer", Internal: false, Summary: "DELETE /v1/admin/super-admins/{user_id}"},
+	{Method: "DELETE", Path: "/v1/csf/profiles/{kind}/selections/{requirement_id}", Tag: "csf", Tier: "bearer", Internal: false, Summary: "DELETE /v1/csf/profiles/{kind}/selections/{requirement_id}"},
 	{Method: "DELETE", Path: "/v1/decisions/{id}/links/{kind}/{targetID}", Tag: "decisions", Tier: "bearer", Internal: false, Summary: "DELETE /v1/decisions/{id}/links/{kind}/{targetID}"},
 	{Method: "DELETE", Path: "/v1/me/sessions", Tag: "me", Tier: "bearer", Internal: false, Summary: "DELETE /v1/me/sessions"},
 	{Method: "DELETE", Path: "/v1/me/sessions/{id}", Tag: "me", Tier: "bearer", Internal: false, Summary: "DELETE /v1/me/sessions/{id}"},
@@ -91,6 +92,9 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/oscal/component-definitions/{id}", Tag: "oscal", Tier: "bearer", Internal: false, Summary: "GET /v1/oscal/component-definitions/{id} — one import's components + vendor claims"},
 	{Method: "GET", Path: "/v1/oscal/imported-profiles/{id}/provenance", Tag: "oscal", Tier: "bearer", Internal: false, Summary: "GET /v1/oscal/imported-profiles/{id}/provenance"},
 	{Method: "GET", Path: "/v1/controls/{id}/state", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/state"},
+	{Method: "GET", Path: "/v1/csf/gap", Tag: "csf", Tier: "bearer", Internal: false, Summary: "GET /v1/csf/gap — NIST CSF 2.0 Current-vs-Target gap view"},
+	{Method: "GET", Path: "/v1/csf/profiles/{kind}", Tag: "csf", Tier: "bearer", Internal: false, Summary: "GET /v1/csf/profiles/{kind} — a CSF Current or Target profile + selections"},
+	{Method: "GET", Path: "/v1/csf/tier", Tag: "csf", Tier: "bearer", Internal: false, Summary: "GET /v1/csf/tier — the tenant's CSF 2.0 Tier rating"},
 	{Method: "GET", Path: "/v1/dashboard/export", Tag: "dashboard", Tier: "bearer", Internal: false, Summary: "GET /v1/dashboard/export — snapshot of the six dashboard panels in json/csv/xlsx"},
 	{Method: "GET", Path: "/v1/decisions", Tag: "decisions", Tier: "bearer", Internal: false, Summary: "GET /v1/decisions"},
 	{Method: "GET", Path: "/v1/decisions/overdue", Tag: "decisions", Tier: "bearer", Internal: false, Summary: "GET /v1/decisions/overdue"},
@@ -250,6 +254,9 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/walkthroughs/{id}/attachments", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "POST /v1/walkthroughs/{id}/attachments"},
 	{Method: "POST", Path: "/v1/walkthroughs/{id}:finalize", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "POST /v1/walkthroughs/{id}:finalize"},
 	{Method: "PUT", Path: "/v1/board-packs/{id}/sections/{key}", Tag: "board", Tier: "bearer", Internal: false, Summary: "PUT /v1/board-packs/{id}/sections/{key}"},
+	{Method: "PUT", Path: "/v1/csf/profiles/{kind}", Tag: "csf", Tier: "bearer", Internal: false, Summary: "PUT /v1/csf/profiles/{kind} — ensure a CSF Current or Target profile"},
+	{Method: "PUT", Path: "/v1/csf/profiles/{kind}/selections", Tag: "csf", Tier: "bearer", Internal: false, Summary: "PUT /v1/csf/profiles/{kind}/selections — set one Subcategory target outcome"},
+	{Method: "PUT", Path: "/v1/csf/tier", Tag: "csf", Tier: "bearer", Internal: false, Summary: "PUT /v1/csf/tier — set or re-rate the CSF 2.0 Tier"},
 	{Method: "PUT", Path: "/v1/me/email-channel", Tag: "me", Tier: "bearer", Internal: false, Summary: "PUT /v1/me/email-channel"},
 	{Method: "PUT", Path: "/v1/me/slack-channel", Tag: "me", Tier: "bearer", Internal: false, Summary: "PUT /v1/me/slack-channel"},
 	{Method: "PUT", Path: "/v1/me/webhook-channel", Tag: "me", Tier: "bearer", Internal: false, Summary: "PUT /v1/me/webhook-channel"},

@@ -143,6 +143,92 @@ func (ns NullCrosswalkSourceAttribution) Value() (driver.Value, error) {
 	return string(ns.CrosswalkSourceAttribution), nil
 }
 
+type CsfProfileKind string
+
+const (
+	CsfProfileKindCurrent CsfProfileKind = "current"
+	CsfProfileKindTarget  CsfProfileKind = "target"
+)
+
+func (e *CsfProfileKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CsfProfileKind(s)
+	case string:
+		*e = CsfProfileKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CsfProfileKind: %T", src)
+	}
+	return nil
+}
+
+type NullCsfProfileKind struct {
+	CsfProfileKind CsfProfileKind `json:"csf_profile_kind"`
+	Valid          bool           `json:"valid"` // Valid is true if CsfProfileKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCsfProfileKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.CsfProfileKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CsfProfileKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCsfProfileKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CsfProfileKind), nil
+}
+
+type CsfTier string
+
+const (
+	CsfTierTier1Partial      CsfTier = "tier1_partial"
+	CsfTierTier2RiskInformed CsfTier = "tier2_risk_informed"
+	CsfTierTier3Repeatable   CsfTier = "tier3_repeatable"
+	CsfTierTier4Adaptive     CsfTier = "tier4_adaptive"
+)
+
+func (e *CsfTier) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CsfTier(s)
+	case string:
+		*e = CsfTier(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CsfTier: %T", src)
+	}
+	return nil
+}
+
+type NullCsfTier struct {
+	CsfTier CsfTier `json:"csf_tier"`
+	Valid   bool    `json:"valid"` // Valid is true if CsfTier is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCsfTier) Scan(value interface{}) error {
+	if value == nil {
+		ns.CsfTier, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CsfTier.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCsfTier) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CsfTier), nil
+}
+
 type DecisionStatus string
 
 const (
@@ -1048,6 +1134,52 @@ type ControlEvaluation struct {
 	FreshnessClass        *string            `json:"freshness_class"`
 	Trigger               string             `json:"trigger"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+}
+
+type CsfAssessmentAudit struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	SubjectKind        string             `json:"subject_kind"`
+	SubjectID          pgtype.UUID        `json:"subject_id"`
+	Action             string             `json:"action"`
+	Actor              string             `json:"actor"`
+	Detail             string             `json:"detail"`
+	OccurredAt         pgtype.Timestamptz `json:"occurred_at"`
+}
+
+type CsfProfile struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	Kind               CsfProfileKind     `json:"kind"`
+	Name               string             `json:"name"`
+	CreatedBy          string             `json:"created_by"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CsfProfileSelection struct {
+	ID                     pgtype.UUID        `json:"id"`
+	TenantID               pgtype.UUID        `json:"tenant_id"`
+	CsfProfileID           pgtype.UUID        `json:"csf_profile_id"`
+	FrameworkRequirementID pgtype.UUID        `json:"framework_requirement_id"`
+	TargetOutcome          string             `json:"target_outcome"`
+	Note                   string             `json:"note"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CsfTierRating struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	Tier               CsfTier            `json:"tier"`
+	Rationale          string             `json:"rationale"`
+	RatedBy            string             `json:"rated_by"`
+	RatedAt            pgtype.Timestamptz `json:"rated_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Decision struct {

@@ -343,6 +343,12 @@
       "functions": 98,
       "lines": 98
     },
+    "app/api/csf/gap/route.ts": {
+      "statements": 98,
+      "branches": 75,
+      "functions": 98,
+      "lines": 98
+    },
     "app/api/dashboard/activity/route.ts": {
       "statements": 98,
       "branches": 98,
@@ -690,6 +696,12 @@
       "branches": 98,
       "functions": 98,
       "lines": 98
+    },
+    "lib/api/csf.ts": {
+      "statements": 34,
+      "branches": 98,
+      "functions": 48,
+      "lines": 34
     },
     "lib/api/exceptions-export.ts": {
       "statements": 98,
