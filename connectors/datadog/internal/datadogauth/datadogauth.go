@@ -31,10 +31,22 @@ const (
 	// DefaultSite is the US1 site, used when EnvSite is unset.
 	DefaultSite = "datadoghq.com"
 
-	// RequiredScope is the single read-only Application-key scope the connector
-	// needs. Documented as the minimum; the connector issues only monitor reads.
+	// RequiredScope is the read-only Application-key scope the monitor-inventory
+	// surface (monitoring.alert_config.v1) needs. Documented as the minimum; the
+	// connector issues only monitor reads against /api/v1/monitor.
 	RequiredScope = "monitors_read"
+
+	// RequiredSIEMScope is the read-only Application-key scope the Cloud-SIEM
+	// detection-rule surface (datadog.siem_rule.v1, slice 533) needs. The
+	// connector issues only GETs against /api/v2/security_monitoring/rules.
+	RequiredSIEMScope = "security_monitoring_rules_read"
 )
+
+// RequiredScopes is the full least-privilege read-only scope set the connector
+// requires across both evidence surfaces. NEVER grant a write/admin scope.
+func RequiredScopes() []string {
+	return []string{RequiredScope, RequiredSIEMScope}
+}
 
 // Credential is the resolved Datadog auth material. Both keys are kept off
 // String() so accidental %v / %+v formatting paths cannot leak them.

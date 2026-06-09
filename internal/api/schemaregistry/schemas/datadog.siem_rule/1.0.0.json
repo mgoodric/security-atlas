@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/datadog.siem_rule/1.0.0.json",
+  "x-evidence-kind": "datadog.siem_rule.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["MON-01", "THR-01"],
+  "title": "Datadog Cloud-SIEM detection-rule inventory",
+  "description": "One record per Datadog Cloud-SIEM / Security-Monitoring detection rule: the rule's name, detection class (log / signal_correlation / threshold), enabled state, highest case severity, and the NAMES/HANDLES of the notification targets it routes to. Pulled read-only from the Datadog Security-Monitoring API (GET /api/v2/security_monitoring/rules, security_monitoring_rules_read scope). This is the slice-533 sibling of monitoring.alert_config.v1 (slice 488 decision D1): a detection rule carries a severity + a detection-class field the operational alert-config shape lacks, so it gets its own kind rather than widening the shared monitoring kind into a lowest-common-denominator blob. Rule CONFIGURATION only — never firing signals, the detection query's raw log samples, matched-event payloads, the secret webhook URL behind a notification, an integration token, a recipient email address (PII), or the raw detection query. The connector reports a descriptive enabled/severity posture; the platform evaluator owns the final pass/fail per (control, scope).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "rule_id",
+    "rule_name",
+    "detection_class",
+    "enabled",
+    "severity"
+  ],
+  "properties": {
+    "rule_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Datadog-native stable identifier of the detection rule (non-secret; an opaque ID, not a credential)."
+    },
+    "rule_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable name of the detection rule."
+    },
+    "detection_class": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The rule's detection query class: 'log' (log detection), 'signal_correlation' (correlates existing signals), or 'threshold' (threshold/anomaly/impossible-travel/new-value). Descriptive string, not strictly enumerated, so a new Datadog rule kind does not require a schema bump."
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Whether the detection rule is currently active (not disabled)."
+    },
+    "severity": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The highest case severity the rule can produce (info / low / medium / high / critical). A descriptive label of the rule's configured severity, NEVER the content of a firing signal."
+    },
+    "notification_targets": {
+      "type": "array",
+      "description": "The notification targets the rule routes to — NAMES / HANDLES only, never secret webhook URLs, integration tokens, or recipient email addresses.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target_kind", "target_name"],
+        "properties": {
+          "target_kind": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Kind of notification target derived from the handle prefix (e.g. 'slack', 'pagerduty', 'webhook', 'opsgenie'). The KIND, not the secret."
+          },
+          "target_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The handle / channel name of the target (e.g. 'slack-sec-oncall', 'pagerduty-primary'). NEVER the secret webhook URL, integration token, or a recipient email address."
+          }
+        }
+      }
+    }
+  }
+}

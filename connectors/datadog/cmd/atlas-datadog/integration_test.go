@@ -19,6 +19,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/datadogauth"
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/monitors"
+	"github.com/mgoodric/security-atlas/connectors/datadog/internal/siemrules"
 	"github.com/mgoodric/security-atlas/connectors/monitoring/alertcfg"
 	"github.com/mgoodric/security-atlas/connectors/monitoring/monrecord"
 )
@@ -173,6 +174,70 @@ func TestEmittedRecords_NoSecretsOrPII(t *testing.T) {
 		"enabled": true, "folder": true, "notification_targets": true,
 	}
 	banned := []string{"fixture.invalid", "webhook.invalid", "REDACTED-FIXTURE", "oncall@", "https://"}
+	assertNoSecret(t, rec, allowed, banned)
+}
+
+// fakeSIEMAPI is a faked Datadog security-monitoring rules surface (NO live
+// Datadog).
+type fakeSIEMAPI struct{ rules []siemrules.RawRule }
+
+func (f *fakeSIEMAPI) ListRules(_ context.Context) ([]siemrules.RawRule, error) {
+	return f.rules, nil
+}
+
+// TestRun_PushesSIEMRuleRecords verifies the slice-533 end-to-end path: collect
+// from a faked Datadog Security-Monitoring API, build the datadog.siem_rule.v1
+// record, push through the platform's single Push RPC, and assert the receipt
+// (sha256 content hash) + the sibling kind + the actor_id.
+func TestRun_PushesSIEMRuleRecords(t *testing.T) {
+	_, conn, bearer := newBufconnPlatform(t)
+	client := sdk.NewClientFromConn(conn, bearer)
+	fixed := func() time.Time { return time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC) }
+
+	api := &fakeSIEMAPI{rules: []siemrules.RawRule{
+		{ID: "rule-aaa", Name: "Brute force on login", DetectionClass: "log_detection",
+			Enabled: true, Severity: "high", Handles: []string{"@slack-sec-oncall"}},
+	}}
+	rules, err := siemrules.Collect(context.Background(), api, fixed)
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	rec, err := siemrules.Build(rules[0], "scf:THR-01", actorID("siemrules"), "datadog", "prod")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if rec.GetEvidenceKind() != "datadog.siem_rule.v1" {
+		t.Errorf("kind = %q; want datadog.siem_rule.v1", rec.GetEvidenceKind())
+	}
+	receipt, err := client.Push(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if receipt.GetHash() == "" {
+		t.Fatal("receipt hash empty (sha256 content-hash)")
+	}
+	if !strings.HasPrefix(rec.GetSourceAttribution().GetActorId(), "connector:datadog:siemrules@") {
+		t.Errorf("actor_id = %q", rec.GetSourceAttribution().GetActorId())
+	}
+}
+
+// TestSIEMEmittedRecords_NoSecretsOrPII verifies P0-533: even when a rule's
+// notification list embeds an email recipient and a webhook-shaped string, the
+// emitted payload carries config + target-name metadata only.
+func TestSIEMEmittedRecords_NoSecretsOrPII(t *testing.T) {
+	fixed := func() time.Time { return time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC) }
+	api := &fakeSIEMAPI{rules: []siemrules.RawRule{
+		{ID: "1", Name: "n", DetectionClass: "log", Enabled: true, Severity: "high",
+			Handles: []string{"@oncall@fixture.invalid", "@slack-ops"}},
+	}}
+	rules, _ := siemrules.Collect(context.Background(), api, fixed)
+	rec, _ := siemrules.Build(rules[0], "scf:THR-01", actorID("siemrules"), "datadog", "prod")
+
+	allowed := map[string]bool{
+		"rule_id": true, "rule_name": true, "detection_class": true,
+		"enabled": true, "severity": true, "notification_targets": true,
+	}
+	banned := []string{"fixture.invalid", "webhook.invalid", "oncall@", "https://", "@example.com"}
 	assertNoSecret(t, rec, allowed, banned)
 }
 
