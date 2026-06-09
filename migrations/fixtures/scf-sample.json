@@ -319,6 +319,13 @@
     },
 
     {
+      "scf_id": "THR-01",
+      "family": "THR",
+      "title": "Threat Intelligence Program",
+      "description": "Mechanisms exist to implement a threat intelligence program that includes a cross-organization information-sharing capability to detect and respond to security threats."
+    },
+
+    {
       "scf_id": "TPM-01",
       "family": "TPM",
       "title": "Third-Party Management",
