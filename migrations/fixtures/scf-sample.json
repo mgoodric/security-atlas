@@ -322,7 +322,55 @@
       "scf_id": "THR-01",
       "family": "THR",
       "title": "Threat Intelligence Program",
-      "description": "Mechanisms exist to implement a threat intelligence program that includes a cross-organization information-sharing capability to detect and respond to security threats."
+      "description": "Mechanisms exist to implement a threat intelligence program that includes a cross-organization information-sharing capability to influence the development of system and security architectures, the selection of security solutions, monitoring, threat hunting, and response and recovery activities."
+    },
+    {
+      "scf_id": "THR-02",
+      "family": "THR",
+      "title": "Indicators of Exposure (IOE)",
+      "description": "Mechanisms exist to develop Indicators of Exposure (IOE) to understand the potential attack vectors that attackers could use to attack the organization."
+    },
+    {
+      "scf_id": "THR-03",
+      "family": "THR",
+      "title": "Threat Intelligence Feeds",
+      "description": "Mechanisms exist to maintain situational awareness of evolving threats by leveraging the knowledge of attacker tactics, techniques, and procedures to facilitate the implementation of preventative and compensating controls."
+    },
+    {
+      "scf_id": "THR-04",
+      "family": "THR",
+      "title": "Threat Hunting",
+      "description": "Mechanisms exist to perform cyber threat hunting that uses Indicators of Compromise (IOC) to detect, track, and disrupt threats that evade existing security controls."
+    },
+    {
+      "scf_id": "THR-05",
+      "family": "THR",
+      "title": "Insider Threat Program",
+      "description": "Mechanisms exist to implement an insider threat program that includes a cross-discipline insider threat incident handling team."
+    },
+    {
+      "scf_id": "THR-06",
+      "family": "THR",
+      "title": "Insider Threat Awareness",
+      "description": "Mechanisms exist to utilize security awareness training on recognizing and reporting potential indicators of insider threat."
+    },
+    {
+      "scf_id": "THR-07",
+      "family": "THR",
+      "title": "Vulnerability Disclosure Program (VDP)",
+      "description": "Mechanisms exist to establish a Vulnerability Disclosure Program (VDP) to assist with the secure development and maintenance of products and services that receives unsolicited reports about potential security vulnerabilities."
+    },
+    {
+      "scf_id": "THR-09",
+      "family": "THR",
+      "title": "Threat Catalog",
+      "description": "Mechanisms exist to develop and keep current a catalog of applicable internal and external threats to the organization, both natural and manmade."
+    },
+    {
+      "scf_id": "THR-10",
+      "family": "THR",
+      "title": "Threat Analysis",
+      "description": "Mechanisms exist to identify, assess, and remediate technology-related threats to both assets and business processes, taking into account such factors as risk to the organization and the likelihood and impact of a threat being realized."
     },
 
     {
