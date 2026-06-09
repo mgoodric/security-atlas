@@ -11,11 +11,13 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
 	"github.com/mgoodric/security-atlas/connectors/grafana/internal/alertrules"
+	"github.com/mgoodric/security-atlas/connectors/grafana/internal/ssoconfig"
 	"github.com/mgoodric/security-atlas/connectors/monitoring/alertcfg"
 )
 
@@ -36,8 +38,15 @@ func (f *fakeSDKClient) Push(_ context.Context, _ *evidencev1.EvidenceRecord) (*
 func (f *fakeSDKClient) Close() error { f.closeCalled = true; return nil }
 
 type seamOverrides struct {
-	collect   func(ctx context.Context, api alertrules.API) ([]alertcfg.RawRule, error)
-	newClient func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error)
+	collect    func(ctx context.Context, api alertrules.API) ([]alertcfg.RawRule, error)
+	ssoCollect func(ctx context.Context, api ssoconfig.API, now func() time.Time) (ssoconfig.AccessConfig, error)
+	newClient  func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error)
+}
+
+// defaultSSOCollect returns a fixed access-config so tests that only exercise
+// the alert-rule path do not hit live Grafana for the access-config pass.
+func defaultSSOCollect(_ context.Context, _ ssoconfig.API, _ func() time.Time) (ssoconfig.AccessConfig, error) {
+	return ssoconfig.AccessConfig{SSOEnabled: true, TeamCount: 1}, nil
 }
 
 func installSeams(t *testing.T, o seamOverrides) {
@@ -47,6 +56,15 @@ func installSeams(t *testing.T, o seamOverrides) {
 		alertRulesCollect = o.collect
 		t.Cleanup(func() { alertRulesCollect = prev })
 	}
+	// Always seam the SSO collector so doRun's access-config pass never touches
+	// live Grafana; tests may override it explicitly.
+	prevSSO := ssoConfigCollect
+	if o.ssoCollect != nil {
+		ssoConfigCollect = o.ssoCollect
+	} else {
+		ssoConfigCollect = defaultSSOCollect
+	}
+	t.Cleanup(func() { ssoConfigCollect = prevSSO })
 	if o.newClient != nil {
 		prev := newSDKClient
 		newSDKClient = o.newClient
@@ -61,7 +79,7 @@ func okEnv(t *testing.T) {
 }
 
 func okFlags() runFlags {
-	return runFlags{environment: "prod", ruleControl: "scf:MON-01"}
+	return runFlags{environment: "prod", ruleControl: "scf:MON-01", accessControl: "scf:IAC-06"}
 }
 
 func twoRules() []alertcfg.RawRule {
@@ -86,11 +104,39 @@ func TestDoRun_PushSuccess(t *testing.T) {
 	if err := doRun(context.Background(), okFlags()); err != nil {
 		t.Fatalf("doRun: %v", err)
 	}
-	if fake.pushed != 2 {
-		t.Errorf("pushed = %d; want 2", fake.pushed)
+	// 2 alert-rule records + 1 access-config record.
+	if fake.pushed != 3 {
+		t.Errorf("pushed = %d; want 3 (2 alert rules + 1 access config)", fake.pushed)
 	}
 	if !fake.closeCalled {
 		t.Error("Close not called")
+	}
+}
+
+func TestDoRun_AccessConfigCollectError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("403 sso-settings")
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		collect: func(_ context.Context, _ alertrules.API) ([]alertcfg.RawRule, error) { return nil, nil },
+		ssoCollect: func(_ context.Context, _ ssoconfig.API, _ func() time.Time) (ssoconfig.AccessConfig, error) {
+			return ssoconfig.AccessConfig{}, sentinel
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	err := doRun(context.Background(), okFlags())
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "grafana access-config collect: ") {
+		t.Fatalf("want wrapped access-config collect error; got %v", err)
+	}
+}
+
+func TestNewSSOConfigAPI_Constructor(t *testing.T) {
+	if newSSOConfigAPI(http.DefaultClient, "https://grafana.example.com", "test-grafana-token") == nil {
+		t.Error("newSSOConfigAPI returned nil")
 	}
 }
 

@@ -69,3 +69,36 @@ func TestRequiredRole_IsViewer(t *testing.T) {
 		t.Errorf("RequiredRole = %q; want Viewer (read-only, P0-488-2)", RequiredRole)
 	}
 }
+
+// TestRequiredAccessConfigScopes pins the slice-534 access-config scope set: the
+// precise additional READ permissions beyond Viewer, and that none of them is a
+// write/admin action (P0-534 / threat-model E — read-only least privilege; never
+// grant Admin "to be safe").
+func TestRequiredAccessConfigScopes(t *testing.T) {
+	t.Parallel()
+	scopes := RequiredAccessConfigScopes()
+	if len(scopes) != 2 {
+		t.Fatalf("RequiredAccessConfigScopes len = %d; want 2 (sso-settings + access-control)", len(scopes))
+	}
+	if scopes[0] != SSOSettingsReadPermission {
+		t.Errorf("scopes[0] = %q; want SSOSettingsReadPermission", scopes[0])
+	}
+	if scopes[1] != AccessControlReadPermission {
+		t.Errorf("scopes[1] = %q; want AccessControlReadPermission", scopes[1])
+	}
+	// Every documented permission must be read-only — never a write/admin action.
+	bannedActions := []string{"settings:write", "roles:write", "users.roles:add",
+		"users.roles:remove", "teams.roles:add", ":write", "admin", "Admin"}
+	for _, s := range scopes {
+		// The fixed-role names embed "read"; assert the read intent is present and
+		// no write/admin action leaked into the documented minimum.
+		if !strings.Contains(s, "read") {
+			t.Errorf("documented scope %q is not a read permission", s)
+		}
+		for _, b := range bannedActions {
+			if strings.Contains(s, b) {
+				t.Errorf("documented scope %q contains a non-read action %q (over-privilege)", s, b)
+			}
+		}
+	}
+}

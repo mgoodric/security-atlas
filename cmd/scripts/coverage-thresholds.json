@@ -102,6 +102,7 @@
     "connectors/grafana/cmd/atlas-grafana": 86,
     "connectors/grafana/internal/alertrules": 87,
     "connectors/grafana/internal/grafanaauth": 98,
+    "connectors/grafana/internal/ssoconfig": 92,
     "connectors/pagerduty/cmd/atlas-pagerduty": 86,
     "connectors/pagerduty/internal/incidents": 93,
     "connectors/pagerduty/internal/oncall": 95,
