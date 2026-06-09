@@ -24,11 +24,11 @@ const armAPIVersion = "2023-07-01"
 // the connector reads roleAssignments / roleDefinitions against (slice 615).
 const authzAPIVersion = "2022-04-01"
 
-// maxRoleAssignmentsPerVault bounds the per-vault roleAssignments read (DoS
-// guard, threat-model D). ARM returns a single bounded page; the connector
-// truncates defensively. A huge estate that legitimately exceeds this needs the
-// shared cursor-pagination follow-on (filed as spillover; see slice 486 R3) —
-// pagination is deliberately NOT implemented here.
+// maxRoleAssignmentsPerVault bounds the per-vault roleAssignments collected
+// across ALL cursor pages (DoS guard, threat-model D). Slice 623 added nextLink
+// pagination, so the connector now follows the ARM nextLink cursor up to this
+// many role assignments for one vault; a vault with more than this many
+// assignments has its list truncated honestly at the cap.
 const maxRoleAssignmentsPerVault = 200
 
 // maxRoleAssignmentsPerRun caps the TOTAL role assignments enumerated across all
@@ -41,6 +41,16 @@ const maxRoleAssignmentsPerRun = 2000
 // lookups (each unique role-definition guid is looked up at most once and cached;
 // this is the cap on distinct guids resolved per run — also a DoS guard).
 const maxRoleDefinitionLookupsPerRun = 100
+
+// maxRoleAssignmentPages caps the per-vault roleAssignments nextLink walk
+// (slice 623). Independent of the record caps above, it is the loop-termination
+// backstop so a self-pointing or non-terminating roleAssignments nextLink chain
+// cannot drive an unbounded read loop for a single vault — the walk stops after
+// this many pages even if the record caps are never reached (e.g. empty pages
+// with a recurring nextLink). Hitting the cap is not an error; the connector
+// reports the assignments it gathered. Mirrors firewall.maxRuleCollectionGroupPages
+// (slice 634, P0-634-2).
+const maxRoleAssignmentPages = 100
 
 // Client is a thin read-only HTTP client for the ARM vaults list endpoint. It
 // holds a short-lived bearer token (never logged) and issues only GET requests
@@ -122,6 +132,10 @@ type armRoleAssignment struct {
 
 type armRoleAssignmentPage struct {
 	Value []armRoleAssignment `json:"value"`
+	// NextLink is the ARM continuation cursor: an absolute URL carrying an opaque
+	// skiptoken that must be requested verbatim (not reconstructed). Empty on the
+	// last page (slice 623).
+	NextLink string `json:"nextLink"`
 }
 
 // armRoleDefinition mirrors a Microsoft.Authorization/roleDefinitions entry. We
@@ -198,59 +212,93 @@ func (c *Client) ListVaults(ctx context.Context) ([]RawVault, error) {
 }
 
 // listVaultRoleAssignments reads Microsoft.Authorization/roleAssignments scoped
-// to one vault resource id and maps each into a rbac_role_assignment AccessEntry
-// (principal object id + resolved role definition NAME). METADATA ONLY — never a
-// secret/key/certificate value (P0-615-2); ARM Reader suffices (P0-615-3).
+// to one vault resource id, following the ARM nextLink cursor across pages
+// (slice 623), and maps each into a rbac_role_assignment AccessEntry (principal
+// object id + resolved role definition NAME). METADATA ONLY — never a
+// secret/key/certificate value (P0-615-2 / P0-623-3); ARM Reader suffices
+// (P0-615-3 / P0-623-4).
 //
-// Bounded by construction (DoS guard, threat-model D): a single bounded page,
-// truncated to maxRoleAssignmentsPerVault, and skipped entirely once the run-wide
-// cap (maxRoleAssignmentsPerRun) is reached. Cursor pagination for a huge estate
-// is a documented follow-on, NOT implemented here.
+// Bounded by construction (DoS guard, threat-model D), UNCHANGED in WHAT it
+// collects by slice 623 — only HOW MANY pages it walks:
+//   - the per-vault record cap (maxRoleAssignmentsPerVault) truncates the
+//     collected assignments for one vault across all its pages;
+//   - the run-wide cap (maxRoleAssignmentsPerRun) skips the read entirely once
+//     the run total is reached and stops the walk mid-vault when crossed (the
+//     DoS backstop slice 623 keeps, P0-623-2);
+//   - the per-vault page cap (maxRoleAssignmentPages) is the loop-termination
+//     backstop so a self-pointing / non-terminating nextLink terminates rather
+//     than looping forever (P0-623-2).
 //
-// On read error it returns the error STRING (so the caller can mark the vault
+// Every request — first page and every nextLink follow-up — is a GET. On read
+// error it returns the error STRING (so the caller can mark the vault
 // INCONCLUSIVE) rather than failing the whole run — one throttled vault must not
-// blind the connector to the rest of the estate.
+// blind the connector to the rest of the estate. Assignments gathered before an
+// error on a later page are discarded so the vault is verdicted INCONCLUSIVE
+// (partial-read honesty) rather than reported as a complete-but-truncated set.
 func (c *Client) listVaultRoleAssignments(ctx context.Context, vaultID string, roleNames map[string]string, runTotal *int) ([]AccessEntry, int, string) {
 	if *runTotal >= maxRoleAssignmentsPerRun {
 		return nil, 0, ""
 	}
-	u := fmt.Sprintf("%s%s/providers/Microsoft.Authorization/roleAssignments?api-version=%s",
+	next := fmt.Sprintf("%s%s/providers/Microsoft.Authorization/roleAssignments?api-version=%s",
 		c.BaseURL, vaultID, authzAPIVersion)
+
+	entries := make([]AccessEntry, 0)
+	for page := 0; page < maxRoleAssignmentPages; page++ {
+		raPage, rerr := c.getRoleAssignmentPage(ctx, next)
+		if rerr != "" {
+			return nil, 0, rerr
+		}
+		for _, ra := range raPage.Value {
+			if len(entries) >= maxRoleAssignmentsPerVault {
+				break
+			}
+			if *runTotal+len(entries) >= maxRoleAssignmentsPerRun {
+				break
+			}
+			if ra.Properties.PrincipalID == "" {
+				continue
+			}
+			entries = append(entries, AccessEntry{
+				PrincipalID:   ra.Properties.PrincipalID,
+				PrincipalType: "rbac_role_assignment",
+				RoleName:      c.resolveRoleName(ctx, ra.Properties.RoleDefinitionID, roleNames),
+			})
+		}
+		// Stop following the cursor once a cap is reached or the cursor is spent.
+		if len(entries) >= maxRoleAssignmentsPerVault ||
+			*runTotal+len(entries) >= maxRoleAssignmentsPerRun ||
+			strings.TrimSpace(raPage.NextLink) == "" {
+			break
+		}
+		// The server-issued nextLink is an absolute URL carrying an opaque
+		// skiptoken — follow it verbatim.
+		next = raPage.NextLink
+	}
+	return entries, len(entries), ""
+}
+
+// getRoleAssignmentPage GETs one roleAssignments page (first page or a nextLink
+// follow-up). It returns the error as a STRING so the caller can mark the vault
+// INCONCLUSIVE rather than failing the whole run.
+func (c *Client) getRoleAssignmentPage(ctx context.Context, u string) (*armRoleAssignmentPage, string) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, 0, err.Error()
+		return nil, err.Error()
 	}
 	c.applyAuth(req)
 	res, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, 0, err.Error()
+		return nil, err.Error()
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
-		return nil, 0, (&APIError{Status: res.StatusCode, Body: drain(res.Body)}).Error()
+		return nil, (&APIError{Status: res.StatusCode, Body: drain(res.Body)}).Error()
 	}
 	var page armRoleAssignmentPage
 	if err := json.NewDecoder(res.Body).Decode(&page); err != nil {
-		return nil, 0, fmt.Errorf("decode role assignments: %w", err).Error()
+		return nil, fmt.Errorf("decode role assignments: %w", err).Error()
 	}
-	entries := make([]AccessEntry, 0, len(page.Value))
-	for _, ra := range page.Value {
-		if len(entries) >= maxRoleAssignmentsPerVault {
-			break
-		}
-		if *runTotal+len(entries) >= maxRoleAssignmentsPerRun {
-			break
-		}
-		if ra.Properties.PrincipalID == "" {
-			continue
-		}
-		entries = append(entries, AccessEntry{
-			PrincipalID:   ra.Properties.PrincipalID,
-			PrincipalType: "rbac_role_assignment",
-			RoleName:      c.resolveRoleName(ctx, ra.Properties.RoleDefinitionID, roleNames),
-		})
-	}
-	return entries, len(entries), ""
+	return &page, ""
 }
 
 // resolveRoleName turns a roleDefinition resource id into its human-readable

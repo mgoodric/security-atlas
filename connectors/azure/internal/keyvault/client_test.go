@@ -483,6 +483,221 @@ func TestClient_ListVaults_SkipsAssignmentWithoutPrincipal(t *testing.T) {
 	}
 }
 
+// --- slice 623: roleAssignments ARM nextLink cursor pagination ---
+
+// fakeSkiptoken is an obviously-fake ARM continuation cursor — no real
+// subscription / tenant material. It only routes a faked multi-page server.
+const fakeSkiptoken = "00000000-0000-0000-0000-00000000page2"
+
+// TestClient_ListVaults_RoleAssignmentsFollowsNextLink covers AC-1: the per-vault
+// roleAssignments read follows the ARM nextLink cursor to completion. Page 1
+// carries a nextLink, page 2 has none; BOTH assignments (one per page) must be
+// accumulated onto the RBAC vault, and every request — including the nextLink
+// follow-up — must be a GET.
+func TestClient_ListVaults_RoleAssignmentsFollowsNextLink(t *testing.T) {
+	var methods []string
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		switch {
+		case strings.Contains(r.URL.Path, "Microsoft.Authorization/roleDefinitions"):
+			_, _ = w.Write([]byte(`{"properties":{"roleName":"Key Vault Reader"}}`))
+		case strings.Contains(r.URL.Path, "Microsoft.Authorization/roleAssignments"):
+			if r.URL.Query().Get("$skiptoken") == fakeSkiptoken {
+				// page2 of the roleAssignments list — no nextLink (terminates).
+				_, _ = w.Write([]byte(`{"value":[
+					{"properties":{"principalId":"00000000-0000-0000-0000-0000000000b2","roleDefinitionId":"/subscriptions/test-sub/providers/Microsoft.Authorization/roleDefinitions/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}
+				]}`))
+				return
+			}
+			// page1 — carries an obviously-fake nextLink back to this test server.
+			next := srvURL + "/x/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01&$skiptoken=" + fakeSkiptoken
+			_, _ = w.Write([]byte(`{"value":[
+				{"properties":{"principalId":"00000000-0000-0000-0000-0000000000b1","roleDefinitionId":"/subscriptions/test-sub/providers/Microsoft.Authorization/roleDefinitions/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}
+			],"nextLink":"` + next + `"}`))
+		default:
+			_, _ = w.Write([]byte(rbacVaultPage))
+		}
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+
+	c := keyvault.NewClient(srv.Client(), srv.URL, "test-sub", "tok")
+	got, err := c.ListVaults(context.Background())
+	if err != nil {
+		t.Fatalf("ListVaults: %v", err)
+	}
+	rbac := got[0]
+	if rbac.Name != "kv-rbac" || rbac.ReadError != "" {
+		t.Fatalf("RBAC vault should read clean across pages: %+v", rbac)
+	}
+	if len(rbac.AccessEntries) != 2 {
+		t.Fatalf("role assignments across pages = %d; want 2 (page1 + page2 accumulated)", len(rbac.AccessEntries))
+	}
+	if rbac.AccessEntries[0].PrincipalID != "00000000-0000-0000-0000-0000000000b1" ||
+		rbac.AccessEntries[1].PrincipalID != "00000000-0000-0000-0000-0000000000b2" {
+		t.Errorf("assignments not accumulated across pages in order: %+v", rbac.AccessEntries)
+	}
+	for _, e := range rbac.AccessEntries {
+		if e.PrincipalType != "rbac_role_assignment" || e.RoleName != "Key Vault Reader" {
+			t.Errorf("entry malformed: %+v", e)
+		}
+	}
+	for _, m := range methods {
+		if m != http.MethodGet {
+			t.Errorf("method = %s; want GET (nextLink follow-ups are GET too, ARM Reader)", m)
+		}
+	}
+}
+
+// TestClient_ListVaults_RoleAssignmentsNextLinkLoopTerminates covers AC-2: a
+// roleAssignments nextLink that points back at itself (a hostile / buggy
+// self-referential cursor) terminates after the per-vault page cap rather than
+// looping forever. The connector reports what it gathered; cap-hit is not an
+// error. The page cap is the loop-termination DoS backstop (the run-wide cap is
+// exercised separately by the existing per-vault truncation test).
+func TestClient_ListVaults_RoleAssignmentsNextLinkLoopTerminates(t *testing.T) {
+	var assignReads int
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "Microsoft.Authorization/roleDefinitions"):
+			_, _ = w.Write([]byte(`{"properties":{"roleName":"Key Vault Reader"}}`))
+		case strings.Contains(r.URL.Path, "Microsoft.Authorization/roleAssignments"):
+			assignReads++
+			// Every page points its nextLink straight back at itself — a cursor that
+			// never terminates on its own. The per-vault page cap must break it.
+			self := srvURL + "/x/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01&$skiptoken=" + fakeSkiptoken
+			_, _ = w.Write([]byte(`{"value":[
+				{"properties":{"principalId":"00000000-0000-0000-0000-0000000000c1","roleDefinitionId":"/x/roleDefinitions/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}
+			],"nextLink":"` + self + `"}`))
+		default:
+			_, _ = w.Write([]byte(rbacVaultPage))
+		}
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+
+	c := keyvault.NewClient(srv.Client(), srv.URL, "test-sub", "tok")
+	got, err := c.ListVaults(context.Background())
+	if err != nil {
+		t.Fatalf("ListVaults: %v", err)
+	}
+	// The self-pointing nextLink terminated at the page cap, NOT forever.
+	if assignReads > keyvault.MaxRoleAssignmentPagesForTest() {
+		t.Fatalf("roleAssignments reads = %d; expected to stop at the per-vault page cap %d (loop must terminate)",
+			assignReads, keyvault.MaxRoleAssignmentPagesForTest())
+	}
+	// One assignment was gathered per page until the cap; the connector reported
+	// what it collected without erroring.
+	if got[0].ReadError != "" {
+		t.Errorf("cap-hit must not be a read error; got %q", got[0].ReadError)
+	}
+	if len(got[0].AccessEntries) == 0 {
+		t.Error("expected assignments gathered up to the page cap")
+	}
+}
+
+// TestClient_ListVaults_RoleAssignmentsLaterPageErrorMarksInconclusive pins the
+// partial-read-honesty contract for the cursor walk: an error on a LATER page
+// (after page 1 succeeded with a nextLink) discards the assignments gathered so
+// far and marks the vault INCONCLUSIVE, rather than reporting a
+// complete-but-truncated set.
+func TestClient_ListVaults_RoleAssignmentsLaterPageErrorMarksInconclusive(t *testing.T) {
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "Microsoft.Authorization/roleDefinitions"):
+			_, _ = w.Write([]byte(`{"properties":{"roleName":"Key Vault Reader"}}`))
+		case strings.Contains(r.URL.Path, "Microsoft.Authorization/roleAssignments"):
+			if r.URL.Query().Get("$skiptoken") == fakeSkiptoken {
+				w.WriteHeader(http.StatusTooManyRequests) // page2 throttled
+				return
+			}
+			next := srvURL + "/x/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01&$skiptoken=" + fakeSkiptoken
+			_, _ = w.Write([]byte(`{"value":[
+				{"properties":{"principalId":"00000000-0000-0000-0000-0000000000d1","roleDefinitionId":"/x/roleDefinitions/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}
+			],"nextLink":"` + next + `"}`))
+		default:
+			_, _ = w.Write([]byte(rbacVaultPage))
+		}
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+
+	c := keyvault.NewClient(srv.Client(), srv.URL, "test-sub", "tok")
+	got, err := c.ListVaults(context.Background())
+	if err != nil {
+		t.Fatalf("ListVaults must not fail the run on a per-vault read error: %v", err)
+	}
+	if got[0].ReadError == "" {
+		t.Error("a later-page roleAssignments error should mark the vault INCONCLUSIVE")
+	}
+	if len(got[0].AccessEntries) != 0 {
+		t.Errorf("page-1 assignments must be discarded on a later-page error (partial-read honesty): %+v", got[0].AccessEntries)
+	}
+}
+
+// TestClient_ListVaults_RoleAssignmentsSecretBearingFieldDiscardedAcrossPages
+// covers AC-3 at the decode boundary across the new cursor walk: even when an
+// ARM roleAssignments page (any page) carries an extra secret-bearing field
+// alongside the principal id, the decode discards everything except the
+// principal id + roleDefinition id, so NO secret value reaches an AccessEntry.
+// The structural guard (TestStructs_MetadataOnly_NoSecretValueFields) proves the
+// struct has no field to land it in; this proves the multi-page decode path
+// never carries it through.
+func TestClient_ListVaults_RoleAssignmentsSecretBearingFieldDiscardedAcrossPages(t *testing.T) {
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "Microsoft.Authorization/roleDefinitions"):
+			_, _ = w.Write([]byte(`{"properties":{"roleName":"Key Vault Reader"}}`))
+		case strings.Contains(r.URL.Path, "Microsoft.Authorization/roleAssignments"):
+			if r.URL.Query().Get("$skiptoken") == fakeSkiptoken {
+				// page2 also salts in a hostile secret-bearing field — must be dropped.
+				_, _ = w.Write([]byte(`{"value":[
+					{"properties":{"principalId":"00000000-0000-0000-0000-0000000000e2","roleDefinitionId":"/x/roleDefinitions/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","secretValue":"P@SSW0RD-SHOULD-NEVER-SURFACE-2","privateKey":"-----BEGIN-NOPE-----"}}
+				]}`))
+				return
+			}
+			next := srvURL + "/x/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01&$skiptoken=" + fakeSkiptoken
+			// page1 salts in a secret-bearing field ARM would never legitimately
+			// return; the connector must NOT carry it onto an AccessEntry.
+			_, _ = w.Write([]byte(`{"value":[
+				{"properties":{"principalId":"00000000-0000-0000-0000-0000000000e1","roleDefinitionId":"/x/roleDefinitions/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","secretValue":"P@SSW0RD-SHOULD-NEVER-SURFACE-1"}}
+			],"nextLink":"` + next + `"}`))
+		default:
+			_, _ = w.Write([]byte(rbacVaultPage))
+		}
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+
+	c := keyvault.NewClient(srv.Client(), srv.URL, "test-sub", "tok")
+	got, err := c.ListVaults(context.Background())
+	if err != nil {
+		t.Fatalf("ListVaults: %v", err)
+	}
+	rbac := got[0]
+	if len(rbac.AccessEntries) != 2 {
+		t.Fatalf("entries = %d; want 2 across pages", len(rbac.AccessEntries))
+	}
+	for _, e := range rbac.AccessEntries {
+		// An AccessEntry carries principal id + type + role name only. Assert no
+		// field on it holds the salted secret-bearing payload.
+		all := strings.ToLower(e.PrincipalID + "|" + e.PrincipalType + "|" + e.RoleName + "|" + strings.Join(e.Permissions, ","))
+		if strings.Contains(all, "password") || strings.Contains(all, "p@ssw0rd") ||
+			strings.Contains(all, "begin-nope") || strings.Contains(all, "secretvalue") {
+			t.Errorf("AccessEntry carried a secret-bearing ARM field (P0-623-3 over-collection violation): %+v", e)
+		}
+		// The roleDefinitionId here is not a full Microsoft.Authorization path, so
+		// it resolves to the bare guid fallback — still metadata, no secret.
+		if e.RoleName != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" || e.PrincipalType != "rbac_role_assignment" {
+			t.Errorf("only metadata should survive the decode: %+v", e)
+		}
+	}
+}
+
 func TestNewClient_DefaultsBaseURL(t *testing.T) {
 	c := keyvault.NewClient(nil, "", "test-sub", "tok")
 	if c.BaseURL != "https://management.azure.com" {
