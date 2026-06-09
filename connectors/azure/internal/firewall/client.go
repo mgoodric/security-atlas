@@ -21,18 +21,36 @@ const ARMScope = "https://management.azure.com/.default"
 const armAPIVersion = "2024-01-01"
 
 // maxRuleCollectionGroupsPerPolicy bounds the per-policy ruleCollectionGroups
-// read (DoS guard, threat-model D). ARM returns a single bounded page; the
-// connector truncates defensively. A huge estate that legitimately exceeds this
-// needs the shared cursor-pagination follow-on — pagination is deliberately NOT
-// implemented here.
+// collected across ALL cursor pages (DoS guard, threat-model D). Slice 634 added
+// nextLink pagination, so the connector now follows the ARM nextLink cursor up to
+// this many rule-collection groups for one policy; a policy with more than this
+// many groups has its list truncated honestly at the cap.
 const maxRuleCollectionGroupsPerPolicy = 200
 
 // maxRuleCollectionGroupsPerRun caps the TOTAL rule-collection groups enumerated
 // across all firewall policies in one connector run (DoS guard, threat-model D).
 // Once the run reaches the cap, further per-policy rule-collection-group reads
 // are skipped (the policy still reports; its rule-collection-group list is
-// simply truncated).
+// simply truncated). This is the run-wide DoS backstop the per-run cap names; it
+// is UNCHANGED by slice 634's nextLink pagination (P0-634-2).
 const maxRuleCollectionGroupsPerRun = 2000
+
+// maxFirewallPolicyPages caps the firewallPolicies-list nextLink walk
+// (slice 634). It is the loop-termination / DoS backstop for a pathological or
+// self-pointing nextLink on the policy list: a malicious or buggy nextLink that
+// points to itself terminates after this many pages rather than looping forever
+// (P0-634-2). Hitting the cap is not an error — the connector reports the
+// policies it gathered.
+const maxFirewallPolicyPages = 100
+
+// maxRuleCollectionGroupPages caps the per-policy ruleCollectionGroups nextLink
+// walk (slice 634). Independent of the record caps above, it is the
+// loop-termination backstop so a self-pointing or non-terminating
+// ruleCollectionGroups nextLink chain cannot drive an unbounded read loop for a
+// single policy — the walk stops after this many pages even if the record caps
+// are never reached (e.g. empty pages with a recurring nextLink). Hitting the
+// cap is not an error.
+const maxRuleCollectionGroupPages = 100
 
 // Client is a thin read-only HTTP client for the ARM firewallPolicies list +
 // ruleCollectionGroups list endpoints. It holds a short-lived bearer token
@@ -77,6 +95,10 @@ type armFirewallPolicy struct {
 
 type armFirewallPolicyPage struct {
 	Value []armFirewallPolicy `json:"value"`
+	// NextLink is the ARM continuation cursor: an absolute URL carrying an opaque
+	// skiptoken that must be requested verbatim (not reconstructed). Empty on the
+	// last page.
+	NextLink string `json:"nextLink"`
 }
 
 // armRuleCollectionGroup mirrors one Microsoft.Network/firewallPolicies/
@@ -125,41 +147,61 @@ type armAppProto struct {
 
 type armRuleCollectionGroupPage struct {
 	Value []armRuleCollectionGroup `json:"value"`
+	// NextLink is the ARM continuation cursor for the ruleCollectionGroups list
+	// (see armFirewallPolicyPage.NextLink). Empty on the last page.
+	NextLink string `json:"nextLink"`
 }
 
-// ListFirewallPolicies fetches the first page of Azure Firewall policies in the
-// subscription, then reads each policy's rule-collection groups via a scoped
-// read-only ARM read. Read-only (firewallPolicies + ruleCollectionGroups list,
-// ARM Reader role). This is a GET against the list surfaces only — it never
-// mutates and never reads flow logs / NAT secrets / threat-intel feeds.
+// ListFirewallPolicies enumerates the Azure Firewall policies in the
+// subscription by following the ARM nextLink cursor across the firewallPolicies
+// list pages (slice 634), then reads each policy's rule-collection groups via a
+// scoped read-only ARM read (itself nextLink-paginated). Read-only
+// (firewallPolicies + ruleCollectionGroups list, ARM Reader role). Every request
+// — first page and every nextLink follow-up — is a GET against the list surfaces
+// only; it never mutates and never reads flow logs / NAT secrets / threat-intel
+// feeds (P0-634-1, P0-634-3).
+//
+// The policy-list walk is bounded by maxFirewallPolicyPages so a pathological /
+// self-pointing nextLink terminates (P0-634-2); the per-policy group reads stay
+// bounded by the run-wide maxRuleCollectionGroupsPerRun DoS backstop, which slice
+// 634 does NOT remove.
 func (c *Client) ListFirewallPolicies(ctx context.Context) ([]RawPolicy, error) {
-	u := fmt.Sprintf("%s/subscriptions/%s/providers/Microsoft.Network/firewallPolicies?api-version=%s",
+	next := fmt.Sprintf("%s/subscriptions/%s/providers/Microsoft.Network/firewallPolicies?api-version=%s",
 		c.BaseURL, url.PathEscape(c.SubscriptionID), armAPIVersion)
-	page, err := c.getFirewallPolicyPage(ctx, u)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]RawPolicy, 0, len(page.Value))
+
+	var out []RawPolicy
 	var groupsThisRun int
-	for _, p := range page.Value {
-		rp := RawPolicy{
-			ID:            p.ID,
-			Name:          p.Name,
-			ResourceGroup: resourceGroupFromID(p.ID),
-			Location:      p.Location,
+	for page := 0; page < maxFirewallPolicyPages; page++ {
+		fpPage, err := c.getFirewallPolicyPage(ctx, next)
+		if err != nil {
+			return nil, err
 		}
-		if p.ID != "" {
-			groups, n, rerr := c.listRuleCollectionGroups(ctx, p.ID, &groupsThisRun)
-			if rerr != "" {
-				// A per-policy ruleCollectionGroups read error marks the policy
-				// INCONCLUSIVE (the verdict() path) rather than dropping it — the
-				// same fail-soft contract the Key-Vault RBAC read uses.
-				rp.ReadError = rerr
+		for _, p := range fpPage.Value {
+			rp := RawPolicy{
+				ID:            p.ID,
+				Name:          p.Name,
+				ResourceGroup: resourceGroupFromID(p.ID),
+				Location:      p.Location,
 			}
-			groupsThisRun += n
-			rp.RuleCollectionGroups = groups
+			if p.ID != "" {
+				groups, n, rerr := c.listRuleCollectionGroups(ctx, p.ID, &groupsThisRun)
+				if rerr != "" {
+					// A per-policy ruleCollectionGroups read error marks the policy
+					// INCONCLUSIVE (the verdict() path) rather than dropping it — the
+					// same fail-soft contract the Key-Vault RBAC read uses.
+					rp.ReadError = rerr
+				}
+				groupsThisRun += n
+				rp.RuleCollectionGroups = groups
+			}
+			out = append(out, rp)
 		}
-		out = append(out, rp)
+		if strings.TrimSpace(fpPage.NextLink) == "" {
+			break
+		}
+		// The server-issued nextLink is an absolute URL carrying an opaque
+		// skiptoken — follow it verbatim.
+		next = fpPage.NextLink
 	}
 	return out, nil
 }
@@ -186,56 +228,88 @@ func (c *Client) getFirewallPolicyPage(ctx context.Context, u string) (*armFirew
 }
 
 // listRuleCollectionGroups reads the ruleCollectionGroups scoped to one firewall
-// policy resource id and maps each into a RuleCollectionGroup (priority + its
-// network/application rule collections). CONFIGURATION metadata only — never a
-// flow log, packet capture, traffic content, NAT-rule secret, threat-intel feed,
-// or route table (P0-614-2); ARM Reader suffices (P0-614-1).
+// policy resource id, following the ARM nextLink cursor across pages (slice 634),
+// and maps each into a RuleCollectionGroup (priority + its network/application
+// rule collections). CONFIGURATION metadata only — never a flow log, packet
+// capture, traffic content, NAT-rule secret, threat-intel feed, or route table
+// (P0-614-2 / P0-634-1); ARM Reader suffices.
 //
-// Bounded by construction (DoS guard, threat-model D): a single bounded page,
-// truncated to maxRuleCollectionGroupsPerPolicy, and skipped entirely once the
-// run-wide cap (maxRuleCollectionGroupsPerRun) is reached. Cursor pagination for
-// a huge estate is a documented follow-on, NOT implemented here.
+// Bounded by construction (DoS guard, threat-model D), UNCHANGED in WHAT it
+// collects by slice 634 — only HOW MANY pages:
+//   - the per-policy record cap (maxRuleCollectionGroupsPerPolicy) truncates the
+//     collected groups for one policy across all its pages;
+//   - the run-wide cap (maxRuleCollectionGroupsPerRun) stops the walk entirely
+//     once the run total is reached (the DoS backstop slice 634 keeps);
+//   - the per-policy page cap (maxRuleCollectionGroupPages) is the loop-
+//     termination backstop so a self-pointing / non-terminating nextLink
+//     terminates (P0-634-2).
 //
-// On read error it returns the error STRING (so the caller can mark the policy
+// Every request — first page and every nextLink follow-up — is a GET. On read
+// error it returns the error STRING (so the caller can mark the policy
 // INCONCLUSIVE) rather than failing the whole run — one throttled policy must
-// not blind the connector to the rest of the estate.
+// not blind the connector to the rest of the estate. Groups gathered before an
+// error on a later page are discarded so the policy is verdicted INCONCLUSIVE
+// (partial-read honesty) rather than reported as a complete-but-truncated set.
 func (c *Client) listRuleCollectionGroups(ctx context.Context, policyID string, runTotal *int) ([]RuleCollectionGroup, int, string) {
 	if *runTotal >= maxRuleCollectionGroupsPerRun {
 		return nil, 0, ""
 	}
-	u := fmt.Sprintf("%s%s/ruleCollectionGroups?api-version=%s", c.BaseURL, policyID, armAPIVersion)
+	next := fmt.Sprintf("%s%s/ruleCollectionGroups?api-version=%s", c.BaseURL, policyID, armAPIVersion)
+
+	groups := make([]RuleCollectionGroup, 0)
+	for page := 0; page < maxRuleCollectionGroupPages; page++ {
+		rcgPage, rerr := c.getRuleCollectionGroupPage(ctx, next)
+		if rerr != "" {
+			return nil, 0, rerr
+		}
+		for _, g := range rcgPage.Value {
+			if len(groups) >= maxRuleCollectionGroupsPerPolicy {
+				break
+			}
+			if *runTotal+len(groups) >= maxRuleCollectionGroupsPerRun {
+				break
+			}
+			groups = append(groups, RuleCollectionGroup{
+				Name:            g.Name,
+				Priority:        g.Properties.Priority,
+				RuleCollections: mapRuleCollections(g.Properties.RuleCollections),
+			})
+		}
+		// Stop following the cursor once a cap is reached or the cursor is spent.
+		if len(groups) >= maxRuleCollectionGroupsPerPolicy ||
+			*runTotal+len(groups) >= maxRuleCollectionGroupsPerRun ||
+			strings.TrimSpace(rcgPage.NextLink) == "" {
+			break
+		}
+		// The server-issued nextLink is an absolute URL carrying an opaque
+		// skiptoken — follow it verbatim.
+		next = rcgPage.NextLink
+	}
+	return groups, len(groups), ""
+}
+
+// getRuleCollectionGroupPage GETs one ruleCollectionGroups page (first page or a
+// nextLink follow-up). It returns the error as a STRING so the caller can mark
+// the policy INCONCLUSIVE rather than failing the whole run.
+func (c *Client) getRuleCollectionGroupPage(ctx context.Context, u string) (*armRuleCollectionGroupPage, string) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, 0, err.Error()
+		return nil, err.Error()
 	}
 	c.applyAuth(req)
 	res, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, 0, err.Error()
+		return nil, err.Error()
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
-		return nil, 0, (&APIError{Status: res.StatusCode, Body: drain(res.Body)}).Error()
+		return nil, (&APIError{Status: res.StatusCode, Body: drain(res.Body)}).Error()
 	}
 	var page armRuleCollectionGroupPage
 	if err := json.NewDecoder(res.Body).Decode(&page); err != nil {
-		return nil, 0, fmt.Errorf("decode rule collection groups: %w", err).Error()
+		return nil, fmt.Errorf("decode rule collection groups: %w", err).Error()
 	}
-	groups := make([]RuleCollectionGroup, 0, len(page.Value))
-	for _, g := range page.Value {
-		if len(groups) >= maxRuleCollectionGroupsPerPolicy {
-			break
-		}
-		if *runTotal+len(groups) >= maxRuleCollectionGroupsPerRun {
-			break
-		}
-		groups = append(groups, RuleCollectionGroup{
-			Name:            g.Name,
-			Priority:        g.Properties.Priority,
-			RuleCollections: mapRuleCollections(g.Properties.RuleCollections),
-		})
-	}
-	return groups, len(groups), ""
+	return &page, ""
 }
 
 // mapRuleCollections normalizes the ARM ruleCollection list into the connector's
