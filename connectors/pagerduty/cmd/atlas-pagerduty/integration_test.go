@@ -18,6 +18,7 @@ import (
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/incidents"
+	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/metrics"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/oncall"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/pagerdutyauth"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/pdrecord"
@@ -71,6 +72,13 @@ type fakePostmortemsAPI struct{ postmortems []postmortems.RawPostmortem }
 
 func (f *fakePostmortemsAPI) ListPostmortems(_ context.Context, _, _ time.Time) ([]postmortems.RawPostmortem, error) {
 	return f.postmortems, nil
+}
+
+// fakeMetricsAPI is a faked PagerDuty incident-timing surface (NO live PagerDuty).
+type fakeMetricsAPI struct{ timings []metrics.RawTiming }
+
+func (f *fakeMetricsAPI) ListIncidentTimings(_ context.Context, _, _ time.Time) ([]metrics.RawTiming, error) {
+	return f.timings, nil
 }
 
 // TestRegister_ListsConnector verifies AC-1 + AC-7.
@@ -250,6 +258,30 @@ func TestEmittedRecords_NoPIIorFreeText(t *testing.T) {
 	// checked against pmAllowed instead).
 	pmBanned := []string{"@", "+1555", "phone", "fixture.invalid", "SSN", "customer", "narrative", "root cause", "Rotate"}
 	assertNoBanned(t, pmRec, pmAllowed, pmBanned)
+
+	// Response-metrics path (slice 539 / P0-539 — DOMINANT individual-profiling
+	// risk). The RawTiming the fake returns carries ONLY the service grain +
+	// timestamps; the aggregate the connector emits is SERVICE-grained, never
+	// per-responder. Even though we feed a named responder via the source-shape
+	// elsewhere (the metrics-package drop test), here we assert the emitted
+	// record's grain is the service id and no responder-identity value survives.
+	mAPI := &fakeMetricsAPI{timings: []metrics.RawTiming{
+		{ServiceID: "SVC1", CreatedAt: now.Add(-time.Hour), Acks: []metrics.RawAck{{At: now.Add(-50 * time.Minute)}}, ResolvedAt: now},
+		{ServiceID: "SVC1", CreatedAt: now.Add(-2 * time.Hour), Acks: []metrics.RawAck{{At: now.Add(-110 * time.Minute)}}},
+	}}
+	svcMetrics, _ := metrics.Collect(context.Background(), mAPI, now.AddDate(0, 0, -90), now)
+	if len(svcMetrics) != 1 || svcMetrics[0].ServiceID != "SVC1" {
+		t.Fatalf("want one SVC1 aggregate; got %+v", svcMetrics)
+	}
+	mRec, _ := pdrecord.BuildResponseMetrics(svcMetrics[0], "scf:IRO-02", actorID("metrics"), "pagerduty", "prod", now.AddDate(0, 0, -90), now, now)
+
+	mAllowed := map[string]bool{
+		"service_id": true, "window_start": true, "window_end": true,
+		"incident_count": true, "acknowledged_count": true, "resolved_count": true,
+		"mtta_seconds": true, "mttr_seconds": true,
+	}
+	mBanned := []string{"@", "+1555", "phone", "fixture.invalid", "SSN", "customer", "responder", "acknowledger", "assignee", "Alice", "Jane"}
+	assertNoBanned(t, mRec, mAllowed, mBanned)
 }
 
 // TestCredential_NeverLogged verifies AC-11 + P0-489-4.

@@ -28,10 +28,12 @@ const ConnectorName = "pagerduty-connector"
 //   - pagerduty.oncall_coverage.v1     (escalation-policy + on-call coverage, pull — slice 489)
 //   - pagerduty.incident_summary.v1    (bounded-window incident summaries, pull — slice 489)
 //   - pagerduty.postmortem_summary.v1  (bounded-window postmortem METADATA, pull — slice 538)
+//   - pagerduty.response_metrics.v1    (service-level MTTA/MTTR aggregates, pull — slice 539)
 var SupportedKinds = []string{
 	pdrecord.OnCallKind,
 	pdrecord.IncidentKind,
 	pdrecord.PostmortemKind,
+	pdrecord.MetricsKind,
 }
 
 // PullInterval names the connector's pull cadence HONESTLY (P0-489-6). The
@@ -127,10 +129,11 @@ func sdkOpts() []sdk.Option {
 
 const longDescription = `security-atlas PagerDuty incident-response connector
 
-Emits three evidence kinds:
+Emits four evidence kinds:
   - pagerduty.oncall_coverage.v1     (run subcommand, pull — escalation policy + on-call coverage)
   - pagerduty.incident_summary.v1    (run subcommand, pull — bounded-window incident summaries)
   - pagerduty.postmortem_summary.v1  (run subcommand, pull — bounded-window postmortem METADATA)
+  - pagerduty.response_metrics.v1    (run subcommand, pull — service-level MTTA/MTTR aggregates)
 
 Profile: pull. Each invocation is one bounded read-and-push pass on an
 operator-scheduled cadence (recommended 24h). This is NOT continuous
@@ -140,17 +143,22 @@ Least-privilege PagerDuty access (read-only):
   - a READ-ONLY REST API token.
   - NEVER use a full-access / write / admin token.
 
-The connector reads COVERAGE + incident-SUMMARY + postmortem-METADATA only:
+The connector reads COVERAGE + incident-SUMMARY + postmortem-METADATA +
+service-level response-time AGGREGATES only:
   - escalation policies, their tiers, and the on-call IDENTITY (id + display
     name) needed to prove coverage;
   - incident id / number / urgency / status / service / created+resolved
-    timestamps over a bounded look-back window; and
+    timestamps over a bounded look-back window;
   - per-postmortem META-FACTS: that a review EXISTS for an incident, its status,
     created+published timestamps, and the corrective-action COUNT + completed/open
-    rollup.
+    rollup; and
+  - per-SERVICE incident-response AGGREGATES: MTTA / MTTR (mean + p50/p90/p95) and
+    incident / acknowledged / resolved counts over the window.
 It NEVER collects a responder's personal phone number or personal email, the
 incident's free-text title/body/notes, the postmortem narrative / timeline /
-root-cause prose, or an action-item title.
+root-cause prose, an action-item title, or WHICH NAMED RESPONDER acknowledged
+or resolved an incident (response metrics are aggregated to the service grain —
+they are a program-level posture, never a per-engineer scorecard).
 
 Auth: set PAGERDUTY_TOKEN (read-only). The token is read from the environment,
 never a CLI flag, and never logged or placed into an evidence record.`

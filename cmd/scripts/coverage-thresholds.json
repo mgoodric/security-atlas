@@ -105,6 +105,7 @@
     "connectors/grafana/internal/ssoconfig": 92,
     "connectors/pagerduty/cmd/atlas-pagerduty": 86,
     "connectors/pagerduty/internal/incidents": 93,
+    "connectors/pagerduty/internal/metrics": 95,
     "connectors/pagerduty/internal/oncall": 95,
     "connectors/pagerduty/internal/pagerdutyauth": 98,
     "connectors/pagerduty/internal/pdhttp": 90,

@@ -25,6 +25,7 @@ import (
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/incidents"
+	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/metrics"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/oncall"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/postmortems"
 )
@@ -34,6 +35,7 @@ const (
 	OnCallKind     = "pagerduty.oncall_coverage.v1"
 	IncidentKind   = "pagerduty.incident_summary.v1"
 	PostmortemKind = "pagerduty.postmortem_summary.v1"
+	MetricsKind    = "pagerduty.response_metrics.v1"
 	SchemaVersion  = "1.0.0"
 	sourceVendorPD = "pagerduty"
 )
@@ -188,6 +190,61 @@ func BuildPostmortem(p postmortems.Postmortem, controlID, actorID, service, envi
 	}, nil
 }
 
+// BuildResponseMetrics turns a SERVICE-level incident-response aggregate into a
+// pushable EvidenceRecord. The payload is an AGGREGATE-ONLY rollup: the opaque
+// service id (the grain), the incident / acknowledged / resolved counts, and the
+// MTTA / MTTR mean + p50 / p90 / p95 (whole seconds). There is NO code path here
+// that could place a responder identity (name / email / id / contact) into the
+// payload — the input type (metrics.ServiceMetrics) has no such field BY
+// CONSTRUCTION (P0-539). The aggregation grain is the service, never a named
+// responder. The idempotency key collapses same-service re-runs within the hour
+// into one ledger row. windowSince/windowUntil bound the aggregation window and
+// are emitted so an auditor knows the period.
+func BuildResponseMetrics(m metrics.ServiceMetrics, controlID, actorID, service, environment string, windowSince, windowUntil, observedAt time.Time) (*evidencev1.EvidenceRecord, error) {
+	now := observedAt.UTC().Truncate(time.Hour)
+	pm := map[string]any{
+		"service_id":         m.ServiceID,
+		"window_start":       windowSince.UTC().Format(time.RFC3339),
+		"window_end":         windowUntil.UTC().Format(time.RFC3339),
+		"incident_count":     m.IncidentCount,
+		"acknowledged_count": m.AcknowledgedCount,
+		"resolved_count":     m.ResolvedCount,
+		"mtta_seconds": map[string]any{
+			"mean": m.MTTASecondsMean,
+			"p50":  m.MTTASecondsP50,
+			"p90":  m.MTTASecondsP90,
+			"p95":  m.MTTASecondsP95,
+		},
+		"mttr_seconds": map[string]any{
+			"mean": m.MTTRSecondsMean,
+			"p50":  m.MTTRSecondsP50,
+			"p90":  m.MTTRSecondsP90,
+			"p95":  m.MTTRSecondsP95,
+		},
+	}
+	payload, err := structpb.NewStruct(pm)
+	if err != nil {
+		return nil, err
+	}
+	return &evidencev1.EvidenceRecord{
+		IdempotencyKey: metricsKey(m.ServiceID, now),
+		EvidenceKind:   MetricsKind,
+		SchemaVersion:  SchemaVersion,
+		ControlId:      controlID,
+		Scope: []*evidencev1.ScopeDimension{
+			{Key: "service", Values: []string{service}},
+			{Key: "environment", Values: []string{environment}},
+		},
+		ObservedAt: timestamppb.New(now),
+		Result:     evidencev1.Result_RESULT_INCONCLUSIVE,
+		Payload:    payload,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "connector",
+			ActorId:   actorID,
+		},
+	}, nil
+}
+
 // onCallKey: sha256("pagerduty.oncall_coverage|<policy_id>|<hour>").
 func onCallKey(policyID string, observedAt time.Time) string {
 	hour := observedAt.UTC().Truncate(time.Hour).Format(time.RFC3339)
@@ -206,5 +263,14 @@ func incidentKey(incidentID string, observedAt time.Time) string {
 func postmortemKey(postmortemID string, observedAt time.Time) string {
 	hour := observedAt.UTC().Truncate(time.Hour).Format(time.RFC3339)
 	sum := sha256.Sum256([]byte("pagerduty.postmortem_summary|" + postmortemID + "|" + hour))
+	return hex.EncodeToString(sum[:])
+}
+
+// metricsKey: sha256("pagerduty.response_metrics|<service_id>|<hour>"). The
+// grain is the service id (never a responder), so same-service re-runs within
+// the hour collapse into one ledger row.
+func metricsKey(serviceID string, observedAt time.Time) string {
+	hour := observedAt.UTC().Truncate(time.Hour).Format(time.RFC3339)
+	sum := sha256.Sum256([]byte("pagerduty.response_metrics|" + serviceID + "|" + hour))
 	return hex.EncodeToString(sum[:])
 }

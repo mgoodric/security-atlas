@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/incidents"
+	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/metrics"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/oncall"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/postmortems"
 )
@@ -156,5 +157,81 @@ func TestBuildPostmortem_Idempotent(t *testing.T) {
 	b, _ := BuildPostmortem(p, "c", "actor", "pagerduty", "prod", fixedNow.Add(30*time.Minute))
 	if a.GetIdempotencyKey() != b.GetIdempotencyKey() {
 		t.Error("same postmortem within the hour should share an idempotency key")
+	}
+}
+
+func TestBuildResponseMetrics(t *testing.T) {
+	t.Parallel()
+	m := metrics.ServiceMetrics{
+		ServiceID:         "SVCA",
+		IncidentCount:     5,
+		AcknowledgedCount: 4,
+		ResolvedCount:     3,
+		MTTASecondsMean:   120, MTTASecondsP50: 100, MTTASecondsP90: 180, MTTASecondsP95: 200,
+		MTTRSecondsMean: 1200, MTTRSecondsP50: 1000, MTTRSecondsP90: 1800, MTTRSecondsP95: 2000,
+	}
+	since := time.Date(2026, 3, 9, 0, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 6, 7, 0, 0, 0, 0, time.UTC)
+	rec, err := BuildResponseMetrics(m, "scf:IRO-02", "connector:pagerduty:metrics@dev", "pagerduty", "prod", since, until, fixedNow)
+	if err != nil {
+		t.Fatalf("BuildResponseMetrics: %v", err)
+	}
+	if rec.GetEvidenceKind() != MetricsKind || rec.GetSchemaVersion() != SchemaVersion {
+		t.Errorf("kind/version = %q/%q", rec.GetEvidenceKind(), rec.GetSchemaVersion())
+	}
+	if rec.GetIdempotencyKey() == "" {
+		t.Error("empty idempotency key")
+	}
+	if got := rec.GetObservedAt().AsTime(); got != fixedNow.Truncate(time.Hour) {
+		t.Errorf("observed_at = %v", got)
+	}
+	pm := rec.GetPayload().AsMap()
+	if pm["service_id"] != "SVCA" {
+		t.Errorf("service_id = %v", pm["service_id"])
+	}
+	if pm["window_start"] != "2026-03-09T00:00:00Z" || pm["window_end"] != "2026-06-07T00:00:00Z" {
+		t.Errorf("window = %v..%v", pm["window_start"], pm["window_end"])
+	}
+	if pm["incident_count"] != float64(5) || pm["acknowledged_count"] != float64(4) || pm["resolved_count"] != float64(3) {
+		t.Errorf("counts = %v", pm)
+	}
+	mtta, ok := pm["mtta_seconds"].(map[string]any)
+	if !ok {
+		t.Fatalf("mtta_seconds not an object: %T", pm["mtta_seconds"])
+	}
+	if mtta["mean"] != float64(120) || mtta["p95"] != float64(200) {
+		t.Errorf("mtta = %v", mtta)
+	}
+	mttr, ok := pm["mttr_seconds"].(map[string]any)
+	if !ok {
+		t.Fatalf("mttr_seconds not an object: %T", pm["mttr_seconds"])
+	}
+	if mttr["mean"] != float64(1200) || mttr["p90"] != float64(1800) {
+		t.Errorf("mttr = %v", mttr)
+	}
+
+	// AGGREGATE-ONLY (P0-539): the only payload keys are the known aggregate
+	// keys — no responder-identity key can appear.
+	allowed := map[string]bool{
+		"service_id": true, "window_start": true, "window_end": true,
+		"incident_count": true, "acknowledged_count": true, "resolved_count": true,
+		"mtta_seconds": true, "mttr_seconds": true,
+	}
+	for k := range pm {
+		if !allowed[k] {
+			t.Errorf("unexpected payload key %q — response-metrics payload must be aggregate-only (P0-539)", k)
+		}
+	}
+}
+
+func TestBuildResponseMetrics_Idempotent(t *testing.T) {
+	t.Parallel()
+	m := metrics.ServiceMetrics{ServiceID: "SVCA", IncidentCount: 1}
+	since := time.Date(2026, 3, 9, 0, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 6, 7, 0, 0, 0, 0, time.UTC)
+	a, _ := BuildResponseMetrics(m, "c", "actor", "pagerduty", "prod", since, until, fixedNow)
+	b, _ := BuildResponseMetrics(m, "c", "actor", "pagerduty", "prod", since, until, fixedNow.Add(30*time.Minute))
+	if a.GetIdempotencyKey() != b.GetIdempotencyKey() {
+		t.Error("same service within the hour should share an idempotency key")
 	}
 }

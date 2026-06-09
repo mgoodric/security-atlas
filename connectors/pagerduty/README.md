@@ -6,13 +6,14 @@ the platform's evidence pipeline — the recurring SOC 2 CC7.3 / CC7.4 / CC7.5
 and the slice-372 IR plan's "show your on-call schedule and incident history"
 ask. It follows the locked connector pattern verbatim: register-per-run, a
 stable `actor_id`, an hour-truncated `observed_at`, scope minimums, and
-vendor-native read-only auth. It emits three evidence kinds:
+vendor-native read-only auth. It emits four evidence kinds:
 
 | Kind                              | Profile | Source                                              |
 | --------------------------------- | ------- | --------------------------------------------------- |
 | `pagerduty.oncall_coverage.v1`    | pull    | PagerDuty REST API `GET /escalation_policies`       |
 | `pagerduty.incident_summary.v1`   | pull    | PagerDuty REST API `GET /incidents?since=&until=`   |
 | `pagerduty.postmortem_summary.v1` | pull    | PagerDuty REST API `GET /postmortems?since=&until=` |
+| `pagerduty.response_metrics.v1`   | pull    | PagerDuty REST API `GET /incidents?since=&until=`   |
 
 The postmortem-summary kind (slice 538) is the deliberate slice-489 follow-on
 (P0-489-7): it carries postmortem / retrospective **METADATA only** (existence,
@@ -20,6 +21,17 @@ status, timestamps, corrective-action count + completed/open rollup), feeding
 SOC 2 CC7.5 ("recover from identified security incidents") and the slice-372 IR
 continuous-improvement loop — **never** the narrative. See the boundary section
 below.
+
+The response-metrics kind (slice 539) is the second slice-489 follow-on
+(P0-489-7): it carries **SERVICE-/TEAM-level incident-response performance
+aggregates** — time-to-acknowledge (MTTA) and time-to-resolve (MTTR), each as a
+mean plus p50 / p90 / p95, with incident / acknowledged / resolved counts over a
+bounded window — feeding SOC 2 CC7.4 ("responds to identified security
+incidents"). The aggregation altitude is the load-bearing call: metrics are
+**service-grained, never per-named-responder**, so the evidence ledger never
+becomes an individual-performance surveillance store. The connector never
+decodes **which individual** acknowledged or resolved an incident. See the
+boundary section below.
 
 The connector is **API-based**, not an in-host agent — consistent with the "no
 closed proprietary collector agents" anti-pattern. It reads the read-only
@@ -39,7 +51,11 @@ PII. The connector collects **coverage facts + incident-summary metadata only**:
   timestamps** over a bounded look-back window;
 - per-postmortem **META-FACTS**: that a review **exists** for an incident, the
   linked incident id, the review **status**, the **created / published
-  timestamps**, and the corrective-action **COUNT** + completed/open rollup.
+  timestamps**, and the corrective-action **COUNT** + completed/open rollup;
+- per-**service** incident-response **AGGREGATES**: MTTA / MTTR (mean +
+  p50 / p90 / p95) and incident / acknowledged / resolved **counts** over the
+  window — derived from each incident's created / first-acknowledged / resolved
+  timestamps, then rolled up to the service grain.
 
 **Never collected (out of scope):**
 
@@ -49,7 +65,11 @@ PII. The connector collects **coverage facts + incident-summary metadata only**:
   data);
 - the postmortem **narrative body, timeline, or root-cause prose**, an action
   item's operator-authored **title / description**, or any customer data /
-  responder PII the postmortem free-text embeds.
+  responder PII the postmortem free-text embeds;
+- **which named responder** acknowledged or resolved an incident — response
+  metrics are aggregated to the **service** grain, never a per-engineer
+  scorecard. The acknowledgment's `acknowledger`, the assignees, and the
+  resolver are **never decoded**.
 
 The decode boundary is the enforcement point: the HTTP clients decode only the
 listed fields into PII-free / free-text-free structs, so the unwanted fields
@@ -65,6 +85,21 @@ reflection guard (`postmortems_guard_test.go:TestMetadataOnly_StructuralGuard`)
 (`postmortems/client_test.go:TestClient_ListPostmortems_DropsNarrative`) feeds a
 fake API response that deliberately embeds a narrative body, root-cause prose,
 responder PII, and action-item titles, and proves none of it reaches a record.
+
+For the response-metrics kind the over-collection risk is **dominant** in a
+different direction — **profiling named individuals** (a privacy + works-council
+concern in some jurisdictions). The boundary is therefore also enforced
+**structurally**: the record types (`RawAck` / `RawTiming` / `ServiceMetrics`)
+have **no field that can hold a responder identity (name / email / id-as-person
+/ contact) BY CONSTRUCTION** — the only string field is the opaque service id
+(the aggregation grain). A reflection guard
+(`metrics_guard_test.go:TestAggregateOnly_StructuralGuard`) **fails the build**
+the moment a responder-identity or free-text field is added. A drop test
+(`metrics_guard_test.go:TestCollect_DropsResponderIdentity`) feeds a fake API
+response that deliberately embeds named acknowledgers, assignees, responder
+emails, and an incident title naming an individual, and proves **no
+per-named-responder identity becomes the grain** of any emitted metrics record —
+the grain stays the service id.
 
 A test (`integration_test.go:TestEmittedRecords_NoPIIorFreeText`) asserts no
 PII-shaped or free-text substring reaches an emitted payload (AC-10), and
@@ -93,12 +128,13 @@ incident-lifecycle webhooks) is a documented follow-on, not part of v0.
 
 ## Incident look-back window
 
-`--lookback-days` (default **90**) bounds the incident **and postmortem** query
-windows (`since = now - lookback-days`, `until = now`). 90 days fits a typical
-SOC 2 observation increment while keeping each run bounded (threat-model D).
-Increase it for a wider audit window; the run cost grows with the incident /
-postmortem count. The postmortem read is additionally hard-capped
-(`postmortems.MaxRecords`) and the page loop is bounded, so a paginated source
+`--lookback-days` (default **90**) bounds the incident, postmortem, **and
+response-metrics** query windows (`since = now - lookback-days`, `until = now`).
+90 days fits a typical SOC 2 observation increment while keeping each run bounded
+(threat-model D). Increase it for a wider audit window; the run cost grows with
+the incident / postmortem count. The postmortem read is hard-capped
+(`postmortems.MaxRecords`), the response-metrics aggregate set is hard-capped
+(`metrics.MaxServices`), and every page loop is bounded, so a paginated source
 cannot make a run unbounded.
 
 ## Usage
@@ -112,13 +148,15 @@ export SECURITY_ATLAS_ENDPOINT=atlas.example.com:443
 export SECURITY_ATLAS_TOKEN=<platform bearer>
 atlas-pagerduty register
 
-# Read coverage + incident summaries + postmortem metadata and push evidence.
+# Read coverage + incident summaries + postmortem metadata + response metrics
+# and push evidence.
 export PAGERDUTY_TOKEN=<read-only PagerDuty REST API token>
 atlas-pagerduty run --environment prod --lookback-days 90
 ```
 
-The `run` subcommand emits all three kinds in one pass. Override the
-postmortem control mapping with `--postmortem-control` (default `scf:IRO-13`).
+The `run` subcommand emits all four kinds in one pass. Override the postmortem
+control mapping with `--postmortem-control` (default `scf:IRO-13`) and the
+response-metrics control mapping with `--metrics-control` (default `scf:IRO-02`).
 
 ## Scope minimums
 
@@ -139,8 +177,13 @@ accuracy recheck:
 - `pagerduty.postmortem_summary.v1` → `IRO-13` (Root-Cause Analysis), `IRO-09`
   (Incident Reporting) — proves incidents are reviewed and corrective actions
   tracked (SOC 2 CC7.5; the slice-372 IR continuous-improvement loop).
+- `pagerduty.response_metrics.v1` → `IRO-02` (Incident Handling), `MON-02`
+  (Continuous Monitoring) — proves incidents are acknowledged and resolved within
+  target windows at the program level (SOC 2 CC7.4). Service-level aggregates,
+  never a per-engineer scorecard.
 
 ## Follow-ons (out of v0 scope)
 
-- responder-performance metrics (slice 539);
-- event-driven profile via PagerDuty webhooks (slice 540).
+- event-driven profile via PagerDuty webhooks (slice 540);
+- per-team (rather than per-service) aggregation grain, if PagerDuty's team
+  model proves a better board-reporting altitude than the service grain.

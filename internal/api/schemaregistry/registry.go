@@ -181,6 +181,17 @@ func DefaultSeed() []KindVersion {
 		// field that can hold it; a reflection guard fails the build if one is
 		// added).
 		{Kind: "pagerduty.postmortem_summary.v1", Version: "1.0.0"},
+		// Slice 539: PagerDuty connector SERVICE-/TEAM-level incident-response
+		// performance AGGREGATES (MTTA / MTTR — mean + p50/p90/p95 + counts) over a
+		// bounded look-back window — the deliberate slice-489 over-collection
+		// follow-on (P0-489-7). Proves incidents are acknowledged + resolved within
+		// target windows at the PROGRAM level (SOC 2 CC7.4): SCF IRO-02 Incident
+		// Handling / MON-02 Continuous Monitoring. AGGREGATE-ONLY — the grain is the
+		// service, NEVER a named responder; the connector never decodes which
+		// individual acknowledged or resolved an incident (the record struct has no
+		// field that can hold a responder identity; a reflection guard fails the
+		// build if one is added). NOT a per-engineer scorecard.
+		{Kind: "pagerduty.response_metrics.v1", Version: "1.0.0"},
 		// Slice 490: MDM connectors (Jamf + Intune) — shared managed-device
 		// endpoint-posture summary evidence kind (SOC 2 CC6.7 / CC6.8, ISO A.8).
 		{Kind: "endpoint.device_posture.v1", Version: "1.0.0"},
