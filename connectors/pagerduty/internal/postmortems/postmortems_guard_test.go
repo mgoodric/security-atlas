@@ -45,7 +45,7 @@ func TestMetadataOnly_StructuralGuard(t *testing.T) {
 	var walk func(prefix string, rt reflect.Type)
 	walk = func(prefix string, rt reflect.Type) {
 		switch rt.Kind() {
-		case reflect.Slice, reflect.Array, reflect.Ptr:
+		case reflect.Slice, reflect.Array, reflect.Pointer:
 			walk(prefix, rt.Elem())
 			return
 		case reflect.Struct:
