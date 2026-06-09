@@ -295,6 +295,174 @@ func TestClient_ListFirewallPolicies_EmptyAndUntypedCollections(t *testing.T) {
 	}
 }
 
+// fakeSkiptoken is an obviously-fake ARM continuation cursor — no real
+// skiptoken / GUID / vendor secret (GitGuardian-neutral).
+const fakeSkiptoken = "00000000-0000-0000-0000-00000000page2"
+
+// TestClient_ListFirewallPolicies_FollowsPolicyListNextLink covers the
+// firewallPolicies-list cursor walk: page1 carries a nextLink → page2 has none.
+// Both policies (one per page) must be collected, and every request must be GET.
+func TestClient_ListFirewallPolicies_FollowsPolicyListNextLink(t *testing.T) {
+	var methods []string
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		switch {
+		case strings.Contains(r.URL.Path, "ruleCollectionGroups"):
+			_, _ = w.Write([]byte(`{"value":[]}`))
+		case r.URL.Query().Get("$skiptoken") == fakeSkiptoken:
+			// page2 of the policy list — no nextLink (terminates the walk).
+			_, _ = w.Write([]byte(`{
+				"value": [
+					{
+						"id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg2/providers/Microsoft.Network/firewallPolicies/fwpolicy2",
+						"name": "fwpolicy2",
+						"location": "westus"
+					}
+				]
+			}`))
+		default:
+			// page1 of the policy list — carries an obviously-fake nextLink back to
+			// this (non-Azure, 127.0.0.1) test server.
+			next := srvURL + "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/firewallPolicies?api-version=2024-01-01&$skiptoken=" + fakeSkiptoken
+			_, _ = w.Write([]byte(`{
+				"value": [
+					{
+						"id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg1/providers/Microsoft.Network/firewallPolicies/fwpolicy1",
+						"name": "fwpolicy1",
+						"location": "eastus"
+					}
+				],
+				"nextLink": "` + next + `"
+			}`))
+		}
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+
+	c := firewall.NewClient(srv.Client(), srv.URL, "test-sub", "tok")
+	got, err := c.ListFirewallPolicies(context.Background())
+	if err != nil {
+		t.Fatalf("ListFirewallPolicies: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("policies across pages = %d; want 2 (page1 + page2)", len(got))
+	}
+	if got[0].Name != "fwpolicy1" || got[1].Name != "fwpolicy2" {
+		t.Errorf("policies not collected across pages in order: %+v", got)
+	}
+	for _, m := range methods {
+		if m != http.MethodGet {
+			t.Errorf("method = %s; want GET (nextLink follow-ups are GET too)", m)
+		}
+	}
+}
+
+// TestClient_ListFirewallPolicies_FollowsGroupNextLink covers the per-policy
+// ruleCollectionGroups cursor walk: group page1 has a nextLink → page2 has none.
+// Both groups must be collected onto the single policy.
+func TestClient_ListFirewallPolicies_FollowsGroupNextLink(t *testing.T) {
+	var methods []string
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		if !strings.Contains(r.URL.Path, "ruleCollectionGroups") {
+			_, _ = w.Write([]byte(neutralPolicyPage))
+			return
+		}
+		if r.URL.Query().Get("$skiptoken") == fakeSkiptoken {
+			// group page2 — no nextLink.
+			_, _ = w.Write([]byte(`{
+				"value": [
+					{ "name": "GroupOnPage2", "properties": { "priority": 400, "ruleCollections": [] } }
+				]
+			}`))
+			return
+		}
+		// group page1 — carries an obviously-fake nextLink.
+		next := srvURL + "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg1/providers/Microsoft.Network/firewallPolicies/fwpolicy1/ruleCollectionGroups?api-version=2024-01-01&$skiptoken=" + fakeSkiptoken
+		_, _ = w.Write([]byte(`{
+			"value": [
+				{ "name": "GroupOnPage1", "properties": { "priority": 200, "ruleCollections": [] } }
+			],
+			"nextLink": "` + next + `"
+		}`))
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+
+	c := firewall.NewClient(srv.Client(), srv.URL, "test-sub", "tok")
+	got, err := c.ListFirewallPolicies(context.Background())
+	if err != nil {
+		t.Fatalf("ListFirewallPolicies: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("policies = %d; want 1", len(got))
+	}
+	groups := got[0].RuleCollectionGroups
+	if len(groups) != 2 {
+		t.Fatalf("groups across pages = %d; want 2 (page1 + page2)", len(groups))
+	}
+	if groups[0].Name != "GroupOnPage1" || groups[1].Name != "GroupOnPage2" {
+		t.Errorf("groups not collected across pages in order: %+v", groups)
+	}
+	for _, m := range methods {
+		if m != http.MethodGet {
+			t.Errorf("method = %s; want GET", m)
+		}
+	}
+}
+
+// TestClient_ListFirewallPolicies_GroupNextLinkLoopTerminates pins the
+// loop-termination DoS backstop: a ruleCollectionGroups nextLink that points to
+// itself (a hostile / buggy self-referential cursor) terminates after the
+// per-policy page cap rather than running forever. The connector reports what it
+// gathered (cap-hit is not an error).
+func TestClient_ListFirewallPolicies_GroupNextLinkLoopTerminates(t *testing.T) {
+	var groupReads int
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "ruleCollectionGroups") {
+			_, _ = w.Write([]byte(neutralPolicyPage))
+			return
+		}
+		groupReads++
+		// Every group page points its nextLink straight back at itself — a cursor
+		// that never terminates on its own. The per-policy page cap must break it.
+		self := srvURL + "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg1/providers/Microsoft.Network/firewallPolicies/fwpolicy1/ruleCollectionGroups?api-version=2024-01-01&$skiptoken=" + fakeSkiptoken
+		_, _ = w.Write([]byte(`{
+			"value": [
+				{ "name": "Loop", "properties": { "priority": 100, "ruleCollections": [] } }
+			],
+			"nextLink": "` + self + `"
+		}`))
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+
+	c := firewall.NewClient(srv.Client(), srv.URL, "test-sub", "tok")
+	got, err := c.ListFirewallPolicies(context.Background())
+	if err != nil {
+		t.Fatalf("ListFirewallPolicies: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("policies = %d; want 1", len(got))
+	}
+	// The self-pointing nextLink terminated at the page cap, NOT forever.
+	if groupReads > firewall.MaxRuleCollectionGroupPagesForTest() {
+		t.Fatalf("group reads = %d; expected to stop at the per-policy page cap %d (loop must terminate)",
+			groupReads, firewall.MaxRuleCollectionGroupPagesForTest())
+	}
+	// One group was gathered per page until the cap; the connector reported what
+	// it collected without erroring.
+	if got[0].ReadError != "" {
+		t.Errorf("cap-hit must not be a read error; got %q", got[0].ReadError)
+	}
+	if len(got[0].RuleCollectionGroups) == 0 {
+		t.Error("expected the gathered-before-cap groups to be reported")
+	}
+}
+
 func TestNewClient_DefaultsBaseURL(t *testing.T) {
 	c := firewall.NewClient(nil, "", "test-sub", "tok")
 	if c.BaseURL != "https://management.azure.com" {
