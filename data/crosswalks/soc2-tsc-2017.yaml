@@ -387,6 +387,11 @@ mappings:
     relationship_type: intersects_with
     strength: 0.7
     rationale: "Threat Intelligence Program informs the detection rules that monitor system components for anomalies indicative of malicious acts; the SIEM detection-rule evidence family (datadog.siem_rule.v1, slice 533) anchors here."
+  - tsc_code: CC7.2
+    scf_anchor: THR-04
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Threat Hunting (slice 641 THR-04) is the proactive operational activity that detects malicious-act anomalies evading existing controls — a partial overlap with CC7.2's anomaly monitoring (hunting is one technique within the broader monitoring concept; CC7.2 also covers natural-disaster/error anomalies hunting does not). Added by slice 646."
   - tsc_code: CC7.3
     scf_anchor: AAA-01
     relationship_type: intersects_with
