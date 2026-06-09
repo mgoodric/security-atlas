@@ -180,6 +180,11 @@ mappings:
     relationship_type: equal
     strength: 1.0
     rationale: "Threat Intelligence Program (THR-01) is the dedicated SCF threat-intel anchor and the direct STRM equivalent of A.5.7 Threat intelligence. Upgraded from the slice-438 placeholder MON-08 (intersects_with/0.5, LOW CONFIDENCE) once slice 635 seeded the THR domain into the sample catalog."
+  - requirement_code: A.5.7
+    scf_anchor: THR-03
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "A.5.7 collects and analyzes threat information to produce intelligence; Threat Intelligence Feeds (slice 641 THR-03) are a subset mechanism of that program — the ingest side of producing threat intelligence. Sits alongside the A.5.7=THR-01 program equal. Added by slice 646."
   - requirement_code: A.5.8
     scf_anchor: SEA-01
     relationship_type: intersects_with
@@ -306,6 +311,11 @@ mappings:
     relationship_type: equal
     strength: 0.9
     rationale: "Management of technical vulnerabilities maps to SCF Vulnerability & Patch Management Policy — shared with SOC 2 CC7.1."
+  - requirement_code: A.8.8
+    scf_anchor: THR-02
+    relationship_type: subset_of
+    strength: 0.6
+    rationale: "A.8.8 'the organization's exposure is evaluated' is the threat-exposure facet of vulnerability management; Indicators of Exposure (slice 641 THR-02) covers the exposure-evaluation concept directly, a subset of the broader A.8.8 obtain/evaluate/remediate cycle (VPM-01 carries the equal). Added by slice 646."
   - requirement_code: A.8.9
     scf_anchor: CFG-04
     relationship_type: equal
@@ -336,6 +346,11 @@ mappings:
     relationship_type: intersects_with
     strength: 0.6
     rationale: "A.8.16 'appropriate actions are taken to evaluate potential information security incidents' is informed by the Threat Intelligence Program; the SIEM detection-rule evidence family (datadog.siem_rule.v1, slice 533) anchors at THR-01."
+  - requirement_code: A.8.16
+    scf_anchor: THR-04
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "A.8.16 'networks, systems, and applications are monitored for anomalous behavior' overlaps Threat Hunting (slice 641 THR-04) — proactive hunting is one monitoring technique that surfaces anomalous behavior. Partial: A.8.16 also covers passive/automated monitoring beyond active hunting. Added by slice 646."
   - requirement_code: A.8.20
     scf_anchor: NET-04
     relationship_type: equal

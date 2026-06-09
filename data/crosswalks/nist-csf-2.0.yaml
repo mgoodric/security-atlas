@@ -604,11 +604,26 @@ mappings:
     relationship_type: "intersects_with"
     strength: 0.6
     rationale: "Receiving/analyzing cyber threat intelligence overlaps SCF Anomalous Behavior Detection (the closest threat-analysis anchor in the sample fixture); a dedicated threat-intelligence anchor is absent (LOW)."
+  - requirement_code: "ID.RA-02"
+    scf_anchor: "THR-03"
+    relationship_type: "equal"
+    strength: 0.9
+    rationale: "ID.RA-02 'cyber threat intelligence is received from information-sharing sources and analyzed' is the direct STRM match for Threat Intelligence Feeds (slice 641 THR-03) — the dedicated threat-intel-feed anchor the slice-480 row's '(LOW)' note flagged as absent. The MON-08 placeholder above stays as a secondary anomaly-detection overlap; THR-03 is now the primary dedicated anchor. Added by slice 646."
   - requirement_code: "ID.RA-03"
     scf_anchor: "RSK-04"
     relationship_type: "subset_of"
     strength: 0.75
     rationale: "Identifying and recording internal/external threats is part of SCF Risk Assessment."
+  - requirement_code: "ID.RA-03"
+    scf_anchor: "THR-09"
+    relationship_type: "subset_of"
+    strength: 0.7
+    rationale: "ID.RA-03 'internal and external threats are identified and recorded' is the threat-cataloging activity; Threat Catalog (slice 641 THR-09) is the dedicated record of identified threats — a subset of ID.RA-03 alongside the RSK-04 risk-assessment edge. Added by slice 646."
+  - requirement_code: "ID.RA-03"
+    scf_anchor: "THR-10"
+    relationship_type: "subset_of"
+    strength: 0.6
+    rationale: "ID.RA-03's 'identified' half (distinct from the 'recorded' half THR-09 carries) is the threat-analysis activity that surfaces internal/external threats; Threat Analysis (slice 641 THR-10) is the dedicated anchor for that analysis. Partial — ID.RA-03 spans both analysis (THR-10) and cataloging (THR-09). Added by slice 646."
   - requirement_code: "ID.RA-04"
     scf_anchor: "RSK-04"
     relationship_type: "subset_of"
@@ -830,6 +845,11 @@ mappings:
     relationship_type: "intersects_with"
     strength: 0.6
     rationale: "Integrating cyber threat intelligence into event analysis overlaps SCF Anomalous Behavior Detection; a dedicated threat-intelligence anchor is absent from the fixture (LOW)."
+  - requirement_code: "DE.AE-07"
+    scf_anchor: "THR-01"
+    relationship_type: "intersects_with"
+    strength: 0.7
+    rationale: "DE.AE-07 'cyber threat intelligence and other contextual information are integrated into event analysis' is the program-level threat-intel function; Threat Intelligence Program (THR-01, reconciled in slice 641 to name monitoring/hunting/response as program outputs) is the dedicated anchor for integrating intelligence into analysis — supersedes the MON-08 '(LOW)' placeholder above as the primary anchor. Added by slice 646."
   - requirement_code: "DE.AE-08"
     scf_anchor: "IRO-04"
     relationship_type: "subset_of"
