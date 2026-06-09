@@ -2,19 +2,20 @@ package pss
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"sort"
-	"strings"
-	"time"
+
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/k8slist"
 )
 
 // Client is a thin read-only HTTP client for the one Kubernetes endpoint the PSS
 // collector reads: core namespaces (get/list — already held by the base
-// ClusterRole). It holds a short-lived bearer token (never logged) and issues
-// only GET requests.
+// ClusterRole). It delegates HTTP + pagination to the shared k8slist.Reader:
+// the namespace list call follows the Kubernetes `metadata.continue` cursor to
+// completion (slice 653), so a cluster with more than one page of namespaces is
+// no longer silently truncated. It holds a short-lived bearer token (never
+// logged) and issues only GET requests.
 //
 // CRITICAL (structural over-collection guard): the namespace object carries
 // arbitrary labels AND annotations. This client extracts ONLY the
@@ -24,24 +25,18 @@ import (
 // the single chokepoint; a test feeds a namespace WITH unrelated labels +
 // annotations and proves none of them reach a RawNamespace / Admission.
 type Client struct {
-	HTTP    *http.Client
-	BaseURL string
-	token   string
+	r *k8slist.Reader
 }
 
 // NewClient builds a PSS client. token is a read-only ServiceAccount bearer
 // token (from k8sauth.Credential.Token). baseURL is the API server URL.
 func NewClient(httpClient *http.Client, baseURL, token string) *Client {
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 20 * time.Second}
-	}
-	return &Client{HTTP: httpClient, BaseURL: strings.TrimRight(baseURL, "/"), token: token}
+	return &Client{r: k8slist.NewReader(httpClient, baseURL, token)}
 }
 
-// pageLimit bounds the single namespace list call (read-only). A cluster with
-// more than this many namespaces is paginated server-side; v0 reads the first
-// bounded page (a documented follow-on, mirrors netpol).
-const pageLimit = 500
+// APIError is re-exported from the shared reader so existing callers and tests
+// keep referring to pss.APIError.
+type APIError = k8slist.APIError
 
 // labelPrefix is the only label namespace the connector reads off a Namespace
 // object. Every other label, and every annotation, is discarded.
@@ -74,22 +69,19 @@ type apiNamespace struct {
 	Metadata apiMeta `json:"metadata"`
 }
 
-type namespaceList struct {
-	Items []apiNamespace `json:"items"`
-}
-
-// ListNamespacePSS reads every namespace (one bounded list call — read-only) and
-// reduces each to its PSS label configuration. A namespace with no PSS labels
-// appears with every Level unset (unenforced — recorded honestly). Read-only:
-// only a GET against core namespaces.
+// ListNamespacePSS reads every namespace (the list call follows the continue
+// cursor to completion — read-only) and reduces each to its PSS label
+// configuration. A namespace with no PSS labels appears with every Level unset
+// (unenforced — recorded honestly). Read-only: only a GET against core
+// namespaces.
 func (c *Client) ListNamespacePSS(ctx context.Context) ([]RawNamespace, error) {
-	var nsList namespaceList
-	if err := c.getJSON(ctx, "/api/v1/namespaces", &nsList); err != nil {
+	namespaces, err := k8slist.ListAll[apiNamespace](ctx, c.r, "/api/v1/namespaces")
+	if err != nil {
 		return nil, fmt.Errorf("list namespaces: %w", err)
 	}
 
-	out := make([]RawNamespace, 0, len(nsList.Items))
-	for _, ns := range nsList.Items {
+	out := make([]RawNamespace, 0, len(namespaces))
+	for _, ns := range namespaces {
 		if ns.Metadata.Name == "" {
 			continue
 		}
@@ -116,47 +108,4 @@ func reduce(ns apiNamespace) RawNamespace {
 		WarnLevel:      Level(labels[labelWarn]),
 		WarnVersion:    labels[labelWarnVersion],
 	}
-}
-
-func (c *Client) getJSON(ctx context.Context, path string, into any) error {
-	u := fmt.Sprintf("%s%s?limit=%d", c.BaseURL, path, pageLimit)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return err
-	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-	req.Header.Set("Accept", "application/json")
-	res, err := c.HTTP.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode != http.StatusOK {
-		return &APIError{Status: res.StatusCode, Body: drain(res.Body)}
-	}
-	if err := json.NewDecoder(res.Body).Decode(into); err != nil {
-		return fmt.Errorf("decode %s: %w", path, err)
-	}
-	return nil
-}
-
-// APIError carries Kubernetes REST error context.
-type APIError struct {
-	Status int
-	Body   string
-}
-
-func (e *APIError) Error() string {
-	if e.Body == "" {
-		return fmt.Sprintf("k8s: HTTP %d", e.Status)
-	}
-	return fmt.Sprintf("k8s: HTTP %d: %s", e.Status, e.Body)
-}
-
-func drain(r io.Reader) string {
-	const max = 1 << 13
-	b, _ := io.ReadAll(io.LimitReader(r, max))
-	return string(b)
 }

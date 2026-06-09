@@ -207,3 +207,47 @@ func TestAPIError_String(t *testing.T) {
 		t.Error("body should be included")
 	}
 }
+
+// TestClient_ListNamespacePSS_FollowsContinueAcrossPages is the slice-653 AC-2
+// proof for the PSS client: the namespaces endpoint returns two pages (page 1
+// carries a metadata.continue token; page 2 returns an empty token) and the
+// client accumulates namespaces across both via the shared k8slist.Reader. A
+// cluster with more than one page of namespaces is no longer silently truncated.
+func TestClient_ListNamespacePSS_FollowsContinueAcrossPages(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/namespaces", func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("continue") {
+		case "":
+			_, _ = w.Write([]byte(`{"metadata":{"continue":"PAGE-2"},"items":[
+				{"metadata":{"name":"ns-alpha","labels":{"pod-security.kubernetes.io/enforce":"restricted"}}}
+			]}`))
+		case "PAGE-2":
+			_, _ = w.Write([]byte(`{"metadata":{"continue":""},"items":[
+				{"metadata":{"name":"ns-bravo","labels":{"pod-security.kubernetes.io/enforce":"baseline"}}}
+			]}`))
+		default:
+			t.Errorf("unexpected continue token %q", r.URL.Query().Get("continue"))
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.Client(), srv.URL, "test-k8s-token")
+	got, err := c.ListNamespacePSS(context.Background())
+	if err != nil {
+		t.Fatalf("ListNamespacePSS: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("namespaces = %d; want 2 accumulated across two pages", len(got))
+	}
+	// Sorted by name: ns-alpha, ns-bravo.
+	if got[0].Name != "ns-alpha" || got[1].Name != "ns-bravo" {
+		t.Fatalf("expected ns-alpha + ns-bravo across pages; got %+v", got)
+	}
+	if got[0].EnforceLevel != LevelRestricted {
+		t.Errorf("ns-alpha enforce = %q; want restricted", got[0].EnforceLevel)
+	}
+	if got[1].EnforceLevel != LevelBaseline {
+		t.Errorf("ns-bravo enforce = %q; want baseline", got[1].EnforceLevel)
+	}
+}
