@@ -71,6 +71,7 @@ tags:
   - name: board
   - name: calendar
   - name: controls
+  - name: csf
   - name: dashboard
   - name: decisions
   - name: evidence
@@ -1597,6 +1598,131 @@ paths:
       summary: POST /v1/controls:upload-bundle
       tags: [controls]
       operationId: post-v1-controls_upload-bundle
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/csf/gap:
+    get:
+      summary: GET /v1/csf/gap — NIST CSF 2.0 Current-vs-Target gap view
+      tags: [csf]
+      operationId: get-v1-csf-gap
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/csf/profiles/{kind}:
+    get:
+      summary: GET /v1/csf/profiles/{kind} — a CSF Current or Target profile + selections
+      tags: [csf]
+      operationId: get-v1-csf-profiles-kind
+      security:
+        - bearer: []
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    put:
+      summary: PUT /v1/csf/profiles/{kind} — ensure a CSF Current or Target profile
+      tags: [csf]
+      operationId: put-v1-csf-profiles-kind
+      security:
+        - bearer: []
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/csf/profiles/{kind}/selections:
+    put:
+      summary: PUT /v1/csf/profiles/{kind}/selections — set one Subcategory target outcome
+      tags: [csf]
+      operationId: put-v1-csf-profiles-kind-selections
+      security:
+        - bearer: []
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/csf/profiles/{kind}/selections/{requirement_id}:
+    delete:
+      summary: DELETE /v1/csf/profiles/{kind}/selections/{requirement_id}
+      tags: [csf]
+      operationId: delete-v1-csf-profiles-kind-selections-requirement_id
+      security:
+        - bearer: []
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/csf/tier:
+    get:
+      summary: GET /v1/csf/tier — the tenant's CSF 2.0 Tier rating
+      tags: [csf]
+      operationId: get-v1-csf-tier
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    put:
+      summary: PUT /v1/csf/tier — set or re-rate the CSF 2.0 Tier
+      tags: [csf]
+      operationId: put-v1-csf-tier
       security:
         - bearer: []
       responses:

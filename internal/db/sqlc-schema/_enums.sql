@@ -183,3 +183,17 @@ CREATE TYPE decision_status AS ENUM (
     'superseded',
     'expired'
 );
+
+-- ===== From migrations/sql/20260608080000_csf_tier_profile.sql (slice 515) =====
+
+CREATE TYPE csf_tier AS ENUM (
+    'tier1_partial',
+    'tier2_risk_informed',
+    'tier3_repeatable',
+    'tier4_adaptive'
+);
+
+CREATE TYPE csf_profile_kind AS ENUM (
+    'current',
+    'target'
+);

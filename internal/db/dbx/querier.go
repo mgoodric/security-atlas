@@ -331,6 +331,9 @@ type Querier interface {
 	// so a deleted YAML edge is reflected in the DB. Safe because cascade
 	// edges are derived content (catalogs/metrics/*.yaml is the source).
 	DeleteAllMetricCascadeEdges(ctx context.Context) error
+	// Clear a Subcategory selection (the operator removed the target outcome).
+	// Returns the deleted row so the caller can audit what was cleared.
+	DeleteCsfProfileSelection(ctx context.Context, arg DeleteCsfProfileSelectionParams) (CsfProfileSelection, error)
 	DeleteDecision(ctx context.Context, arg DeleteDecisionParams) error
 	// Used by tests + cleanup paths. Production deployments will rarely delete
 	// a scope (supersession is the lifecycle exit); the row is preserved as
@@ -518,6 +521,9 @@ type Querier interface {
 	// is TEXT (slice 002); slice 017 stores JSON in that text.
 	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)
 	GetControlByID(ctx context.Context, arg GetControlByIDParams) (GetControlByIDRow, error)
+	GetCsfProfile(ctx context.Context, arg GetCsfProfileParams) (CsfProfile, error)
+	GetCsfProfileByID(ctx context.Context, arg GetCsfProfileByIDParams) (CsfProfile, error)
+	GetCsfTierRating(ctx context.Context, arg GetCsfTierRatingParams) (CsfTierRating, error)
 	// Lookup by the human-readable decision_id ("DL-2026-04-12"). Unique within
 	// tenant (UNIQUE (tenant_id, decision_id)).
 	GetDecisionByDecisionID(ctx context.Context, arg GetDecisionByDecisionIDParams) (Decision, error)
@@ -803,6 +809,8 @@ type Querier interface {
 	// Insert a new control row (initial upload or supersession). Caller is
 	// responsible for UPDATE-ing the predecessor's superseded_by in the same tx.
 	InsertControlVersion(ctx context.Context, arg InsertControlVersionParams) (Control, error)
+	// ===== csf_assessment_audit =====
+	InsertCsfAssessmentAudit(ctx context.Context, arg InsertCsfAssessmentAuditParams) (CsfAssessmentAudit, error)
 	// The drift refresh write: APPEND one snapshot row. The table is append-only
 	// (no UPDATE/DELETE RLS policy) — every refresh, scheduled or on-ingest,
 	// appends a fresh row; the read path takes the latest row per
@@ -1374,6 +1382,13 @@ type Querier interface {
 	// BOTH the UUID control_id path and the free-form control_ref path (slice
 	// 013), so evidence pushed under an SCF-anchor string is still counted.
 	ListControlsWithLatestEvidence(ctx context.Context, tenantID pgtype.UUID) ([]ListControlsWithLatestEvidenceRow, error)
+	// Newest first. Exposed for the audit trail + integration assertions.
+	ListCsfAssessmentAudit(ctx context.Context, arg ListCsfAssessmentAuditParams) ([]CsfAssessmentAudit, error)
+	// The gap-view row source for ONE profile: every selection joined to its
+	// shared CSF Subcategory (code + title) so the handler can render the
+	// per-Subcategory target outcome without a second round trip. Newest CSF
+	// Subcategory ordering is by code (e.g. GV.OC-01, GV.OC-02, …).
+	ListCsfProfileSelectionsWithSubcategory(ctx context.Context, arg ListCsfProfileSelectionsWithSubcategoryParams) ([]ListCsfProfileSelectionsWithSubcategoryRow, error)
 	// The audit trail for a single decision, oldest first. Powers the
 	// decision-detail audit-log rail.
 	ListDecisionAudit(ctx context.Context, arg ListDecisionAuditParams) ([]DecisionsAudit, error)
@@ -2450,6 +2465,33 @@ type Querier interface {
 	// with secret-unchanged semantics. id is supplied by the caller (UUIDv4)
 	// so the insert path is deterministic in tests.
 	UpsertAdminSSO(ctx context.Context, arg UpsertAdminSSOParams) (UpsertAdminSSORow, error)
+	// ===== csf_profiles =====
+	// Insert (or no-op update) the single profile per (tenant, framework_version,
+	// kind). Re-creating the same kind returns the existing row (its name/updated
+	// refreshed) rather than erroring, so the editor is idempotent.
+	UpsertCsfProfile(ctx context.Context, arg UpsertCsfProfileParams) (UpsertCsfProfileRow, error)
+	// ===== csf_profile_selections =====
+	// Set the target outcome for one Subcategory inside a profile. Re-setting the
+	// same (profile, Subcategory) updates the outcome + note in place.
+	UpsertCsfProfileSelection(ctx context.Context, arg UpsertCsfProfileSelectionParams) (UpsertCsfProfileSelectionRow, error)
+	// Slice 515 — NIST CSF 2.0 Tier / Profile assessment queries.
+	//
+	// Conventions match slice 018 / 512:
+	//   * tenant_id is always the first parameter on tenant-scoped reads even
+	//     though RLS reads it from the app.current_tenant GUC — the explicit
+	//     predicate keeps query plans on the (tenant_id, …) indexes.
+	//   * Time stamps (now()) are issued by the DB so the application doesn't
+	//     choose a clock.
+	//   * The gap-view read joins selections to the SHARED CSF Subcategory rows
+	//     (framework_requirements) by FK — the per-Subcategory↔SCF-anchor mapping
+	//     is NEVER re-stored here (invariant #1, P0-515-2); the anchor/coverage
+	//     traversal is done by internal/api/ucfcoverage at read time.
+	// ===== csf_tier_ratings =====
+	// Insert or update the single Tier rating per (tenant, framework_version).
+	// Re-rating updates the row in place; the caller appends a csf_assessment_audit
+	// row ('tier_rated' on insert, 'tier_rerated' on the conflict path) and reads
+	// the returned `(xmax = 0)` flag to know which it was.
+	UpsertCsfTierRating(ctx context.Context, arg UpsertCsfTierRatingParams) (UpsertCsfTierRatingRow, error)
 	// Set a user's email-channel master opt-in (AC-9). The (tenant_id,
 	// user_id) PK is the conflict target.
 	UpsertEmailOptIn(ctx context.Context, arg UpsertEmailOptInParams) (bool, error)

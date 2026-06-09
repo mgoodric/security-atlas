@@ -37,6 +37,7 @@ import (
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	controlstateapi "github.com/mgoodric/security-atlas/internal/api/controlstate"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	csfassessmentapi "github.com/mgoodric/security-atlas/internal/api/csfassessment"
 	dashboardapi "github.com/mgoodric/security-atlas/internal/api/dashboard"
 	dashboardexportapi "github.com/mgoodric/security-atlas/internal/api/dashboardexport"
 	decisionsapi "github.com/mgoodric/security-atlas/internal/api/decisions"
@@ -82,6 +83,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/board"
 	"github.com/mgoodric/security-atlas/internal/control"
+	"github.com/mgoodric/security-atlas/internal/csfassessment"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/decision"
 	"github.com/mgoodric/security-atlas/internal/drift"
@@ -459,6 +461,21 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/framework-scopes/{id}", fwH.Get)
 	root.Patch("/v1/framework-scopes/{id}", fwH.Patch)
 	root.Get("/v1/controls/{id}/effective-scope", fwH.EffectiveScope)
+	// Slice 515: NIST CSF 2.0 Tier / Profile assessment workflow. Tenant-
+	// confidential assessment state over the shared CSF crosswalk; edit routes
+	// are grc_engineer/admin-gated inside the handler, read routes are any
+	// tenant credential. The gap view reads the existing crosswalk traversal
+	// (invariant #1) rather than re-storing it. Literal-segment routes
+	// ({kind}/selections) are registered before the {requirement_id} variant
+	// per chi's same-method resolution order.
+	csfH := csfassessmentapi.New(csfassessment.NewStore(s.dbPool))
+	root.Put("/v1/csf/tier", csfH.PutTier)
+	root.Get("/v1/csf/tier", csfH.GetTier)
+	root.Get("/v1/csf/gap", csfH.Gap)
+	root.Put("/v1/csf/profiles/{kind}/selections", csfH.PutSelection)
+	root.Delete("/v1/csf/profiles/{kind}/selections/{requirement_id}", csfH.DeleteSelection)
+	root.Put("/v1/csf/profiles/{kind}", csfH.PutProfile)
+	root.Get("/v1/csf/profiles/{kind}", csfH.GetProfile)
 	// Slice 036: S3 artifact store — large-payload upload + short-TTL
 	// signed download. Routes only mount when an artifact store has been
 	// wired in via Server.AttachArtifactStore (or Config.ArtifactStore).

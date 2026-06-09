@@ -3089,6 +3089,29 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Added
 
+- **slice 515** — NIST CSF 2.0 **Tier / Profile assessment workflow** on top of
+  the slice-480/514 CSF crosswalk. Adds the tenant-confidential assessment
+  state CSF layers over the shared reference data: a **Tier rating** (1-4:
+  Partial → Risk Informed → Repeatable → Adaptive) and **Current / Target
+  Profiles** (a per-Subcategory target-outcome selection) with a
+  **Current-vs-Target gap view**. The gap view READS the existing CSF
+  Subcategory → SCF-anchor crosswalk (constitutional invariant #1) — it never
+  re-stores the mapping. Four new tenant-scoped tables
+  (`csf_tier_ratings`, `csf_profiles`, `csf_profile_selections`,
+  `csf_assessment_audit`), each under PostgreSQL **RLS + FORCE** with the
+  four-policy split (invariant #6); an RLS-isolation integration test proves a
+  tenant's Tier / profile / gap never leaks cross-tenant (deny-on-missing-
+  context too). Assessment changes are recorded in an append-only audit log
+  (who set which Tier / selection, when, against which CSF version —
+  threat-model R). New REST endpoints under `/v1/csf/**` (Tier rating, Profile
+  CRUD, gap view), edit-gated to the `grc_engineer`/`admin` role; a viewer can
+  read but not edit (threat-model E). A new web assessment surface renders the
+  Tier + Current-vs-Target gap table. **JUDGMENT (decisions-log D1):**
+  CSF-specific tables, NOT a generalized maturity-assessment primitive — the
+  Tier ordinal has no analog in ISO Annex A / PCI compensating-controls, so
+  generalizing now would be speculative generality (Article VII Simplicity
+  Gate); the tables are framework-pinned, so a future generalization is
+  additive. See `docs/audit-log/515-csf-tier-profile-decisions.md`.
 - **slice 492** — OSCAL **catalog import** (the ingest direction of
   constitutional invariant #8, which names both directions explicitly; the
   export half already shipped). A new `ImportCatalog` RPC on the Go↔Python
