@@ -211,8 +211,14 @@ func TestActorID_Shape(t *testing.T) {
 }
 
 func TestSupportedKinds_WorkerLifecycle(t *testing.T) {
-	if len(SupportedKinds) != 1 || SupportedKinds[0] != "hris.worker_lifecycle.v1" {
-		t.Errorf("SupportedKinds = %v", SupportedKinds)
+	want := []string{"hris.worker_lifecycle.v1", "hris.manager_hierarchy.v1"}
+	if len(SupportedKinds) != len(want) {
+		t.Fatalf("SupportedKinds = %v; want %v", SupportedKinds, want)
+	}
+	for i, k := range want {
+		if SupportedKinds[i] != k {
+			t.Errorf("SupportedKinds[%d] = %q; want %q", i, SupportedKinds[i], k)
+		}
 	}
 }
 

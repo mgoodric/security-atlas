@@ -21,11 +21,13 @@ import (
 // ConnectorName is logged in `connectors list`.
 const ConnectorName = "bamboohr-connector"
 
-// SupportedKinds is the canonical list of evidence kinds slice 491 emits from
-// the BambooHR connector.
-//   - hris.worker_lifecycle.v1 (worker roster + employment status, pull)
+// SupportedKinds is the canonical list of evidence kinds the BambooHR connector
+// emits.
+//   - hris.worker_lifecycle.v1 (worker roster + employment status, pull — slice 491)
+//   - hris.manager_hierarchy.v1 (reporting tree derived from the roster — slice 571)
 var SupportedKinds = []string{
 	"hris.worker_lifecycle.v1",
+	"hris.manager_hierarchy.v1",
 }
 
 // PullInterval names the connector's pull cadence HONESTLY (P0-491-6). The

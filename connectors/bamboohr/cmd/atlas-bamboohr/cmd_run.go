@@ -14,6 +14,8 @@ import (
 
 	"github.com/mgoodric/security-atlas/connectors/bamboohr/internal/bamboohrauth"
 	"github.com/mgoodric/security-atlas/connectors/bamboohr/internal/workers"
+	"github.com/mgoodric/security-atlas/connectors/hris/hierarchy"
+	"github.com/mgoodric/security-atlas/connectors/hris/hierarchyrecord"
 	"github.com/mgoodric/security-atlas/connectors/hris/worker"
 	"github.com/mgoodric/security-atlas/connectors/hris/workerrecord"
 )
@@ -41,9 +43,10 @@ type sdkPushClient interface {
 }
 
 type runFlags struct {
-	environment   string
-	workerControl string
-	baseURL       string
+	environment      string
+	workerControl    string
+	hierarchyControl string
+	baseURL          string
 }
 
 func newRunCmd() *cobra.Command {
@@ -78,6 +81,7 @@ or personal contact detail.`,
 	}
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
 	cmd.Flags().StringVar(&f.workerControl, "worker-control", "scf:IAC-22", "control_id to attach to hris.worker_lifecycle.v1 records")
+	cmd.Flags().StringVar(&f.hierarchyControl, "hierarchy-control", "scf:IAC-22", "control_id to attach to hris.manager_hierarchy.v1 records")
 	cmd.Flags().StringVar(&f.baseURL, "base-url", "", "BambooHR API base URL override (env: BAMBOOHR_BASE_URL)")
 	return cmd
 }
@@ -114,7 +118,25 @@ func doRun(ctx context.Context, f runFlags) error {
 		pushed++
 	}
 
-	fmt.Printf("pushed %d records (hris=bamboohr environment=%s)\n", pushed, f.environment)
+	// Manager-hierarchy evidence (slice 571): derive the reporting tree from the
+	// SAME bounded roster (no new source read) and push one edge record per
+	// worker, sharing the roster's observed_at.
+	hpushed := 0
+	if len(wks) > 0 {
+		rosterObservedAt := wks[0].ObservedAt
+		for _, e := range hierarchy.Build(wks) {
+			rec, err := hierarchyrecord.Build(e, worker.HRISBambooHR, f.hierarchyControl, actorID("hierarchy"), "bamboohr", f.environment, rosterObservedAt)
+			if err != nil {
+				return fmt.Errorf("build hierarchy record %s: %w", e.WorkerAssignmentID, err)
+			}
+			if err := pushOne(ctx, sdkClient, rec); err != nil {
+				return fmt.Errorf("push hierarchy %s: %w", e.WorkerAssignmentID, err)
+			}
+			hpushed++
+		}
+	}
+
+	fmt.Printf("pushed %d worker-lifecycle + %d manager-hierarchy records (hris=bamboohr environment=%s)\n", pushed, hpushed, f.environment)
 	return nil
 }
 

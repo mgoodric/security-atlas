@@ -12,6 +12,8 @@ import (
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
+	"github.com/mgoodric/security-atlas/connectors/hris/hierarchy"
+	"github.com/mgoodric/security-atlas/connectors/hris/hierarchyrecord"
 	"github.com/mgoodric/security-atlas/connectors/hris/worker"
 	"github.com/mgoodric/security-atlas/connectors/hris/workerrecord"
 	"github.com/mgoodric/security-atlas/connectors/rippling/internal/ripplingauth"
@@ -41,9 +43,10 @@ type sdkPushClient interface {
 }
 
 type runFlags struct {
-	environment   string
-	workerControl string
-	baseURL       string
+	environment      string
+	workerControl    string
+	hierarchyControl string
+	baseURL          string
 }
 
 func newRunCmd() *cobra.Command {
@@ -78,6 +81,7 @@ or personal contact detail.`,
 	}
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
 	cmd.Flags().StringVar(&f.workerControl, "worker-control", "scf:IAC-22", "control_id to attach to hris.worker_lifecycle.v1 records")
+	cmd.Flags().StringVar(&f.hierarchyControl, "hierarchy-control", "scf:IAC-22", "control_id to attach to hris.manager_hierarchy.v1 records")
 	cmd.Flags().StringVar(&f.baseURL, "base-url", "", "Rippling API base URL override (env: RIPPLING_BASE_URL)")
 	return cmd
 }
@@ -114,7 +118,27 @@ func doRun(ctx context.Context, f runFlags) error {
 		pushed++
 	}
 
-	fmt.Printf("pushed %d records (hris=rippling environment=%s)\n", pushed, f.environment)
+	// Manager-hierarchy evidence (slice 571): derive the reporting tree from the
+	// SAME bounded roster (no new source read) and push one edge record per
+	// worker, sharing the roster's observed_at so a tree's records carry one
+	// consistent timestamp. rosterObservedAt is the hour-truncated observation
+	// time worker.Normalize stamped on every worker.
+	hpushed := 0
+	if len(wks) > 0 {
+		rosterObservedAt := wks[0].ObservedAt
+		for _, e := range hierarchy.Build(wks) {
+			rec, err := hierarchyrecord.Build(e, worker.HRISRippling, f.hierarchyControl, actorID("hierarchy"), "rippling", f.environment, rosterObservedAt)
+			if err != nil {
+				return fmt.Errorf("build hierarchy record %s: %w", e.WorkerAssignmentID, err)
+			}
+			if err := pushOne(ctx, sdkClient, rec); err != nil {
+				return fmt.Errorf("push hierarchy %s: %w", e.WorkerAssignmentID, err)
+			}
+			hpushed++
+		}
+	}
+
+	fmt.Printf("pushed %d worker-lifecycle + %d manager-hierarchy records (hris=rippling environment=%s)\n", pushed, hpushed, f.environment)
 	return nil
 }
 

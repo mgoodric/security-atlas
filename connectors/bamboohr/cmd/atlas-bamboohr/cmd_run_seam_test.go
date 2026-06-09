@@ -63,7 +63,7 @@ func okEnv(t *testing.T) {
 }
 
 func okFlags() runFlags {
-	return runFlags{environment: "prod", workerControl: "scf:IAC-22"}
+	return runFlags{environment: "prod", workerControl: "scf:IAC-22", hierarchyControl: "scf:IAC-22"}
 }
 
 func twoWorkers() []worker.RawWorker {
@@ -88,8 +88,9 @@ func TestDoRun_PushSuccess(t *testing.T) {
 	if err := doRun(context.Background(), okFlags()); err != nil {
 		t.Fatalf("doRun: %v", err)
 	}
-	if fake.pushed != 2 {
-		t.Errorf("pushed = %d; want 2", fake.pushed)
+	// 2 workers -> 2 worker-lifecycle records + 2 manager-hierarchy records.
+	if fake.pushed != 4 {
+		t.Errorf("pushed = %d; want 4 (2 lifecycle + 2 hierarchy)", fake.pushed)
 	}
 	if !fake.closeCalled {
 		t.Error("Close not called")
@@ -157,6 +158,46 @@ func TestDoRun_PushError(t *testing.T) {
 	err := doRun(context.Background(), okFlags())
 	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "push worker ") {
 		t.Fatalf("want wrapped push error; got %v", err)
+	}
+}
+
+// countingPushClient errors only on or after the Nth push, so a test can drive
+// the hierarchy push loop past the lifecycle loop to assert its error wrapping.
+type countingPushClient struct {
+	failFrom    int // 1-based push index at which to start failing
+	pushErr     error
+	pushed      int
+	closeCalled bool
+}
+
+func (c *countingPushClient) Push(_ context.Context, _ *evidencev1.EvidenceRecord) (*evidencev1.EvidenceReceipt, error) {
+	c.pushed++
+	if c.pushErr != nil && c.pushed >= c.failFrom {
+		return nil, c.pushErr
+	}
+	return &evidencev1.EvidenceReceipt{}, nil
+}
+
+func (c *countingPushClient) Close() error { c.closeCalled = true; return nil }
+
+// TestDoRun_HierarchyPushError drives the lifecycle pushes to success, then
+// fails the first hierarchy push, asserting the hierarchy-specific error wrap.
+func TestDoRun_HierarchyPushError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("push rejected")
+	// 2 workers -> lifecycle pushes are #1,#2; first hierarchy push is #3.
+	fake := &countingPushClient{failFrom: 3, pushErr: sentinel}
+	installSeams(t, seamOverrides{
+		collect:   func(_ context.Context, _ workers.API) ([]worker.RawWorker, error) { return twoWorkers(), nil },
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	err := doRun(context.Background(), okFlags())
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "push hierarchy ") {
+		t.Fatalf("want wrapped hierarchy push error; got %v", err)
 	}
 }
 

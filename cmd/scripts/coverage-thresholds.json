@@ -136,6 +136,8 @@
     "connectors/jamf/internal/jamfauth": 98,
     "connectors/hris/worker": 98,
     "connectors/hris/workerrecord": 90,
+    "connectors/hris/hierarchy": 98,
+    "connectors/hris/hierarchyrecord": 87,
     "connectors/hris/idem": 98,
     "connectors/rippling/cmd/atlas-rippling": 86,
     "connectors/rippling/internal/workers": 90,
