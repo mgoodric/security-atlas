@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/pagerduty.postmortem_summary/1.0.0.json",
+  "x-evidence-kind": "pagerduty.postmortem_summary.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IRO-13", "IRO-09"],
+  "title": "PagerDuty postmortem summary",
+  "description": "One record per postmortem / retrospective over a bounded look-back window: the postmortem's opaque id, the linked incident id, the review status, the created / published timestamps, and a corrective-action ROLLUP (the count of tracked action items plus the completed / open split). Pulled read-only from the PagerDuty REST API (postmortems endpoint, since/until window). META-FACTS ONLY — proves a review EXISTS for an incident and that corrective actions are tracked, NEVER the postmortem narrative body, timeline free-text, root-cause prose, an action item's operator-authored title or description, customer data, or any responder personal contact detail. The over-collection boundary is structural: the connector's record types have no field that can hold the narrative, and a reflection guard fails the build if one is added. Proves incidents are reviewed and corrective actions tracked, feeding the IR continuous-improvement loop (SOC 2 CC7.5 'recover from identified security incidents'; SCF IRO-13 Root-Cause Analysis, IRO-09 Incident Reporting). The connector reports a descriptive review posture; the platform evaluator owns the final pass/fail per (control, scope). x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "postmortem_id",
+    "incident_id",
+    "status",
+    "created_at",
+    "action_item_count",
+    "action_items_completed",
+    "action_items_open"
+  ],
+  "properties": {
+    "postmortem_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "PagerDuty-native stable identifier of the postmortem / retrospective (an opaque ID, not a credential)."
+    },
+    "incident_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "PagerDuty-native stable identifier of the incident this review is about (an opaque ID). Ties the review to the incident; not a credential."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["not_started", "in_progress", "in_review", "published"],
+      "description": "Postmortem review lifecycle status. A normalized enum, never a free-text status string."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the postmortem was created (RFC 3339)."
+    },
+    "published_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the postmortem was published (RFC 3339); absent if not yet published."
+    },
+    "action_item_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of corrective-action items tracked on the postmortem. A COUNT only — never an item title or description."
+    },
+    "action_items_completed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of tracked corrective-action items in a completed state."
+    },
+    "action_items_open": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of tracked corrective-action items not yet completed (action_item_count minus action_items_completed)."
+    }
+  }
+}

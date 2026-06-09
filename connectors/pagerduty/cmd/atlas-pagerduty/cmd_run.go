@@ -16,6 +16,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/oncall"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/pagerdutyauth"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/pdrecord"
+	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/postmortems"
 )
 
 // Package-level seams: doRun reaches through these function variables so tests
@@ -23,10 +24,11 @@ import (
 // without hitting live PagerDuty or a real platform endpoint. Production code
 // paths are byte-for-byte unchanged; only the call-site indirection moved.
 var (
-	oncallCollect    = oncall.Collect
-	incidentsCollect = incidents.Collect
-	nowFn            = time.Now
-	newSDKClient     = func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error) {
+	oncallCollect     = oncall.Collect
+	incidentsCollect  = incidents.Collect
+	postmortemCollect = postmortems.Collect
+	nowFn             = time.Now
+	newSDKClient      = func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error) {
 		return sdk.NewClient(endpoint, bearer, opts...)
 	}
 	newOnCallAPI = func(hc *http.Client, baseURL, token string) oncall.API {
@@ -34,6 +36,9 @@ var (
 	}
 	newIncidentsAPI = func(hc *http.Client, baseURL, token string) incidents.API {
 		return incidents.NewClient(hc, baseURL, token)
+	}
+	newPostmortemsAPI = func(hc *http.Client, baseURL, token string) postmortems.API {
+		return postmortems.NewClient(hc, baseURL, token)
 	}
 )
 
@@ -44,30 +49,34 @@ type sdkPushClient interface {
 }
 
 type runFlags struct {
-	environment     string
-	service         string
-	onCallControl   string
-	incidentControl string
-	lookbackDays    int
+	environment       string
+	service           string
+	onCallControl     string
+	incidentControl   string
+	postmortemControl string
+	lookbackDays      int
 }
 
 func newRunCmd() *cobra.Command {
 	var f runFlags
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "read PagerDuty on-call coverage + incident summaries and push evidence",
-		Long: `Read PagerDuty on-call coverage (escalation policies + on-call) and
-incident summaries (bounded look-back window) via the read-only PagerDuty REST
-API, transform to pagerduty.oncall_coverage.v1 / pagerduty.incident_summary.v1
-records, and push to the platform.
+		Short: "read PagerDuty on-call coverage + incident + postmortem metadata and push evidence",
+		Long: `Read PagerDuty on-call coverage (escalation policies + on-call),
+incident summaries, and postmortem / retrospective METADATA (all over a bounded
+look-back window) via the read-only PagerDuty REST API, transform to
+pagerduty.oncall_coverage.v1 / pagerduty.incident_summary.v1 /
+pagerduty.postmortem_summary.v1 records, and push to the platform.
 
 Profile: pull. One bounded read-and-push pass per invocation; operator-scheduled
 (recommended 24h). NOT continuous monitoring.
 
 Auth: set PAGERDUTY_TOKEN (read-only). The token never appears in a log line or
-an evidence record. The connector emits coverage facts + on-call IDENTITY and
-incident SUMMARY metadata only — never responder personal contact details,
-incident free-text, or postmortem text.`,
+an evidence record. The connector emits coverage facts + on-call IDENTITY,
+incident SUMMARY metadata, and postmortem META-FACTS only (existence, status,
+timestamps, corrective-action COUNT) — never responder personal contact
+details, incident free-text, the postmortem narrative / timeline / root-cause
+prose, or an action-item title.`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		PreRunE: func(_ *cobra.Command, _ []string) error {
@@ -87,7 +96,8 @@ incident free-text, or postmortem text.`,
 	cmd.Flags().StringVar(&f.service, "service", "pagerduty", "service scope tag")
 	cmd.Flags().StringVar(&f.onCallControl, "oncall-control", "scf:IRO-04", "control_id to attach to pagerduty.oncall_coverage.v1 records")
 	cmd.Flags().StringVar(&f.incidentControl, "incident-control", "scf:IRO-02", "control_id to attach to pagerduty.incident_summary.v1 records")
-	cmd.Flags().IntVar(&f.lookbackDays, "lookback-days", 90, "bounded incident look-back window in days")
+	cmd.Flags().StringVar(&f.postmortemControl, "postmortem-control", "scf:IRO-13", "control_id to attach to pagerduty.postmortem_summary.v1 records")
+	cmd.Flags().IntVar(&f.lookbackDays, "lookback-days", 90, "bounded incident + postmortem look-back window in days")
 	return cmd
 }
 
@@ -142,8 +152,25 @@ func doRun(ctx context.Context, f runFlags) error {
 		pushed++
 	}
 
-	fmt.Printf("pushed %d records (vendor=pagerduty environment=%s policies=%d incidents=%d lookback_days=%d)\n",
-		pushed, f.environment, len(policies), len(incs), f.lookbackDays)
+	// Postmortem / retrospective METADATA over the same bounded look-back window.
+	postmortemsAPI := newPostmortemsAPI(httpClient, cred.BaseURL(), cred.Token())
+	pms, err := postmortemCollect(ctx, postmortemsAPI, since, now)
+	if err != nil {
+		return fmt.Errorf("pagerduty postmortems collect: %w", err)
+	}
+	for _, p := range pms {
+		rec, err := pdrecord.BuildPostmortem(p, f.postmortemControl, actorID("postmortems"), f.service, f.environment, now)
+		if err != nil {
+			return fmt.Errorf("build postmortem record %s: %w", p.ID, err)
+		}
+		if err := pushOne(ctx, sdkClient, rec); err != nil {
+			return fmt.Errorf("push postmortem %s: %w", p.ID, err)
+		}
+		pushed++
+	}
+
+	fmt.Printf("pushed %d records (vendor=pagerduty environment=%s policies=%d incidents=%d postmortems=%d lookback_days=%d)\n",
+		pushed, f.environment, len(policies), len(incs), len(pms), f.lookbackDays)
 	return nil
 }
 

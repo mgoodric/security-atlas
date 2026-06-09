@@ -6,6 +6,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/incidents"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/oncall"
+	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/postmortems"
 )
 
 var fixedNow = time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
@@ -84,5 +85,76 @@ func TestBuildIncident_OmitsOptionalWhenZero(t *testing.T) {
 	}
 	if _, ok := pm["service_id"]; ok {
 		t.Error("service_id should be omitted when empty")
+	}
+}
+
+func TestBuildPostmortem(t *testing.T) {
+	t.Parallel()
+	p := postmortems.Postmortem{
+		ID: "PM1", IncidentID: "INC1", Status: "published",
+		CreatedAt:       time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC),
+		PublishedAt:     time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC),
+		ActionItemCount: 3, ActionItemsDone: 2, ActionItemsOpen: 1,
+	}
+	rec, err := BuildPostmortem(p, "scf:IRO-13", "connector:pagerduty:postmortems@dev", "pagerduty", "prod", fixedNow)
+	if err != nil {
+		t.Fatalf("BuildPostmortem: %v", err)
+	}
+	if rec.GetEvidenceKind() != PostmortemKind || rec.GetSchemaVersion() != SchemaVersion {
+		t.Errorf("kind/version = %q/%q", rec.GetEvidenceKind(), rec.GetSchemaVersion())
+	}
+	if rec.GetIdempotencyKey() == "" {
+		t.Error("empty idempotency key")
+	}
+	if got := rec.GetObservedAt().AsTime(); got != fixedNow.Truncate(time.Hour) {
+		t.Errorf("observed_at = %v", got)
+	}
+	pm := rec.GetPayload().AsMap()
+	if pm["postmortem_id"] != "PM1" || pm["incident_id"] != "INC1" || pm["status"] != "published" {
+		t.Errorf("payload = %v", pm)
+	}
+	// structpb numbers come back as float64.
+	if pm["action_item_count"] != float64(3) || pm["action_items_completed"] != float64(2) || pm["action_items_open"] != float64(1) {
+		t.Errorf("rollup payload = %v", pm)
+	}
+	if pm["published_at"] != "2026-05-03T12:00:00Z" {
+		t.Errorf("published_at = %v", pm["published_at"])
+	}
+
+	// No payload key can carry the narrative / an action-item title (P0-538):
+	// the only payload keys are the known metadata keys.
+	allowed := map[string]bool{
+		"postmortem_id": true, "incident_id": true, "status": true, "created_at": true,
+		"published_at": true, "action_item_count": true, "action_items_completed": true, "action_items_open": true,
+	}
+	for k := range pm {
+		if !allowed[k] {
+			t.Errorf("unexpected payload key %q — postmortem payload must be metadata-only", k)
+		}
+	}
+}
+
+func TestBuildPostmortem_OmitsPublishedWhenUnpublished(t *testing.T) {
+	t.Parallel()
+	p := postmortems.Postmortem{ID: "PM2", IncidentID: "INC2", Status: "in_progress",
+		CreatedAt: time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)}
+	rec, _ := BuildPostmortem(p, "c", "actor", "pagerduty", "prod", fixedNow)
+	pm := rec.GetPayload().AsMap()
+	if _, ok := pm["published_at"]; ok {
+		t.Error("published_at should be omitted when unpublished")
+	}
+	// The zero-action-item rollup is still emitted (a published-zero is a fact).
+	if pm["action_item_count"] != float64(0) {
+		t.Errorf("action_item_count = %v; want 0", pm["action_item_count"])
+	}
+}
+
+func TestBuildPostmortem_Idempotent(t *testing.T) {
+	t.Parallel()
+	p := postmortems.Postmortem{ID: "PM1", IncidentID: "INC1", Status: "published"}
+	a, _ := BuildPostmortem(p, "c", "actor", "pagerduty", "prod", fixedNow)
+	b, _ := BuildPostmortem(p, "c", "actor", "pagerduty", "prod", fixedNow.Add(30*time.Minute))
+	if a.GetIdempotencyKey() != b.GetIdempotencyKey() {
+		t.Error("same postmortem within the hour should share an idempotency key")
 	}
 }

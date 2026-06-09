@@ -23,13 +23,15 @@ import (
 // ConnectorName is logged in `connectors list`.
 const ConnectorName = "pagerduty-connector"
 
-// SupportedKinds is the canonical list of evidence kinds slice 489 emits from
-// the PagerDuty connector.
-//   - pagerduty.oncall_coverage.v1   (escalation-policy + on-call coverage, pull)
-//   - pagerduty.incident_summary.v1  (bounded-window incident summaries, pull)
+// SupportedKinds is the canonical list of evidence kinds the PagerDuty
+// connector emits.
+//   - pagerduty.oncall_coverage.v1     (escalation-policy + on-call coverage, pull — slice 489)
+//   - pagerduty.incident_summary.v1    (bounded-window incident summaries, pull — slice 489)
+//   - pagerduty.postmortem_summary.v1  (bounded-window postmortem METADATA, pull — slice 538)
 var SupportedKinds = []string{
 	pdrecord.OnCallKind,
 	pdrecord.IncidentKind,
+	pdrecord.PostmortemKind,
 }
 
 // PullInterval names the connector's pull cadence HONESTLY (P0-489-6). The
@@ -125,9 +127,10 @@ func sdkOpts() []sdk.Option {
 
 const longDescription = `security-atlas PagerDuty incident-response connector
 
-Emits two evidence kinds:
-  - pagerduty.oncall_coverage.v1   (run subcommand, pull — escalation policy + on-call coverage)
-  - pagerduty.incident_summary.v1  (run subcommand, pull — bounded-window incident summaries)
+Emits three evidence kinds:
+  - pagerduty.oncall_coverage.v1     (run subcommand, pull — escalation policy + on-call coverage)
+  - pagerduty.incident_summary.v1    (run subcommand, pull — bounded-window incident summaries)
+  - pagerduty.postmortem_summary.v1  (run subcommand, pull — bounded-window postmortem METADATA)
 
 Profile: pull. Each invocation is one bounded read-and-push pass on an
 operator-scheduled cadence (recommended 24h). This is NOT continuous
@@ -137,13 +140,17 @@ Least-privilege PagerDuty access (read-only):
   - a READ-ONLY REST API token.
   - NEVER use a full-access / write / admin token.
 
-The connector reads COVERAGE + incident-SUMMARY metadata only:
+The connector reads COVERAGE + incident-SUMMARY + postmortem-METADATA only:
   - escalation policies, their tiers, and the on-call IDENTITY (id + display
-    name) needed to prove coverage; and
+    name) needed to prove coverage;
   - incident id / number / urgency / status / service / created+resolved
-    timestamps over a bounded look-back window.
+    timestamps over a bounded look-back window; and
+  - per-postmortem META-FACTS: that a review EXISTS for an incident, its status,
+    created+published timestamps, and the corrective-action COUNT + completed/open
+    rollup.
 It NEVER collects a responder's personal phone number or personal email, the
-incident's free-text title/body/notes, or postmortem text.
+incident's free-text title/body/notes, the postmortem narrative / timeline /
+root-cause prose, or an action-item title.
 
 Auth: set PAGERDUTY_TOKEN (read-only). The token is read from the environment,
 never a CLI flag, and never logged or placed into an evidence record.`

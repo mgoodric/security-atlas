@@ -21,6 +21,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/oncall"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/pagerdutyauth"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/pdrecord"
+	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/postmortems"
 )
 
 const tenantA = "11111111-1111-1111-1111-111111111111"
@@ -63,6 +64,13 @@ type fakeIncidentsAPI struct{ incidents []incidents.RawIncident }
 
 func (f *fakeIncidentsAPI) ListIncidents(_ context.Context, _, _ time.Time) ([]incidents.RawIncident, error) {
 	return f.incidents, nil
+}
+
+// fakePostmortemsAPI is a faked PagerDuty postmortems surface (NO live PagerDuty).
+type fakePostmortemsAPI struct{ postmortems []postmortems.RawPostmortem }
+
+func (f *fakePostmortemsAPI) ListPostmortems(_ context.Context, _, _ time.Time) ([]postmortems.RawPostmortem, error) {
+	return f.postmortems, nil
 }
 
 // TestRegister_ListsConnector verifies AC-1 + AC-7.
@@ -215,6 +223,33 @@ func TestEmittedRecords_NoPIIorFreeText(t *testing.T) {
 		"service_id": true, "service_name": true, "created_at": true, "resolved_at": true,
 	}
 	assertNoBanned(t, incRec, incAllowed, banned)
+
+	// Postmortem path (slice 538 / P0-538 — DOMINANT over-collection risk). The
+	// RawPostmortem the fake returns carries ONLY metadata; even if the source
+	// payload had embedded a narrative body, the struct has no slot for it, so
+	// the emitted record is metadata-only. The allow-listed keys legitimately
+	// contain the substring "postmortem", so the postmortem record uses a banned
+	// list that checks VALUES for narrative/PII markers (and never an item title).
+	pmAPI := &fakePostmortemsAPI{postmortems: []postmortems.RawPostmortem{
+		{
+			ID: "PM-FAKE-1", IncidentID: "INC-FAKE-1", Status: "published",
+			CreatedAt:   now.Add(-48 * time.Hour),
+			PublishedAt: now.Add(-time.Hour),
+			ActionItems: []postmortems.RawActionItem{{Completed: true}, {Completed: false}},
+		},
+	}}
+	pms, _ := postmortems.Collect(context.Background(), pmAPI, now.AddDate(0, 0, -90), now)
+	pmRec, _ := pdrecord.BuildPostmortem(pms[0], "scf:IRO-13", actorID("postmortems"), "pagerduty", "prod", now)
+
+	pmAllowed := map[string]bool{
+		"postmortem_id": true, "incident_id": true, "status": true, "created_at": true,
+		"published_at": true, "action_item_count": true, "action_items_completed": true, "action_items_open": true,
+	}
+	// Narrative/PII value markers (NOT "postmortem"/"description", which would
+	// false-positive on this record's legitimate metadata key names — keys are
+	// checked against pmAllowed instead).
+	pmBanned := []string{"@", "+1555", "phone", "fixture.invalid", "SSN", "customer", "narrative", "root cause", "Rotate"}
+	assertNoBanned(t, pmRec, pmAllowed, pmBanned)
 }
 
 // TestCredential_NeverLogged verifies AC-11 + P0-489-4.

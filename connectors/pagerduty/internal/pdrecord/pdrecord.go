@@ -1,14 +1,17 @@
 // Package pdrecord builds the canonical PagerDuty evidence records — the
-// pagerduty.oncall_coverage.v1 record from a normalized oncall.Policy and the
-// pagerduty.incident_summary.v1 record from a normalized incidents.Incident.
+// pagerduty.oncall_coverage.v1 record from a normalized oncall.Policy, the
+// pagerduty.incident_summary.v1 record from a normalized incidents.Incident,
+// and the pagerduty.postmortem_summary.v1 record from a normalized
+// postmortems.Postmortem.
 //
 // The builder is the single choke point that turns connector-side data into a
 // pushed record: it derives the idempotency key, sets the evidence kind /
 // schema version, the scope dimensions, the source attribution, and the
 // PII-free payload. There is no code path here that could place an incident
-// free-text body or a responder's personal contact detail into a payload — the
-// input types (oncall.Policy / incidents.Incident) have no such field
-// (P0-489-3).
+// free-text body, a responder's personal contact detail, or a postmortem
+// narrative / action-item title into a payload — the input types
+// (oncall.Policy / incidents.Incident / postmortems.Postmortem) have no such
+// field (P0-489-3 / P0-538).
 package pdrecord
 
 import (
@@ -23,12 +26,14 @@ import (
 
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/incidents"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/oncall"
+	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/postmortems"
 )
 
 // Evidence kinds + schema versions this connector emits.
 const (
 	OnCallKind     = "pagerduty.oncall_coverage.v1"
 	IncidentKind   = "pagerduty.incident_summary.v1"
+	PostmortemKind = "pagerduty.postmortem_summary.v1"
 	SchemaVersion  = "1.0.0"
 	sourceVendorPD = "pagerduty"
 )
@@ -137,6 +142,52 @@ func BuildIncident(in incidents.Incident, controlID, actorID, service, environme
 	}, nil
 }
 
+// BuildPostmortem turns a normalized postmortem-metadata view into a pushable
+// EvidenceRecord. The payload is META-ONLY: the postmortem id, the linked
+// incident id, the review status, the created / published timestamps, and the
+// corrective-action ROLLUP (count + completed/open split). There is NO code
+// path here that could place the postmortem narrative, timeline, root-cause
+// prose, or an action-item title into the payload — the input type
+// (postmortems.Postmortem) has no such field BY CONSTRUCTION (P0-538). The
+// idempotency key collapses same-postmortem re-runs within the hour into one
+// ledger row.
+func BuildPostmortem(p postmortems.Postmortem, controlID, actorID, service, environment string, observedAt time.Time) (*evidencev1.EvidenceRecord, error) {
+	now := observedAt.UTC().Truncate(time.Hour)
+	pm := map[string]any{
+		"postmortem_id":          p.ID,
+		"incident_id":            p.IncidentID,
+		"status":                 p.Status,
+		"created_at":             p.CreatedAt.UTC().Format(time.RFC3339),
+		"action_item_count":      p.ActionItemCount,
+		"action_items_completed": p.ActionItemsDone,
+		"action_items_open":      p.ActionItemsOpen,
+	}
+	if !p.PublishedAt.IsZero() {
+		pm["published_at"] = p.PublishedAt.UTC().Format(time.RFC3339)
+	}
+	payload, err := structpb.NewStruct(pm)
+	if err != nil {
+		return nil, err
+	}
+	return &evidencev1.EvidenceRecord{
+		IdempotencyKey: postmortemKey(p.ID, now),
+		EvidenceKind:   PostmortemKind,
+		SchemaVersion:  SchemaVersion,
+		ControlId:      controlID,
+		Scope: []*evidencev1.ScopeDimension{
+			{Key: "service", Values: []string{service}},
+			{Key: "environment", Values: []string{environment}},
+		},
+		ObservedAt: timestamppb.New(now),
+		Result:     evidencev1.Result_RESULT_INCONCLUSIVE,
+		Payload:    payload,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "connector",
+			ActorId:   actorID,
+		},
+	}, nil
+}
+
 // onCallKey: sha256("pagerduty.oncall_coverage|<policy_id>|<hour>").
 func onCallKey(policyID string, observedAt time.Time) string {
 	hour := observedAt.UTC().Truncate(time.Hour).Format(time.RFC3339)
@@ -148,5 +199,12 @@ func onCallKey(policyID string, observedAt time.Time) string {
 func incidentKey(incidentID string, observedAt time.Time) string {
 	hour := observedAt.UTC().Truncate(time.Hour).Format(time.RFC3339)
 	sum := sha256.Sum256([]byte("pagerduty.incident_summary|" + incidentID + "|" + hour))
+	return hex.EncodeToString(sum[:])
+}
+
+// postmortemKey: sha256("pagerduty.postmortem_summary|<postmortem_id>|<hour>").
+func postmortemKey(postmortemID string, observedAt time.Time) string {
+	hour := observedAt.UTC().Truncate(time.Hour).Format(time.RFC3339)
+	sum := sha256.Sum256([]byte("pagerduty.postmortem_summary|" + postmortemID + "|" + hour))
 	return hex.EncodeToString(sum[:])
 }

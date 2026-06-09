@@ -22,13 +22,14 @@ func newPermissionsCmd() *cobra.Command {
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
 			_, _ = fmt.Fprintln(tw, "CREDENTIAL\tSCOPE\tGATES")
 			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n",
-				"REST API token", pagerdutyauth.RequiredScope, "pagerduty.oncall_coverage.v1 + pagerduty.incident_summary.v1")
+				"REST API token", pagerdutyauth.RequiredScope, "pagerduty.oncall_coverage.v1 + pagerduty.incident_summary.v1 + pagerduty.postmortem_summary.v1")
 			_ = tw.Flush()
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(),
 				strings.TrimSpace(`
 NEVER use a full-access / write / admin PagerDuty token.
-The connector issues only read GETs against /escalation_policies and /incidents,
-and never reads responder personal contact details or incident free-text.`))
+The connector issues only read GETs against /escalation_policies, /incidents,
+and /postmortems, and never reads responder personal contact details, incident
+free-text, or postmortem narrative / timeline / root-cause prose.`))
 		},
 	}
 }
