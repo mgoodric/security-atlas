@@ -209,3 +209,47 @@ func TestAPIError_String(t *testing.T) {
 		t.Error("body should be included")
 	}
 }
+
+// TestClient_ListNamespaceCoverage_FollowsContinueAcrossPages is the slice-621
+// AC-2 proof for the netpol client: the networkpolicies endpoint returns two
+// pages and the client accumulates policies across both, grouping them under
+// their namespaces. A cluster with more than one page of networkpolicies is no
+// longer silently truncated.
+func TestClient_ListNamespaceCoverage_FollowsContinueAcrossPages(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/namespaces", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"metadata":{"continue":""},"items":[{"metadata":{"name":"prod"}}]}`))
+	})
+	mux.HandleFunc("/apis/networking.k8s.io/v1/networkpolicies", func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("continue") {
+		case "":
+			_, _ = w.Write([]byte(`{"metadata":{"continue":"PAGE-2"},"items":[
+				{"metadata":{"name":"np-one","namespace":"prod"},"spec":{"podSelector":{},"policyTypes":["Ingress"]}}
+			]}`))
+		case "PAGE-2":
+			_, _ = w.Write([]byte(`{"metadata":{"continue":""},"items":[
+				{"metadata":{"name":"np-two","namespace":"prod"},"spec":{"podSelector":{},"policyTypes":["Ingress"]}}
+			]}`))
+		default:
+			t.Errorf("unexpected continue token %q", r.URL.Query().Get("continue"))
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.Client(), srv.URL, "test-k8s-token")
+	got, err := c.ListNamespaceCoverage(context.Background())
+	if err != nil {
+		t.Fatalf("ListNamespaceCoverage: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "prod" {
+		t.Fatalf("namespaces = %+v; want one ('prod')", got)
+	}
+	if len(got[0].Policies) != 2 {
+		t.Fatalf("prod policies = %d; want 2 accumulated across two pages", len(got[0].Policies))
+	}
+	names := map[string]bool{got[0].Policies[0].Name: true, got[0].Policies[1].Name: true}
+	if !names["np-one"] || !names["np-two"] {
+		t.Errorf("expected np-one + np-two across pages; got %+v", got[0].Policies)
+	}
+}

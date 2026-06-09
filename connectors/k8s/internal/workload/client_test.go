@@ -161,3 +161,46 @@ func TestAPIError_String(t *testing.T) {
 		t.Error("bare status mismatch")
 	}
 }
+
+// TestClient_ListWorkloads_FollowsContinueAcrossPages is the slice-621 AC-2
+// proof for the workload client: the deployments endpoint returns two pages and
+// the client accumulates workloads across both. A cluster with more than one
+// page of deployments is no longer silently truncated.
+func TestClient_ListWorkloads_FollowsContinueAcrossPages(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/apis/apps/v1/deployments", func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("continue") {
+		case "":
+			_, _ = w.Write([]byte(`{"metadata":{"continue":"PAGE-2"},"items":[
+				{"metadata":{"name":"dep-one","namespace":"prod"},"spec":{"template":{"spec":{"containers":[{"securityContext":{"runAsNonRoot":true,"readOnlyRootFilesystem":true,"allowPrivilegeEscalation":false}}]}}}}
+			]}`))
+		case "PAGE-2":
+			_, _ = w.Write([]byte(`{"metadata":{"continue":""},"items":[
+				{"metadata":{"name":"dep-two","namespace":"prod"},"spec":{"template":{"spec":{"containers":[{"securityContext":{"privileged":true}}]}}}}
+			]}`))
+		default:
+			t.Errorf("unexpected continue token %q", r.URL.Query().Get("continue"))
+		}
+	})
+	mux.HandleFunc("/apis/apps/v1/daemonsets", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"metadata":{"continue":""},"items":[]}`))
+	})
+	mux.HandleFunc("/apis/apps/v1/statefulsets", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"metadata":{"continue":""},"items":[]}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.Client(), srv.URL, "test-k8s-token")
+	got, err := c.ListWorkloads(context.Background())
+	if err != nil {
+		t.Fatalf("ListWorkloads: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d; want 2 deployments accumulated across two pages", len(got))
+	}
+	names := map[string]bool{got[0].Name: true, got[1].Name: true}
+	if !names["dep-one"] || !names["dep-two"] {
+		t.Errorf("expected dep-one + dep-two across pages; got %+v", got)
+	}
+}

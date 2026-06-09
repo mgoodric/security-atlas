@@ -116,3 +116,52 @@ func TestAPIError_String(t *testing.T) {
 		t.Error("body should appear in error")
 	}
 }
+
+// TestClient_ListBindings_FollowsContinueAcrossPages is the slice-621 AC-2 proof
+// for the rbac client: the clusterrolebindings endpoint returns two pages (page
+// 1 carries a non-empty metadata.continue, page 2 an empty one) and the client
+// accumulates bindings across both. A cluster with more than one page of
+// clusterrolebindings is no longer silently truncated.
+func TestClient_ListBindings_FollowsContinueAcrossPages(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/apis/rbac.authorization.k8s.io/v1/clusterroles", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"metadata":{"continue":""},"items":[
+			{"metadata":{"name":"view"},"rules":[{"apiGroups":[""],"resources":["pods"],"verbs":["get","list"]}]}
+		]}`))
+	})
+	mux.HandleFunc("/apis/rbac.authorization.k8s.io/v1/roles", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"metadata":{"continue":""},"items":[]}`))
+	})
+	mux.HandleFunc("/apis/rbac.authorization.k8s.io/v1/clusterrolebindings", func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("continue") {
+		case "":
+			_, _ = w.Write([]byte(`{"metadata":{"continue":"PAGE-2"},"items":[
+				{"metadata":{"name":"crb-one"},"roleRef":{"kind":"ClusterRole","name":"view"},"subjects":[{"kind":"User","name":"alice"}]}
+			]}`))
+		case "PAGE-2":
+			_, _ = w.Write([]byte(`{"metadata":{"continue":""},"items":[
+				{"metadata":{"name":"crb-two"},"roleRef":{"kind":"ClusterRole","name":"view"},"subjects":[{"kind":"User","name":"bob"}]}
+			]}`))
+		default:
+			t.Errorf("unexpected continue token %q", r.URL.Query().Get("continue"))
+		}
+	})
+	mux.HandleFunc("/apis/rbac.authorization.k8s.io/v1/rolebindings", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"metadata":{"continue":""},"items":[]}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.Client(), srv.URL, "test-k8s-token")
+	got, err := c.ListBindings(context.Background())
+	if err != nil {
+		t.Fatalf("ListBindings: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d; want 2 clusterrolebindings accumulated across two pages", len(got))
+	}
+	names := map[string]bool{got[0].Name: true, got[1].Name: true}
+	if !names["crb-one"] || !names["crb-two"] {
+		t.Errorf("expected crb-one + crb-two across pages; got %+v", got)
+	}
+}
