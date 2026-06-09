@@ -135,6 +135,14 @@ func DefaultSeed() []KindVersion {
 		// NetworkPolicy SPEC metadata only, NEVER pod contents, container env,
 		// secrets, the peer/CIDR/port contents of a rule block, or traffic.
 		{Kind: "k8s.networkpolicy_coverage.v1", Version: "1.0.0"},
+		// Slice 524: Kubernetes connector Pod-Security-Standards admission config
+		// (configuration-baseline control: SCF CFG-02). Read-only (get/list on
+		// core namespaces — NO new ClusterRole rule; reuses the base grant). PSS
+		// LABEL configuration only (the pod-security.kubernetes.io/enforce|audit|
+		// warn levels + optional pinned versions), NEVER pod specs, container env,
+		// secrets, logs, or any other namespace label/annotation. The ENFORCED side
+		// of workload hardening, complementing k8s.workload_security_context.v1.
+		{Kind: "k8s.pod_security_admission.v1", Version: "1.0.0"},
 		// Slice 488: monitoring connectors (Datadog + Grafana) — shared
 		// alert/monitor configuration-inventory evidence kind.
 		{Kind: "monitoring.alert_config.v1", Version: "1.0.0"},

@@ -17,6 +17,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/idem"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/k8sauth"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/netpol"
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/pss"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/rbac"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/workload"
 )
@@ -29,11 +30,12 @@ var (
 	rbacPull     = rbac.Pull
 	workloadScan = workload.Inspect
 	netpolScan   = netpol.Assess
+	pssScan      = pss.Assess
 	newSDKClient = func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error) {
 		return sdk.NewClient(endpoint, bearer, opts...)
 	}
-	// newRBACAPI / newWorkloadAPI / newNetpolAPI build the live read-only HTTP
-	// clients; seamed so tests inject fakes.
+	// newRBACAPI / newWorkloadAPI / newNetpolAPI / newPSSAPI build the live
+	// read-only HTTP clients; seamed so tests inject fakes.
 	newRBACAPI = func(hc *http.Client, baseURL, token string) rbac.API {
 		return rbac.NewClient(hc, baseURL, token)
 	}
@@ -42,6 +44,9 @@ var (
 	}
 	newNetpolAPI = func(hc *http.Client, baseURL, token string) netpol.API {
 		return netpol.NewClient(hc, baseURL, token)
+	}
+	newPSSAPI = func(hc *http.Client, baseURL, token string) pss.API {
+		return pss.NewClient(hc, baseURL, token)
 	}
 )
 
@@ -59,19 +64,22 @@ type runFlags struct {
 	rbacControl     string
 	workloadControl string
 	netpolControl   string
+	pssControl      string
 	skipRBAC        bool
 	skipWorkload    bool
 	skipNetpol      bool
+	skipPSS         bool
 }
 
 func newRunCmd() *cobra.Command {
 	var f runFlags
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "read Kubernetes RBAC + workload security contexts + NetworkPolicy coverage and push evidence records",
-		Long: `Read Kubernetes RBAC roles + bindings, workload security contexts, and
-NetworkPolicy coverage via the read-only Kubernetes API, transform to evidence
-records, and push to the platform.
+		Short: "read Kubernetes RBAC + workload security contexts + NetworkPolicy coverage + Pod-Security-Standards admission config and push evidence records",
+		Long: `Read Kubernetes RBAC roles + bindings, workload security contexts,
+NetworkPolicy coverage, and Pod-Security-Standards admission configuration via
+the read-only Kubernetes API, transform to evidence records, and push to the
+platform.
 
 Profile: pull. One bounded read-and-push pass per invocation; operator-scheduled
 (recommended 24h). NOT continuous monitoring.
@@ -80,7 +88,9 @@ Least-privilege Kubernetes access (read-only ClusterRole — verbs get,list only
   - rbac.authorization.k8s.io: roles/clusterroles/rolebindings/clusterrolebindings
   - apps: deployments/daemonsets/statefulsets
   - networking.k8s.io: networkpolicies
-  - core: namespaces
+  - core: namespaces  (also gates the Pod-Security-Standards admission kind —
+    PSS config lives in pod-security.kubernetes.io/* labels on the namespace;
+    NO new ClusterRole rule is required)
 NEVER 'secrets', NEVER write verbs, NEVER cluster-admin / wildcards.
 
 Auth: set KUBERNETES_API_SERVER + KUBECONFIG_TOKEN (out-of-cluster), or pass
@@ -111,9 +121,11 @@ record.`,
 	cmd.Flags().StringVar(&f.rbacControl, "rbac-control", "scf:IAC-21", "control_id to attach to k8s.rbac_binding.v1 records")
 	cmd.Flags().StringVar(&f.workloadControl, "workload-control", "scf:CFG-02", "control_id to attach to k8s.workload_security_context.v1 records")
 	cmd.Flags().StringVar(&f.netpolControl, "netpol-control", "scf:NET-04", "control_id to attach to k8s.networkpolicy_coverage.v1 records")
+	cmd.Flags().StringVar(&f.pssControl, "pss-control", "scf:CFG-02", "control_id to attach to k8s.pod_security_admission.v1 records")
 	cmd.Flags().BoolVar(&f.skipRBAC, "skip-rbac", false, "skip k8s.rbac_binding.v1 pull")
 	cmd.Flags().BoolVar(&f.skipWorkload, "skip-workload", false, "skip k8s.workload_security_context.v1 pull")
 	cmd.Flags().BoolVar(&f.skipNetpol, "skip-netpol", false, "skip k8s.networkpolicy_coverage.v1 pull")
+	cmd.Flags().BoolVar(&f.skipPSS, "skip-pss", false, "skip k8s.pod_security_admission.v1 pull")
 	return cmd
 }
 
@@ -187,6 +199,23 @@ func doRun(ctx context.Context, f runFlags) error {
 			}
 			if err := pushOne(ctx, sdkClient, rec); err != nil {
 				return fmt.Errorf("push netpol %s: %w", c.Namespace, err)
+			}
+			pushed++
+		}
+	}
+
+	if !f.skipPSS {
+		admissions, err := pssScan(ctx, newPSSAPI(httpClient, cred.APIServer(), cred.Token()), nil)
+		if err != nil {
+			return fmt.Errorf("pss assess: %w", err)
+		}
+		for _, a := range admissions {
+			rec, err := buildPSSRecord(a, f.cluster, f.environment, f.pssControl)
+			if err != nil {
+				return fmt.Errorf("build pss record %s: %w", a.Namespace, err)
+			}
+			if err := pushOne(ctx, sdkClient, rec); err != nil {
+				return fmt.Errorf("push pss %s: %w", a.Namespace, err)
 			}
 			pushed++
 		}
@@ -354,6 +383,69 @@ func mapNetpolResult(r netpol.CoverageResult) evidencev1.Result {
 		return evidencev1.Result_RESULT_FAIL
 	case netpol.ResultInconclusive:
 		return evidencev1.Result_RESULT_INCONCLUSIVE
+	default:
+		return evidencev1.Result_RESULT_UNSPECIFIED
+	}
+}
+
+// buildPSSRecord maps one namespace's Pod-Security-Standards admission
+// assessment into an evidence record. PSS LABEL configuration only — namespace
+// name + the three modes' levels + optional pinned versions + the configured
+// flag. NO pod specs, secrets, or arbitrary namespace labels/annotations.
+func buildPSSRecord(a pss.Admission, cluster, env, controlID string) (*evidencev1.EvidenceRecord, error) {
+	now := a.ObservedAt.UTC().Truncate(time.Hour)
+	pm := map[string]any{
+		"namespace":  a.Namespace,
+		"configured": a.Configured,
+	}
+	if a.EnforceLevel != pss.LevelUnset {
+		pm["enforce_level"] = string(a.EnforceLevel)
+	}
+	if a.EnforceVersion != "" {
+		pm["enforce_version"] = a.EnforceVersion
+	}
+	if a.AuditLevel != pss.LevelUnset {
+		pm["audit_level"] = string(a.AuditLevel)
+	}
+	if a.AuditVersion != "" {
+		pm["audit_version"] = a.AuditVersion
+	}
+	if a.WarnLevel != pss.LevelUnset {
+		pm["warn_level"] = string(a.WarnLevel)
+	}
+	if a.WarnVersion != "" {
+		pm["warn_version"] = a.WarnVersion
+	}
+	payload, err := structpb.NewStruct(pm)
+	if err != nil {
+		return nil, err
+	}
+	return &evidencev1.EvidenceRecord{
+		IdempotencyKey: idem.PSSAdmissionKey(a.Namespace, now),
+		EvidenceKind:   "k8s.pod_security_admission.v1",
+		SchemaVersion:  "1.0.0",
+		ControlId:      controlID,
+		Scope: []*evidencev1.ScopeDimension{
+			{Key: "cluster", Values: []string{cluster}},
+			{Key: "environment", Values: []string{env}},
+			{Key: "namespace", Values: []string{a.Namespace}},
+		},
+		ObservedAt: timestamppb.New(now),
+		Result:     mapPSSResult(a.Result),
+		Payload:    payload,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "connector",
+			ActorId:   actorID("pss"),
+		},
+	}, nil
+}
+
+func mapPSSResult(r pss.AssessResult) evidencev1.Result {
+	switch r {
+	case pss.ResultPass:
+		return evidencev1.Result_RESULT_PASS
+	case pss.ResultFail:
+		return evidencev1.Result_RESULT_FAIL
 	default:
 		return evidencev1.Result_RESULT_UNSPECIFIED
 	}

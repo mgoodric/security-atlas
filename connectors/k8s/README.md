@@ -1,21 +1,32 @@
 # Kubernetes connector
 
 The Kubernetes connector (slice 487) brings cluster RBAC + workload hardening +
-network segmentation to the platform's evidence pipeline. It follows the locked
-connector pattern verbatim: register-per-run, a stable `actor_id`, an
-hour-truncated `observed_at`, scope minimums, and vendor-native read-only auth.
-It emits three evidence kinds:
+network segmentation + admission-time enforcement to the platform's evidence
+pipeline. It follows the locked connector pattern verbatim: register-per-run, a
+stable `actor_id`, an hour-truncated `observed_at`, scope minimums, and
+vendor-native read-only auth. It emits four evidence kinds:
 
-| Kind                               | Profile | Source                                                                        |
-| ---------------------------------- | ------- | ----------------------------------------------------------------------------- |
-| `k8s.rbac_binding.v1`              | pull    | Kubernetes API `rbac.authorization.k8s.io/v1` roles + bindings (get,list)     |
-| `k8s.workload_security_context.v1` | pull    | Kubernetes API `apps/v1` deployments / daemonsets / statefulsets (get,list)   |
-| `k8s.networkpolicy_coverage.v1`    | pull    | Kubernetes API `networking.k8s.io/v1` networkpolicies + namespaces (get,list) |
+| Kind                               | Profile | Source                                                                              |
+| ---------------------------------- | ------- | ----------------------------------------------------------------------------------- |
+| `k8s.rbac_binding.v1`              | pull    | Kubernetes API `rbac.authorization.k8s.io/v1` roles + bindings (get,list)           |
+| `k8s.workload_security_context.v1` | pull    | Kubernetes API `apps/v1` deployments / daemonsets / statefulsets (get,list)         |
+| `k8s.networkpolicy_coverage.v1`    | pull    | Kubernetes API `networking.k8s.io/v1` networkpolicies + namespaces (get,list)       |
+| `k8s.pod_security_admission.v1`    | pull    | Kubernetes API core `namespaces` (get,list) — `pod-security.kubernetes.io/*` labels |
 
 The third kind (`k8s.networkpolicy_coverage.v1`, slice 523) reports, per
 namespace, how many NetworkPolicies exist, a per-policy SPEC summary, and the
 derived default-deny assessment — the recurring SOC 2 CC6.6 / ISO A.8 "prove
 network segmentation between workloads" evidence demand.
+
+The fourth kind (`k8s.pod_security_admission.v1`, slice 524) reports, per
+namespace, the Pod-Security-Standards admission configuration: which namespaces
+carry the `pod-security.kubernetes.io/enforce`, `/audit`, and `/warn` labels and
+at which level (`privileged` / `baseline` / `restricted`), plus the optional
+pinned version per mode. This is the **enforced** side of workload hardening
+(does admission block under-hardened pods), complementing the **actual**-posture
+`k8s.workload_security_context.v1` kind — the recurring "is hardening enforced at
+admission, not just configured per-workload" auditor ask. It reuses the existing
+`namespaces` get/list grant (**no new ClusterRole rule**).
 
 The connector is **API-based**, not an in-node agent — consistent with the
 "no closed proprietary collector agents on endpoints" anti-pattern. It reads the
@@ -88,7 +99,9 @@ role with write verbs (`create`/`update`/`patch`/`delete`/`deletecollection`),
 wildcards (`*`), or **`get`/`list` on `secrets`**. The connector has no write
 code path and no Secret-read code path; the only operations it issues are reads
 of the four RBAC kinds + the three workload kinds + networkpolicies +
-namespaces. The
+namespaces. The Pod-Security-Standards admission kind needs **no new rule** — PSS
+configuration lives in `pod-security.kubernetes.io/*` labels on the Namespace
+object, read via the existing `namespaces` get/list grant. The
 `atlas-k8s permissions` output and `internal/k8sauth.DocumentedClusterRole()` are
 the single source of truth — a unit test fails the build if anyone widens the
 rule set into a write verb, a wildcard, or `secrets`.
@@ -122,7 +135,8 @@ atlas-k8s register \
   --endpoint platform.example.com:443 \
   --token "$SECURITY_ATLAS_TOKEN"
 
-# Read RBAC + workload security contexts + NetworkPolicy coverage, push records.
+# Read RBAC + workload security contexts + NetworkPolicy coverage + PSS
+# admission config, push records.
 # The cluster token is read from the environment (never the CLI, so it stays
 # out of shell history):
 export KUBERNETES_API_SERVER=https://kube-api.example.com:6443
@@ -153,9 +167,11 @@ atlas-k8s permissions
 | `--rbac-control`     | `run`      | no       | `scf:IAC-21`                  | control id attached to RBAC records                        |
 | `--workload-control` | `run`      | no       | `scf:CFG-02`                  | control id attached to workload records                    |
 | `--netpol-control`   | `run`      | no       | `scf:NET-04`                  | control id attached to NetworkPolicy coverage records      |
+| `--pss-control`      | `run`      | no       | `scf:CFG-02`                  | control id attached to PSS admission records               |
 | `--skip-rbac`        | `run`      | no       | `false`                       | skip the `k8s.rbac_binding.v1` pull                        |
 | `--skip-workload`    | `run`      | no       | `false`                       | skip the `k8s.workload_security_context.v1` pull           |
 | `--skip-netpol`      | `run`      | no       | `false`                       | skip the `k8s.networkpolicy_coverage.v1` pull              |
+| `--skip-pss`         | `run`      | no       | `false`                       | skip the `k8s.pod_security_admission.v1` pull              |
 
 The cluster token is **only** read from `KUBECONFIG_TOKEN` (or the projected
 in-cluster mount) — never a CLI flag — so it never lands in shell history. It is
@@ -164,7 +180,8 @@ its token on every format path).
 
 `register` announces `name=k8s-connector`,
 `supported_kinds=[k8s.rbac_binding.v1, k8s.workload_security_context.v1,
-k8s.networkpolicy_coverage.v1]`, and `profiles_supported=[pull]` to
+k8s.networkpolicy_coverage.v1, k8s.pod_security_admission.v1]`, and
+`profiles_supported=[pull]` to
 `ConnectorRegistryService.Register`. The
 `profiles_supported` value describes how the connector retrieves data **from the
 cluster** (a scheduled pull); the platform-side wire is always push
@@ -175,29 +192,32 @@ cluster** (a scheduled pull); the platform-side wire is always push
 Every emitted record sets the minimum scope dimensions the connector-pattern
 convention requires:
 
-| Scope key     | Value                    | Source                                       |
-| ------------- | ------------------------ | -------------------------------------------- |
-| `cluster`     | the `--cluster` flag     | the `--cluster` flag                         |
-| `environment` | the `--environment` flag | the `--environment` flag                     |
-| `namespace`   | the assessed namespace   | `k8s.networkpolicy_coverage.v1` records only |
+| Scope key     | Value                    | Source                                                                    |
+| ------------- | ------------------------ | ------------------------------------------------------------------------- |
+| `cluster`     | the `--cluster` flag     | the `--cluster` flag                                                      |
+| `environment` | the `--environment` flag | the `--environment` flag                                                  |
+| `namespace`   | the assessed namespace   | `k8s.networkpolicy_coverage.v1` + `k8s.pod_security_admission.v1` records |
 
 `run` fails loudly when `--cluster` or `--environment` is unset rather than
-pushing an un-scoped record. NetworkPolicy coverage records add a `namespace`
-scope dimension (one record per namespace) so a FrameworkScope predicate can cut
-on namespace.
+pushing an un-scoped record. NetworkPolicy coverage **and** PSS admission records
+add a `namespace` scope dimension (one record per namespace) so a FrameworkScope
+predicate can cut on namespace.
 
 `source_attribution.actor_id` follows the cross-connector convention
 `connector:<vendor>:<service>@<version>` — `connector:k8s:rbac@<version>` for RBAC
-records, `connector:k8s:workload@<version>` for workload records, and
-`connector:k8s:netpol@<version>` for NetworkPolicy coverage records, where
-`<version>` is the build's module version (or `dev` under `go run`).
+records, `connector:k8s:workload@<version>` for workload records,
+`connector:k8s:netpol@<version>` for NetworkPolicy coverage records, and
+`connector:k8s:pss@<version>` for PSS admission records, where `<version>` is the
+build's module version (or `dev` under `go run`).
 
 ## Idempotency
 
 Each record's `idempotency_key` is
 `sha256("<kind>|<identity>|<hour_truncated_observed_at>")` (see `internal/idem`).
 RBAC identity = `scope/namespace/name`; workload identity = `kind/namespace/name`;
-NetworkPolicy coverage identity = `namespace` (one coverage record per namespace).
+NetworkPolicy coverage identity = `namespace` (one coverage record per namespace);
+PSS admission identity = `namespace` (one PSS record per namespace — a distinct
+key from the netpol key thanks to the `k8s.pod_security_admission` kind prefix).
 `observed_at` is truncated to the UTC hour, so two runs within the same hour for
 the same binding / workload / namespace collapse to one ledger row; a run that
 crosses an hour boundary writes a fresh record.
@@ -226,11 +246,19 @@ crosses an hour boundary writes a fresh record.
   default-deny (unprotected, or only per-pod allow rules); `INCONCLUSIVE` when a
   per-namespace read errored. The platform evaluator owns the final
   (control, namespace) call (e.g. whether default-deny ingress alone suffices).
+- **`k8s.pod_security_admission.v1` → `PASS` / `FAIL`.** The connector verdicts
+  the per-namespace admission posture from the `enforce` label: `PASS` when the
+  namespace **enforces** a hardened level (`baseline` or `restricted`); `FAIL`
+  when no `enforce` label is set (unenforced — recorded honestly), or when
+  `enforce` is only `privileged`. `audit` / `warn` modes are reported in the
+  record but do not drive the verdict (they observe / warn, they do not block
+  admission). The platform evaluator owns the final (control, namespace) call.
 
 ## What the connector never collects (the load-bearing guard)
 
 The connector collects **RBAC rules/bindings + workload security-context flags +
-NetworkPolicy SPEC metadata only**. It never reads, materializes, or emits:
+NetworkPolicy SPEC metadata + namespace PSS labels only**. It never reads,
+materializes, or emits:
 
 - Secret values (its ClusterRole does not grant `secrets`)
 - ConfigMap values
@@ -244,17 +272,28 @@ NetworkPolicy SPEC metadata only**. It never reads, materializes, or emits:
   materialized into Go memory) — and the `RawPolicy` / `Coverage` structs have
   **no field** that could carry a peer or selector value
 - actual network traffic / flow logs (this is configuration, not telemetry)
+- any namespace label or annotation other than the `pod-security.kubernetes.io/*`
+  labels (the PSS client reads **only** those six label keys off `metadata.labels`
+  and never decodes `metadata.annotations` at all; every other namespace label,
+  the `spec`, and the `status` are discarded by the JSON decoder) — and the
+  `RawNamespace` / `Admission` structs have **no field** that could carry a pod
+  spec, secret, or arbitrary namespace metadata (a reflection guard fails the
+  build if such a field is added)
 
-Tests assert that no Secret / ConfigMap / env material — and no NetworkPolicy
-peer / selector / port value — ever enters an evidence record, and that the
-cluster token never appears in any formatted credential.
+Tests assert that no Secret / ConfigMap / env material — no NetworkPolicy peer /
+selector / port value — and no non-PSS namespace label / annotation ever enters
+an evidence record, and that the cluster token never appears in any formatted
+credential.
 
 ## Not in v0 (follow-ons)
 
-The connector ships three evidence surfaces (RBAC, workload security context,
-NetworkPolicy coverage). It does **not** ship:
+The connector ships four evidence surfaces (RBAC, workload security context,
+NetworkPolicy coverage, Pod-Security-Standards admission config). It does **not**
+ship:
 
-- Pod-Security-Standards admission-config evidence
+- the cluster's `AdmissionConfiguration` file (out of API reach), validating /
+  mutating webhooks, or third-party policy engines (OPA/Gatekeeper, Kyverno) —
+  the PSS kind reads **namespace labels only**
 - Secret-inventory (metadata-only) evidence
 - image-provenance / audit-log evidence
 - CNI-plugin-specific policy (Cilium / Calico CRDs) coverage — `networking.k8s.io`
@@ -264,7 +303,9 @@ NetworkPolicy coverage). It does **not** ship:
 - cursor pagination (v0 reads a bounded first page per endpoint, `limit=500`)
 
 These are filed as follow-on slices (see `docs/issues/487-kubernetes-connector.md`,
-`docs/issues/523-k8s-networkpolicy-evidence.md`, and the spillover band 621–624).
+`docs/issues/523-k8s-networkpolicy-evidence.md`,
+`docs/issues/524-k8s-pod-security-standards-admission-evidence.md`, and the
+spillover bands 621–624 + 652–659).
 
 ## Tests
 
@@ -276,13 +317,20 @@ Unit tests fake the Kubernetes API surfaces (no live cluster, no real
 credentials) and pin the RBAC normalization + wildcard heuristic, the workload
 hardening verdict matrix, the security-context aggregation across containers, the
 NetworkPolicy default-deny assessment matrix, the credential redaction, the
-read-only ClusterRole contract, and the `idem` hour-window behavior. The netpol
-client test serves a NetworkPolicy whose rule block embeds a podSelector label,
-an ingress peer namespaceSelector label, a CIDR, and a port, and asserts none of
-that peer / selector payload escapes into the reduced record (the over-collection
-guard). The integration test (in-package, bufconn platform — no Postgres)
-exercises the full collect → build → SDK `Push` → push-receipt round-trip for all
-three kinds and asserts two same-hour pushes collapse to one `record_id`, that
-emitted payloads carry config / authz metadata only (no Secret / ConfigMap / env
-values, no NetworkPolicy peer / selector value), and that the credential never
-surfaces in a formatted log.
+read-only ClusterRole contract, the PSS enforce/audit/warn verdict matrix, and
+the `idem` hour-window behavior. The netpol client test serves a NetworkPolicy
+whose rule block embeds a podSelector label, an ingress peer namespaceSelector
+label, a CIDR, and a port, and asserts none of that peer / selector payload
+escapes into the reduced record (the over-collection guard). The PSS client test
+serves a namespace carrying unrelated labels (a team label, a secret-looking
+label value) **and** annotations (a kubectl last-applied blob with embedded
+secret material, an owner-email) alongside the `pod-security.kubernetes.io/*`
+labels, and asserts only the PSS labels reach a record (the label-filter guard);
+a reflection guard pins that the PSS structs carry only namespace name + the
+three modes / levels / versions. The integration test (in-package, bufconn
+platform — no Postgres) exercises the full collect → build → SDK `Push` →
+push-receipt round-trip for all four kinds and asserts two same-hour pushes
+collapse to one `record_id`, that emitted payloads carry config / authz metadata
+only (no Secret / ConfigMap / env values, no NetworkPolicy peer / selector value,
+no non-PSS namespace label / annotation), and that the credential never surfaces
+in a formatted log.

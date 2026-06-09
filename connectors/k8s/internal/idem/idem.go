@@ -7,6 +7,7 @@
 //   - RBACBindingKey:     sha256("k8s.rbac_binding|<scope>/<namespace>/<name>|<hour>")
 //   - WorkloadKey:        sha256("k8s.workload_security_context|<kind>/<namespace>/<name>|<hour>")
 //   - NetpolCoverageKey:  sha256("k8s.networkpolicy_coverage|<namespace>|<hour>")
+//   - PSSAdmissionKey:    sha256("k8s.pod_security_admission|<namespace>|<hour>")
 //
 // Anti-criterion: every push from this connector derives its idempotency_key
 // here. The cmd layer never invents one ad-hoc and never pushes with an empty
@@ -36,6 +37,13 @@ func WorkloadKey(kind, namespace, name string, observedAt time.Time) string {
 // coverage record (one record per namespace per run).
 func NetpolCoverageKey(namespace string, observedAt time.Time) string {
 	return hashKey("k8s.networkpolicy_coverage", namespace, observedAt)
+}
+
+// PSSAdmissionKey returns the idempotency key for one namespace's
+// Pod-Security-Standards admission assessment. The namespace uniquely identifies
+// a PSS record (one record per namespace per run).
+func PSSAdmissionKey(namespace string, observedAt time.Time) string {
+	return hashKey("k8s.pod_security_admission", namespace, observedAt)
 }
 
 func hashKey(prefix, id string, observedAt time.Time) string {

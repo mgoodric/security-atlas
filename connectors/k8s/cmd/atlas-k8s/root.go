@@ -25,10 +25,12 @@ const ConnectorName = "k8s-connector"
 //   - k8s.rbac_binding.v1                 (Kubernetes RBAC, pull — slice 487)
 //   - k8s.workload_security_context.v1    (Kubernetes apps workloads, pull — slice 487)
 //   - k8s.networkpolicy_coverage.v1       (Kubernetes NetworkPolicy posture, pull — slice 523)
+//   - k8s.pod_security_admission.v1       (Kubernetes PSS admission config, pull — slice 524)
 var SupportedKinds = []string{
 	"k8s.rbac_binding.v1",
 	"k8s.workload_security_context.v1",
 	"k8s.networkpolicy_coverage.v1",
+	"k8s.pod_security_admission.v1",
 }
 
 // PullInterval names the connector's pull cadence HONESTLY (P0-487-6). The
@@ -125,10 +127,11 @@ func sdkOpts() []sdk.Option {
 
 const longDescription = `security-atlas Kubernetes connector
 
-Emits three evidence kinds:
+Emits four evidence kinds:
   - k8s.rbac_binding.v1               (run subcommand, pull — Kubernetes RBAC)
   - k8s.workload_security_context.v1  (run subcommand, pull — apps workloads)
   - k8s.networkpolicy_coverage.v1     (run subcommand, pull — NetworkPolicies)
+  - k8s.pod_security_admission.v1     (run subcommand, pull — PSS admission cfg)
 
 Profile: pull. Each invocation is one bounded read-and-push pass on an
 operator-scheduled cadence (recommended 24h). This is NOT continuous
@@ -139,13 +142,15 @@ Least-privilege Kubernetes access (read-only ClusterRole):
     clusterrolebindings  — verbs get,list
   - apps: deployments, daemonsets, statefulsets  — verbs get,list
   - networking.k8s.io: networkpolicies  — verbs get,list
-  - core: namespaces  — verbs get,list
+  - core: namespaces  — verbs get,list  (also gates the PSS admission kind —
+    PSS config is namespace pod-security.kubernetes.io/* labels; NO new rule)
 
 NEVER grant write verbs, cluster-admin, wildcards, or get/list on 'secrets'.
-The connector reads RBAC + security-context + NetworkPolicy CONFIGURATION only
-— never Secret values, ConfigMap values, container env, NetworkPolicy peer/port
-contents, or logs. Use the 'permissions' subcommand to print the canonical
-ClusterRole.
+The connector reads RBAC + security-context + NetworkPolicy + Pod-Security-
+Standards CONFIGURATION only — never Secret values, ConfigMap values, container
+env, NetworkPolicy peer/port contents, pod specs, arbitrary namespace
+labels/annotations, or logs. Use the 'permissions' subcommand to print the
+canonical ClusterRole.
 
 Auth: a read-only ServiceAccount token. Set KUBERNETES_API_SERVER +
 KUBECONFIG_TOKEN (out-of-cluster), or pass --auth-mode in-cluster to read the
