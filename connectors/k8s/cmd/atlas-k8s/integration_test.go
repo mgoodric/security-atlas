@@ -19,6 +19,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/k8sauth"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/netpol"
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/pss"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/rbac"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/workload"
 )
@@ -83,8 +84,8 @@ func TestRegister_ListsConnector(t *testing.T) {
 	for _, h := range list.GetHandles() {
 		if h.GetName() == ConnectorName {
 			found = true
-			if len(h.GetSupportedKinds()) != 3 {
-				t.Errorf("supported_kinds = %d; want 3", len(h.GetSupportedKinds()))
+			if len(h.GetSupportedKinds()) != 4 {
+				t.Errorf("supported_kinds = %d; want 4", len(h.GetSupportedKinds()))
 			}
 			if strings.Join(h.GetProfilesSupported(), ",") != "pull" {
 				t.Errorf("profiles_supported = %v; want [pull]", h.GetProfilesSupported())
@@ -201,6 +202,45 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if got := scopeValue(npRec.GetScope(), "namespace"); got != "prod" {
 		t.Errorf("netpol namespace scope = %q; want prod", got)
 	}
+
+	// PSS admission (faked Kubernetes API surface — NO live cluster). The faked
+	// namespace carries unrelated labels + annotations that must NOT escape into
+	// the pushed record (label-filter / over-collection guard).
+	pssAPI := &fakePSSForIntegration{namespaces: []pss.RawNamespace{
+		{Name: "prod", EnforceLevel: pss.LevelRestricted, EnforceVersion: "v1.29", AuditLevel: pss.LevelBaseline},
+		{Name: "legacy", EnforceLevel: pss.LevelPrivileged},
+		{Name: "dev"}, // unenforced — no PSS labels
+	}}
+	admissions, err := pss.Assess(context.Background(), pssAPI, fixed)
+	if err != nil {
+		t.Fatalf("pss.Assess: %v", err)
+	}
+	var prodAdm *pss.Admission
+	for i := range admissions {
+		if admissions[i].Namespace == "prod" {
+			prodAdm = &admissions[i]
+		}
+	}
+	if prodAdm == nil || prodAdm.Result != pss.ResultPass || !prodAdm.Configured {
+		t.Fatalf("prod namespace should PASS with enforce=restricted; got %+v", prodAdm)
+	}
+	pssRec, err := buildPSSRecord(*prodAdm, "cluster-1", "prod", "scf:CFG-02")
+	if err != nil {
+		t.Fatalf("buildPSSRecord: %v", err)
+	}
+	pssReceipt, err := client.Push(context.Background(), pssRec)
+	if err != nil {
+		t.Fatalf("Push pss: %v", err)
+	}
+	if pssReceipt.GetHash() == "" {
+		t.Fatal("pss receipt hash empty (AC-5 sha256 content-hash)")
+	}
+	if !strings.HasPrefix(pssRec.GetSourceAttribution().GetActorId(), "connector:k8s:pss@") {
+		t.Errorf("pss actor_id = %q", pssRec.GetSourceAttribution().GetActorId())
+	}
+	if got := scopeValue(pssRec.GetScope(), "namespace"); got != "prod" {
+		t.Errorf("pss namespace scope = %q; want prod", got)
+	}
 }
 
 // TestRun_DedupesWithinHour verifies AC-6: two records from the same resource in
@@ -261,6 +301,15 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 	covs, _ := netpol.Assess(context.Background(), npAPI, fixed)
 	npRec, _ := buildNetpolRecord(covs[0], "cluster-1", "prod", "scf:NET-04")
 
+	// PSS admission: the faked namespace carries unrelated labels + annotations
+	// (via the client boundary) — but the RawNamespace the assessment consumes
+	// already holds ONLY PSS fields. Assert the emitted payload keys stay PSS-only.
+	pssAPI := &fakePSSForIntegration{namespaces: []pss.RawNamespace{
+		{Name: "prod", EnforceLevel: pss.LevelRestricted, EnforceVersion: "v1.29", AuditLevel: pss.LevelBaseline},
+	}}
+	adms, _ := pss.Assess(context.Background(), pssAPI, fixed)
+	pssRec, _ := buildPSSRecord(adms[0], "cluster-1", "prod", "scf:CFG-02")
+
 	// Allow-list of permitted top-level payload keys per kind. Any key NOT in
 	// the allow-list is a leak and fails the test (config / authz metadata only).
 	rbacAllowed := map[string]bool{
@@ -278,7 +327,13 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 		"namespace": true, "policy_count": true, "default_deny_ingress": true,
 		"default_deny_egress": true, "policies": true,
 	}
-	bannedSubstrings := []string{"secret", "configmap", "config_map", "env", "value", "data", "token", "password", "log"}
+	pssAllowed := map[string]bool{
+		"namespace": true, "configured": true,
+		"enforce_level": true, "enforce_version": true,
+		"audit_level": true, "audit_version": true,
+		"warn_level": true, "warn_version": true,
+	}
+	bannedSubstrings := []string{"secret", "configmap", "config_map", "env", "value", "data", "token", "password", "log", "annotation"}
 
 	check := func(t *testing.T, rec *evidencev1.EvidenceRecord, allowed map[string]bool) {
 		for k := range rec.GetPayload().AsMap() {
@@ -296,6 +351,7 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 	check(t, rbacRec, rbacAllowed)
 	check(t, wlRec, workloadAllowed)
 	check(t, npRec, netpolAllowed)
+	check(t, pssRec, pssAllowed)
 
 	// The nested per-policy summaries must carry SPEC metadata only — never a
 	// peer / selector / port value. Allow-list the nested keys too.
@@ -356,5 +412,11 @@ func (f *fakeWorkloadForIntegration) ListWorkloads(_ context.Context) ([]workloa
 type fakeNetpolForIntegration struct{ namespaces []netpol.RawNamespace }
 
 func (f *fakeNetpolForIntegration) ListNamespaceCoverage(_ context.Context) ([]netpol.RawNamespace, error) {
+	return f.namespaces, nil
+}
+
+type fakePSSForIntegration struct{ namespaces []pss.RawNamespace }
+
+func (f *fakePSSForIntegration) ListNamespacePSS(_ context.Context) ([]pss.RawNamespace, error) {
 	return f.namespaces, nil
 }

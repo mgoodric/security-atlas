@@ -17,6 +17,7 @@ import (
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/netpol"
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/pss"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/rbac"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/workload"
 )
@@ -42,6 +43,7 @@ type seamOverrides struct {
 	rbacPull     func(ctx context.Context, api rbac.API, now func() time.Time) ([]rbac.Binding, error)
 	workloadScan func(ctx context.Context, api workload.API, now func() time.Time) ([]workload.SecurityContext, error)
 	netpolScan   func(ctx context.Context, api netpol.API, now func() time.Time) ([]netpol.Coverage, error)
+	pssScan      func(ctx context.Context, api pss.API, now func() time.Time) ([]pss.Admission, error)
 	newClient    func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error)
 }
 
@@ -61,6 +63,11 @@ func installSeams(t *testing.T, o seamOverrides) {
 		prev := netpolScan
 		netpolScan = o.netpolScan
 		t.Cleanup(func() { netpolScan = prev })
+	}
+	if o.pssScan != nil {
+		prev := pssScan
+		pssScan = o.pssScan
+		t.Cleanup(func() { pssScan = prev })
 	}
 	if o.newClient != nil {
 		prev := newSDKClient
@@ -83,6 +90,7 @@ func okFlags() runFlags {
 		rbacControl:     "scf:IAC-21",
 		workloadControl: "scf:CFG-02",
 		netpolControl:   "scf:NET-04",
+		pssControl:      "scf:CFG-02",
 	}
 }
 
@@ -109,6 +117,13 @@ func oneCoverage() []netpol.Coverage {
 	}}
 }
 
+func oneAdmission() []pss.Admission {
+	return []pss.Admission{{
+		Namespace: "prod", EnforceLevel: pss.LevelRestricted, Configured: true,
+		Result: pss.ResultPass, ObservedAt: time.Now().UTC(),
+	}}
+}
+
 func TestDoRun_PushSuccessAllKinds(t *testing.T) {
 	resetCommon(t)
 	common.endpoint = "127.0.0.1:1"
@@ -127,17 +142,121 @@ func TestDoRun_PushSuccessAllKinds(t *testing.T) {
 		netpolScan: func(_ context.Context, _ netpol.API, _ func() time.Time) ([]netpol.Coverage, error) {
 			return oneCoverage(), nil
 		},
+		pssScan: func(_ context.Context, _ pss.API, _ func() time.Time) ([]pss.Admission, error) {
+			return oneAdmission(), nil
+		},
 		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
 	})
 
 	if err := doRun(context.Background(), okFlags()); err != nil {
 		t.Fatalf("doRun: %v", err)
 	}
-	if fake.pushed != 3 {
-		t.Errorf("pushed = %d; want 3 (one rbac + one workload + one netpol)", fake.pushed)
+	if fake.pushed != 4 {
+		t.Errorf("pushed = %d; want 4 (one rbac + one workload + one netpol + one pss)", fake.pushed)
 	}
 	if !fake.closeCalled {
 		t.Error("Close not called")
+	}
+}
+
+func TestDoRun_PSSOnly(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		pssScan: func(_ context.Context, _ pss.API, _ func() time.Time) ([]pss.Admission, error) {
+			return oneAdmission(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	f.skipWorkload = true
+	f.skipNetpol = true
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 1 {
+		t.Errorf("pushed = %d; want 1 (pss only)", fake.pushed)
+	}
+}
+
+func TestDoRun_SkipPSS(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		pssScan: func(_ context.Context, _ pss.API, _ func() time.Time) ([]pss.Admission, error) {
+			t.Fatal("pssScan should not be called when --skip-pss is set")
+			return nil, nil
+		},
+		rbacPull: func(_ context.Context, _ rbac.API, _ func() time.Time) ([]rbac.Binding, error) {
+			return oneBinding(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipWorkload = true
+	f.skipNetpol = true
+	f.skipPSS = true
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 1 {
+		t.Errorf("pushed = %d; want 1 (rbac only)", fake.pushed)
+	}
+}
+
+func TestDoRun_PSSAssessError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("k8s 403")
+	installSeams(t, seamOverrides{
+		pssScan: func(_ context.Context, _ pss.API, _ func() time.Time) ([]pss.Admission, error) {
+			return nil, sentinel
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	f.skipWorkload = true
+	f.skipNetpol = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "pss assess: ") {
+		t.Fatalf("want wrapped pss assess error; got %v", err)
+	}
+}
+
+func TestDoRun_PSSPushError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("push rejected")
+	fake := &fakeSDKClient{pushErr: sentinel}
+	installSeams(t, seamOverrides{
+		pssScan: func(_ context.Context, _ pss.API, _ func() time.Time) ([]pss.Admission, error) {
+			return oneAdmission(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	f.skipWorkload = true
+	f.skipNetpol = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "push pss ") {
+		t.Fatalf("want wrapped push pss error; got %v", err)
 	}
 }
 
@@ -161,6 +280,7 @@ func TestDoRun_SkipNetpol(t *testing.T) {
 	f := okFlags()
 	f.skipWorkload = true
 	f.skipNetpol = true
+	f.skipPSS = true
 	if err := doRun(context.Background(), f); err != nil {
 		t.Fatalf("doRun: %v", err)
 	}
@@ -185,6 +305,7 @@ func TestDoRun_NetpolOnly(t *testing.T) {
 	f := okFlags()
 	f.skipRBAC = true
 	f.skipWorkload = true
+	f.skipPSS = true
 	if err := doRun(context.Background(), f); err != nil {
 		t.Fatalf("doRun: %v", err)
 	}
@@ -254,6 +375,7 @@ func TestDoRun_SkipRBAC(t *testing.T) {
 	f := okFlags()
 	f.skipRBAC = true
 	f.skipNetpol = true
+	f.skipPSS = true
 	if err := doRun(context.Background(), f); err != nil {
 		t.Fatalf("doRun: %v", err)
 	}
@@ -278,6 +400,7 @@ func TestDoRun_SkipWorkload(t *testing.T) {
 	f := okFlags()
 	f.skipWorkload = true
 	f.skipNetpol = true
+	f.skipPSS = true
 	if err := doRun(context.Background(), f); err != nil {
 		t.Fatalf("doRun: %v", err)
 	}
@@ -409,5 +532,8 @@ func TestNewRBACAPIAndWorkloadAPI_Constructors(t *testing.T) {
 	}
 	if newNetpolAPI(http.DefaultClient, "https://k", "test-k8s-token") == nil {
 		t.Error("newNetpolAPI returned nil")
+	}
+	if newPSSAPI(http.DefaultClient, "https://k", "test-k8s-token") == nil {
+		t.Error("newPSSAPI returned nil")
 	}
 }

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/k8s.pod_security_admission/1.0.0.json",
+  "x-evidence-kind": "k8s.pod_security_admission.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["CFG-02"],
+  "title": "Kubernetes Pod-Security-Standards admission configuration",
+  "description": "Per-namespace Kubernetes Pod-Security-Standards (PSS) admission configuration captured read-only from the Kubernetes API (get/list on core namespaces — a rule the base connector already holds): which namespaces carry the pod-security.kubernetes.io/enforce, /audit, and /warn labels and at which level (privileged / baseline / restricted), plus the optional pinned version label per mode. This is the ENFORCED side of workload hardening (does admission block / audit / warn on under-hardened pods), complementing the k8s.workload_security_context.v1 ACTUAL-posture kind. The minimum that demonstrates admission-time enforcement of the configuration-baseline control (e.g. which namespaces enforce a restricted PSS vs are unenforced). PSS LABEL configuration ONLY — never pod specs, container env, Secret / ConfigMap values, logs, nor any other namespace label or annotation beyond the pod-security.kubernetes.io/* labels (the connector reads ONLY those label keys; a structural reflection guard fails the build if a record field for other namespace metadata is added). Scope: namespace PSS labels only; this does NOT read the cluster's AdmissionConfiguration file (out of API reach), validating/mutating webhooks, or third-party policy engines (OPA/Gatekeeper, Kyverno) — those are documented follow-ons. The connector emits a descriptive PASS/FAIL verdict per namespace (PASS = enforces baseline/restricted; FAIL = unenforced or privileged-only); the platform evaluator owns the final policy call. x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["namespace", "configured"],
+  "properties": {
+    "namespace": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Namespace the PSS admission assessment is for."
+    },
+    "configured": {
+      "type": "boolean",
+      "description": "True when at least one PSS mode (enforce/audit/warn) carries a level on this namespace — i.e. PSS admission is configured at all. False means the namespace has no pod-security.kubernetes.io/* labels (unenforced)."
+    },
+    "enforce_level": {
+      "type": "string",
+      "enum": ["privileged", "baseline", "restricted"],
+      "description": "The pod-security.kubernetes.io/enforce level. Omitted when the namespace has no enforce label (admission is not blocked). 'restricted'/'baseline' is hardened; 'privileged' is unrestricted."
+    },
+    "enforce_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The pinned pod-security.kubernetes.io/enforce-version label (a kube minor like 'v1.29', or 'latest'). Omitted when absent."
+    },
+    "audit_level": {
+      "type": "string",
+      "enum": ["privileged", "baseline", "restricted"],
+      "description": "The pod-security.kubernetes.io/audit level (logs a violation, does not block). Omitted when absent."
+    },
+    "audit_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The pinned pod-security.kubernetes.io/audit-version label. Omitted when absent."
+    },
+    "warn_level": {
+      "type": "string",
+      "enum": ["privileged", "baseline", "restricted"],
+      "description": "The pod-security.kubernetes.io/warn level (returns a user-facing warning, does not block). Omitted when absent."
+    },
+    "warn_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The pinned pod-security.kubernetes.io/warn-version label. Omitted when absent."
+    }
+  }
+}

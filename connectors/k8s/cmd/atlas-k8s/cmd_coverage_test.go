@@ -21,6 +21,7 @@ import (
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/netpol"
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/pss"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/rbac"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/workload"
 )
@@ -138,6 +139,89 @@ func TestActorID_NetpolShape(t *testing.T) {
 	id := actorID("netpol")
 	if !strings.HasPrefix(id, "connector:k8s:netpol@") {
 		t.Errorf("actorID(netpol) = %q", id)
+	}
+}
+
+func TestMapPSSResult(t *testing.T) {
+	cases := []struct {
+		name string
+		in   pss.AssessResult
+		want evidencev1.Result
+	}{
+		{"pass", pss.ResultPass, evidencev1.Result_RESULT_PASS},
+		{"fail", pss.ResultFail, evidencev1.Result_RESULT_FAIL},
+		{"default", pss.AssessResult("unknown"), evidencev1.Result_RESULT_UNSPECIFIED},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mapPSSResult(tc.in); got != tc.want {
+				t.Errorf("mapPSSResult(%q) = %v; want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildPSSRecord_Shape(t *testing.T) {
+	a := pss.Admission{
+		Namespace: "prod", Configured: true,
+		EnforceLevel: pss.LevelRestricted, EnforceVersion: "v1.29",
+		AuditLevel: pss.LevelBaseline, WarnLevel: pss.LevelBaseline,
+		Result: pss.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
+	}
+	rec, err := buildPSSRecord(a, "cluster-1", "prod", "scf:CFG-02")
+	if err != nil {
+		t.Fatalf("buildPSSRecord: %v", err)
+	}
+	if rec.EvidenceKind != "k8s.pod_security_admission.v1" {
+		t.Errorf("kind = %q", rec.EvidenceKind)
+	}
+	if rec.Result != evidencev1.Result_RESULT_PASS {
+		t.Errorf("result = %v; want PASS", rec.Result)
+	}
+	if rec.IdempotencyKey == "" {
+		t.Error("empty idempotency key")
+	}
+	if rec.GetSourceAttribution().GetActorId() == "" || !strings.HasPrefix(rec.GetSourceAttribution().GetActorId(), "connector:k8s:pss@") {
+		t.Errorf("actor_id = %q; want connector:k8s:pss@*", rec.GetSourceAttribution().GetActorId())
+	}
+	if got := scopeValue(rec.GetScope(), "namespace"); got != "prod" {
+		t.Errorf("namespace scope = %q; want prod", got)
+	}
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{"namespace", "configured", "enforce_level", "enforce_version", "audit_level", "warn_level"} {
+		if _, ok := pl[k]; !ok {
+			t.Errorf("payload missing %q; got %v", k, pl)
+		}
+	}
+}
+
+func TestBuildPSSRecord_OmitsUnsetModesAndVersions(t *testing.T) {
+	a := pss.Admission{
+		Namespace: "dev", Configured: false, Result: pss.ResultFail,
+		ObservedAt: time.Now().UTC(),
+	}
+	rec, err := buildPSSRecord(a, "c", "prod", "scf:CFG-02")
+	if err != nil {
+		t.Fatalf("buildPSSRecord: %v", err)
+	}
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{"enforce_level", "enforce_version", "audit_level", "audit_version", "warn_level", "warn_version"} {
+		if _, ok := pl[k]; ok {
+			t.Errorf("unset field %q should be omitted; got %v", k, pl)
+		}
+	}
+	if rec.Result != evidencev1.Result_RESULT_FAIL {
+		t.Errorf("result = %v; want FAIL", rec.Result)
+	}
+	if pl["configured"] != false {
+		t.Errorf("configured = %v; want false", pl["configured"])
+	}
+}
+
+func TestActorID_PSSShape(t *testing.T) {
+	id := actorID("pss")
+	if !strings.HasPrefix(id, "connector:k8s:pss@") {
+		t.Errorf("actorID(pss) = %q", id)
 	}
 }
 

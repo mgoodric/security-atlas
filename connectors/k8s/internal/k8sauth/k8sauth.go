@@ -188,7 +188,7 @@ func DocumentedClusterRole() []PolicyRule {
 			APIGroups: []string{""},
 			Resources: []string{"namespaces"},
 			Verbs:     readOnlyVerbs,
-			Gates:     "namespace enumeration (scope context for all kinds)",
+			Gates:     "namespace enumeration (scope context for all kinds) + k8s.pod_security_admission.v1 (PSS admission config — pod-security.kubernetes.io/* namespace labels; NO new rule required)",
 		},
 	}
 }
