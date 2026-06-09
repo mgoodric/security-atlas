@@ -167,7 +167,82 @@ null`, `profile: null`, zero selections, an empty gap, and no tier in its gap
 
 ---
 
-## Detection-tier classification (slice 353)
+## D7 — Refining the invariant-#1/#7 guard test (the post-CI constitutional-guard JUDGMENT)
+
+**Context:** CI shard A surfaced one real failure after the slice landed:
+`TestImport_NoDirectRequirementToRequirementTableExists`
+(`internal/api/soc2import/import_test.go`) failed with "invariant 1 violated: N
+FKs point at framework_requirements; expected exactly 1". The csfassessment
+package's own suite passed; the failure was in the soc2import crosswalk guard.
+
+**Root cause:** the guard's second sub-check counted EVERY foreign key into
+`framework_requirements` and allowed exactly 1 (the crosswalk edge
+`fw_to_scf_edges.framework_requirement_id`). Slice 515's
+`csf_profile_selections.framework_requirement_id` is a SECOND FK into
+`framework_requirements`, so the heuristic tripped.
+
+**Decision: PATH A — refine the guard. Do NOT remove the FK (path B rejected).**
+
+Why `csf_profile_selections` is NOT a crosswalk and therefore does NOT violate
+invariant #1/#7:
+
+- Invariant #1/#7 forbids requirement→requirement MAPPING tables that bypass
+  SCF anchors — i.e. a framework-to-framework edge that duplicates control
+  coverage instead of routing through the shared SCF anchor (canvas §3.5).
+- `csf_profile_selections` maps a tenant's per-Subcategory TARGET OUTCOME to the
+  shared CSF Subcategory row. It is **assessment-state → reference-data**, not
+  **requirement → requirement**. It maps NOTHING from one requirement to
+  another, and it never bypasses the crosswalk: the gap view's
+  Subcategory→SCF-anchor traversal still goes through the existing
+  `fw_to_scf_edges` path (D1 / invariant #1 / P0-515-2).
+- A CSF Profile is CSF-native: it MUST reference the real Subcategory row for
+  referential integrity (a selection cannot point at a non-existent or
+  hard-deleted Subcategory; the FK + `ON DELETE CASCADE` enforce that). Routing
+  the FK "through SCF anchors" instead (path B) would be architecturally wrong —
+  a CSF profile is about CSF Subcategory outcomes, not SCF anchors — and would
+  LOSE the integrity the FK buys. Path B is rejected.
+
+Why the guard's old heuristic was over-broad (not wrong, just outgrown): "count
+every FK to framework_requirements, allow exactly 1" was a correct proxy ONLY
+while the crosswalk edge was the sole referencer. The slice adds the first
+legitimate non-crosswalk referencer, so the proxy now has a false positive.
+
+**The exact refinement.** The distinguishing property between a crosswalk bridge
+and assessment-state is the **tenancy** of the referencing table:
+
+- A crosswalk/edge table is **catalog data** — shared, tenant-agnostic, NO
+  `tenant_id` column (e.g. `fw_to_scf_edges`). Invariant #3.5 + #1 make this
+  structural: a crosswalk is shared reference data by construction.
+- Assessment-state is **tenant-scoped** — carries a `tenant_id` column (e.g.
+  `csf_profile_selections`).
+
+So the FK-count query now restricts to FKs ORIGINATING from **catalog tables**
+(`NOT EXISTS` a `tenant_id` column on the referencing table) and still allows
+exactly 1. The `%req%req%` table-name check above is UNCHANGED. The failure
+message + comment now state the refined rule precisely ("a second CATALOG FK …
+is a framework-to-framework crosswalk that bypasses SCF anchors").
+
+**Why the refined guard still catches a real req→req crosswalk (verified, not
+asserted):**
+
+- A genuine `fw_to_fw_edges` crosswalk would be **catalog** data — shared,
+  tenant-agnostic, no `tenant_id` (exactly like `fw_to_scf_edges`). It is NOT
+  excluded by the `tenant_id` filter, so it still increments the count → caught.
+- A tenant-scoped table cannot "launder" a crosswalk through the exclusion,
+  because a crosswalk is shared catalog data by definition — putting a
+  `tenant_id` on it would make it a per-tenant override, not the shared
+  framework-to-framework mapping the invariant forbids.
+- The test now carries a **positive sub-assertion**: it creates a CATALOG (no
+  `tenant_id`) `fw_to_fw_edges_probe` table referencing `framework_requirements`
+  twice inside a rolled-back transaction and asserts the count query trips to
+  `>1`. If a future edit broke the refinement (e.g. excluded all referencers),
+  this sub-assertion fails loudly. Empirically verified locally: steady-state
+  catalog FK count = 1; a tenant-scoped probe leaves it at 1 (correctly
+  excluded); a catalog probe pushes it to 2 (correctly caught).
+
+**Blast radius:** the only behavior change is to the guard test's FK-count
+predicate (+ message/comment + the positive sub-assertion). No production code,
+no schema, no data-model change. Surgical per the Article requirement.
 
 - `detection_tier_actual`: `unit` — one latent bug surfaced _during the slice_
   and was caught before any commit by the unit/typecheck loop, not in
@@ -192,6 +267,18 @@ null`, `profile: null`, zero selections, an empty gap, and no tier in its gap
   route-mocked per the b219 project lesson). The two detection-tier deltas above
   (`actual=unit`/`actual=lint` vs `target=unit`) are _in-tier_ catches, not a
   coverage gap.
+- **Post-merge addendum (D7):** a THIRD finding surfaced at
+  `detection_tier_actual: integration` — CI shard A's
+  `TestImport_NoDirectRequirementToRequirementTableExists` failed because the
+  slice's `csf_profile_selections.framework_requirement_id` is a legitimate
+  second (non-crosswalk, tenant-scoped) FK into `framework_requirements` that the
+  guard's old FK-count heuristic flagged. This is the correct detection tier for
+  a cross-slice constitutional-guard interaction (it can only surface when the
+  whole crosswalk schema is present against real Postgres — exactly the
+  integration tier). `detection_tier_target` for this class is also
+  `integration`: the guard lives there by design. Resolved by refining the guard
+  (D7), not by relaxing it — the guard still trips on a real req→req crosswalk
+  (verified by an added positive sub-assertion + empirical check).
 
 ---
 
