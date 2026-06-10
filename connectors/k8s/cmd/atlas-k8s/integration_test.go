@@ -21,6 +21,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/netpol"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/pss"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/rbac"
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/secretmeta"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/workload"
 )
 
@@ -84,8 +85,8 @@ func TestRegister_ListsConnector(t *testing.T) {
 	for _, h := range list.GetHandles() {
 		if h.GetName() == ConnectorName {
 			found = true
-			if len(h.GetSupportedKinds()) != 4 {
-				t.Errorf("supported_kinds = %d; want 4", len(h.GetSupportedKinds()))
+			if len(h.GetSupportedKinds()) != 5 {
+				t.Errorf("supported_kinds = %d; want 5", len(h.GetSupportedKinds()))
 			}
 			if strings.Join(h.GetProfilesSupported(), ",") != "pull" {
 				t.Errorf("profiles_supported = %v; want [pull]", h.GetProfilesSupported())
@@ -241,6 +242,42 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if got := scopeValue(pssRec.GetScope(), "namespace"); got != "prod" {
 		t.Errorf("pss namespace scope = %q; want prod", got)
 	}
+
+	// Secret-inventory (faked Kubernetes API surface — NO live cluster). The
+	// faked Secret carries real key NAMES; the metadata-only guard is proven in
+	// the secretmeta package, here we prove the collect -> push round-trip + the
+	// sha256 receipt + the secretmeta actor_id.
+	secAPI := &fakeSecretMetaForIntegration{secrets: []secretmeta.RawSecret{
+		{Namespace: "prod", Name: "web-tls", Type: "kubernetes.io/tls",
+			CreatedAt: time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC), KeyNames: []string{"tls.crt", "tls.key"}},
+	}}
+	inventory, err := secretmeta.Collect(context.Background(), secAPI, fixed)
+	if err != nil {
+		t.Fatalf("secretmeta.Collect: %v", err)
+	}
+	if len(inventory) != 1 || inventory[0].AgeDays != 30 {
+		t.Fatalf("secret inventory wrong: %+v", inventory)
+	}
+	secRec, err := buildSecretMetaRecord(inventory[0], "cluster-1", "prod", "scf:CRY-01")
+	if err != nil {
+		t.Fatalf("buildSecretMetaRecord: %v", err)
+	}
+	secReceipt, err := client.Push(context.Background(), secRec)
+	if err != nil {
+		t.Fatalf("Push secret-inventory: %v", err)
+	}
+	if secReceipt.GetHash() == "" {
+		t.Fatal("secret-inventory receipt hash empty (AC-6 sha256 content-hash)")
+	}
+	if secRec.GetEvidenceKind() != "k8s.secret_inventory.v1" {
+		t.Errorf("secret-inventory kind = %q", secRec.GetEvidenceKind())
+	}
+	if !strings.HasPrefix(secRec.GetSourceAttribution().GetActorId(), "connector:k8s:secretmeta@") {
+		t.Errorf("secret-inventory actor_id = %q", secRec.GetSourceAttribution().GetActorId())
+	}
+	if got := scopeValue(secRec.GetScope(), "namespace"); got != "prod" {
+		t.Errorf("secret-inventory namespace scope = %q; want prod", got)
+	}
 }
 
 // TestRun_DedupesWithinHour verifies AC-6: two records from the same resource in
@@ -356,6 +393,36 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 	check(t, npRec, netpolAllowed)
 	check(t, pssRec, pssAllowed)
 
+	// Secret-inventory: the payload keys legitimately CONTAIN "secret" (the kind
+	// is about Secret objects), so the generic banned-substring check does not
+	// apply. Instead assert (a) the payload keys are exactly the metadata-only
+	// allow-list, and (b) the fixture Secret's VALUE never appears anywhere in
+	// the serialized payload — the load-bearing AC-5 proof at the cmd layer.
+	const secValueMarker = "test-secret-value-should-be-dropped"
+	secAPI := &fakeSecretMetaForIntegration{secrets: []secretmeta.RawSecret{
+		{Namespace: "prod", Name: "web-tls", Type: "kubernetes.io/tls",
+			CreatedAt: time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC), KeyNames: []string{"tls.crt", "tls.key", "token"}},
+	}}
+	inv, _ := secretmeta.Collect(context.Background(), secAPI, fixed)
+	secRec, _ := buildSecretMetaRecord(inv[0], "cluster-1", "prod", "scf:CRY-01")
+	secretAllowed := map[string]bool{
+		"namespace": true, "secret_name": true, "secret_type": true,
+		"age_days": true, "key_count": true, "created_at": true, "key_names": true,
+	}
+	for k := range secRec.GetPayload().AsMap() {
+		if !secretAllowed[k] {
+			t.Errorf("secret-inventory payload carries non-allow-listed key %q (possible value leak)", k)
+		}
+	}
+	// No Secret value field exists structurally; assert the marker (and a base64
+	// form of it) never serialize into the payload.
+	secBlob := secRec.GetPayload().String()
+	for _, needle := range []string{secValueMarker, "ALmoNotAValue=="} {
+		if strings.Contains(secBlob, needle) {
+			t.Errorf("secret-inventory payload leaked a value-shaped string %q: %s", needle, secBlob)
+		}
+	}
+
 	// The nested per-policy summaries must carry SPEC metadata only — never a
 	// peer / selector / port value. Allow-list the nested keys too.
 	nestedAllowed := map[string]bool{
@@ -425,4 +492,10 @@ type fakePSSForIntegration struct{ namespaces []pss.RawNamespace }
 
 func (f *fakePSSForIntegration) ListNamespacePSS(_ context.Context) ([]pss.RawNamespace, error) {
 	return f.namespaces, nil
+}
+
+type fakeSecretMetaForIntegration struct{ secrets []secretmeta.RawSecret }
+
+func (f *fakeSecretMetaForIntegration) ListSecretMeta(_ context.Context) ([]secretmeta.RawSecret, error) {
+	return f.secrets, nil
 }

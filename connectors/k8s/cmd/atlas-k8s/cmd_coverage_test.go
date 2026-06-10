@@ -23,6 +23,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/netpol"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/pss"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/rbac"
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/secretmeta"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/workload"
 )
 
@@ -237,6 +238,101 @@ func TestActorID_PSSShape(t *testing.T) {
 	id := actorID("pss")
 	if !strings.HasPrefix(id, "connector:k8s:pss@") {
 		t.Errorf("actorID(pss) = %q", id)
+	}
+}
+
+func TestBuildSecretMetaRecord_Shape(t *testing.T) {
+	s := secretmeta.Inventory{
+		Namespace: "prod", Name: "web-tls", Type: "kubernetes.io/tls",
+		AgeDays: 30, CreatedAt: time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC),
+		KeyNames: []string{"tls.crt", "tls.key"}, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
+	}
+	rec, err := buildSecretMetaRecord(s, "cluster-1", "prod", "scf:CRY-01")
+	if err != nil {
+		t.Fatalf("buildSecretMetaRecord: %v", err)
+	}
+	if rec.EvidenceKind != "k8s.secret_inventory.v1" {
+		t.Errorf("kind = %q", rec.EvidenceKind)
+	}
+	// Inventory is descriptive — INCONCLUSIVE (no pass/fail verdict).
+	if rec.Result != evidencev1.Result_RESULT_INCONCLUSIVE {
+		t.Errorf("result = %v; want INCONCLUSIVE", rec.Result)
+	}
+	if rec.IdempotencyKey == "" {
+		t.Error("empty idempotency key")
+	}
+	if !strings.HasPrefix(rec.GetSourceAttribution().GetActorId(), "connector:k8s:secretmeta@") {
+		t.Errorf("actor_id = %q; want connector:k8s:secretmeta@*", rec.GetSourceAttribution().GetActorId())
+	}
+	if got := scopeValue(rec.GetScope(), "namespace"); got != "prod" {
+		t.Errorf("namespace scope = %q; want prod", got)
+	}
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{"namespace", "secret_name", "secret_type", "age_days", "key_count", "created_at", "key_names"} {
+		if _, ok := pl[k]; !ok {
+			t.Errorf("payload missing %q; got %v", k, pl)
+		}
+	}
+	// METADATA ONLY: no value field of any kind.
+	for _, banned := range []string{"data", "string_data", "value", "values"} {
+		if _, ok := pl[banned]; ok {
+			t.Errorf("secret-inventory payload must NOT carry a value field %q", banned)
+		}
+	}
+}
+
+func TestBuildSecretMetaRecord_OmitsEmptyOptionals(t *testing.T) {
+	s := secretmeta.Inventory{
+		Namespace: "default", Name: "empty", Type: "Opaque",
+		AgeDays: 0, ObservedAt: time.Now().UTC(),
+		// no CreatedAt, no KeyNames
+	}
+	rec, err := buildSecretMetaRecord(s, "c", "prod", "scf:CRY-01")
+	if err != nil {
+		t.Fatalf("buildSecretMetaRecord: %v", err)
+	}
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{"created_at", "key_names"} {
+		if _, ok := pl[k]; ok {
+			t.Errorf("empty optional %q should be omitted; got %v", k, pl)
+		}
+	}
+	// key_count is always present (0 for an empty Secret).
+	if pl["key_count"] != float64(0) {
+		t.Errorf("key_count = %v; want 0", pl["key_count"])
+	}
+}
+
+func TestActorID_SecretMetaShape(t *testing.T) {
+	id := actorID("secretmeta")
+	if !strings.HasPrefix(id, "connector:k8s:secretmeta@") {
+		t.Errorf("actorID(secretmeta) = %q", id)
+	}
+}
+
+// TestNewPermissionsCmd_SecretInventoryFlagAddsSecretsGrant proves the
+// --secret-inventory flag renders the ClusterRole WITH the one secrets get/list
+// grant (slice 525), while the default render still withholds it.
+func TestNewPermissionsCmd_SecretInventoryFlagAddsSecretsGrant(t *testing.T) {
+	cmd := newPermissionsCmd()
+	if err := cmd.Flags().Set("secret-inventory", "true"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.Run(cmd, nil)
+	out := buf.String()
+	if !strings.Contains(out, "secrets") {
+		t.Errorf("--secret-inventory output must include the secrets grant; got %q", out)
+	}
+	if !strings.Contains(out, "get,list") {
+		t.Errorf("secrets grant must be get,list; got %q", out)
+	}
+	// Must NOT grant any write verb on secrets.
+	for _, write := range []string{"create", "update", "patch", "delete", "deletecollection", "*"} {
+		if strings.Contains(out, ","+write) || strings.Contains(out, write+",") {
+			t.Errorf("--secret-inventory output leaked a write/wildcard verb %q; got %q", write, out)
+		}
 	}
 }
 

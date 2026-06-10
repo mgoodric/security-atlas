@@ -120,6 +120,7 @@
     "connectors/k8s/internal/k8slist": 95,
     "connectors/k8s/internal/netpol": 93,
     "connectors/k8s/internal/rbac": 89,
+    "connectors/k8s/internal/secretmeta": 96,
     "connectors/k8s/internal/workload": 93,
     "connectors/manual/cmd/atlas-manual": 71,
     "connectors/manual/internal/idem": 98,

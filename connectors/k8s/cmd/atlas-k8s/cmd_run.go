@@ -19,6 +19,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/netpol"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/pss"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/rbac"
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/secretmeta"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/workload"
 )
 
@@ -27,11 +28,12 @@ import (
 // without hitting a live cluster or a real platform endpoint. Production code
 // paths are byte-for-byte unchanged; only the call-site indirection moved.
 var (
-	rbacPull     = rbac.Pull
-	workloadScan = workload.Inspect
-	netpolScan   = netpol.Assess
-	pssScan      = pss.Assess
-	newSDKClient = func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error) {
+	rbacPull       = rbac.Pull
+	workloadScan   = workload.Inspect
+	netpolScan     = netpol.Assess
+	pssScan        = pss.Assess
+	secretMetaScan = secretmeta.Collect
+	newSDKClient   = func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error) {
 		return sdk.NewClient(endpoint, bearer, opts...)
 	}
 	// newRBACAPI / newWorkloadAPI / newNetpolAPI / newPSSAPI build the live
@@ -47,6 +49,9 @@ var (
 	}
 	newPSSAPI = func(hc *http.Client, baseURL, token string) pss.API {
 		return pss.NewClient(hc, baseURL, token)
+	}
+	newSecretMetaAPI = func(hc *http.Client, baseURL, token string) secretmeta.API {
+		return secretmeta.NewClient(hc, baseURL, token)
 	}
 )
 
@@ -65,10 +70,16 @@ type runFlags struct {
 	workloadControl string
 	netpolControl   string
 	pssControl      string
+	secretControl   string
 	skipRBAC        bool
 	skipWorkload    bool
 	skipNetpol      bool
 	skipPSS         bool
+	// collectSecretInventory is OPT-IN (default false): the k8s.secret_inventory.v1
+	// kind requires the one `secrets` get/list ClusterRole grant the base
+	// connector intentionally withholds (slice 525). It is never collected
+	// unless the operator explicitly enables it AND has granted the rule.
+	collectSecretInventory bool
 }
 
 func newRunCmd() *cobra.Command {
@@ -95,7 +106,13 @@ Least-privilege Kubernetes access (read-only ClusterRole — verbs get,list only
   - core: namespaces  (also gates the Pod-Security-Standards admission kind —
     PSS config lives in pod-security.kubernetes.io/* labels on the namespace;
     NO new ClusterRole rule is required)
-NEVER 'secrets', NEVER write verbs, NEVER cluster-admin / wildcards.
+NEVER write verbs, NEVER cluster-admin / wildcards. The base ClusterRole
+deliberately EXCLUDES 'secrets'.
+
+OPT-IN (--collect-secret-inventory, slice 525): adds the k8s.secret_inventory.v1
+kind, which needs EXACTLY ONE extra rule — core 'secrets' verbs get,list. Even
+then the connector reads Secret METADATA ONLY (type/namespace/name/age/
+key-NAMES); it NEVER reads, decodes, or records a Secret VALUE.
 
 Auth: set KUBERNETES_API_SERVER + KUBECONFIG_TOKEN (out-of-cluster), or pass
 --auth-mode in-cluster. The token never appears in a log line or an evidence
@@ -126,10 +143,13 @@ record.`,
 	cmd.Flags().StringVar(&f.workloadControl, "workload-control", "scf:CFG-02", "control_id to attach to k8s.workload_security_context.v1 records")
 	cmd.Flags().StringVar(&f.netpolControl, "netpol-control", "scf:NET-04", "control_id to attach to k8s.networkpolicy_coverage.v1 records")
 	cmd.Flags().StringVar(&f.pssControl, "pss-control", "scf:CFG-02", "control_id to attach to k8s.pod_security_admission.v1 records")
+	cmd.Flags().StringVar(&f.secretControl, "secret-control", "scf:CRY-01", "control_id to attach to k8s.secret_inventory.v1 records")
 	cmd.Flags().BoolVar(&f.skipRBAC, "skip-rbac", false, "skip k8s.rbac_binding.v1 pull")
 	cmd.Flags().BoolVar(&f.skipWorkload, "skip-workload", false, "skip k8s.workload_security_context.v1 pull")
 	cmd.Flags().BoolVar(&f.skipNetpol, "skip-netpol", false, "skip k8s.networkpolicy_coverage.v1 pull")
 	cmd.Flags().BoolVar(&f.skipPSS, "skip-pss", false, "skip k8s.pod_security_admission.v1 pull")
+	cmd.Flags().BoolVar(&f.collectSecretInventory, "collect-secret-inventory", false,
+		"OPT-IN: collect k8s.secret_inventory.v1 (Secret METADATA only — type/namespace/name/age/key-NAMES, NEVER a value). Requires the one extra 'secrets' get/list ClusterRole grant the base connector withholds (see 'permissions --secret-inventory').")
 	return cmd
 }
 
@@ -220,6 +240,27 @@ func doRun(ctx context.Context, f runFlags) error {
 			}
 			if err := pushOne(ctx, sdkClient, rec); err != nil {
 				return fmt.Errorf("push pss %s: %w", a.Namespace, err)
+			}
+			pushed++
+		}
+	}
+
+	// Secret-inventory is OPT-IN: it requires the one extra `secrets` get/list
+	// grant the base ClusterRole withholds (slice 525). Skipped entirely unless
+	// the operator explicitly enables it. METADATA ONLY — the collector never
+	// reads, decodes, or records a Secret value.
+	if f.collectSecretInventory {
+		inventory, err := secretMetaScan(ctx, newSecretMetaAPI(httpClient, cred.APIServer(), cred.Token()), nil)
+		if err != nil {
+			return fmt.Errorf("secret-inventory collect: %w", err)
+		}
+		for _, s := range inventory {
+			rec, err := buildSecretMetaRecord(s, f.cluster, f.environment, f.secretControl)
+			if err != nil {
+				return fmt.Errorf("build secret-inventory record %s/%s: %w", s.Namespace, s.Name, err)
+			}
+			if err := pushOne(ctx, sdkClient, rec); err != nil {
+				return fmt.Errorf("push secret-inventory %s/%s: %w", s.Namespace, s.Name, err)
 			}
 			pushed++
 		}
@@ -450,6 +491,52 @@ func buildPSSRecord(a pss.Admission, cluster, env, controlID string) (*evidencev
 		SourceAttribution: &evidencev1.SourceAttribution{
 			ActorType: "connector",
 			ActorId:   actorID("pss"),
+		},
+	}, nil
+}
+
+// buildSecretMetaRecord maps one Secret's metadata inventory into an evidence
+// record (slice 525). Secret METADATA ONLY — namespace, name, type, age, and
+// the KEY NAMES of .data. There is deliberately NO value field: the secretmeta
+// collector physically cannot carry a Secret value, so no value can reach the
+// payload here. The record is descriptive (INCONCLUSIVE) — it is an inventory
+// signal (rotation / sprawl), not a pass/fail control verdict; the platform
+// evaluator owns the policy call.
+func buildSecretMetaRecord(s secretmeta.Inventory, cluster, env, controlID string) (*evidencev1.EvidenceRecord, error) {
+	now := s.ObservedAt.UTC().Truncate(time.Hour)
+	pm := map[string]any{
+		"namespace":   s.Namespace,
+		"secret_name": s.Name,
+		"secret_type": s.Type,
+		"age_days":    float64(s.AgeDays),
+		"key_count":   float64(len(s.KeyNames)),
+	}
+	if !s.CreatedAt.IsZero() {
+		pm["created_at"] = s.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	if len(s.KeyNames) > 0 {
+		pm["key_names"] = toAnySlice(s.KeyNames)
+	}
+	payload, err := structpb.NewStruct(pm)
+	if err != nil {
+		return nil, err
+	}
+	return &evidencev1.EvidenceRecord{
+		IdempotencyKey: idem.SecretInventoryKey(s.Namespace, s.Name, now),
+		EvidenceKind:   "k8s.secret_inventory.v1",
+		SchemaVersion:  "1.0.0",
+		ControlId:      controlID,
+		Scope: []*evidencev1.ScopeDimension{
+			{Key: "cluster", Values: []string{cluster}},
+			{Key: "environment", Values: []string{env}},
+			{Key: "namespace", Values: []string{s.Namespace}},
+		},
+		ObservedAt: timestamppb.New(now),
+		Result:     evidencev1.Result_RESULT_INCONCLUSIVE, // descriptive inventory — evaluator decides
+		Payload:    payload,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "connector",
+			ActorId:   actorID("secretmeta"),
 		},
 	}, nil
 }

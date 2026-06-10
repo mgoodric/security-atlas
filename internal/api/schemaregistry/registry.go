@@ -148,6 +148,18 @@ func DefaultSeed() []KindVersion {
 		// secrets, logs, or any other namespace label/annotation. The ENFORCED side
 		// of workload hardening, complementing k8s.workload_security_context.v1.
 		{Kind: "k8s.pod_security_admission.v1", Version: "1.0.0"},
+		// Slice 525: Kubernetes connector Secret-inventory (metadata-only). The
+		// OPT-IN mode that adds the ONE `secrets` get/list ClusterRole grant the
+		// base connector intentionally withholds. Read-only; Secret METADATA ONLY
+		// — type / namespace / name / age / key-NAMES (the .data MAP KEYS), NEVER
+		// a Secret VALUE (.data / .stringData, raw or base64). The collector
+		// struct physically cannot hold a value; a reflection guard + a
+		// fixture-with-real-data drop test fail the build if one is added.
+		// Anchors CRY-01 (cryptographic controls) + CRY-09 (key management); the
+		// spec's candidate IAC-22 is absent from the bundled SCF catalog, so
+		// CRY-09 — the closest real anchor for secret-material lifecycle — is used
+		// (decisions-log D2).
+		{Kind: "k8s.secret_inventory.v1", Version: "1.0.0"},
 		// Slice 488: monitoring connectors (Datadog + Grafana) — shared
 		// alert/monitor configuration-inventory evidence kind.
 		{Kind: "monitoring.alert_config.v1", Version: "1.0.0"},

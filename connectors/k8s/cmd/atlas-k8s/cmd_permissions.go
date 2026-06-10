@@ -12,16 +12,33 @@ import (
 
 // newPermissionsCmd prints the documented least-privilege read-only ClusterRole
 // the connector requires. Lets ops surface the canonical list without grepping
-// the source. The DocumentedClusterRole test (in k8sauth) holds this list to a
-// get/list-only, no-Secrets, no-wildcard contract (P0-487-2 / P0-487-3).
+// the source. The DocumentedClusterRole test (in k8sauth) holds the base list to
+// a get/list-only, no-Secrets, no-wildcard contract (P0-487-2 / P0-487-3).
+//
+// --secret-inventory prints the role INCLUDING the one extra `secrets` get/list
+// rule that the OPT-IN k8s.secret_inventory.v1 mode requires (slice 525). The
+// SecretInventoryClusterRole test pins that this adds EXACTLY that one rule and
+// still rejects write verbs / wildcards. The secrets grant is the one access the
+// base connector intentionally withholds.
 func newPermissionsCmd() *cobra.Command {
-	return &cobra.Command{
+	var secretInventory bool
+	cmd := &cobra.Command{
 		Use:   "permissions",
 		Short: "print the least-privilege read-only ClusterRole this connector requires",
 		Run: func(cmd *cobra.Command, _ []string) {
+			rules := k8sauth.DocumentedClusterRole()
+			if secretInventory {
+				rules = k8sauth.SecretInventoryClusterRole()
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(),
+					"# secret-inventory mode (slice 525): includes the ONE extra 'secrets' get/list grant")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(),
+					"# the base connector withholds. Even with it, the connector reads Secret METADATA")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(),
+					"# ONLY (type/namespace/name/age/key-NAMES) — never a Secret value.")
+			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
 			_, _ = fmt.Fprintln(tw, "API GROUP\tRESOURCES\tVERBS\tGATES")
-			for _, r := range k8sauth.DocumentedClusterRole() {
+			for _, r := range rules {
 				group := strings.Join(r.APIGroups, ",")
 				if group == "" {
 					group = "(core)"
@@ -32,4 +49,7 @@ func newPermissionsCmd() *cobra.Command {
 			_ = tw.Flush()
 		},
 	}
+	cmd.Flags().BoolVar(&secretInventory, "secret-inventory", false,
+		"include the OPT-IN 'secrets' get/list rule the k8s.secret_inventory.v1 mode requires (slice 525)")
+	return cmd
 }

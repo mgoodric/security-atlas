@@ -4,7 +4,7 @@ The Kubernetes connector (slice 487) brings cluster RBAC + workload hardening +
 network segmentation + admission-time enforcement to the platform's evidence
 pipeline. It follows the locked connector pattern verbatim: register-per-run, a
 stable `actor_id`, an hour-truncated `observed_at`, scope minimums, and
-vendor-native read-only auth. It emits four evidence kinds:
+vendor-native read-only auth. It emits five evidence kinds:
 
 | Kind                               | Profile | Source                                                                                                                                                        |
 | ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -12,6 +12,7 @@ vendor-native read-only auth. It emits four evidence kinds:
 | `k8s.workload_security_context.v1` | pull    | Kubernetes API `apps/v1` deployments / daemonsets / statefulsets (get,list)                                                                                   |
 | `k8s.networkpolicy_coverage.v1`    | pull    | Kubernetes API `networking.k8s.io/v1` networkpolicies + namespaces (get,list) — plus the installed CNI's policy CRDs when present (Cilium / Calico, get,list) |
 | `k8s.pod_security_admission.v1`    | pull    | Kubernetes API core `namespaces` (get,list) — `pod-security.kubernetes.io/*` labels                                                                           |
+| `k8s.secret_inventory.v1`          | pull    | Kubernetes API core `secrets` (get,list) — **OPT-IN, slice 525** — Secret METADATA only (type / namespace / name / age / key-NAMES), **never a value**        |
 
 The third kind (`k8s.networkpolicy_coverage.v1`, slice 523) reports, per
 namespace, how many NetworkPolicies exist, a per-policy SPEC summary, and the
@@ -47,16 +48,32 @@ pinned version per mode. This is the **enforced** side of workload hardening
 admission, not just configured per-workload" auditor ask. It reuses the existing
 `namespaces` get/list grant (**no new ClusterRole rule**).
 
+The fifth kind (`k8s.secret_inventory.v1`, slice 525) is **opt-in** and is the
+**one deliberate exception** to the rule below: it requires adding **exactly one**
+ClusterRole rule — core `secrets` `get`/`list`, the one grant the base connector
+intentionally withholds. Even with that grant, the connector collects Secret
+**METADATA ONLY** — the Secret `type` (`Opaque` / `kubernetes.io/tls` /
+`kubernetes.io/service-account-token` / ...), namespace, name, creation timestamp
+plus derived age in days, and the **NAMES** of the keys under `.data` (the map
+keys, e.g. `tls.crt` / `tls.key` / `token`). It **never** reads, base64-decodes,
+or records a Secret **value** (`.data` / `.stringData`). The auditable question is
+"how many TLS secrets / SA tokens exist, where, and how old" (rotation + sprawl
+signals), never the contents. See
+[the secret-inventory section](#secret-inventory-opt-in-the-one-secrets-grant)
+below. Enable it with `run --collect-secret-inventory`; it is **off by default**.
+
 The connector is **API-based**, not an in-node agent — consistent with the
 "no closed proprietary collector agents on endpoints" anti-pattern. It reads the
 read-only Kubernetes API the same way `kubectl get` does.
 
-The connector reads **RBAC + security-context + NetworkPolicy configuration
-only**. It never reads Secret values, ConfigMap values, container env, pod logs,
-nor the peer/CIDR/port contents inside a NetworkPolicy rule block — and its
-ClusterRole does not even grant access to `secrets`. The cluster credential stays
-source-side and never enters an evidence record or a platform push (canvas
-invariant #3).
+By default the connector reads **RBAC + security-context + NetworkPolicy +
+Pod-Security-Standards configuration only**. It never reads ConfigMap values,
+container env, pod logs, nor the peer/CIDR/port contents inside a NetworkPolicy
+rule block — and the **base** ClusterRole does not even grant access to
+`secrets`. The **only** way the connector reaches Secret objects is the opt-in
+`k8s.secret_inventory.v1` mode (slice 525), and even then it reads Secret
+**metadata only** — never a value. The cluster credential stays source-side and
+never enters an evidence record or a platform push (canvas invariant #3).
 
 ## Profile + interval — honest, not "continuous monitoring"
 
@@ -123,16 +140,62 @@ subjects:
 Run `atlas-k8s permissions` to print this rule set.
 
 **Banned grants.** Do **not** bind the ServiceAccount to `cluster-admin` or any
-role with write verbs (`create`/`update`/`patch`/`delete`/`deletecollection`),
-wildcards (`*`), or **`get`/`list` on `secrets`**. The connector has no write
-code path and no Secret-read code path; the only operations it issues are reads
-of the four RBAC kinds + the three workload kinds + networkpolicies +
-namespaces. The Pod-Security-Standards admission kind needs **no new rule** — PSS
-configuration lives in `pod-security.kubernetes.io/*` labels on the Namespace
-object, read via the existing `namespaces` get/list grant. The
+role with write verbs (`create`/`update`/`patch`/`delete`/`deletecollection`) or
+wildcards (`*`). The connector has no write code path; the only operations it
+issues are reads. The Pod-Security-Standards admission kind needs **no new
+rule** — PSS configuration lives in `pod-security.kubernetes.io/*` labels on the
+Namespace object, read via the existing `namespaces` get/list grant. The
 `atlas-k8s permissions` output and `internal/k8sauth.DocumentedClusterRole()` are
 the single source of truth — a unit test fails the build if anyone widens the
-rule set into a write verb, a wildcard, or `secrets`.
+**base** rule set into a write verb, a wildcard, or `secrets`.
+
+The one exception is the opt-in Secret-inventory mode below, which adds **exactly
+one** `secrets` `get`/`list` rule — and nothing more (a unit test pins that the
+secret-inventory ClusterRole adds that single rule and still rejects write verbs
+and wildcards).
+
+### Secret-inventory (opt-in): the one `secrets` grant
+
+The `k8s.secret_inventory.v1` kind (slice 525) is **off by default** and is the
+single grant the base connector intentionally withholds. Enabling it does two
+things, both deliberate and loud:
+
+1. **It adds exactly one ClusterRole rule** — core `secrets` `get`/`list`. No
+   write verb, no wildcard, no other resource. Append this rule to the
+   `security-atlas-readonly` ClusterRole only if you want the inventory:
+
+   ```yaml
+   # OPT-IN (slice 525): the ONE secrets grant the base connector withholds.
+   # Secret METADATA only — type/namespace/name/age/key-NAMES, NEVER a value.
+   - apiGroups: [""]
+     resources: ["secrets"]
+     verbs: ["get", "list"]
+   ```
+
+   Print the full role including this rule with
+   `atlas-k8s permissions --secret-inventory`.
+
+2. **It collects Secret METADATA only — never a value.** The collector reads the
+   Secret `type`, namespace, name, creation timestamp + age, and the **names** of
+   the keys under `.data` (the map keys, e.g. `tls.crt` / `tls.key` / `token`).
+   It **never** reads, base64-decodes, or records the value behind any key, and
+   it never touches `.stringData`. This is enforced **structurally**, not by
+   discipline: the record struct has no field that can hold a value, a reflection
+   guard fails the build if a value-bearing field is ever added, and a test feeds
+   a fixture Secret with real `.data` (base64) + `.stringData` and asserts only
+   `type` / `namespace` / `name` / `age` / `key-names` survive — no value, raw
+   or base64-decoded, ever enters a record.
+
+Run it with:
+
+```bash
+atlas-k8s run --cluster prod-us-east --environment prod \
+  --collect-secret-inventory
+```
+
+The emitted record is **descriptive** (`INCONCLUSIVE`) — it is an inventory
+signal (rotation / sprawl: how many TLS secrets / SA tokens exist, where, how
+old), not a pass/fail verdict; the platform evaluator owns any policy call.
 
 ### Recommended in-cluster pod security context
 
@@ -183,23 +246,25 @@ atlas-k8s run --cluster prod-us-east --environment prod --auth-mode in-cluster
 atlas-k8s permissions
 ```
 
-| Flag                 | Subcommand | Required | Default                       | Notes                                                      |
-| -------------------- | ---------- | -------- | ----------------------------- | ---------------------------------------------------------- |
-| `--endpoint`         | both       | yes      | env `SECURITY_ATLAS_ENDPOINT` | platform gRPC endpoint                                     |
-| `--token`            | both       | yes      | env `SECURITY_ATLAS_TOKEN`    | security-atlas bearer token                                |
-| `--insecure`         | both       | no       | `false`                       | disables TLS; loopback endpoints only                      |
-| `--cluster`          | `run`      | yes      | —                             | cluster identifier; scopes every record                    |
-| `--environment`      | `run`      | yes      | —                             | environment scope tag; records are never emitted un-scoped |
-| `--api-server`       | `run`      | no\*     | env `KUBERNETES_API_SERVER`   | API server URL (\*required, via flag or env)               |
-| `--auth-mode`        | `run`      | no       | `kubeconfig-token`            | `kubeconfig-token` or `in-cluster`                         |
-| `--rbac-control`     | `run`      | no       | `scf:IAC-21`                  | control id attached to RBAC records                        |
-| `--workload-control` | `run`      | no       | `scf:CFG-02`                  | control id attached to workload records                    |
-| `--netpol-control`   | `run`      | no       | `scf:NET-04`                  | control id attached to NetworkPolicy coverage records      |
-| `--pss-control`      | `run`      | no       | `scf:CFG-02`                  | control id attached to PSS admission records               |
-| `--skip-rbac`        | `run`      | no       | `false`                       | skip the `k8s.rbac_binding.v1` pull                        |
-| `--skip-workload`    | `run`      | no       | `false`                       | skip the `k8s.workload_security_context.v1` pull           |
-| `--skip-netpol`      | `run`      | no       | `false`                       | skip the `k8s.networkpolicy_coverage.v1` pull              |
-| `--skip-pss`         | `run`      | no       | `false`                       | skip the `k8s.pod_security_admission.v1` pull              |
+| Flag                         | Subcommand | Required | Default                       | Notes                                                                                                 |
+| ---------------------------- | ---------- | -------- | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `--endpoint`                 | both       | yes      | env `SECURITY_ATLAS_ENDPOINT` | platform gRPC endpoint                                                                                |
+| `--token`                    | both       | yes      | env `SECURITY_ATLAS_TOKEN`    | security-atlas bearer token                                                                           |
+| `--insecure`                 | both       | no       | `false`                       | disables TLS; loopback endpoints only                                                                 |
+| `--cluster`                  | `run`      | yes      | —                             | cluster identifier; scopes every record                                                               |
+| `--environment`              | `run`      | yes      | —                             | environment scope tag; records are never emitted un-scoped                                            |
+| `--api-server`               | `run`      | no\*     | env `KUBERNETES_API_SERVER`   | API server URL (\*required, via flag or env)                                                          |
+| `--auth-mode`                | `run`      | no       | `kubeconfig-token`            | `kubeconfig-token` or `in-cluster`                                                                    |
+| `--rbac-control`             | `run`      | no       | `scf:IAC-21`                  | control id attached to RBAC records                                                                   |
+| `--workload-control`         | `run`      | no       | `scf:CFG-02`                  | control id attached to workload records                                                               |
+| `--netpol-control`           | `run`      | no       | `scf:NET-04`                  | control id attached to NetworkPolicy coverage records                                                 |
+| `--pss-control`              | `run`      | no       | `scf:CFG-02`                  | control id attached to PSS admission records                                                          |
+| `--secret-control`           | `run`      | no       | `scf:CRY-01`                  | control id attached to Secret-inventory records                                                       |
+| `--skip-rbac`                | `run`      | no       | `false`                       | skip the `k8s.rbac_binding.v1` pull                                                                   |
+| `--skip-workload`            | `run`      | no       | `false`                       | skip the `k8s.workload_security_context.v1` pull                                                      |
+| `--skip-netpol`              | `run`      | no       | `false`                       | skip the `k8s.networkpolicy_coverage.v1` pull                                                         |
+| `--skip-pss`                 | `run`      | no       | `false`                       | skip the `k8s.pod_security_admission.v1` pull                                                         |
+| `--collect-secret-inventory` | `run`      | no       | `false`                       | **opt-in** `k8s.secret_inventory.v1` (Secret metadata only; needs the extra `secrets` get/list grant) |
 
 The cluster token is **only** read from `KUBECONFIG_TOKEN` (or the projected
 in-cluster mount) — never a CLI flag — so it never lands in shell history. It is
@@ -208,7 +273,8 @@ its token on every format path).
 
 `register` announces `name=k8s-connector`,
 `supported_kinds=[k8s.rbac_binding.v1, k8s.workload_security_context.v1,
-k8s.networkpolicy_coverage.v1, k8s.pod_security_admission.v1]`, and
+k8s.networkpolicy_coverage.v1, k8s.pod_security_admission.v1,
+k8s.secret_inventory.v1]`, and
 `profiles_supported=[pull]` to
 `ConnectorRegistryService.Register`. The
 `profiles_supported` value describes how the connector retrieves data **from the
@@ -220,23 +286,25 @@ cluster** (a scheduled pull); the platform-side wire is always push
 Every emitted record sets the minimum scope dimensions the connector-pattern
 convention requires:
 
-| Scope key     | Value                    | Source                                                                    |
-| ------------- | ------------------------ | ------------------------------------------------------------------------- |
-| `cluster`     | the `--cluster` flag     | the `--cluster` flag                                                      |
-| `environment` | the `--environment` flag | the `--environment` flag                                                  |
-| `namespace`   | the assessed namespace   | `k8s.networkpolicy_coverage.v1` + `k8s.pod_security_admission.v1` records |
+| Scope key     | Value                    | Source                                                                                                |
+| ------------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `cluster`     | the `--cluster` flag     | the `--cluster` flag                                                                                  |
+| `environment` | the `--environment` flag | the `--environment` flag                                                                              |
+| `namespace`   | the assessed namespace   | `k8s.networkpolicy_coverage.v1` + `k8s.pod_security_admission.v1` + `k8s.secret_inventory.v1` records |
 
 `run` fails loudly when `--cluster` or `--environment` is unset rather than
-pushing an un-scoped record. NetworkPolicy coverage **and** PSS admission records
-add a `namespace` scope dimension (one record per namespace) so a FrameworkScope
-predicate can cut on namespace.
+pushing an un-scoped record. NetworkPolicy coverage, PSS admission, **and**
+Secret-inventory records add a `namespace` scope dimension (one record per
+namespace, or per Secret for the inventory) so a FrameworkScope predicate can cut
+on namespace.
 
 `source_attribution.actor_id` follows the cross-connector convention
 `connector:<vendor>:<service>@<version>` — `connector:k8s:rbac@<version>` for RBAC
 records, `connector:k8s:workload@<version>` for workload records,
-`connector:k8s:netpol@<version>` for NetworkPolicy coverage records, and
-`connector:k8s:pss@<version>` for PSS admission records, where `<version>` is the
-build's module version (or `dev` under `go run`).
+`connector:k8s:netpol@<version>` for NetworkPolicy coverage records,
+`connector:k8s:pss@<version>` for PSS admission records, and
+`connector:k8s:secretmeta@<version>` for Secret-inventory records, where
+`<version>` is the build's module version (or `dev` under `go run`).
 
 ## Idempotency
 
@@ -245,10 +313,12 @@ Each record's `idempotency_key` is
 RBAC identity = `scope/namespace/name`; workload identity = `kind/namespace/name`;
 NetworkPolicy coverage identity = `namespace` (one coverage record per namespace);
 PSS admission identity = `namespace` (one PSS record per namespace — a distinct
-key from the netpol key thanks to the `k8s.pod_security_admission` kind prefix).
+key from the netpol key thanks to the `k8s.pod_security_admission` kind prefix);
+Secret-inventory identity = `namespace/name` (one record per Secret — a distinct
+key thanks to the `k8s.secret_inventory` kind prefix).
 `observed_at` is truncated to the UTC hour, so two runs within the same hour for
-the same binding / workload / namespace collapse to one ledger row; a run that
-crosses an hour boundary writes a fresh record.
+the same binding / workload / namespace / secret collapse to one ledger row; a
+run that crosses an hour boundary writes a fresh record.
 
 ## Result semantics
 
@@ -281,14 +351,26 @@ crosses an hour boundary writes a fresh record.
   `enforce` is only `privileged`. `audit` / `warn` modes are reported in the
   record but do not drive the verdict (they observe / warn, they do not block
   admission). The platform evaluator owns the final (control, namespace) call.
+- **`k8s.secret_inventory.v1` → `INCONCLUSIVE` (descriptive).** The connector
+  emits a Secret-metadata inventory, not a verdict: it does not decide whether a
+  Secret is too old or whether a key set is wrong — the platform evaluator owns
+  any rotation / sprawl policy call per (control, scope). The signal is the
+  metadata itself (type / age / key-names per Secret).
 
 ## What the connector never collects (the load-bearing guard)
 
 The connector collects **RBAC rules/bindings + workload security-context flags +
-NetworkPolicy SPEC metadata + namespace PSS labels only**. It never reads,
-materializes, or emits:
+NetworkPolicy SPEC metadata + namespace PSS labels + (opt-in) Secret metadata
+only**. It never reads, materializes, or emits:
 
-- Secret values (its ClusterRole does not grant `secrets`)
+- **Secret values.** By default the base ClusterRole does not grant `secrets` at
+  all. The opt-in `k8s.secret_inventory.v1` mode (slice 525) adds `secrets`
+  get/list and reads Secret **metadata only** — type / namespace / name / age /
+  the **names** of the keys under `.data` — and **never** a value (`.data` /
+  `.stringData`, raw or base64-decoded). The record struct physically cannot hold
+  a value; a reflection guard fails the build if a value-bearing field is added,
+  and a fixture-with-real-`.data` test proves no value (raw or decoded) reaches a
+  record.
 - ConfigMap values
 - container `env` / `envFrom` payloads (the workload client decodes only the
   security-context + host-namespace fields; env / volumes are discarded by the
@@ -321,14 +403,13 @@ credential.
 
 ## Not in v0 (follow-ons)
 
-The connector ships four evidence surfaces (RBAC, workload security context,
-NetworkPolicy coverage, Pod-Security-Standards admission config). It does **not**
-ship:
+The connector ships five evidence surfaces (RBAC, workload security context,
+NetworkPolicy coverage, Pod-Security-Standards admission config, and the opt-in
+Secret-inventory metadata). It does **not** ship:
 
 - the cluster's `AdmissionConfiguration` file (out of API reach), validating /
   mutating webhooks, or third-party policy engines (OPA/Gatekeeper, Kyverno) —
   the PSS kind reads **namespace labels only**
-- Secret-inventory (metadata-only) evidence
 - image-provenance / audit-log evidence
 - CNI-plugin-specific policy (Cilium / Calico CRDs) coverage — `networking.k8s.io`
   NetworkPolicy only
@@ -361,10 +442,16 @@ label value) **and** annotations (a kubectl last-applied blob with embedded
 secret material, an owner-email) alongside the `pod-security.kubernetes.io/*`
 labels, and asserts only the PSS labels reach a record (the label-filter guard);
 a reflection guard pins that the PSS structs carry only namespace name + the
-three modes / levels / versions. The integration test (in-package, bufconn
+three modes / levels / versions. The Secret-inventory client test serves Secrets
+with **real** `.data` (base64) + `.stringData` (plaintext) + an annotation
+carrying a secret blob, and asserts that **no value — base64, decoded, or
+plaintext — ever reaches a record** (the load-bearing metadata-only guard); a
+reflection guard pins that the Secret-inventory structs carry only metadata +
+key-names and have no value-bearing field, and a no-token-log test proves the
+bearer token never enters a record. The integration test (in-package, bufconn
 platform — no Postgres) exercises the full collect → build → SDK `Push` →
-push-receipt round-trip for all four kinds and asserts two same-hour pushes
-collapse to one `record_id`, that emitted payloads carry config / authz metadata
-only (no Secret / ConfigMap / env values, no NetworkPolicy peer / selector value,
-no non-PSS namespace label / annotation), and that the credential never surfaces
-in a formatted log.
+push-receipt round-trip for all five kinds and asserts two same-hour pushes
+collapse to one `record_id`, that emitted payloads carry config / authz / Secret
+metadata only (no Secret value, no ConfigMap / env values, no NetworkPolicy peer
+/ selector value, no non-PSS namespace label / annotation), and that the
+credential never surfaces in a formatted log.
