@@ -29,6 +29,40 @@ type API interface {
 	ListWorkers(ctx context.Context) ([]RawWorker, error)
 }
 
+// OneAPI is the narrow single-worker re-read surface the event-driven
+// (subscribe) profile depends on (slice 573). The concrete client issues a
+// read-only GET for one worker's minimal lifecycle fields.
+type OneAPI interface {
+	GetWorker(ctx context.Context, workerID string) (RawWorker, bool, error)
+}
+
+// FetchOne re-reads ONE worker by id and maps it to the PII-bounded
+// worker.RawWorker, reusing the same status/date mapping as the pull path so a
+// webhook-triggered record is identical in shape to a polled one (slice 573).
+// ok=false when the source no longer returns the worker.
+func FetchOne(ctx context.Context, api OneAPI, workerID string) (worker.RawWorker, bool, error) {
+	if api == nil {
+		return worker.RawWorker{}, false, errors.New("workers: OneAPI is nil")
+	}
+	raw, ok, err := api.GetWorker(ctx, workerID)
+	if err != nil {
+		return worker.RawWorker{}, false, fmt.Errorf("get rippling worker %s: %w", workerID, err)
+	}
+	if !ok || strings.TrimSpace(raw.ID) == "" {
+		return worker.RawWorker{}, false, nil
+	}
+	return worker.RawWorker{
+		WorkerID:            raw.ID,
+		Status:              mapStatus(raw.EmploymentStatus),
+		StartDate:           parseDate(raw.StartDate),
+		EndDate:             parseDate(raw.EndDate),
+		Title:               raw.Title,
+		Department:          raw.Department,
+		ManagerAssignmentID: raw.ManagerAssignmentID,
+		WorkEmail:           raw.WorkEmail,
+	}, true, nil
+}
+
 // RawWorker is the narrow, PII-bounded view the Rippling client returns for one
 // worker. The HTTP client maps the Rippling directory response into this shape,
 // discarding all sensitive PII at the decode boundary. Tests construct it

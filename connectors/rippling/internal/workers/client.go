@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -106,6 +107,49 @@ func (c *Client) ListWorkers(ctx context.Context) ([]RawWorker, error) {
 		})
 	}
 	return out, nil
+}
+
+// apiEmployeeEnvelope is the single-employee response shape (GET
+// /platform/api/employees/{id}) — the same minimal lifecycle fields as the list
+// endpoint. Used by the webhook profile's trigger+re-read (slice 573).
+type apiEmployeeEnvelope struct {
+	apiEmployee
+}
+
+// GetWorker re-reads ONE worker's minimal lifecycle fields by id, for the
+// event-driven (subscribe) profile (slice 573). Same read-only `fields`
+// over-collection guard as ListWorkers: the request asks for the lifecycle
+// fields only, so the API never returns the excluded PII. ok=false when the
+// worker id is unknown (404) — the caller skips the push.
+func (c *Client) GetWorker(ctx context.Context, workerID string) (RawWorker, bool, error) {
+	id := strings.TrimSpace(workerID)
+	if id == "" {
+		return RawWorker{}, false, nil
+	}
+	q := url.Values{}
+	q.Set("fields", strings.Join(LifecycleFields, ","))
+	var env apiEmployeeEnvelope
+	err := c.getJSON(ctx, "/platform/api/employees/"+url.PathEscape(id)+"?"+q.Encode(), &env)
+	if err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
+			return RawWorker{}, false, nil
+		}
+		return RawWorker{}, false, err
+	}
+	if strings.TrimSpace(env.ID) == "" {
+		return RawWorker{}, false, nil
+	}
+	return RawWorker{
+		ID:                  env.ID,
+		EmploymentStatus:    env.EmploymentStatus,
+		StartDate:           env.StartDate,
+		EndDate:             env.EndDate,
+		Title:               env.Title,
+		Department:          env.Department,
+		ManagerAssignmentID: env.Manager,
+		WorkEmail:           env.WorkEmail,
+	}, true, nil
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, into any) error {

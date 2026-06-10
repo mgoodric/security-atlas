@@ -30,6 +30,38 @@ type API interface {
 	ListWorkers(ctx context.Context) ([]RawWorker, error)
 }
 
+// OneAPI is the narrow single-worker re-read surface the event-driven
+// (subscribe) profile depends on (slice 573).
+type OneAPI interface {
+	GetWorker(ctx context.Context, workerID string) (RawWorker, bool, error)
+}
+
+// FetchOne re-reads ONE worker by id and maps it to the PII-bounded
+// worker.RawWorker, reusing the same status/date mapping as the pull path so a
+// webhook-triggered record is identical in shape to a polled one (slice 573).
+func FetchOne(ctx context.Context, api OneAPI, workerID string) (worker.RawWorker, bool, error) {
+	if api == nil {
+		return worker.RawWorker{}, false, errors.New("workers: OneAPI is nil")
+	}
+	raw, ok, err := api.GetWorker(ctx, workerID)
+	if err != nil {
+		return worker.RawWorker{}, false, fmt.Errorf("get bamboohr worker %s: %w", workerID, err)
+	}
+	if !ok || strings.TrimSpace(raw.ID) == "" {
+		return worker.RawWorker{}, false, nil
+	}
+	return worker.RawWorker{
+		WorkerID:            raw.ID,
+		Status:              mapStatus(raw.Status, raw.TerminationDate),
+		StartDate:           parseDate(raw.HireDate),
+		EndDate:             parseDate(raw.TerminationDate),
+		Title:               raw.JobTitle,
+		Department:          raw.Department,
+		ManagerAssignmentID: raw.ManagerAssignmentID,
+		WorkEmail:           raw.WorkEmail,
+	}, true, nil
+}
+
 // RawWorker is the narrow, PII-bounded view the BambooHR client returns for one
 // worker. The HTTP client maps the BambooHR report response into this shape,
 // discarding all sensitive PII at the decode boundary. Tests construct it

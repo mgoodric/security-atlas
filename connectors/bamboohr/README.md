@@ -8,9 +8,9 @@ CC6.1 / CC6.2 / CC6.3). It follows the locked connector pattern verbatim:
 register-per-run, a stable `actor_id`, an hour-truncated `observed_at`, scope
 minimums, and vendor-native read-only auth. It emits one evidence kind:
 
-| Kind                       | Profile | Source                                               |
-| -------------------------- | ------- | ---------------------------------------------------- |
-| `hris.worker_lifecycle.v1` | pull    | BambooHR API `GET /v1/reports/custom` (field-scoped) |
+| Kind                       | Profiles        | Source                                                                                                   |
+| -------------------------- | --------------- | -------------------------------------------------------------------------------------------------------- |
+| `hris.worker_lifecycle.v1` | pull, subscribe | BambooHR API `GET /v1/reports/custom` (field-scoped poll) + the BambooHR termination webhook (slice 573) |
 
 The evidence shape is **shared** with the Rippling connector (the lifecycle field
 set is identical at this altitude); `source_hris` preserves provenance.
@@ -67,14 +67,35 @@ Set `BAMBOOHR_API_KEY` + `BAMBOOHR_COMPANY_DOMAIN` (and optionally
 The key is sent as the HTTP Basic username, read from the environment, never a
 CLI flag, and never logged or placed into an evidence record.
 
-## Profile + interval — honest, not "continuous monitoring"
+## Profiles — honest naming, not "continuous monitoring"
 
-The connector runs on the **pull** profile: each invocation is one bounded
-read-and-push pass. It is **operator-scheduled** (cron / scheduler) — the
-recommended cadence is **every 24h**. This is deliberately **not** "continuous
-monitoring": the interval is named honestly. A real-time leaver signal via
-BambooHR webhooks (an event-driven profile) is a documented follow-on (slice
-573), not part of v0.
+The connector supports two retrieval profiles. Both describe how the connector
+retrieves data **from BambooHR**; the platform-side wire is **always push**
+(invariant #3) regardless of profile.
+
+**`pull`** — each invocation is one bounded read-and-push pass, **operator-scheduled**
+(cron / scheduler), recommended cadence **every 24h**. Deliberately **not**
+"continuous monitoring": the interval is named honestly.
+
+**`subscribe`** (slice 573) — a long-lived **source-side webhook receiver** that
+runs **inside this connector process** (`atlas-bamboohr subscribe`). It receives
+BambooHR termination / status-change webhook deliveries, **verifies the
+per-monitor HMAC-SHA256 signature** (`X-BambooHR-Signature`) **before** doing any
+work, re-reads the affected worker's minimal lifecycle fields via the same
+read-only API, builds the **same** `hris.worker_lifecycle.v1` record, and pushes
+it. This is **event-driven**, not "continuous monitoring", and **not** a platform
+inbound API — the receiver is part of the connector. The webhook is a **trigger**;
+the authoritative lifecycle facts come from the bounded re-read, so the
+over-collection guard is unchanged.
+
+**Dedup against pull:** a webhook-emitted record and a pull-emitted record for the
+same worker within the same UTC hour derive the **same idempotency key**, so the
+append-only ledger collapses them.
+
+**Webhook auth:** set `BAMBOOHR_WEBHOOK_SECRET` to the per-monitor private key.
+Front the receiver with a reverse proxy for TLS; it binds loopback by default. An
+unsigned, forged, or wrong-signature delivery is rejected with `401` and produces
+no record; an oversized body is rejected with `413` before it is read.
 
 ## Usage
 
@@ -82,15 +103,19 @@ BambooHR webhooks (an event-driven profile) is a documented follow-on (slice
 # Print the least-privilege scope requirement.
 atlas-bamboohr permissions
 
-# Register the connector instance (profiles_supported = [pull]).
+# Register the connector instance (profiles_supported = [pull, subscribe]).
 export SECURITY_ATLAS_ENDPOINT=atlas.example.com:443
 export SECURITY_ATLAS_TOKEN=<platform bearer>
 atlas-bamboohr register
 
-# Read worker-lifecycle records and push evidence.
+# pull: read worker-lifecycle records and push evidence (operator-scheduled).
 export BAMBOOHR_API_KEY=<read-only worker-directory key>
 export BAMBOOHR_COMPANY_DOMAIN=<your-company-subdomain>
 atlas-bamboohr run --environment prod
+
+# subscribe: run the source-side termination-webhook receiver (event-driven).
+export BAMBOOHR_WEBHOOK_SECRET=<per-monitor private key>
+atlas-bamboohr subscribe --environment prod --listen 127.0.0.1:8534 --path /hooks/bamboohr
 ```
 
 ## Scope minimums
@@ -109,5 +134,9 @@ pass/fail per `(control, scope)`.
 ## Follow-ons (out of v0 scope)
 
 - manager-hierarchy evidence for review-routing (slice 571);
-- event-driven profile via BambooHR webhooks — a real-time leaver signal for
-  deprovisioning (slice 573).
+- ~~event-driven profile via BambooHR webhooks~~ **delivered (slice 573)** — see
+  the `subscribe` profile above;
+- cursor pagination for the single-pass `pull` report (threat-model D);
+- a multi-employee webhook fan-out (the current receiver acts on the first
+  changed employee per delivery — a single termination is the dominant leaver
+  case).

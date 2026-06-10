@@ -34,6 +34,11 @@ var (
 	newWorkersAPI = func(hc *http.Client, baseURL, companyDomain, apiKey string) workers.API {
 		return workers.NewClient(hc, baseURL, companyDomain, apiKey)
 	}
+	// newWorkersOneAPI builds the live single-worker read-only client for the
+	// event-driven (subscribe) profile; seamed so tests inject a fake (slice 573).
+	newWorkersOneAPI = func(hc *http.Client, baseURL, companyDomain, apiKey string) workers.OneAPI {
+		return workers.NewClient(hc, baseURL, companyDomain, apiKey)
+	}
 )
 
 // sdkPushClient is the narrow surface doRun consumes from sdk.Client.
