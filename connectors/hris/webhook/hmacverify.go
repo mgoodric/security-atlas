@@ -1,44 +1,41 @@
 package webhook
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/mgoodric/security-atlas/connectors/hris/worker"
+	"github.com/mgoodric/security-atlas/connectors/shared/webhookrecv"
 )
 
 // ErrUnsigned is returned when a delivery carries no signature header. It is the
 // dominant rejection: an anonymous POST to the receiver is unsigned and stops
-// here, before any record is built.
-var ErrUnsigned = errors.New("webhook: delivery carries no signature")
+// here, before any record is built. It is the shared webhookrecv error so the
+// receiver and the skeleton agree on the sentinel.
+var ErrUnsigned = webhookrecv.ErrUnsigned
 
 // ErrBadSignature is returned when a signature is present but does not match the
 // HMAC computed over the body with the subscription secret (a forged or
 // tampered delivery).
-var ErrBadSignature = errors.New("webhook: signature does not match")
+var ErrBadSignature = webhookrecv.ErrBadSignature
 
 // SigEncoding is how a vendor encodes the HMAC digest in its signature header.
-type SigEncoding int
+// It mirrors webhookrecv.Encoding so existing call sites keep the HRIS-local
+// names (slices 573 / 655) while the verifier core is the shared one.
+type SigEncoding = webhookrecv.Encoding
 
 const (
 	// EncodingHex is a lowercase hex digest (Rippling's scheme).
-	EncodingHex SigEncoding = iota
+	EncodingHex = webhookrecv.EncodingHex
 	// EncodingHexUpper is an uppercase hex digest (BambooHR's documented scheme).
-	EncodingHexUpper
+	EncodingHexUpper = webhookrecv.EncodingHexUpper
 )
 
 // HMACVerifier verifies a delivery by recomputing HMAC-SHA256 over the raw body
 // with a per-subscription shared secret and comparing it, in constant time,
-// against the digest the vendor placed in HeaderName. It is the reusable core
-// both HRIS verifiers (and the future PagerDuty 540 / MDM 557 receivers) build
-// on. The secret never appears in a log line or the HTTP response.
-//
-// Some vendors prefix the header value (e.g. "sha256="); Prefix is stripped
-// before the compare. Encoding selects hex casing.
+// against the digest the vendor placed in its signature header. It is the HRIS
+// vendor adapter over the shared webhookrecv.HMACConfig core (slice 656): the
+// header name, prefix, and encoding are the only per-vendor axes. The secret
+// never appears in a log line or the HTTP response.
 type HMACVerifier struct {
 	// HeaderName is the request header carrying the vendor's signature.
 	HeaderName string
@@ -70,31 +67,13 @@ func NewHMACVerifier(vendor worker.HRIS, secret, headerName, prefix string, enc 
 func (v *HMACVerifier) Vendor() worker.HRIS { return v.vendor }
 
 // Verify implements Verifier: recompute HMAC-SHA256(body, secret) and
-// constant-time compare against the header digest. Returns ErrUnsigned when the
-// header is absent and ErrBadSignature when it does not match.
+// constant-time compare against the header digest via the shared core. Returns
+// ErrUnsigned when the header is absent and ErrBadSignature when it does not
+// match.
 func (v *HMACVerifier) Verify(body []byte, header http.Header) error {
-	got := strings.TrimSpace(header.Get(v.HeaderName))
-	if got == "" {
-		return ErrUnsigned
-	}
-	got = strings.TrimPrefix(got, v.Prefix)
-
-	mac := hmac.New(sha256.New, v.secret)
-	mac.Write(body)
-	sum := mac.Sum(nil)
-
-	var want string
-	switch v.Encoding {
-	case EncodingHexUpper:
-		want = strings.ToUpper(hex.EncodeToString(sum))
-		got = strings.ToUpper(got)
-	default:
-		want = hex.EncodeToString(sum)
-		got = strings.ToLower(got)
-	}
-	// Constant-time compare; defends against a timing oracle on the digest.
-	if !hmac.Equal([]byte(got), []byte(want)) {
-		return ErrBadSignature
-	}
-	return nil
+	return webhookrecv.HMACConfig{
+		Header:   v.HeaderName,
+		Prefix:   v.Prefix,
+		Encoding: v.Encoding,
+	}.Verify(v.secret, body, header)
 }

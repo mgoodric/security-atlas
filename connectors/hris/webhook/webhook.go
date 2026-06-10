@@ -31,7 +31,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"time"
@@ -40,6 +39,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/connectors/hris/worker"
 	"github.com/mgoodric/security-atlas/connectors/hris/workerrecord"
+	"github.com/mgoodric/security-atlas/connectors/shared/webhookrecv"
 )
 
 // MaxBodyBytes bounds a single webhook delivery. HRIS termination webhooks are
@@ -173,57 +173,42 @@ func NewReceiver(cfg Config) (*Receiver, error) {
 }
 
 // ServeHTTP implements the receive → verify → parse → re-read → build → push
-// pipeline. Only POST is accepted. The signature is verified BEFORE the body is
-// parsed; a failed verification returns 401 and builds nothing.
+// pipeline. The vendor-agnostic preamble (POST-only, body cap → 413, verify-FIRST
+// → 401) is the shared webhookrecv skeleton (slice 656); the verified body is
+// then handed to buildAndPush, the HRIS fan-out adapter.
 func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+	webhookrecv.Handle(w, req, MaxBodyBytes, r.cfg.Verifier, r.buildAndPush)
+}
 
-	// Size-bound the body BEFORE reading it (a hostile POST cannot exhaust
-	// memory). MaxBytesReader caps the read and Errors past the limit.
-	req.Body = http.MaxBytesReader(w, req.Body, MaxBodyBytes)
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
-		return
-	}
-
-	// Verify BEFORE any work. Reject unsigned / forged / wrong-signature with a
-	// bare 401 (no detail leak).
-	if err := r.cfg.Verifier.Verify(body, req.Header); err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
+// buildAndPush is the HRIS vendor adapter the skeleton invokes on a verified raw
+// body: parse the worker ids, dedup/cap them, and fan out one re-read+build+push
+// per changed worker. It returns the HTTP status the skeleton writes. Signature
+// verification has already happened ONCE in the skeleton, before this runs — it
+// is NOT re-run per worker.
+func (r *Receiver) buildAndPush(req *http.Request, body []byte) int {
 	ids, err := r.cfg.Parser.ParseWorkerIDs(body)
 	if err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
+		return http.StatusBadRequest
 	}
 	ids = dedupCap(ids)
 	if len(ids) == 0 {
 		// Authentic delivery, but no actionable worker (e.g. an unrelated event):
 		// acknowledge so the vendor does not retry, but emit nothing.
-		w.WriteHeader(http.StatusOK)
-		return
+		return http.StatusOK
 	}
 
-	// Fan out: one trigger+re-read+push per changed worker (slice 655). Signature
-	// verification already happened ONCE above, before this loop — it is NOT
-	// re-run per worker. A per-worker re-read or push failure does not abort the
-	// others: the successes are emitted and only the failures are signalled back
-	// (so the vendor retries the whole delivery; the already-pushed records
-	// collapse against the pull/idempotency key on the retry — D3 slice 573).
+	// Fan out: one trigger+re-read+push per changed worker (slice 655). A
+	// per-worker re-read or push failure does not abort the others: the successes
+	// are emitted and only the failures are signalled back (so the vendor retries
+	// the whole delivery; the already-pushed records collapse against the
+	// pull/idempotency key on the retry — D3 slice 573).
 	if failed := r.processAll(req.Context(), ids); failed > 0 {
 		// At least one worker failed mid-fan-out. The vendor SHOULD retry; 502
 		// signals "not acknowledged". The successes are already pushed and
 		// dedup-collapse on the retry.
-		http.Error(w, "upstream error", http.StatusBadGateway)
-		return
+		return http.StatusBadGateway
 	}
-	w.WriteHeader(http.StatusOK)
+	return http.StatusOK
 }
 
 // dedupCap removes blank/duplicate ids (a delivery that repeats an id must not
@@ -307,41 +292,18 @@ func (r *Receiver) process(ctx context.Context, workerID string) error {
 
 // Server lifecycle ----------------------------------------------------------
 
-// NewServer wraps a Receiver in a bounded http.Server mounted at path. The
-// timeouts satisfy gosec G112 (Slowloris) and bound a slow client; the receiver
-// is a long-lived process the connector's `run --profile=subscribe` owns.
+// NewServer wraps a Receiver in a bounded http.Server mounted at path via the
+// shared webhookrecv constructor. The timeouts satisfy gosec G112 (Slowloris)
+// and bound a slow client; the receiver is a long-lived process the connector's
+// `run --profile=subscribe` owns.
 func NewServer(addr, path string, rec *Receiver) *http.Server {
-	mux := http.NewServeMux()
-	mux.Handle(path, rec)
-	return &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
+	return webhookrecv.NewServer(addr, path, rec)
 }
 
 // Serve runs srv until ctx is cancelled, then drains it with a bounded graceful
-// shutdown. It blocks; the connector's run loop calls it. A returned
-// http.ErrServerClosed (the normal shutdown path) is squashed to nil.
+// shutdown via the shared webhookrecv lifecycle. It blocks; the connector's run
+// loop calls it. A returned http.ErrServerClosed (the normal shutdown path) is
+// squashed to nil.
 func Serve(ctx context.Context, srv *http.Server) error {
-	errc := make(chan error, 1)
-	go func() {
-		err := srv.ListenAndServe()
-		if errors.Is(err, http.ErrServerClosed) {
-			err = nil
-		}
-		errc <- err
-	}()
-	select {
-	case err := <-errc:
-		return err
-	case <-ctx.Done():
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shutCtx)
-		return <-errc
-	}
+	return webhookrecv.Serve(ctx, srv)
 }

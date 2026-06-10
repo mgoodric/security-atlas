@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/incidents"
 	"github.com/mgoodric/security-atlas/connectors/pagerduty/internal/pdrecord"
+	"github.com/mgoodric/security-atlas/connectors/shared/webhookrecv"
 )
 
 // MaxBodyBytes bounds a single webhook delivery. PagerDuty v3 incident webhook
@@ -133,52 +133,37 @@ type wireDelivery struct {
 	} `json:"event"`
 }
 
-// ServeHTTP implements the receive → verify → parse → build → push pipeline. Only
-// POST is accepted. The signature is verified BEFORE the body is parsed; a failed
-// verification returns 401 and builds nothing.
+// ServeHTTP implements the receive → verify → parse → build → push pipeline. The
+// vendor-agnostic preamble (POST-only, body cap → 413, verify-FIRST → 401) is the
+// shared webhookrecv skeleton (slice 656, STRIDE Spoofing/DoS); the verified body
+// is then handed to buildAndPush, the PagerDuty single-incident adapter.
 func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+	webhookrecv.Handle(w, req, MaxBodyBytes, r.cfg.Verifier, r.buildAndPush)
+}
 
-	// Size-bound the body BEFORE reading it (a hostile POST cannot exhaust
-	// memory). MaxBytesReader caps the read and errors past the limit.
-	req.Body = http.MaxBytesReader(w, req.Body, MaxBodyBytes)
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
-		return
-	}
-
-	// Verify BEFORE any work (STRIDE Spoofing, DOMINANT). Reject unsigned /
-	// forged / wrong-signature with a bare 401 (no detail leak — the error is not
-	// echoed into the response or a record).
-	if err := r.cfg.Verifier.Verify(body, req.Header); err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
+// buildAndPush is the PagerDuty vendor adapter the skeleton invokes on a verified
+// raw body: decode the summary-only view, skip non-incident / id-less events with
+// a 200 ack, else build+push the one incident record. It returns the HTTP status
+// the skeleton writes. Signature verification has already happened in the
+// skeleton, before this runs.
+func (r *Receiver) buildAndPush(req *http.Request, body []byte) int {
 	var d wireDelivery
 	if err := json.Unmarshal(body, &d); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
+		return http.StatusBadRequest
 	}
 
 	if !strings.HasPrefix(d.Event.EventType, incidentEventPrefix) {
 		// Authentic delivery, but not an incident-lifecycle event (e.g. a test
 		// ping or a service.* event): acknowledge so PagerDuty does not retry,
 		// but emit nothing.
-		w.WriteHeader(http.StatusOK)
-		return
+		return http.StatusOK
 	}
 
 	id := strings.TrimSpace(d.Event.Data.ID)
 	if id == "" {
 		// Authentic incident event with no incident id; acknowledge but emit
 		// nothing (nothing to attribute / dedup against).
-		w.WriteHeader(http.StatusOK)
-		return
+		return http.StatusOK
 	}
 
 	if err := r.emit(req.Context(), d); err != nil {
@@ -187,10 +172,9 @@ func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		// log entries through embedded newlines (CWE-117 log injection / b245
 		// CodeQL lesson).
 		log.Printf("pagerduty/webhook: emit incident %q failed: %q", id, err)
-		http.Error(w, "upstream error", http.StatusBadGateway)
-		return
+		return http.StatusBadGateway
 	}
-	w.WriteHeader(http.StatusOK)
+	return http.StatusOK
 }
 
 // emit normalizes the verified delivery's SUMMARY fields and pushes the same
@@ -271,41 +255,18 @@ func parseTime(s string) time.Time {
 
 // Server lifecycle ----------------------------------------------------------
 
-// NewServer wraps a Receiver in a bounded http.Server mounted at path. The
-// timeouts satisfy gosec G112 (Slowloris) and bound a slow client; the receiver
-// is the long-lived process the connector's `run --profile=subscribe` owns.
+// NewServer wraps a Receiver in a bounded http.Server mounted at path via the
+// shared webhookrecv constructor. The timeouts satisfy gosec G112 (Slowloris)
+// and bound a slow client; the receiver is the long-lived process the
+// connector's `run --profile=subscribe` owns.
 func NewServer(addr, path string, rec *Receiver) *http.Server {
-	mux := http.NewServeMux()
-	mux.Handle(path, rec)
-	return &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
+	return webhookrecv.NewServer(addr, path, rec)
 }
 
 // Serve runs srv until ctx is cancelled, then drains it with a bounded graceful
-// shutdown. It blocks; the connector's run loop calls it. A returned
-// http.ErrServerClosed (the normal shutdown path) is squashed to nil.
+// shutdown via the shared webhookrecv lifecycle. It blocks; the connector's run
+// loop calls it. A returned http.ErrServerClosed (the normal shutdown path) is
+// squashed to nil.
 func Serve(ctx context.Context, srv *http.Server) error {
-	errc := make(chan error, 1)
-	go func() {
-		err := srv.ListenAndServe()
-		if errors.Is(err, http.ErrServerClosed) {
-			err = nil
-		}
-		errc <- err
-	}()
-	select {
-	case err := <-errc:
-		return err
-	case <-ctx.Done():
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shutCtx)
-		return <-errc
-	}
+	return webhookrecv.Serve(ctx, srv)
 }

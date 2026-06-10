@@ -16,8 +16,6 @@ package githubwebhook
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -26,6 +24,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/mgoodric/security-atlas/connectors/shared/webhookrecv"
 )
 
 const (
@@ -42,6 +42,18 @@ const (
 	signaturePrefix = "sha256="
 )
 
+// ghHMAC is the shared HMAC config for GitHub's scheme: lowercase hex digest
+// behind the "sha256=" prefix in X-Hub-Signature-256, single signature (slice 656
+// factored core). GitHub keeps its own VerifySignature wrapper because its
+// missing-vs-malformed-vs-bad error taxonomy is asserted by callers and is
+// finer-grained than the shared ErrUnsigned/ErrBadSignature pair; the wrapper
+// reuses the shared core only for the constant-time digest match.
+var ghHMAC = webhookrecv.HMACConfig{
+	Header:   HeaderSignature,
+	Prefix:   signaturePrefix,
+	Encoding: webhookrecv.EncodingHex,
+}
+
 // VerifySignature returns nil iff sigHeader is a syntactically-valid
 // X-Hub-Signature-256 value AND its HMAC-SHA256 over body (keyed by
 // secret) matches the provided hex digest. The match is constant-time —
@@ -52,31 +64,33 @@ const (
 // Returns ErrMissingSignature, ErrMalformedSignature, or ErrBadSignature
 // so the caller can map each to the right HTTP status.
 func VerifySignature(secret []byte, body []byte, sigHeader string) error {
+	// Syntactic pre-checks keep GitHub's finer-grained error taxonomy
+	// (missing / malformed) that the shared ErrUnsigned/ErrBadSignature pair does
+	// not distinguish. The constant-time digest match itself is delegated to the
+	// shared webhookrecv core (byte-identical: lowercase-hex decode then
+	// hmac.Equal over the raw digest bytes).
 	if sigHeader == "" {
 		return ErrMissingSignature
 	}
 	if !strings.HasPrefix(sigHeader, signaturePrefix) {
 		return ErrMalformedSignature
 	}
-	supplied, err := hex.DecodeString(strings.TrimPrefix(sigHeader, signaturePrefix))
-	if err != nil {
+	if _, err := hex.DecodeString(strings.TrimPrefix(sigHeader, signaturePrefix)); err != nil {
 		return ErrMalformedSignature
 	}
-	mac := hmac.New(sha256.New, secret)
-	mac.Write(body)
-	expected := mac.Sum(nil)
-	if !hmac.Equal(expected, supplied) {
+	h := http.Header{}
+	h.Set(HeaderSignature, sigHeader)
+	if err := ghHMAC.Verify(secret, body, h); err != nil {
 		return ErrBadSignature
 	}
 	return nil
 }
 
-// Sign returns the X-Hub-Signature-256 value computed from secret + body.
-// Used by tests only. Production code never signs outbound webhooks.
+// Sign returns the X-Hub-Signature-256 value computed from secret + body
+// (lowercase hex behind "sha256="). Used by tests only. Production code never
+// signs outbound webhooks.
 func Sign(secret []byte, body []byte) string {
-	mac := hmac.New(sha256.New, secret)
-	mac.Write(body)
-	return signaturePrefix + hex.EncodeToString(mac.Sum(nil))
+	return ghHMAC.Sign(secret, body)
 }
 
 // Errors returned by VerifySignature. The handler maps them to status
