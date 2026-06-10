@@ -33,14 +33,57 @@ only the `firewallPolicies` + `ruleCollectionGroups` **list** surfaces and never
 mutates a network resource). The Azure credential stays source-side and never
 enters an evidence record or a platform push (canvas invariant #3).
 
-## Profile + interval — honest, not "continuous monitoring"
+## Profiles + interval — honest, not "continuous monitoring"
 
-The connector runs on the **pull** profile: each invocation is one bounded
-read-and-push pass. It is **operator-scheduled** (cron / scheduler) — the
-recommended cadence is **every 24h**. This is deliberately **not** "continuous
-monitoring": the interval is named honestly. An event-driven profile (via Azure
-Event Grid / Activity-Log diagnostic settings) is a documented follow-on, not
-part of v0.
+The connector advertises `profiles_supported=[pull, subscribe]`. Both describe how
+the connector retrieves data **from Azure**; the platform-side wire is always push
+(invariant #3).
+
+- **pull** (`run` subcommand): each invocation is one bounded read-and-push pass.
+  **Operator-scheduled** (cron / scheduler) — recommended cadence **every 24h**. It
+  is the **reconciliation backstop**.
+- **subscribe** (`eventgrid` subcommand, slice 522): an event-driven receiver. Azure
+  Event Grid delivers a change event for an in-scope resource; the connector treats
+  the event as a **trigger**, re-reads the changed resource via the **same read-only
+  path** the pull profile uses, and pushes the matching record. "Event-driven" means
+  **Event-Grid delivery latency** (typically seconds to a minute) plus a short
+  **coalescing window** — it is **not** instantaneous and is deliberately **not**
+  "continuous monitoring".
+
+Both are named honestly. The event is never the data: the record's contents come
+entirely from the re-read of real Azure state, so a forged event can at most cause a
+redundant read of real config — never a fabricated record. See the `eventgrid`
+subcommand below and `docs/audit-log/522-azure-eventgrid-decisions.md`.
+
+### `eventgrid` subscribe receiver — security + operation
+
+- **Delivery auth (per event):** set `AZURE_EVENTGRID_DELIVERY_KEY` to the delivery
+  key you configured on the Event Grid subscription. Every delivery's key is verified
+  **constant-time BEFORE** any re-read; a missing/forged key is rejected **401** and
+  never triggers a re-read. The key location is `--credential-in header|query`
+  (default `header`, `--credential-name Authorization`).
+- **SubscriptionValidation handshake:** when Event Grid validates the webhook it
+  POSTs a `Microsoft.EventGrid.SubscriptionValidationEvent` carrying a
+  `validationCode`; the receiver responds `200 {"validationResponse":"<code>"}` and
+  builds **no** record.
+- **DoS bounding:** a bounded event queue + a coalescing window collapse an event
+  storm into one re-read per resource; the body is size-bounded (413). The pull
+  profile is the reconciliation backstop for any dropped event.
+- **No new permission:** the re-read uses the **same** read-only Graph + ARM Reader
+  set as the pull profile (plus the operator's Event-Grid subscription read,
+  configured in Azure). No write path; no new evidence kind.
+- **Bind / TLS:** defaults to loopback (`127.0.0.1:8485`). Event Grid requires an
+  HTTPS endpoint with a valid certificate — terminate TLS at a reverse proxy in
+  front of this process.
+
+### Cross-profile dedup
+
+A subscribe-emitted record and a pull-emitted record for the **same resource in the
+same UTC hour** derive the **identical** idempotency key
+(`sha256("<kind>|<resource_id>|<hour>")`, the slice-486 key, unchanged via the same
+record builders) and collapse to **one** ledger row. An event at 14:45 and a pull at
+15:05 fall in different UTC hours → two rows, which is correct (two observations an
+hour apart).
 
 ## Auth — least-privilege read-only Entra app + ARM Reader
 
@@ -132,32 +175,48 @@ atlas-azure run \
   --subscription-id <subscription-guid> \
   --environment prod
 
+# Run the event-driven (subscribe) Event Grid receiver. The delivery key is read
+# from the environment (never the CLI). Terminate TLS at a reverse proxy in front.
+export AZURE_EVENTGRID_DELIVERY_KEY=<delivery-key-configured-on-the-subscription>
+
+atlas-azure eventgrid \
+  --endpoint platform.example.com:443 \
+  --token "$SECURITY_ATLAS_TOKEN" \
+  --subscription-id <subscription-guid> \
+  --environment prod \
+  --listen 127.0.0.1:8485 \
+  --path /webhooks/azure/eventgrid
+
 # Print the least-privilege Azure permissions.
 atlas-azure permissions
 ```
 
-| Flag                 | Subcommand | Required | Default                       | Notes                                                                                                                                                                               |
-| -------------------- | ---------- | -------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--endpoint`         | both       | yes      | env `SECURITY_ATLAS_ENDPOINT` | platform gRPC endpoint                                                                                                                                                              |
-| `--token`            | both       | yes      | env `SECURITY_ATLAS_TOKEN`    | security-atlas bearer token                                                                                                                                                         |
-| `--insecure`         | both       | no       | `false`                       | disables TLS; loopback endpoints only                                                                                                                                               |
-| `--tenant-id`        | `run`      | no\*     | env `AZURE_TENANT_ID`         | Entra tenant id (\*required, via flag or env)                                                                                                                                       |
-| `--client-id`        | `run`      | no\*     | env `AZURE_CLIENT_ID`         | app-registration client id (client-credentials mode)                                                                                                                                |
-| `--subscription-id`  | `run`      | yes†     | —                             | subscription for the storage + AKS + NSG + Key-Vault + Azure-Firewall kinds († unless all of `--skip-storage`, `--skip-aks`, `--skip-nsg`, `--skip-keyvault` and `--skip-firewall`) |
-| `--environment`      | `run`      | yes      | —                             | environment scope tag; records are never emitted un-scoped                                                                                                                          |
-| `--auth-mode`        | `run`      | no       | `client-credentials`          | `client-credentials` or `managed-identity`                                                                                                                                          |
-| `--entra-control`    | `run`      | no       | `scf:IAC-21`                  | control id attached to entra records                                                                                                                                                |
-| `--storage-control`  | `run`      | no       | `scf:CRY-04`                  | control id attached to storage records                                                                                                                                              |
-| `--aks-control`      | `run`      | no       | `scf:CFG-02`                  | control id attached to AKS records                                                                                                                                                  |
-| `--nsg-control`      | `run`      | no       | `scf:NET-04`                  | control id attached to NSG records                                                                                                                                                  |
-| `--keyvault-control` | `run`      | no       | `scf:CRY-09`                  | control id attached to Key-Vault records                                                                                                                                            |
-| `--firewall-control` | `run`      | no       | `scf:NET-04`                  | control id attached to Azure-Firewall records                                                                                                                                       |
-| `--skip-entra`       | `run`      | no       | `false`                       | skip the `azure.entra_role_assignment.v1` pull                                                                                                                                      |
-| `--skip-storage`     | `run`      | no       | `false`                       | skip the `azure.storage_account_config.v1` pull                                                                                                                                     |
-| `--skip-aks`         | `run`      | no       | `false`                       | skip the `azure.aks_cluster_config.v1` pull                                                                                                                                         |
-| `--skip-nsg`         | `run`      | no       | `false`                       | skip the `azure.nsg_rules.v1` pull                                                                                                                                                  |
-| `--skip-keyvault`    | `run`      | no       | `false`                       | skip the `azure.keyvault_access_config.v1` pull                                                                                                                                     |
-| `--skip-firewall`    | `run`      | no       | `false`                       | skip the `azure.firewall_rules.v1` pull                                                                                                                                             |
+| Flag                 | Subcommand  | Required | Default                       | Notes                                                                                                                                                                               |
+| -------------------- | ----------- | -------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--endpoint`         | both        | yes      | env `SECURITY_ATLAS_ENDPOINT` | platform gRPC endpoint                                                                                                                                                              |
+| `--token`            | both        | yes      | env `SECURITY_ATLAS_TOKEN`    | security-atlas bearer token                                                                                                                                                         |
+| `--insecure`         | both        | no       | `false`                       | disables TLS; loopback endpoints only                                                                                                                                               |
+| `--tenant-id`        | `run`       | no\*     | env `AZURE_TENANT_ID`         | Entra tenant id (\*required, via flag or env)                                                                                                                                       |
+| `--client-id`        | `run`       | no\*     | env `AZURE_CLIENT_ID`         | app-registration client id (client-credentials mode)                                                                                                                                |
+| `--subscription-id`  | `run`       | yes†     | —                             | subscription for the storage + AKS + NSG + Key-Vault + Azure-Firewall kinds († unless all of `--skip-storage`, `--skip-aks`, `--skip-nsg`, `--skip-keyvault` and `--skip-firewall`) |
+| `--environment`      | `run`       | yes      | —                             | environment scope tag; records are never emitted un-scoped                                                                                                                          |
+| `--auth-mode`        | `run`       | no       | `client-credentials`          | `client-credentials` or `managed-identity`                                                                                                                                          |
+| `--entra-control`    | `run`       | no       | `scf:IAC-21`                  | control id attached to entra records                                                                                                                                                |
+| `--storage-control`  | `run`       | no       | `scf:CRY-04`                  | control id attached to storage records                                                                                                                                              |
+| `--aks-control`      | `run`       | no       | `scf:CFG-02`                  | control id attached to AKS records                                                                                                                                                  |
+| `--nsg-control`      | `run`       | no       | `scf:NET-04`                  | control id attached to NSG records                                                                                                                                                  |
+| `--keyvault-control` | `run`       | no       | `scf:CRY-09`                  | control id attached to Key-Vault records                                                                                                                                            |
+| `--firewall-control` | `run`       | no       | `scf:NET-04`                  | control id attached to Azure-Firewall records                                                                                                                                       |
+| `--skip-entra`       | `run`       | no       | `false`                       | skip the `azure.entra_role_assignment.v1` pull                                                                                                                                      |
+| `--skip-storage`     | `run`       | no       | `false`                       | skip the `azure.storage_account_config.v1` pull                                                                                                                                     |
+| `--skip-aks`         | `run`       | no       | `false`                       | skip the `azure.aks_cluster_config.v1` pull                                                                                                                                         |
+| `--skip-nsg`         | `run`       | no       | `false`                       | skip the `azure.nsg_rules.v1` pull                                                                                                                                                  |
+| `--skip-keyvault`    | `run`       | no       | `false`                       | skip the `azure.keyvault_access_config.v1` pull                                                                                                                                     |
+| `--skip-firewall`    | `run`       | no       | `false`                       | skip the `azure.firewall_rules.v1` pull                                                                                                                                             |
+| `--listen`           | `eventgrid` | no       | `127.0.0.1:8485`              | address to bind the Event Grid receiver (loopback default; terminate TLS at a reverse proxy)                                                                                        |
+| `--path`             | `eventgrid` | no       | `/webhooks/azure/eventgrid`   | URL path the Event Grid receiver listens on                                                                                                                                         |
+| `--credential-in`    | `eventgrid` | no       | `header`                      | where Event Grid carries the delivery key: `header` or `query`                                                                                                                      |
+| `--credential-name`  | `eventgrid` | no       | `Authorization`               | header name (`credential-in=header`) or query-param name (`credential-in=query`) carrying the delivery key                                                                          |
 
 The client secret is **only** read from `AZURE_CLIENT_SECRET` — never a CLI flag
 — so it never lands in shell history. It is never logged and never enters an
@@ -166,9 +225,10 @@ path).
 
 `register` announces `name=azure-connector`,
 `supported_kinds=[azure.entra_role_assignment.v1, azure.storage_account_config.v1, azure.aks_cluster_config.v1, azure.nsg_rules.v1, azure.keyvault_access_config.v1, azure.firewall_rules.v1]`,
-and `profiles_supported=[pull]` to `ConnectorRegistryService.Register`. The
-`profiles_supported` value describes how the connector retrieves data **from
-Azure** (a scheduled pull); the platform-side wire is always push (invariant #3).
+and `profiles_supported=[pull, subscribe]` to `ConnectorRegistryService.Register`.
+The `profiles_supported` values describe how the connector retrieves data **from
+Azure** (a scheduled pull, or event-driven Event Grid receipt); the platform-side
+wire is always push (invariant #3).
 
 ## Scope minimums
 
@@ -282,8 +342,13 @@ The connector ships six evidence surfaces. It does **not** ship:
   a policy with more rule-collection groups than the cap needs the shared
   cursor-pagination follow-on (filed as spillover slice 634)
 - route tables / VNet peering topology
-- Azure-Policy / Activity-Log evidence
-- an event-driven (subscribe) profile via Azure Event Grid
+- Azure-Policy evidence
+- **Event-Grid subscription / Activity-Log diagnostic-setting auto-provisioning** —
+  the `eventgrid` subscribe receiver (slice 522) **receives** events; it does not
+  auto-create the Event-Grid system topic / diagnostic setting that routes events to
+  the webhook (the operator wires that in the portal / IaC). Auto-provisioning would
+  need a write-scope permission this connector excludes — filed as a follow-on
+  spillover
 - cursor pagination / multi-subscription auto-enumeration (v0 reads a bounded
   first page for one subscription)
 

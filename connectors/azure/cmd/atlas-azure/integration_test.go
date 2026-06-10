@@ -55,7 +55,8 @@ func newBufconnPlatform(t *testing.T) (*api.Server, *grpc.ClientConn, string) {
 }
 
 // TestRegister_ListsConnector verifies AC-1 + AC-7: register surfaces this
-// connector via the ConnectorRegistry List RPC with profiles_supported=[pull].
+// connector via the ConnectorRegistry List RPC with
+// profiles_supported=[pull, subscribe] (slice 522 adds the subscribe profile).
 func TestRegister_ListsConnector(t *testing.T) {
 	_, conn, bearer := newBufconnPlatform(t)
 	registry := connectorsv1.NewConnectorRegistryServiceClient(conn)
@@ -67,7 +68,7 @@ func TestRegister_ListsConnector(t *testing.T) {
 		Version:           connectorVersion(),
 		InstanceId:        "test-instance-azure",
 		SupportedKinds:    SupportedKinds,
-		ProfilesSupported: []string{"pull"},
+		ProfilesSupported: ProfilesSupported,
 	})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
@@ -89,8 +90,8 @@ func TestRegister_ListsConnector(t *testing.T) {
 			if len(h.GetSupportedKinds()) != 6 {
 				t.Errorf("supported_kinds = %d; want 6", len(h.GetSupportedKinds()))
 			}
-			if strings.Join(h.GetProfilesSupported(), ",") != "pull" {
-				t.Errorf("profiles_supported = %v; want [pull]", h.GetProfilesSupported())
+			if strings.Join(h.GetProfilesSupported(), ",") != "pull,subscribe" {
+				t.Errorf("profiles_supported = %v; want [pull subscribe]", h.GetProfilesSupported())
 			}
 		}
 	}
