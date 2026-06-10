@@ -260,8 +260,10 @@ func (r *Receiver) processAll(ctx context.Context, ids []string) int {
 	for _, id := range ids {
 		if err := r.process(ctx, id); err != nil {
 			// Log and continue — do not let one bad worker drop the whole delivery
-			// or fail the others. The id is a non-PII HRIS-native key (safe to log).
-			log.Printf("webhook: fan-out worker %s failed: %v", id, err)
+			// or fail the others. The id is a non-PII HRIS-native key; it is
+			// %q-escaped (and so is the worker id embedded in err) so a crafted
+			// id cannot forge log entries via embedded newlines (CWE-117).
+			log.Printf("webhook: fan-out worker %q failed: %v", id, err)
 			failed++
 		}
 	}
@@ -274,7 +276,7 @@ func (r *Receiver) processAll(ctx context.Context, ids []string) int {
 func (r *Receiver) process(ctx context.Context, workerID string) error {
 	raw, ok, err := r.cfg.Fetcher.FetchWorker(ctx, workerID)
 	if err != nil {
-		return fmt.Errorf("re-read worker %s: %w", workerID, err)
+		return fmt.Errorf("re-read worker %q: %w", workerID, err)
 	}
 	if !ok {
 		// Source no longer returns the worker; nothing to emit. Not an error.
@@ -292,12 +294,12 @@ func (r *Receiver) process(ctx context.Context, workerID string) error {
 	}
 	rec, err := workerrecord.Build(wks[0], r.cfg.ControlID, r.cfg.ActorID, string(r.cfg.Vendor), r.cfg.Environment)
 	if err != nil {
-		return fmt.Errorf("build record %s: %w", workerID, err)
+		return fmt.Errorf("build record %q: %w", workerID, err)
 	}
 	pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if _, err := r.cfg.Pusher.Push(pctx, rec); err != nil {
-		return fmt.Errorf("push worker %s: %w", workerID, err)
+		return fmt.Errorf("push worker %q: %w", workerID, err)
 	}
 	return nil
 }
