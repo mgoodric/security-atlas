@@ -8,12 +8,64 @@ ask. It follows the locked connector pattern verbatim: register-per-run, a
 stable `actor_id`, an hour-truncated `observed_at`, scope minimums, and
 vendor-native read-only auth. It emits four evidence kinds:
 
-| Kind                              | Profile | Source                                              |
-| --------------------------------- | ------- | --------------------------------------------------- |
-| `pagerduty.oncall_coverage.v1`    | pull    | PagerDuty REST API `GET /escalation_policies`       |
-| `pagerduty.incident_summary.v1`   | pull    | PagerDuty REST API `GET /incidents?since=&until=`   |
-| `pagerduty.postmortem_summary.v1` | pull    | PagerDuty REST API `GET /postmortems?since=&until=` |
-| `pagerduty.response_metrics.v1`   | pull    | PagerDuty REST API `GET /incidents?since=&until=`   |
+| Kind                              | Profile          | Source                                                    |
+| --------------------------------- | ---------------- | --------------------------------------------------------- |
+| `pagerduty.oncall_coverage.v1`    | pull             | PagerDuty REST API `GET /escalation_policies`             |
+| `pagerduty.incident_summary.v1`   | pull · subscribe | REST `GET /incidents?since=&until=` · v3 incident webhook |
+| `pagerduty.postmortem_summary.v1` | pull             | PagerDuty REST API `GET /postmortems?since=&until=`       |
+| `pagerduty.response_metrics.v1`   | pull             | PagerDuty REST API `GET /incidents?since=&until=`         |
+
+`profiles_supported` is **`[pull, subscribe]`**, named honestly. `pull` is the
+scheduled read-only REST poll (the `run` subcommand). `subscribe` (slice 540) is
+**event-driven** PagerDuty v3 webhook receipt (the `webhook` subcommand) — NOT
+"continuous monitoring" and not a relabeled poll. Both describe how the connector
+retrieves data **from the source**; the platform-side wire is always **push**
+(canvas invariant #3) regardless of profile.
+
+### The `subscribe` (webhook) profile — slice 540
+
+The `webhook` subcommand runs a **source-side** webhook receiver **inside this
+connector process**: a bounded long-lived `http.Server` that receives PagerDuty
+v3 incident-lifecycle webhook deliveries (`incident.triggered` /
+`incident.acknowledged` / `incident.resolved` / `incident.escalated` / …),
+**verifies the `X-PagerDuty-Signature` HMAC before any work**, and pushes the
+**same** `pagerduty.incident_summary.v1` record the pull profile emits. It is part
+of the **connector**, not the platform: it adds **no** inbound platform API
+(invariant #3 holds — the record still leaves the connector via `Push`).
+
+- **Signature verification (STRIDE Spoofing, dominant).** PagerDuty v3 signs each
+  delivery with HMAC-SHA256 over the **raw request body** keyed by the
+  per-subscription **signing secret**; the `X-PagerDuty-Signature` header carries
+  one or more comma-separated `v1=<hex>` signatures (multiple during a
+  secret-rotation). The receiver accepts iff **any** `v1=` signature matches
+  (constant-time `hmac.Equal`). An unsigned / forged / wrong-signature delivery is
+  rejected **401 before any record is built or pushed**. The signing secret is
+  source-side config (`PAGERDUTY_WEBHOOK_SECRET`), never a flag, never logged.
+- **Summary-only (threat-model I).** The v3 webhook `data` block carries the
+  incident's free-text `title` / `description` / `body`. The receiver decodes
+  **only** the summary fields (id / number / status / urgency / service /
+  timestamps) — the decode struct has **no** free-text field **by construction**,
+  so the incident free-text never enters memory as connector data even though the
+  payload includes it. The webhook payload **maps directly** to the summary shape;
+  no REST re-read is needed (the v3 `data` block already carries the structured
+  summary).
+- **Cross-profile dedup.** A webhook-emitted record and a subsequent pull-emitted
+  record for the **same incident in the same UTC hour** derive the **same**
+  idempotency key (`pdrecord.BuildIncident`, reused unchanged — the slice 489
+  key), so the ledger collapses them to one row.
+- **DoS bounding (threat-model D).** The body is size-bounded (256 KiB →
+  `413` before a full read); the signature is verified first so unverified load is
+  shed cheaply before any expensive work; the `http.Server` sets the gosec-G112
+  Slowloris timeouts.
+- **Bind.** Loopback by default (`127.0.0.1:8474`); terminate TLS at a reverse
+  proxy in front of this process and forward the **verbatim** request body (the
+  signature is over the raw body).
+
+```sh
+export PAGERDUTY_WEBHOOK_SECRET=<per-subscription signing secret>
+export SECURITY_ATLAS_ENDPOINT=... SECURITY_ATLAS_TOKEN=...
+atlas-pagerduty webhook --environment prod --listen 127.0.0.1:8474 --path /webhooks/pagerduty
+```
 
 The postmortem-summary kind (slice 538) is the deliberate slice-489 follow-on
 (P0-489-7): it carries postmortem / retrospective **METADATA only** (existence,

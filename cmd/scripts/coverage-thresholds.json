@@ -114,6 +114,7 @@
     "connectors/pagerduty/internal/pdhttp": 90,
     "connectors/pagerduty/internal/pdrecord": 90,
     "connectors/pagerduty/internal/postmortems": 95,
+    "connectors/pagerduty/internal/webhook": 90,
     "connectors/jira/internal/jiratickets": 89,
     "connectors/jira/internal/lineartickets": 85,
     "connectors/k8s/cmd/atlas-k8s": 88,

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,21 +28,27 @@ func newRegisterCmd() *cobra.Command {
 			ctx, cancel := authedContext(10 * time.Second)
 			defer cancel()
 
-			// profiles_supported = [pull]: the connector retrieves data FROM
-			// PagerDuty on a schedule (read-only API GETs). The platform-side
-			// wire is always push (invariant #3) regardless of this value.
+			// profiles_supported = [pull, subscribe], named HONESTLY (P0-540):
+			//   - pull: the connector retrieves data FROM PagerDuty on a schedule
+			//     (read-only REST API GETs — the `run` subcommand).
+			//   - subscribe: the connector receives PagerDuty v3 incident webhook
+			//     deliveries event-driven (the `webhook` subcommand). This is NOT
+			//     "continuous monitoring" and NOT a relabeled poll.
+			// Both describe how the connector retrieves data FROM the source; the
+			// platform-side wire is ALWAYS push (invariant #3) regardless of either
+			// value.
 			resp, err := client.Register(ctx, &connectorsv1.RegisterRequest{
 				Name:              ConnectorName,
 				Version:           connectorVersion(),
 				InstanceId:        uuid.NewString(),
 				SupportedKinds:    SupportedKinds,
-				ProfilesSupported: []string{"pull"},
+				ProfilesSupported: ProfilesSupported,
 			})
 			if err != nil {
 				return fmt.Errorf("register: %w", err)
 			}
-			fmt.Printf("registered id=%s instance_id=%s kinds=%d profiles=pull\n",
-				resp.GetHandle().GetId(), resp.GetHandle().GetInstanceId(), len(SupportedKinds))
+			fmt.Printf("registered id=%s instance_id=%s kinds=%d profiles=%s\n",
+				resp.GetHandle().GetId(), resp.GetHandle().GetInstanceId(), len(SupportedKinds), strings.Join(ProfilesSupported, ","))
 			return nil
 		},
 	}
