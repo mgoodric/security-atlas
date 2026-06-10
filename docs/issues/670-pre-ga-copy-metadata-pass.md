@@ -36,6 +36,13 @@ None — user-facing copy + document metadata. No data/scope/wire change.
       refs, "canvas §", raw `/v1/...` paths, "future slice", "TEMPLATED V1") and replace with
       user-facing language. JUDGMENT (decisions log): list the surfaces touched + the
       replacement phrasing; honor the CLAUDE.md repetition/tone discipline.
+- [ ] **AC-6 (035).** Calendar + dashboard "Upcoming" exception-event labels show the SCF
+      code + control name, not a raw control UUID ("Exception on control 32e55da9-…" →
+      "Exception on AAA-01 — …"). Same raw-UUID-in-copy class as AC-2, different surface
+      (`/calendar`, `/dashboard`).
+- [ ] **AC-7 (040).** `/risks` sets a consistent "Risks · security-atlas" document title
+      (it regressed to the raw URL "atlas-edge.home.gmoney.sh/risks"). Same class as AC-4,
+      different route — re-audit ALL primary routes for the per-page title prefix while here.
 
 ## Anti-criteria
 
