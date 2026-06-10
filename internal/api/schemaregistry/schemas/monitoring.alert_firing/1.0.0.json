@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/monitoring.alert_firing/1.0.0.json",
+  "x-evidence-kind": "monitoring.alert_firing.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["MON-01", "IRO-09"],
+  "title": "Monitoring alert-firing event",
+  "description": "One record per alert-firing event from a monitoring source (Datadog monitor alert-events / Grafana alert-instance state-history): the firing rule's id, the source vendor, the firing state (alerting / resolved / no_data / pending), the timeline timestamps (fired_at / resolved_at), and the NAME/HANDLE of the notification target the alert routed to. Pulled read-only over a bounded look-back window (Datadog Events API GET /api/v1/events sources=monitor_alert, events_read scope; Grafana state-history GET /api/v1/rules/history, Viewer role). This is the slice-535 firing-history SIBLING of monitoring.alert_config.v1 (slice 488): slice 488 reads which alerts are CONFIGURED (SOC 2 CC7.2 — the entity has monitoring); this surface reads what actually FIRED and was resolved (SOC 2 CC7.3/CC7.4 — the entity evaluates security events and responds to identified incidents). Firing METADATA only — NEVER the alert MESSAGE body, the triggering METRIC VALUES, the secret WEBHOOK URL, or recipient PII; the connector's record struct has no field that can hold them and a reflection guard fails the build if one is added. The connector reports a descriptive firing posture; the platform evaluator owns the final pass/fail per (control, scope). Profile: bounded PULL on the operator's schedule — NOT continuous monitoring and NOT event-driven; the platform-side wire is always push. x-default-scf-anchors are default mapping hints flagged for maintainer recheck (the spec candidate IRO-02 is absent from the bundled SCF catalog fixture, so IRO-09 — the closest present incident anchor — is used; see decisions-log D3).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_vendor", "rule_id", "state", "fired_at"],
+  "properties": {
+    "source_vendor": {
+      "type": "string",
+      "enum": ["datadog", "grafana"],
+      "description": "The monitoring source that produced the firing event. Both vendors emit this one vendor-neutral kind."
+    },
+    "rule_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Vendor-native stable identifier of the rule/monitor that fired (an opaque ID, not a credential). Ties the firing back to its monitoring.alert_config.v1 inventory record (slice 488)."
+    },
+    "state": {
+      "type": "string",
+      "enum": ["alerting", "resolved", "no_data", "pending"],
+      "description": "The normalized firing state: 'alerting' (firing/triggered), 'resolved' (recovered/OK/normal), 'no_data' (no data to evaluate), or 'pending' (condition met, for-duration not yet elapsed). Derived from the vendor-native state; an unknown state normalizes to 'alerting' (the conservative audit-relevant case)."
+    },
+    "fired_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC3339 timestamp of when the alert entered this state (the firing instant). Proves the alert fired within the audit period. Part of the (vendor, rule_id, fired_at) idempotency key."
+    },
+    "resolved_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC3339 timestamp of when the alert returned to a healthy state; absent while the alert is still firing. Proves the alert was acted upon / recovered within the audit period."
+    },
+    "target_kind": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The kind of the notification target the alert routed to (slack / pagerduty / webhook / contact_point / handle). The KIND, never the secret webhook URL or token."
+    },
+    "target_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The NAME/HANDLE of the notification target (a Slack channel name, a contact-point name, a '@handle'). A handle/name only — NEVER the secret webhook URL, an integration token, or a recipient email address (PII); an email-shaped handle is dropped before this field is populated."
+    }
+  }
+}

@@ -176,6 +176,21 @@ func DefaultSeed() []KindVersion {
 		// Slice 488: monitoring connectors (Datadog + Grafana) — shared
 		// alert/monitor configuration-inventory evidence kind.
 		{Kind: "monitoring.alert_config.v1", Version: "1.0.0"},
+		// Slice 535: monitoring connectors (Datadog + Grafana) — shared
+		// alert-FIRING-history evidence kind, the firing-history sibling of
+		// monitoring.alert_config.v1. Slice 488 reads which alerts are CONFIGURED
+		// (CC7.2); this reads what actually FIRED and resolved (CC7.3/CC7.4): one
+		// record per firing event (rule_id, vendor, fired_at, resolved_at, state,
+		// routing-target HANDLE). Anchors MON-01 + IRO-09 (the spec candidate
+		// IRO-02 is absent from the bundled SCF fixture; IRO-09 is the closest
+		// present incident anchor — decisions-log D3). Read-only (Datadog
+		// events_read GET /api/v1/events; Grafana Viewer GET /api/v1/rules/history),
+		// bounded PULL over a look-back window (NOT continuous monitoring, NOT
+		// event-driven). Firing METADATA only — never the alert message body, the
+		// triggering metric values, the secret webhook URL, or recipient PII (the
+		// record struct has no field that can hold them; a reflection guard fails
+		// the build if one is added).
+		{Kind: "monitoring.alert_firing.v1", Version: "1.0.0"},
 		// Slice 533: Datadog Cloud-SIEM / Security-Monitoring detection-rule
 		// inventory — the deliberate slice-488 D1 sibling-kind SPLIT (a detection
 		// rule carries a severity + detection-class field monitoring.alert_config

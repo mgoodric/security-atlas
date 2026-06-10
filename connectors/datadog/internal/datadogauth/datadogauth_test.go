@@ -115,12 +115,12 @@ func TestRequiredSignalScope_IsReadOnly(t *testing.T) {
 }
 
 // TestRequiredScopes_FullReadOnlySet exercises the RequiredScopes helper: it
-// returns exactly the three read-only scopes the connector needs across every
+// returns exactly the four read-only scopes the connector needs across every
 // evidence surface, in order, and never a write/admin scope.
 func TestRequiredScopes_FullReadOnlySet(t *testing.T) {
 	t.Parallel()
 	got := RequiredScopes()
-	want := []string{"monitors_read", "security_monitoring_rules_read", "security_monitoring_signals_read"}
+	want := []string{"monitors_read", "security_monitoring_rules_read", "security_monitoring_signals_read", "events_read"}
 	if len(got) != len(want) {
 		t.Fatalf("RequiredScopes() = %v; want %v", got, want)
 	}
@@ -137,8 +137,20 @@ func TestRequiredScopes_FullReadOnlySet(t *testing.T) {
 			t.Errorf("scope %q is not a read-only (_read-suffixed) scope", s)
 		}
 	}
-	// The helper composes the three exported constants.
-	if got[0] != RequiredScope || got[1] != RequiredSIEMScope || got[2] != RequiredSignalScope {
-		t.Errorf("RequiredScopes() must compose RequiredScope + RequiredSIEMScope + RequiredSignalScope; got %v", got)
+	// The helper composes the four exported constants.
+	if got[0] != RequiredScope || got[1] != RequiredSIEMScope || got[2] != RequiredSignalScope || got[3] != RequiredFiringScope {
+		t.Errorf("RequiredScopes() must compose RequiredScope + RequiredSIEMScope + RequiredSignalScope + RequiredFiringScope; got %v", got)
+	}
+}
+
+// TestRequiredFiringScope_IsReadOnly pins the slice-535 alert-firing scope to
+// the least-privilege read-only value (no write/admin).
+func TestRequiredFiringScope_IsReadOnly(t *testing.T) {
+	t.Parallel()
+	if RequiredFiringScope != "events_read" {
+		t.Errorf("RequiredFiringScope = %q; want events_read (read-only)", RequiredFiringScope)
+	}
+	if strings.Contains(RequiredFiringScope, "write") || strings.Contains(RequiredFiringScope, "admin") {
+		t.Errorf("RequiredFiringScope must not grant write/admin: %q", RequiredFiringScope)
 	}
 }

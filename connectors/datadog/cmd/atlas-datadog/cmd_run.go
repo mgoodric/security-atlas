@@ -13,10 +13,12 @@ import (
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/datadogauth"
+	"github.com/mgoodric/security-atlas/connectors/datadog/internal/firingevents"
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/monitors"
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/siemrules"
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/siemsignals"
 	"github.com/mgoodric/security-atlas/connectors/monitoring/alertcfg"
+	"github.com/mgoodric/security-atlas/connectors/monitoring/firingrecord"
 	"github.com/mgoodric/security-atlas/connectors/monitoring/monrecord"
 )
 
@@ -46,6 +48,13 @@ var (
 	newSIEMSignalsAPI  = func(hc *http.Client, baseURL, apiKey, appKey string) siemsignals.API {
 		return siemsignals.NewClient(hc, baseURL, apiKey, appKey)
 	}
+	// firingCollect + newFiringAPI are the slice-535 seams, parallel to the
+	// siemsignals pair: tests swap in a fake Datadog Events read (monitor
+	// alert-firing history).
+	firingCollect = firingevents.Collect
+	newFiringAPI  = func(hc *http.Client, baseURL, apiKey, appKey string) firingevents.API {
+		return firingevents.NewClient(hc, baseURL, apiKey, appKey)
+	}
 )
 
 // sdkPushClient is the narrow surface doRun consumes from sdk.Client.
@@ -59,7 +68,9 @@ type runFlags struct {
 	monitorControl    string
 	siemControl       string
 	siemSignalControl string
+	firingControl     string
 	siemLookback      time.Duration
+	firingLookback    time.Duration
 	site              string
 }
 
@@ -106,7 +117,9 @@ time-series.`,
 	cmd.Flags().StringVar(&f.monitorControl, "monitor-control", "scf:MON-01", "control_id to attach to monitoring.alert_config.v1 records")
 	cmd.Flags().StringVar(&f.siemControl, "siem-control", "scf:THR-01", "control_id to attach to datadog.siem_rule.v1 records")
 	cmd.Flags().StringVar(&f.siemSignalControl, "siem-signal-control", "scf:IRO-09", "control_id to attach to datadog.siem_signal.v1 records")
+	cmd.Flags().StringVar(&f.firingControl, "firing-control", "scf:IRO-09", "control_id to attach to monitoring.alert_firing.v1 records")
 	cmd.Flags().DurationVar(&f.siemLookback, "siem-lookback", 24*time.Hour, "bounded look-back window for the SIEM signal-history pull (honest interval — NOT continuous monitoring)")
+	cmd.Flags().DurationVar(&f.firingLookback, "datadog-firing-lookback", 24*time.Hour, "bounded look-back window for the monitor alert-firing-history pull (honest interval — NOT continuous monitoring)")
 	cmd.Flags().StringVar(&f.site, "site", "", "Datadog site override (env: DATADOG_SITE; default datadoghq.com)")
 	return cmd
 }
@@ -153,9 +166,39 @@ func doRun(ctx context.Context, f runFlags) error {
 		return err
 	}
 
-	fmt.Printf("pushed %d records (vendor=datadog environment=%s: monitors=%d siem_rules=%d siem_signals=%d)\n",
-		pushed+siemPushed+signalPushed, f.environment, pushed, siemPushed, signalPushed)
+	firingPushed, err := runFiring(ctx, f, cred, httpClient, sdkClient)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("pushed %d records (vendor=datadog environment=%s: monitors=%d siem_rules=%d siem_signals=%d alert_firings=%d)\n",
+		pushed+siemPushed+signalPushed+firingPushed, f.environment, pushed, siemPushed, signalPushed, firingPushed)
 	return nil
+}
+
+// runFiring collects + pushes Datadog monitor alert-firing-history evidence
+// (monitoring.alert_firing.v1) over a bounded look-back window. Separated from
+// the other passes so each evidence kind has an isolated collect->build->push
+// loop; all four share the one Push RPC (invariant #3). Bounded PULL, not
+// event-driven (decisions-log D1).
+func runFiring(ctx context.Context, f runFlags, cred datadogauth.Credential, httpClient *http.Client, sdkClient sdkPushClient) (int, error) {
+	api := newFiringAPI(httpClient, cred.BaseURL(), cred.APIKey(), cred.AppKey())
+	firings, err := firingCollect(ctx, api, f.firingLookback, nil)
+	if err != nil {
+		return 0, fmt.Errorf("datadog firing collect: %w", err)
+	}
+	pushed := 0
+	for _, fr := range firings {
+		rec, err := firingrecord.Build(fr, f.firingControl, actorID("firing"), "datadog", f.environment)
+		if err != nil {
+			return pushed, fmt.Errorf("build firing record %s: %w", fr.RuleID, err)
+		}
+		if err := pushOne(ctx, sdkClient, rec); err != nil {
+			return pushed, fmt.Errorf("push firing %s: %w", fr.RuleID, err)
+		}
+		pushed++
+	}
+	return pushed, nil
 }
 
 // runSIEMRules collects + pushes Datadog Cloud-SIEM detection-rule evidence
