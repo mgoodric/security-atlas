@@ -40,12 +40,18 @@ const (
 	// detection-rule surface (datadog.siem_rule.v1, slice 533) needs. The
 	// connector issues only GETs against /api/v2/security_monitoring/rules.
 	RequiredSIEMScope = "security_monitoring_rules_read"
+
+	// RequiredSignalScope is the read-only Application-key scope the Cloud-SIEM
+	// signal-history surface (datadog.siem_signal.v1, slice 636) needs. The
+	// connector issues only GETs against /api/v2/security_monitoring/signals.
+	// NEVER grant the write/triage scope (security_monitoring_signals_write).
+	RequiredSignalScope = "security_monitoring_signals_read"
 )
 
 // RequiredScopes is the full least-privilege read-only scope set the connector
-// requires across both evidence surfaces. NEVER grant a write/admin scope.
+// requires across every evidence surface. NEVER grant a write/admin scope.
 func RequiredScopes() []string {
-	return []string{RequiredScope, RequiredSIEMScope}
+	return []string{RequiredScope, RequiredSIEMScope, RequiredSignalScope}
 }
 
 // Credential is the resolved Datadog auth material. Both keys are kept off

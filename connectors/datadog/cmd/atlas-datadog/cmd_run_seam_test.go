@@ -18,6 +18,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/monitors"
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/siemrules"
+	"github.com/mgoodric/security-atlas/connectors/datadog/internal/siemsignals"
 	"github.com/mgoodric/security-atlas/connectors/monitoring/alertcfg"
 )
 
@@ -38,15 +39,22 @@ func (f *fakeSDKClient) Push(_ context.Context, _ *evidencev1.EvidenceRecord) (*
 func (f *fakeSDKClient) Close() error { f.closeCalled = true; return nil }
 
 type seamOverrides struct {
-	collect     func(ctx context.Context, api monitors.API) ([]alertcfg.RawRule, error)
-	siemCollect func(ctx context.Context, api siemrules.API, now func() time.Time) ([]siemrules.Rule, error)
-	newClient   func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error)
+	collect       func(ctx context.Context, api monitors.API) ([]alertcfg.RawRule, error)
+	siemCollect   func(ctx context.Context, api siemrules.API, now func() time.Time) ([]siemrules.Rule, error)
+	signalCollect func(ctx context.Context, api siemsignals.API, lookback time.Duration, now func() time.Time) ([]siemsignals.Signal, error)
+	newClient     func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error)
 }
 
-// noSIEM is the default SIEM seam used by tests that only exercise the monitor
-// path: it returns no rules so doRun's SIEM pass is a no-op (never touches a
-// live Datadog security-monitoring endpoint).
+// noSIEM is the default SIEM-rule seam used by tests that only exercise the
+// monitor path: it returns no rules so doRun's SIEM-rule pass is a no-op (never
+// touches a live Datadog security-monitoring endpoint).
 func noSIEM(_ context.Context, _ siemrules.API, _ func() time.Time) ([]siemrules.Rule, error) {
+	return nil, nil
+}
+
+// noSignals is the default signal-history seam: returns no signals so doRun's
+// signal pass is a no-op (never touches a live security-signals endpoint).
+func noSignals(_ context.Context, _ siemsignals.API, _ time.Duration, _ func() time.Time) ([]siemsignals.Signal, error) {
 	return nil, nil
 }
 
@@ -57,8 +65,8 @@ func installSeams(t *testing.T, o seamOverrides) {
 		monitorsCollect = o.collect
 		t.Cleanup(func() { monitorsCollect = prev })
 	}
-	// Always stub the SIEM collector unless a test overrides it, so the monitor
-	// path tests never reach a live security-monitoring API.
+	// Always stub the SIEM-rule collector unless a test overrides it, so the
+	// monitor path tests never reach a live security-monitoring API.
 	prevSIEM := siemrulesCollect
 	if o.siemCollect != nil {
 		siemrulesCollect = o.siemCollect
@@ -66,6 +74,14 @@ func installSeams(t *testing.T, o seamOverrides) {
 		siemrulesCollect = noSIEM
 	}
 	t.Cleanup(func() { siemrulesCollect = prevSIEM })
+	// Always stub the signal-history collector unless a test overrides it.
+	prevSignals := siemSignalsCollect
+	if o.signalCollect != nil {
+		siemSignalsCollect = o.signalCollect
+	} else {
+		siemSignalsCollect = noSignals
+	}
+	t.Cleanup(func() { siemSignalsCollect = prevSignals })
 	if o.newClient != nil {
 		prev := newSDKClient
 		newSDKClient = o.newClient
@@ -80,7 +96,21 @@ func okEnv(t *testing.T) {
 }
 
 func okFlags() runFlags {
-	return runFlags{environment: "prod", monitorControl: "scf:MON-01", siemControl: "scf:THR-01"}
+	return runFlags{
+		environment:       "prod",
+		monitorControl:    "scf:MON-01",
+		siemControl:       "scf:THR-01",
+		siemSignalControl: "scf:IRO-09",
+		siemLookback:      24 * time.Hour,
+	}
+}
+
+func twoSignals() []siemsignals.Signal {
+	ts := time.Date(2026, 6, 7, 11, 0, 0, 0, time.UTC)
+	return []siemsignals.Signal{
+		{SignalID: "sig-1", RuleID: "rule-a", RuleName: "Brute force", Severity: "high", Status: "archived", TriagedAt: ts, ObservedAt: ts},
+		{SignalID: "sig-2", RuleID: "rule-b", Severity: "medium", Status: "open", ObservedAt: ts},
+	}
 }
 
 func twoSIEMRules() []siemrules.Rule {
@@ -260,5 +290,108 @@ func TestDoRun_SIEMPushError(t *testing.T) {
 	err := doRun(context.Background(), okFlags())
 	if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "push siem rule ") {
 		t.Fatalf("want wrapped siem push error; got %v", err)
+	}
+}
+
+func TestNewSIEMSignalsAPI_Constructor(t *testing.T) {
+	if newSIEMSignalsAPI(http.DefaultClient, "https://api.datadoghq.com", "test-datadog-api-key", "test-datadog-app-key") == nil {
+		t.Error("newSIEMSignalsAPI returned nil")
+	}
+}
+
+// TestDoRun_PushesAllThreeKinds verifies one run pushes monitor + SIEM-rule +
+// SIEM-signal records through the single Push RPC (invariant #3).
+func TestDoRun_PushesAllThreeKinds(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		collect: func(_ context.Context, _ monitors.API) ([]alertcfg.RawRule, error) { return twoMonitors(), nil },
+		siemCollect: func(_ context.Context, _ siemrules.API, _ func() time.Time) ([]siemrules.Rule, error) {
+			return twoSIEMRules(), nil
+		},
+		signalCollect: func(_ context.Context, _ siemsignals.API, _ time.Duration, _ func() time.Time) ([]siemsignals.Signal, error) {
+			return twoSignals(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	if err := doRun(context.Background(), okFlags()); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 6 {
+		t.Errorf("pushed = %d; want 6 (2 monitors + 2 siem rules + 2 siem signals)", fake.pushed)
+	}
+}
+
+// TestDoRun_SignalLookbackThreaded asserts the --siem-lookback flag value
+// reaches the signal collector unchanged.
+func TestDoRun_SignalLookbackThreaded(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+
+	var gotLookback time.Duration
+	installSeams(t, seamOverrides{
+		collect: func(_ context.Context, _ monitors.API) ([]alertcfg.RawRule, error) { return nil, nil },
+		signalCollect: func(_ context.Context, _ siemsignals.API, lookback time.Duration, _ func() time.Time) ([]siemsignals.Signal, error) {
+			gotLookback = lookback
+			return nil, nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	f := okFlags()
+	f.siemLookback = 6 * time.Hour
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if gotLookback != 6*time.Hour {
+		t.Errorf("lookback = %v; want 6h threaded through", gotLookback)
+	}
+}
+
+func TestDoRun_SignalCollectError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("403")
+	installSeams(t, seamOverrides{
+		collect: func(_ context.Context, _ monitors.API) ([]alertcfg.RawRule, error) { return nil, nil },
+		signalCollect: func(_ context.Context, _ siemsignals.API, _ time.Duration, _ func() time.Time) ([]siemsignals.Signal, error) {
+			return nil, sentinel
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	err := doRun(context.Background(), okFlags())
+	if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "datadog siem signal collect: ") {
+		t.Fatalf("want wrapped siem signal collect error; got %v", err)
+	}
+}
+
+func TestDoRun_SignalPushError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("push rejected")
+	fake := &fakeSDKClient{pushErr: sentinel}
+	installSeams(t, seamOverrides{
+		collect: func(_ context.Context, _ monitors.API) ([]alertcfg.RawRule, error) { return nil, nil },
+		signalCollect: func(_ context.Context, _ siemsignals.API, _ time.Duration, _ func() time.Time) ([]siemsignals.Signal, error) {
+			return twoSignals(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	err := doRun(context.Background(), okFlags())
+	if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "push siem signal ") {
+		t.Fatalf("want wrapped siem signal push error; got %v", err)
 	}
 }

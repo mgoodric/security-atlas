@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/datadog.siem_signal/1.0.0.json",
+  "x-evidence-kind": "datadog.siem_signal.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["THR-01", "IRO-09"],
+  "title": "Datadog Cloud-SIEM signal-history triage outcome",
+  "description": "One record per Datadog Cloud-SIEM / Security-Monitoring SIGNAL that fired and its triage outcome: the signal's id, the firing rule's id + name, severity, the triage status (open / under_review / triaged / archived), the timeline timestamps (first-seen / triaged / last-updated), and the OPAQUE handle of who triaged. Pulled read-only over a bounded look-back window from the Datadog security-signals search API (GET /api/v2/security_monitoring/signals, security_monitoring_signals_read scope). This is the slice-636 sibling of datadog.siem_rule.v1 (slice 533): slice 533 reads detection-rule CONFIGURATION (SOC 2 CC7.2 — which rules exist); this surface reads what FIRED and how it was TRIAGED (SOC 2 CC7.3 — incident response: rules actually fired and were triaged over the audit period, when, and by whom). Triage METADATA only — NEVER the signal MESSAGE body, the matched log/event SAMPLES, the matched-event payload, the raw detection query, signal-body tags/facets, or a recipient/triager email address (PII); the connector's record struct has no field that can hold them and a reflection guard fails the build if one is added. The connector reports a descriptive triage posture; the platform evaluator owns the final pass/fail per (control, scope). Profile: bounded PULL on the operator's schedule — NOT continuous monitoring and NOT event-driven; the platform-side wire is always push.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["signal_id", "rule_id", "severity", "status"],
+  "properties": {
+    "signal_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Datadog-native stable identifier of the security signal (non-secret; an opaque ID, not a credential)."
+    },
+    "rule_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Datadog-native identifier of the detection rule that fired this signal — ties the signal back to its datadog.siem_rule.v1 configuration record (slice 533)."
+    },
+    "rule_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable name of the firing detection rule (descriptive label; never the signal message body)."
+    },
+    "severity": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The signal's severity label (info / low / medium / high / critical). A descriptive label of the rule's configured severity reflected on the signal, NEVER the matched content."
+    },
+    "status": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The signal's triage status, normalized to the audit vocabulary: 'open' (un-triaged), 'under_review' (assigned/being reviewed), 'triaged' (an explicit triage disposition), or 'archived' (Datadog's native closed state). Derived from Datadog's workflow triage_state; an unknown state normalizes to 'open' (the conservative audit-relevant case)."
+    },
+    "first_seen_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC3339 timestamp of when the signal was first observed (the firing instant). Proves the detection happened within the audit period."
+    },
+    "triaged_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC3339 timestamp of when the signal's triage state was last updated. Proves a triage action happened within the audit period."
+    },
+    "last_updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC3339 timestamp of the signal's most recent workflow update."
+    },
+    "triager_handle": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The OPAQUE handle / id of who triaged the signal (the archiver, falling back to the assignee). A handle or stable id only — NEVER a raw email address or display name (PII); an email-shaped value is dropped before this field is populated."
+    }
+  }
+}

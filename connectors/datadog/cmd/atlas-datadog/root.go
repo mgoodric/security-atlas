@@ -26,9 +26,12 @@ const ConnectorName = "datadog-connector"
 //   - monitoring.alert_config.v1 (Datadog monitor inventory, pull — slice 488)
 //   - datadog.siem_rule.v1        (Cloud-SIEM detection-rule inventory, pull —
 //     slice 533; the slice-488 D1 sibling-kind split)
+//   - datadog.siem_signal.v1      (Cloud-SIEM signal-history triage outcomes,
+//     bounded pull — slice 636; the slice-533 CC7.3 sibling)
 var SupportedKinds = []string{
 	"monitoring.alert_config.v1",
 	"datadog.siem_rule.v1",
+	"datadog.siem_signal.v1",
 }
 
 // PullInterval names the connector's pull cadence HONESTLY (P0-488-6). The
@@ -124,28 +127,35 @@ func sdkOpts() []sdk.Option {
 
 const longDescription = `security-atlas Datadog monitoring connector
 
-Emits two evidence kinds:
+Emits three evidence kinds:
   - monitoring.alert_config.v1  (run subcommand, pull — Datadog monitor inventory)
   - datadog.siem_rule.v1        (run subcommand, pull — Cloud-SIEM detection-rule
                                  inventory; the slice-488 D1 sibling-kind split)
+  - datadog.siem_signal.v1      (run subcommand, bounded pull — Cloud-SIEM
+                                 signal-history triage outcomes; the slice-533
+                                 CC7.3 sibling — what fired and was triaged)
 
 Profile: pull. Each invocation is one bounded read-and-push pass on an
-operator-scheduled cadence (recommended 24h). This is NOT continuous
-monitoring — the interval is named honestly.
+operator-scheduled cadence (recommended 24h). The signal-history surface reads a
+bounded look-back window (--siem-lookback, default 24h). This is NOT continuous
+monitoring and NOT event-driven — the interval is named honestly.
 
 Least-privilege Datadog access (read-only):
   - an API key + an Application key scoped EXACTLY 'monitors_read' +
-    'security_monitoring_rules_read'.
+    'security_monitoring_rules_read' + 'security_monitoring_signals_read'.
   - NEVER grant a write/admin scope (no monitors_write, no
-    security_monitoring_rules_write, no admin).
+    security_monitoring_rules_write, no security_monitoring_signals_write, no
+    admin).
 
-The connector reads CONFIGURATION only — monitor / detection-rule name, type /
-detection class, enabled state, severity (SIEM rules only), and the
-notification-target HANDLES (e.g. @slack-sec-oncall). It NEVER collects the
-secret webhook URL behind an integration, an integration token, a recipient
-email address (PII), the monitor query, the detection query, firing signals,
-matched log samples, matched-event payloads, dashboard JSON, or metric
-time-series. Email-recipient mentions are dropped.
+The connector reads CONFIGURATION + triage METADATA only — monitor /
+detection-rule name, type / detection class, enabled state, severity, the
+notification-target HANDLES (e.g. @slack-sec-oncall), and — for signal history —
+the signal id, firing rule id, triage status, timeline timestamps, and the
+OPAQUE triager handle. It NEVER collects the secret webhook URL behind an
+integration, an integration token, a recipient email address (PII), the monitor
+query, the detection query, a signal MESSAGE body, matched log samples,
+matched-event payloads, signal-body tags, dashboard JSON, or metric
+time-series. Email-recipient and email-triager values are dropped.
 
 Auth: set DATADOG_API_KEY + DATADOG_APP_KEY (and optionally DATADOG_SITE). The
 keys are read from the environment, never a CLI flag, and never logged or placed

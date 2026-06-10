@@ -20,6 +20,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/datadogauth"
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/monitors"
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/siemrules"
+	"github.com/mgoodric/security-atlas/connectors/datadog/internal/siemsignals"
 	"github.com/mgoodric/security-atlas/connectors/monitoring/alertcfg"
 	"github.com/mgoodric/security-atlas/connectors/monitoring/monrecord"
 )
@@ -238,6 +239,73 @@ func TestSIEMEmittedRecords_NoSecretsOrPII(t *testing.T) {
 		"enabled": true, "severity": true, "notification_targets": true,
 	}
 	banned := []string{"fixture.invalid", "webhook.invalid", "oncall@", "https://", "@example.com"}
+	assertNoSecret(t, rec, allowed, banned)
+}
+
+// fakeSignalAPI is a faked Datadog security-signals surface (NO live Datadog).
+type fakeSignalAPI struct{ signals []siemsignals.RawSignal }
+
+func (f *fakeSignalAPI) ListSignals(_ context.Context, _ time.Time) ([]siemsignals.RawSignal, error) {
+	return f.signals, nil
+}
+
+// TestRun_PushesSIEMSignalRecords verifies the slice-636 end-to-end path:
+// collect from a faked Datadog security-signals API, build the
+// datadog.siem_signal.v1 record, push through the platform's single Push RPC,
+// and assert the receipt + the sibling kind + the actor_id.
+func TestRun_PushesSIEMSignalRecords(t *testing.T) {
+	_, conn, bearer := newBufconnPlatform(t)
+	client := sdk.NewClientFromConn(conn, bearer)
+	fixed := func() time.Time { return time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC) }
+
+	api := &fakeSignalAPI{signals: []siemsignals.RawSignal{
+		{ID: "sig-1", RuleID: "rule-aaa", RuleName: "Brute force on login",
+			Severity: "high", Status: "archived",
+			FirstSeen:     time.Date(2026, 6, 7, 10, 0, 0, 0, time.UTC),
+			Triaged:       time.Date(2026, 6, 7, 11, 5, 0, 0, time.UTC),
+			TriagerHandle: "alice-sec"},
+	}}
+	signals, err := siemsignals.Collect(context.Background(), api, 24*time.Hour, fixed)
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	rec, err := siemsignals.Build(signals[0], "scf:IRO-09", actorID("siemsignals"), "datadog", "prod")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if rec.GetEvidenceKind() != "datadog.siem_signal.v1" {
+		t.Errorf("kind = %q; want datadog.siem_signal.v1", rec.GetEvidenceKind())
+	}
+	receipt, err := client.Push(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if receipt.GetHash() == "" {
+		t.Fatal("receipt hash empty (sha256 content-hash)")
+	}
+	if !strings.HasPrefix(rec.GetSourceAttribution().GetActorId(), "connector:datadog:siemsignals@") {
+		t.Errorf("actor_id = %q", rec.GetSourceAttribution().GetActorId())
+	}
+}
+
+// TestSIEMSignalEmittedRecords_NoBodyOrPII verifies P0-636: even when a signal
+// payload embeds a message body, matched samples, the detection query, and an
+// email-shaped triager, the emitted payload carries triage metadata only.
+func TestSIEMSignalEmittedRecords_NoBodyOrPII(t *testing.T) {
+	fixed := func() time.Time { return time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC) }
+	api := &fakeSignalAPI{signals: []siemsignals.RawSignal{
+		{ID: "s1", RuleID: "r1", RuleName: "n", Severity: "high", Status: "archived",
+			TriagerHandle: "victim@fixture.invalid"}, // email-shaped triager: dropped
+	}}
+	signals, _ := siemsignals.Collect(context.Background(), api, time.Hour, fixed)
+	rec, _ := siemsignals.Build(signals[0], "scf:IRO-09", actorID("siemsignals"), "datadog", "prod")
+
+	allowed := map[string]bool{
+		"signal_id": true, "rule_id": true, "rule_name": true, "severity": true,
+		"status": true, "first_seen_at": true, "triaged_at": true,
+		"last_updated_at": true, "triager_handle": true,
+	}
+	banned := []string{"fixture.invalid", "victim@", "https://", "hunter2", "@example.com"}
 	assertNoSecret(t, rec, allowed, banned)
 }
 
