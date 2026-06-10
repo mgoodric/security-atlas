@@ -85,8 +85,8 @@ func TestRegister_ListsConnector(t *testing.T) {
 	for _, h := range list.GetHandles() {
 		if h.GetName() == ConnectorName {
 			found = true
-			if len(h.GetSupportedKinds()) != 5 {
-				t.Errorf("supported_kinds = %d; want 5", len(h.GetSupportedKinds()))
+			if len(h.GetSupportedKinds()) != 7 {
+				t.Errorf("supported_kinds = %d; want 7", len(h.GetSupportedKinds()))
 			}
 			if strings.Join(h.GetProfilesSupported(), ",") != "pull" {
 				t.Errorf("profiles_supported = %v; want [pull]", h.GetProfilesSupported())

@@ -250,6 +250,78 @@ func SecretInventoryClusterRole() []PolicyRule {
 	return append(base, SecretsRule())
 }
 
+// AdmissionWebhookRule returns the ONE additional base ClusterRole rule the
+// admission-webhook collector (slice 652) requires: admissionregistration.k8s.io
+// `validatingwebhookconfigurations` + `mutatingwebhookconfigurations` with verbs
+// get,list — and NOTHING more. This is the deliberate, FLAGGED scope expansion
+// this slice owns (unlike its parent #524, which reused the held `namespaces`
+// grant). The collector reads CONFIGURATION METADATA ONLY (which resources/
+// operations a webhook intercepts, failurePolicy, selector SCOPE, sideEffects,
+// the service dispatch ref); it NEVER reads the webhook caBundle / TLS client
+// key — that guard is enforced structurally in the admission collector, not by
+// this rule. Verbs stay get,list (no write); the resources are exactly the two
+// webhook-configuration kinds (no wildcard, never `secrets`).
+func AdmissionWebhookRule() PolicyRule {
+	return PolicyRule{
+		APIGroups: []string{"admissionregistration.k8s.io"},
+		Resources: []string{"validatingwebhookconfigurations", "mutatingwebhookconfigurations"},
+		Verbs:     readOnlyVerbs,
+		Gates:     "k8s.admission_webhook.v1 (admission-webhook CONFIG metadata — failurePolicy/selector-scope/intercepted resources+operations/service ref; NEVER the caBundle/TLS key; slice 652)",
+	}
+}
+
+// PolicyEngineRules returns the OPTIONAL read-only ClusterRole rules the
+// admission policy-engine collector (slice 652) requires WHEN OPA/Gatekeeper or
+// Kyverno is installed. Each is detected by API-discovery probe, so an absent
+// engine is never an error and the grant is only meaningful when the CRD group
+// is present (the slice-622 pattern). The collector reads policy CONFIGURATION
+// METADATA ONLY (name / kind / scope / enforcement-action); it NEVER reads the
+// policy's Rego/CEL decision-logic body — that guard is structural in the
+// collector. Every resource is named EXPLICITLY — never a wildcard, never
+// `secrets`, never a write verb.
+//
+//	templates.gatekeeper.sh: constrainttemplates — get,list. The static, named
+//	    catalog of installed Gatekeeper policies (each template's name IS the
+//	    constraint KIND it renders). Reading the templates proves WHICH policies
+//	    are defined cluster-wide without needing a per-constraint-kind wildcard
+//	    grant (Gatekeeper renders one dynamic CRD kind per template; naming those
+//	    statically is impossible, so a wildcard would be required to read the
+//	    per-constraint enforcement-action — that is deliberately OUT of v0 to keep
+//	    the grant wildcard-free; see decisions-log D5).
+//	kyverno.io: clusterpolicies + policies — get,list. Static named resources;
+//	    the enforcement action (validationFailureAction) is read directly.
+func PolicyEngineRules() []PolicyRule {
+	return []PolicyRule{
+		{
+			APIGroups: []string{"templates.gatekeeper.sh"},
+			Resources: []string{"constrainttemplates"},
+			Verbs:     readOnlyVerbs,
+			Gates:     "k8s.admission_policy.v1 (OPA/Gatekeeper ConstraintTemplate catalog — name/kind; NEVER the Rego body; optional, only when the CRD group is present; slice 652)",
+		},
+		{
+			APIGroups: []string{"kyverno.io"},
+			Resources: []string{"clusterpolicies", "policies"},
+			Verbs:     readOnlyVerbs,
+			Gates:     "k8s.admission_policy.v1 (Kyverno (Cluster)Policy CONFIG metadata — name/scope/validationFailureAction; NEVER the rule body; optional, only when the CRD group is present; slice 652)",
+		},
+	}
+}
+
+// AdmissionEvidenceClusterRole returns the read-only ClusterRole the connector
+// requires WHEN the admission-evidence mode (slice 652) is enabled: the base
+// least-privilege rules PLUS the one admission-webhook get/list rule
+// (AdmissionWebhookRule) PLUS the optional policy-engine get/list rules
+// (PolicyEngineRules). The base connector's ClusterRole (DocumentedClusterRole)
+// is unchanged. The companion test pins that this set adds EXACTLY the
+// admission-webhook + policy-engine rules over the base and still rejects every
+// write verb and any `secrets` grant.
+func AdmissionEvidenceClusterRole() []PolicyRule {
+	base := DocumentedClusterRole()
+	base = append(base, AdmissionWebhookRule())
+	base = append(base, PolicyEngineRules()...)
+	return base
+}
+
 func firstNonEmpty(a, b string) string {
 	if a != "" {
 		return a
