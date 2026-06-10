@@ -342,6 +342,117 @@ func TestAdmissionEvidenceClusterRole_AddsExactlyTheAdmissionRules(t *testing.T)
 	}
 }
 
+// TestReadOnlyWatchVerbs_AreGetListWatch pins slice-526: the subscribe profile's
+// verb set is EXACTLY get,list,watch — `watch` is the only addition over the
+// pull profile, and it is read-only (never a write verb).
+func TestReadOnlyWatchVerbs_AreGetListWatch(t *testing.T) {
+	t.Parallel()
+	v := ReadOnlyWatchVerbs()
+	sort.Strings(v)
+	if strings.Join(v, ",") != "get,list,watch" {
+		t.Errorf("subscribe verbs = %v; want [get list watch]", v)
+	}
+	writeVerbs := map[string]bool{
+		"create": true, "update": true, "patch": true,
+		"delete": true, "deletecollection": true, "*": true,
+	}
+	for _, verb := range ReadOnlyWatchVerbs() {
+		if writeVerbs[verb] {
+			t.Errorf("subscribe verb set contains a write/wildcard verb %q (P0-526)", verb)
+		}
+	}
+	// Returned slice must be a copy.
+	v[0] = "delete"
+	if strings.Join(ReadOnlyWatchVerbs(), ",") != "get,list,watch" {
+		t.Error("ReadOnlyWatchVerbs returned a mutable reference")
+	}
+}
+
+// TestSubscribeClusterRole_AddsWatchVerbNoNewResource pins slice-526 / P0-526:
+// the subscribe ClusterRole is the base set with `watch` ADDED to EXACTLY the
+// rbac + apps rules — adding NO new resource, NO write verb, NO `secrets`, NO
+// wildcard. Every other rule keeps get,list only.
+func TestSubscribeClusterRole_AddsWatchVerbNoNewResource(t *testing.T) {
+	t.Parallel()
+	base := DocumentedClusterRole()
+	sub := SubscribeClusterRole()
+
+	// (a) Same number of rules — no new RESOURCE rule is introduced.
+	if len(sub) != len(base) {
+		t.Fatalf("subscribe ClusterRole has %d rules; want base(%d) — no new resource rule", len(sub), len(base))
+	}
+
+	// (b) Collect the base resource set; the subscribe set must match it exactly.
+	baseResources := map[string]bool{}
+	for _, r := range base {
+		for _, res := range r.Resources {
+			baseResources[res] = true
+		}
+	}
+
+	allowedVerbs := map[string]bool{"get": true, "list": true, "watch": true}
+	watchableRules := 0
+	for _, r := range sub {
+		// No write verb, no wildcard verb.
+		for _, verb := range r.Verbs {
+			if !allowedVerbs[verb] {
+				t.Errorf("subscribe rule on %v grants non-read verb %q (P0-526)", r.Resources, verb)
+			}
+		}
+		// No new resource, no banned resource.
+		for _, res := range r.Resources {
+			if !baseResources[res] {
+				t.Errorf("subscribe rule introduced a NEW resource %q (P0-526 — watch adds no resource)", res)
+			}
+			if res == "secrets" {
+				t.Errorf("subscribe rule grants `secrets` (P0-526): %v", r.Resources)
+			}
+			if res == "*" {
+				t.Errorf("subscribe rule grants wildcard resource (P0-526): %v", r.Resources)
+			}
+		}
+		for _, g := range r.APIGroups {
+			if g == "*" {
+				t.Errorf("subscribe rule grants wildcard apiGroup (P0-526)")
+			}
+		}
+		// (c) Exactly the rbac + apps rules carry `watch`.
+		hasWatch := false
+		for _, verb := range r.Verbs {
+			if verb == "watch" {
+				hasWatch = true
+			}
+		}
+		watchable := false
+		for _, g := range r.APIGroups {
+			if g == "rbac.authorization.k8s.io" || g == "apps" {
+				watchable = true
+			}
+		}
+		if hasWatch != watchable {
+			t.Errorf("rule %v: hasWatch=%v but watchable(rbac/apps)=%v — watch must be on EXACTLY the rbac+apps rules",
+				r.APIGroups, hasWatch, watchable)
+		}
+		if hasWatch {
+			watchableRules++
+		}
+	}
+	// The base has exactly two watchable surfaces (rbac.authorization.k8s.io + apps).
+	if watchableRules != 2 {
+		t.Errorf("watch verb appears on %d rules; want exactly 2 (rbac + apps)", watchableRules)
+	}
+
+	// (d) The BASE role must stay get,list-only on those surfaces (subscribe is
+	// the opt-in widening; operators not running it keep the narrower grant).
+	for _, r := range base {
+		for _, verb := range r.Verbs {
+			if verb == "watch" {
+				t.Errorf("base ClusterRole leaked a `watch` verb (must stay pull-only get,list): %v", r.APIGroups)
+			}
+		}
+	}
+}
+
 func TestReadOnlyVerbs_AreGetList(t *testing.T) {
 	t.Parallel()
 	v := ReadOnlyVerbs()

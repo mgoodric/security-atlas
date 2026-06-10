@@ -155,6 +155,14 @@ type PolicyRule struct {
 // it never mutates the cluster.
 var readOnlyVerbs = []string{"get", "list"}
 
+// readOnlyWatchVerbs is the read-only verb set the event-driven (subscribe)
+// profile requires (slice 526): get,list (the pull path) PLUS `watch` (the
+// event stream). `watch` is read-only — it streams object changes; it never
+// mutates the cluster. It is added ONLY to the two surfaces the watch consumer
+// reaches (rbac bindings + apps workloads), never to `secrets`, never as a
+// write verb, never as a wildcard.
+var readOnlyWatchVerbs = []string{"get", "list", "watch"}
+
 // DocumentedClusterRole returns the canonical least-privilege read-only
 // ClusterRole the connector requires. The cmd help text and README both render
 // this; keeping it programmatic lets the test pin the doc + the README in sync.
@@ -217,6 +225,56 @@ func ReadOnlyVerbs() []string {
 	out := make([]string, len(readOnlyVerbs))
 	copy(out, readOnlyVerbs)
 	return out
+}
+
+// ReadOnlyWatchVerbs returns a copy of the verb set the event-driven (subscribe)
+// profile requires: get,list,watch. The `watch` verb is read-only (it streams
+// changes); it is the ONLY addition the subscribe profile makes over the pull
+// profile's get,list.
+func ReadOnlyWatchVerbs() []string {
+	out := make([]string, len(readOnlyWatchVerbs))
+	copy(out, readOnlyWatchVerbs)
+	return out
+}
+
+// SubscribeClusterRole returns the read-only ClusterRole the connector requires
+// WHEN the event-driven (subscribe) profile is enabled (slice 526). It is the
+// base least-privilege set with the `watch` verb ADDED — alongside the existing
+// get,list — to EXACTLY the two surfaces the watch consumer streams:
+//
+//   - rbac.authorization.k8s.io rolebindings/clusterrolebindings (and the
+//     roles/clusterroles it resolves rules from), and
+//   - apps deployments/daemonsets/statefulsets.
+//
+// Every OTHER rule (networkpolicies, CNI CRDs, namespaces, admission configs)
+// keeps get,list only — the watch consumer does not stream them. No new
+// RESOURCE is added; the ONLY delta from DocumentedClusterRole is the `watch`
+// verb on the two existing rbac + apps rules. The companion test pins that this
+// set (a) adds no new resource, (b) adds `watch` to exactly the rbac + apps
+// rules, (c) never grants a write verb, `secrets`, or a wildcard.
+func SubscribeClusterRole() []PolicyRule {
+	base := DocumentedClusterRole()
+	out := make([]PolicyRule, 0, len(base))
+	for _, r := range base {
+		if ruleIsWatchable(r) {
+			r.Verbs = ReadOnlyWatchVerbs()
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// ruleIsWatchable reports whether a base rule covers a surface the event-driven
+// watch consumer streams (rbac bindings or apps workloads). Only these two gain
+// the `watch` verb.
+func ruleIsWatchable(r PolicyRule) bool {
+	for _, g := range r.APIGroups {
+		switch g {
+		case "rbac.authorization.k8s.io", "apps":
+			return true
+		}
+	}
+	return false
 }
 
 // SecretsRule returns the ONE additional ClusterRole rule the secret-inventory
