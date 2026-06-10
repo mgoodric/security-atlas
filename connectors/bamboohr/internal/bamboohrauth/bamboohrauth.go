@@ -34,6 +34,11 @@ const (
 	// EnvBaseURL optionally overrides the BambooHR API base URL. Non-secret.
 	EnvBaseURL = "BAMBOOHR_BASE_URL"
 
+	// EnvWebhookSecret is the per-monitor shared secret BambooHR signs webhook
+	// deliveries with (HMAC-SHA256 over the raw body). Secret. Required only for
+	// the event-driven `subscribe` profile (slice 573).
+	EnvWebhookSecret = "BAMBOOHR_WEBHOOK_SECRET"
+
 	// DefaultBaseURL is the BambooHR REST API base.
 	DefaultBaseURL = "https://api.bamboohr.com"
 

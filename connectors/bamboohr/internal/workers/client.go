@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -107,6 +108,47 @@ func (c *Client) ListWorkers(ctx context.Context) ([]RawWorker, error) {
 		})
 	}
 	return out, nil
+}
+
+// GetWorker re-reads ONE worker's minimal lifecycle fields by id, for the
+// event-driven (subscribe) profile (slice 573). It uses the per-employee
+// endpoint (GET /v1/employees/{id}?fields=...) with the SAME minimal `fields`
+// over-collection guard as the custom report: only the lifecycle fields are
+// requested, so the excluded PII never returns. ok=false on 404 (unknown id).
+//
+// The single-employee endpoint returns flat string fields keyed by the same
+// field ids; it does not wrap them in an "employees" array.
+func (c *Client) GetWorker(ctx context.Context, workerID string) (RawWorker, bool, error) {
+	id := strings.TrimSpace(workerID)
+	if id == "" {
+		return RawWorker{}, false, nil
+	}
+	q := url.Values{}
+	q.Set("fields", strings.Join(LifecycleFields, ","))
+	path := "/api/gateway.php/" + url.PathEscape(c.companyDomain) + "/v1/employees/" + url.PathEscape(id) + "?" + q.Encode()
+	var e apiEmployee
+	if err := c.getJSON(ctx, path, &e); err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
+			return RawWorker{}, false, nil
+		}
+		return RawWorker{}, false, err
+	}
+	if strings.TrimSpace(e.ID) == "" {
+		// BambooHR's per-employee endpoint omits "id" from the field response;
+		// fall back to the requested id so the record carries a stable key.
+		e.ID = id
+	}
+	return RawWorker{
+		ID:                  e.ID,
+		Status:              e.Status,
+		HireDate:            e.HireDate,
+		TerminationDate:     e.TerminationDate,
+		JobTitle:            e.JobTitle,
+		Department:          e.Department,
+		ManagerAssignmentID: e.SupervisorEid,
+		WorkEmail:           e.WorkEmail,
+	}, true, nil
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, into any) error {

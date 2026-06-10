@@ -14,9 +14,9 @@ It follows the locked connector pattern verbatim: register-per-run, a stable
 `actor_id`, an hour-truncated `observed_at`, scope minimums, and vendor-native
 read-only auth. It emits one evidence kind:
 
-| Kind                       | Profile | Source                                                    |
-| -------------------------- | ------- | --------------------------------------------------------- |
-| `hris.worker_lifecycle.v1` | pull    | Rippling API `GET /platform/api/employees` (field-scoped) |
+| Kind                       | Profiles        | Source                                                                                                        |
+| -------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------- |
+| `hris.worker_lifecycle.v1` | pull, subscribe | Rippling API `GET /platform/api/employees` (field-scoped poll) + the Rippling termination webhook (slice 573) |
 
 The evidence shape is **shared** with the BambooHR connector (the lifecycle field
 set is identical at this altitude); `source_hris` preserves provenance.
@@ -72,14 +72,37 @@ group only**. Run `atlas-rippling permissions` to print the canonical minimum.
 The token is read from the environment, never a CLI flag (so it never lands in
 shell history), and is never logged or placed into an evidence record.
 
-## Profile + interval — honest, not "continuous monitoring"
+## Profiles — honest naming, not "continuous monitoring"
 
-The connector runs on the **pull** profile: each invocation is one bounded
-read-and-push pass. It is **operator-scheduled** (cron / scheduler) — the
-recommended cadence is **every 24h**. This is deliberately **not** "continuous
-monitoring": the interval is named honestly. A real-time leaver signal via
-Rippling termination webhooks (an event-driven profile) is a documented
-follow-on (slice 573), not part of v0.
+The connector supports two retrieval profiles. Both describe how the connector
+retrieves data **from Rippling**; the platform-side wire is **always push**
+(invariant #3) regardless of profile.
+
+**`pull`** — each invocation is one bounded read-and-push pass, **operator-scheduled**
+(cron / scheduler), recommended cadence **every 24h**. Deliberately **not**
+"continuous monitoring": the interval is named honestly.
+
+**`subscribe`** (slice 573) — a long-lived **source-side webhook receiver** that
+runs **inside this connector process** (`atlas-rippling subscribe`). It receives
+Rippling termination / status-change webhook deliveries, **verifies the
+per-subscription HMAC-SHA256 signature** (`X-Rippling-Signature`) **before** doing
+any work, re-reads the affected worker's minimal lifecycle fields via the same
+read-only API, builds the **same** `hris.worker_lifecycle.v1` record, and pushes
+it. This is **event-driven**, not "continuous monitoring", and it is **not** a
+platform inbound API — the receiver is part of the connector. The webhook is a
+**trigger**; the authoritative lifecycle facts come from the bounded re-read, so
+the over-collection guard is unchanged.
+
+**Dedup against pull:** a webhook-emitted record and a pull-emitted record for the
+same worker within the same UTC hour derive the **same idempotency key**, so the
+append-only ledger collapses them — a termination is never double-written via
+both a webhook and a subsequent poll.
+
+**Webhook auth:** set `RIPPLING_WEBHOOK_SECRET` to the per-subscription signing
+secret. Front the receiver with a reverse proxy for TLS; it binds loopback by
+default. An unsigned, forged, or wrong-signature delivery is rejected with `401`
+and produces no record; an oversized body is rejected with `413` before it is
+read.
 
 ## Usage
 
@@ -87,14 +110,18 @@ follow-on (slice 573), not part of v0.
 # Print the least-privilege scope requirement.
 atlas-rippling permissions
 
-# Register the connector instance (profiles_supported = [pull]).
+# Register the connector instance (profiles_supported = [pull, subscribe]).
 export SECURITY_ATLAS_ENDPOINT=atlas.example.com:443
 export SECURITY_ATLAS_TOKEN=<platform bearer>
 atlas-rippling register
 
-# Read worker-lifecycle records and push evidence.
+# pull: read worker-lifecycle records and push evidence (operator-scheduled).
 export RIPPLING_API_TOKEN=<read-only worker-lifecycle token>
 atlas-rippling run --environment prod
+
+# subscribe: run the source-side termination-webhook receiver (event-driven).
+export RIPPLING_WEBHOOK_SECRET=<per-subscription signing secret>
+atlas-rippling subscribe --environment prod --listen 127.0.0.1:8533 --path /hooks/rippling
 ```
 
 ## Scope minimums
@@ -118,5 +145,7 @@ accuracy recheck:
 ## Follow-ons (out of v0 scope)
 
 - manager-hierarchy evidence for review-routing (slice 571);
-- event-driven profile via Rippling termination webhooks — the highest-value
-  upgrade, a real-time leaver signal for deprovisioning (slice 573).
+- ~~event-driven profile via Rippling termination webhooks~~ **delivered (slice 573)** — see the `subscribe` profile above;
+- cursor pagination for the single-page `pull` read (threat-model D);
+- a multi-employee webhook fan-out (the current receiver acts on the affected
+  worker per delivery).

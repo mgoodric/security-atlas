@@ -5,7 +5,9 @@ import (
 	"crypto/tls"
 	"fmt"
 	"os"
+	"os/signal"
 	"runtime/debug"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -34,6 +36,17 @@ var SupportedKinds = []string{
 // connector is run-on-a-schedule (cron / scheduler), not "continuous
 // monitoring": each invocation is one bounded read-and-push pass.
 const PullInterval = "24h (recommended; operator-scheduled — NOT continuous monitoring)"
+
+// ProfilesSupported is how the connector retrieves data FROM BambooHR: a
+// scheduled read-only poll (pull) and an event-driven webhook the connector
+// receives source-side (subscribe, slice 573). The platform-side wire is ALWAYS
+// push (invariant #3).
+var ProfilesSupported = []string{"pull", "subscribe"}
+
+// SubscribeMechanism names the event-driven profile HONESTLY (P0-491-6 /
+// slice 573): a real-time leaver signal driven by the BambooHR webhook, NOT
+// "continuous monitoring" and NOT a platform inbound API.
+const SubscribeMechanism = "event-driven via the BambooHR termination/status-change webhook (source-side receiver; NOT continuous monitoring)"
 
 // common is the persistent flag set every subcommand needs.
 var common struct {
@@ -71,8 +84,17 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVar(&common.insecure, "insecure", false, "disable TLS to platform (loopback endpoints only)")
 	root.AddCommand(newRegisterCmd())
 	root.AddCommand(newRunCmd())
+	root.AddCommand(newSubscribeCmd())
 	root.AddCommand(newPermissionsCmd())
 	return root
+}
+
+// commandContext returns a context cancelled on SIGINT / SIGTERM, so the
+// long-lived `subscribe` receiver drains gracefully on Ctrl-C or a container
+// stop signal (slice 573).
+func commandContext() context.Context {
+	ctx, _ := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	return ctx
 }
 
 // dialConnectorRegistry opens a gRPC connection scoped to the ConnectorRegistry

@@ -29,6 +29,11 @@ const (
 	// EnvBaseURL optionally overrides the Rippling API base URL. Non-secret.
 	EnvBaseURL = "RIPPLING_BASE_URL"
 
+	// EnvWebhookSecret is the per-subscription shared secret Rippling signs
+	// webhook deliveries with (HMAC-SHA256 over the raw body). Secret. Required
+	// only for the event-driven `subscribe` profile (slice 573).
+	EnvWebhookSecret = "RIPPLING_WEBHOOK_SECRET"
+
 	// DefaultBaseURL is the Rippling REST API base.
 	DefaultBaseURL = "https://api.rippling.com"
 
