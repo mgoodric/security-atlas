@@ -23,11 +23,23 @@ import (
 func newPermissionsCmd() *cobra.Command {
 	var secretInventory bool
 	var admissionEvidence bool
+	var subscribe bool
 	cmd := &cobra.Command{
 		Use:   "permissions",
 		Short: "print the least-privilege read-only ClusterRole this connector requires",
 		Run: func(cmd *cobra.Command, _ []string) {
 			rules := k8sauth.DocumentedClusterRole()
+			if subscribe {
+				rules = k8sauth.SubscribeClusterRole()
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(),
+					"# event-driven (subscribe) profile (slice 526): the base role with the `watch`")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(),
+					"# verb ADDED (alongside get,list) on EXACTLY the rbac + apps surfaces the watch")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(),
+					"# consumer streams. No new resource, never 'secrets', never a write verb, never")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(),
+					"# a wildcard. Every other rule stays get,list-only.")
+			}
 			if admissionEvidence {
 				rules = k8sauth.AdmissionEvidenceClusterRole()
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(),
@@ -67,5 +79,7 @@ func newPermissionsCmd() *cobra.Command {
 		"include the OPT-IN 'secrets' get/list rule the k8s.secret_inventory.v1 mode requires (slice 525)")
 	cmd.Flags().BoolVar(&admissionEvidence, "admission", false,
 		"include the admission-webhook + policy-engine (OPA/Gatekeeper + Kyverno) get/list rules the k8s.admission_webhook.v1 + k8s.admission_policy.v1 kinds require (slice 652)")
+	cmd.Flags().BoolVar(&subscribe, "subscribe", false,
+		"print the event-driven (subscribe) profile ClusterRole: the base role with the `watch` verb added on the rbac + apps surfaces (slice 526)")
 	return cmd
 }

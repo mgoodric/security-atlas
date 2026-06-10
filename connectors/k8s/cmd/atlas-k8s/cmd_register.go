@@ -27,20 +27,24 @@ func newRegisterCmd() *cobra.Command {
 			ctx, cancel := authedContext(10 * time.Second)
 			defer cancel()
 
-			// profiles_supported = [pull]: the connector retrieves data FROM the
-			// cluster on a schedule (read-only API list calls). The platform-side
-			// wire is always push (invariant #3) regardless of this value.
+			// profiles_supported = [pull, subscribe]: BOTH describe how the connector
+			// retrieves data FROM the cluster — `pull` is a scheduled read-and-push
+			// pass (read-only API list calls); `subscribe` is event-driven via the
+			// Kubernetes watch API (the 'subscribe' subcommand consumes a long-lived
+			// watch stream and pushes as RBAC / workload changes happen — NOT
+			// "continuous monitoring", the mechanism is named honestly). The
+			// platform-side wire is ALWAYS push (invariant #3) regardless of profile.
 			resp, err := client.Register(ctx, &connectorsv1.RegisterRequest{
 				Name:              ConnectorName,
 				Version:           connectorVersion(),
 				InstanceId:        uuid.NewString(),
 				SupportedKinds:    SupportedKinds,
-				ProfilesSupported: []string{"pull"},
+				ProfilesSupported: []string{"pull", "subscribe"},
 			})
 			if err != nil {
 				return fmt.Errorf("register: %w", err)
 			}
-			fmt.Printf("registered id=%s instance_id=%s kinds=%d profiles=pull\n",
+			fmt.Printf("registered id=%s instance_id=%s kinds=%d profiles=pull,subscribe\n",
 				resp.GetHandle().GetId(), resp.GetHandle().GetInstanceId(), len(SupportedKinds))
 			return nil
 		},

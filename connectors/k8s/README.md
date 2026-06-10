@@ -6,15 +6,15 @@ pipeline. It follows the locked connector pattern verbatim: register-per-run, a
 stable `actor_id`, an hour-truncated `observed_at`, scope minimums, and
 vendor-native read-only auth. It emits seven evidence kinds:
 
-| Kind                               | Profile | Source                                                                                                                                                                       |
-| ---------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `k8s.rbac_binding.v1`              | pull    | Kubernetes API `rbac.authorization.k8s.io/v1` roles + bindings (get,list)                                                                                                    |
-| `k8s.workload_security_context.v1` | pull    | Kubernetes API `apps/v1` deployments / daemonsets / statefulsets (get,list)                                                                                                  |
-| `k8s.networkpolicy_coverage.v1`    | pull    | Kubernetes API `networking.k8s.io/v1` networkpolicies + namespaces (get,list) — plus the installed CNI's policy CRDs when present (Cilium / Calico, get,list)                |
-| `k8s.pod_security_admission.v1`    | pull    | Kubernetes API core `namespaces` (get,list) — `pod-security.kubernetes.io/*` labels                                                                                          |
-| `k8s.admission_webhook.v1`         | pull    | Kubernetes API `admissionregistration.k8s.io/v1` validating + mutating webhook configurations (get,list) — **slice 652** — webhook CONFIG metadata, **never the caBundle**   |
-| `k8s.admission_policy.v1`          | pull    | OPA/Gatekeeper `templates.gatekeeper.sh` + Kyverno `kyverno.io` policy CRDs (get,list, probe-detected) — **slice 652** — policy CONFIG metadata, **never the Rego/CEL body** |
-| `k8s.secret_inventory.v1`          | pull    | Kubernetes API core `secrets` (get,list) — **OPT-IN, slice 525** — Secret METADATA only (type / namespace / name / age / key-NAMES), **never a value**                       |
+| Kind                               | Profile          | Source                                                                                                                                                                       |
+| ---------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `k8s.rbac_binding.v1`              | pull + subscribe | Kubernetes API `rbac.authorization.k8s.io/v1` roles + bindings (get,list; **+ watch** on the subscribe profile — slice 526)                                                  |
+| `k8s.workload_security_context.v1` | pull + subscribe | Kubernetes API `apps/v1` deployments / daemonsets / statefulsets (get,list; **+ watch** on the subscribe profile — slice 526)                                                |
+| `k8s.networkpolicy_coverage.v1`    | pull             | Kubernetes API `networking.k8s.io/v1` networkpolicies + namespaces (get,list) — plus the installed CNI's policy CRDs when present (Cilium / Calico, get,list)                |
+| `k8s.pod_security_admission.v1`    | pull             | Kubernetes API core `namespaces` (get,list) — `pod-security.kubernetes.io/*` labels                                                                                          |
+| `k8s.admission_webhook.v1`         | pull             | Kubernetes API `admissionregistration.k8s.io/v1` validating + mutating webhook configurations (get,list) — **slice 652** — webhook CONFIG metadata, **never the caBundle**   |
+| `k8s.admission_policy.v1`          | pull             | OPA/Gatekeeper `templates.gatekeeper.sh` + Kyverno `kyverno.io` policy CRDs (get,list, probe-detected) — **slice 652** — policy CONFIG metadata, **never the Rego/CEL body** |
+| `k8s.secret_inventory.v1`          | pull             | Kubernetes API core `secrets` (get,list) — **OPT-IN, slice 525** — Secret METADATA only (type / namespace / name / age / key-NAMES), **never a value**                       |
 
 The third kind (`k8s.networkpolicy_coverage.v1`, slice 523) reports, per
 namespace, how many NetworkPolicies exist, a per-policy SPEC summary, and the
@@ -108,14 +108,67 @@ rule block — and the **base** ClusterRole does not even grant access to
 **metadata only** — never a value. The cluster credential stays source-side and
 never enters an evidence record or a platform push (canvas invariant #3).
 
-## Profile + interval — honest, not "continuous monitoring"
+## Profiles — honest, not "continuous monitoring"
 
-The connector runs on the **pull** profile: each invocation is one bounded
-read-and-push pass. It is **operator-scheduled** (cron / scheduler / a
-CronJob in-cluster) — the recommended cadence is **every 24h**. This is
-deliberately **not** "continuous monitoring": the interval is named honestly. A
-watch-based event-driven profile (via the Kubernetes audit log) is a documented
-follow-on, not part of v0.
+The connector registers `profiles_supported=[pull, subscribe]`. **Both** describe
+how the connector retrieves data **from the cluster**; the platform-side wire is
+always **push** (canvas invariant #3) regardless of profile.
+
+### pull (the `run` subcommand)
+
+Each invocation is one bounded read-and-push pass. It is **operator-scheduled**
+(cron / scheduler / a CronJob in-cluster) — the recommended cadence is **every
+24h**. This is deliberately **not** "continuous monitoring": the interval is
+named honestly. The pull profile is the **reconciliation backstop** and the only
+profile that resolves the full binding + role-rule + every-kind picture.
+
+### subscribe (the `subscribe` subcommand) — event-driven via the Kubernetes watch (slice 526)
+
+The subscribe profile consumes a long-lived **Kubernetes `watch`** against the
+same read-only surfaces the pull profile reads (`rolebindings` for RBAC,
+`deployments` for workloads), and pushes the **same two evidence kinds**
+(`k8s.rbac_binding.v1`, `k8s.workload_security_context.v1`) — **no new kind** — as
+RBAC / workload changes happen, instead of waiting for the next pull pass. This is
+**event-driven via the Kubernetes watch API**, **not** "continuous monitoring":
+the mechanism is named honestly.
+
+**Watch lifecycle (the reflector pattern).** A Kubernetes watch is a long-lived
+stream that ends (the server closes it periodically, or errors). The connector:
+
+1. **LIST**s the resource to obtain the starting `resourceVersion` (RV);
+2. **WATCH**es from that RV with `allowWatchBookmarks=true` so the server
+   periodically sends a Bookmark event that advances the resume point cheaply
+   (no re-LIST per reconnect);
+3. on stream close / transient error, **re-watches** from the last-seen RV;
+4. on a **410 Gone** (`resourceVersion too old`), **re-LISTs** for a fresh RV and
+   resumes the watch from it.
+
+The loop is bound by the process context — `SIGINT`/`SIGTERM` shuts it down
+gracefully.
+
+**Dedup + DoS coalescing.** Every event-built record carries the **same
+slice-487 hour-window idempotency key** the pull path uses. So a watch-emitted
+record and a pull-emitted record for the **same resource in the same hour**
+collapse to one ledger row — and a **burst** of edits to one binding within the
+hour collapses too (threat-model D). Run **both** profiles: subscribe for
+freshness, pull for reconciliation; the hour-window key makes the overlap free.
+
+**Audit-log alternative.** A Kubernetes audit-log consumer is a documented
+**future / fallback** option (it sees the actor of each change directly), but it
+requires control-plane audit-policy access that managed clusters frequently do
+not expose. The `watch` against the read-only API is portable to every cluster,
+so it is what ships. (See `docs/audit-log/526-k8s-watch-decisions.md` D1.)
+
+```sh
+# Run the event-driven profile (alongside a scheduled `run` pull).
+atlas-k8s subscribe --cluster prod-eks --environment prod \
+  --endpoint $SECURITY_ATLAS_ENDPOINT --token $SECURITY_ATLAS_TOKEN
+```
+
+The subscribe profile needs the base ClusterRole with the **`watch`** verb added
+(alongside `get,list`) on **exactly** the rbac + apps surfaces — no new resource,
+never `secrets`, never a write verb, never a wildcard. Print it with
+`atlas-k8s permissions --subscribe`.
 
 ## Auth — least-privilege read-only ClusterRole
 
@@ -134,12 +187,16 @@ kind: ClusterRole
 metadata:
   name: security-atlas-readonly
 rules:
+  # On the event-driven (subscribe) profile — slice 526 — add "watch" to the
+  # verbs on EXACTLY these two rules (rbac + apps): ["get", "list", "watch"]. No
+  # new resource; never secrets/write/wildcard. `permissions --subscribe` prints
+  # this variant. The pull-only profile keeps the get,list grant below.
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["roles", "clusterroles", "rolebindings", "clusterrolebindings"]
-    verbs: ["get", "list"]
+    verbs: ["get", "list"] # subscribe profile: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["deployments", "daemonsets", "statefulsets"]
-    verbs: ["get", "list"]
+    verbs: ["get", "list"] # subscribe profile: ["get", "list", "watch"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["get", "list"]
@@ -295,25 +352,28 @@ atlas-k8s run --cluster prod-us-east --environment prod --auth-mode in-cluster
 atlas-k8s permissions
 ```
 
-| Flag                         | Subcommand | Required | Default                       | Notes                                                                                                 |
-| ---------------------------- | ---------- | -------- | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `--endpoint`                 | both       | yes      | env `SECURITY_ATLAS_ENDPOINT` | platform gRPC endpoint                                                                                |
-| `--token`                    | both       | yes      | env `SECURITY_ATLAS_TOKEN`    | security-atlas bearer token                                                                           |
-| `--insecure`                 | both       | no       | `false`                       | disables TLS; loopback endpoints only                                                                 |
-| `--cluster`                  | `run`      | yes      | —                             | cluster identifier; scopes every record                                                               |
-| `--environment`              | `run`      | yes      | —                             | environment scope tag; records are never emitted un-scoped                                            |
-| `--api-server`               | `run`      | no\*     | env `KUBERNETES_API_SERVER`   | API server URL (\*required, via flag or env)                                                          |
-| `--auth-mode`                | `run`      | no       | `kubeconfig-token`            | `kubeconfig-token` or `in-cluster`                                                                    |
-| `--rbac-control`             | `run`      | no       | `scf:IAC-21`                  | control id attached to RBAC records                                                                   |
-| `--workload-control`         | `run`      | no       | `scf:CFG-02`                  | control id attached to workload records                                                               |
-| `--netpol-control`           | `run`      | no       | `scf:NET-04`                  | control id attached to NetworkPolicy coverage records                                                 |
-| `--pss-control`              | `run`      | no       | `scf:CFG-02`                  | control id attached to PSS admission records                                                          |
-| `--secret-control`           | `run`      | no       | `scf:CRY-01`                  | control id attached to Secret-inventory records                                                       |
-| `--skip-rbac`                | `run`      | no       | `false`                       | skip the `k8s.rbac_binding.v1` pull                                                                   |
-| `--skip-workload`            | `run`      | no       | `false`                       | skip the `k8s.workload_security_context.v1` pull                                                      |
-| `--skip-netpol`              | `run`      | no       | `false`                       | skip the `k8s.networkpolicy_coverage.v1` pull                                                         |
-| `--skip-pss`                 | `run`      | no       | `false`                       | skip the `k8s.pod_security_admission.v1` pull                                                         |
-| `--collect-secret-inventory` | `run`      | no       | `false`                       | **opt-in** `k8s.secret_inventory.v1` (Secret metadata only; needs the extra `secrets` get/list grant) |
+| Flag                              | Subcommand  | Required | Default                       | Notes                                                                                                         |
+| --------------------------------- | ----------- | -------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `--endpoint`                      | both        | yes      | env `SECURITY_ATLAS_ENDPOINT` | platform gRPC endpoint                                                                                        |
+| `--token`                         | both        | yes      | env `SECURITY_ATLAS_TOKEN`    | security-atlas bearer token                                                                                   |
+| `--insecure`                      | both        | no       | `false`                       | disables TLS; loopback endpoints only                                                                         |
+| `--cluster`                       | `run`       | yes      | —                             | cluster identifier; scopes every record                                                                       |
+| `--environment`                   | `run`       | yes      | —                             | environment scope tag; records are never emitted un-scoped                                                    |
+| `--api-server`                    | `run`       | no\*     | env `KUBERNETES_API_SERVER`   | API server URL (\*required, via flag or env)                                                                  |
+| `--auth-mode`                     | `run`       | no       | `kubeconfig-token`            | `kubeconfig-token` or `in-cluster`                                                                            |
+| `--rbac-control`                  | `run`       | no       | `scf:IAC-21`                  | control id attached to RBAC records                                                                           |
+| `--workload-control`              | `run`       | no       | `scf:CFG-02`                  | control id attached to workload records                                                                       |
+| `--netpol-control`                | `run`       | no       | `scf:NET-04`                  | control id attached to NetworkPolicy coverage records                                                         |
+| `--pss-control`                   | `run`       | no       | `scf:CFG-02`                  | control id attached to PSS admission records                                                                  |
+| `--secret-control`                | `run`       | no       | `scf:CRY-01`                  | control id attached to Secret-inventory records                                                               |
+| `--skip-rbac`                     | `run`       | no       | `false`                       | skip the `k8s.rbac_binding.v1` pull                                                                           |
+| `--skip-workload`                 | `run`       | no       | `false`                       | skip the `k8s.workload_security_context.v1` pull                                                              |
+| `--skip-netpol`                   | `run`       | no       | `false`                       | skip the `k8s.networkpolicy_coverage.v1` pull                                                                 |
+| `--skip-pss`                      | `run`       | no       | `false`                       | skip the `k8s.pod_security_admission.v1` pull                                                                 |
+| `--collect-secret-inventory`      | `run`       | no       | `false`                       | **opt-in** `k8s.secret_inventory.v1` (Secret metadata only; needs the extra `secrets` get/list grant)         |
+| `--cluster` / `--environment`     | `subscribe` | yes      | —                             | same scoping as `run`; required on the event-driven profile                                                   |
+| `--skip-rbac` / `--skip-workload` | `subscribe` | no       | `false`                       | do not watch that surface (at least one must remain enabled)                                                  |
+| `--coalesce-cap`                  | `subscribe` | no       | `100000`                      | in-process per-hour idempotency-key set cap (DoS bound; the platform hour-window key is the durable collapse) |
 
 The cluster token is **only** read from `KUBECONFIG_TOKEN` (or the projected
 in-cluster mount) — never a CLI flag — so it never lands in shell history. It is
@@ -324,11 +384,11 @@ its token on every format path).
 `supported_kinds=[k8s.rbac_binding.v1, k8s.workload_security_context.v1,
 k8s.networkpolicy_coverage.v1, k8s.pod_security_admission.v1,
 k8s.secret_inventory.v1]`, and
-`profiles_supported=[pull]` to
-`ConnectorRegistryService.Register`. The
-`profiles_supported` value describes how the connector retrieves data **from the
-cluster** (a scheduled pull); the platform-side wire is always push
-(invariant #3).
+`profiles_supported=[pull, subscribe]` to
+`ConnectorRegistryService.Register`. Both `profiles_supported` values describe how
+the connector retrieves data **from the cluster** — `pull` is a scheduled
+read-and-push pass; `subscribe` is event-driven via the Kubernetes watch API. The
+platform-side wire is always push (invariant #3) regardless of profile.
 
 ## Scope minimums
 
