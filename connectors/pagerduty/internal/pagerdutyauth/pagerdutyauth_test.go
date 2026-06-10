@@ -65,3 +65,33 @@ func TestRequiredScope_IsReadOnly(t *testing.T) {
 		t.Errorf("RequiredScope must not grant write/admin: %q", RequiredScope)
 	}
 }
+
+func TestResolveWebhookSecret_FromOpt(t *testing.T) {
+	t.Parallel()
+	got, err := ResolveWebhookSecret("test-webhook-secret")
+	if err != nil {
+		t.Fatalf("ResolveWebhookSecret: %v", err)
+	}
+	if got != "test-webhook-secret" {
+		t.Errorf("secret = %q; want test-webhook-secret", got)
+	}
+}
+
+func TestResolveWebhookSecret_FromEnv(t *testing.T) {
+	t.Setenv(EnvWebhookSecret, "test-env-webhook-secret")
+	got, err := ResolveWebhookSecret("")
+	if err != nil {
+		t.Fatalf("ResolveWebhookSecret: %v", err)
+	}
+	if got != "test-env-webhook-secret" {
+		t.Errorf("env fallback failed: %q", got)
+	}
+}
+
+func TestResolveWebhookSecret_MissingErrors(t *testing.T) {
+	t.Setenv(EnvWebhookSecret, "")
+	_, err := ResolveWebhookSecret("")
+	if err == nil || !strings.Contains(err.Error(), EnvWebhookSecret) {
+		t.Fatalf("want missing-secret error naming %s; got %v", EnvWebhookSecret, err)
+	}
+}

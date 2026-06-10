@@ -22,6 +22,13 @@ const (
 	// flag so the token never appears in shell history.
 	EnvToken = "PAGERDUTY_TOKEN"
 
+	// EnvWebhookSecret is the PagerDuty v3 webhook per-subscription SIGNING
+	// SECRET used by the `subscribe` profile's receiver to verify the
+	// X-PagerDuty-Signature HMAC. Like the token, it is read from the
+	// environment (never a CLI flag, so it never lands in shell history) and is
+	// never logged or placed into an evidence record (P0-540).
+	EnvWebhookSecret = "PAGERDUTY_WEBHOOK_SECRET"
+
 	// BaseURL is the PagerDuty REST API base. PagerDuty's REST API is a single
 	// global host (region is a property of the account, not the host).
 	BaseURL = "https://api.pagerduty.com"
@@ -67,6 +74,19 @@ func Resolve(opts ResolveOpts) (Credential, error) {
 		return Credential{}, fmt.Errorf("pagerdutyauth: API token required (set %s, scoped %s)", EnvToken, RequiredScope)
 	}
 	return Credential{token: token}, nil
+}
+
+// ResolveWebhookSecret returns the PagerDuty v3 webhook signing secret for the
+// `subscribe` profile. It is required (after env fallback). The returned string
+// is the raw secret; callers pass it to webhook.NewHMACVerifier and must never
+// log it. opt overrides the env var (used by tests); empty falls back to
+// PAGERDUTY_WEBHOOK_SECRET.
+func ResolveWebhookSecret(opt string) (string, error) {
+	secret := strings.TrimSpace(firstNonEmpty(opt, os.Getenv(EnvWebhookSecret)))
+	if secret == "" {
+		return "", fmt.Errorf("pagerdutyauth: webhook signing secret required (set %s)", EnvWebhookSecret)
+	}
+	return secret, nil
 }
 
 func firstNonEmpty(vs ...string) string {

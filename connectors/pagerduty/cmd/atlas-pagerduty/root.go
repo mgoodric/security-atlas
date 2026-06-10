@@ -41,6 +41,16 @@ var SupportedKinds = []string{
 // monitoring": each invocation is one bounded read-and-push pass.
 const PullInterval = "24h (recommended; operator-scheduled — NOT continuous monitoring)"
 
+// ProfilesSupported is what the connector advertises at register time, named
+// HONESTLY (P0-540):
+//   - pull:      scheduled read-only REST GETs (the `run` subcommand).
+//   - subscribe: event-driven PagerDuty v3 incident webhook receipt (the
+//     `webhook` subcommand). NOT continuous monitoring; NOT a relabeled poll.
+//
+// Both describe how the connector retrieves data FROM the source. The platform
+// wire is ALWAYS push (invariant #3) regardless of either value.
+var ProfilesSupported = []string{"pull", "subscribe"}
+
 // common is the persistent flag set every subcommand needs.
 var common struct {
 	endpoint string
@@ -77,6 +87,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVar(&common.insecure, "insecure", false, "disable TLS to platform (loopback endpoints only)")
 	root.AddCommand(newRegisterCmd())
 	root.AddCommand(newRunCmd())
+	root.AddCommand(newWebhookCmd())
 	root.AddCommand(newPermissionsCmd())
 	return root
 }
