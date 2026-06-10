@@ -29,12 +29,13 @@ const bambooSigHeader = "X-BambooHR-Signature"
 // without binding a real port.
 var serveReceiver = webhook.Serve
 
-// bambooParser extracts the triggered worker id from a BambooHR webhook
+// bambooParser extracts the triggered worker ids from a BambooHR webhook
 // envelope. BambooHR webhooks deliver an "employees" array of changed records,
-// each carrying the employee id; the connector re-reads each worker's
-// authoritative minimal lifecycle fields. v0 acts on the first changed employee
-// (single-worker termination is the dominant leaver case); a multi-employee
-// fan-out is a documented follow-on (decisions log Revisit).
+// each carrying the employee id; a single delivery can carry MORE THAN ONE
+// changed employee (e.g. a bulk status change). The parser returns EVERY changed
+// employee's id (slice 655 fan-out); the receiver re-reads + pushes a record for
+// each. The shared receiver de-duplicates and bounds the list (webhook.MaxFanOut)
+// before fanning out.
 type bambooParser struct{}
 
 type bambooWebhookEnvelope struct {
@@ -43,18 +44,18 @@ type bambooWebhookEnvelope struct {
 	} `json:"employees"`
 }
 
-func (bambooParser) ParseWorkerID(body []byte) (string, bool, error) {
+func (bambooParser) ParseWorkerIDs(body []byte) ([]string, error) {
 	var env bambooWebhookEnvelope
 	if err := json.Unmarshal(body, &env); err != nil {
-		return "", false, fmt.Errorf("parse bamboohr webhook: %w", err)
+		return nil, fmt.Errorf("parse bamboohr webhook: %w", err)
 	}
+	ids := make([]string, 0, len(env.Employees))
 	for _, e := range env.Employees {
-		id := stringifyID(e.ID)
-		if id != "" {
-			return id, true, nil
+		if id := stringifyID(e.ID); id != "" {
+			ids = append(ids, id)
 		}
 	}
-	return "", false, nil
+	return ids, nil
 }
 
 // stringifyID normalizes a BambooHR employee id that may arrive as a JSON number

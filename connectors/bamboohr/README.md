@@ -81,12 +81,21 @@ retrieves data **from BambooHR**; the platform-side wire is **always push**
 runs **inside this connector process** (`atlas-bamboohr subscribe`). It receives
 BambooHR termination / status-change webhook deliveries, **verifies the
 per-monitor HMAC-SHA256 signature** (`X-BambooHR-Signature`) **before** doing any
-work, re-reads the affected worker's minimal lifecycle fields via the same
-read-only API, builds the **same** `hris.worker_lifecycle.v1` record, and pushes
-it. This is **event-driven**, not "continuous monitoring", and **not** a platform
-inbound API — the receiver is part of the connector. The webhook is a **trigger**;
-the authoritative lifecycle facts come from the bounded re-read, so the
-over-collection guard is unchanged.
+work, then for **each** changed employee in the delivery's `employees[]` array
+re-reads that worker's minimal lifecycle fields via the same read-only API, builds
+the **same** `hris.worker_lifecycle.v1` record, and pushes it (slice 655
+multi-employee fan-out). Signature verification happens **once** per delivery,
+before any fan-out. This is **event-driven**, not "continuous monitoring", and
+**not** a platform inbound API — the receiver is part of the connector. The
+webhook is a **trigger**; the authoritative lifecycle facts come from the bounded
+re-read, so the over-collection guard is unchanged.
+
+**Multi-employee fan-out (slice 655):** one delivery can carry several changed
+employees (e.g. a bulk status change); the receiver re-reads + pushes one record
+per changed employee, de-duplicating repeated ids and bounding the fan-out at 100
+distinct workers per delivery. If one employee's re-read or push fails mid-fan-out,
+the healthy employees are still emitted and the delivery returns `502` so the
+vendor retries (the already-pushed records dedup-collapse on the retry).
 
 **Dedup against pull:** a webhook-emitted record and a pull-emitted record for the
 same worker within the same UTC hour derive the **same idempotency key**, so the
@@ -137,6 +146,6 @@ pass/fail per `(control, scope)`.
 - ~~event-driven profile via BambooHR webhooks~~ **delivered (slice 573)** — see
   the `subscribe` profile above;
 - cursor pagination for the single-pass `pull` report (threat-model D);
-- a multi-employee webhook fan-out (the current receiver acts on the first
-  changed employee per delivery — a single termination is the dominant leaver
-  case).
+- ~~a multi-employee webhook fan-out~~ **delivered (slice 655)** — the receiver
+  now re-reads + pushes one record per changed employee in a delivery; see the
+  `subscribe` profile above.

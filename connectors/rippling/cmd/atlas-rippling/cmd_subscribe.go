@@ -47,19 +47,24 @@ type ripplingWebhookEnvelope struct {
 	} `json:"data"`
 }
 
-func (ripplingParser) ParseWorkerID(body []byte) (string, bool, error) {
+// ParseWorkerIDs returns the single affected worker as a one-element slice (or an
+// empty slice for an unrelated event). The Rippling envelope is single-worker, so
+// the shared receiver's fan-out loop is a no-op here — Rippling behavior is
+// identical to the pre-fan-out single-worker path (slice 655: Rippling stays
+// single).
+func (ripplingParser) ParseWorkerIDs(body []byte) ([]string, error) {
 	var env ripplingWebhookEnvelope
 	if err := json.Unmarshal(body, &env); err != nil {
-		return "", false, fmt.Errorf("parse rippling webhook: %w", err)
+		return nil, fmt.Errorf("parse rippling webhook: %w", err)
 	}
 	id := strings.TrimSpace(env.Data.EmployeeID)
 	if id == "" {
 		id = strings.TrimSpace(env.Data.ID)
 	}
 	if id == "" {
-		return "", false, nil
+		return nil, nil
 	}
-	return id, true, nil
+	return []string{id}, nil
 }
 
 // ripplingFetcher adapts the read-only single-worker client to the receiver's

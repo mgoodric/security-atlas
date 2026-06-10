@@ -17,7 +17,7 @@ import (
 )
 
 func TestNewServer_HasTimeouts(t *testing.T) {
-	rec := testReceiver(t, &recordingPusher{}, &staticFetcher{ok: true}, idParser{id: "w1", ok: true})
+	rec := testReceiver(t, &recordingPusher{}, &staticFetcher{ok: true}, oneID("w1"))
 	srv := NewServer(":0", "/hooks/hris", rec)
 	if srv.ReadHeaderTimeout == 0 {
 		t.Error("ReadHeaderTimeout unset (gosec G112)")
@@ -33,7 +33,7 @@ func TestNewServer_HasTimeouts(t *testing.T) {
 func TestServe_RunsAndShutsDown(t *testing.T) {
 	pusher := &recordingPusher{}
 	fetcher := &staticFetcher{raw: worker.RawWorker{WorkerID: "w1", Status: worker.StatusTerminated}, ok: true}
-	rec := testReceiver(t, pusher, fetcher, idParser{id: "w1", ok: true})
+	rec := testReceiver(t, pusher, fetcher, oneID("w1"))
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -83,7 +83,7 @@ func TestServe_RunsAndShutsDown(t *testing.T) {
 // malformed address fails ListenAndServe synchronously, and Serve returns that
 // error (not nil) before the context is ever cancelled.
 func TestServe_ListenError(t *testing.T) {
-	rec := testReceiver(t, &recordingPusher{}, &staticFetcher{ok: true}, idParser{id: "w1", ok: true})
+	rec := testReceiver(t, &recordingPusher{}, &staticFetcher{ok: true}, oneID("w1"))
 	srv := NewServer("256.256.256.256:99999", "/hooks/hris", rec)
 	err := Serve(context.Background(), srv)
 	if err == nil {
@@ -97,7 +97,7 @@ func TestServe_ListenError(t *testing.T) {
 func TestReceiver_FetchedWorkerMissingIDEmitsNothing(t *testing.T) {
 	pusher := &recordingPusher{}
 	fetcher := &staticFetcher{raw: worker.RawWorker{WorkerID: "   "}, ok: true}
-	rec := testReceiver(t, pusher, fetcher, idParser{id: "w1", ok: true})
+	rec := testReceiver(t, pusher, fetcher, oneID("w1"))
 	body := `{"worker_id":"w1"}`
 	mac := hmac.New(sha256.New, []byte(testSecret))
 	mac.Write([]byte(body))
