@@ -159,6 +159,18 @@ func DefaultSeed() []KindVersion {
 		// signals, raw log samples, matched-event payloads, secret notification
 		// targets, recipient PII, or the raw detection query.
 		{Kind: "datadog.siem_rule.v1", Version: "1.0.0"},
+		// Slice 636: Datadog Cloud-SIEM signal-history triage outcomes — the
+		// slice-533 CC7.3 sibling. Slice 533 reads detection-rule CONFIGURATION
+		// (CC7.2: which rules exist); this reads what FIRED and how it was TRIAGED
+		// (CC7.3 incident response: rules fired + were triaged over the audit
+		// period, when, by whom): THR-01 + IRO-09. Read-only
+		// (security_monitoring_signals_read), bounded PULL over a look-back window
+		// (NOT continuous monitoring, NOT event-driven). Triage METADATA only —
+		// never the signal message body, matched log/event samples, the
+		// matched-event payload, the raw detection query, signal-body tags, or a
+		// recipient/triager email (the record struct has no field that can hold
+		// them; a reflection guard fails the build if one is added).
+		{Kind: "datadog.siem_signal.v1", Version: "1.0.0"},
 		// Slice 534: Grafana connector authn/authz CONFIG evidence — the
 		// deliberate slice-488 deferred authn/authz surface (P0-488-7). Proves
 		// SSO is enforced + access is role-based (SOC 2 CC6.1/CC6.2/CC6.3): SCF

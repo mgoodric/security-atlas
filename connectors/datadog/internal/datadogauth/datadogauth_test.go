@@ -102,13 +102,25 @@ func TestRequiredSIEMScope_IsReadOnly(t *testing.T) {
 	}
 }
 
-// TestRequiredScopes_FullReadOnlySet exercises the slice-533 RequiredScopes
-// helper: it returns exactly the two read-only scopes the connector needs
-// across both evidence surfaces, in order, and never a write/admin scope.
+// TestRequiredSignalScope_IsReadOnly pins the slice-636 signal-history scope to
+// the least-privilege read-only value (no write/triage/admin).
+func TestRequiredSignalScope_IsReadOnly(t *testing.T) {
+	t.Parallel()
+	if RequiredSignalScope != "security_monitoring_signals_read" {
+		t.Errorf("RequiredSignalScope = %q; want security_monitoring_signals_read (read-only)", RequiredSignalScope)
+	}
+	if strings.Contains(RequiredSignalScope, "write") || strings.Contains(RequiredSignalScope, "admin") {
+		t.Errorf("RequiredSignalScope must not grant write/admin: %q", RequiredSignalScope)
+	}
+}
+
+// TestRequiredScopes_FullReadOnlySet exercises the RequiredScopes helper: it
+// returns exactly the three read-only scopes the connector needs across every
+// evidence surface, in order, and never a write/admin scope.
 func TestRequiredScopes_FullReadOnlySet(t *testing.T) {
 	t.Parallel()
 	got := RequiredScopes()
-	want := []string{"monitors_read", "security_monitoring_rules_read"}
+	want := []string{"monitors_read", "security_monitoring_rules_read", "security_monitoring_signals_read"}
 	if len(got) != len(want) {
 		t.Fatalf("RequiredScopes() = %v; want %v", got, want)
 	}
@@ -125,8 +137,8 @@ func TestRequiredScopes_FullReadOnlySet(t *testing.T) {
 			t.Errorf("scope %q is not a read-only (_read-suffixed) scope", s)
 		}
 	}
-	// The helper composes the two exported constants.
-	if got[0] != RequiredScope || got[1] != RequiredSIEMScope {
-		t.Errorf("RequiredScopes() must compose RequiredScope + RequiredSIEMScope; got %v", got)
+	// The helper composes the three exported constants.
+	if got[0] != RequiredScope || got[1] != RequiredSIEMScope || got[2] != RequiredSignalScope {
+		t.Errorf("RequiredScopes() must compose RequiredScope + RequiredSIEMScope + RequiredSignalScope; got %v", got)
 	}
 }

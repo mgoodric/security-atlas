@@ -15,6 +15,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/datadogauth"
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/monitors"
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/siemrules"
+	"github.com/mgoodric/security-atlas/connectors/datadog/internal/siemsignals"
 	"github.com/mgoodric/security-atlas/connectors/monitoring/alertcfg"
 	"github.com/mgoodric/security-atlas/connectors/monitoring/monrecord"
 )
@@ -39,6 +40,12 @@ var (
 	newSIEMRulesAPI  = func(hc *http.Client, baseURL, apiKey, appKey string) siemrules.API {
 		return siemrules.NewClient(hc, baseURL, apiKey, appKey)
 	}
+	// siemSignalsCollect + newSIEMSignalsAPI are the slice-636 seams, parallel
+	// to the siemrules pair: tests swap in a fake Datadog security-signals read.
+	siemSignalsCollect = siemsignals.Collect
+	newSIEMSignalsAPI  = func(hc *http.Client, baseURL, apiKey, appKey string) siemsignals.API {
+		return siemsignals.NewClient(hc, baseURL, apiKey, appKey)
+	}
 )
 
 // sdkPushClient is the narrow surface doRun consumes from sdk.Client.
@@ -48,10 +55,12 @@ type sdkPushClient interface {
 }
 
 type runFlags struct {
-	environment    string
-	monitorControl string
-	siemControl    string
-	site           string
+	environment       string
+	monitorControl    string
+	siemControl       string
+	siemSignalControl string
+	siemLookback      time.Duration
+	site              string
 }
 
 func newRunCmd() *cobra.Command {
@@ -59,22 +68,27 @@ func newRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "read Datadog monitor inventory and push evidence records",
-		Long: `Read Datadog monitor inventory (GET /api/v1/monitor, monitors_read)
-and Datadog Cloud-SIEM detection-rule inventory
-(GET /api/v2/security_monitoring/rules, security_monitoring_rules_read) via the
-read-only Datadog API, transform to monitoring.alert_config.v1 +
-datadog.siem_rule.v1 records, and push to the platform.
+		Long: `Read Datadog monitor inventory (GET /api/v1/monitor, monitors_read),
+Datadog Cloud-SIEM detection-rule inventory
+(GET /api/v2/security_monitoring/rules, security_monitoring_rules_read), and
+Datadog Cloud-SIEM signal-history triage outcomes
+(GET /api/v2/security_monitoring/signals, security_monitoring_signals_read) via
+the read-only Datadog API, transform to monitoring.alert_config.v1 +
+datadog.siem_rule.v1 + datadog.siem_signal.v1 records, and push to the platform.
 
 Profile: pull. One bounded read-and-push pass per invocation; operator-scheduled
-(recommended 24h). NOT continuous monitoring.
+(recommended 24h). The signal-history surface reads a bounded look-back window
+(--siem-lookback, default 24h). NOT continuous monitoring and NOT event-driven.
 
 Auth: set DATADOG_API_KEY + DATADOG_APP_KEY (read-only monitors_read +
-security_monitoring_rules_read scopes), and optionally DATADOG_SITE. The keys
-never appear in a log line or an evidence record. The connector emits monitor /
-detection-rule name, type, enabled state, severity (SIEM only), and
-notification-target HANDLES only — never the secret webhook URL, an integration
-token, a recipient email, the monitor query, the detection query, firing
-signals, matched log samples, matched-event payloads, dashboard JSON, or metric
+security_monitoring_rules_read + security_monitoring_signals_read scopes), and
+optionally DATADOG_SITE. The keys never appear in a log line or an evidence
+record. The connector emits monitor / detection-rule name, type, enabled state,
+severity, notification-target HANDLES, and — for signal history — the signal id,
+firing rule id, status, timeline timestamps, and the OPAQUE triager handle only
+— never the secret webhook URL, an integration token, a recipient email, the
+monitor query, the detection query, a signal MESSAGE body, matched log samples,
+matched-event payloads, signal-body tags, dashboard JSON, or metric
 time-series.`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -91,6 +105,8 @@ time-series.`,
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
 	cmd.Flags().StringVar(&f.monitorControl, "monitor-control", "scf:MON-01", "control_id to attach to monitoring.alert_config.v1 records")
 	cmd.Flags().StringVar(&f.siemControl, "siem-control", "scf:THR-01", "control_id to attach to datadog.siem_rule.v1 records")
+	cmd.Flags().StringVar(&f.siemSignalControl, "siem-signal-control", "scf:IRO-09", "control_id to attach to datadog.siem_signal.v1 records")
+	cmd.Flags().DurationVar(&f.siemLookback, "siem-lookback", 24*time.Hour, "bounded look-back window for the SIEM signal-history pull (honest interval — NOT continuous monitoring)")
 	cmd.Flags().StringVar(&f.site, "site", "", "Datadog site override (env: DATADOG_SITE; default datadoghq.com)")
 	return cmd
 }
@@ -132,8 +148,13 @@ func doRun(ctx context.Context, f runFlags) error {
 		return err
 	}
 
-	fmt.Printf("pushed %d records (vendor=datadog environment=%s: monitors=%d siem_rules=%d)\n",
-		pushed+siemPushed, f.environment, pushed, siemPushed)
+	signalPushed, err := runSIEMSignals(ctx, f, cred, httpClient, sdkClient)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("pushed %d records (vendor=datadog environment=%s: monitors=%d siem_rules=%d siem_signals=%d)\n",
+		pushed+siemPushed+signalPushed, f.environment, pushed, siemPushed, signalPushed)
 	return nil
 }
 
@@ -155,6 +176,31 @@ func runSIEMRules(ctx context.Context, f runFlags, cred datadogauth.Credential, 
 		}
 		if err := pushOne(ctx, sdkClient, rec); err != nil {
 			return pushed, fmt.Errorf("push siem rule %s: %w", rule.RuleID, err)
+		}
+		pushed++
+	}
+	return pushed, nil
+}
+
+// runSIEMSignals collects + pushes Datadog Cloud-SIEM signal-history evidence
+// (datadog.siem_signal.v1) over a bounded look-back window. Separated from the
+// rule pass so each evidence kind has an isolated collect->build->push loop;
+// all three share the one Push RPC (invariant #3). Bounded PULL, not
+// event-driven (decisions-log D2).
+func runSIEMSignals(ctx context.Context, f runFlags, cred datadogauth.Credential, httpClient *http.Client, sdkClient sdkPushClient) (int, error) {
+	api := newSIEMSignalsAPI(httpClient, cred.BaseURL(), cred.APIKey(), cred.AppKey())
+	signals, err := siemSignalsCollect(ctx, api, f.siemLookback, nil)
+	if err != nil {
+		return 0, fmt.Errorf("datadog siem signal collect: %w", err)
+	}
+	pushed := 0
+	for _, sig := range signals {
+		rec, err := siemsignals.Build(sig, f.siemSignalControl, actorID("siemsignals"), "datadog", f.environment)
+		if err != nil {
+			return pushed, fmt.Errorf("build siem signal record %s: %w", sig.SignalID, err)
+		}
+		if err := pushOne(ctx, sdkClient, rec); err != nil {
+			return pushed, fmt.Errorf("push siem signal %s: %w", sig.SignalID, err)
 		}
 		pushed++
 	}

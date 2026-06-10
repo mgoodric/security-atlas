@@ -26,13 +26,16 @@ func newPermissionsCmd() *cobra.Command {
 			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n",
 				"Application key", datadogauth.RequiredSIEMScope, "datadog.siem_rule.v1 (Cloud-SIEM detection-rule inventory)")
 			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n",
+				"Application key", datadogauth.RequiredSignalScope, "datadog.siem_signal.v1 (Cloud-SIEM signal-history triage outcomes)")
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n",
 				"API key", "(no scope — identifies the org)", "required alongside the Application key")
 			_ = tw.Flush()
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(),
 				strings.TrimSpace(`
 NEVER grant a write/admin Application-key scope (no monitors_write, no
-security_monitoring_rules_write, no admin). The connector issues only read GETs
-against /api/v1/monitor and /api/v2/security_monitoring/rules.`))
+security_monitoring_rules_write, no security_monitoring_signals_write, no admin).
+The connector issues only read GETs against /api/v1/monitor,
+/api/v2/security_monitoring/rules, and /api/v2/security_monitoring/signals.`))
 		},
 	}
 }
