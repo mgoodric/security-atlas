@@ -326,6 +326,9 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 	netpolAllowed := map[string]bool{
 		"namespace": true, "policy_count": true, "default_deny_ingress": true,
 		"default_deny_egress": true, "policies": true,
+		// slice 622: the policy SOURCE set (API-group identifiers — SPEC metadata,
+		// never peer/selector payload).
+		"sources": true,
 	}
 	pssAllowed := map[string]bool{
 		"namespace": true, "configured": true,
@@ -358,6 +361,9 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 	nestedAllowed := map[string]bool{
 		"name": true, "policy_types": true, "selects_all_pods": true,
 		"ingress_rule_count": true, "egress_rule_count": true,
+		// slice 622: the per-policy SOURCE API group (SPEC metadata, never a
+		// peer/selector/port value).
+		"source": true,
 	}
 	if policies, ok := npRec.GetPayload().AsMap()["policies"].([]any); ok {
 		for _, p := range policies {

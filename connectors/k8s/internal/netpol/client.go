@@ -26,13 +26,18 @@ import (
 // discards unmodeled keys, so they never materialize into Go memory here and can
 // never reach an evidence record.
 type Client struct {
-	r *k8slist.Reader
+	r   *k8slist.Reader
+	cni *cniReader
 }
 
 // NewClient builds a NetworkPolicy client. token is a read-only ServiceAccount
 // bearer token (from k8sauth.Credential.Token). baseURL is the API server URL.
+// The client also folds in CNI-native policy CRDs (Cilium / Calico) when those
+// CRDs are present in the cluster (slice 622) — detected by API discovery, never
+// hard-failing when absent.
 func NewClient(httpClient *http.Client, baseURL, token string) *Client {
-	return &Client{r: k8slist.NewReader(httpClient, baseURL, token)}
+	r := k8slist.NewReader(httpClient, baseURL, token)
+	return &Client{r: r, cni: newCNIReader(r)}
 }
 
 // APIError is re-exported from the shared reader so existing callers and tests
@@ -102,6 +107,36 @@ func (c *Client) ListNamespaceCoverage(ctx context.Context) ([]RawNamespace, err
 		byNamespace[ns] = append(byNamespace[ns], reduce(np))
 	}
 
+	// The ordered, deduplicated set of real namespaces — the only namespaces a
+	// cluster-wide CNI policy may fold default-deny into.
+	nsNames := make([]string, 0, len(namespaces))
+	for _, ns := range namespaces {
+		if ns.Metadata.Name != "" {
+			nsNames = append(nsNames, ns.Metadata.Name)
+		}
+	}
+
+	// Fold in CNI-native policy CRDs (Cilium / Calico) when present. Absent CRDs
+	// contribute nothing (no hard-fail). cni may be nil in a directly-constructed
+	// Client used by a narrow test; guard it.
+	if c.cni != nil {
+		cniByNS, clusterwide, cerr := c.cni.collect(ctx)
+		if cerr != nil {
+			return nil, fmt.Errorf("list cni networkpolicies: %w", cerr)
+		}
+		for ns, ps := range cniByNS {
+			byNamespace[ns] = append(byNamespace[ns], ps...)
+		}
+		// Cluster-wide CNI policies (CiliumClusterwide / Calico GlobalNetworkPolicy)
+		// apply to every namespace — fold a copy into each real namespace so the
+		// per-namespace default-deny assessment credits them.
+		for _, cw := range clusterwide {
+			for _, name := range nsNames {
+				byNamespace[name] = append(byNamespace[name], cw)
+			}
+		}
+	}
+
 	out := make([]RawNamespace, 0, len(namespaces))
 	for _, ns := range namespaces {
 		name := ns.Metadata.Name
@@ -109,7 +144,12 @@ func (c *Client) ListNamespaceCoverage(ctx context.Context) ([]RawNamespace, err
 			continue
 		}
 		policies := byNamespace[name]
-		sort.Slice(policies, func(i, j int) bool { return policies[i].Name < policies[j].Name })
+		sort.Slice(policies, func(i, j int) bool {
+			if policies[i].Name != policies[j].Name {
+				return policies[i].Name < policies[j].Name
+			}
+			return policies[i].Source < policies[j].Source
+		})
 		out = append(out, RawNamespace{Name: name, Policies: policies})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -122,6 +162,7 @@ func reduce(np apiNetpol) RawPolicy {
 	spec := np.Spec
 	return RawPolicy{
 		Name:             np.Metadata.Name,
+		Source:           SourceUpstream,
 		PolicyTypes:      derivePolicyTypes(spec),
 		SelectsAllPods:   spec.PodSelector.isEmpty(),
 		IngressRuleCount: len(spec.Ingress),

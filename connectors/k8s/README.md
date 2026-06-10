@@ -6,17 +6,36 @@ pipeline. It follows the locked connector pattern verbatim: register-per-run, a
 stable `actor_id`, an hour-truncated `observed_at`, scope minimums, and
 vendor-native read-only auth. It emits four evidence kinds:
 
-| Kind                               | Profile | Source                                                                              |
-| ---------------------------------- | ------- | ----------------------------------------------------------------------------------- |
-| `k8s.rbac_binding.v1`              | pull    | Kubernetes API `rbac.authorization.k8s.io/v1` roles + bindings (get,list)           |
-| `k8s.workload_security_context.v1` | pull    | Kubernetes API `apps/v1` deployments / daemonsets / statefulsets (get,list)         |
-| `k8s.networkpolicy_coverage.v1`    | pull    | Kubernetes API `networking.k8s.io/v1` networkpolicies + namespaces (get,list)       |
-| `k8s.pod_security_admission.v1`    | pull    | Kubernetes API core `namespaces` (get,list) — `pod-security.kubernetes.io/*` labels |
+| Kind                               | Profile | Source                                                                                                                                                        |
+| ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `k8s.rbac_binding.v1`              | pull    | Kubernetes API `rbac.authorization.k8s.io/v1` roles + bindings (get,list)                                                                                     |
+| `k8s.workload_security_context.v1` | pull    | Kubernetes API `apps/v1` deployments / daemonsets / statefulsets (get,list)                                                                                   |
+| `k8s.networkpolicy_coverage.v1`    | pull    | Kubernetes API `networking.k8s.io/v1` networkpolicies + namespaces (get,list) — plus the installed CNI's policy CRDs when present (Cilium / Calico, get,list) |
+| `k8s.pod_security_admission.v1`    | pull    | Kubernetes API core `namespaces` (get,list) — `pod-security.kubernetes.io/*` labels                                                                           |
 
 The third kind (`k8s.networkpolicy_coverage.v1`, slice 523) reports, per
 namespace, how many NetworkPolicies exist, a per-policy SPEC summary, and the
 derived default-deny assessment — the recurring SOC 2 CC6.6 / ISO A.8 "prove
 network segmentation between workloads" evidence demand.
+
+**CNI-native policy CRDs (slice 622).** Many production clusters enforce
+segmentation entirely through their CNI's own CRDs rather than (or in addition
+to) upstream `networking.k8s.io` NetworkPolicy. When a Cilium CRD (`cilium.io`:
+`CiliumNetworkPolicy` / `CiliumClusterwideNetworkPolicy`) or a Calico CRD
+(`crd.projectcalico.org`: `NetworkPolicy` / `GlobalNetworkPolicy`) is **present**
+in the cluster — detected by API discovery, never hard-failing when absent — the
+collector reads those policy objects (`get,list`) and folds their coverage into
+the same per-namespace default-deny assessment. Each policy summary carries a
+`source` (`networking.k8s.io` / `cilium.io` / `crd.projectcalico.org`) and the
+namespace carries the `sources` set, so the evaluator can reason about which
+enforcement plane covers a namespace. A cluster-wide CNI policy
+(`CiliumClusterwideNetworkPolicy` / Calico `GlobalNetworkPolicy`) with an
+all-endpoints zero-rule shape folds default-deny into every namespace. Without
+this, a Cilium/Calico-only cluster reads as fully unprotected — a false-FAIL.
+Same over-collection guard as upstream: **CRD SPEC metadata only**, never the
+peer / selector / CIDR / port contents of a rule. The fields are added
+additively to the `1.0.0` schema (no version bump); records predating CNI
+support stay valid and read as upstream-only.
 
 The fourth kind (`k8s.pod_security_admission.v1`, slice 524) reports, per
 namespace, the Pod-Security-Standards admission configuration: which namespaces
@@ -73,6 +92,15 @@ rules:
     verbs: ["get", "list"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
+    verbs: ["get", "list"]
+  # CNI-native policy CRDs (slice 622) — optional. Include only the apiGroup(s)
+  # for the CNI installed in your cluster; the connector detects CRD presence and
+  # skips an absent CNI without error. get,list only — never write/secrets/wildcard.
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumnetworkpolicies", "ciliumclusterwidenetworkpolicies"]
+    verbs: ["get", "list"]
+  - apiGroups: ["crd.projectcalico.org"]
+    resources: ["networkpolicies", "globalnetworkpolicies"]
     verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["namespaces"]
@@ -270,7 +298,13 @@ materializes, or emits:
   ingress / egress rule block (the netpol client **counts** rule blocks but
   decodes them as opaque `json.RawMessage`, so the peers inside are never
   materialized into Go memory) — and the `RawPolicy` / `Coverage` structs have
-  **no field** that could carry a peer or selector value
+  **no field** that could carry a peer or selector value. The same guard applies
+  verbatim to the CNI-native policy CRDs (slice 622): the Cilium
+  `endpointSelector` and Calico `selector` are read **only** for their
+  all-vs-narrow disposition, the `ingress`/`egress` rule arrays are counted as
+  opaque `json.RawMessage`, and the per-policy `source` carried into a record is
+  an API-group string (`cilium.io` / `crd.projectcalico.org`), never workload
+  data
 - actual network traffic / flow logs (this is configuration, not telemetry)
 - any namespace label or annotation other than the `pod-security.kubernetes.io/*`
   labels (the PSS client reads **only** those six label keys off `metadata.labels`

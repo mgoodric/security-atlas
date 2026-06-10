@@ -6,7 +6,7 @@
   "x-owner": "platform",
   "x-default-scf-anchors": ["NET-04", "NET-01"],
   "title": "Kubernetes NetworkPolicy coverage",
-  "description": "Per-namespace Kubernetes NetworkPolicy segmentation posture captured read-only from the Kubernetes API (get/list on networking.k8s.io/v1 networkpolicies + core namespaces): how many NetworkPolicies exist in the namespace, a per-policy SPEC summary (name, the directions it governs, whether its podSelector is empty i.e. selects every pod, and a COUNT of its ingress/egress rule blocks), and the derived default-deny assessment per direction. The minimum that demonstrates the network-segmentation control (e.g. which namespaces enforce a default-deny vs are unprotected). NetworkPolicy SPEC metadata ONLY — never pod contents, container env, Secret / ConfigMap values, the peer/CIDR/port contents inside a rule block, nor actual traffic. The connector reads NetworkPolicy objects + the namespace list (read-only) and never reads pod logs, exec, or secrets. The connector emits a descriptive PASS/FAIL/INCONCLUSIVE verdict per namespace; the platform evaluator owns the final policy call. x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9).",
+  "description": "Per-namespace Kubernetes NetworkPolicy segmentation posture captured read-only from the Kubernetes API (get/list on networking.k8s.io/v1 networkpolicies + core namespaces, plus the installed CNI's own policy CRDs when present — Cilium cilium.io CiliumNetworkPolicy/CiliumClusterwideNetworkPolicy, Calico crd.projectcalico.org NetworkPolicy/GlobalNetworkPolicy): how many policies exist in the namespace, a per-policy SPEC summary (name, the SOURCE API group it was read from, the directions it governs, whether its pod/endpoint selector is empty i.e. selects every pod, and a COUNT of its ingress/egress rule blocks), and the derived default-deny assessment per direction. The minimum that demonstrates the network-segmentation control (e.g. which namespaces enforce a default-deny vs are unprotected). Policy SPEC metadata ONLY — never pod contents, container env, Secret / ConfigMap values, the peer/CIDR/port/selector contents inside a rule block, nor actual traffic. The connector reads policy objects + the namespace list (read-only) and never reads pod logs, exec, or secrets. The connector emits a descriptive PASS/FAIL/INCONCLUSIVE verdict per namespace; the platform evaluator owns the final policy call. x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9).",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -34,6 +34,14 @@
       "type": "boolean",
       "description": "True when at least one all-pods (empty-podSelector) Egress policy has zero egress allow rules — the canonical default-deny-egress posture."
     },
+    "sources": {
+      "type": "array",
+      "description": "Optional (slice 622). The deduplicated set of policy SOURCE API groups that contributed coverage for this namespace — 'networking.k8s.io' (upstream NetworkPolicy), 'cilium.io' (Cilium CRD), and/or 'crd.projectcalico.org' (Calico CRD). Absent on records predating CNI-native support; an absent value implies upstream networking.k8s.io only.",
+      "items": {
+        "type": "string",
+        "enum": ["networking.k8s.io", "cilium.io", "crd.projectcalico.org"]
+      }
+    },
     "policies": {
       "type": "array",
       "description": "Per-policy SPEC summaries for the namespace. SPEC metadata only — never the peer / CIDR / port contents of a rule block.",
@@ -46,6 +54,11 @@
             "type": "string",
             "minLength": 1,
             "description": "NetworkPolicy name."
+          },
+          "source": {
+            "type": "string",
+            "enum": ["networking.k8s.io", "cilium.io", "crd.projectcalico.org"],
+            "description": "Optional (slice 622). The API group this policy was read from. Absent implies upstream 'networking.k8s.io'. 'cilium.io' / 'crd.projectcalico.org' mark a CNI-native policy CRD folded into the assessment."
           },
           "policy_types": {
             "type": "array",

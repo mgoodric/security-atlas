@@ -245,3 +245,54 @@ func TestNewReader_NilClientGetsDefault(t *testing.T) {
 		t.Errorf("BaseURL = %q; want trailing slash trimmed", r.BaseURL)
 	}
 }
+
+// TestProbe_ReturnsStatusAndSendsBearer pins the slice-622 discovery primitive:
+// Probe returns the raw HTTP status (200 present / 404 absent) and sends the
+// bearer token. The body is never decoded.
+func TestProbe_ReturnsStatusAndSendsBearer(t *testing.T) {
+	t.Parallel()
+	var gotAuth, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		if r.URL.Path == "/apis/cilium.io/v2" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"resources":[]}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	r := NewReader(srv.Client(), srv.URL, "test-probe-token")
+
+	status, err := r.Probe(context.Background(), "/apis/cilium.io/v2")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Errorf("present status = %d; want 200", status)
+	}
+	if gotAuth != "Bearer test-probe-token" {
+		t.Errorf("auth header = %q", gotAuth)
+	}
+	if gotPath != "/apis/cilium.io/v2" {
+		t.Errorf("probe path = %q", gotPath)
+	}
+
+	status, err = r.Probe(context.Background(), "/apis/absent.io/v1")
+	if err != nil {
+		t.Fatalf("Probe absent: %v", err)
+	}
+	if status != http.StatusNotFound {
+		t.Errorf("absent status = %d; want 404", status)
+	}
+}
+
+// TestProbe_RequestError surfaces a transport error (unreachable host).
+func TestProbe_RequestError(t *testing.T) {
+	t.Parallel()
+	r := NewReader(nil, "http://127.0.0.1:1", "tok")
+	if _, err := r.Probe(context.Background(), "/apis/cilium.io/v2"); err == nil {
+		t.Fatal("want transport error on unreachable host")
+	}
+}

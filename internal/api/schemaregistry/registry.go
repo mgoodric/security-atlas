@@ -134,6 +134,11 @@ func DefaultSeed() []KindVersion {
 		// (get/list on networking.k8s.io/v1 networkpolicies + core namespaces) —
 		// NetworkPolicy SPEC metadata only, NEVER pod contents, container env,
 		// secrets, the peer/CIDR/port contents of a rule block, or traffic.
+		// Slice 622 extends the same 1.0.0 kind additively: when a CNI policy CRD
+		// is present (Cilium cilium.io / Calico crd.projectcalico.org), its policy
+		// SPEC metadata folds into the per-namespace default-deny assessment and an
+		// optional per-policy `source` + namespace `sources` set distinguishes the
+		// enforcement plane. Both fields are optional — no version bump.
 		{Kind: "k8s.networkpolicy_coverage.v1", Version: "1.0.0"},
 		// Slice 524: Kubernetes connector Pod-Security-Standards admission config
 		// (configuration-baseline control: SCF CFG-02). Read-only (get/list on

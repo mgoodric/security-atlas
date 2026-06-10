@@ -154,6 +154,100 @@ func TestAssess_DefaultNow(t *testing.T) {
 	}
 }
 
+// TestAssess_SourceTaggingAndSourcesSet pins slice-622 AC-2: every policy
+// summary carries its source; an unset source defaults to upstream; the
+// namespace-level Sources set is the deduplicated, sorted union.
+func TestAssess_SourceTaggingAndSourcesSet(t *testing.T) {
+	t.Parallel()
+	ns := RawNamespace{Name: "prod", Policies: []RawPolicy{
+		{Name: "upstream-deny", SelectsAllPods: true, PolicyTypes: []string{PolicyTypeIngress}}, // no source -> upstream
+		{Name: "cilium-deny", Source: SourceCilium, SelectsAllPods: true, PolicyTypes: []string{PolicyTypeIngress}},
+		{Name: "calico-deny", Source: SourceCalico, SelectsAllPods: true, PolicyTypes: []string{PolicyTypeEgress}},
+	}}
+	got, err := Assess(context.Background(), &fakeAPI{namespaces: []RawNamespace{ns}}, fixedNow())
+	if err != nil {
+		t.Fatalf("Assess: %v", err)
+	}
+	c := got[0]
+	bySource := map[string]string{}
+	for _, p := range c.Policies {
+		bySource[p.Name] = p.Source
+	}
+	if bySource["upstream-deny"] != SourceUpstream {
+		t.Errorf("unset source = %q; want upstream default", bySource["upstream-deny"])
+	}
+	if bySource["cilium-deny"] != SourceCilium || bySource["calico-deny"] != SourceCalico {
+		t.Errorf("CNI sources not preserved: %v", bySource)
+	}
+	want := []string{SourceCilium, SourceCalico, SourceUpstream} // sorted: cilium.io < crd.projectcalico.org < networking.k8s.io
+	if len(c.Sources) != 3 || c.Sources[0] != want[0] || c.Sources[1] != want[1] || c.Sources[2] != want[2] {
+		t.Errorf("Sources = %v; want sorted %v", c.Sources, want)
+	}
+}
+
+// TestAssess_CNIPolicyEstablishesDefaultDeny pins slice-622 AC-1: a CNI-native
+// all-pods zero-rule policy credits default-deny exactly like an upstream one —
+// a Cilium/Calico-only namespace is no longer a false-FAIL.
+func TestAssess_CNIPolicyEstablishesDefaultDeny(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		source string
+		dir    string
+	}{
+		{"cilium-ingress", SourceCilium, PolicyTypeIngress},
+		{"calico-egress", SourceCalico, PolicyTypeEgress},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ns := RawNamespace{Name: "prod", Policies: []RawPolicy{
+				{Name: "cni-deny", Source: tc.source, SelectsAllPods: true, PolicyTypes: []string{tc.dir}},
+			}}
+			got, err := Assess(context.Background(), &fakeAPI{namespaces: []RawNamespace{ns}}, fixedNow())
+			if err != nil {
+				t.Fatalf("Assess: %v", err)
+			}
+			if got[0].Result != ResultPass {
+				t.Fatalf("CNI default-deny should PASS; got %q (%s)", got[0].Result, got[0].Reason)
+			}
+		})
+	}
+}
+
+// TestAssess_CNIWithAllowRuleDoesNotOverCredit pins the conservative-credit
+// JUDGMENT call: an all-pods CNI policy that carries an allow rule does NOT
+// establish default-deny.
+func TestAssess_CNIWithAllowRuleDoesNotOverCredit(t *testing.T) {
+	t.Parallel()
+	ns := RawNamespace{Name: "prod", Policies: []RawPolicy{
+		{Name: "cilium-allow", Source: SourceCilium, SelectsAllPods: true, PolicyTypes: []string{PolicyTypeIngress}, IngressRuleCount: 1},
+	}}
+	got, err := Assess(context.Background(), &fakeAPI{namespaces: []RawNamespace{ns}}, fixedNow())
+	if err != nil {
+		t.Fatalf("Assess: %v", err)
+	}
+	if got[0].Result != ResultFail {
+		t.Errorf("all-pods CNI policy WITH an allow rule must not be default-deny; got %q", got[0].Result)
+	}
+}
+
+func TestNormalizeSource(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"":                  SourceUpstream,
+		"networking.k8s.io": SourceUpstream,
+		"bogus":             SourceUpstream,
+		SourceCilium:        SourceCilium,
+		SourceCalico:        SourceCalico,
+	}
+	for in, want := range cases {
+		if got := normalizeSource(in); got != want {
+			t.Errorf("normalizeSource(%q) = %q; want %q", in, got, want)
+		}
+	}
+}
+
 func TestNormalizeTypes_DedupAndDropsUnknown(t *testing.T) {
 	t.Parallel()
 	got := normalizeTypes([]string{"Ingress", "Ingress", "bogus", "Egress"})

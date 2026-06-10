@@ -185,6 +185,25 @@ func DocumentedClusterRole() []PolicyRule {
 			Gates:     "k8s.networkpolicy_coverage.v1 (NetworkPolicy segmentation posture)",
 		},
 		{
+			// Slice 622: Cilium CNI-native policy CRDs. Read-only get,list only;
+			// detected by CRD presence (the connector does not require this group
+			// to exist). Folds CiliumNetworkPolicy / CiliumClusterwideNetworkPolicy
+			// SPEC metadata into the per-namespace default-deny assessment.
+			APIGroups: []string{"cilium.io"},
+			Resources: []string{"ciliumnetworkpolicies", "ciliumclusterwidenetworkpolicies"},
+			Verbs:     readOnlyVerbs,
+			Gates:     "k8s.networkpolicy_coverage.v1 (Cilium CNI-native segmentation — optional, only used when the CRD is present)",
+		},
+		{
+			// Slice 622: Calico CNI-native policy CRDs. Read-only get,list only;
+			// detected by CRD presence. Folds Calico NetworkPolicy /
+			// GlobalNetworkPolicy SPEC metadata into the per-namespace assessment.
+			APIGroups: []string{"crd.projectcalico.org"},
+			Resources: []string{"networkpolicies", "globalnetworkpolicies"},
+			Verbs:     readOnlyVerbs,
+			Gates:     "k8s.networkpolicy_coverage.v1 (Calico CNI-native segmentation — optional, only used when the CRD is present)",
+		},
+		{
 			APIGroups: []string{""},
 			Resources: []string{"namespaces"},
 			Verbs:     readOnlyVerbs,

@@ -88,6 +88,10 @@ Least-privilege Kubernetes access (read-only ClusterRole — verbs get,list only
   - rbac.authorization.k8s.io: roles/clusterroles/rolebindings/clusterrolebindings
   - apps: deployments/daemonsets/statefulsets
   - networking.k8s.io: networkpolicies
+  - cilium.io: ciliumnetworkpolicies/ciliumclusterwidenetworkpolicies
+    (optional — only read when the Cilium CRD is present in the cluster)
+  - crd.projectcalico.org: networkpolicies/globalnetworkpolicies
+    (optional — only read when the Calico CRD is present in the cluster)
   - core: namespaces  (also gates the Pod-Security-Standards admission kind —
     PSS config lives in pod-security.kubernetes.io/* labels on the namespace;
     NO new ClusterRole rule is required)
@@ -335,6 +339,13 @@ func buildNetpolRecord(c netpol.Coverage, cluster, env, controlID string) (*evid
 		"default_deny_ingress": c.DefaultDenyIngress,
 		"default_deny_egress":  c.DefaultDenyEgress,
 	}
+	// sources is the set of policy SOURCES (API groups) that contributed coverage
+	// for this namespace (slice 622, AC-2). Omitted when the namespace has no
+	// policies. Lets the evaluator distinguish upstream NetworkPolicy from
+	// CNI-native (Cilium / Calico) enforcement.
+	if len(c.Sources) > 0 {
+		pm["sources"] = toAnySlice(c.Sources)
+	}
 	if len(c.Policies) > 0 {
 		policies := make([]any, 0, len(c.Policies))
 		for _, p := range c.Policies {
@@ -343,6 +354,9 @@ func buildNetpolRecord(c netpol.Coverage, cluster, env, controlID string) (*evid
 				"selects_all_pods":   p.SelectsAllPods,
 				"ingress_rule_count": float64(p.IngressRuleCount),
 				"egress_rule_count":  float64(p.EgressRuleCount),
+			}
+			if p.Source != "" {
+				m["source"] = p.Source
 			}
 			if len(p.PolicyTypes) > 0 {
 				m["policy_types"] = toAnySlice(p.PolicyTypes)
