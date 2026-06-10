@@ -104,3 +104,32 @@ func TestRequiredPermission_IsReadOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveClientState_FromOpt(t *testing.T) {
+	t.Parallel()
+	got, err := ResolveClientState("test-client-state-value")
+	if err != nil {
+		t.Fatalf("ResolveClientState: %v", err)
+	}
+	if got != "test-client-state-value" {
+		t.Errorf("clientState = %q", got)
+	}
+}
+
+func TestResolveClientState_FromEnv(t *testing.T) {
+	t.Setenv(EnvClientState, "test-env-client-state")
+	got, err := ResolveClientState("")
+	if err != nil {
+		t.Fatalf("ResolveClientState: %v", err)
+	}
+	if got != "test-env-client-state" {
+		t.Errorf("clientState = %q", got)
+	}
+}
+
+func TestResolveClientState_MissingErrors(t *testing.T) {
+	t.Setenv(EnvClientState, "")
+	if _, err := ResolveClientState(""); err == nil {
+		t.Fatal("want error when clientState unset")
+	}
+}

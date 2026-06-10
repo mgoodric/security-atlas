@@ -33,6 +33,14 @@ const (
 	EnvClientID = "INTUNE_CLIENT_ID"
 	// EnvClientSecret is the Entra app-registration client secret.
 	EnvClientSecret = "INTUNE_CLIENT_SECRET"
+	// EnvClientState carries the per-subscription `clientState` secret the
+	// connector sets when it creates the Microsoft Graph change-notification
+	// subscription and that Graph echoes on every delivery (the `subscribe`
+	// profile, slice 557). The receiver constant-time compares each delivery's
+	// clientState against this value and rejects mismatches. Graph does NOT
+	// HMAC-sign notification bodies — clientState is the per-delivery secret. Read
+	// from the environment, never a flag, never logged.
+	EnvClientState = "INTUNE_WEBHOOK_CLIENT_STATE"
 	// EnvGraphHost overrides the Graph host (e.g. for sovereign clouds:
 	// graph.microsoft.us). Defaults to graph.microsoft.com.
 	EnvGraphHost = "INTUNE_GRAPH_HOST"
@@ -132,6 +140,19 @@ func Resolve(opts ResolveOpts) (Credential, error) {
 		graphHost:    graphHost,
 		loginHost:    loginHost,
 	}, nil
+}
+
+// ResolveClientState returns the per-subscription Graph `clientState` secret for
+// the `subscribe` profile (slice 557). It is required (after env fallback). The
+// returned string is the raw secret; callers pass it to
+// mdmwebhook.NewClientStateVerifier and must never log it. opt overrides the env
+// var (used by tests); empty falls back to INTUNE_WEBHOOK_CLIENT_STATE.
+func ResolveClientState(opt string) (string, error) {
+	cs := strings.TrimSpace(firstNonEmpty(opt, os.Getenv(EnvClientState)))
+	if cs == "" {
+		return "", fmt.Errorf("intuneauth: webhook clientState secret required (set %s)", EnvClientState)
+	}
+	return cs, nil
 }
 
 func firstNonEmpty(vs ...string) string {

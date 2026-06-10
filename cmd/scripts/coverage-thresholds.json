@@ -143,6 +143,7 @@
     "connectors/mdm/swrecord": 91,
     "connectors/mdm/cfgprofile": 94,
     "connectors/mdm/cfgrecord": 96,
+    "connectors/mdm/mdmwebhook": 94,
     "connectors/jamf/cmd/atlas-jamf": 86,
     "connectors/jamf/internal/devices": 86,
     "connectors/jamf/internal/jamfauth": 98,
