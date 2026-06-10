@@ -4,7 +4,7 @@
   "x-evidence-kind": "access_review.completion.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["IAC-17", "IAC-18"],
+  "x-default-scf-anchors": ["IAC-15"],
   "title": "Access review completion",
   "description": "A periodic access review run by a roleholder.",
   "type": "object",

@@ -4,7 +4,7 @@
   "x-evidence-kind": "github.scim_user.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["IAC-22", "IAC-09"],
+  "x-default-scf-anchors": ["IAC-07"],
   "title": "GitHub SCIM-provisioned user state",
   "description": "Per-user lifecycle state from a GitHub Enterprise organization SCIM endpoint. Reconciled on a schedule; one record per user per run.",
   "type": "object",

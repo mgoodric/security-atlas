@@ -4,7 +4,7 @@
   "x-evidence-kind": "okta.user_lifecycle.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["IAC-22", "IAC-09", "HRS-04"],
+  "x-default-scf-anchors": ["IAC-07", "HRS-04"],
   "title": "Okta user lifecycle state",
   "description": "Per-user lifecycle + MFA-enrolment state from /api/v1/users. Reconciled on a schedule; one record per user per run. Feeds SCIM-compliance evidence for account provisioning + deprovisioning controls (joiner/mover/leaver) plus MFA-enrolment coverage.",
   "type": "object",

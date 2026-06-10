@@ -4,7 +4,7 @@
   "x-evidence-kind": "aws.s3.bucket_encryption_state.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["CRY-04", "DCH-06"],
+  "x-default-scf-anchors": ["CRY-04"],
   "title": "AWS S3 bucket encryption state",
   "description": "Per-bucket default-encryption configuration captured by the AWS connector.",
   "type": "object",

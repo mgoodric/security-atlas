@@ -4,7 +4,7 @@
   "x-evidence-kind": "azure.entra_role_assignment.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["IAC-21", "IAC-22"],
+  "x-default-scf-anchors": ["IAC-21"],
   "title": "Azure Entra ID role assignment",
   "description": "One record per (principal, role, scope) directory-role / RBAC assignment in Microsoft Entra ID, plus the service-principal / app-registration inventory facts needed to interpret it. Pulled read-only from Microsoft Graph (Directory.Read.All + Application.Read.All). Config + assignment metadata only — never mailbox/profile PII. The platform evaluator decides pass/fail per (control, assignment); the connector emits descriptive (INCONCLUSIVE) records.",
   "type": "object",
