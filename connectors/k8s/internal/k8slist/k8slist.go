@@ -112,6 +112,32 @@ func ListAll[T any](ctx context.Context, r *Reader, path string) ([]T, error) {
 	return out, nil
 }
 
+// Probe issues a read-only GET against path (an API-discovery path such as
+// "/apis/cilium.io/v2") and returns the HTTP status code, discarding the body.
+// It is the presence-check primitive for CNI-CRD discovery (slice 622): a 200
+// means the API group/version is served (the CRD is installed), a 404 means it
+// is absent. It adds no verb beyond GET and no new ClusterRole grant — discovery
+// is the same read-only plane the list calls use. The response body is drained
+// and closed so the connection can be reused; it is never decoded.
+func (r *Reader) Probe(ctx context.Context, path string) (int, error) {
+	u := r.BaseURL + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return 0, err
+	}
+	if r.token != "" {
+		req.Header.Set("Authorization", "Bearer "+r.token)
+	}
+	req.Header.Set("Accept", "application/json")
+	res, err := r.HTTP.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = res.Body.Close() }()
+	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 1<<13))
+	return res.StatusCode, nil
+}
+
 // getPage GETs one list page. cont is the `metadata.continue` token from the
 // previous page ("" on the first request). The URL carries `limit` always and
 // `continue` only when cont is non-empty.

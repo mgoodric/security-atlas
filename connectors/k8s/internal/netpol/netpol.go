@@ -38,6 +38,23 @@ const (
 	PolicyTypeEgress  = "Egress"
 )
 
+// Policy SOURCE identifiers (slice 622, AC-2). The coverage record tags every
+// policy summary with the API group it was read from so the platform evaluator
+// can reason about which enforcement plane established a namespace's
+// segmentation. SourceUpstream is the absent/default value: a record without a
+// per-policy source is implicitly upstream networking.k8s.io (back-compat with
+// slice-523 records that predate this field).
+const (
+	// SourceUpstream is the in-tree networking.k8s.io/v1 NetworkPolicy plane.
+	SourceUpstream = "networking.k8s.io"
+	// SourceCilium is the Cilium CNI plane (cilium.io CiliumNetworkPolicy /
+	// CiliumClusterwideNetworkPolicy).
+	SourceCilium = "cilium.io"
+	// SourceCalico is the Calico CNI plane (crd.projectcalico.org NetworkPolicy /
+	// GlobalNetworkPolicy).
+	SourceCalico = "crd.projectcalico.org"
+)
+
 // RawNamespace is the narrow view the API surface returns for one namespace's
 // NetworkPolicy posture. The concrete client maps the Kubernetes API responses
 // into this shape; tests construct it directly. Policy SPEC metadata only — no
@@ -58,6 +75,10 @@ type RawNamespace struct {
 // rules. NO pod contents, NO from/to peer payloads beyond their bounded count.
 type RawPolicy struct {
 	Name string
+	// Source is the API group the policy was read from (SourceUpstream /
+	// SourceCilium / SourceCalico). Empty is treated as SourceUpstream. SPEC
+	// metadata only — the source name is an API-group string, never workload data.
+	Source string
 	// PolicyTypes is the spec.policyTypes list ("Ingress" / "Egress"). When the
 	// API omits it, the client derives it per Kubernetes semantics (Ingress is
 	// always implied; Egress only when an egress block is present).
@@ -81,15 +102,25 @@ type Coverage struct {
 	Policies           []PolicySummary
 	DefaultDenyIngress bool
 	DefaultDenyEgress  bool
-	Result             CoverageResult
-	Reason             string
-	ObservedAt         time.Time
+	// Sources is the deterministic, deduplicated set of API groups that
+	// contributed policies to this namespace (e.g. ["cilium.io",
+	// "networking.k8s.io"]). Empty when the namespace has zero policies. Lets the
+	// evaluator see at a glance which enforcement planes cover the namespace
+	// (slice 622, AC-2).
+	Sources    []string
+	Result     CoverageResult
+	Reason     string
+	ObservedAt time.Time
 }
 
 // PolicySummary is the per-policy summary carried in a Coverage record. SPEC
 // metadata only.
 type PolicySummary struct {
-	Name             string
+	Name string
+	// Source is the API group the policy was read from. Defaults to
+	// SourceUpstream when unset. Lets the evaluator distinguish upstream
+	// NetworkPolicy from CNI-native CRD enforcement (slice 622, AC-2).
+	Source           string
 	PolicyTypes      []string
 	SelectsAllPods   bool
 	IngressRuleCount int
@@ -150,10 +181,14 @@ func assessNamespace(ns RawNamespace, observedAt time.Time) Coverage {
 		c.Reason = "read namespace network policies: " + ns.ReadError
 		return c
 	}
+	sources := map[string]bool{}
 	for _, p := range ns.Policies {
 		types := normalizeTypes(p.PolicyTypes)
+		src := normalizeSource(p.Source)
+		sources[src] = true
 		c.Policies = append(c.Policies, PolicySummary{
 			Name:             p.Name,
+			Source:           src,
 			PolicyTypes:      types,
 			SelectsAllPods:   p.SelectsAllPods,
 			IngressRuleCount: p.IngressRuleCount,
@@ -169,8 +204,31 @@ func assessNamespace(ns RawNamespace, observedAt time.Time) Coverage {
 			c.DefaultDenyEgress = true
 		}
 	}
+	c.Sources = sortedKeys(sources)
 	c.Result, c.Reason = verdict(c)
 	return c
+}
+
+// normalizeSource maps a raw policy source to one of the three known API-group
+// identifiers; an empty/unknown source defaults to SourceUpstream so slice-523
+// records (which carry no source) read as upstream networking.k8s.io.
+func normalizeSource(s string) string {
+	switch s {
+	case SourceCilium, SourceCalico:
+		return s
+	default:
+		return SourceUpstream
+	}
+}
+
+// sortedKeys returns the map's keys sorted, for deterministic record output.
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func verdict(c Coverage) (CoverageResult, string) {
