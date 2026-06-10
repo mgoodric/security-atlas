@@ -122,14 +122,16 @@ func NewReceiver(cfg Config) (*Receiver, error) {
 	}, nil
 }
 
-// ServeHTTP implements the receive → verify → enqueue pipeline. The vendor-agnostic
-// preamble (POST-only → 405, body cap → 413, verify-FIRST → 401) is the shared
-// webhookrecv skeleton; the verified body is then handed to enqueue, which parses
-// the events, drops unmapped ones honestly, and enqueues in-scope ones. The actual
-// re-read/push happens on the background worker (Run).
+// ServeHTTP implements the receive → (handshake?) → verify → enqueue pipeline. The
+// vendor-agnostic preamble (POST-only → 405, body cap → 413, handshake → 200, verify-
+// FIRST → 401) is the shared webhookrecv skeleton (slice 657): the SubscriptionValidation
+// handshake is intercepted via validationCodeHook BEFORE the delivery-key Verifier
+// (the handshake is unsigned by design), and a real delivery's verified body is then
+// handed to enqueue, which parses the events, drops unmapped ones honestly, and
+// enqueues in-scope ones. The actual re-read/push happens on the background worker (Run).
 func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	v := r.requestVerifier(req)
-	webhookrecv.Handle(w, req, r.maxBodyBytes, v, r.enqueue)
+	webhookrecv.HandleWithValidation(w, req, r.maxBodyBytes, validationCodeHook{}, v, r.enqueue)
 }
 
 // requestVerifier returns the Verifier the skeleton calls for THIS request. For the
