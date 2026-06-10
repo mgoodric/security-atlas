@@ -1091,8 +1091,11 @@ func (s *Server) httpHandler() http.Handler {
 	// seeder runs (fail closed). Per-IP rate limit of 1 invocation
 	// per 60 seconds on Seed + Teardown; Status is unlimited.
 	// authPool is the BYPASSRLS pool required by demoseed.Seeder
-	// (slice 205 LOAD-BEARING design).
-	adminDemoH := admindemo.New(s.authPool, admindemo.DefaultEnabledFunc)
+	// (slice 205 LOAD-BEARING design). dbPool is the RLS-enforced
+	// app-role pool slice 671 uses to drive the post-seed evaluator
+	// (eval.EvaluateAll + freshness.Refresh) under RLS so the seeded
+	// tenant shows real control state instead of "—".
+	adminDemoH := admindemo.New(s.authPool, admindemo.DefaultEnabledFunc).SetAppPool(s.dbPool)
 	root.Get("/v1/admin/demo/status", adminDemoH.Status)
 	root.Post("/v1/admin/demo/seed", adminDemoH.Seed)
 	root.Post("/v1/admin/demo/teardown", adminDemoH.Teardown)
