@@ -19,7 +19,7 @@ require (
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.9.2
+	github.com/jackc/pgx/v5 v5.10.0
 	github.com/nats-io/nats.go v1.52.0
 	github.com/open-policy-agent/opa v1.17.0
 	github.com/pkg/sftp v1.13.10
