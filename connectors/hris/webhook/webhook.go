@@ -260,10 +260,11 @@ func (r *Receiver) processAll(ctx context.Context, ids []string) int {
 	for _, id := range ids {
 		if err := r.process(ctx, id); err != nil {
 			// Log and continue — do not let one bad worker drop the whole delivery
-			// or fail the others. The id is a non-PII HRIS-native key; it is
-			// %q-escaped (and so is the worker id embedded in err) so a crafted
-			// id cannot forge log entries via embedded newlines (CWE-117).
-			log.Printf("webhook: fan-out worker %q failed: %v", id, err)
+			// or fail the others. Both the id AND the error string (which can
+			// embed the worker id via the upstream re-read/push wraps) are
+			// %q-escaped so a crafted id cannot forge log entries through
+			// embedded newlines (CWE-117 log injection).
+			log.Printf("webhook: fan-out worker %q failed: %q", id, err)
 			failed++
 		}
 	}
