@@ -46,12 +46,19 @@ const (
 	// connector issues only GETs against /api/v2/security_monitoring/signals.
 	// NEVER grant the write/triage scope (security_monitoring_signals_write).
 	RequiredSignalScope = "security_monitoring_signals_read"
+
+	// RequiredFiringScope is the read-only Application-key scope the monitor
+	// alert-FIRING history surface (monitoring.alert_firing.v1, slice 535) needs.
+	// The connector issues only GETs against /api/v1/events filtered to
+	// monitor-alert events (sources=monitor_alert). `events_read` is the
+	// read-only minimum; NEVER grant the write scope (events_write).
+	RequiredFiringScope = "events_read"
 )
 
 // RequiredScopes is the full least-privilege read-only scope set the connector
 // requires across every evidence surface. NEVER grant a write/admin scope.
 func RequiredScopes() []string {
-	return []string{RequiredScope, RequiredSIEMScope, RequiredSignalScope}
+	return []string{RequiredScope, RequiredSIEMScope, RequiredSignalScope, RequiredFiringScope}
 }
 
 // Credential is the resolved Datadog auth material. Both keys are kept off

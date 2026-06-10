@@ -12,10 +12,12 @@ import (
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
+	"github.com/mgoodric/security-atlas/connectors/grafana/internal/alerthistory"
 	"github.com/mgoodric/security-atlas/connectors/grafana/internal/alertrules"
 	"github.com/mgoodric/security-atlas/connectors/grafana/internal/grafanaauth"
 	"github.com/mgoodric/security-atlas/connectors/grafana/internal/ssoconfig"
 	"github.com/mgoodric/security-atlas/connectors/monitoring/alertcfg"
+	"github.com/mgoodric/security-atlas/connectors/monitoring/firingrecord"
 	"github.com/mgoodric/security-atlas/connectors/monitoring/monrecord"
 )
 
@@ -38,6 +40,13 @@ var (
 	newSSOConfigAPI  = func(hc *http.Client, baseURL, token string) ssoconfig.API {
 		return ssoconfig.NewClient(hc, baseURL, token)
 	}
+	// alertHistoryCollect + newAlertHistoryAPI are the slice-535 seams, parallel
+	// to the alertrules pair: tests swap in a fake Grafana alert state-history
+	// read (alert-firing history).
+	alertHistoryCollect = alerthistory.Collect
+	newAlertHistoryAPI  = func(hc *http.Client, baseURL, token string) alerthistory.API {
+		return alerthistory.NewClient(hc, baseURL, token)
+	}
 )
 
 // sdkPushClient is the narrow surface doRun consumes from sdk.Client.
@@ -47,10 +56,12 @@ type sdkPushClient interface {
 }
 
 type runFlags struct {
-	environment   string
-	ruleControl   string
-	accessControl string
-	baseURL       string
+	environment    string
+	ruleControl    string
+	accessControl  string
+	firingControl  string
+	firingLookback time.Duration
+	baseURL        string
 }
 
 func newRunCmd() *cobra.Command {
@@ -90,6 +101,8 @@ member / role-assignment identity.`,
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
 	cmd.Flags().StringVar(&f.ruleControl, "rule-control", "scf:MON-01", "control_id to attach to monitoring.alert_config.v1 records")
 	cmd.Flags().StringVar(&f.accessControl, "access-control", "scf:IAC-06", "control_id to attach to grafana.access_config.v1 records")
+	cmd.Flags().StringVar(&f.firingControl, "firing-control", "scf:IRO-09", "control_id to attach to monitoring.alert_firing.v1 records")
+	cmd.Flags().DurationVar(&f.firingLookback, "grafana-firing-lookback", 24*time.Hour, "bounded look-back window for the alert-firing-history pull (honest interval — NOT continuous monitoring)")
 	cmd.Flags().StringVar(&f.baseURL, "grafana-url", "", "Grafana base URL override (env: GRAFANA_URL)")
 	return cmd
 }
@@ -131,9 +144,39 @@ func doRun(ctx context.Context, f runFlags) error {
 		return err
 	}
 
-	fmt.Printf("pushed %d records (vendor=grafana environment=%s: alert_rules=%d access_config=%d)\n",
-		pushed+accessPushed, f.environment, pushed, accessPushed)
+	firingPushed, err := runFiring(ctx, f, cred, httpClient, sdkClient)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("pushed %d records (vendor=grafana environment=%s: alert_rules=%d access_config=%d alert_firings=%d)\n",
+		pushed+accessPushed+firingPushed, f.environment, pushed, accessPushed, firingPushed)
 	return nil
+}
+
+// runFiring collects + pushes Grafana alert-firing-history evidence
+// (monitoring.alert_firing.v1) over a bounded look-back window. Separated from
+// the other passes so each evidence kind has an isolated collect->build->push
+// loop; all three share the one Push RPC (invariant #3). Bounded PULL, not
+// event-driven (decisions-log D1).
+func runFiring(ctx context.Context, f runFlags, cred grafanaauth.Credential, httpClient *http.Client, sdkClient sdkPushClient) (int, error) {
+	api := newAlertHistoryAPI(httpClient, cred.BaseURL(), cred.Token())
+	firings, err := alertHistoryCollect(ctx, api, f.firingLookback, nil)
+	if err != nil {
+		return 0, fmt.Errorf("grafana firing collect: %w", err)
+	}
+	pushed := 0
+	for _, fr := range firings {
+		rec, err := firingrecord.Build(fr, f.firingControl, actorID("firing"), "grafana", f.environment)
+		if err != nil {
+			return pushed, fmt.Errorf("build firing record %s: %w", fr.RuleID, err)
+		}
+		if err := pushOne(ctx, sdkClient, rec); err != nil {
+			return pushed, fmt.Errorf("push firing %s: %w", fr.RuleID, err)
+		}
+		pushed++
+	}
+	return pushed, nil
 }
 
 // runAccessConfig collects + pushes the Grafana SSO + RBAC configuration

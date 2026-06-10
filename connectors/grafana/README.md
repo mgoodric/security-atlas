@@ -7,10 +7,21 @@ connector pattern verbatim: register-per-run, a stable `actor_id`, an
 hour-truncated `observed_at`, scope minimums, and vendor-native read-only auth.
 It emits two evidence kinds (the first shared with the Datadog connector):
 
-| Kind                         | Profile | Source                                                                                                       |
-| ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
-| `monitoring.alert_config.v1` | pull    | Grafana provisioning API `GET /api/v1/provisioning/alert-rules` + `/contact-points`                          |
-| `grafana.access_config.v1`   | pull    | Grafana API `GET /api/v1/sso-settings` + `/api/teams/search` + `/api/access-control/assignments` (slice 534) |
+| Kind                         | Profile      | Source                                                                                                       |
+| ---------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------ |
+| `monitoring.alert_config.v1` | pull         | Grafana provisioning API `GET /api/v1/provisioning/alert-rules` + `/contact-points`                          |
+| `grafana.access_config.v1`   | pull         | Grafana API `GET /api/v1/sso-settings` + `/api/teams/search` + `/api/access-control/assignments` (slice 534) |
+| `monitoring.alert_firing.v1` | bounded pull | Grafana alerting state-history API `GET /api/v1/rules/history` (`Viewer` role) — slice 535                   |
+
+The `monitoring.alert_firing.v1` kind (slice 535) is the **firing-history
+sibling** of the shared config kind — vendor-neutral, emitted by **both** the
+Grafana and Datadog connectors. Slice 488 reads which alerts are **configured**
+(CC7.2); this reads what actually **fired** and resolved (CC7.3/CC7.4). One record
+per alert-instance state transition: `rule_id` (rule UID), `source_vendor`,
+`state` (alerting / resolved / no_data / pending), `fired_at`, `resolved_at`, and
+the routing-target **contact-point handle**. Anchors: SCF `MON-01` + `IRO-09`
+(the spec candidate IRO-02 is absent from the bundled SCF fixture; IRO-09 is the
+closest present incident anchor — see slice-535 decisions log D3).
 
 The `grafana.access_config.v1` kind (slice 534) is the authn/authz surface 488
 deferred (P0-488-7): it proves SSO is enforced and access is role-based for SOC 2
@@ -37,8 +48,14 @@ never enters an evidence record or a platform push (canvas invariant #3).
 The connector runs on the **pull** profile: each invocation is one bounded
 read-and-push pass. It is **operator-scheduled** (cron / scheduler) — the
 recommended cadence is **every 24h**. This is deliberately **not** "continuous
-monitoring": the interval is named honestly. An event-driven profile is a
-documented follow-on, not part of v0.
+monitoring": the interval is named honestly.
+
+The **firing-history** surface (`monitoring.alert_firing.v1`) is a **bounded
+pull** over a look-back window (`--grafana-firing-lookback`, default 24h) of the
+alerting state-history API. It is **not event-driven**: Grafana's state-history
+API is a query surface with no first-class push this connector receives. Same
+honest-interval discipline; see the slice-535 decisions log
+(`docs/audit-log/535-monitoring-alert-firing-decisions.md`, D1).
 
 ## Auth — least-privilege read-only role
 
@@ -48,6 +65,7 @@ surfaces have different least-privilege read minimums:
 | Surface       | Minimum read permission                                                       | Why                                                         |
 | ------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------- |
 | alert-config  | `Viewer` role                                                                 | list alert rules + contact points (read)                    |
+| alert-firing  | `Viewer` role                                                                 | read alert state-history via `GET /api/v1/rules/history`    |
 | access-config | `fixed:settings:reader` (`settings:read` on `settings:auth.*`)                | read SSO settings via `GET /api/v1/sso-settings`            |
 | access-config | `fixed:roles:reader` (`roles:read` + `users.roles:read` + `teams.roles:read`) | enumerate RBAC role assignments via `/api/access-control/…` |
 
@@ -83,23 +101,25 @@ atlas-grafana run \
 atlas-grafana permissions
 ```
 
-| Flag               | Subcommand | Required | Default                       | Notes                                                       |
-| ------------------ | ---------- | -------- | ----------------------------- | ----------------------------------------------------------- |
-| `--endpoint`       | both       | yes      | env `SECURITY_ATLAS_ENDPOINT` | platform gRPC endpoint                                      |
-| `--token`          | both       | yes      | env `SECURITY_ATLAS_TOKEN`    | security-atlas bearer token                                 |
-| `--insecure`       | both       | no       | `false`                       | disables TLS; loopback endpoints only                       |
-| `--environment`    | `run`      | yes      | —                             | environment scope tag; records are never emitted un-scoped  |
-| `--rule-control`   | `run`      | no       | `scf:MON-01`                  | control id attached to `monitoring.alert_config.v1` records |
-| `--access-control` | `run`      | no       | `scf:IAC-06`                  | control id attached to `grafana.access_config.v1` records   |
-| `--grafana-url`    | `run`      | no       | env `GRAFANA_URL`             | Grafana base URL override                                   |
+| Flag                        | Subcommand | Required | Default                       | Notes                                                       |
+| --------------------------- | ---------- | -------- | ----------------------------- | ----------------------------------------------------------- |
+| `--endpoint`                | both       | yes      | env `SECURITY_ATLAS_ENDPOINT` | platform gRPC endpoint                                      |
+| `--token`                   | both       | yes      | env `SECURITY_ATLAS_TOKEN`    | security-atlas bearer token                                 |
+| `--insecure`                | both       | no       | `false`                       | disables TLS; loopback endpoints only                       |
+| `--environment`             | `run`      | yes      | —                             | environment scope tag; records are never emitted un-scoped  |
+| `--rule-control`            | `run`      | no       | `scf:MON-01`                  | control id attached to `monitoring.alert_config.v1` records |
+| `--access-control`          | `run`      | no       | `scf:IAC-06`                  | control id attached to `grafana.access_config.v1` records   |
+| `--firing-control`          | `run`      | no       | `scf:IRO-09`                  | control id attached to `monitoring.alert_firing.v1` records |
+| `--grafana-firing-lookback` | `run`      | no       | `24h`                         | bounded look-back window for the alert-firing-history pull  |
+| `--grafana-url`             | `run`      | no       | env `GRAFANA_URL`             | Grafana base URL override                                   |
 
 The Grafana token is **only** read from `GRAFANA_TOKEN` — never a CLI flag — so it
 never lands in shell history. It is never logged and never enters an evidence
 record (the resolved credential redacts the token on every format path).
 
 `register` announces `name=grafana-connector`,
-`supported_kinds=[monitoring.alert_config.v1, grafana.access_config.v1]`, and
-`profiles_supported=[pull]` to `ConnectorRegistryService.Register`.
+`supported_kinds=[monitoring.alert_config.v1, grafana.access_config.v1, monitoring.alert_firing.v1]`,
+and `profiles_supported=[pull]` to `ConnectorRegistryService.Register`.
 `profiles_supported` describes how the connector retrieves data **from Grafana**
 (a scheduled pull); the platform-side wire is always push (invariant #3).
 
@@ -114,8 +134,9 @@ record (the resolved credential redacts the token on every format path).
 record.
 
 `source_attribution.actor_id` follows the cross-connector convention:
-`connector:grafana:alerts@<version>` for the alert-config records and
-`connector:grafana:ssoconfig@<version>` for the access-config records.
+`connector:grafana:alerts@<version>` for the alert-config records,
+`connector:grafana:ssoconfig@<version>` for the access-config records, and
+`connector:grafana:firing@<version>` for the alert-firing-history records.
 
 ## What the connector never collects (the load-bearing guard)
 
@@ -142,9 +163,24 @@ SAML private key, OAuth client secret, LDAP bind password, signing cert, and a
 user email/login/name, and asserts none reaches a record. The Grafana token never
 appears in any formatted credential.
 
+The **firing-history** surface (`monitoring.alert_firing.v1`) carries the same
+structural guard at the shared `firing.RawFiring`/`firing.Firing` layer: those
+structs hold only `rule_id` / `state` / `fired_at` / `resolved_at` / the
+contact-point handle — no field for the alert **annotation/message body**, the
+triggering **metric values** (the state-history line's `values` map), the secret
+**contact-point settings**, or recipient PII. The state-history client decodes
+only the rule UID, the state, the timestamp, and the contact-point label;
+`TestStructuralOverCollectionGuard` (in `connectors/monitoring/firing`) pins the
+field set, and the Grafana drop test feeds a state-history line carrying an
+annotation body, a `values` map, a webhook secret, and a recipient-email label and
+asserts none reaches a record. The read is **bounded** (`maxTransitions=5000`, a
+60s run timeout, and the `--grafana-firing-lookback` window) — the load-bearing
+DoS bound, since a flapping alert can transition thousands of times.
+
 ## Not in v0 (follow-ons)
 
-- alert-firing-history (event-driven) profile (slice 535)
+- a genuine event-driven `subscribe` profile if/when Grafana ships a state-history
+  webhook the connector can receive (today it is a query surface — bounded pull)
 
 ## Tests
 

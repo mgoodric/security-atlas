@@ -16,10 +16,12 @@ import (
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
+	"github.com/mgoodric/security-atlas/connectors/datadog/internal/firingevents"
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/monitors"
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/siemrules"
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/siemsignals"
 	"github.com/mgoodric/security-atlas/connectors/monitoring/alertcfg"
+	"github.com/mgoodric/security-atlas/connectors/monitoring/firing"
 )
 
 type fakeSDKClient struct {
@@ -42,6 +44,7 @@ type seamOverrides struct {
 	collect       func(ctx context.Context, api monitors.API) ([]alertcfg.RawRule, error)
 	siemCollect   func(ctx context.Context, api siemrules.API, now func() time.Time) ([]siemrules.Rule, error)
 	signalCollect func(ctx context.Context, api siemsignals.API, lookback time.Duration, now func() time.Time) ([]siemsignals.Signal, error)
+	firingCollect func(ctx context.Context, api firingevents.API, lookback time.Duration, now func() time.Time) ([]firing.Firing, error)
 	newClient     func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error)
 }
 
@@ -55,6 +58,12 @@ func noSIEM(_ context.Context, _ siemrules.API, _ func() time.Time) ([]siemrules
 // noSignals is the default signal-history seam: returns no signals so doRun's
 // signal pass is a no-op (never touches a live security-signals endpoint).
 func noSignals(_ context.Context, _ siemsignals.API, _ time.Duration, _ func() time.Time) ([]siemsignals.Signal, error) {
+	return nil, nil
+}
+
+// noFiring is the default firing-history seam: returns no firings so doRun's
+// firing pass is a no-op (never touches a live Events endpoint).
+func noFiring(_ context.Context, _ firingevents.API, _ time.Duration, _ func() time.Time) ([]firing.Firing, error) {
 	return nil, nil
 }
 
@@ -82,6 +91,14 @@ func installSeams(t *testing.T, o seamOverrides) {
 		siemSignalsCollect = noSignals
 	}
 	t.Cleanup(func() { siemSignalsCollect = prevSignals })
+	// Always stub the firing-history collector unless a test overrides it.
+	prevFiring := firingCollect
+	if o.firingCollect != nil {
+		firingCollect = o.firingCollect
+	} else {
+		firingCollect = noFiring
+	}
+	t.Cleanup(func() { firingCollect = prevFiring })
 	if o.newClient != nil {
 		prev := newSDKClient
 		newSDKClient = o.newClient
@@ -101,7 +118,17 @@ func okFlags() runFlags {
 		monitorControl:    "scf:MON-01",
 		siemControl:       "scf:THR-01",
 		siemSignalControl: "scf:IRO-09",
+		firingControl:     "scf:IRO-09",
 		siemLookback:      24 * time.Hour,
+		firingLookback:    24 * time.Hour,
+	}
+}
+
+func twoFirings() []firing.Firing {
+	fired := time.Date(2026, 6, 7, 11, 0, 0, 0, time.UTC)
+	return []firing.Firing{
+		{SourceVendor: firing.VendorDatadog, RuleID: "1", State: firing.StateAlerting, FiredAt: fired, ObservedAt: fired},
+		{SourceVendor: firing.VendorDatadog, RuleID: "2", State: firing.StateResolved, FiredAt: fired, ResolvedAt: fired.Add(time.Hour), ObservedAt: fired},
 	}
 }
 
@@ -393,5 +420,111 @@ func TestDoRun_SignalPushError(t *testing.T) {
 	err := doRun(context.Background(), okFlags())
 	if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "push siem signal ") {
 		t.Fatalf("want wrapped siem signal push error; got %v", err)
+	}
+}
+
+func TestNewFiringAPI_Constructor(t *testing.T) {
+	if newFiringAPI(http.DefaultClient, "https://api.datadoghq.com", "test-datadog-api-key", "test-datadog-app-key") == nil {
+		t.Error("newFiringAPI returned nil")
+	}
+}
+
+// TestDoRun_PushesAllFourKinds verifies one run pushes monitor + SIEM-rule +
+// SIEM-signal + alert-firing records through the single Push RPC (invariant #3).
+func TestDoRun_PushesAllFourKinds(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		collect: func(_ context.Context, _ monitors.API) ([]alertcfg.RawRule, error) { return twoMonitors(), nil },
+		siemCollect: func(_ context.Context, _ siemrules.API, _ func() time.Time) ([]siemrules.Rule, error) {
+			return twoSIEMRules(), nil
+		},
+		signalCollect: func(_ context.Context, _ siemsignals.API, _ time.Duration, _ func() time.Time) ([]siemsignals.Signal, error) {
+			return twoSignals(), nil
+		},
+		firingCollect: func(_ context.Context, _ firingevents.API, _ time.Duration, _ func() time.Time) ([]firing.Firing, error) {
+			return twoFirings(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	if err := doRun(context.Background(), okFlags()); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 8 {
+		t.Errorf("pushed = %d; want 8 (2 monitors + 2 siem rules + 2 siem signals + 2 firings)", fake.pushed)
+	}
+}
+
+// TestDoRun_FiringLookbackThreaded asserts the --datadog-firing-lookback flag
+// value reaches the firing collector unchanged.
+func TestDoRun_FiringLookbackThreaded(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+
+	var gotLookback time.Duration
+	installSeams(t, seamOverrides{
+		collect: func(_ context.Context, _ monitors.API) ([]alertcfg.RawRule, error) { return nil, nil },
+		firingCollect: func(_ context.Context, _ firingevents.API, lookback time.Duration, _ func() time.Time) ([]firing.Firing, error) {
+			gotLookback = lookback
+			return nil, nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	f := okFlags()
+	f.firingLookback = 12 * time.Hour
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if gotLookback != 12*time.Hour {
+		t.Errorf("lookback = %v; want 12h threaded through", gotLookback)
+	}
+}
+
+func TestDoRun_FiringCollectError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("403")
+	installSeams(t, seamOverrides{
+		collect: func(_ context.Context, _ monitors.API) ([]alertcfg.RawRule, error) { return nil, nil },
+		firingCollect: func(_ context.Context, _ firingevents.API, _ time.Duration, _ func() time.Time) ([]firing.Firing, error) {
+			return nil, sentinel
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	err := doRun(context.Background(), okFlags())
+	if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "datadog firing collect: ") {
+		t.Fatalf("want wrapped firing collect error; got %v", err)
+	}
+}
+
+func TestDoRun_FiringPushError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("push rejected")
+	fake := &fakeSDKClient{pushErr: sentinel}
+	installSeams(t, seamOverrides{
+		collect: func(_ context.Context, _ monitors.API) ([]alertcfg.RawRule, error) { return nil, nil },
+		firingCollect: func(_ context.Context, _ firingevents.API, _ time.Duration, _ func() time.Time) ([]firing.Firing, error) {
+			return twoFirings(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	err := doRun(context.Background(), okFlags())
+	if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "push firing ") {
+		t.Fatalf("want wrapped firing push error; got %v", err)
 	}
 }

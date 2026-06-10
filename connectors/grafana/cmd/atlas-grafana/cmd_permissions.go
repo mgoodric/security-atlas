@@ -29,6 +29,9 @@ func newPermissionsCmd() *cobra.Command {
 			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n",
 				"access-config", grafanaauth.AccessControlReadPermission,
 				"grafana.access_config.v1 (RBAC role assignments)")
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n",
+				"alert-firing", grafanaauth.RequiredRole+" role",
+				"monitoring.alert_firing.v1 (alert state-history)")
 			_ = tw.Flush()
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(),
 				strings.TrimSpace(`
