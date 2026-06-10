@@ -26,11 +26,13 @@ const ConnectorName = "k8s-connector"
 //   - k8s.workload_security_context.v1    (Kubernetes apps workloads, pull — slice 487)
 //   - k8s.networkpolicy_coverage.v1       (Kubernetes NetworkPolicy posture, pull — slice 523)
 //   - k8s.pod_security_admission.v1       (Kubernetes PSS admission config, pull — slice 524)
+//   - k8s.secret_inventory.v1             (Kubernetes Secret METADATA inventory, pull — slice 525; OPT-IN)
 var SupportedKinds = []string{
 	"k8s.rbac_binding.v1",
 	"k8s.workload_security_context.v1",
 	"k8s.networkpolicy_coverage.v1",
 	"k8s.pod_security_admission.v1",
+	"k8s.secret_inventory.v1",
 }
 
 // PullInterval names the connector's pull cadence HONESTLY (P0-487-6). The
@@ -127,11 +129,13 @@ func sdkOpts() []sdk.Option {
 
 const longDescription = `security-atlas Kubernetes connector
 
-Emits four evidence kinds:
+Emits five evidence kinds:
   - k8s.rbac_binding.v1               (run subcommand, pull — Kubernetes RBAC)
   - k8s.workload_security_context.v1  (run subcommand, pull — apps workloads)
   - k8s.networkpolicy_coverage.v1     (run subcommand, pull — NetworkPolicies)
   - k8s.pod_security_admission.v1     (run subcommand, pull — PSS admission cfg)
+  - k8s.secret_inventory.v1           (run --collect-secret-inventory, pull —
+    Secret METADATA inventory; OPT-IN, slice 525)
 
 Profile: pull. Each invocation is one bounded read-and-push pass on an
 operator-scheduled cadence (recommended 24h). This is NOT continuous
@@ -145,12 +149,21 @@ Least-privilege Kubernetes access (read-only ClusterRole):
   - core: namespaces  — verbs get,list  (also gates the PSS admission kind —
     PSS config is namespace pod-security.kubernetes.io/* labels; NO new rule)
 
-NEVER grant write verbs, cluster-admin, wildcards, or get/list on 'secrets'.
-The connector reads RBAC + security-context + NetworkPolicy + Pod-Security-
-Standards CONFIGURATION only — never Secret values, ConfigMap values, container
-env, NetworkPolicy peer/port contents, pod specs, arbitrary namespace
-labels/annotations, or logs. Use the 'permissions' subcommand to print the
-canonical ClusterRole.
+NEVER grant write verbs, cluster-admin, or wildcards.
+
+By default the connector reads RBAC + security-context + NetworkPolicy +
+Pod-Security-Standards CONFIGURATION only — never Secret values, ConfigMap
+values, container env, NetworkPolicy peer/port contents, pod specs, arbitrary
+namespace labels/annotations, or logs. The base ClusterRole deliberately
+EXCLUDES 'secrets'.
+
+ONE OPT-IN EXCEPTION (slice 525): 'run --collect-secret-inventory' emits the
+k8s.secret_inventory.v1 kind, which requires adding EXACTLY ONE rule —
+core 'secrets' verbs get,list — to the ClusterRole. Even then the connector
+collects Secret METADATA ONLY (type / namespace / name / age / key-NAMES); it
+NEVER reads, decodes, or records a Secret VALUE (.data / .stringData). Use
+'permissions --secret-inventory' to print the ClusterRole that includes the
+secrets grant.
 
 Auth: a read-only ServiceAccount token. Set KUBERNETES_API_SERVER +
 KUBECONFIG_TOKEN (out-of-cluster), or pass --auth-mode in-cluster to read the

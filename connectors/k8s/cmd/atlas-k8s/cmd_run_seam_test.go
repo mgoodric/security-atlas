@@ -19,6 +19,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/netpol"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/pss"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/rbac"
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/secretmeta"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/workload"
 )
 
@@ -40,11 +41,12 @@ func (f *fakeSDKClient) Push(_ context.Context, _ *evidencev1.EvidenceRecord) (*
 func (f *fakeSDKClient) Close() error { f.closeCalled = true; return nil }
 
 type seamOverrides struct {
-	rbacPull     func(ctx context.Context, api rbac.API, now func() time.Time) ([]rbac.Binding, error)
-	workloadScan func(ctx context.Context, api workload.API, now func() time.Time) ([]workload.SecurityContext, error)
-	netpolScan   func(ctx context.Context, api netpol.API, now func() time.Time) ([]netpol.Coverage, error)
-	pssScan      func(ctx context.Context, api pss.API, now func() time.Time) ([]pss.Admission, error)
-	newClient    func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error)
+	rbacPull       func(ctx context.Context, api rbac.API, now func() time.Time) ([]rbac.Binding, error)
+	workloadScan   func(ctx context.Context, api workload.API, now func() time.Time) ([]workload.SecurityContext, error)
+	netpolScan     func(ctx context.Context, api netpol.API, now func() time.Time) ([]netpol.Coverage, error)
+	pssScan        func(ctx context.Context, api pss.API, now func() time.Time) ([]pss.Admission, error)
+	secretMetaScan func(ctx context.Context, api secretmeta.API, now func() time.Time) ([]secretmeta.Inventory, error)
+	newClient      func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error)
 }
 
 func installSeams(t *testing.T, o seamOverrides) {
@@ -68,6 +70,11 @@ func installSeams(t *testing.T, o seamOverrides) {
 		prev := pssScan
 		pssScan = o.pssScan
 		t.Cleanup(func() { pssScan = prev })
+	}
+	if o.secretMetaScan != nil {
+		prev := secretMetaScan
+		secretMetaScan = o.secretMetaScan
+		t.Cleanup(func() { secretMetaScan = prev })
 	}
 	if o.newClient != nil {
 		prev := newSDKClient
@@ -124,6 +131,13 @@ func oneAdmission() []pss.Admission {
 	}}
 }
 
+func oneInventory() []secretmeta.Inventory {
+	return []secretmeta.Inventory{{
+		Namespace: "prod", Name: "web-tls", Type: "kubernetes.io/tls",
+		AgeDays: 30, KeyNames: []string{"tls.crt", "tls.key"}, ObservedAt: time.Now().UTC(),
+	}}
+}
+
 func TestDoRun_PushSuccessAllKinds(t *testing.T) {
 	resetCommon(t)
 	common.endpoint = "127.0.0.1:1"
@@ -156,6 +170,119 @@ func TestDoRun_PushSuccessAllKinds(t *testing.T) {
 	}
 	if !fake.closeCalled {
 		t.Error("Close not called")
+	}
+}
+
+// TestDoRun_SecretInventoryOptIn proves the OPT-IN secret-inventory block runs
+// only when --collect-secret-inventory is set, and pushes one record per Secret.
+func TestDoRun_SecretInventoryOptIn(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		secretMetaScan: func(_ context.Context, _ secretmeta.API, _ func() time.Time) ([]secretmeta.Inventory, error) {
+			return oneInventory(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	f.skipWorkload = true
+	f.skipNetpol = true
+	f.skipPSS = true
+	f.collectSecretInventory = true
+	f.secretControl = "scf:CRY-01"
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 1 {
+		t.Errorf("pushed = %d; want 1 (secret-inventory only)", fake.pushed)
+	}
+}
+
+// TestDoRun_SecretInventoryOptOutByDefault proves the block is SKIPPED when the
+// opt-in flag is false — the base connector never touches secrets unless asked.
+func TestDoRun_SecretInventoryOptOutByDefault(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		secretMetaScan: func(_ context.Context, _ secretmeta.API, _ func() time.Time) ([]secretmeta.Inventory, error) {
+			t.Fatal("secretMetaScan must NOT run unless --collect-secret-inventory is set")
+			return nil, nil
+		},
+		rbacPull: func(_ context.Context, _ rbac.API, _ func() time.Time) ([]rbac.Binding, error) {
+			return oneBinding(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipWorkload = true
+	f.skipNetpol = true
+	f.skipPSS = true
+	// collectSecretInventory defaults false.
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 1 {
+		t.Errorf("pushed = %d; want 1 (rbac only — secret-inventory off)", fake.pushed)
+	}
+}
+
+func TestDoRun_SecretInventoryCollectError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("k8s 403 secrets")
+	installSeams(t, seamOverrides{
+		secretMetaScan: func(_ context.Context, _ secretmeta.API, _ func() time.Time) ([]secretmeta.Inventory, error) {
+			return nil, sentinel
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	f.skipWorkload = true
+	f.skipNetpol = true
+	f.skipPSS = true
+	f.collectSecretInventory = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "secret-inventory collect: ") {
+		t.Fatalf("want wrapped secret-inventory collect error; got %v", err)
+	}
+}
+
+func TestDoRun_SecretInventoryPushError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("push rejected")
+	fake := &fakeSDKClient{pushErr: sentinel}
+	installSeams(t, seamOverrides{
+		secretMetaScan: func(_ context.Context, _ secretmeta.API, _ func() time.Time) ([]secretmeta.Inventory, error) {
+			return oneInventory(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	f.skipWorkload = true
+	f.skipNetpol = true
+	f.skipPSS = true
+	f.collectSecretInventory = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "push secret-inventory ") {
+		t.Fatalf("want wrapped push secret-inventory error; got %v", err)
 	}
 }
 
@@ -535,5 +662,8 @@ func TestNewRBACAPIAndWorkloadAPI_Constructors(t *testing.T) {
 	}
 	if newPSSAPI(http.DefaultClient, "https://k", "test-k8s-token") == nil {
 		t.Error("newPSSAPI returned nil")
+	}
+	if newSecretMetaAPI(http.DefaultClient, "https://k", "test-k8s-token") == nil {
+		t.Error("newSecretMetaAPI returned nil")
 	}
 }

@@ -163,6 +163,78 @@ func TestDocumentedClusterRole_IsLeastPrivilege(t *testing.T) {
 	}
 }
 
+// TestSecretsRule_IsGetListOnSecretsOnly pins slice-525 AC-4 / P0-525: the one
+// rule the secret-inventory mode adds grants EXACTLY core `secrets` with verbs
+// get,list — no write verb, no wildcard verb, no wildcard resource, no wildcard
+// apiGroup.
+func TestSecretsRule_IsGetListOnSecretsOnly(t *testing.T) {
+	t.Parallel()
+	r := SecretsRule()
+	if len(r.APIGroups) != 1 || r.APIGroups[0] != "" {
+		t.Errorf("secrets rule apiGroups = %v; want [\"\"] (core)", r.APIGroups)
+	}
+	if len(r.Resources) != 1 || r.Resources[0] != "secrets" {
+		t.Errorf("secrets rule resources = %v; want [secrets]", r.Resources)
+	}
+	verbs := r.SortedVerbs()
+	if strings.Join(verbs, ",") != "get,list" {
+		t.Errorf("secrets rule verbs = %v; want [get list]", verbs)
+	}
+}
+
+// TestSecretInventoryClusterRole_AddsExactlyTheSecretsRule pins slice-525 AC-4:
+// the secret-inventory ClusterRole is the base least-privilege set PLUS EXACTLY
+// one rule — core secrets get/list. It (a) still grants only get/list across
+// every rule, (b) introduces no wildcard, and (c) adds `secrets` to exactly one
+// rule and no other.
+func TestSecretInventoryClusterRole_AddsExactlyTheSecretsRule(t *testing.T) {
+	t.Parallel()
+	base := DocumentedClusterRole()
+	full := SecretInventoryClusterRole()
+
+	if len(full) != len(base)+1 {
+		t.Fatalf("secret-inventory ClusterRole has %d rules; want base(%d)+1", len(full), len(base))
+	}
+
+	allowedVerbs := map[string]bool{"get": true, "list": true}
+	secretsRuleCount := 0
+	for _, r := range full {
+		for _, v := range r.Verbs {
+			if !allowedVerbs[v] {
+				t.Errorf("rule on %v grants non-read verb %q (P0-525 — secret-inventory mode stays read-only)", r.Resources, v)
+			}
+		}
+		for _, res := range r.Resources {
+			if res == "*" {
+				t.Errorf("rule grants wildcard resource (P0-525)")
+			}
+			if res == "secrets" {
+				secretsRuleCount++
+			}
+		}
+		for _, g := range r.APIGroups {
+			if g == "*" {
+				t.Errorf("rule grants wildcard apiGroup (P0-525)")
+			}
+		}
+	}
+	// secrets must appear in exactly ONE rule (the one we added), in the core
+	// apiGroup only.
+	if secretsRuleCount != 1 {
+		t.Errorf("secrets appears in %d rules; want exactly 1 (the slice-525 grant)", secretsRuleCount)
+	}
+
+	// And the BASE role must still EXCLUDE secrets entirely — operators not
+	// running the secret-inventory mode keep the narrower grant.
+	for _, r := range base {
+		for _, res := range r.Resources {
+			if res == "secrets" {
+				t.Errorf("base ClusterRole leaked a secrets grant (must stay slice-487 narrow): %v", r.Resources)
+			}
+		}
+	}
+}
+
 func TestReadOnlyVerbs_AreGetList(t *testing.T) {
 	t.Parallel()
 	v := ReadOnlyVerbs()

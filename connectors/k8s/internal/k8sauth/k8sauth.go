@@ -219,6 +219,37 @@ func ReadOnlyVerbs() []string {
 	return out
 }
 
+// SecretsRule returns the ONE additional ClusterRole rule the secret-inventory
+// mode (slice 525) requires: core `secrets` with verbs get,list — and NOTHING
+// more. This is the one grant the base connector (DocumentedClusterRole)
+// intentionally withholds; it is documented LOUDLY because the connector now
+// reaches Secret objects. The mode reads METADATA ONLY (type / namespace / name
+// / age / key-names); it never reads, decodes, or records a Secret VALUE
+// (.data / .stringData) — that guard is enforced structurally in the
+// secretmeta collector, not by this rule. Verbs stay get,list (no write); the
+// resource is exactly "secrets" (no wildcard).
+func SecretsRule() PolicyRule {
+	return PolicyRule{
+		APIGroups: []string{""},
+		Resources: []string{"secrets"},
+		Verbs:     readOnlyVerbs,
+		Gates:     "k8s.secret_inventory.v1 (Secret METADATA inventory — type/namespace/name/age/key-NAMES ONLY, NEVER a Secret value; slice 525)",
+	}
+}
+
+// SecretInventoryClusterRole returns the read-only ClusterRole the connector
+// requires WHEN the secret-inventory mode (slice 525) is enabled: the base
+// least-privilege rules PLUS the one `secrets` get/list rule (SecretsRule).
+// The base connector's ClusterRole (DocumentedClusterRole) is unchanged and
+// still excludes `secrets`; operators who do not run the secret-inventory mode
+// keep the narrower grant. The companion test pins that this set adds EXACTLY
+// one rule over the base — the secrets get/list rule — and still rejects every
+// write verb and wildcard.
+func SecretInventoryClusterRole() []PolicyRule {
+	base := DocumentedClusterRole()
+	return append(base, SecretsRule())
+}
+
 func firstNonEmpty(a, b string) string {
 	if a != "" {
 		return a
