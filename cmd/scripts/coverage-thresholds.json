@@ -81,6 +81,7 @@
     "connectors/azure/internal/aks": 90,
     "connectors/azure/internal/azureauth": 93,
     "connectors/azure/internal/entra": 91,
+    "connectors/azure/internal/eventgrid": 95,
     "connectors/azure/internal/firewall": 90,
     "connectors/azure/internal/idem": 98,
     "connectors/azure/internal/keyvault": 90,

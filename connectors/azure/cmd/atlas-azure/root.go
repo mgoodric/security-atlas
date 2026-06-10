@@ -44,6 +44,22 @@ var SupportedKinds = []string{
 // recommended cadence is documented; the operator owns the actual schedule.
 const PullInterval = "24h (recommended; operator-scheduled — NOT continuous monitoring)"
 
+// ProfilesSupported is what the connector advertises at register time, named
+// HONESTLY (slice 522 / P0-522-3):
+//   - pull:      scheduled read-only Graph + ARM GETs (the `run` subcommand). One
+//     bounded read-and-push pass per invocation; operator-scheduled (recommended
+//     24h). The reconciliation backstop.
+//   - subscribe: event-driven receipt of Azure Event Grid change events (the
+//     `eventgrid` subcommand) — an in-scope resource change triggers a re-read of
+//     that resource via the SAME read-only path the pull profile uses, emitting a
+//     fresh record promptly. Event-driven means Event-Grid delivery latency
+//     (typically seconds to a minute) plus the coalescing window — NOT
+//     instantaneous, and NOT "continuous monitoring".
+//
+// Both values describe how the connector retrieves data FROM Azure. The
+// platform-side wire is ALWAYS push (invariant #3) regardless of either value.
+var ProfilesSupported = []string{"pull", "subscribe"}
+
 // commonFlags is the persistent set every subcommand needs.
 var common struct {
 	endpoint string
@@ -80,6 +96,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVar(&common.insecure, "insecure", false, "disable TLS to platform (loopback endpoints only)")
 	root.AddCommand(newRegisterCmd())
 	root.AddCommand(newRunCmd())
+	root.AddCommand(newEventGridCmd())
 	root.AddCommand(newPermissionsCmd())
 	return root
 }
