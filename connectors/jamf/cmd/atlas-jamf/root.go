@@ -37,6 +37,19 @@ var SupportedKinds = []string{
 // monitoring": each invocation is one bounded read-and-push pass.
 const PullInterval = "24h (recommended; operator-scheduled — NOT continuous monitoring)"
 
+// ProfilesSupported is what the connector advertises at register time, named
+// HONESTLY (slice 557 / P0-490-7):
+//   - pull:      scheduled read-only Jamf Pro REST GETs (the `run` /
+//     `run-software` / `run-config-profiles` subcommands).
+//   - subscribe: event-driven receipt of Jamf Pro webhook deliveries (the
+//     `webhook` subcommand) — a fresh device-posture record is emitted when a
+//     computer's posture changes. This is NOT "continuous monitoring" and NOT a
+//     relabeled poll.
+//
+// Both values describe how the connector retrieves data FROM Jamf Pro. The
+// platform-side wire is ALWAYS push (invariant #3) regardless of either value.
+var ProfilesSupported = []string{"pull", "subscribe"}
+
 // common is the persistent flag set every subcommand needs.
 var common struct {
 	endpoint string
@@ -75,6 +88,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newRunCmd())
 	root.AddCommand(newRunSoftwareCmd())
 	root.AddCommand(newRunConfigProfilesCmd())
+	root.AddCommand(newWebhookCmd())
 	root.AddCommand(newPermissionsCmd())
 	return root
 }

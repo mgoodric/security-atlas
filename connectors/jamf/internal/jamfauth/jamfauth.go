@@ -31,6 +31,21 @@ const (
 	EnvClientID = "JAMF_CLIENT_ID"
 	// EnvClientSecret is the Jamf Pro API client secret.
 	EnvClientSecret = "JAMF_CLIENT_SECRET"
+	// EnvWebhookSecret is the operator-configured shared secret Jamf Pro replays
+	// on every webhook delivery (the `subscribe` profile, slice 557). Jamf Pro
+	// webhooks do NOT HMAC-sign the body; the operator sets a static credential on
+	// the webhook (a Basic-auth or custom-header value) and the receiver requires
+	// it verbatim. Read from the environment, never a flag, never logged.
+	EnvWebhookSecret = "JAMF_WEBHOOK_SECRET"
+	// EnvWebhookHeader optionally overrides the request header the shared secret
+	// is carried in. Defaults to DefaultWebhookHeader.
+	EnvWebhookHeader = "JAMF_WEBHOOK_HEADER"
+
+	// DefaultWebhookHeader is the request header the receiver reads the
+	// operator-configured shared secret from when JAMF_WEBHOOK_HEADER is unset.
+	// Jamf's webhook UI lets the operator add a custom header; this is the
+	// connector's documented default name.
+	DefaultWebhookHeader = "X-Jamf-Webhook-Secret"
 
 	// RequiredRole is the documented least-privilege API-role privilege set the
 	// connector needs. Read-only inventory access only; no management/write
@@ -94,6 +109,28 @@ func Resolve(opts ResolveOpts) (Credential, error) {
 		return Credential{}, fmt.Errorf("jamfauth: client secret required (set %s, bound to a read-only API role)", EnvClientSecret)
 	}
 	return Credential{baseURL: baseURL, clientID: clientID, clientSecret: clientSecret}, nil
+}
+
+// ResolveWebhookSecret returns the operator-configured Jamf webhook shared secret
+// for the `subscribe` profile (slice 557). It is required (after env fallback).
+// The returned string is the raw secret; callers pass it to
+// mdmwebhook.NewSharedSecretVerifier and must never log it. opt overrides the env
+// var (used by tests); empty falls back to JAMF_WEBHOOK_SECRET.
+func ResolveWebhookSecret(opt string) (string, error) {
+	secret := strings.TrimSpace(firstNonEmpty(opt, os.Getenv(EnvWebhookSecret)))
+	if secret == "" {
+		return "", fmt.Errorf("jamfauth: webhook shared secret required (set %s)", EnvWebhookSecret)
+	}
+	return secret, nil
+}
+
+// WebhookHeader returns the request header the receiver reads the shared secret
+// from: JAMF_WEBHOOK_HEADER if set, else DefaultWebhookHeader.
+func WebhookHeader(opt string) string {
+	if h := strings.TrimSpace(firstNonEmpty(opt, os.Getenv(EnvWebhookHeader))); h != "" {
+		return h
+	}
+	return DefaultWebhookHeader
 }
 
 func firstNonEmpty(vs ...string) string {

@@ -79,3 +79,46 @@ func TestRequiredRole_IsReadOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveWebhookSecret_FromOpt(t *testing.T) {
+	t.Parallel()
+	got, err := ResolveWebhookSecret("test-jamf-webhook-secret")
+	if err != nil {
+		t.Fatalf("ResolveWebhookSecret: %v", err)
+	}
+	if got != "test-jamf-webhook-secret" {
+		t.Errorf("secret = %q", got)
+	}
+}
+
+func TestResolveWebhookSecret_FromEnv(t *testing.T) {
+	t.Setenv(EnvWebhookSecret, "test-env-webhook-secret")
+	got, err := ResolveWebhookSecret("")
+	if err != nil {
+		t.Fatalf("ResolveWebhookSecret: %v", err)
+	}
+	if got != "test-env-webhook-secret" {
+		t.Errorf("secret = %q", got)
+	}
+}
+
+func TestResolveWebhookSecret_MissingErrors(t *testing.T) {
+	t.Setenv(EnvWebhookSecret, "")
+	if _, err := ResolveWebhookSecret(""); err == nil {
+		t.Fatal("want error when webhook secret unset")
+	}
+}
+
+func TestWebhookHeader_DefaultAndOverride(t *testing.T) {
+	t.Setenv(EnvWebhookHeader, "")
+	if got := WebhookHeader(""); got != DefaultWebhookHeader {
+		t.Errorf("default header = %q, want %q", got, DefaultWebhookHeader)
+	}
+	if got := WebhookHeader("X-Custom-Hdr"); got != "X-Custom-Hdr" {
+		t.Errorf("opt override = %q", got)
+	}
+	t.Setenv(EnvWebhookHeader, "X-Env-Hdr")
+	if got := WebhookHeader(""); got != "X-Env-Hdr" {
+		t.Errorf("env override = %q", got)
+	}
+}
