@@ -235,6 +235,113 @@ func TestSecretInventoryClusterRole_AddsExactlyTheSecretsRule(t *testing.T) {
 	}
 }
 
+// TestAdmissionWebhookRule_IsGetListOnly pins slice-652: the admission-webhook
+// rule grants EXACTLY admissionregistration.k8s.io
+// validatingwebhookconfigurations + mutatingwebhookconfigurations with verbs
+// get,list — no write verb, no wildcard, no `secrets`.
+func TestAdmissionWebhookRule_IsGetListOnly(t *testing.T) {
+	t.Parallel()
+	r := AdmissionWebhookRule()
+	if len(r.APIGroups) != 1 || r.APIGroups[0] != "admissionregistration.k8s.io" {
+		t.Errorf("apiGroups = %v; want [admissionregistration.k8s.io]", r.APIGroups)
+	}
+	wantRes := map[string]bool{"validatingwebhookconfigurations": true, "mutatingwebhookconfigurations": true}
+	if len(r.Resources) != 2 {
+		t.Fatalf("resources = %v; want exactly the two webhook-config kinds", r.Resources)
+	}
+	for _, res := range r.Resources {
+		if !wantRes[res] {
+			t.Errorf("unexpected resource %q", res)
+		}
+		if res == "secrets" || res == "*" {
+			t.Errorf("admission-webhook rule must never grant %q (P0)", res)
+		}
+	}
+	if strings.Join(r.SortedVerbs(), ",") != "get,list" {
+		t.Errorf("verbs = %v; want [get list]", r.SortedVerbs())
+	}
+}
+
+// TestPolicyEngineRules_AreGetListNoWildcardNoSecrets pins slice-652: every
+// optional policy-engine rule grants only get,list on a NAMED resource — never a
+// wildcard resource/apiGroup, never `secrets`, never a write verb.
+func TestPolicyEngineRules_AreGetListNoWildcardNoSecrets(t *testing.T) {
+	t.Parallel()
+	rules := PolicyEngineRules()
+	if len(rules) == 0 {
+		t.Fatal("PolicyEngineRules is empty")
+	}
+	allowedVerbs := map[string]bool{"get": true, "list": true}
+	for _, r := range rules {
+		for _, v := range r.Verbs {
+			if !allowedVerbs[v] {
+				t.Errorf("policy-engine rule on %v grants non-read verb %q (P0)", r.Resources, v)
+			}
+		}
+		for _, res := range r.Resources {
+			if res == "secrets" {
+				t.Errorf("policy-engine rule grants `secrets` (P0): %v", r.Resources)
+			}
+			if res == "*" {
+				t.Errorf("policy-engine rule grants wildcard resource (P0): %v", r.Resources)
+			}
+		}
+		for _, g := range r.APIGroups {
+			if g == "*" {
+				t.Errorf("policy-engine rule grants wildcard apiGroup (P0): %v", r.APIGroups)
+			}
+		}
+	}
+}
+
+// TestAdmissionEvidenceClusterRole_AddsExactlyTheAdmissionRules pins slice-652:
+// the admission-evidence ClusterRole is the base least-privilege set PLUS the
+// admission-webhook rule PLUS the policy-engine rules. It (a) still grants only
+// get,list across every rule, (b) introduces no wildcard resource and no
+// `secrets`, and (c) leaves the BASE role unchanged (still excluding both the
+// webhook and policy grants AND `secrets`).
+func TestAdmissionEvidenceClusterRole_AddsExactlyTheAdmissionRules(t *testing.T) {
+	t.Parallel()
+	base := DocumentedClusterRole()
+	full := AdmissionEvidenceClusterRole()
+
+	wantAdded := 1 + len(PolicyEngineRules())
+	if len(full) != len(base)+wantAdded {
+		t.Fatalf("admission ClusterRole has %d rules; want base(%d)+%d", len(full), len(base), wantAdded)
+	}
+
+	allowedVerbs := map[string]bool{"get": true, "list": true}
+	for _, r := range full {
+		for _, v := range r.Verbs {
+			if !allowedVerbs[v] {
+				t.Errorf("rule on %v grants non-read verb %q (P0 — admission mode stays read-only)", r.Resources, v)
+			}
+		}
+		for _, res := range r.Resources {
+			if res == "*" {
+				t.Errorf("rule grants wildcard resource (P0): %v", r.Resources)
+			}
+			if res == "secrets" {
+				t.Errorf("admission mode must never grant `secrets` (P0): %v", r.Resources)
+			}
+		}
+		for _, g := range r.APIGroups {
+			if g == "*" {
+				t.Errorf("rule grants wildcard apiGroup (P0): %v", r.APIGroups)
+			}
+		}
+	}
+
+	// The base role must still EXCLUDE the admission grants entirely.
+	for _, r := range base {
+		for _, g := range r.APIGroups {
+			if g == "admissionregistration.k8s.io" || g == "templates.gatekeeper.sh" || g == "kyverno.io" {
+				t.Errorf("base ClusterRole leaked an admission-evidence grant (must stay slice-487 narrow): %v", r.APIGroups)
+			}
+		}
+	}
+}
+
 func TestReadOnlyVerbs_AreGetList(t *testing.T) {
 	t.Parallel()
 	v := ReadOnlyVerbs()

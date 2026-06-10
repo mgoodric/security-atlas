@@ -27,12 +27,16 @@ const ConnectorName = "k8s-connector"
 //   - k8s.networkpolicy_coverage.v1       (Kubernetes NetworkPolicy posture, pull — slice 523)
 //   - k8s.pod_security_admission.v1       (Kubernetes PSS admission config, pull — slice 524)
 //   - k8s.secret_inventory.v1             (Kubernetes Secret METADATA inventory, pull — slice 525; OPT-IN)
+//   - k8s.admission_webhook.v1            (Kubernetes admission-webhook CONFIG metadata, pull — slice 652)
+//   - k8s.admission_policy.v1             (OPA/Gatekeeper + Kyverno policy CONFIG metadata, pull — slice 652)
 var SupportedKinds = []string{
 	"k8s.rbac_binding.v1",
 	"k8s.workload_security_context.v1",
 	"k8s.networkpolicy_coverage.v1",
 	"k8s.pod_security_admission.v1",
 	"k8s.secret_inventory.v1",
+	"k8s.admission_webhook.v1",
+	"k8s.admission_policy.v1",
 }
 
 // PullInterval names the connector's pull cadence HONESTLY (P0-487-6). The
@@ -129,11 +133,15 @@ func sdkOpts() []sdk.Option {
 
 const longDescription = `security-atlas Kubernetes connector
 
-Emits five evidence kinds:
+Emits seven evidence kinds:
   - k8s.rbac_binding.v1               (run subcommand, pull — Kubernetes RBAC)
   - k8s.workload_security_context.v1  (run subcommand, pull — apps workloads)
   - k8s.networkpolicy_coverage.v1     (run subcommand, pull — NetworkPolicies)
   - k8s.pod_security_admission.v1     (run subcommand, pull — PSS admission cfg)
+  - k8s.admission_webhook.v1          (run subcommand, pull — admission-webhook
+    CONFIG metadata; slice 652)
+  - k8s.admission_policy.v1           (run subcommand, pull — OPA/Gatekeeper +
+    Kyverno policy CONFIG metadata; slice 652)
   - k8s.secret_inventory.v1           (run --collect-secret-inventory, pull —
     Secret METADATA inventory; OPT-IN, slice 525)
 
@@ -146,8 +154,18 @@ Least-privilege Kubernetes access (read-only ClusterRole):
     clusterrolebindings  — verbs get,list
   - apps: deployments, daemonsets, statefulsets  — verbs get,list
   - networking.k8s.io: networkpolicies  — verbs get,list
+  - admissionregistration.k8s.io: validatingwebhookconfigurations,
+    mutatingwebhookconfigurations  — verbs get,list  (NEW in slice 652 — gates
+    the k8s.admission_webhook.v1 kind; CONFIG metadata only, NEVER the caBundle)
   - core: namespaces  — verbs get,list  (also gates the PSS admission kind —
     PSS config is namespace pod-security.kubernetes.io/* labels; NO new rule)
+
+OPTIONAL (only meaningful when the policy engine is installed; detected by
+API-discovery probe — absence is never an error):
+  - templates.gatekeeper.sh: constrainttemplates  — verbs get,list  (OPA/
+    Gatekeeper policy catalog — name/kind, NEVER the Rego body; slice 652)
+  - kyverno.io: clusterpolicies, policies  — verbs get,list  (Kyverno policy
+    CONFIG metadata — name/scope/enforcement-action, NEVER the rule body; 652)
 
 NEVER grant write verbs, cluster-admin, or wildcards.
 

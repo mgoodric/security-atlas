@@ -4,15 +4,17 @@ The Kubernetes connector (slice 487) brings cluster RBAC + workload hardening +
 network segmentation + admission-time enforcement to the platform's evidence
 pipeline. It follows the locked connector pattern verbatim: register-per-run, a
 stable `actor_id`, an hour-truncated `observed_at`, scope minimums, and
-vendor-native read-only auth. It emits five evidence kinds:
+vendor-native read-only auth. It emits seven evidence kinds:
 
-| Kind                               | Profile | Source                                                                                                                                                        |
-| ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `k8s.rbac_binding.v1`              | pull    | Kubernetes API `rbac.authorization.k8s.io/v1` roles + bindings (get,list)                                                                                     |
-| `k8s.workload_security_context.v1` | pull    | Kubernetes API `apps/v1` deployments / daemonsets / statefulsets (get,list)                                                                                   |
-| `k8s.networkpolicy_coverage.v1`    | pull    | Kubernetes API `networking.k8s.io/v1` networkpolicies + namespaces (get,list) — plus the installed CNI's policy CRDs when present (Cilium / Calico, get,list) |
-| `k8s.pod_security_admission.v1`    | pull    | Kubernetes API core `namespaces` (get,list) — `pod-security.kubernetes.io/*` labels                                                                           |
-| `k8s.secret_inventory.v1`          | pull    | Kubernetes API core `secrets` (get,list) — **OPT-IN, slice 525** — Secret METADATA only (type / namespace / name / age / key-NAMES), **never a value**        |
+| Kind                               | Profile | Source                                                                                                                                                                       |
+| ---------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `k8s.rbac_binding.v1`              | pull    | Kubernetes API `rbac.authorization.k8s.io/v1` roles + bindings (get,list)                                                                                                    |
+| `k8s.workload_security_context.v1` | pull    | Kubernetes API `apps/v1` deployments / daemonsets / statefulsets (get,list)                                                                                                  |
+| `k8s.networkpolicy_coverage.v1`    | pull    | Kubernetes API `networking.k8s.io/v1` networkpolicies + namespaces (get,list) — plus the installed CNI's policy CRDs when present (Cilium / Calico, get,list)                |
+| `k8s.pod_security_admission.v1`    | pull    | Kubernetes API core `namespaces` (get,list) — `pod-security.kubernetes.io/*` labels                                                                                          |
+| `k8s.admission_webhook.v1`         | pull    | Kubernetes API `admissionregistration.k8s.io/v1` validating + mutating webhook configurations (get,list) — **slice 652** — webhook CONFIG metadata, **never the caBundle**   |
+| `k8s.admission_policy.v1`          | pull    | OPA/Gatekeeper `templates.gatekeeper.sh` + Kyverno `kyverno.io` policy CRDs (get,list, probe-detected) — **slice 652** — policy CONFIG metadata, **never the Rego/CEL body** |
+| `k8s.secret_inventory.v1`          | pull    | Kubernetes API core `secrets` (get,list) — **OPT-IN, slice 525** — Secret METADATA only (type / namespace / name / age / key-NAMES), **never a value**                       |
 
 The third kind (`k8s.networkpolicy_coverage.v1`, slice 523) reports, per
 namespace, how many NetworkPolicies exist, a per-policy SPEC summary, and the
@@ -48,7 +50,38 @@ pinned version per mode. This is the **enforced** side of workload hardening
 admission, not just configured per-workload" auditor ask. It reuses the existing
 `namespaces` get/list grant (**no new ClusterRole rule**).
 
-The fifth kind (`k8s.secret_inventory.v1`, slice 525) is **opt-in** and is the
+The fifth and sixth kinds (`k8s.admission_webhook.v1` + `k8s.admission_policy.v1`,
+slice 652) are the **"is hardening enforced beyond namespace PSS labels?"**
+surfaces an auditor asks about once PSS labels are covered. Unlike slice 524
+(which reused the held `namespaces` grant), this slice **deliberately adds new
+read-only ClusterRole rules** — the **flagged scope expansion** this slice owns:
+
+- **Admission webhooks** (`k8s.admission_webhook.v1`): the new
+  `admissionregistration.k8s.io` `validatingwebhookconfigurations` +
+  `mutatingwebhookconfigurations` `get,list` rule. Per webhook entry it records
+  the CONFIG metadata — which resource TYPES + operation VERBS it intercepts, its
+  `failurePolicy` (Fail / Ignore) and a derived `fail_closed` flag, whether it
+  scopes by a namespace/object selector (the **presence**, never the match
+  expressions), the declared `sideEffects`, and the dispatch service ref. It
+  **never** reads the webhook's `.clientConfig.caBundle` / TLS client key or any
+  intercepted object.
+- **Third-party policy engines** (`k8s.admission_policy.v1`): OPA/Gatekeeper
+  (`templates.gatekeeper.sh` `constrainttemplates`) and Kyverno (`kyverno.io`
+  `clusterpolicies` + `policies`), each detected by an **API-discovery probe** so
+  an **absent engine is never an error** (the slice-622 pattern). Per policy it
+  records name, scope (cluster / namespaced), kind, and enforcement action
+  (`enforce` / `audit` / `dryrun` / ...) + a derived `enforcing` flag. It
+  **never** reads the policy's Rego/CEL decision-logic body. For Gatekeeper, v0
+  records the ConstraintTemplate catalog (which policies are DEFINED); the
+  per-constraint enforcement action is out of v0 because reading it would require
+  a wildcard grant over the dynamic per-template constraint CRDs — deliberately
+  avoided to keep every rule wildcard-free.
+
+Both kinds are descriptive (`INCONCLUSIVE`); the platform evaluator owns the
+fail-open / coverage policy call. Print the role that includes these rules with
+`atlas-k8s permissions --admission`.
+
+The seventh kind (`k8s.secret_inventory.v1`, slice 525) is **opt-in** and is the
 **one deliberate exception** to the rule below: it requires adding **exactly one**
 ClusterRole rule — core `secrets` `get`/`list`, the one grant the base connector
 intentionally withholds. Even with that grant, the connector collects Secret
@@ -118,6 +151,22 @@ rules:
     verbs: ["get", "list"]
   - apiGroups: ["crd.projectcalico.org"]
     resources: ["networkpolicies", "globalnetworkpolicies"]
+    verbs: ["get", "list"]
+  # Admission webhooks (slice 652) — the deliberate, flagged scope expansion this
+  # slice owns. CONFIG metadata only; never the webhook caBundle / TLS key.
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources:
+      ["validatingwebhookconfigurations", "mutatingwebhookconfigurations"]
+    verbs: ["get", "list"]
+  # Third-party policy engines (slice 652) — OPTIONAL. Include only the apiGroup(s)
+  # for the engine installed in your cluster; the connector probes CRD presence and
+  # skips an absent engine without error. get,list only — never write/secrets/wildcard.
+  # CONFIG metadata only; never the policy Rego/CEL decision-logic body.
+  - apiGroups: ["templates.gatekeeper.sh"]
+    resources: ["constrainttemplates"]
+    verbs: ["get", "list"]
+  - apiGroups: ["kyverno.io"]
+    resources: ["clusterpolicies", "policies"]
     verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["namespaces"]
@@ -351,6 +400,13 @@ run that crosses an hour boundary writes a fresh record.
   `enforce` is only `privileged`. `audit` / `warn` modes are reported in the
   record but do not drive the verdict (they observe / warn, they do not block
   admission). The platform evaluator owns the final (control, namespace) call.
+- **`k8s.admission_webhook.v1` → `INCONCLUSIVE` (descriptive).** The connector
+  emits the webhook's wiring (intercepted resources/operations, `fail_closed`,
+  selector scope, dispatch ref), not a verdict — the platform evaluator owns any
+  fail-open / coverage policy call per (control, scope).
+- **`k8s.admission_policy.v1` → `INCONCLUSIVE` (descriptive).** The connector
+  emits the policy's config (engine / name / scope / kind / enforcement action +
+  derived `enforcing`), not a verdict — the platform evaluator owns the call.
 - **`k8s.secret_inventory.v1` → `INCONCLUSIVE` (descriptive).** The connector
   emits a Secret-metadata inventory, not a verdict: it does not decide whether a
   Secret is too old or whether a key set is wrong — the platform evaluator owns
@@ -387,6 +443,19 @@ only**. It never reads, materializes, or emits:
   opaque `json.RawMessage`, and the per-policy `source` carried into a record is
   an API-group string (`cilium.io` / `crd.projectcalico.org`), never workload
   data
+- **Admission-webhook caBundle / TLS key (slice 652).** The
+  `k8s.admission_webhook.v1` collector reads webhook **CONFIG metadata only** —
+  it does **not** model `.clientConfig.caBundle`, the dispatch `url`, or any TLS
+  field, so the JSON decoder discards them; the `RawWebhook` / `Webhook` structs
+  have **no field** that could carry a caBundle / TLS key or an intercepted
+  object (a reflection guard fails the build if one is added, and a
+  fixture-with-real-caBundle drop test proves none reaches a record).
+- **Policy-engine Rego/CEL decision-logic body (slice 652).** The
+  `k8s.admission_policy.v1` collector reads policy **CONFIG metadata only** — it
+  does **not** model the Gatekeeper ConstraintTemplate `targets[]` (Rego) or the
+  Kyverno `spec.rules[]` (CEL/JMESPath), so the decoder discards them; the
+  `RawPolicy` / `Policy` structs have **no field** that could carry a rule body
+  (the same reflection guard + a fixture-with-real-Rego/CEL drop test enforce it).
 - actual network traffic / flow logs (this is configuration, not telemetry)
 - any namespace label or annotation other than the `pod-security.kubernetes.io/*`
   labels (the PSS client reads **only** those six label keys off `metadata.labels`
@@ -403,19 +472,23 @@ credential.
 
 ## Not in v0 (follow-ons)
 
-The connector ships five evidence surfaces (RBAC, workload security context,
-NetworkPolicy coverage, Pod-Security-Standards admission config, and the opt-in
-Secret-inventory metadata). It does **not** ship:
+The connector ships seven evidence surfaces (RBAC, workload security context,
+NetworkPolicy coverage, Pod-Security-Standards admission config, admission-webhook
+config, third-party policy-engine config, and the opt-in Secret-inventory
+metadata). It does **not** ship:
 
-- the cluster's `AdmissionConfiguration` file (out of API reach), validating /
-  mutating webhooks, or third-party policy engines (OPA/Gatekeeper, Kyverno) —
-  the PSS kind reads **namespace labels only**
+- the cluster's `AdmissionConfiguration` file (out of API reach — it lives on the
+  control-plane host filesystem, not the Kubernetes API; likely never in scope for
+  an API-only connector)
+- the **per-constraint** Gatekeeper enforcement action — v0 records the
+  ConstraintTemplate catalog (which policies are DEFINED); reading each
+  constraint's `enforcementAction` would require a wildcard grant over the dynamic
+  per-template constraint CRDs, deliberately avoided to keep every rule
+  wildcard-free (a follow-on can revisit if a wildcard-free discovery path is
+  acceptable)
 - image-provenance / audit-log evidence
-- CNI-plugin-specific policy (Cilium / Calico CRDs) coverage — `networking.k8s.io`
-  NetworkPolicy only
 - Service / Ingress object coverage
 - a watch-based event-driven profile via the Kubernetes audit log
-- cursor pagination (v0 reads a bounded first page per endpoint, `limit=500`)
 
 These are filed as follow-on slices (see `docs/issues/487-kubernetes-connector.md`,
 `docs/issues/523-k8s-networkpolicy-evidence.md`,

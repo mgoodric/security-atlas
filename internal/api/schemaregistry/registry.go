@@ -160,6 +160,19 @@ func DefaultSeed() []KindVersion {
 		// CRY-09 — the closest real anchor for secret-material lifecycle — is used
 		// (decisions-log D2).
 		{Kind: "k8s.secret_inventory.v1", Version: "1.0.0"},
+		// Slice 652: Kubernetes connector admission-webhook + policy-engine evidence
+		// (the #524 PSS follow-on). The deliberate, FLAGGED ClusterRole expansion:
+		// the base role gains the admissionregistration.k8s.io
+		// validatingwebhookconfigurations + mutatingwebhookconfigurations get/list
+		// rule (gating k8s.admission_webhook.v1), plus OPTIONAL policy-engine get/list
+		// rules (templates.gatekeeper.sh + kyverno.io) detected by API-discovery probe
+		// (gating k8s.admission_policy.v1). CONFIG metadata only — NEVER the webhook
+		// caBundle/TLS key, the policy Rego/CEL decision-logic body, or an intercepted
+		// payload (structural reflection guard + caBundle/Rego/CEL drop tests). Both
+		// anchored to CFG-02 (the same configuration-hardening anchor the PSS admission
+		// + webhook kinds share). Read-only get,list, no wildcard, no `secrets`.
+		{Kind: "k8s.admission_webhook.v1", Version: "1.0.0"},
+		{Kind: "k8s.admission_policy.v1", Version: "1.0.0"},
 		// Slice 488: monitoring connectors (Datadog + Grafana) — shared
 		// alert/monitor configuration-inventory evidence kind.
 		{Kind: "monitoring.alert_config.v1", Version: "1.0.0"},

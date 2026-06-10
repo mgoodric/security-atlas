@@ -9,6 +9,8 @@
 //   - NetpolCoverageKey:  sha256("k8s.networkpolicy_coverage|<namespace>|<hour>")
 //   - PSSAdmissionKey:    sha256("k8s.pod_security_admission|<namespace>|<hour>")
 //   - SecretInventoryKey: sha256("k8s.secret_inventory|<namespace>/<name>|<hour>")
+//   - AdmissionWebhookKey: sha256("k8s.admission_webhook|<kind>/<config>/<webhook>|<hour>")
+//   - AdmissionPolicyKey:  sha256("k8s.admission_policy|<engine>/<namespace>/<name>|<hour>")
 //
 // Anti-criterion: every push from this connector derives its idempotency_key
 // here. The cmd layer never invents one ad-hoc and never pushes with an empty
@@ -52,6 +54,20 @@ func PSSAdmissionKey(namespace string, observedAt time.Time) string {
 // Secret across the cluster; one record per Secret per run.
 func SecretInventoryKey(namespace, name string, observedAt time.Time) string {
 	return hashKey("k8s.secret_inventory", namespace+"/"+name, observedAt)
+}
+
+// AdmissionWebhookKey returns the idempotency key for one admission-webhook
+// entry (slice 652). kind/config/webhook together uniquely identify a webhook
+// entry across the cluster; one record per webhook entry per run.
+func AdmissionWebhookKey(kind, config, webhook string, observedAt time.Time) string {
+	return hashKey("k8s.admission_webhook", kind+"/"+config+"/"+webhook, observedAt)
+}
+
+// AdmissionPolicyKey returns the idempotency key for one policy-engine policy
+// (slice 652). engine/namespace/name together uniquely identify a policy; one
+// record per policy per run. namespace is empty for cluster-wide policies.
+func AdmissionPolicyKey(engine, namespace, name string, observedAt time.Time) string {
+	return hashKey("k8s.admission_policy", engine+"/"+namespace+"/"+name, observedAt)
 }
 
 func hashKey(prefix, id string, observedAt time.Time) string {

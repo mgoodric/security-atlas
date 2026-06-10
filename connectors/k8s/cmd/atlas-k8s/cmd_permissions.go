@@ -22,11 +22,25 @@ import (
 // base connector intentionally withholds.
 func newPermissionsCmd() *cobra.Command {
 	var secretInventory bool
+	var admissionEvidence bool
 	cmd := &cobra.Command{
 		Use:   "permissions",
 		Short: "print the least-privilege read-only ClusterRole this connector requires",
 		Run: func(cmd *cobra.Command, _ []string) {
 			rules := k8sauth.DocumentedClusterRole()
+			if admissionEvidence {
+				rules = k8sauth.AdmissionEvidenceClusterRole()
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(),
+					"# admission-evidence mode (slice 652): the base role PLUS the admission-webhook")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(),
+					"# get/list rule (admissionregistration.k8s.io) and the OPTIONAL policy-engine")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(),
+					"# get/list rules (templates.gatekeeper.sh + kyverno.io — only meaningful when the")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(),
+					"# engine is installed). CONFIG metadata only — NEVER a caBundle/TLS key or a")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(),
+					"# policy Rego/CEL body. Still get,list-only, no secrets, no wildcard.")
+			}
 			if secretInventory {
 				rules = k8sauth.SecretInventoryClusterRole()
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(),
@@ -51,5 +65,7 @@ func newPermissionsCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&secretInventory, "secret-inventory", false,
 		"include the OPT-IN 'secrets' get/list rule the k8s.secret_inventory.v1 mode requires (slice 525)")
+	cmd.Flags().BoolVar(&admissionEvidence, "admission", false,
+		"include the admission-webhook + policy-engine (OPA/Gatekeeper + Kyverno) get/list rules the k8s.admission_webhook.v1 + k8s.admission_policy.v1 kinds require (slice 652)")
 	return cmd
 }

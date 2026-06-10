@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/k8s.admission_policy/1.0.0.json",
+  "x-evidence-kind": "k8s.admission_policy.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["CFG-02"],
+  "title": "Kubernetes third-party admission-policy configuration (metadata-only)",
+  "description": "Per-policy CONFIGURATION metadata for the third-party admission policy engines OPA/Gatekeeper and Kyverno, captured read-only from the Kubernetes API (get/list on templates.gatekeeper.sh constrainttemplates + kyverno.io clusterpolicies/policies — OPTIONAL ClusterRole rules detected by API-discovery probe, so an absent engine is never an error; slice 652). The auditable question is 'which admission policies are enforced cluster-wide, and which only audit?' — proving policy-engine coverage WITHOUT reading the policy's Rego/CEL decision-logic body. CONFIGURATION metadata ONLY: the engine (gatekeeper / kyverno), the policy name, its scope (cluster / namespaced) + namespace when namespaced, the policy kind (the Gatekeeper template's rendered constraint KIND, or 'ClusterPolicy' / 'Policy' for Kyverno), and the enforcement action (enforce / deny / audit / warn / dryrun) + a derived enforcing flag. There is deliberately NO field for the policy's Rego/CEL decision-logic body: the connector NEVER reads, models, or records it — the collector struct physically cannot hold it and the client decode does not model the Gatekeeper template targets[] (Rego) or the Kyverno spec.rules[] (CEL/JMESPath) at all (a reflection guard + a fixture-with-real-rego/CEL drop test fail the build / suite if a body-bearing field is ever added). For Gatekeeper, v0 records the ConstraintTemplate catalog (which policies are DEFINED) with enforcement_action left unset — the per-constraint action would require a wildcard grant over the dynamic per-template constraint CRDs, deliberately out of v0 to keep the grant wildcard-free (decisions-log D5). The connector emits no pass/fail verdict (descriptive configuration evidence — INCONCLUSIVE); the platform evaluator owns any policy call. x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9): CFG-02 (Configuration Management / System Hardening — the same anchor the admission-webhook + PSS kinds use; policy engines are the same enforced-hardening surface).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["engine", "policy_name", "scope", "enforcing"],
+  "properties": {
+    "engine": {
+      "type": "string",
+      "enum": ["gatekeeper", "kyverno"],
+      "description": "The third-party admission policy engine this policy belongs to."
+    },
+    "policy_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The policy object name (metadata.name). A name, never the rule body."
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["cluster", "namespaced"],
+      "description": "Whether the policy is cluster-wide (Gatekeeper Constraint/Template, Kyverno ClusterPolicy) or namespaced (Kyverno Policy)."
+    },
+    "namespace": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The namespace the policy lives in. Present only for namespaced policies; omitted for cluster-wide policies."
+    },
+    "policy_kind": {
+      "type": "string",
+      "description": "The CRD kind: the Gatekeeper template's rendered constraint KIND (e.g. 'K8sRequiredLabels'), or 'ClusterPolicy' / 'Policy' for Kyverno. The KIND, never the rule body. Omitted when the source object carries no kind."
+    },
+    "enforcement_action": {
+      "type": "string",
+      "description": "The policy's action as the engine reports it (enforce / deny / audit / warn / dryrun), lower-cased. The verb that decides whether a violation blocks admission. CONFIG metadata, never the rule logic. Omitted when unset (e.g. a Gatekeeper template, whose action is per-constraint and out of v0)."
+    },
+    "enforcing": {
+      "type": "boolean",
+      "description": "True when the enforcement action BLOCKS admission on a violation (enforce / deny) rather than only observing (audit / warn / dryrun / unset). The derived hardening signal."
+    }
+  }
+}

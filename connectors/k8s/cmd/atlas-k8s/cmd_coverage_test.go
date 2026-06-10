@@ -20,6 +20,7 @@ import (
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/admission"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/netpol"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/pss"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/rbac"
@@ -307,6 +308,156 @@ func TestActorID_SecretMetaShape(t *testing.T) {
 	id := actorID("secretmeta")
 	if !strings.HasPrefix(id, "connector:k8s:secretmeta@") {
 		t.Errorf("actorID(secretmeta) = %q", id)
+	}
+}
+
+func TestBuildAdmissionWebhookRecord_Shape(t *testing.T) {
+	w := admission.Webhook{
+		Kind: admission.KindValidating, ConfigName: "vcfg", WebhookName: "v.example.com",
+		FailurePolicy: admission.FailurePolicyFail, FailClosed: true, SideEffects: "None",
+		HasNamespaceSelector: true, TargetService: "ns/svc",
+		InterceptedResources:  []string{"pods", "deployments"},
+		InterceptedOperations: []string{"CREATE", "UPDATE"},
+		ObservedAt:            time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
+	}
+	rec, err := buildAdmissionWebhookRecord(w, "cluster-1", "prod", "scf:CFG-02")
+	if err != nil {
+		t.Fatalf("buildAdmissionWebhookRecord: %v", err)
+	}
+	if rec.EvidenceKind != "k8s.admission_webhook.v1" {
+		t.Errorf("kind = %q", rec.EvidenceKind)
+	}
+	if rec.Result != evidencev1.Result_RESULT_INCONCLUSIVE {
+		t.Errorf("result = %v; want INCONCLUSIVE", rec.Result)
+	}
+	if rec.IdempotencyKey == "" {
+		t.Error("empty idempotency key")
+	}
+	if !strings.HasPrefix(rec.GetSourceAttribution().GetActorId(), "connector:k8s:admission-webhook@") {
+		t.Errorf("actor_id = %q", rec.GetSourceAttribution().GetActorId())
+	}
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{"webhook_kind", "config_name", "webhook_name", "fail_closed", "failure_policy", "side_effects", "has_namespace_selector", "has_object_selector", "target_service", "intercepted_resources", "intercepted_operations"} {
+		if _, ok := pl[k]; !ok {
+			t.Errorf("payload missing %q; got %v", k, pl)
+		}
+	}
+	// CONFIG metadata only: no caBundle / TLS / body field.
+	for _, banned := range []string{"ca_bundle", "cabundle", "tls_key", "url", "rego", "body"} {
+		if _, ok := pl[banned]; ok {
+			t.Errorf("webhook payload must NOT carry a forbidden field %q", banned)
+		}
+	}
+}
+
+func TestBuildAdmissionWebhookRecord_OmitsEmptyOptionals(t *testing.T) {
+	w := admission.Webhook{
+		Kind: admission.KindMutating, ConfigName: "mcfg", WebhookName: "m.example.com",
+		FailurePolicy: admission.FailurePolicyUnset, ObservedAt: time.Now().UTC(),
+	}
+	rec, err := buildAdmissionWebhookRecord(w, "c", "prod", "scf:CFG-02")
+	if err != nil {
+		t.Fatalf("buildAdmissionWebhookRecord: %v", err)
+	}
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{"failure_policy", "side_effects", "target_service", "intercepted_resources", "intercepted_operations"} {
+		if _, ok := pl[k]; ok {
+			t.Errorf("empty optional %q should be omitted; got %v", k, pl)
+		}
+	}
+	// fail_closed is always present.
+	if pl["fail_closed"] != false {
+		t.Errorf("fail_closed = %v; want false (unset failurePolicy)", pl["fail_closed"])
+	}
+}
+
+func TestBuildAdmissionPolicyRecord_Shape(t *testing.T) {
+	p := admission.Policy{
+		Engine: admission.EngineKyverno, Name: "require-labels", Namespace: "team-a",
+		Scope: admission.ScopeNamespaced, PolicyKind: "Policy", EnforcementAction: "enforce",
+		Enforcing: true, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
+	}
+	rec, err := buildAdmissionPolicyRecord(p, "cluster-1", "prod", "scf:CFG-02")
+	if err != nil {
+		t.Fatalf("buildAdmissionPolicyRecord: %v", err)
+	}
+	if rec.EvidenceKind != "k8s.admission_policy.v1" {
+		t.Errorf("kind = %q", rec.EvidenceKind)
+	}
+	if rec.Result != evidencev1.Result_RESULT_INCONCLUSIVE {
+		t.Errorf("result = %v; want INCONCLUSIVE", rec.Result)
+	}
+	if !strings.HasPrefix(rec.GetSourceAttribution().GetActorId(), "connector:k8s:admission-policy@") {
+		t.Errorf("actor_id = %q", rec.GetSourceAttribution().GetActorId())
+	}
+	// namespaced policy carries a namespace scope dimension.
+	if got := scopeValue(rec.GetScope(), "namespace"); got != "team-a" {
+		t.Errorf("namespace scope = %q; want team-a", got)
+	}
+	pl := rec.GetPayload().AsMap()
+	for _, k := range []string{"engine", "policy_name", "scope", "enforcing", "policy_kind", "enforcement_action", "namespace"} {
+		if _, ok := pl[k]; !ok {
+			t.Errorf("payload missing %q; got %v", k, pl)
+		}
+	}
+	for _, banned := range []string{"rego", "cel", "body", "rules", "match", "validate"} {
+		if _, ok := pl[banned]; ok {
+			t.Errorf("policy payload must NOT carry a forbidden body field %q", banned)
+		}
+	}
+}
+
+func TestBuildAdmissionPolicyRecord_ClusterScopeOmitsNamespace(t *testing.T) {
+	p := admission.Policy{
+		Engine: admission.EngineGatekeeper, Name: "k8srequiredlabels", Scope: admission.ScopeCluster,
+		PolicyKind: "K8sRequiredLabels", ObservedAt: time.Now().UTC(),
+	}
+	rec, err := buildAdmissionPolicyRecord(p, "c", "prod", "scf:CFG-02")
+	if err != nil {
+		t.Fatalf("buildAdmissionPolicyRecord: %v", err)
+	}
+	if got := scopeValue(rec.GetScope(), "namespace"); got != "" {
+		t.Errorf("cluster-scoped policy must not carry a namespace scope; got %q", got)
+	}
+	pl := rec.GetPayload().AsMap()
+	if _, ok := pl["namespace"]; ok {
+		t.Errorf("cluster-scoped policy payload must omit namespace; got %v", pl)
+	}
+	// enforcement_action omitted (Gatekeeper template, no action).
+	if _, ok := pl["enforcement_action"]; ok {
+		t.Errorf("template with no action must omit enforcement_action; got %v", pl)
+	}
+}
+
+func TestActorID_AdmissionShapes(t *testing.T) {
+	if !strings.HasPrefix(actorID("admission-webhook"), "connector:k8s:admission-webhook@") {
+		t.Errorf("actorID(admission-webhook) wrong")
+	}
+	if !strings.HasPrefix(actorID("admission-policy"), "connector:k8s:admission-policy@") {
+		t.Errorf("actorID(admission-policy) wrong")
+	}
+}
+
+// TestNewPermissionsCmd_AdmissionFlagAddsWebhookAndPolicyGrants proves the
+// --admission flag renders the ClusterRole WITH the admission-webhook +
+// policy-engine get/list grants (slice 652), wildcard- and secrets-free.
+func TestNewPermissionsCmd_AdmissionFlagAddsWebhookAndPolicyGrants(t *testing.T) {
+	cmd := newPermissionsCmd()
+	if err := cmd.Flags().Set("admission", "true"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.Run(cmd, nil)
+	out := buf.String()
+	for _, want := range []string{"validatingwebhookconfigurations", "mutatingwebhookconfigurations", "constrainttemplates", "clusterpolicies", "get,list"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("--admission output missing %q; got %q", want, out)
+		}
+	}
+	// No secrets, no wildcard resource.
+	if strings.Contains(out, " secrets ") || strings.Contains(out, "\tsecrets\t") {
+		t.Errorf("--admission output must not grant secrets; got %q", out)
 	}
 }
 

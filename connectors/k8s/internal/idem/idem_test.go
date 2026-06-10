@@ -105,6 +105,44 @@ func TestSecretInventoryKey_StableAndDistinct(t *testing.T) {
 	}
 }
 
+func TestAdmissionWebhookKey_StableAndDistinct(t *testing.T) {
+	t.Parallel()
+	a := time.Date(2026, 6, 7, 12, 5, 0, 0, time.UTC)
+	b := time.Date(2026, 6, 7, 12, 55, 0, 0, time.UTC)
+	if AdmissionWebhookKey("validating", "cfg", "wh", a) != AdmissionWebhookKey("validating", "cfg", "wh", b) {
+		t.Error("same webhook within the hour should share a key")
+	}
+	if AdmissionWebhookKey("validating", "cfg", "wh", a) == AdmissionWebhookKey("mutating", "cfg", "wh", a) {
+		t.Error("different webhook kind should differ")
+	}
+	if AdmissionWebhookKey("validating", "cfgA", "wh", a) == AdmissionWebhookKey("validating", "cfgB", "wh", a) {
+		t.Error("different config name should differ")
+	}
+	c := time.Date(2026, 6, 7, 13, 0, 0, 0, time.UTC)
+	if AdmissionWebhookKey("validating", "cfg", "wh", a) == AdmissionWebhookKey("validating", "cfg", "wh", c) {
+		t.Error("different hour should differ")
+	}
+}
+
+func TestAdmissionPolicyKey_StableAndDistinct(t *testing.T) {
+	t.Parallel()
+	a := time.Date(2026, 6, 7, 12, 5, 0, 0, time.UTC)
+	b := time.Date(2026, 6, 7, 12, 55, 0, 0, time.UTC)
+	if AdmissionPolicyKey("kyverno", "", "p", a) != AdmissionPolicyKey("kyverno", "", "p", b) {
+		t.Error("same policy within the hour should share a key")
+	}
+	if AdmissionPolicyKey("kyverno", "", "p", a) == AdmissionPolicyKey("gatekeeper", "", "p", a) {
+		t.Error("different engine should differ")
+	}
+	if AdmissionPolicyKey("kyverno", "ns-a", "p", a) == AdmissionPolicyKey("kyverno", "ns-b", "p", a) {
+		t.Error("different namespace should differ")
+	}
+	// Distinct from the webhook key (different prefix).
+	if AdmissionPolicyKey("kyverno", "", "x", a) == AdmissionWebhookKey("kyverno", "", "x", a) {
+		t.Error("policy and webhook keys must differ (kind prefix)")
+	}
+}
+
 func TestKeys_AreHex64(t *testing.T) {
 	t.Parallel()
 	for _, k := range []string{
@@ -113,6 +151,8 @@ func TestKeys_AreHex64(t *testing.T) {
 		NetpolCoverageKey("prod", time.Now()),
 		PSSAdmissionKey("prod", time.Now()),
 		SecretInventoryKey("prod", "s", time.Now()),
+		AdmissionWebhookKey("validating", "cfg", "wh", time.Now()),
+		AdmissionPolicyKey("kyverno", "ns", "p", time.Now()),
 	} {
 		if len(k) != 64 {
 			t.Errorf("key %q len = %d; want 64 (sha256 hex)", k, len(k))

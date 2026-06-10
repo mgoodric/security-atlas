@@ -14,6 +14,7 @@ import (
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/admission"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/idem"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/k8sauth"
 	"github.com/mgoodric/security-atlas/connectors/k8s/internal/netpol"
@@ -28,12 +29,14 @@ import (
 // without hitting a live cluster or a real platform endpoint. Production code
 // paths are byte-for-byte unchanged; only the call-site indirection moved.
 var (
-	rbacPull       = rbac.Pull
-	workloadScan   = workload.Inspect
-	netpolScan     = netpol.Assess
-	pssScan        = pss.Assess
-	secretMetaScan = secretmeta.Collect
-	newSDKClient   = func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error) {
+	rbacPull             = rbac.Pull
+	workloadScan         = workload.Inspect
+	netpolScan           = netpol.Assess
+	pssScan              = pss.Assess
+	secretMetaScan       = secretmeta.Collect
+	admissionWebhookScan = admission.CollectWebhooks
+	admissionPolicyScan  = admission.CollectPolicies
+	newSDKClient         = func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error) {
 		return sdk.NewClient(endpoint, bearer, opts...)
 	}
 	// newRBACAPI / newWorkloadAPI / newNetpolAPI / newPSSAPI build the live
@@ -53,6 +56,12 @@ var (
 	newSecretMetaAPI = func(hc *http.Client, baseURL, token string) secretmeta.API {
 		return secretmeta.NewClient(hc, baseURL, token)
 	}
+	newAdmissionWebhookAPI = func(hc *http.Client, baseURL, token string) admission.WebhookAPI {
+		return admission.NewWebhookClient(hc, baseURL, token)
+	}
+	newAdmissionPolicyAPI = func(hc *http.Client, baseURL, token string) admission.PolicyAPI {
+		return admission.NewPolicyClient(hc, baseURL, token)
+	}
 )
 
 // sdkPushClient is the narrow surface doRun consumes from sdk.Client.
@@ -62,19 +71,23 @@ type sdkPushClient interface {
 }
 
 type runFlags struct {
-	cluster         string
-	environment     string
-	authMode        string
-	apiServer       string
-	rbacControl     string
-	workloadControl string
-	netpolControl   string
-	pssControl      string
-	secretControl   string
-	skipRBAC        bool
-	skipWorkload    bool
-	skipNetpol      bool
-	skipPSS         bool
+	cluster          string
+	environment      string
+	authMode         string
+	apiServer        string
+	rbacControl      string
+	workloadControl  string
+	netpolControl    string
+	pssControl       string
+	secretControl    string
+	webhookControl   string
+	policyControl    string
+	skipRBAC         bool
+	skipWorkload     bool
+	skipNetpol       bool
+	skipPSS          bool
+	skipAdmissionWH  bool
+	skipAdmissionPol bool
 	// collectSecretInventory is OPT-IN (default false): the k8s.secret_inventory.v1
 	// kind requires the one `secrets` get/list ClusterRole grant the base
 	// connector intentionally withholds (slice 525). It is never collected
@@ -103,6 +116,13 @@ Least-privilege Kubernetes access (read-only ClusterRole — verbs get,list only
     (optional — only read when the Cilium CRD is present in the cluster)
   - crd.projectcalico.org: networkpolicies/globalnetworkpolicies
     (optional — only read when the Calico CRD is present in the cluster)
+  - admissionregistration.k8s.io: validatingwebhookconfigurations/
+    mutatingwebhookconfigurations  (NEW in slice 652 — gates
+    k8s.admission_webhook.v1; CONFIG metadata only, NEVER the caBundle/TLS key)
+  - templates.gatekeeper.sh: constrainttemplates  (optional — OPA/Gatekeeper
+    policy catalog; only read when the CRD is present)
+  - kyverno.io: clusterpolicies/policies  (optional — Kyverno policy CONFIG
+    metadata; only read when the CRD is present)
   - core: namespaces  (also gates the Pod-Security-Standards admission kind —
     PSS config lives in pod-security.kubernetes.io/* labels on the namespace;
     NO new ClusterRole rule is required)
@@ -144,10 +164,14 @@ record.`,
 	cmd.Flags().StringVar(&f.netpolControl, "netpol-control", "scf:NET-04", "control_id to attach to k8s.networkpolicy_coverage.v1 records")
 	cmd.Flags().StringVar(&f.pssControl, "pss-control", "scf:CFG-02", "control_id to attach to k8s.pod_security_admission.v1 records")
 	cmd.Flags().StringVar(&f.secretControl, "secret-control", "scf:CRY-01", "control_id to attach to k8s.secret_inventory.v1 records")
+	cmd.Flags().StringVar(&f.webhookControl, "webhook-control", "scf:CFG-02", "control_id to attach to k8s.admission_webhook.v1 records")
+	cmd.Flags().StringVar(&f.policyControl, "policy-control", "scf:CFG-02", "control_id to attach to k8s.admission_policy.v1 records")
 	cmd.Flags().BoolVar(&f.skipRBAC, "skip-rbac", false, "skip k8s.rbac_binding.v1 pull")
 	cmd.Flags().BoolVar(&f.skipWorkload, "skip-workload", false, "skip k8s.workload_security_context.v1 pull")
 	cmd.Flags().BoolVar(&f.skipNetpol, "skip-netpol", false, "skip k8s.networkpolicy_coverage.v1 pull")
 	cmd.Flags().BoolVar(&f.skipPSS, "skip-pss", false, "skip k8s.pod_security_admission.v1 pull")
+	cmd.Flags().BoolVar(&f.skipAdmissionWH, "skip-admission-webhooks", false, "skip k8s.admission_webhook.v1 pull")
+	cmd.Flags().BoolVar(&f.skipAdmissionPol, "skip-admission-policies", false, "skip k8s.admission_policy.v1 pull (OPA/Gatekeeper + Kyverno; only emits when an engine is installed)")
 	cmd.Flags().BoolVar(&f.collectSecretInventory, "collect-secret-inventory", false,
 		"OPT-IN: collect k8s.secret_inventory.v1 (Secret METADATA only — type/namespace/name/age/key-NAMES, NEVER a value). Requires the one extra 'secrets' get/list ClusterRole grant the base connector withholds (see 'permissions --secret-inventory').")
 	return cmd
@@ -240,6 +264,43 @@ func doRun(ctx context.Context, f runFlags) error {
 			}
 			if err := pushOne(ctx, sdkClient, rec); err != nil {
 				return fmt.Errorf("push pss %s: %w", a.Namespace, err)
+			}
+			pushed++
+		}
+	}
+
+	if !f.skipAdmissionWH {
+		webhooks, err := admissionWebhookScan(ctx, newAdmissionWebhookAPI(httpClient, cred.APIServer(), cred.Token()), nil)
+		if err != nil {
+			return fmt.Errorf("admission-webhook collect: %w", err)
+		}
+		for _, w := range webhooks {
+			rec, err := buildAdmissionWebhookRecord(w, f.cluster, f.environment, f.webhookControl)
+			if err != nil {
+				return fmt.Errorf("build admission-webhook record %s/%s: %w", w.ConfigName, w.WebhookName, err)
+			}
+			if err := pushOne(ctx, sdkClient, rec); err != nil {
+				return fmt.Errorf("push admission-webhook %s/%s: %w", w.ConfigName, w.WebhookName, err)
+			}
+			pushed++
+		}
+	}
+
+	// Admission policy-engine collection: OPA/Gatekeeper + Kyverno, detected by
+	// API-discovery probe — an absent engine contributes nothing (no hard-fail).
+	// CONFIG metadata only — never the policy's Rego/CEL decision-logic body.
+	if !f.skipAdmissionPol {
+		policies, err := admissionPolicyScan(ctx, newAdmissionPolicyAPI(httpClient, cred.APIServer(), cred.Token()), nil)
+		if err != nil {
+			return fmt.Errorf("admission-policy collect: %w", err)
+		}
+		for _, p := range policies {
+			rec, err := buildAdmissionPolicyRecord(p, f.cluster, f.environment, f.policyControl)
+			if err != nil {
+				return fmt.Errorf("build admission-policy record %s/%s: %w", p.Engine, p.Name, err)
+			}
+			if err := pushOne(ctx, sdkClient, rec); err != nil {
+				return fmt.Errorf("push admission-policy %s/%s: %w", p.Engine, p.Name, err)
 			}
 			pushed++
 		}
@@ -537,6 +598,111 @@ func buildSecretMetaRecord(s secretmeta.Inventory, cluster, env, controlID strin
 		SourceAttribution: &evidencev1.SourceAttribution{
 			ActorType: "connector",
 			ActorId:   actorID("secretmeta"),
+		},
+	}, nil
+}
+
+// buildAdmissionWebhookRecord maps one admission-webhook configuration entry
+// into an evidence record (slice 652). CONFIGURATION metadata ONLY — the webhook
+// kind, configuration + entry names, failurePolicy + derived fail_closed,
+// sideEffects, whether it scopes by namespace/object selector, the dispatch
+// service ref, and the intercepted resource/operation sets. There is
+// deliberately NO field for the caBundle / TLS key or an intercepted payload:
+// the admission collector physically cannot carry them. The record is
+// descriptive (INCONCLUSIVE) — it reports the webhook's wiring; the platform
+// evaluator owns any fail-open / scope policy call.
+func buildAdmissionWebhookRecord(w admission.Webhook, cluster, env, controlID string) (*evidencev1.EvidenceRecord, error) {
+	now := w.ObservedAt.UTC().Truncate(time.Hour)
+	pm := map[string]any{
+		"webhook_kind":           string(w.Kind),
+		"config_name":            w.ConfigName,
+		"webhook_name":           w.WebhookName,
+		"fail_closed":            w.FailClosed,
+		"has_namespace_selector": w.HasNamespaceSelector,
+		"has_object_selector":    w.HasObjectSelector,
+	}
+	if w.FailurePolicy != admission.FailurePolicyUnset {
+		pm["failure_policy"] = string(w.FailurePolicy)
+	}
+	if w.SideEffects != "" {
+		pm["side_effects"] = w.SideEffects
+	}
+	if w.TargetService != "" {
+		pm["target_service"] = w.TargetService
+	}
+	if len(w.InterceptedResources) > 0 {
+		pm["intercepted_resources"] = toAnySlice(w.InterceptedResources)
+	}
+	if len(w.InterceptedOperations) > 0 {
+		pm["intercepted_operations"] = toAnySlice(w.InterceptedOperations)
+	}
+	payload, err := structpb.NewStruct(pm)
+	if err != nil {
+		return nil, err
+	}
+	return &evidencev1.EvidenceRecord{
+		IdempotencyKey: idem.AdmissionWebhookKey(string(w.Kind), w.ConfigName, w.WebhookName, now),
+		EvidenceKind:   "k8s.admission_webhook.v1",
+		SchemaVersion:  "1.0.0",
+		ControlId:      controlID,
+		Scope: []*evidencev1.ScopeDimension{
+			{Key: "cluster", Values: []string{cluster}},
+			{Key: "environment", Values: []string{env}},
+		},
+		ObservedAt: timestamppb.New(now),
+		Result:     evidencev1.Result_RESULT_INCONCLUSIVE, // descriptive — evaluator decides
+		Payload:    payload,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "connector",
+			ActorId:   actorID("admission-webhook"),
+		},
+	}, nil
+}
+
+// buildAdmissionPolicyRecord maps one policy-engine policy into an evidence
+// record (slice 652). CONFIGURATION metadata ONLY — the engine, policy name,
+// scope, kind, and enforcement action + derived enforcing flag. There is
+// deliberately NO field for the policy's Rego/CEL decision-logic body: the
+// admission collector physically cannot carry it. The record is descriptive
+// (INCONCLUSIVE).
+func buildAdmissionPolicyRecord(p admission.Policy, cluster, env, controlID string) (*evidencev1.EvidenceRecord, error) {
+	now := p.ObservedAt.UTC().Truncate(time.Hour)
+	pm := map[string]any{
+		"engine":      string(p.Engine),
+		"policy_name": p.Name,
+		"scope":       string(p.Scope),
+		"enforcing":   p.Enforcing,
+	}
+	if p.PolicyKind != "" {
+		pm["policy_kind"] = p.PolicyKind
+	}
+	if p.EnforcementAction != "" {
+		pm["enforcement_action"] = p.EnforcementAction
+	}
+	scope := []*evidencev1.ScopeDimension{
+		{Key: "cluster", Values: []string{cluster}},
+		{Key: "environment", Values: []string{env}},
+	}
+	if p.Namespace != "" {
+		pm["namespace"] = p.Namespace
+		scope = append(scope, &evidencev1.ScopeDimension{Key: "namespace", Values: []string{p.Namespace}})
+	}
+	payload, err := structpb.NewStruct(pm)
+	if err != nil {
+		return nil, err
+	}
+	return &evidencev1.EvidenceRecord{
+		IdempotencyKey: idem.AdmissionPolicyKey(string(p.Engine), p.Namespace, p.Name, now),
+		EvidenceKind:   "k8s.admission_policy.v1",
+		SchemaVersion:  "1.0.0",
+		ControlId:      controlID,
+		Scope:          scope,
+		ObservedAt:     timestamppb.New(now),
+		Result:         evidencev1.Result_RESULT_INCONCLUSIVE, // descriptive — evaluator decides
+		Payload:        payload,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "connector",
+			ActorId:   actorID("admission-policy"),
 		},
 	}, nil
 }
