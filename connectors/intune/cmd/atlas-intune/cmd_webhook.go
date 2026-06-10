@@ -147,28 +147,40 @@ func doWebhook(ctx context.Context, f webhookFlags) error {
 // `validationToken` query parameter when it creates or renews a subscription; the
 // receiver MUST respond 200 with the token echoed verbatim as text/plain within
 // ~10s and MUST NOT process it as a delivery (no clientState verification, no
-// record). This handler intercepts that case FIRST, then delegates every real
-// delivery to the shared verify-first skeleton (the wrapped mdmwebhook.Receiver),
-// which verifies clientState BEFORE building any record. Keeping the handshake in
-// the vendor adapter (not the shared package) honors the slice-557 directive to
-// avoid bending the shared seam for one vendor's special path.
+// record).
+//
+// Slice 657: the handshake now adopts the shared validation-handshake seam
+// (webhookrecv.ValidationHook) — validationTokenHook detects the query param and
+// the shared skeleton (via Receiver.ServeHTTPWithValidation) answers the handshake
+// BEFORE the verify-first delivery path. The adapter no longer hand-rolls the
+// interception; the shared seam owns the ordering, so every real delivery still
+// reaches the clientState Verifier BEFORE any record (verify-first intact).
 type validationHandler struct {
-	inner http.Handler
+	inner *mdmwebhook.Receiver
 }
 
 func (h validationHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	if token := req.URL.Query().Get("validationToken"); token != "" {
-		// Bound the echoed token (defensive: a hostile caller cannot make us
-		// reflect an unbounded body) and respond plain-text per the Graph contract.
-		if len(token) > maxValidationTokenLen {
-			token = token[:maxValidationTokenLen]
-		}
-		w.Header().Set("Content-Type", "text/plain")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(token))
-		return
+	h.inner.ServeHTTPWithValidation(w, req, validationTokenHook{})
+}
+
+// validationTokenHook is the Intune webhookrecv.ValidationHook. It detects the
+// Microsoft Graph `validationToken` query parameter and echoes it verbatim as
+// text/plain, bounded by maxValidationTokenLen — the EXACT response shape the
+// pre-657 hand-rolled handler produced. A request without the query param returns
+// ok=false and falls through to the shared verify-first delivery path.
+type validationTokenHook struct{}
+
+func (validationTokenHook) Detect(req *http.Request, _ []byte) ([]byte, string, bool) {
+	token := req.URL.Query().Get("validationToken")
+	if token == "" {
+		return nil, "", false
 	}
-	h.inner.ServeHTTP(w, req)
+	// Bound the echoed token (defensive: a hostile caller cannot make us reflect an
+	// unbounded body) and respond plain-text per the Graph contract.
+	if len(token) > maxValidationTokenLen {
+		token = token[:maxValidationTokenLen]
+	}
+	return []byte(token), "text/plain", true
 }
 
 // signalContext returns a context cancelled on SIGINT / SIGTERM so the long-lived
