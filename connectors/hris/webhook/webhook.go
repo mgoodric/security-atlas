@@ -32,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -82,14 +83,27 @@ type Pusher interface {
 	Push(ctx context.Context, record *evidencev1.EvidenceRecord) (*evidencev1.EvidenceReceipt, error)
 }
 
-// PayloadParser extracts the triggered worker id from a verified raw delivery.
-// Each vendor's webhook envelope differs; the parser is per-vendor. It returns
-// the worker id the delivery is about; an empty id (ok=false) means the delivery
-// carried no actionable worker (the receiver acknowledges it with 200 but emits
-// nothing).
+// PayloadParser extracts the triggered worker ids from a verified raw delivery.
+// Each vendor's webhook envelope differs; the parser is per-vendor. A single
+// delivery can carry MORE THAN ONE changed worker (slice 655: BambooHR delivers
+// an employees[] array; a bulk status change fans out to N workers), so the
+// parser returns a SLICE of worker ids. An empty slice means the delivery carried
+// no actionable worker (the receiver acknowledges it with 200 but emits nothing).
+//
+// Single-worker vendors (Rippling: the envelope carries exactly one affected
+// worker) return a one-element slice — the receiver's fan-out loop is a no-op for
+// them and their behavior is identical to the pre-fan-out single-worker path.
 type PayloadParser interface {
-	ParseWorkerID(body []byte) (workerID string, ok bool, err error)
+	ParseWorkerIDs(body []byte) (workerIDs []string, err error)
 }
+
+// MaxFanOut bounds the number of distinct workers the receiver re-reads + pushes
+// for a single webhook delivery. A delivery carrying more changed employees than
+// this is processed up to the cap (the first MaxFanOut distinct ids) and the
+// remainder is dropped with a logged warning — a sane bound so a hostile or
+// runaway delivery cannot trigger an unbounded fan-out of re-reads. 100 is far
+// above any realistic single-delivery bulk change.
+const MaxFanOut = 100
 
 // Config wires a receiver. All fields are required except Now (defaults to
 // time.Now). The observed-at clock is injectable so a webhook-emitted record and
@@ -183,29 +197,80 @@ func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	workerID, ok, err := r.cfg.Parser.ParseWorkerID(body)
+	ids, err := r.cfg.Parser.ParseWorkerIDs(body)
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	if !ok {
+	ids = dedupCap(ids)
+	if len(ids) == 0 {
 		// Authentic delivery, but no actionable worker (e.g. an unrelated event):
 		// acknowledge so the vendor does not retry, but emit nothing.
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	if err := r.process(req.Context(), workerID); err != nil {
-		// The vendor SHOULD retry on a transient failure; 502 signals "not
-		// acknowledged".
+	// Fan out: one trigger+re-read+push per changed worker (slice 655). Signature
+	// verification already happened ONCE above, before this loop — it is NOT
+	// re-run per worker. A per-worker re-read or push failure does not abort the
+	// others: the successes are emitted and only the failures are signalled back
+	// (so the vendor retries the whole delivery; the already-pushed records
+	// collapse against the pull/idempotency key on the retry — D3 slice 573).
+	if failed := r.processAll(req.Context(), ids); failed > 0 {
+		// At least one worker failed mid-fan-out. The vendor SHOULD retry; 502
+		// signals "not acknowledged". The successes are already pushed and
+		// dedup-collapse on the retry.
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
-// process re-reads the worker, builds the shared record, and pushes it. Split
-// out so it is unit-testable without an HTTP round trip.
+// dedupCap removes blank/duplicate ids (a delivery that repeats an id must not
+// double-push) preserving first-seen order, and bounds the result to MaxFanOut so
+// a runaway delivery cannot trigger an unbounded fan-out of re-reads. Over-cap ids
+// are dropped with a logged warning.
+func dedupCap(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		if len(out) == MaxFanOut {
+			log.Printf("webhook: delivery carried more than %d distinct workers; dropping the remainder", MaxFanOut)
+			break
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
+// processAll fans the trigger+re-read+push over each worker id and returns the
+// number that FAILED (a transient re-read or push error). A worker the source no
+// longer returns (ok=false) is not a failure (it emits nothing). A failure of one
+// worker never aborts the rest — the loop continues and only the count of
+// failures is returned, so the successes are pushed regardless.
+func (r *Receiver) processAll(ctx context.Context, ids []string) int {
+	failed := 0
+	for _, id := range ids {
+		if err := r.process(ctx, id); err != nil {
+			// Log and continue — do not let one bad worker drop the whole delivery
+			// or fail the others. The id is a non-PII HRIS-native key (safe to log).
+			log.Printf("webhook: fan-out worker %s failed: %v", id, err)
+			failed++
+		}
+	}
+	return failed
+}
+
+// process re-reads ONE worker, builds the shared record, and pushes it. Split out
+// so it is unit-testable without an HTTP round trip and so the fan-out loop is a
+// trivial wrapper over the single-worker path.
 func (r *Receiver) process(ctx context.Context, workerID string) error {
 	raw, ok, err := r.cfg.Fetcher.FetchWorker(ctx, workerID)
 	if err != nil {

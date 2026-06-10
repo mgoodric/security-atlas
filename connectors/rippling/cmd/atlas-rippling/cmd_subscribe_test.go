@@ -130,28 +130,42 @@ func TestDoSubscribe_ServeErrorPropagates(t *testing.T) {
 }
 
 func TestRipplingParser_ExtractsEmployeeID(t *testing.T) {
-	id, ok, err := ripplingParser{}.ParseWorkerID([]byte(`{"event":"employee.terminated","data":{"employeeId":"emp-7"}}`))
-	if err != nil || !ok || id != "emp-7" {
-		t.Fatalf("ParseWorkerID = %q ok=%v err=%v", id, ok, err)
+	ids, err := ripplingParser{}.ParseWorkerIDs([]byte(`{"event":"employee.terminated","data":{"employeeId":"emp-7"}}`))
+	if err != nil || len(ids) != 1 || ids[0] != "emp-7" {
+		t.Fatalf("ParseWorkerIDs = %v err=%v", ids, err)
 	}
 }
 
 func TestRipplingParser_FallsBackToID(t *testing.T) {
-	id, ok, _ := ripplingParser{}.ParseWorkerID([]byte(`{"data":{"id":"emp-9"}}`))
-	if !ok || id != "emp-9" {
-		t.Errorf("fallback id = %q ok=%v", id, ok)
+	ids, _ := ripplingParser{}.ParseWorkerIDs([]byte(`{"data":{"id":"emp-9"}}`))
+	if len(ids) != 1 || ids[0] != "emp-9" {
+		t.Errorf("fallback id = %v", ids)
+	}
+}
+
+// TestRipplingParser_StaysSingleWorker is the slice-655 invariant for Rippling:
+// the envelope is single-worker, so the parser always returns at most a
+// one-element slice — the receiver's fan-out loop is a no-op and Rippling
+// behavior is unchanged.
+func TestRipplingParser_StaysSingleWorker(t *testing.T) {
+	ids, err := ripplingParser{}.ParseWorkerIDs([]byte(`{"event":"employee.terminated","data":{"employeeId":"emp-7"}}`))
+	if err != nil {
+		t.Fatalf("ParseWorkerIDs err=%v", err)
+	}
+	if len(ids) != 1 {
+		t.Fatalf("Rippling must stay single-worker; got %d ids %v", len(ids), ids)
 	}
 }
 
 func TestRipplingParser_NoWorker(t *testing.T) {
-	_, ok, err := ripplingParser{}.ParseWorkerID([]byte(`{"event":"unrelated","data":{}}`))
-	if err != nil || ok {
-		t.Errorf("no-worker: ok=%v err=%v", ok, err)
+	ids, err := ripplingParser{}.ParseWorkerIDs([]byte(`{"event":"unrelated","data":{}}`))
+	if err != nil || len(ids) != 0 {
+		t.Errorf("no-worker: ids=%v err=%v", ids, err)
 	}
 }
 
 func TestRipplingParser_BadJSON(t *testing.T) {
-	_, _, err := ripplingParser{}.ParseWorkerID([]byte(`not-json`))
+	_, err := ripplingParser{}.ParseWorkerIDs([]byte(`not-json`))
 	if err == nil {
 		t.Fatal("want parse error on bad json")
 	}

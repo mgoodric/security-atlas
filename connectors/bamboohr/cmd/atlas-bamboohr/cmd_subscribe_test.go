@@ -131,28 +131,56 @@ func TestDoSubscribe_ServeErrorPropagates(t *testing.T) {
 }
 
 func TestBambooParser_ExtractsStringID(t *testing.T) {
-	id, ok, err := bambooParser{}.ParseWorkerID([]byte(`{"employees":[{"id":"42"}]}`))
-	if err != nil || !ok || id != "42" {
-		t.Fatalf("ParseWorkerID = %q ok=%v err=%v", id, ok, err)
+	ids, err := bambooParser{}.ParseWorkerIDs([]byte(`{"employees":[{"id":"42"}]}`))
+	if err != nil || len(ids) != 1 || ids[0] != "42" {
+		t.Fatalf("ParseWorkerIDs = %v err=%v", ids, err)
 	}
 }
 
 func TestBambooParser_ExtractsNumericID(t *testing.T) {
-	id, ok, err := bambooParser{}.ParseWorkerID([]byte(`{"employees":[{"id":42}]}`))
-	if err != nil || !ok || id != "42" {
-		t.Fatalf("numeric id = %q ok=%v err=%v", id, ok, err)
+	ids, err := bambooParser{}.ParseWorkerIDs([]byte(`{"employees":[{"id":42}]}`))
+	if err != nil || len(ids) != 1 || ids[0] != "42" {
+		t.Fatalf("numeric id = %v err=%v", ids, err)
+	}
+}
+
+// TestBambooParser_FansOutAllEmployees is the slice-655 parser assertion: a
+// delivery carrying multiple changed employees returns EVERY id, not just the
+// first.
+func TestBambooParser_FansOutAllEmployees(t *testing.T) {
+	ids, err := bambooParser{}.ParseWorkerIDs([]byte(`{"employees":[{"id":"7"},{"id":42},{"id":"9"}]}`))
+	if err != nil {
+		t.Fatalf("ParseWorkerIDs err=%v", err)
+	}
+	want := []string{"7", "42", "9"}
+	if len(ids) != len(want) {
+		t.Fatalf("ParseWorkerIDs = %v; want %v", ids, want)
+	}
+	for i, w := range want {
+		if ids[i] != w {
+			t.Errorf("id[%d] = %q; want %q", i, ids[i], w)
+		}
+	}
+}
+
+// TestBambooParser_SkipsBlankEmployeeIDs asserts an employee with a null/blank id
+// is skipped while the rest are returned.
+func TestBambooParser_SkipsBlankEmployeeIDs(t *testing.T) {
+	ids, err := bambooParser{}.ParseWorkerIDs([]byte(`{"employees":[{"id":null},{"id":"5"}]}`))
+	if err != nil || len(ids) != 1 || ids[0] != "5" {
+		t.Fatalf("ParseWorkerIDs = %v err=%v; want [5]", ids, err)
 	}
 }
 
 func TestBambooParser_NoWorker(t *testing.T) {
-	_, ok, err := bambooParser{}.ParseWorkerID([]byte(`{"employees":[]}`))
-	if err != nil || ok {
-		t.Errorf("no-worker: ok=%v err=%v", ok, err)
+	ids, err := bambooParser{}.ParseWorkerIDs([]byte(`{"employees":[]}`))
+	if err != nil || len(ids) != 0 {
+		t.Errorf("no-worker: ids=%v err=%v", ids, err)
 	}
 }
 
 func TestBambooParser_BadJSON(t *testing.T) {
-	_, _, err := bambooParser{}.ParseWorkerID([]byte(`not-json`))
+	_, err := bambooParser{}.ParseWorkerIDs([]byte(`not-json`))
 	if err == nil {
 		t.Fatal("want parse error on bad json")
 	}

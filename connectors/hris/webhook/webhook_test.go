@@ -19,6 +19,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -68,14 +69,18 @@ func (f *staticFetcher) FetchWorker(_ context.Context, id string) (worker.RawWor
 	return f.raw, f.ok, nil
 }
 
-// idParser pulls a worker id out of a trivial test envelope: {"worker_id":"..."}.
+// idParser pulls worker id(s) out of a trivial test envelope. ids is the slice it
+// returns; an empty ids (the zero value) models the "no actionable worker" ack
+// path. err short-circuits to 400.
 type idParser struct {
-	id  string
-	ok  bool
+	ids []string
 	err error
 }
 
-func (p idParser) ParseWorkerID(_ []byte) (string, bool, error) { return p.id, p.ok, p.err }
+func (p idParser) ParseWorkerIDs(_ []byte) ([]string, error) { return p.ids, p.err }
+
+// oneID is a convenience for the single-worker tests carried over from slice 573.
+func oneID(id string) idParser { return idParser{ids: []string{id}} }
 
 func hexSig(secret, body string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
@@ -109,7 +114,7 @@ func testReceiver(t *testing.T, p *recordingPusher, f *staticFetcher, parser Pay
 func TestReceiver_RejectsUnsigned(t *testing.T) {
 	pusher := &recordingPusher{}
 	fetcher := &staticFetcher{raw: worker.RawWorker{WorkerID: "w1", Status: worker.StatusTerminated}, ok: true}
-	rec := testReceiver(t, pusher, fetcher, idParser{id: "w1", ok: true})
+	rec := testReceiver(t, pusher, fetcher, oneID("w1"))
 
 	body := `{"worker_id":"w1"}`
 	req := httptest.NewRequest(http.MethodPost, "/hooks/hris", strings.NewReader(body))
@@ -131,7 +136,7 @@ func TestReceiver_RejectsUnsigned(t *testing.T) {
 func TestReceiver_RejectsForgedSignature(t *testing.T) {
 	pusher := &recordingPusher{}
 	fetcher := &staticFetcher{raw: worker.RawWorker{WorkerID: "w1", Status: worker.StatusTerminated}, ok: true}
-	rec := testReceiver(t, pusher, fetcher, idParser{id: "w1", ok: true})
+	rec := testReceiver(t, pusher, fetcher, oneID("w1"))
 
 	body := `{"worker_id":"w1"}`
 	req := httptest.NewRequest(http.MethodPost, "/hooks/hris", strings.NewReader(body))
@@ -156,7 +161,7 @@ func TestReceiver_AcceptsSignedAndPushesOne(t *testing.T) {
 	fetcher := &staticFetcher{raw: worker.RawWorker{
 		WorkerID: "w1", Status: worker.StatusTerminated, Title: "SWE", Department: "Eng",
 	}, ok: true}
-	rec := testReceiver(t, pusher, fetcher, idParser{id: "w1", ok: true})
+	rec := testReceiver(t, pusher, fetcher, oneID("w1"))
 
 	body := `{"worker_id":"w1"}`
 	req := httptest.NewRequest(http.MethodPost, "/hooks/hris", strings.NewReader(body))
@@ -179,6 +184,230 @@ func TestReceiver_AcceptsSignedAndPushesOne(t *testing.T) {
 	}
 }
 
+// idCountingFetcher returns a distinct terminated worker per requested id and
+// records the order of re-reads, so a fan-out test can assert one re-read + one
+// push per changed employee.
+type idCountingFetcher struct {
+	fetched []string
+	failIDs map[string]error // ids that should error the re-read
+	missing map[string]bool  // ids the source no longer returns (ok=false)
+}
+
+func (f *idCountingFetcher) FetchWorker(_ context.Context, id string) (worker.RawWorker, bool, error) {
+	f.fetched = append(f.fetched, id)
+	if err := f.failIDs[id]; err != nil {
+		return worker.RawWorker{}, false, err
+	}
+	if f.missing[id] {
+		return worker.RawWorker{}, false, nil
+	}
+	return worker.RawWorker{WorkerID: id, Status: worker.StatusTerminated}, true, nil
+}
+
+func signedReq(t *testing.T, body string) *http.Request {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/hooks/hris", strings.NewReader(body))
+	req.Header.Set(testHeader, hexSig(testSecret, body))
+	return req
+}
+
+func fanoutReceiver(t *testing.T, p *recordingPusher, f WorkerFetcher, parser PayloadParser) *Receiver {
+	t.Helper()
+	v := NewHMACVerifier(worker.HRISBambooHR, testSecret, testHeader, "", EncodingHex)
+	rec, err := NewReceiver(Config{
+		Vendor:      worker.HRISBambooHR,
+		Verifier:    v,
+		Parser:      parser,
+		Fetcher:     f,
+		Pusher:      p,
+		ActorID:     "connector:bamboohr:webhook@test",
+		Environment: "prod",
+		Now:         fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("NewReceiver: %v", err)
+	}
+	return rec
+}
+
+// TestReceiver_FansOutToEachWorker is the load-bearing slice-655 assertion: a
+// signed delivery carrying N>1 changed workers re-reads + pushes a record for
+// EACH worker, not just the first.
+func TestReceiver_FansOutToEachWorker(t *testing.T) {
+	pusher := &recordingPusher{}
+	fetcher := &idCountingFetcher{}
+	rec := fanoutReceiver(t, pusher, fetcher, idParser{ids: []string{"a", "b", "c"}})
+
+	body := `{"employees":[{"id":"a"},{"id":"b"},{"id":"c"}]}`
+	rr := httptest.NewRecorder()
+	rec.ServeHTTP(rr, signedReq(t, body))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("multi-worker delivery: status = %d; want 200", rr.Code)
+	}
+	if len(fetcher.fetched) != 3 {
+		t.Fatalf("re-read %d workers; want 3 (%v)", len(fetcher.fetched), fetcher.fetched)
+	}
+	if len(pusher.pushed) != 3 {
+		t.Fatalf("pushed %d records; want 3 (one per changed worker)", len(pusher.pushed))
+	}
+	got := map[string]bool{}
+	for _, rec := range pusher.pushed {
+		got[rec.GetPayload().AsMap()["worker_id"].(string)] = true
+	}
+	for _, want := range []string{"a", "b", "c"} {
+		if !got[want] {
+			t.Errorf("no record pushed for worker %q", want)
+		}
+	}
+}
+
+// TestReceiver_ForgedDeliveryNoFanOut asserts a forged multi-worker delivery is
+// rejected BEFORE any employee is processed — signature verify is the first step,
+// once per delivery, ahead of the fan-out (P0 anti-criterion).
+func TestReceiver_ForgedDeliveryNoFanOut(t *testing.T) {
+	pusher := &recordingPusher{}
+	fetcher := &idCountingFetcher{}
+	rec := fanoutReceiver(t, pusher, fetcher, idParser{ids: []string{"a", "b", "c"}})
+
+	body := `{"employees":[{"id":"a"},{"id":"b"},{"id":"c"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/hooks/hris", strings.NewReader(body))
+	req.Header.Set(testHeader, hexSig("wrong-secret", body)) // forged
+	rr := httptest.NewRecorder()
+	rec.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("forged multi-worker delivery: status = %d; want 401", rr.Code)
+	}
+	if len(fetcher.fetched) != 0 {
+		t.Errorf("forged delivery re-read %d workers; want 0 (reject before fan-out)", len(fetcher.fetched))
+	}
+	if len(pusher.pushed) != 0 {
+		t.Errorf("forged delivery pushed %d records; want 0", len(pusher.pushed))
+	}
+}
+
+// TestReceiver_PartialFailureEmitsSuccessesAnd502 asserts one bad worker mid
+// fan-out does not drop the whole delivery or fail the others: the healthy
+// workers are pushed, and the delivery returns 502 so the vendor retries (the
+// successes dedup-collapse on the retry).
+func TestReceiver_PartialFailureEmitsSuccessesAnd502(t *testing.T) {
+	pusher := &recordingPusher{}
+	fetcher := &idCountingFetcher{failIDs: map[string]error{"b": errors.New("bamboohr 503")}}
+	rec := fanoutReceiver(t, pusher, fetcher, idParser{ids: []string{"a", "b", "c"}})
+
+	body := `{"employees":[{"id":"a"},{"id":"b"},{"id":"c"}]}`
+	rr := httptest.NewRecorder()
+	rec.ServeHTTP(rr, signedReq(t, body))
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("partial failure: status = %d; want 502", rr.Code)
+	}
+	if len(fetcher.fetched) != 3 {
+		t.Errorf("re-read %d workers; want 3 (the failure must not abort the others)", len(fetcher.fetched))
+	}
+	if len(pusher.pushed) != 2 {
+		t.Fatalf("pushed %d records; want 2 (a + c succeed, b failed)", len(pusher.pushed))
+	}
+}
+
+// TestReceiver_MissingWorkerMidFanOutIsNotFailure asserts a worker the source no
+// longer returns (ok=false) emits nothing but does NOT count as a failure — the
+// delivery still acks 200 and the present workers are pushed.
+func TestReceiver_MissingWorkerMidFanOutIsNotFailure(t *testing.T) {
+	pusher := &recordingPusher{}
+	fetcher := &idCountingFetcher{missing: map[string]bool{"b": true}}
+	rec := fanoutReceiver(t, pusher, fetcher, idParser{ids: []string{"a", "b", "c"}})
+
+	rr := httptest.NewRecorder()
+	rec.ServeHTTP(rr, signedReq(t, `{"employees":[{"id":"a"},{"id":"b"},{"id":"c"}]}`))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("missing-worker mid fan-out: status = %d; want 200", rr.Code)
+	}
+	if len(pusher.pushed) != 2 {
+		t.Fatalf("pushed %d records; want 2 (a + c; b is gone)", len(pusher.pushed))
+	}
+}
+
+// TestReceiver_DedupsRepeatedIDsInDelivery asserts a delivery that repeats an id
+// re-reads + pushes that worker only ONCE (the dedup-cap collapses duplicates).
+func TestReceiver_DedupsRepeatedIDsInDelivery(t *testing.T) {
+	pusher := &recordingPusher{}
+	fetcher := &idCountingFetcher{}
+	rec := fanoutReceiver(t, pusher, fetcher, idParser{ids: []string{"a", "a", "b", "a"}})
+
+	rr := httptest.NewRecorder()
+	rec.ServeHTTP(rr, signedReq(t, `{"employees":[{"id":"a"},{"id":"a"},{"id":"b"}]}`))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("repeated-id delivery: status = %d; want 200", rr.Code)
+	}
+	if len(fetcher.fetched) != 2 {
+		t.Errorf("re-read %d workers; want 2 distinct (%v)", len(fetcher.fetched), fetcher.fetched)
+	}
+	if len(pusher.pushed) != 2 {
+		t.Errorf("pushed %d records; want 2 distinct", len(pusher.pushed))
+	}
+}
+
+// TestReceiver_FanOutCapBounds asserts a delivery carrying more than MaxFanOut
+// distinct workers is bounded to the cap.
+func TestReceiver_FanOutCapBounds(t *testing.T) {
+	ids := make([]string, MaxFanOut+10)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("w%d", i)
+	}
+	pusher := &recordingPusher{}
+	fetcher := &idCountingFetcher{}
+	rec := fanoutReceiver(t, pusher, fetcher, idParser{ids: ids})
+
+	rr := httptest.NewRecorder()
+	rec.ServeHTTP(rr, signedReq(t, `{"employees":[]}`))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("over-cap delivery: status = %d; want 200", rr.Code)
+	}
+	if len(pusher.pushed) != MaxFanOut {
+		t.Fatalf("pushed %d records; want MaxFanOut=%d", len(pusher.pushed), MaxFanOut)
+	}
+}
+
+// TestReceiver_EmptyIDsAcks asserts a parser returning an empty slice (no
+// actionable worker) acks 200 and emits nothing.
+func TestReceiver_EmptyIDsAcks(t *testing.T) {
+	pusher := &recordingPusher{}
+	fetcher := &idCountingFetcher{}
+	rec := fanoutReceiver(t, pusher, fetcher, idParser{ids: nil})
+
+	rr := httptest.NewRecorder()
+	rec.ServeHTTP(rr, signedReq(t, `{"employees":[]}`))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("empty-ids delivery: status = %d; want 200", rr.Code)
+	}
+	if len(fetcher.fetched) != 0 || len(pusher.pushed) != 0 {
+		t.Errorf("empty-ids delivery re-read %d / pushed %d; want 0/0", len(fetcher.fetched), len(pusher.pushed))
+	}
+}
+
+// TestReceiver_BlankIDsSkipped asserts blank ids in the slice are skipped.
+func TestReceiver_BlankIDsSkipped(t *testing.T) {
+	pusher := &recordingPusher{}
+	fetcher := &idCountingFetcher{}
+	rec := fanoutReceiver(t, pusher, fetcher, idParser{ids: []string{"", "a", ""}})
+
+	rr := httptest.NewRecorder()
+	rec.ServeHTTP(rr, signedReq(t, `{"employees":[]}`))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("blank-ids delivery: status = %d; want 200", rr.Code)
+	}
+	if len(pusher.pushed) != 1 {
+		t.Fatalf("pushed %d records; want 1 (only the non-blank id)", len(pusher.pushed))
+	}
+}
+
 // TestReceiver_DedupKeyMatchesPull is the load-bearing dedup assertion: the
 // webhook-emitted record and a pull-emitted record for the SAME worker within
 // the SAME UTC hour must carry the SAME idempotency key, so the ledger collapses
@@ -190,7 +419,7 @@ func TestReceiver_DedupKeyMatchesPull(t *testing.T) {
 	// Webhook path.
 	pusher := &recordingPusher{}
 	fetcher := &staticFetcher{raw: raw, ok: true}
-	rec := testReceiver(t, pusher, fetcher, idParser{id: "w1", ok: true})
+	rec := testReceiver(t, pusher, fetcher, oneID("w1"))
 	body := `{"worker_id":"w1"}`
 	req := httptest.NewRequest(http.MethodPost, "/hooks/hris", strings.NewReader(body))
 	req.Header.Set(testHeader, hexSig(testSecret, body))
@@ -227,7 +456,7 @@ func TestReceiver_NoSensitivePII(t *testing.T) {
 		WorkerID: "1", Status: worker.StatusTerminated, Title: "Software Engineer",
 		Department: "Engineering", ManagerAssignmentID: "mgr-9", WorkEmail: "a.engineer@corp.example",
 	}, ok: true}
-	rec := testReceiver(t, pusher, fetcher, idParser{id: "1", ok: true})
+	rec := testReceiver(t, pusher, fetcher, oneID("1"))
 	body := `{"worker_id":"1"}`
 	req := httptest.NewRequest(http.MethodPost, "/hooks/hris", strings.NewReader(body))
 	req.Header.Set(testHeader, hexSig(testSecret, body))
@@ -249,7 +478,7 @@ func TestReceiver_NoSensitivePII(t *testing.T) {
 func TestReceiver_OversizedBodyRejected(t *testing.T) {
 	pusher := &recordingPusher{}
 	fetcher := &staticFetcher{raw: worker.RawWorker{WorkerID: "w1"}, ok: true}
-	rec := testReceiver(t, pusher, fetcher, idParser{id: "w1", ok: true})
+	rec := testReceiver(t, pusher, fetcher, oneID("w1"))
 
 	big := bytes.Repeat([]byte("a"), int(MaxBodyBytes)+1)
 	req := httptest.NewRequest(http.MethodPost, "/hooks/hris", bytes.NewReader(big))
@@ -266,7 +495,7 @@ func TestReceiver_OversizedBodyRejected(t *testing.T) {
 }
 
 func TestReceiver_RejectsNonPost(t *testing.T) {
-	rec := testReceiver(t, &recordingPusher{}, &staticFetcher{ok: true}, idParser{id: "w1", ok: true})
+	rec := testReceiver(t, &recordingPusher{}, &staticFetcher{ok: true}, oneID("w1"))
 	req := httptest.NewRequest(http.MethodGet, "/hooks/hris", nil)
 	rr := httptest.NewRecorder()
 	rec.ServeHTTP(rr, req)
@@ -278,7 +507,7 @@ func TestReceiver_RejectsNonPost(t *testing.T) {
 func TestReceiver_ParserNoWorkerAcksWithoutEmit(t *testing.T) {
 	pusher := &recordingPusher{}
 	fetcher := &staticFetcher{ok: true}
-	rec := testReceiver(t, pusher, fetcher, idParser{ok: false})
+	rec := testReceiver(t, pusher, fetcher, idParser{})
 	body := `{"event":"unrelated"}`
 	req := httptest.NewRequest(http.MethodPost, "/hooks/hris", strings.NewReader(body))
 	req.Header.Set(testHeader, hexSig(testSecret, body))
@@ -310,7 +539,7 @@ func TestReceiver_ParserErrorIsBadRequest(t *testing.T) {
 func TestReceiver_FetchMissingWorkerEmitsNothing(t *testing.T) {
 	pusher := &recordingPusher{}
 	fetcher := &staticFetcher{ok: false} // source no longer returns the worker
-	rec := testReceiver(t, pusher, fetcher, idParser{id: "w1", ok: true})
+	rec := testReceiver(t, pusher, fetcher, oneID("w1"))
 	body := `{"worker_id":"w1"}`
 	req := httptest.NewRequest(http.MethodPost, "/hooks/hris", strings.NewReader(body))
 	req.Header.Set(testHeader, hexSig(testSecret, body))
@@ -327,7 +556,7 @@ func TestReceiver_FetchMissingWorkerEmitsNothing(t *testing.T) {
 func TestReceiver_FetchErrorIsBadGateway(t *testing.T) {
 	pusher := &recordingPusher{}
 	fetcher := &staticFetcher{err: errors.New("rippling 503")}
-	rec := testReceiver(t, pusher, fetcher, idParser{id: "w1", ok: true})
+	rec := testReceiver(t, pusher, fetcher, oneID("w1"))
 	body := `{"worker_id":"w1"}`
 	req := httptest.NewRequest(http.MethodPost, "/hooks/hris", strings.NewReader(body))
 	req.Header.Set(testHeader, hexSig(testSecret, body))
@@ -341,7 +570,7 @@ func TestReceiver_FetchErrorIsBadGateway(t *testing.T) {
 func TestReceiver_PushErrorIsBadGateway(t *testing.T) {
 	pusher := &recordingPusher{pushErr: errors.New("push rejected")}
 	fetcher := &staticFetcher{raw: worker.RawWorker{WorkerID: "w1", Status: worker.StatusTerminated}, ok: true}
-	rec := testReceiver(t, pusher, fetcher, idParser{id: "w1", ok: true})
+	rec := testReceiver(t, pusher, fetcher, oneID("w1"))
 	body := `{"worker_id":"w1"}`
 	req := httptest.NewRequest(http.MethodPost, "/hooks/hris", strings.NewReader(body))
 	req.Header.Set(testHeader, hexSig(testSecret, body))
