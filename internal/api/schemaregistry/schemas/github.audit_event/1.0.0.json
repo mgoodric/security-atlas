@@ -4,7 +4,7 @@
   "x-evidence-kind": "github.audit_event.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["MON-01", "MON-02"],
+  "x-default-scf-anchors": ["MON-01"],
   "title": "GitHub organization audit event",
   "description": "One organization-scoped audit event delivered via webhook (X-GitHub-Event family). Payload is the canonicalized subset of fields the platform evaluator depends on; the full GitHub delivery body is stored in the ledger payload column at ingest time.",
   "type": "object",

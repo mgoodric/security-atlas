@@ -4,7 +4,7 @@
   "x-evidence-kind": "hris.worker_lifecycle.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["IAC-22", "IAC-09", "HRS-04"],
+  "x-default-scf-anchors": ["IAC-07", "HRS-04"],
   "title": "HRIS worker lifecycle (joiner/mover/leaver) state",
   "description": "One record per worker across an HRIS (Rippling, BambooHR): the worker's employment-lifecycle state (active / terminated / on-leave / pending), start (hire) date, end (termination) date, role/title, department, the manager ASSIGNMENT id (for access-review routing), and the work email (the only contact field — the access-review join key). Pulled read-only from the HRIS employee-directory API with a minimal field selector. The HRIS holds the most sensitive PII in the customer's stack; this evidence kind collects WORKER-LIFECYCLE FACTS ONLY and DELIBERATELY EXCLUDES SSN / national id, compensation / salary, home address, bank / payment details, benefits / health enrollment, performance-review fields, date of birth, personal phone, and gender / ethnicity / protected-class data — those fields are never requested and never enter the append-only evidence ledger (constitutional invariant #2). The connector reports descriptive lifecycle facts; the platform evaluator owns the access-review pass/fail per (control, scope) by reconciling this authoritative roster against the IdP/app entitlements (joiner/mover/leaver — SOC 2 CC6.1/CC6.2/CC6.3). Shared across the Rippling + BambooHR connectors because the two HRIS systems' lifecycle field set is identical at this altitude; the source_hris field preserves provenance.",
   "type": "object",

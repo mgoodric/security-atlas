@@ -4,7 +4,7 @@
   "x-evidence-kind": "okta.app_assignment.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["IAC-21", "IAC-22"],
+  "x-default-scf-anchors": ["IAC-21"],
   "title": "Okta application assignment state",
   "description": "One record per Okta-registered application capturing which groups are entitled to access it. Pulled on a schedule from /api/v1/apps and /api/v1/apps/{id}/groups. The platform evaluator decides pass/fail per (control, assignment) pair; the connector emits descriptive (INCONCLUSIVE) records.",
   "type": "object",

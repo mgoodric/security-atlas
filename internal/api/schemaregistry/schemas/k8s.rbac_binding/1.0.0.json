@@ -4,7 +4,7 @@
   "x-evidence-kind": "k8s.rbac_binding.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["IAC-21", "IAC-22"],
+  "x-default-scf-anchors": ["IAC-21"],
   "title": "Kubernetes RBAC binding",
   "description": "One record per (Role|ClusterRole, RoleBinding|ClusterRoleBinding) grant in a Kubernetes cluster: which subjects (users / groups / service-accounts) hold which role, and the rules (apiGroups + resources + verbs) that role grants. Pulled read-only from the Kubernetes API (get/list on rbac.authorization.k8s.io roles/clusterroles/rolebindings/clusterrolebindings). RBAC configuration only — never Secret values, ConfigMap values, container env, or logs. A connector-side heuristic flags wildcard / cluster-admin-grade rules; the platform evaluator decides pass/fail per (control, binding).",
   "type": "object",
