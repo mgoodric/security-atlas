@@ -48,12 +48,56 @@ export const OSCAL_EXPORT_TOOLBAR_NOTE =
 
 /**
  * Builds the BFF download URL for a period's OSCAL signed bundle. A
- * native `<a href download>` GET — the browser raises a `download` event
- * and saves the file with the platform's deterministic filename.
+ * native `<a href download>` GET — the browser raises a `download` event.
  *
  * The id is percent-encoded so a malformed/hostile id cannot break out of
  * the path segment.
  */
 export function oscalExportDownloadURL(periodID: string): string {
   return `/api/audits/${encodeURIComponent(periodID)}/oscal-export`;
+}
+
+/**
+ * Builds the deterministic download filename for a period's OSCAL signed
+ * bundle — `oscal-bundle-<period-id>-<frozen-date>.json` (or, when the
+ * frozen date is absent/malformed, `oscal-bundle-<period-id>.json`).
+ *
+ * This MIRRORS the server-side `downloadFilename`/`frozenDate` logic in
+ * `internal/api/oscalexport/handler.go`. It exists because the anchor's
+ * `download` attribute, for a SAME-ORIGIN download, takes precedence over
+ * the server's `Content-Disposition` filename: a BARE `download`
+ * attribute makes the browser derive the name from the URL's last path
+ * segment (`oscal-export` → sniffed `oscal-export.txt`). Setting the
+ * `download` attribute to this VALUE pins the suggested filename to the
+ * deterministic name regardless of same-origin disposition handling
+ * (AC-2/AC-3). The BFF still sets the matching `Content-Disposition`
+ * header (the authority for non-anchor / cross-origin consumers); this
+ * keeps the anchor and the header in lock-step.
+ *
+ * `frozenAt` is the period's RFC-3339 freeze horizon (the `frozen_at`
+ * wire field); only its leading `YYYY-MM-DD` is used, and a malformed /
+ * empty value omits the date segment rather than guessing one.
+ */
+export function oscalExportDownloadFilename(
+  periodID: string,
+  frozenAt: string | null | undefined,
+): string {
+  const date = frozenDateSegment(frozenAt);
+  return date
+    ? `oscal-bundle-${periodID}-${date}.json`
+    : `oscal-bundle-${periodID}.json`;
+}
+
+/**
+ * Extracts the leading `YYYY-MM-DD` from an RFC-3339 timestamp. Returns
+ * `""` when the input is empty/absent or does not start with a 10-char
+ * date with hyphens at positions 4 and 7 — the caller then omits the date
+ * segment. Mirrors `frozenDate` in the Go handler.
+ */
+function frozenDateSegment(frozenAt: string | null | undefined): string {
+  if (!frozenAt || frozenAt.length < 10) return "";
+  const date = frozenAt.slice(0, 10);
+  if (date[4] !== "-" || date[7] !== "-") return "";
+  if (/[ :TZ]/.test(date)) return "";
+  return date;
 }

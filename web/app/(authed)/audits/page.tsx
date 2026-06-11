@@ -82,6 +82,7 @@ import {
   OSCAL_EXPORT_DOWNLOAD_TESTID,
   OSCAL_EXPORT_TOOLBAR_NOTE,
   OSCAL_EXPORT_TOOLBAR_TESTID,
+  oscalExportDownloadFilename,
   oscalExportDownloadURL,
 } from "./oscal-export";
 import {
@@ -370,10 +371,20 @@ function AuditsPageInner() {
                 a Playwright `waitForEvent("download")` fires (AC-3). The
                 BFF forwards the bearer to the platform :download verb,
                 which serves the bundle tenant-scoped via RLS (invariant
-                #6). */}
+                #6).
+
+                The `download` attribute carries the deterministic
+                filename VALUE (not a bare attribute): for a same-origin
+                download the anchor's `download` value takes precedence
+                over the server `Content-Disposition` filename, and a BARE
+                `download` would make the browser derive the name from the
+                URL last segment (`oscal-export` → `oscal-export.txt`).
+                Pinning the value keeps the suggested filename
+                deterministic and in lock-step with the BFF header
+                (AC-2/AC-3). */}
             <a
               href={oscalExportDownloadURL(p.id)}
-              download
+              download={oscalExportDownloadFilename(p.id, p.frozen_at)}
               className={buttonVariants({ variant: "outline", size: "sm" })}
               data-testid={OSCAL_EXPORT_DOWNLOAD_TESTID}
             >

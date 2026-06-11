@@ -399,6 +399,13 @@ test.describe("OSCAL signed-export browser DOWNLOAD (slice 457)", () => {
       "href",
       `/api/audits/${DL_PERIOD_ID}/oscal-export`,
     );
+    // The `download` attribute carries the deterministic filename VALUE
+    // (not a bare attribute). For a same-origin download the anchor's
+    // `download` value takes precedence over the server
+    // Content-Disposition filename — a bare attribute made the browser
+    // fall back to "oscal-export.txt" from the URL. Pinning the value here
+    // is the page-render guard for that regression.
+    await expect(dl).toHaveAttribute("download", DL_FILENAME);
 
     // Arm the download listener BEFORE the click (a Playwright invariant),
     // then click. Listen on the browser CONTEXT so a download surfaced on
