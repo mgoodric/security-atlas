@@ -156,6 +156,18 @@ func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	webhookrecv.Handle(w, req, r.maxBodyBytes, r.cfg.Verifier, r.buildAndPush)
 }
 
+// ServeHTTPWithValidation is ServeHTTP with a pre-verify validation-handshake hook
+// (slice 657). A vendor whose subscription is fronted by an UNSIGNED validation
+// request (the Intune Graph validationToken handshake) passes a
+// webhookrecv.ValidationHook here; the shared skeleton answers the handshake (echo,
+// 200, no record) BEFORE the verify-first delivery path. A nil hook makes this
+// identical to ServeHTTP. The verify-first invariant is unchanged for every real
+// delivery: a non-handshake delivery still reaches the clientState Verifier before
+// any record.
+func (r *Receiver) ServeHTTPWithValidation(w http.ResponseWriter, req *http.Request, hook webhookrecv.ValidationHook) {
+	webhookrecv.HandleWithValidation(w, req, r.maxBodyBytes, hook, r.cfg.Verifier, r.buildAndPush)
+}
+
 // buildAndPush is the MDM-domain adapter the skeleton invokes on a verified raw
 // body: parse → normalize → build the SAME endpoint.device_posture.v1 record the
 // pull profile emits → push each. It returns the HTTP status the skeleton writes.

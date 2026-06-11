@@ -659,7 +659,9 @@ func requireSuperAdmin(w http.ResponseWriter, r *http.Request) bool {
 // authoritative source.
 func actorFromContext(ctx context.Context) uuid.UUID {
 	if claims := jwtmw.FromContext(ctx); claims != nil {
-		if u, err := uuid.Parse(claims.Subject); err == nil {
+		// Subject is "user:<uuid>" (auth-substrate-v2); strip the prefix
+		// before parsing or the real-auth caller resolves to uuid.Nil.
+		if u, err := uuid.Parse(jwtmw.SubjectUserID(claims.Subject)); err == nil {
 			return u
 		}
 	}
