@@ -13,14 +13,14 @@
 
 | State | Count |
 | --- | --- |
-| merged | 513 |
+| merged | 515 |
 | in-progress | 1 |
-| ready | 87 |
+| ready | 85 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 271 272 304 323 330 336 338 339 354 355 356 357 358 368 384 390 412 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 674 676 677 678 679 680 681 682
+095 112 113 114 115 118 134 228 230 232 271 272 304 323 330 336 338 339 354 355 356 357 358 368 384 390 412 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 677 678 679 681 682
 
 ## In-flight
 
@@ -623,13 +623,13 @@
 | 671 | Seeded demo tenant shows no evaluated control state / zero me... | merged | #1249 | 2026-06-10 | 2894827a |
 | 672 | Policy detail link 404s — `/policies/{id}` route does not e... | merged | #1255 | 2026-06-10 | d8a8763c |
 | 673 | Board Packs list fails to load in seeded tenant — `/api/boa... | merged | #1258 | 2026-06-10 | 07b24d13 |
-| 674 | Dashboard/breadcrumb shows "Default Tenant" while the active ... | ready |  |  |  |
+| 674 | Dashboard/breadcrumb shows "Default Tenant" while the active ... | merged |  | 2026-06-11 | f850f1dd |
 | 675 | Calendar agenda missing audit-period / vendor-review / policy... | merged |  | 2026-06-11 | 6be54edf |
 | 676 | Pervasive 503s on Next.js RSC prefetch/navigation requests | ready |  |  |  |
 | 677 | Metrics correctness pass (freshness contradiction, count labe... | ready |  |  |  |
 | 678 | Demo seed completeness: org_units, questionnaires, ack-role u... | ready |  |  |  |
 | 679 | Vendor UX/data: name/domain spacing, missing Delete control, ... | ready |  |  |  |
-| 680 | Data-quality + scoring clarity: audit-period labels, residual... | ready |  |  |  |
+| 680 | Data-quality + scoring clarity: audit-period labels, residual... | merged |  | 2026-06-11 | d9ca9533 |
 | 681 | Risk register UX: column sorting + per-risk detail; sidebar "... | ready |  |  |  |
 | 682 | Demo seed: anchor controls to SCF + give the demo framework r... | ready |  |  |  |
 | 683 | OSCAL component-definitions edge migration-lag (deploy-note /... | not-ready | #1261 |  | OSCAL edge migration-lag deploy-note; blocked on maintainer edge access |
