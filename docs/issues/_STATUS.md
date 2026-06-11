@@ -7,20 +7,20 @@
 >
 > Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
 
-**Generated:** 2026-06-11 · **Total slices:** 607
+**Generated:** 2026-06-11 · **Total slices:** 609
 
 ## Counts
 
 | State | Count |
 | --- | --- |
-| merged | 526 |
+| merged | 529 |
 | in-progress | 1 |
-| ready | 78 |
+| ready | 77 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 688 689
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 688 690 691
 
 ## In-flight
 
@@ -449,8 +449,8 @@
 | 421 | Parser fuzz harnesses for untrusted-input surfaces | merged | #985 | 2026-06-04 | 9d8e4179 |
 | 422 | Lift `internal/api/oauth` coverage toward the 90% security-cr... | merged | #975 | 2026-06-03 | 3e6eae8e |
 | 423 | End-to-end test for the OSCAL signed-export download chain | merged | #981 | 2026-06-04 | 7298f546 |
-| 424 | End-to-end test for the vendor-review workflow | ready |  |  |  |
-| 425 | Real cloud-KMS round-trip integration test for `internal/osca... | ready |  |  |  |
+| 424 | End-to-end test for the vendor-review workflow | merged |  | 2026-06-11 | bfbd482d |
+| 425 | Real cloud-KMS round-trip integration test for `internal/osca... | merged |  | 2026-06-11 | 2ada94e9 |
 | 426 | Targeted coverage-lift round: decisions / policies / me / fre... | merged | #1006 | 2026-06-04 | 9dfb08b8 |
 | 427 | Publish the auditor-facing "verify a signed OSCAL export" pag... | merged | #974 | 2026-06-03 | 2dcb70be |
 | 428 | ADRs for the four load-bearing canvas invariants without a de... | ready |  |  |  |
@@ -638,4 +638,6 @@
 | 686 | Read-only vendor detail page with review history | merged |  | 2026-06-11 | 84e6386c |
 | 687 | Contract-tier rollout: controls-detail + audit-workspace REMA... | merged |  | 2026-06-11 | fb9b03b4 |
 | 688 | vendor_reviews ledger (per-review history surface) | ready |  |  |  |
-| 689 | Contract-tier rollout: audit-workspace read tail (populations... | ready |  |  |  |
+| 689 | Contract-tier rollout: audit-workspace read tail (populations... | merged |  | 2026-06-11 | 4020b1a4 |
+| 690 | Contract-tier rollout: audit-workspace read-tail remainder (s... | ready |  |  |  |
+| 691 | Vendor detail does not refresh after recording a review | ready |  |  |  |
