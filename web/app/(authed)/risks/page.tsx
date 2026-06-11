@@ -81,6 +81,7 @@ import {
   buildRiskExportURL,
 } from "@/lib/api/risks-export";
 
+import { risksCountLabel } from "./count-label";
 import {
   ALL,
   applyFilters,
@@ -349,11 +350,36 @@ function RisksPageInner() {
     },
   ];
 
+  // Slice 684 — header count semantics fix (mirrors slice 666 on
+  // /controls). Previously the header read "Showing {visible} of {rows}
+  // risks" while the shared `<ListPagination>` footer reads "Showing M–N
+  // of TOTAL" — both used the verb "Showing" but meant different things,
+  // so read together the header implied all rows were on screen while
+  // the footer paginated only the first page. The header now drops the
+  // verb and renders a plain COUNT of the filtered register; the footer
+  // keeps sole ownership of the page-range phrasing. The filtered count
+  // drives the header (AC-3) and is the same number the footer
+  // paginates over, so the two now read consistently. Copy/semantics
+  // only — page size + counts are unchanged (anti-criterion). See
+  // `docs/audit-log/684-risks-count-semantics-decisions.md`.
+  const countLabel = risksCountLabel(visible.length, rows.length);
   const meta = (
-    <span>
-      Showing{" "}
-      <span className="text-foreground font-medium">{visible.length}</span> of{" "}
-      <span className="font-mono">{rows.length}</span> risks
+    <span data-testid="risks-count-label">
+      {countLabel.isFiltered ? (
+        <>
+          <span className="text-foreground font-medium">
+            {countLabel.filtered}
+          </span>{" "}
+          of <span className="font-mono">{countLabel.total}</span> risks
+        </>
+      ) : (
+        <>
+          <span className="text-foreground font-medium">
+            {countLabel.total}
+          </span>{" "}
+          risks
+        </>
+      )}
     </span>
   );
 

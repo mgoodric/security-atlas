@@ -133,6 +133,12 @@
       "functions": 98,
       "lines": 98
     },
+    "app/(authed)/risks/count-label.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "app/(authed)/risks/filters.ts": {
       "statements": 98,
       "branches": 95,
