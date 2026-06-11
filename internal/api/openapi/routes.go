@@ -106,6 +106,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/exceptions/expiring", Tag: "exceptions", Tier: "bearer", Internal: false, Summary: "GET /v1/exceptions/expiring"},
 	{Method: "GET", Path: "/v1/exceptions/{id}", Tag: "exceptions", Tier: "bearer", Internal: false, Summary: "GET /v1/exceptions/{id}"},
 	{Method: "GET", Path: "/v1/exceptions/{id}/audit-log", Tag: "exceptions", Tier: "bearer", Internal: false, Summary: "GET /v1/exceptions/{id}/audit-log"},
+	{Method: "GET", Path: "/v1/features/enabled", Tag: "feature-flags", Tier: "bearer", Internal: false, Summary: "GET /v1/features/enabled — non-admin enabled-modules read (slice 660 gating flags)"},
 	{Method: "GET", Path: "/v1/framework-scopes", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes"},
 	{Method: "GET", Path: "/v1/framework-scopes/{id}", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes/{id}"},
 	{Method: "GET", Path: "/v1/frameworks", Tag: "frameworks", Tier: "bearer", Internal: false, Summary: "GET /v1/frameworks"},

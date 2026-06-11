@@ -391,6 +391,12 @@
       "functions": 98,
       "lines": 98
     },
+    "app/api/features/enabled/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "app/api/install-state/route.ts": {
       "statements": 98,
       "branches": 98,
@@ -754,6 +760,12 @@
     "lib/display-name.ts": {
       "statements": 98,
       "branches": 91,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/feature-nav.ts": {
+      "statements": 98,
+      "branches": 98,
       "functions": 98,
       "lines": 98
     },
