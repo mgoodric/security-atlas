@@ -24,8 +24,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { FeatureDisabledState } from "@/components/feature-disabled-state";
 import { APIError } from "@/lib/api/base";
 import { BoardPack, generateBoardPack, listBoardPacks } from "@/lib/api/board";
+import { isFeatureDisabledError } from "@/lib/feature-nav";
 
 // Slice 032 — quarterly board pack list + generate.
 //
@@ -65,6 +67,18 @@ export default function BoardPacksPage() {
       queryClient.invalidateQueries({ queryKey: ["board-packs"] });
     },
   });
+
+  // Slice 660: the `board.reporting` flag gates this module. A flag-off
+  // tenant reaches here only by direct navigation (the nav entry is
+  // hidden server-side); the gated API returns 404 "feature disabled".
+  // Render the clean disabled panel instead of the raw error state.
+  if (packsQuery.isError && isFeatureDisabledError(packsQuery.error)) {
+    return (
+      <div className="mx-auto max-w-4xl p-8">
+        <FeatureDisabledState moduleName="Board packs" />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-8">

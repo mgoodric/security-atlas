@@ -76,6 +76,7 @@ tags:
   - name: decisions
   - name: evidence
   - name: exceptions
+  - name: feature-flags
   - name: framework-scopes
   - name: frameworks
   - name: install
@@ -2097,6 +2098,20 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/features/enabled:
+    get:
+      summary: GET /v1/features/enabled — non-admin enabled-modules read (slice 660 gating flags)
+      tags: [feature-flags]
+      operationId: get-v1-features-enabled
+      security:
+        - bearer: []
       responses:
         default:
           description: Default response envelope.

@@ -235,6 +235,12 @@ func (s *Server) httpHandler() http.Handler {
 	// request ends.
 	root.Use(featureflag.CacheMiddleware)
 
+	// Slice 660: one shared feature-flag Store, reused by the route-gate
+	// middleware (OSCAL + board), the admin features handler, and the
+	// non-admin enabled-modules read. Tenant scope comes from RLS on each
+	// per-request transaction (invariant #6).
+	featureFlagStore := featureflag.NewStore(s.dbPool)
+
 	queries := dbx.New(s.dbPool)
 	// Slice 104: the anchors handler needs the pool (not just the
 	// pre-bound queries) to open per-request tenant-GUC transactions
@@ -842,19 +848,31 @@ func (s *Server) httpHandler() http.Handler {
 	// persisted Postgres rows). Routes appended per the parallel-batch
 	// convention (chi rejects two Mounts at "/"). The {id}:verb shape mirrors
 	// the slice-025 walkthroughs /{id}:finalize precedent.
+	// Slice 660: the OSCAL vendor-claims module gates on the `oscal.export`
+	// feature flag. The whole module (list + get + accept/reject/needs-info
+	// disposition + scf-anchor map) is wrapped in a featureflag.Gate group so
+	// a flag-off tenant gets a clean 404 + {"error":"feature disabled"} (no
+	// internal detail leak — slice 367) on EVERY route, not just nav-hidden.
+	// `oscal.export` is OFF by default pending GA, which also removes the
+	// user-facing exposure of the edge-broken OSCAL page (ATLAS-001/659/683)
+	// regardless of 659's outcome. The Gate reads the caller's tenant flag
+	// (RLS — invariant #6) and falls open to the Seed default on a DB error.
 	oscalComponentsH := oscalcomponentsapi.New(oscalcomponentsapi.NewStore(s.dbPool))
-	root.Get("/v1/oscal/component-definitions", oscalComponentsH.ListDefinitions)
-	root.Get("/v1/oscal/component-definitions/{id}", oscalComponentsH.GetDefinition)
-	root.Post("/v1/oscal/component-claims/{id}:accept", oscalComponentsH.Accept)
-	root.Post("/v1/oscal/component-claims/{id}:reject", oscalComponentsH.Reject)
-	root.Post("/v1/oscal/component-claims/{id}:needs-info", oscalComponentsH.NeedsInfo)
-	// Slice 620: operator maps an UNMAPPED vendor claim (slice-512
-	// scf_anchor_id IS NULL) to a canonical SCF anchor. grc_engineer-gated;
-	// validates the anchor exists in the bundled catalog; sets the crosswalk +
-	// appends an append-only mapping-audit row. Requirement -> SCF anchor only
-	// (invariant #7); the claim stays a claim -- mapping NEVER writes
-	// control_evaluations (invariant #2 / P0-512-1).
-	root.Patch("/v1/oscal/component-claims/{id}/scf-anchor", oscalComponentsH.MapScfAnchor)
+	root.Group(func(r chi.Router) {
+		r.Use(featureflag.Gate(featureFlagStore, "oscal.export"))
+		r.Get("/v1/oscal/component-definitions", oscalComponentsH.ListDefinitions)
+		r.Get("/v1/oscal/component-definitions/{id}", oscalComponentsH.GetDefinition)
+		r.Post("/v1/oscal/component-claims/{id}:accept", oscalComponentsH.Accept)
+		r.Post("/v1/oscal/component-claims/{id}:reject", oscalComponentsH.Reject)
+		r.Post("/v1/oscal/component-claims/{id}:needs-info", oscalComponentsH.NeedsInfo)
+		// Slice 620: operator maps an UNMAPPED vendor claim (slice-512
+		// scf_anchor_id IS NULL) to a canonical SCF anchor. grc_engineer-gated;
+		// validates the anchor exists in the bundled catalog; sets the crosswalk +
+		// appends an append-only mapping-audit row. Requirement -> SCF anchor only
+		// (invariant #7); the claim stays a claim -- mapping NEVER writes
+		// control_evaluations (invariant #2 / P0-512-1).
+		r.Patch("/v1/oscal/component-claims/{id}/scf-anchor", oscalComponentsH.MapScfAnchor)
+	})
 	// Slice 016: evidence freshness + control drift read model. Two
 	// read-only endpoints over the slice-016 read-model tables
 	// (evidence_freshness, control_drift_snapshots). Routes appended per the
@@ -951,32 +969,42 @@ func (s *Server) httpHandler() http.Handler {
 	boardStore := board.NewStore(s.dbPool)
 	boardGen := board.NewGenerator(boardStore, freshnessStore, driftStore)
 	boardH := boardapi.New(boardGen, boardStore)
-	boardH.RegisterRoutes(root)
-	// Slice 032: quarterly board pack. Extends the slice-031 monthly brief
-	// into the full board-meeting artifact — a multi-section report
-	// (posture, top risks, coverage trend, open findings, operational
-	// metrics, investment-vs-coverage, asks of the board) with a
-	// draft -> publish lifecycle. The PackGenerator reuses the same
-	// slice-016 freshness + drift read models plus the board-pack-owned
-	// failing-evaluations read (control_evaluations as of period_end —
-	// decision D4). The narrative is TEMPLATED — no LLM (P0 anti-criterion).
-	// Publish is gated on every section being human-approved (decision D6).
-	// Routes appended per the parallel-batch convention; the literal-suffix
-	// and deeper /sections/... routes are declared before the bare /{id}.
-	boardPackStore := board.NewPackStore(s.dbPool)
-	// Slice 273: the board-pack `vendor_burndown` section reads through
-	// the existing slice-122 high-criticality vendor burndown surface
-	// (vendor.Store.Burndown) via a tiny in-process adapter. The adapter
-	// lives at this wiring layer so internal/board stays free of an
-	// internal/vendor import (board.VendorBurndownReader is the contract).
-	// Pinned to criticality=high per slice 273 D2 — the board concern is
-	// overdue reviews on the vendors that matter.
-	boardPackGen := board.NewPackGenerator(
-		boardPackStore, freshnessStore, driftStore,
-		vendorBurndownAdapter{store: vendorStore},
-	)
-	boardPackH := boardapi.NewPack(boardPackGen, boardPackStore)
-	boardPackH.RegisterRoutes(root)
+	// Slice 660: the board-reporting module (briefs + packs) gates on the
+	// `board.reporting` feature flag. Both RegisterRoutes calls receive a
+	// featureflag.Gate-wrapped router so a flag-off tenant gets a clean 404
+	// + {"error":"feature disabled"} on EVERY board route (briefs + packs),
+	// matching the OSCAL gate above (consistent 404 shape; no internal
+	// leak). `board.reporting` is OFF by default pending GA. The Gate reads
+	// the caller's tenant flag under RLS (invariant #6).
+	root.Group(func(r chi.Router) {
+		r.Use(featureflag.Gate(featureFlagStore, "board.reporting"))
+		boardH.RegisterRoutes(r)
+		// Slice 032: quarterly board pack. Extends the slice-031 monthly brief
+		// into the full board-meeting artifact — a multi-section report
+		// (posture, top risks, coverage trend, open findings, operational
+		// metrics, investment-vs-coverage, asks of the board) with a
+		// draft -> publish lifecycle. The PackGenerator reuses the same
+		// slice-016 freshness + drift read models plus the board-pack-owned
+		// failing-evaluations read (control_evaluations as of period_end —
+		// decision D4). The narrative is TEMPLATED — no LLM (P0 anti-criterion).
+		// Publish is gated on every section being human-approved (decision D6).
+		// Routes appended per the parallel-batch convention; the literal-suffix
+		// and deeper /sections/... routes are declared before the bare /{id}.
+		boardPackStore := board.NewPackStore(s.dbPool)
+		// Slice 273: the board-pack `vendor_burndown` section reads through
+		// the existing slice-122 high-criticality vendor burndown surface
+		// (vendor.Store.Burndown) via a tiny in-process adapter. The adapter
+		// lives at this wiring layer so internal/board stays free of an
+		// internal/vendor import (board.VendorBurndownReader is the contract).
+		// Pinned to criticality=high per slice 273 D2 — the board concern is
+		// overdue reviews on the vendors that matter.
+		boardPackGen := board.NewPackGenerator(
+			boardPackStore, freshnessStore, driftStore,
+			vendorBurndownAdapter{store: vendorStore},
+		)
+		boardPackH := boardapi.NewPack(boardPackGen, boardPackStore)
+		boardPackH.RegisterRoutes(r)
+	})
 	// Slice 155: questionnaire tracer-bullet — Excel import + manual
 	// authoring + AnswerLibrary skeleton (SCF-anchor keyed) + PDF export.
 	// Routes appended per the parallel-batch convention (chi rejects two
@@ -1017,9 +1045,17 @@ func (s *Server) httpHandler() http.Handler {
 	// non-admin callers see 403 even without the slice-035 OPA
 	// middleware wired. Routes appended per the parallel-batch
 	// convention (chi rejects two Mounts at "/").
-	featuresH := featuresapi.New(featureflag.NewStore(s.dbPool))
+	featuresH := featuresapi.New(featureFlagStore)
 	root.Get("/v1/admin/features", featuresH.List)
 	root.Patch("/v1/admin/features/{key}", featuresH.Patch)
+	// Slice 660: NON-admin, tenant-scoped enabled-modules read. The web
+	// shell calls this for EVERY authed user to gate nav (hide Vendor
+	// Claims / Board Packs when their flag is off) — the admin
+	// GET /v1/admin/features above stays admin-only (it carries the full
+	// inventory + toggle/audit surface). This route exposes ONLY the
+	// slice 660 gating booleans (featureflag.GatingKeys) for the caller's
+	// own tenant (RLS — invariant #6); no write path, no audit metadata.
+	root.Get("/v1/features/enabled", featuresH.Enabled)
 	// Slice 062: admin BFF backend endpoints — SSO config, users + roles,
 	// and unified audit-log read across the seven per-domain audit log
 	// tables (via the admin_audit_log_v view from migration _022). Each
