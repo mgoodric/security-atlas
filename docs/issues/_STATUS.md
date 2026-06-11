@@ -13,14 +13,14 @@
 
 | State | Count |
 | --- | --- |
-| merged | 535 |
+| merged | 538 |
 | in-progress | 1 |
-| ready | 84 |
+| ready | 81 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 428 434 435 436 440 441 442 443 446 449 450 452 453 455 457 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 688 691 694 695 696 697 698 699 700 701 702 703 704
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 434 435 436 440 441 442 443 446 449 450 452 453 455 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 688 691 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -453,7 +453,7 @@
 | 425 | Real cloud-KMS round-trip integration test for `internal/osca... | merged |  | 2026-06-11 | 2ada94e9 |
 | 426 | Targeted coverage-lift round: decisions / policies / me / fre... | merged | #1006 | 2026-06-04 | 9dfb08b8 |
 | 427 | Publish the auditor-facing "verify a signed OSCAL export" pag... | merged | #974 | 2026-06-03 | 2dcb70be |
-| 428 | ADRs for the four load-bearing canvas invariants without a de... | ready |  |  |  |
+| 428 | ADRs for the four load-bearing canvas invariants without a de... | merged |  |  | ADRs 0011-0014 merged via #989 (2026-06-04); #1266 backfill miss (file says merged) |
 | 429 | README parity for the AWS connector and the Go/TypeScript SDKs | merged | #979 | 2026-06-04 | 74ca43be |
 | 430 | Consolidated environment-variable / configuration reference page | merged | #984 | 2026-06-04 | 07c2c25c |
 | 431 | External-IdP / OIDC operator setup guide | merged | #994 | 2026-06-04 | bdca8df7 |
@@ -482,7 +482,7 @@
 | 454 | go-otel observability group bump (13 modules) | merged | #986 | 2026-06-04 | b839f98a |
 | 455 | OIDC-identity-strategy decision spike (unblocks cosign keyles... | ready |  |  |  |
 | 456 | `internal/api/oauth` residual coverage: audit-write + signer-... | merged | #1022 | 2026-06-05 | 02c926f9 |
-| 457 | Browser download surface for the OSCAL signed-export bundle | ready |  |  |  |
+| 457 | Browser download surface for the OSCAL signed-export bundle | merged |  | 2026-06-11 | a04fd240 |
 | 458 | pre-commit guard against committing machine-local analysis ca... | merged | #1005 | 2026-06-04 | e3877b29 |
 | 459 | Sweep code-comment `Plans/mockups/` provenance citations to t... | merged | #1010 | 2026-06-04 | 4833a7bd |
 | 460 | `NATS_URL` is read by the server but absent from `.env.example` | merged | #460 | 2026-06-04 | a528e279 |
@@ -653,4 +653,4 @@
 | 701 | Collapse the ~21 stub jobs behind a promoted merge-gate | ready |  |  |  |
 | 702 | container-publish edge-build efficiency | ready |  |  |  |
 | 703 | Main-canary: run a single representative leg on docs-only pushes | ready |  |  |  |
-| 704 | Contract-tier rollout: tenant-wide `/v1/evidence` ledger wind... | ready |  |  |  |
+| 704 | Contract-tier rollout: tenant-wide `/v1/evidence` ledger wind... | merged |  | 2026-06-11 | f882950d |
