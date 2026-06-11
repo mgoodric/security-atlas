@@ -37,6 +37,12 @@
       "functions": 98,
       "lines": 98
     },
+    "app/(authed)/vendors/[id]/detail-view.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "app/(authed)/controls/count-label.ts": {
       "statements": 98,
       "branches": 98,
