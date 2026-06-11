@@ -72,7 +72,7 @@ no header-injection surface in the href.
 
 **Confidence:** high.
 
-### D3 — Review history: record the scalar-only reality, file the ledger as slice 687 (AC-4)
+### D3 — Review history: record the scalar-only reality, file the ledger as slice 688 (AC-4)
 
 **Options considered.**
 
@@ -82,7 +82,7 @@ no header-injection surface in the href.
    honestly, and file the ledger as a follow-on slice (the prompt's
    DEFAULT LEAN).
 
-**Chosen:** Option 2. Filed **slice 687** (`docs/issues/687-vendor-reviews-ledger.md`,
+**Chosen:** Option 2. Filed **slice 688** (`docs/issues/688-vendor-reviews-ledger.md`,
 status `not-ready` — depends on this slice merging).
 
 **Rationale.** A true per-review history needs an append-only,
@@ -95,11 +95,11 @@ single scalar would be dishonest (the "continuous monitoring that's
 actually 24-hour polling" anti-pattern, applied to history). The detail
 page therefore carries a "Review history" card that names the gap
 plainly: "v1 records a single last-review date (<date>) … A per-review
-timeline arrives with the vendor-review ledger." Slice 687 replaces that
+timeline arrives with the vendor-review ledger." Slice 688 replaces that
 placeholder with the real timeline.
 
 **Confidence:** high (the deferral is the documented default; the only
-open shape is slice 687's own — ledger columns + back-fill semantics).
+open shape is slice 688's own — ledger columns + back-fill semantics).
 
 ### D4 — A "Review history" placeholder card vs. nothing
 
@@ -115,7 +115,7 @@ open shape is slice 687's own — ledger columns + back-fill semantics).
 leave the next reader (or the maintainer) re-asking "where's the
 history?" — the question this slice exists to settle. A named card that
 points forward to the ledger is the honest, self-documenting surface and
-gives slice 687 an obvious render target. The card reuses the summary's
+gives slice 688 an obvious render target. The card reuses the summary's
 `last_review_date` so it stays consistent with the field above it.
 
 **Confidence:** medium (the exact copy is a UX call the maintainer may
@@ -127,9 +127,9 @@ re-word once real operators see it).
   (the detail) after a save is the flow operators want, vs. returning to
   the list. If operators routinely edit-then-edit-another, the list might
   be the better landing. Low-cost to flip.
-- **D3 → slice 687.** This is the top of the iteration backlog: once a
+- **D3 → slice 688.** This is the top of the iteration backlog: once a
   real review cadence runs against real vendors, the single-scalar
-  `last_review_date` will feel thin. Pick up slice 687 (ledger +
+  `last_review_date` will feel thin. Pick up slice 688 (ledger +
   back-fill + history render) at that point. Decide there whether
   `last_review_date` becomes a derived view over the ledger or stays a
   denormalized cache.
@@ -148,5 +148,5 @@ re-word once real operators see it).
 | -------------------------------------------------- | ---------- |
 | D1 route shape (`[id]` read-only + `[id]/edit`)    | high       |
 | D2 owner mailto reuses `isEmail`                   | high       |
-| D3 defer ledger → slice 687, record scalar reality | high       |
+| D3 defer ledger → slice 688, record scalar reality | high       |
 | D4 named "Review history" placeholder card         | medium     |

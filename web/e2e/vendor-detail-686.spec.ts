@@ -97,11 +97,19 @@ test.describe("read-only vendor detail (slice 686)", () => {
       "Signed (2026-01-05)",
     );
 
-    // Read-only: the page renders NO editable form controls. The edit
-    // form lives behind the Edit affordance, not on this route.
-    await expect(page.locator("input")).toHaveCount(0);
-    await expect(page.locator("select")).toHaveCount(0);
-    await expect(page.locator("textarea")).toHaveCount(0);
+    // Read-only: the detail VIEW renders NO editable form controls. The
+    // edit form lives behind the Edit affordance, not on this route.
+    //
+    // The assertion is scoped to the `vendor-detail` subtree, NOT the
+    // whole page: the `(authed)` shell chrome (TopBar) carries the
+    // global ⌘K search <input> (`components/shell/global-search.tsx`),
+    // so a page-wide `locator("input")` count is always >= 1 and is not
+    // what AC-1 is about. AC-1 is "the vendor SUMMARY has no form
+    // inputs" — scope to the detail container.
+    const detail = page.getByTestId("vendor-detail");
+    await expect(detail.locator("input")).toHaveCount(0);
+    await expect(detail.locator("select")).toHaveCount(0);
+    await expect(detail.locator("textarea")).toHaveCount(0);
   });
 
   test("AC-3: a valid email owner renders as a mailto link", async ({

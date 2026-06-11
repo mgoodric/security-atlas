@@ -1,4 +1,4 @@
-# 687 — vendor_reviews ledger (per-review history surface)
+# 688 — vendor_reviews ledger (per-review history surface)
 
 **Cluster:** vendor
 **Estimate:** M (1-2d)
