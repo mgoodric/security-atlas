@@ -585,6 +585,204 @@ func sha256Of(s string) []byte {
 	return h[:]
 }
 
+// demoSCFAnchor is one synthesized SCF anchor for the self-contained spine
+// branch. scf_id values are REAL SCF control codes (the same family/code
+// shape the slice-006 catalog importer produces), so the demo never invents
+// a parallel control taxonomy (invariant #7) — it just bundles a thin slice
+// of the SCF catalog when the full global catalog is not loaded.
+type demoSCFAnchor struct {
+	SCFID  string
+	Family string
+	Title  string
+}
+
+// demoSCFAnchors is the fixed thin-slice SCF anchor set the self-contained
+// spine branch synthesizes. The codes/families are drawn verbatim from the
+// SCF catalog (securecontrolsframework.com) so anchoring to them is anchoring
+// to real SCF controls, not fabricated ones.
+var demoSCFAnchors = []demoSCFAnchor{
+	{"IAC-06", "Identification & Authentication", "Multi-Factor Authentication"},
+	{"CRY-05", "Cryptographic Protections", "Encryption of Data at Rest"},
+	{"BCD-11", "Business Continuity & Disaster Recovery", "Data Backups"},
+	{"TDA-09", "Technology Development & Acquisition", "Secure Coding"},
+	{"TPM-03", "Third-Party Management", "Supply Chain Risk Management"},
+	{"MON-01", "Continuous Monitoring", "Continuous Monitoring"},
+	{"VPM-02", "Vulnerability & Patch Management", "Vulnerability Remediation"},
+	{"IRO-04", "Incident Response", "Incident Handling"},
+}
+
+// writeFrameworkPostureSpine builds the SCF-anchor coverage spine
+// (constitutional invariant #1) for the demo tenant so the dashboard
+// "Framework posture" tiles render REAL coverage instead of "No active
+// framework versions yet" (slice 682 / ATLAS-037).
+//
+// The spine is:
+//
+//	framework_versions (status='current', tenant-scoped demo)
+//	  -> framework_requirements
+//	    -> fw_to_scf_edges (STRM, non-no_relationship)
+//	      -> scf_anchors
+//	        <- controls.scf_anchor_id (this tenant's active controls)
+//
+// AC-4 JUDGMENT (global-catalog dependency vs demo self-containment): the
+// demo seed must work in the common deploy where the full global SCF catalog
+// (tenant_id IS NULL framework_versions + scf_anchors) is NOT loaded — that
+// is the state of the CI integration DB and of a fresh self-host before any
+// catalog import. So the seed is SELF-CONTAINED: it builds the whole spine on
+// a tenant-scoped demo framework_version. When the global SCF catalog IS
+// present, the seed ADOPTS its real anchors (same scf_id codes resolve to the
+// global rows) rather than duplicating them; the demo requirements + edges
+// still hang off the tenant-scoped demo framework_version, so the global
+// catalog is never mutated (AC-4 / invariant #6). See
+// docs/audit-log/682-demo-posture-decisions.md.
+//
+// Idempotency (AC-5): every spine row hangs (directly or via FK CASCADE) off
+// the tenant-scoped demo framework_version, which Teardown deletes with
+// `DELETE FROM framework_versions WHERE tenant_id = $1`. A re-seed rebuilds
+// the spine from scratch with identical cardinality — no duplicate edges.
+//
+// Returns (requirements, edges, controlsAnchored).
+func writeFrameworkPostureSpine(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, int, int, error) {
+	// 1. Find-or-create a tenant-scoped demo framework_version with
+	//    status='current'. writeAuditPeriodsAndSamples may already have
+	//    created one (when the global catalog is absent) OR adopted a global
+	//    version (when present). We never hang demo requirements off a global
+	//    framework_version (that would pollute the global catalog — AC-4), so
+	//    we explicitly resolve the TENANT-SCOPED one and create it if needed.
+	var fwVersionID uuid.UUID
+	err := tx.QueryRow(ctx, `
+		SELECT id FROM framework_versions
+		WHERE tenant_id = $1 AND status = 'current'
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, fs.tenant.ID).Scan(&fwVersionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		fwID := uuid.New()
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO frameworks (id, tenant_id, name, slug, issuer)
+			 VALUES ($1, $2, 'Demo Framework', 'demo-framework', 'demo-seed')
+			 ON CONFLICT (tenant_id, slug) DO NOTHING`,
+			fwID, fs.tenant.ID,
+		); err != nil {
+			return 0, 0, 0, fmt.Errorf("demoseed: spine insert demo framework: %w", err)
+		}
+		// ON CONFLICT may have skipped the insert (a demo framework already
+		// exists from writeAuditPeriodsAndSamples); resolve the real id.
+		if err := tx.QueryRow(ctx,
+			`SELECT id FROM frameworks WHERE tenant_id = $1 AND slug = 'demo-framework'`,
+			fs.tenant.ID,
+		).Scan(&fwID); err != nil {
+			return 0, 0, 0, fmt.Errorf("demoseed: spine resolve demo framework: %w", err)
+		}
+		fwVersionID = uuid.New()
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO framework_versions (id, tenant_id, framework_id, version, status)
+			 VALUES ($1, $2, $3, '1.0', 'current')`,
+			fwVersionID, fs.tenant.ID, fwID,
+		); err != nil {
+			return 0, 0, 0, fmt.Errorf("demoseed: spine insert demo framework_version: %w", err)
+		}
+		fs.frameworkVersionIDs = append(fs.frameworkVersionIDs, fwVersionID)
+	} else if err != nil {
+		return 0, 0, 0, fmt.Errorf("demoseed: spine lookup framework_version: %w", err)
+	}
+
+	// 2. For each anchor in the thin SCF slice: resolve the real global
+	//    scf_anchors row by scf_id when the catalog is loaded (ADOPT), else
+	//    synthesize a tenant-scoped demo anchor on the demo framework_version
+	//    (SELF-CONTAINED). Build a requirement + a STRM edge per anchor.
+	reqCount := 0
+	edgeCount := 0
+	anchorIDs := make([]uuid.UUID, 0, len(demoSCFAnchors))
+	for i, a := range demoSCFAnchors {
+		// ADOPT: a global anchor (tenant_id IS NULL framework_version) with
+		// this scf_id already exists in the catalog.
+		var anchorID uuid.UUID
+		adoptErr := tx.QueryRow(ctx, `
+			SELECT sa.id
+			FROM scf_anchors sa
+			JOIN framework_versions fv ON fv.id = sa.framework_version_id
+			WHERE sa.scf_id = $1 AND fv.tenant_id IS NULL
+			ORDER BY sa.created_at ASC
+			LIMIT 1
+		`, a.SCFID).Scan(&anchorID)
+		if errors.Is(adoptErr, pgx.ErrNoRows) {
+			// SELF-CONTAINED: synthesize a demo anchor on the demo version.
+			anchorID = uuid.New()
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO scf_anchors
+				 (id, framework_version_id, scf_id, family, title, description)
+				 VALUES ($1, $2, $3, $4, $5, $6)`,
+				anchorID, fwVersionID, a.SCFID, a.Family, a.Title,
+				"Demo SCF anchor for the seeded posture spine.",
+			); err != nil {
+				return 0, 0, 0, fmt.Errorf("demoseed: spine insert scf_anchor %s: %w", a.SCFID, err)
+			}
+		} else if adoptErr != nil {
+			return 0, 0, 0, fmt.Errorf("demoseed: spine adopt scf_anchor %s: %w", a.SCFID, adoptErr)
+		}
+		anchorIDs = append(anchorIDs, anchorID)
+
+		// Requirement on the demo framework_version, one per anchor. The code
+		// is a stable demo-namespaced clause id; the title mirrors the anchor.
+		reqID := uuid.New()
+		reqCode := fmt.Sprintf("DEMO-%02d", i+1)
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO framework_requirements
+			 (id, framework_version_id, code, title, body)
+			 VALUES ($1, $2, $3, $4, $5)`,
+			reqID, fwVersionID, reqCode, a.Title,
+			"Demo framework requirement satisfied via the SCF anchor crosswalk.",
+		); err != nil {
+			return 0, 0, 0, fmt.Errorf("demoseed: spine insert framework_requirement %s: %w", reqCode, err)
+		}
+		reqCount++
+
+		// STRM edge requirement -> anchor. 'equal' is the strongest STRM
+		// relationship (NIST IR 8477); a non-'no_relationship' edge is what
+		// the posture query's req_anchor CTE requires. source_attribution
+		// 'org_internal' marks this as a demo-synthesized crosswalk, never
+		// claimed as official SCF mapping.
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO fw_to_scf_edges
+			 (id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale)
+			 VALUES ($1, $2, $3, 'equal', 1.0, 'org_internal', $4)`,
+			uuid.New(), reqID, anchorID,
+			"Demo seed crosswalk: requirement is satisfied by the SCF anchor.",
+		); err != nil {
+			return 0, 0, 0, fmt.Errorf("demoseed: spine insert fw_to_scf_edge %s: %w", reqCode, err)
+		}
+		edgeCount++
+	}
+
+	// 3. Anchor the demo controls. Round-robin the tenant's active controls
+	//    across the chosen anchors so MOST (but not necessarily all)
+	//    requirements are covered — a realistic, non-flat coverage_pct.
+	//    Leaving a couple of requirements uncovered keeps the tile honest
+	//    (coverage < 100% is the realistic demo state). We anchor every
+	//    control to keep the UCF graph dense, but skip the LAST two anchors
+	//    in the round-robin so their requirements render as gaps.
+	coverableAnchors := anchorIDs
+	if len(coverableAnchors) > 2 {
+		coverableAnchors = coverableAnchors[:len(coverableAnchors)-2]
+	}
+	controlsAnchored := 0
+	for i, c := range fs.controls {
+		anchorID := coverableAnchors[i%len(coverableAnchors)]
+		ct, err := tx.Exec(ctx,
+			`UPDATE controls SET scf_anchor_id = $1
+			 WHERE id = $2 AND tenant_id = $3`,
+			anchorID, c.ID, fs.tenant.ID,
+		)
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("demoseed: spine anchor control %s: %w", c.ID, err)
+		}
+		controlsAnchored += int(ct.RowsAffected())
+	}
+
+	return reqCount, edgeCount, controlsAnchored, nil
+}
+
 // writeDemoAuditTrail writes ~50 tenant-scoped me_audit_log rows with
 // realistic actions ('profile.update', 'preferences.update', etc.).
 // Every row carries `payload_json -> demo_seed_v = "205"` for AC-9.

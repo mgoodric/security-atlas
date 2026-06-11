@@ -178,6 +178,9 @@ type Result struct {
 	Decisions         int      // slice 678 / ATLAS-028
 	RoleUsers         int      // slice 678 / ATLAS-037
 	QuestionnaireQns  int      // slice 678 / ATLAS-037 (questions in the seeded questionnaire)
+	FrameworkReqs     int      // slice 682 / ATLAS-037 (posture spine: framework_requirements)
+	STRMEdges         int      // slice 682 / ATLAS-037 (posture spine: fw_to_scf_edges)
+	ControlsAnchored  int      // slice 682 / ATLAS-037 (controls carrying scf_anchor_id)
 	EvidenceKindsUsed []string // for D3 surface — which kinds got rows
 	Idempotent        bool     // true if no rows were INSERTed (already-seeded path)
 }
@@ -353,6 +356,17 @@ func (s *Seeder) Apply(ctx context.Context, in ApplyInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	// Framework-posture spine (slice 682 / ATLAS-037): anchor the demo
+	// controls to SCF anchors + seed framework_requirements + STRM edges so
+	// the dashboard "Framework posture" tiles render real coverage. Runs
+	// AFTER writeControls (the controls exist to be anchored) and AFTER
+	// writeAuditPeriodsAndSamples (the framework-version creation order is
+	// settled) but BEFORE writeFrameworkScopes (which reuses the demo
+	// framework_version the spine guarantees is current).
+	reqCount, edgeCount, ctrlAnchored, err := writeFrameworkPostureSpine(ctx, tx, fixtures)
+	if err != nil {
+		return Result{}, err
+	}
 	eCount, kindsUsed, err := writeEvidence(ctx, tx, fixtures)
 	if err != nil {
 		return Result{}, err
@@ -407,6 +421,9 @@ func (s *Seeder) Apply(ctx context.Context, in ApplyInput) (Result, error) {
 		Decisions:         dCount,
 		RoleUsers:         ruCount,
 		QuestionnaireQns:  qCount,
+		FrameworkReqs:     reqCount,
+		STRMEdges:         edgeCount,
+		ControlsAnchored:  ctrlAnchored,
 		EvidenceKindsUsed: kindsUsed,
 	}, nil
 }
