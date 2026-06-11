@@ -96,3 +96,85 @@ export async function fetchPoliciesList(): Promise<PoliciesListResponse> {
   }
   return (await res.json()) as PoliciesListResponse;
 }
+
+// ----- Slice 672: /policies/[id] read-only detail view -----
+//
+// Server-side fetcher used by the slice 672 BFF `[id]` route. Hits the
+// upstream `GET /v1/policies/{id}` with the bearer (RLS-tenant-scoped —
+// the platform returns only the caller's-tenant policy). The wire shape
+// is `{ policy: policyWire }` (see `wireFromPolicy` in
+// `internal/api/policies/handlers.go`). `apiFetch` throws an `APIError`
+// carrying the upstream status (404 / 401 / 5xx) which the BFF maps to
+// a clean Next response. NO client-supplied tenant_id is accepted or
+// forwarded (invariant #6 — identical posture to the list BFF).
+export async function getPolicy(bearer: string, id: string): Promise<Policy> {
+  const res = await apiFetch(`/v1/policies/${encodeURIComponent(id)}`, bearer);
+  const body = (await res.json()) as { policy: Policy };
+  return body.policy;
+}
+
+// Detail-page acknowledgment-rate cell. Shape mirrors the per-policy
+// `GET /v1/policies/{id}/acknowledgment-rate` (`rateResponse` in
+// `internal/api/policyacks/handlers.go`). `percent` is null when the
+// denominator is zero (no required-role users).
+export type PolicyDetailAckRate = {
+  numerator: number;
+  denominator: number;
+  percent: number | null;
+  window_seconds: number;
+};
+
+// Server-side ack-rate fetcher for the slice 672 detail BFF. Returns
+// `null` (rather than throwing) on the documented non-200 cases:
+//   - upstream 409: the policy is not published (no ack-rate to show)
+//   - upstream 404: race against a deletion between the policy read and
+//     this call — the page already has the policy, so degrade gracefully
+//   - any other status: degrade gracefully — the ack-rate is a secondary
+//     detail; its absence must not break the page render.
+// This is ONE server-side call per detail page (not client per-row
+// fan-out), so it respects the list view's P0-A2 discipline.
+export async function getPolicyAckRate(
+  bearer: string,
+  id: string,
+): Promise<PolicyDetailAckRate | null> {
+  try {
+    const res = await apiFetch(
+      `/v1/policies/${encodeURIComponent(id)}/acknowledgment-rate`,
+      bearer,
+    );
+    return (await res.json()) as PolicyDetailAckRate;
+  } catch {
+    return null;
+  }
+}
+
+// Browser-side fetcher used by the slice 672 detail page. Hits the BFF
+// at `/api/policies/{id}` which forwards the bearer cookie to upstream.
+// On a 404 the BFF returns a 404 (the page maps that to `notFound()` so
+// a genuinely-missing id renders the in-shell not-found boundary). The
+// 401 path is left to the page's /login redirect (matches the vendors
+// detail precedent). Other non-OK statuses surface the upstream `error`
+// message verbatim (slice 367 — no internal-error leak: the BFF already
+// scrubbed the upstream body to a clean `{error}` line).
+export type PolicyDetailResponse = {
+  policy: Policy;
+  /** Null for non-published policies / zero-denominator / unavailable. */
+  ack_rate: PolicyDetailAckRate | null;
+};
+
+export async function fetchPolicyDetail(
+  id: string,
+): Promise<PolicyDetailResponse> {
+  const res = await fetch(`/api/policies/${encodeURIComponent(id)}`);
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* body not JSON — keep the status line */
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as PolicyDetailResponse;
+}
