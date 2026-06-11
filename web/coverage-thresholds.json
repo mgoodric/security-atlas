@@ -139,6 +139,12 @@
       "functions": 98,
       "lines": 98
     },
+    "app/(authed)/board-packs/validate.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "app/(authed)/settings/admin-prefetch.ts": {
       "statements": 98,
       "branches": 98,
