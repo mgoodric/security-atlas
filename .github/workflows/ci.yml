@@ -322,6 +322,51 @@ jobs:
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: "v3.0.6"
+      - name: Start LocalStack KMS (slice 425 — OPTIONAL, leg B3 only)
+        # Slice 425: the internal/oscal/cosign LocalStack round-trip test
+        # (cosign_kms_localstack_integration_test.go) drives the REAL
+        # `cosign sign-blob --key awskms://...` -> `verify-blob` path
+        # (signblob.go) against a hermetic LocalStack KMS sandbox — the
+        # path the slice-413 local-key stand-in cannot reach. LocalStack is
+        # an OPTIONAL dependency: only leg B3 (which owns
+        # ./internal/oscal/cosign/... per scripts/integration-shards.txt)
+        # starts it, and the test is opt-in behind
+        # ATLAS_COSIGN_KMS_LOCALSTACK (set below for this leg only). When
+        # this step is absent (the other legs) the test t.Skips — the
+        # `Go · integration` job stays green either way (P0-425-1).
+        #
+        # Started via `docker run` (NOT a `services:` block) following the
+        # project's non-default-CMD optional-service convention (MinIO /
+        # NATS): we pin a community-edition tag and scope SERVICES=kms so
+        # the image needs no LocalStack license. The aws CLI used to create
+        # the ephemeral signing key is preinstalled on the GitHub-hosted
+        # ubuntu runner.
+        if: matrix.leg == 'B3'
+        run: |
+          docker run -d --name localstack \
+            -p 4566:4566 \
+            -e SERVICES=kms \
+            -e EAGER_SERVICE_LOADING=1 \
+            localstack/localstack:3.8
+          # Wait for the KMS service to report available (up to ~60s).
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4566/_localstack/health | grep -q '"kms": "\(available\|running\)"'; then
+              echo "localstack kms ready"; break
+            fi
+            sleep 2
+          done
+      - name: Enable LocalStack KMS round-trip test (slice 425 — leg B3 only)
+        # Gate the opt-in env so the LocalStack-backed test runs ONLY on the
+        # leg where LocalStack is up. On every other leg these are unset and
+        # the test t.Skips. Credentials are LocalStack dummy values (the
+        # access key is "test"; LocalStack accepts any non-empty secret) —
+        # no real key material, GitGuardian-safe (P0-425-3 / AC-7).
+        if: matrix.leg == 'B3'
+        run: |
+          {
+            echo "ATLAS_COSIGN_KMS_LOCALSTACK=1"
+            echo "ATLAS_COSIGN_KMS_LOCALSTACK_ENDPOINT=http://localhost:4566"
+          } >> "$GITHUB_ENV"
       - name: Start MinIO
         run: |
           docker run -d --name minio \
