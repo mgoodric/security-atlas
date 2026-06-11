@@ -148,6 +148,107 @@ test.describe("/risks/new risk-create form", () => {
     ).toBeVisible({ timeout: 30_000 });
   });
 
+  test("AC-1: a fresh tenant (zero controls) creates a risk through the default flow without linking a control", async ({
+    authedPage: page,
+  }) => {
+    // Slice 663 regression guard. The form opens on treatment "avoid"
+    // (the fresh-tenant-safe default), so a brand-new operator can fill
+    // only the required fields and submit — no unsatisfiable
+    // mitigate-requires-control gate. We do NOT touch the treatment
+    // dropdown: the default flow itself must succeed.
+    let created = false;
+    let postedTreatment: string | undefined;
+
+    // Empty tenant: zero active controls.
+    await page.route("**/api/controls-list", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ controls: [], count: 0 }),
+      });
+    });
+
+    await page.route("**/api/risks", async (route, req) => {
+      if (req.method() === "GET") {
+        const risks = created
+          ? [
+              {
+                id: CREATED_RISK_ID,
+                title: NEW_RISK_TITLE,
+                category: "operational",
+                treatment: "avoid",
+                treatment_owner: "e2e-owner",
+                methodology: "nist_800_30",
+                inherent_score: { likelihood: 3, impact: 3, severity: 9 },
+                status: "open",
+              },
+            ]
+          : [];
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ risks, count: risks.length }),
+        });
+        return;
+      }
+      const body = JSON.parse(req.postData() ?? "{}") as { treatment?: string };
+      postedTreatment = body.treatment;
+      created = true;
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          risk: {
+            id: CREATED_RISK_ID,
+            title: NEW_RISK_TITLE,
+            category: "operational",
+            treatment: "avoid",
+            treatment_owner: "e2e-owner",
+            methodology: "nist_800_30",
+            inherent_score: { likelihood: 3, impact: 3, severity: 9 },
+            status: "open",
+          },
+        }),
+      });
+    });
+
+    await page.goto("/risks/new");
+    await expect(page.getByTestId("risks-create-form")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // The control picker is NOT rendered on the default flow (treatment
+    // is "avoid"), so there is no unsatisfiable required field.
+    await expect(
+      page.getByTestId("risks-create-control-multi-select"),
+    ).toHaveCount(0);
+
+    // Fill only the required fields and submit the default flow.
+    await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
+    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+
+    const createResp = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/risks") &&
+        r.request().method() === "POST" &&
+        r.status() === 201,
+      { timeout: 30_000 },
+    );
+    await page.getByTestId("risks-create-submit").click();
+    await createResp;
+
+    // The default-flow submit posts treatment=avoid (the slice 663
+    // fresh-tenant-safe default) and routes back with the new row.
+    expect(postedTreatment).toBe("avoid");
+    await expect(page).toHaveURL(/\/risks(\?|$)/, { timeout: 30_000 });
+    await expect(
+      page
+        .getByTestId("risks-row-title")
+        .filter({ hasText: NEW_RISK_TITLE })
+        .first(),
+    ).toBeVisible({ timeout: 30_000 });
+  });
+
   test("empty title is gated client-side: no server round-trip, input preserved", async ({
     authedPage: page,
   }) => {
