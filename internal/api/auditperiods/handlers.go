@@ -89,18 +89,25 @@ type createReq struct {
 }
 
 type periodWire struct {
-	ID                 string     `json:"id"`
-	Name               string     `json:"name"`
-	FrameworkVersionID string     `json:"framework_version_id"`
-	PeriodStart        time.Time  `json:"period_start"`
-	PeriodEnd          time.Time  `json:"period_end"`
-	Status             string     `json:"status"`
-	FrozenAt           *time.Time `json:"frozen_at,omitempty"`
-	FrozenHashHex      string     `json:"frozen_hash,omitempty"`
-	FrozenBy           string     `json:"frozen_by,omitempty"`
-	CreatedBy          string     `json:"created_by"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	FrameworkVersionID string `json:"framework_version_id"`
+	// FrameworkLabel is the readable "<name> <version>" catalog label
+	// (e.g. "SCF 2025.2"), surfaced on the LIST path only (slice 680 /
+	// ATLAS-033). omitempty: the Create/Get/Freeze wire shapes do not
+	// join the catalog, and a period whose framework version no longer
+	// resolves has an empty label — in both cases the field is omitted
+	// and the frontend falls back to the framework_version_id.
+	FrameworkLabel string     `json:"framework_label,omitempty"`
+	PeriodStart    time.Time  `json:"period_start"`
+	PeriodEnd      time.Time  `json:"period_end"`
+	Status         string     `json:"status"`
+	FrozenAt       *time.Time `json:"frozen_at,omitempty"`
+	FrozenHashHex  string     `json:"frozen_hash,omitempty"`
+	FrozenBy       string     `json:"frozen_by,omitempty"`
+	CreatedBy      string     `json:"created_by"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 type controlStateObservationWire struct {
@@ -370,6 +377,7 @@ func periodWireFrom(p period.Period) periodWire {
 		PeriodStart:        p.PeriodStart,
 		PeriodEnd:          p.PeriodEnd,
 		Status:             string(p.Status),
+		FrameworkLabel:     p.FrameworkLabel,
 		CreatedBy:          p.CreatedBy,
 		CreatedAt:          p.CreatedAt,
 		UpdatedAt:          p.UpdatedAt,

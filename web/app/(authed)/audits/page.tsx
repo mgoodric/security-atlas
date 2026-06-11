@@ -84,6 +84,7 @@ import {
 import {
   daysUntilEnd,
   daysUntilEndLabel,
+  frameworkVersionLabel,
   frozenMetaLabel,
   frozenTooltip,
   isFrozen,
@@ -264,19 +265,27 @@ function AuditsPageInner() {
     {
       id: "framework_version",
       header: "Framework version",
-      cell: (p) => (
-        // Framework label endpoint does not exist yet. Render the UUID
-        // verbatim in mono so the user can copy it (e.g. for support
-        // tickets). A spillover slice will file the dedicated label
-        // endpoint and this cell will render a friendly name then.
-        <span
-          className="font-mono text-xs text-muted-foreground"
-          title={p.framework_version_id}
-          data-testid="audits-row-framework-version"
-        >
-          {p.framework_version_id.slice(0, 8)}…
-        </span>
-      ),
+      cell: (p) => {
+        // Slice 680 / ATLAS-033: render the readable catalog label
+        // ("SCF 2025.2") when the LIST path resolved one; otherwise fall
+        // back to the truncated framework_version_id UUID in mono so the
+        // user can still copy the identifier for a support ticket. The
+        // title attribute always carries the full UUID for copy.
+        const fw = frameworkVersionLabel(p);
+        return (
+          <span
+            className={
+              fw.readable
+                ? "text-xs text-muted-foreground"
+                : "font-mono text-xs text-muted-foreground"
+            }
+            title={p.framework_version_id}
+            data-testid="audits-row-framework-version"
+          >
+            {fw.text}
+          </span>
+        );
+      },
     },
     {
       id: "period",

@@ -179,6 +179,45 @@ func TestApply_Happy(t *testing.T) {
 		t.Errorf("frozen audit_periods: got %d; want 1 (AC-10)", frozen)
 	}
 
+	// Slice 680 / ATLAS-033 (AC-1 + AC-4): every seeded audit-period's
+	// quarter label must match the calendar quarter of its own
+	// period_start. The prior seed labelled by loop index, so a "Q3"
+	// row could span Feb→May. We read each row back and assert the
+	// label suffix equals the quarter computed from period_start.
+	apRows, err := adminPool.Query(context.Background(),
+		`SELECT name, period_start FROM audit_periods WHERE tenant_id = $1`,
+		res.TenantID,
+	)
+	if err != nil {
+		t.Fatalf("query audit periods for label check: %v", err)
+	}
+	defer apRows.Close()
+	var checked int
+	for apRows.Next() {
+		var name string
+		var periodStart time.Time
+		if err := apRows.Scan(&name, &periodStart); err != nil {
+			t.Fatalf("scan audit period: %v", err)
+		}
+		wantQuarter := (int(periodStart.Month())-1)/3 + 1
+		wantSuffix := fmt.Sprintf("Q%d", wantQuarter)
+		if !strings.HasSuffix(name, wantSuffix) {
+			t.Errorf("ATLAS-033: audit_period %q has period_start %s (calendar %s) but label does not end with %q",
+				name, periodStart.Format("2006-01-02"), wantSuffix, wantSuffix)
+		}
+		// And the start-year must appear in the label.
+		if !strings.Contains(name, fmt.Sprintf("%d", periodStart.Year())) {
+			t.Errorf("ATLAS-033: audit_period %q omits its start year %d", name, periodStart.Year())
+		}
+		checked++
+	}
+	if err := apRows.Err(); err != nil {
+		t.Fatalf("iterate audit periods: %v", err)
+	}
+	if checked == 0 {
+		t.Error("ATLAS-033: no audit_periods found to label-check")
+	}
+
 	// AC-9: every audit-log row written by us carries demo_seed_v.
 	var unmarked int
 	if err := adminPool.QueryRow(context.Background(), `

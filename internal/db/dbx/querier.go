@@ -1208,6 +1208,17 @@ type Querier interface {
 	// (verifies that period_created + period_frozen rows landed).
 	ListAuditPeriodLog(ctx context.Context, arg ListAuditPeriodLogParams) ([]AuditPeriodAuditLog, error)
 	ListAuditPeriodsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]AuditPeriod, error)
+	// Slice 680 / ATLAS-033: the /audits list view rendered a truncated
+	// framework_version_id UUID (which read as an opaque content hash) in the
+	// "Framework version" column because the period row carries only the FK.
+	// This LIST-path query LEFT JOINs frameworks + framework_versions so the
+	// handler can surface a readable label ("SCF 2025.2") instead. LEFT JOIN
+	// (not INNER) so a period whose framework_version_id no longer resolves
+	// still appears in the list — the handler falls back to the UUID when the
+	// label is NULL. Catalog tables (frameworks, framework_versions) are
+	// tenant-NULL global rows; the audit_periods tenant filter + RLS still
+	// scope the result to the caller's tenant.
+	ListAuditPeriodsWithFrameworkByTenant(ctx context.Context, tenantID pgtype.UUID) ([]ListAuditPeriodsWithFrameworkByTenantRow, error)
 	// Returns every assignment the user holds in the current tenant, joined with
 	// the period metadata so the /v1/me/audit-period(s) endpoint can render the
 	// full picture in one round trip.
