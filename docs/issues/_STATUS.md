@@ -13,14 +13,14 @@
 
 | State | Count |
 | --- | --- |
-| merged | 538 |
+| merged | 540 |
 | in-progress | 1 |
-| ready | 81 |
+| ready | 79 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 434 435 436 440 441 442 443 446 449 450 452 453 455 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 688 691 694 695 696 697 698 699 700 701 702 703
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 434 435 436 440 441 442 446 449 450 452 453 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 688 691 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -468,7 +468,7 @@
 | 440 | Board-narrative AI v0 — one numbered section, end-to-end | ready |  |  |  |
 | 441 | Questionnaire AI-answer suggestion v0 (cited drafts, one-clic... | ready |  |  |  |
 | 442 | GCP connector (highest-demand missing cloud) | ready |  |  |  |
-| 443 | Slack connector | ready |  |  |  |
+| 443 | Slack connector | merged |  | 2026-06-11 | 8e866181 |
 | 444 | AI gap-explanation v0 (plain-language, cited, non-binding) | merged |  | 2026-06-11 | 6bcc6942 |
 | 445 | Email/SMTP notification channel (delivery substrate) | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 446 | Disclosure / breach-notification workflow decision spike + AD... | ready |  |  |  |
@@ -480,7 +480,7 @@
 | 452 | Node version alignment: @types/node + CI + runtime + engines ... | ready |  |  |  |
 | 453 | TypeScript 6 migration | ready |  |  |  |
 | 454 | go-otel observability group bump (13 modules) | merged | #986 | 2026-06-04 | b839f98a |
-| 455 | OIDC-identity-strategy decision spike (unblocks cosign keyles... | ready |  |  |  |
+| 455 | OIDC-identity-strategy decision spike (unblocks cosign keyles... | merged |  | 2026-06-11 | a5bc0ea9 |
 | 456 | `internal/api/oauth` residual coverage: audit-write + signer-... | merged | #1022 | 2026-06-05 | 02c926f9 |
 | 457 | Browser download surface for the OSCAL signed-export bundle | merged |  | 2026-06-11 | a04fd240 |
 | 458 | pre-commit guard against committing machine-local analysis ca... | merged | #1005 | 2026-06-04 | e3877b29 |
