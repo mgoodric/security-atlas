@@ -146,7 +146,7 @@
 | 112 | Extend `control-detail.sql` to FULL coverage + enable asserti... | ready |  |  |  |
 | 113 | Extend `audit-workspace.sql` to FULL coverage + enable assert... | ready |  |  |  |
 | 114 | Extend `risk-hierarchy.sql` to FULL coverage + enable asserti... | ready |  |  |  |
-| 115 | Extend `admin-bootstrap.sql` to FULL coverage + enable asserti... | ready |  |  |  |
+| 115 | Extend `admin-bootstrap.sql` to FULL coverage + enable assert... | ready |  |  |  |
 | 116 | Promote `Frontend · Playwright e2e` to required-checks in br... | merged | #494 | 2026-05-22 | 963e60e8 |
 | 117 | Adopt StepSecurity Harden-Runner (audit mode → block mode) | merged | #262 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 118 | Promote StepSecurity Harden-Runner to block mode | ready |  |  |  |
