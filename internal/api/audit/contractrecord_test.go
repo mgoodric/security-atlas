@@ -1,8 +1,15 @@
-// Slice 689 — contract-test-tier rollout to the audit-workspace
-// single-resource READ routes served by this package:
+// Slice 689 + 690 — contract-test-tier rollout to the audit-workspace
+// READ routes served by this package:
 //
-//	GET /v1/populations/{id} -> population-get.golden.json
-//	GET /v1/samples/{id}     -> sample-get.golden.json
+//	GET /v1/populations/{id}             -> population-get.golden.json       (689)
+//	GET /v1/samples/{id}                 -> sample-get.golden.json           (689)
+//	GET /v1/samples/{id}/annotations     -> sample-annotations.golden.json   (690)
+//
+// The first two are verbatim-passthrough BFF reads (toEqual consumers). The
+// annotation-list read (690) has NO verbatim-passthrough GET BFF today — it
+// is read by the sample-detail component, not a thin passthrough — so its
+// consumer half is a FIELD-CONTRACT pin on the recorded provider golden
+// (slice 687 D3 disposition). See decisions log 690 D1/D2.
 //
 // This is the slice-392 / slice-409 / slice-410 / slice-411 / slice-412 /
 // slice-687 shared-recorder helper copied into this package because Go test
@@ -148,11 +155,12 @@ func assertContractGolden(t *testing.T, path, comment, endpoint string, recorded
 	}
 }
 
-// stubSampleReader is the fixed-row implementation of the two-method
+// stubSampleReader is the fixed-row implementation of the three-method
 // sampleReader seam. It returns deterministic rows with no Postgres.
 type stubSampleReader struct {
-	population atlasaudit.Population
-	sample     atlasaudit.Sample
+	population  atlasaudit.Population
+	sample      atlasaudit.Sample
+	annotations []atlasaudit.Annotation
 }
 
 func (s stubSampleReader) GetPopulation(_ context.Context, _ uuid.UUID) (atlasaudit.Population, error) {
@@ -161,6 +169,10 @@ func (s stubSampleReader) GetPopulation(_ context.Context, _ uuid.UUID) (atlasau
 
 func (s stubSampleReader) GetSample(_ context.Context, _ uuid.UUID) (atlasaudit.Sample, error) {
 	return s.sample, nil
+}
+
+func (s stubSampleReader) ListAnnotations(_ context.Context, _ uuid.UUID) ([]atlasaudit.Annotation, error) {
+	return s.annotations, nil
 }
 
 // recordRoutedVariant routes a GET through a chi router so chi.URLParam(r,
@@ -295,6 +307,58 @@ func TestContract_SampleGet(t *testing.T) {
 		filepath.Clean("../../../web/lib/contracts/sample-get.golden.json"),
 		"Slice 689 contract-tier golden. PROVIDER: internal/api/audit/contractrecord_test.go (GetSample, real handler over an injected fixed-row two-method sampleReader stub — Option A seam, no Postgres; routed through chi for the {id} path param). Regenerate: `go test ./internal/api/audit/ -run TestContract_SampleGet -update`. CONSUMER: web/lib/contracts/sample-get.contract.test.ts asserts the BFF at web/app/api/audit/samples/[id]/route.ts — VERBATIM passthrough (toEqual). evidence_record_ids is ALWAYS an array (never null); empty sample records [].",
 		"GET /v1/samples/{id}",
+		recorded,
+	)
+}
+
+// ===== GET /v1/samples/{id}/annotations =====
+
+func TestContract_SampleAnnotationsList(t *testing.T) {
+	annotatedA := mustTime("2026-02-04T11:00:00Z")
+	annotatedB := mustTime("2026-02-04T11:05:30Z")
+
+	// Variant "populated" — two auditor decisions against two sampled
+	// records. Pins the annotation row shape (result / annotated_by /
+	// annotated_at / notes) plus the envelope (annotations[] + count).
+	// One annotation carries a non-empty notes string, one is empty (notes
+	// is NOT omitempty — it serializes as "" when absent).
+	populated := []atlasaudit.Annotation{
+		{
+			ID:               uuid.MustParse(contractEvidenceID),
+			TenantID:         uuid.MustParse(contractTenantID),
+			SampleID:         uuid.MustParse(contractSampleID),
+			EvidenceRecordID: uuid.MustParse("55555555-5555-4555-8555-555555555555"),
+			Result:           "passed",
+			AnnotatedBy:      "key_contract_690",
+			AnnotatedAt:      annotatedA,
+			Notes:            "Control owner confirmed the recert ran on schedule.",
+		},
+		{
+			ID:               uuid.MustParse("66666666-6666-4666-8666-666666666666"),
+			TenantID:         uuid.MustParse(contractTenantID),
+			SampleID:         uuid.MustParse(contractSampleID),
+			EvidenceRecordID: uuid.MustParse("77777777-7777-4777-8777-777777777777"),
+			Result:           "failed",
+			AnnotatedBy:      "key_contract_690",
+			AnnotatedAt:      annotatedB,
+			Notes:            "",
+		},
+	}
+	// Variant "empty" — a sample with no annotations yet. annotations is []
+	// (the handler builds make([]annotationWire, 0)), count is 0.
+	empty := []atlasaudit.Annotation{}
+
+	target := "/v1/samples/" + contractSampleID + "/annotations"
+	recorded := map[string]json.RawMessage{
+		"populated": recordRoutedVariant(t, newHandlerWithReader(stubSampleReader{annotations: populated}).ListAnnotations,
+			"/v1/samples/{id}/annotations", target),
+		"empty": recordRoutedVariant(t, newHandlerWithReader(stubSampleReader{annotations: empty}).ListAnnotations,
+			"/v1/samples/{id}/annotations", target),
+	}
+	assertContractGolden(t,
+		filepath.Clean("../../../web/lib/contracts/sample-annotations.golden.json"),
+		"Slice 690 contract-tier golden. PROVIDER: internal/api/audit/contractrecord_test.go (ListAnnotations, real handler over an injected fixed-row sampleReader stub — Option A seam, no Postgres; routed through chi for the {id} path param). Regenerate: `go test ./internal/api/audit/ -run TestContract_SampleAnnotationsList -update`. CONSUMER: web/lib/contracts/sample-annotations.contract.test.ts is a FIELD-CONTRACT pin (slice 687 D3) — there is NO verbatim-passthrough GET BFF for this list today (read by the sample-detail component, not a thin passthrough). The envelope is {annotations:[], count:N}; each row carries result (passed|failed|not-applicable), annotated_by, annotated_at (ISO-8601), and notes (NOT omitempty — \"\" when absent); annotations is ALWAYS an array (empty sample records []).",
+		"GET /v1/samples/{id}/annotations",
 		recorded,
 	)
 }
