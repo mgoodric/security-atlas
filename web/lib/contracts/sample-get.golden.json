@@ -1,0 +1,31 @@
+{
+  "_comment": "Slice 689 contract-tier golden. PROVIDER: internal/api/audit/contractrecord_test.go (GetSample, real handler over an injected fixed-row two-method sampleReader stub — Option A seam, no Postgres; routed through chi for the {id} path param). Regenerate: `go test ./internal/api/audit/ -run TestContract_SampleGet -update`. CONSUMER: web/lib/contracts/sample-get.contract.test.ts asserts the BFF at web/app/api/audit/samples/[id]/route.ts — VERBATIM passthrough (toEqual). evidence_record_ids is ALWAYS an array (never null); empty sample records [].",
+  "endpoint": "GET /v1/samples/{id}",
+  "variants": {
+    "empty": {
+      "sample": {
+        "created_at": "2026-02-03T09:15:00Z",
+        "created_by": "key_contract_689",
+        "evidence_record_ids": [],
+        "id": "33333333-3333-4333-8333-333333333333",
+        "n": 0,
+        "population_id": "22222222-2222-4222-8222-222222222222",
+        "seed": "contract-seed-689"
+      }
+    },
+    "populated": {
+      "sample": {
+        "created_at": "2026-02-03T09:15:00Z",
+        "created_by": "key_contract_689",
+        "evidence_record_ids": [
+          "44444444-4444-4444-8444-444444444444",
+          "55555555-5555-4555-8555-555555555555"
+        ],
+        "id": "33333333-3333-4333-8333-333333333333",
+        "n": 2,
+        "population_id": "22222222-2222-4222-8222-222222222222",
+        "seed": "contract-seed-689"
+      }
+    }
+  }
+}
