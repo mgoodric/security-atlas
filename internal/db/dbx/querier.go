@@ -77,6 +77,13 @@ type Querier interface {
 	// send (no double-send / 24h rate-limit). Returns the claimed row id when
 	// the claim succeeds.
 	ClaimEmailDigest(ctx context.Context, arg ClaimEmailDigestParams) (pgtype.UUID, error)
+	// Idempotency claim (AC-5 / AC-12 / threat-model T). Insert one delivery-claim
+	// row for (tenant, recipient, dedup_key). ON CONFLICT DO NOTHING means a
+	// re-run for the same logical event returns NO row — the caller skips the
+	// notification write (no duplicate alert, no double-delivered digest). The
+	// WITH CHECK on tenant_write rejects a tenant_id that does not match the GUC,
+	// so a mis-scoped write fails closed rather than landing in another tenant.
+	ClaimStalenessRollup(ctx context.Context, arg ClaimStalenessRollupParams) (pgtype.UUID, error)
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
 	// Count of all generations for the current tenant. Used by the cross-tenant
@@ -130,6 +137,8 @@ type Querier interface {
 	// integration test to assert exactly-1 fallback row after the 10001-record
 	// backpressure scenario.
 	CountSinkFailures(ctx context.Context) (int64, error)
+	// Count claims for a recipient (tests assert no duplicate rows after a re-run).
+	CountStalenessRollupClaims(ctx context.Context, arg CountStalenessRollupClaimsParams) (int64, error)
 	// Used by the /v1/me/notifications response to surface the unread count
 	// in the page header.
 	CountUnreadNotificationsForUser(ctx context.Context, arg CountUnreadNotificationsForUserParams) (int64, error)
@@ -701,6 +710,8 @@ type Querier interface {
 	// Read a user's Slack-channel master opt-in. A missing row (pgx.ErrNoRows)
 	// means OPTED-OUT (P0-543-3).
 	GetSlackOptIn(ctx context.Context, arg GetSlackOptInParams) (bool, error)
+	// Single-claim lookup by dedup key — used by tests + idempotency assertions.
+	GetStalenessRollupClaim(ctx context.Context, arg GetStalenessRollupClaimParams) (StalenessRollupLog, error)
 	// Slice 608: read the caller-tenant's control-bundle upload gate policy.
 	// RLS scopes the row to the current tenant; the WHERE clause exists only so
 	// the query returns at most one row. Returns ErrNoRows when no tenants row
@@ -1060,6 +1071,27 @@ type Querier interface {
 	// alongside the GUC-driven RLS policy (slice 002); tenancy.ApplyTenant
 	// upstream pins the GUC so the read is tenant-scoped (invariant #6).
 	ListActiveControlsWithDescription(ctx context.Context, tenantID pgtype.UUID) ([]ListActiveControlsWithDescriptionRow, error)
+	// Slice 439 — evidence-staleness rollup producer queries.
+	//
+	// The rollup job (internal/staleness) reads the slice-016 freshness read
+	// model per tenant, classifies each control's evidence into stale /
+	// approaching / fresh bands (eval.FreshnessMaxAge owns the threshold), and
+	// writes `evidence.staleness` notifications into the slice-029 notifications
+	// store — one per-control alert on a threshold crossing, plus a weekly digest.
+	//
+	// All queries are tenant-scoped via the leading tenant_id; RLS under FORCE is
+	// the defense-in-depth boundary and the WHERE clause is the primary
+	// correctness guarantee (canvas invariant #6). The cross-tenant leak
+	// (threat-model I) is structurally prevented: the recipient enumeration runs
+	// under the per-tenant GUC, and the dedup claim's WITH CHECK rejects a
+	// tenant_id that does not match the GUC.
+	// Recipient enumeration for the staleness rollup: every ACTIVE user of the
+	// tenant in ctx. Runs under the per-tenant GUC (RLS-scoped) — it returns ONLY
+	// this tenant's users, so the rollup can never address a Tenant B user from a
+	// Tenant A pass (threat-model I). Returns id + email; the rollup uses id as
+	// the slice-029 recipient_user_id (TEXT). Ordered by id for deterministic
+	// delivery + stable tests.
+	ListActiveUsersForTenant(ctx context.Context, tenantID pgtype.UUID) ([]ListActiveUsersForTenantRow, error)
 	// Slice 062 — admin /v1/admin/audit-log query.
 	//
 	// One query against the admin_audit_log_v view (migration _022). Filters

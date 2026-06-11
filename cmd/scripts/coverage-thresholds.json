@@ -282,6 +282,7 @@
     "internal/risk": 77,
     "internal/risk/aggrule": 72,
     "internal/scope": 85,
+    "internal/staleness": 73,
     "internal/tenancy": 90,
     "internal/vendor": 85,
     "pkg/sdk-go": 92,

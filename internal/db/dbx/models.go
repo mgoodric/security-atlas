@@ -1929,6 +1929,16 @@ type SlackChannelOptin struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type StalenessRollupLog struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	RecipientUserID string             `json:"recipient_user_id"`
+	Kind            string             `json:"kind"`
+	DedupKey        string             `json:"dedup_key"`
+	NotificationID  pgtype.UUID        `json:"notification_id"`
+	DeliveredAt     pgtype.Timestamptz `json:"delivered_at"`
+}
+
 // Slice 144: canonical tenant identity row. Adopted late — through v1, tenant_id was a bare UUID with no parent. The slice-192 `GET /v1/me/tenants` handler reads `name` from here; `PATCH /v1/tenants/{id}` (slice 144) mutates it under per-tenant admin or super_admin authority.
 type Tenant struct {
 	ID pgtype.UUID `json:"id"`
