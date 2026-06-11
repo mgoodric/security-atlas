@@ -178,3 +178,6 @@
 {"slice":513,"to":"merged","ts":"2026-06-10","ref":"","note":"gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap)"}
 {"slice":527,"to":"merged","ts":"2026-06-10","ref":"","note":"gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap)"}
 {"slice":685,"to":"not-ready","ts":"2026-06-11","ref":"","note":"wire dashboard activity chips — blocked on backend endpoint filter support (spillover from 667)"}
+{"slice":271,"to":"merged","ts":"2026-06-11","ref":"","note":"pre-convention merge; reconciled 2026-06-03 (batch 184); #1266 backfill miss (not in history Status table)"}
+{"slice":304,"to":"merged","ts":"2026-06-11","ref":"","note":"pre-convention merge; reconciled 2026-06-03 (batch 184); #1266 backfill miss (not in history Status table)"}
+{"slice":390,"to":"merged","ts":"2026-06-11","ref":"","note":"merged via #933 (closes slice 390, integration-enrolment drain batch 8); #1266 backfill miss"}

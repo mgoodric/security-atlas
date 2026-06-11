@@ -7,20 +7,20 @@
 >
 > Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
 
-**Generated:** 2026-06-11 · **Total slices:** 603
+**Generated:** 2026-06-11 · **Total slices:** 604
 
 ## Counts
 
 | State | Count |
 | --- | --- |
-| merged | 515 |
+| merged | 521 |
 | in-progress | 1 |
-| ready | 85 |
+| ready | 80 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 271 272 304 323 330 336 338 339 354 355 356 357 358 368 384 390 412 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 677 678 679 681 682
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 412 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 678 682 686
 
 ## In-flight
 
@@ -296,7 +296,7 @@
 | 268 | Unified `/v1/search` endpoint (aggregates controls + risks + ... | merged | #593 | 2026-05-23 | d9d8e69b |
 | 269 | Dashboard snapshot export endpoint (JSON / CSV / XLSX) | merged | #599 | 2026-05-23 | 418caabf |
 | 270 | Non-admin activity-ledger surface (`/activity`) | merged | #598 | 2026-05-23 | 1ee7242b |
-| 271 | Shared-shell breadcrumb (`<tenant> › <page>`) | ready |  |  |  |
+| 271 | Shared-shell breadcrumb (`<tenant> › <page>`) | merged |  |  | pre-convention merge; reconciled 2026-06-03 (batch 184); #1266 backfill miss (not in history Status table) |
 | 272 | Global search box (`⌘K` modal) in shared shell | ready |  |  |  |
 | 273 | Board-pack: vendor-burndown section | merged | #616 | 2026-05-24 | 418763b8 |
 | 274 | Settings spec AC-9 token-row flake: deterministic-fail invest... | merged | #597 | 2026-05-23 | 235c41d6 |
@@ -329,7 +329,7 @@
 | 301 | Coverage lift — `connectors/github/cmd/atlas-github` to 70%+ | merged | #699 | 2026-05-26 | 5131f95f |
 | 302 | Coverage lift — `connectors/okta/cmd/atlas-okta` to 70%+ | merged | #694 | 2026-05-26 | f1918618 |
 | 303 | Coverage lift — `connectors/osquery/cmd/atlas-osquery` to 70%+ | merged | #692 | 2026-05-26 | 8d3dc905 |
-| 304 | Mobile-baseline e2e: page.route mock for /controls /risks /ev... | ready |  |  |  |
+| 304 | Mobile-baseline e2e: page.route mock for /controls /risks /ev... | merged |  |  | pre-convention merge; reconciled 2026-06-03 (batch 184); #1266 backfill miss (not in history Status table) |
 | 305 | Coverage lift (round 2) — `connectors/aws/cmd/aws-connector... | merged | #698 | 2026-05-26 | b9868ede |
 | 306 | Coverage lift — `connectors/1password/cmd/atlas-1password` ... | merged | #704 | 2026-05-26 | 380ea2c1 |
 | 307 | Coverage lift — `connectors/manual/cmd/atlas-manual` to 70%+ | merged | #705 | 2026-05-26 | d84c7c02 |
@@ -415,7 +415,7 @@
 | 387 | CI harness for the production-build standalone Playwright specs | merged | #896 | 2026-05-29 | a497e20e |
 | 388 | Board-pack export end-to-end Playwright spec | merged | #883 | 2026-05-29 | 259454e5 |
 | 389 | Multi-tenant JWT harness + real-RLS cross-tenant-leak e2e spec | merged | #880 | 2026-05-29 | a5d274a9 |
-| 390 | Drain the integration-job enrolment backlog (38 packages) | ready |  |  |  |
+| 390 | Drain the integration-job enrolment backlog (38 packages) | merged |  |  | merged via #933 (closes slice 390, integration-enrolment drain batch 8); #1266 backfill miss |
 | 391 | Wire `duphelper-lint` into CI as a hard-failure step | merged | #878 | 2026-05-29 | b324adcd |
 | 392 | Roll out the golden-file contract-test tier to high-traffic B... | merged | #884 | 2026-05-29 | 7d817d5c |
 | 393 | Wire slice-353 QA-tactical scripts into CI | merged | #888 | 2026-05-29 | 9aa2452f |
@@ -626,12 +626,13 @@
 | 674 | Dashboard/breadcrumb shows "Default Tenant" while the active ... | merged |  | 2026-06-11 | f850f1dd |
 | 675 | Calendar agenda missing audit-period / vendor-review / policy... | merged |  | 2026-06-11 | 6be54edf |
 | 676 | Pervasive 503s on Next.js RSC prefetch/navigation requests | ready |  |  |  |
-| 677 | Metrics correctness pass (freshness contradiction, count labe... | ready |  |  |  |
+| 677 | Metrics correctness pass (freshness contradiction, count labe... | merged |  | 2026-06-11 | 5ac10361 |
 | 678 | Demo seed completeness: org_units, questionnaires, ack-role u... | ready |  |  |  |
-| 679 | Vendor UX/data: name/domain spacing, missing Delete control, ... | ready |  |  |  |
+| 679 | Vendor UX/data: name/domain spacing, missing Delete control, ... | merged |  | 2026-06-11 | a490e17a |
 | 680 | Data-quality + scoring clarity: audit-period labels, residual... | merged |  | 2026-06-11 | d9ca9533 |
-| 681 | Risk register UX: column sorting + per-risk detail; sidebar "... | ready |  |  |  |
+| 681 | Risk register UX: column sorting + per-risk detail; sidebar "... | merged |  | 2026-06-11 | 35dca30d |
 | 682 | Demo seed: anchor controls to SCF + give the demo framework r... | ready |  |  |  |
 | 683 | OSCAL component-definitions edge migration-lag (deploy-note /... | not-ready | #1261 |  | OSCAL edge migration-lag deploy-note; blocked on maintainer edge access |
 | 684 | Risks page count is inconsistent (header "N of M risks" vs fo... | merged |  | 2026-06-11 | 6f5289ca |
 | 685 | Wire dashboard "Recent activity" filter chips to a real kind ... | not-ready |  |  | wire dashboard activity chips — blocked on backend endpoint filter support (spillover from 667) |
+| 686 | Read-only vendor detail page with review history | ready |  |  |  |
