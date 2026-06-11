@@ -22,6 +22,7 @@
 // orthogonal dimension surfaced elsewhere (canvas invariant 4,
 // anti-criterion P0-4).
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -199,7 +200,7 @@ export function OrgTreePanel({
           <Button
             variant="outline"
             size="sm"
-            render={<a href="/risks" />}
+            render={<Link href="/risks" />}
             data-testid="org-tree-empty-action"
           >
             Add your first org_unit
