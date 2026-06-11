@@ -100,7 +100,11 @@ test.describe("vendors UX/data fixes (slice 679)", () => {
     // The list the page redirects to after a successful delete.
     await mockList(page, []);
 
-    await page.goto("/vendors/" + ONE_VENDOR.id);
+    // Slice 686 split the read path from the edit path: `/vendors/{id}`
+    // is now the read-only detail view and the edit form (with its
+    // Delete control) moved to `/vendors/{id}/edit`. The ATLAS-031
+    // delete assertion follows the control to its new route.
+    await page.goto("/vendors/" + ONE_VENDOR.id + "/edit");
 
     // The Delete control the copy promises exists.
     const trigger = page.getByTestId("vendor-delete-trigger");
