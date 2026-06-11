@@ -25,6 +25,15 @@ updates:
         patterns:
           - "github.com/stretchr/*"
           - "github.com/jackc/*"
+      # Slice 693 — catch-all so every remaining gomod minor/patch bump
+      # batches into ONE weekly PR instead of one-PR-per-dep. Majors stay
+      # ungrouped (own reviewable PR); security updates fire independently.
+      go-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     commit-message:
       prefix: "deps"
       prefix-development: "deps"
@@ -53,6 +62,13 @@ updates:
       tanstack:
         patterns:
           - "@tanstack/*"
+      # Slice 693 — catch-all for remaining npm minor/patch bumps.
+      npm-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     commit-message:
       prefix: "deps"
       prefix-development: "deps"
@@ -65,6 +81,14 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+    # Slice 693 — group minor/patch into one weekly PR (was one-per-dep).
+    groups:
+      pip-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     commit-message:
       prefix: "deps"
       include: "scope"
@@ -75,6 +99,14 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+    # Slice 693 — group minor/patch into one weekly PR (was one-per-dep).
+    groups:
+      pip-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     commit-message:
       prefix: "deps"
       include: "scope"
@@ -86,6 +118,14 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+    # Slice 693 — group base-image minor/patch bumps into one weekly PR.
+    groups:
+      docker-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     commit-message:
       prefix: "deps"
       include: "scope"

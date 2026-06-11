@@ -41,6 +41,7 @@ jobs:
   changes:
     name: Detect changed paths
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       code: ${{ steps.filter.outputs.code }}
       # Slice 179 — narrow filter for the schema-removal-age check. The
@@ -124,6 +125,7 @@ jobs:
     name: Slice status · drift check
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -141,6 +143,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -200,6 +203,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -259,6 +263,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -592,6 +597,7 @@ jobs:
     needs: [changes, build-go, tests-integration-shard]
     if: always() && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -675,6 +681,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -689,6 +696,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -738,6 +746,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -759,6 +768,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -805,6 +815,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -819,6 +830,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -842,6 +854,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -856,6 +869,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -880,6 +894,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -894,6 +909,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -914,6 +930,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -929,6 +946,7 @@ jobs:
   precommit:
     name: pre-commit · all hooks
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -940,12 +958,25 @@ jobs:
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: "1.26"
+          cache: true
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.11"
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "20"
+          cache: "npm"
+      # Slice 693 — cache the pre-commit hook environments (the dominant
+      # cost of this job: pre-commit creates a venv/node_env per hook repo
+      # on a cold run). Keyed on the config hash so a hook-rev bump busts
+      # it; restore-keys lets an unchanged-config run reuse the prior env.
+      - name: Cache pre-commit hook environments
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-${{ runner.os }}-
       - run: pip install pre-commit==3.8.0
       # Slice 158: install actionlint so the slice-158 pre-commit hook
       # has its binary on PATH. Pinned to a tag (not a SHA) because the
@@ -991,6 +1022,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1019,6 +1051,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1057,6 +1090,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -1135,6 +1169,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1167,6 +1202,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1192,6 +1228,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1220,6 +1257,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: web
@@ -1253,6 +1291,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1275,6 +1314,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: web
@@ -1301,6 +1341,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1334,6 +1375,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Slice 082 — un-quarantined. Slice 079's `continue-on-error: true`
     # is removed; the job again fails the PR on red. The seed-data
     # harness (`web/e2e/seed.ts`, `fixtures/e2e/*.sql`) supplies the
@@ -1516,6 +1558,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1568,6 +1611,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Slice 399 — BLOCKING. This leg builds + boots the Next.js
     # `output: "standalone"` server (slice 387 harness) and runs BOTH
     # prod-build-only regression specs against it with ATLAS_PROD_BUILD=1:
@@ -1768,6 +1812,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1795,6 +1840,7 @@ jobs:
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     continue-on-error: true
     permissions:
       contents: read
@@ -2034,6 +2080,7 @@ jobs:
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2072,6 +2119,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2126,6 +2174,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2160,6 +2209,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2199,6 +2249,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2235,6 +2286,7 @@ jobs:
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     continue-on-error: true
     permissions:
       contents: read
@@ -2316,6 +2368,7 @@ jobs:
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - run: echo "Non-PR push OR docs-only change — phantom audit skipped (slice 120)."
 
@@ -2356,6 +2409,7 @@ jobs:
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.schemas == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       pull-requests: read
@@ -2443,6 +2497,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2492,6 +2547,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2553,6 +2609,7 @@ jobs:
   branch-protection-drift-validate:
     name: Infra · branch-protection (PR-time validate)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'pull_request'
     continue-on-error: true
     permissions:
@@ -2657,6 +2714,7 @@ jobs:
   branch-protection-drift-live:
     name: Infra · branch-protection (live drift)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     continue-on-error: true
     permissions:
@@ -2731,6 +2789,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2778,6 +2837,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2817,6 +2877,7 @@ jobs:
   actions-pin-check:
     name: actions-pin-check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2867,6 +2928,7 @@ jobs:
   cache-path-guard:
     name: cache-path-guard
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2908,6 +2970,7 @@ jobs:
   openapi-drift-check:
     name: openapi-drift-check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2962,6 +3025,7 @@ jobs:
   integration-enrolment-check:
     name: integration-enrolment-check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -3011,6 +3075,7 @@ jobs:
   coverage-excludes-check:
     name: coverage-excludes-check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -3052,6 +3117,7 @@ jobs:
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     continue-on-error: true
     permissions:
       contents: read
@@ -3137,6 +3203,7 @@ jobs:
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - run: echo "Non-PR push OR docs-only change — assertion-density advisory skipped (slice 393)."
 
@@ -3226,6 +3293,7 @@ jobs:
       - lint-python
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -3335,6 +3403,7 @@ jobs:
       group: ci-main-canary-${{ github.sha }}-${{ matrix.leg }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
