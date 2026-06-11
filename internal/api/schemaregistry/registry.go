@@ -279,6 +279,25 @@ func DefaultSeed() []KindVersion {
 		// POST /v1/policies/{id}/acknowledge emits one record of this
 		// kind through the slice-013 evidence ledger.
 		{Kind: "policy.acknowledgment.v1", Version: "1.0.0"},
+		// Slice 443: Slack connector — three high-signal evidence surfaces for
+		// the SaaS-startup persona that runs operations in Slack. Read-only
+		// least-privilege OAuth token; membership / admin / retention METADATA
+		// ONLY — never message content, DMs, or channel history (threat-model
+		// I; a reflection guard + an over-collection test fail the build if a
+		// message-body field is ever added). Pull profile on an honest interval;
+		// platform wire stays push (invariant #3).
+		//   - workspace_member: access evidence (who has workspace access +
+		//     admin/owner role + 2FA enforcement). Anchors IAC-01 (identity &
+		//     access mgmt) + IAC-06 (authenticator mgmt — the 2FA dimension).
+		//   - admin_audit_event: admin-action evidence from the audit-logs API.
+		//     Anchor MON-01 (continuous monitoring — same anchor as
+		//     github.audit_event.v1).
+		//   - retention_settings: data-retention evidence (message/file
+		//     retention durations + policy flags). Anchors DCH-01 (data
+		//     protection) + DCH-03 (retention).
+		{Kind: "slack.workspace_member.v1", Version: "1.0.0"},
+		{Kind: "slack.admin_audit_event.v1", Version: "1.0.0"},
+		{Kind: "slack.retention_settings.v1", Version: "1.0.0"},
 	}
 }
 

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/slack.admin_audit_event/1.0.0.json",
+  "x-evidence-kind": "slack.admin_audit_event.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["MON-01"],
+  "title": "Slack admin audit-log event",
+  "description": "One workspace admin audit-log entry from the Slack audit-logs API. Admin-action METADATA only (what action, who, when, what entity) — never message content or the body of any object Slack acted on (slice 443 threat-model I). One record per audit entry; idempotency anchors on the immutable entry id.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["entry_id", "action", "date_create"],
+  "properties": {
+    "entry_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Slack audit-log entry id — also the idempotency anchor."
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Audit action discriminator, e.g. user_login, channel_archive, role_change."
+    },
+    "actor_id": {
+      "type": "string",
+      "description": "Slack user id of the actor that took the action (opaque id)."
+    },
+    "actor_email": {
+      "type": "string",
+      "description": "Actor email as reported by the Slack audit API — the access-review join key."
+    },
+    "entity_type": {
+      "type": "string",
+      "description": "Type of entity acted on: workspace | channel | user | app | file | ..."
+    },
+    "date_create": {
+      "type": "integer",
+      "description": "Slack epoch-seconds timestamp of the event."
+    }
+  }
+}
