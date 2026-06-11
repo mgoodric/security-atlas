@@ -769,6 +769,12 @@
       "functions": 98,
       "lines": 98
     },
+    "lib/auth/current-tenant.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "lib/auth/oauth-client.ts": {
       "statements": 52,
       "branches": 85,
