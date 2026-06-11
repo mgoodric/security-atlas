@@ -46,6 +46,7 @@ import (
 	featuresapi "github.com/mgoodric/security-atlas/internal/api/features"
 	fwscopesapi "github.com/mgoodric/security-atlas/internal/api/frameworkscopes"
 	freshnessdriftapi "github.com/mgoodric/security-atlas/internal/api/freshnessdrift"
+	gapexplainapi "github.com/mgoodric/security-atlas/internal/api/gapexplain"
 	mcpwriteproposalsapi "github.com/mgoodric/security-atlas/internal/api/mcpwriteproposals"
 	meapi "github.com/mgoodric/security-atlas/internal/api/me"
 	metricsapi "github.com/mgoodric/security-atlas/internal/api/metrics"
@@ -92,6 +93,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/freshness"
+	"github.com/mgoodric/security-atlas/internal/gapexplain"
+	"github.com/mgoodric/security-atlas/internal/llm"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/notify/email"
 	"github.com/mgoodric/security-atlas/internal/notify/slack"
@@ -824,6 +827,30 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/controls/{id}/policies", controlDetailH.Policies)
 	root.Get("/v1/controls/{id}/risks", controlDetailH.Risks)
 	root.Get("/v1/controls/{id}/history", controlDetailH.History)
+	// Slice 444: AI gap-explanation v0 — the first AI-assist surface, the
+	// lowest-risk one. GET /v1/controls/{id}/gap-explanation returns the
+	// DETERMINISTIC freshness/evidence rollup ALWAYS, plus a plain-language,
+	// cited, NON-BINDING local-Ollama explanation of that rollup when
+	// available AND every citation resolves to a tenant-owned row (AC-4). The
+	// explanation is a comprehension aid in the control-detail view — never an
+	// audit artifact, never persisted (P0-444-4), no approve/publish/export
+	// path (P0-444-3). Route appended per the parallel-batch convention (chi
+	// rejects two Mounts at "/"); the /v1/controls/{id}/ sub-resource sits
+	// alongside slice 064's /policies,/risks,/history — chi resolves
+	// declaration order within the same method, so no shadowing. The inference
+	// client is local Ollama (slice 498), built from the all-defaults local
+	// config; when Ollama is unreachable the surface degrades gracefully to
+	// the deterministic rollup (AC-7). The gapexplain.Store is a pure read
+	// surface over evidence_freshness + controls + evidence_records (invariant
+	// #2) and runs under app.current_tenant RLS (invariant #6).
+	gapExplainStore := gapexplain.NewStore(s.dbPool)
+	gapExplainSvc := gapexplain.NewService(
+		gapExplainStore,
+		llm.NewOllamaClient(llm.ConfigFromEnv()),
+		gapExplainStore,
+	)
+	gapExplainH := gapexplainapi.New(gapExplainSvc)
+	root.Get("/v1/controls/{id}/gap-explanation", gapExplainH.GapExplanation)
 	// Slice 599: OSCAL resolved-chain provenance read. A single pure read
 	// over the slice-578 provenance persisted into the append-only
 	// imported_catalog_audit_log.detail JSON of the `profile_imported`
