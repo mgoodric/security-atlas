@@ -86,6 +86,7 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 			`DELETE FROM exceptions WHERE tenant_id = $1`,
 			`DELETE FROM controls WHERE tenant_id = $1`,
 			`DELETE FROM policies WHERE tenant_id = $1`,
+			`DELETE FROM vendors WHERE tenant_id = $1`,
 			`DELETE FROM audit_periods WHERE tenant_id = $1`,
 		} {
 			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
@@ -164,6 +165,23 @@ func seedException(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid
 	`, uuid.New(), tenant, ctrlID, expiresAt); err != nil {
 		t.Fatalf("seed exception: %v", err)
 	}
+}
+
+// seedVendor inserts a vendor with a last_review_date and review_cadence so
+// the calendar's vendor-review branch (slice 675) projects a next-review
+// event at last_review_date + cadence. Returns the vendor id.
+func seedVendor(t *testing.T, admin *pgxpool.Pool, tenant string, name string, lastReview time.Time, cadence string) uuid.UUID {
+	t.Helper()
+	vendorID := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO vendors (
+			id, tenant_id, name, criticality, review_cadence, last_review_date
+		)
+		VALUES ($1, $2, $3, 'high', $4, $5)
+	`, vendorID, tenant, name, cadence, lastReview); err != nil {
+		t.Fatalf("seed vendor: %v", err)
+	}
+	return vendorID
 }
 
 func seedEvaluation(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.UUID, evaluatedAt time.Time) {
@@ -371,6 +389,84 @@ func TestCalendar_ControlCadenceMathOverdueWhenNeverEvaluated(t *testing.T) {
 	first := events[0].(map[string]any)
 	if first["status"] != "overdue" {
 		t.Errorf("status=%v want=overdue (never-evaluated control)", first["status"])
+	}
+}
+
+// ----- Slice 675: calendar agenda sources vendor reviews (AC-1 / AC-5) -----
+
+// TestCalendar_SurfacesVendorReviews is the slice-675 regression guard: a
+// vendor with a last_review_date + cadence whose next review falls in the
+// default window appears in the agenda with type=vendor. Before slice 675
+// the calendar's UNION had no vendor branch, so this returned 0 events.
+func TestCalendar_SurfacesVendorReviews(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+
+	tenant := freshTenant(t, admin)
+	now := time.Now().UTC()
+
+	// last_review_date 30 days ago + quarterly cadence => next review in ~62
+	// days, inside the default 90-day forward window.
+	seedVendor(t, admin, tenant, "Acme Cloud", now.Add(-30*24*time.Hour), "quarterly")
+
+	env := testServer(t, app, tenant)
+	resp, body := get(t, env, "/v1/calendar?types=vendor")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("calendar GET: status=%d body=%s", resp.StatusCode, string(body))
+	}
+	got := decodeJSON(t, body)
+	events := got["events"].([]any)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 vendor-review event, got %d; body=%s", len(events), string(body))
+	}
+	first := events[0].(map[string]any)
+	if first["type"] != "vendor" {
+		t.Errorf("type=%v want=vendor", first["type"])
+	}
+	if !strings.Contains(first["title"].(string), "Acme Cloud") {
+		t.Errorf("title=%v want to contain vendor name", first["title"])
+	}
+	if first["related_entity_kind"] != "vendor" {
+		t.Errorf("related_entity_kind=%v want=vendor", first["related_entity_kind"])
+	}
+}
+
+// TestCalendar_AgendaSourcesAllDashboardTypes is the AC-5 acceptance test: a
+// tenant with an audit period + a vendor review + an exception shows ALL
+// three in the agenda (the demo-audit bug was: exceptions only).
+func TestCalendar_AgendaSourcesAllDashboardTypes(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+
+	tenant := freshTenant(t, admin)
+	fvID := seedFrameworkVersion(t, admin)
+	now := time.Now().UTC()
+
+	// One of each: audit period closing in 30d, vendor review due in ~62d,
+	// exception expiring in 10d. All inside the default 90-day window.
+	seedAuditPeriod(t, admin, tenant, fvID, now.Add(30*24*time.Hour))
+	seedVendor(t, admin, tenant, "Globex SaaS", now.Add(-30*24*time.Hour), "quarterly")
+	ctrl := seedControlWithCadence(t, admin, tenant, "annual")
+	seedException(t, admin, tenant, ctrl, now.Add(10*24*time.Hour))
+
+	env := testServer(t, app, tenant)
+	// No types filter => all sources.
+	resp, body := get(t, env, "/v1/calendar?types=audit,vendor,exception")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("calendar GET: status=%d body=%s", resp.StatusCode, string(body))
+	}
+	got := decodeJSON(t, body)
+	events := got["events"].([]any)
+
+	seen := map[string]bool{}
+	for _, e := range events {
+		ev := e.(map[string]any)
+		seen[ev["type"].(string)] = true
+	}
+	for _, want := range []string{"audit", "vendor", "exception"} {
+		if !seen[want] {
+			t.Errorf("agenda missing event type %q; types seen=%v body=%s", want, seen, string(body))
+		}
 	}
 }
 

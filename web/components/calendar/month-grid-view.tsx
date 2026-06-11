@@ -33,6 +33,7 @@ const TYPE_COLOR: Record<string, string> = {
   audit: "bg-blue-500",
   exception: "bg-amber-500",
   policy: "bg-purple-500",
+  vendor: "bg-rose-500",
   control: "bg-emerald-500",
 };
 

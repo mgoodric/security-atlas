@@ -62,6 +62,10 @@ export function linkFor(ev: CalendarEvent): LinkForResult {
       return { kind: "static", reason: EXCEPTION_REASON };
     case "policy":
       return { kind: "static", reason: POLICY_REASON };
+    case "vendor":
+      // Slice 675: vendor review events link to the real per-vendor
+      // detail page (web/app/(authed)/vendors/[id]/page.tsx).
+      return { kind: "link", href: `/vendors/${ev.related_entity_id}` };
     case "control":
       return { kind: "link", href: `/controls/${ev.related_entity_id}` };
     default:

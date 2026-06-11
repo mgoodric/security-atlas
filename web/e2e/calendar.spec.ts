@@ -93,6 +93,26 @@ test.describe("compliance calendar", () => {
     //    expect(tooltip).toMatch(/future slice/i);
   });
 
+  test("AC-675-1: legend lists 'Vendor reviews' and the agenda surfaces vendor events", async () => {
+    // Slice 675. The calendar previously sourced a narrower set than the
+    // dashboard "Upcoming" widget — it lacked vendor reviews entirely, and
+    // the legend had no "Vendor reviews" entry. When the seed harness
+    // (slice 082) lands and the test tenant carries at least one vendor
+    // with last_review_date + cadence whose next review falls in the
+    // default 90-day window, assert both that the legend lists vendor
+    // reviews AND that a vendor row renders in the agenda linking to the
+    // real /vendors/<id> detail page.
+    //
+    //    await page.goto("/calendar");
+    // Legend includes the vendor entry (AC-2).
+    //    await expect(page.getByLabel("Vendor reviews")).toBeVisible();
+    // Agenda surfaces at least one vendor row (AC-1 / AC-5).
+    //    const vendorRow = page.locator("li", { hasText: "Vendor review" }).first();
+    //    await expect(vendorRow).toBeVisible();
+    // Vendor rows link to the real per-vendor detail page (not a dead anchor).
+    //    await expect(vendorRow.locator('a[href^="/vendors/"]')).toHaveCount(1);
+  });
+
   test("AC-12: filter checkbox hides events of that type", async () => {
     //    await page.goto("/calendar");
     //    const initial = await page.locator("ul li").count();

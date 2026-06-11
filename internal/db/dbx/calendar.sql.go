@@ -88,6 +88,49 @@ FROM (
 
     UNION ALL
 
+    -- vendor reviews: last_review_date + cadence interval is the next-review
+    -- date. Mirrors the dashboard "Upcoming" rollup's vendor branch
+    -- (internal/db/queries/dashboard.sql ListUpcomingItems) so the two
+    -- surfaces source the SAME vendor-review events (slice 675 AC-1/AC-3).
+    -- Vendors with no last_review_date are excluded — there is no anchor to
+    -- project a next-review date from. The cadence -> interval mapping is the
+    -- vendor_review_cadence enum (monthly/quarterly/biannual/annual); the
+    -- ELSE-less CASE is total over the enum so next_due_at is never NULL.
+    SELECT
+        v.id::text                                                    AS event_id,
+        'vendor'::text                                                AS event_type,
+        ('Vendor review: ' || v.name)::text                           AS title,
+        (v.last_review_date + CASE v.review_cadence
+            WHEN 'monthly'   THEN INTERVAL '1 month'
+            WHEN 'quarterly' THEN INTERVAL '3 months'
+            WHEN 'biannual'  THEN INTERVAL '6 months'
+            WHEN 'annual'    THEN INTERVAL '12 months'
+         END)::timestamptz                                            AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        v.id::text                                                    AS related_entity_id,
+        'vendor'::text                                                AS related_entity_kind,
+        v.criticality::text                                           AS summary,
+        v.review_cadence::text                                        AS status,
+        v.review_cadence::text                                        AS cadence
+    FROM vendors v
+    WHERE v.tenant_id = $1
+      AND v.last_review_date IS NOT NULL
+      AND (v.last_review_date + CASE v.review_cadence
+            WHEN 'monthly'   THEN INTERVAL '1 month'
+            WHEN 'quarterly' THEN INTERVAL '3 months'
+            WHEN 'biannual'  THEN INTERVAL '6 months'
+            WHEN 'annual'    THEN INTERVAL '12 months'
+           END)::timestamptz >= $2::timestamptz
+      AND (v.last_review_date + CASE v.review_cadence
+            WHEN 'monthly'   THEN INTERVAL '1 month'
+            WHEN 'quarterly' THEN INTERVAL '3 months'
+            WHEN 'biannual'  THEN INTERVAL '6 months'
+            WHEN 'annual'    THEN INTERVAL '12 months'
+           END)::timestamptz <  $3::timestamptz
+      AND ($4::text = '' OR position('vendor' IN $4::text) > 0)
+
+    UNION ALL
+
     -- periodic control reviews: manual_periodic / manual_attested controls
     -- whose next_due_at falls in the window. Two cases:
     --   (a) never evaluated   -> next_due_at = now()        status=overdue
@@ -214,12 +257,15 @@ type ListCalendarEventsRow struct {
 
 // Slice 094 — compliance calendar backend read query.
 //
-// ONE UNION ALL across four event sources:
+// ONE UNION ALL across five event sources:
 //
 //  1. audit_periods           — period_end is the audit's "report due" date
 //  2. exceptions              — expires_at is the waiver-lapse date
 //  3. policies                — next_review_at is the next review date
-//  4. controls + control_evaluations — periodic-review controls whose
+//  4. vendors                 — last_review_date + review_cadence interval is
+//     the next vendor-review date. Mirrors the dashboard "Upcoming" rollup's
+//     vendor branch so the two surfaces cannot drift (slice 675).
+//  5. controls + control_evaluations — periodic-review controls whose
 //     cadence (derived from freshness_class) places their next review
 //     between $from and $to. last_evaluated_at = MAX(evaluated_at) over
 //     the append-only control_evaluations ledger.
@@ -232,7 +278,7 @@ type ListCalendarEventsRow struct {
 // timestamptz bounds.
 //
 // Type filter (`type_filter`) is a CSV string. Empty string (”) means
-// "all four sources." A non-empty filter narrows to the subset by checking
+// "all five sources." A non-empty filter narrows to the subset by checking
 // membership on the per-branch literal type discriminator.
 //
 // Cadence math for the controls branch:

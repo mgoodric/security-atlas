@@ -196,6 +196,15 @@ LIMIT sqlc.arg(row_limit);
 -- shape {due_date, category, title, resource_type, resource_id}. NOT four
 -- round-trips (anti-criterion P0: no N+1).
 --
+-- SHARED UPCOMING-EVENT VOCABULARY (slice 675, ADR-0015): this query and
+-- the compliance calendar's `ListCalendarEvents`
+-- (internal/db/queries/calendar.sql) both answer "what's coming up?" and
+-- MUST source the same entity types. The vendor branch below is mirrored
+-- by the calendar's vendor branch (same last_review_date + cadence math).
+-- If you add or remove an event source here, make the matching change in
+-- calendar.sql (or note why the two intentionally differ) so the dashboard
+-- and the calendar cannot silently drift again.
+--
 -- due_date semantics per source:
 --   exception        — expires_at (the waiver lapses)
 --   policy_ack       — latest ack's acknowledged_at + 365d (the annual
