@@ -174,6 +174,10 @@ type Result struct {
 	BoardPacks        int
 	FrameworkScopes   int
 	AuditLogRows      int
+	OrgUnits          int      // slice 678 / ATLAS-028
+	Decisions         int      // slice 678 / ATLAS-028
+	RoleUsers         int      // slice 678 / ATLAS-037
+	QuestionnaireQns  int      // slice 678 / ATLAS-037 (questions in the seeded questionnaire)
 	EvidenceKindsUsed []string // for D3 surface — which kinds got rows
 	Idempotent        bool     // true if no rows were INSERTed (already-seeded path)
 }
@@ -308,11 +312,36 @@ func (s *Seeder) Apply(ctx context.Context, in ApplyInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	// org_units BEFORE risks: risks.org_unit_id FKs into org_units
+	// (slice 678 / ATLAS-028).
+	ouCount, err := writeOrgUnits(ctx, tx, fixtures)
+	if err != nil {
+		return Result{}, err
+	}
 	rCount, err := writeRisks(ctx, tx, fixtures)
 	if err != nil {
 		return Result{}, err
 	}
+	// decisions AFTER risks: decision_risks links FK into risks
+	// (slice 678 / ATLAS-028).
+	dCount, err := writeDecisions(ctx, tx, fixtures)
+	if err != nil {
+		return Result{}, err
+	}
 	pCount, err := writePolicies(ctx, tx, fixtures)
+	if err != nil {
+		return Result{}, err
+	}
+	// role-holder users + api_keys + acks AFTER policies: the ack roster
+	// matches users' api_keys.owner_roles against policies'
+	// acknowledgment_required_roles (slice 678 / ATLAS-037). Reuses the
+	// admin user's password hash (these users never log in interactively).
+	ruCount, err := writeRoleUsers(ctx, tx, fixtures, passwordHash)
+	if err != nil {
+		return Result{}, err
+	}
+	// one questionnaire so /questionnaires is demonstrable (ATLAS-037).
+	qCount, err := writeQuestionnaire(ctx, tx, fixtures)
 	if err != nil {
 		return Result{}, err
 	}
@@ -374,6 +403,10 @@ func (s *Seeder) Apply(ctx context.Context, in ApplyInput) (Result, error) {
 		BoardPacks:        bpCount,
 		FrameworkScopes:   fsCount,
 		AuditLogRows:      auditCount + 1, // +1 for the demo_seed_apply meta row
+		OrgUnits:          ouCount,
+		Decisions:         dCount,
+		RoleUsers:         ruCount,
+		QuestionnaireQns:  qCount,
 		EvidenceKindsUsed: kindsUsed,
 	}, nil
 }
@@ -438,8 +471,24 @@ func (s *Seeder) Teardown(ctx context.Context, slug string, actorUserID uuid.UUI
 		`DELETE FROM audit_periods      WHERE tenant_id = $1`,
 		`DELETE FROM evidence_audit_log WHERE tenant_id = $1`,
 		`DELETE FROM evidence_records   WHERE tenant_id = $1`,
+		// Slice 678 demo-breadth rows. decision link tables BEFORE
+		// decisions (FK CASCADE handles it, but explicit keeps the sweep
+		// deterministic); decisions BEFORE risks is NOT required
+		// (decision_risks → risks is ON DELETE CASCADE), but risks'
+		// org_unit_id → org_units is ON DELETE SET NULL, so org_units may
+		// be swept any time after risks. questionnaire children CASCADE
+		// from the parent, swept explicitly for determinism.
+		`DELETE FROM decision_risks      WHERE tenant_id = $1`,
+		`DELETE FROM decision_controls   WHERE tenant_id = $1`,
+		`DELETE FROM decision_exceptions WHERE tenant_id = $1`,
+		`DELETE FROM decision_scope_predicates WHERE tenant_id = $1`,
+		`DELETE FROM decisions           WHERE tenant_id = $1`,
+		`DELETE FROM questionnaire_answers   WHERE tenant_id = $1`,
+		`DELETE FROM questionnaire_questions  WHERE tenant_id = $1`,
+		`DELETE FROM questionnaires           WHERE tenant_id = $1`,
 		`DELETE FROM risk_control_links WHERE tenant_id = $1`,
 		`DELETE FROM risks              WHERE tenant_id = $1`,
+		`DELETE FROM org_units          WHERE tenant_id = $1`,
 		`DELETE FROM policy_acknowledgments WHERE tenant_id = $1`,
 		`DELETE FROM policies           WHERE tenant_id = $1`,
 		`DELETE FROM controls           WHERE tenant_id = $1`,
@@ -465,6 +514,10 @@ func (s *Seeder) Teardown(ctx context.Context, slug string, actorUserID uuid.UUI
 		`DELETE FROM board_packs        WHERE tenant_id = $1`,
 		`DELETE FROM me_audit_log       WHERE tenant_id = $1`,
 		`DELETE FROM user_roles         WHERE tenant_id = $1`,
+		// api_keys carry the role-holder users' roster roles (slice 678).
+		// No FK ordering constraint vs users (issued_by is FK-less), but
+		// sweep before users for a clean dependency order.
+		`DELETE FROM api_keys           WHERE tenant_id = $1`,
 		`DELETE FROM local_credentials  WHERE tenant_id = $1`,
 		`DELETE FROM sessions           WHERE tenant_id = $1`,
 		`DELETE FROM users              WHERE tenant_id = $1`,
