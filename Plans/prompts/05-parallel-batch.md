@@ -4,6 +4,24 @@ Run N slices from a single orchestrator prompt while preserving per-slice rigor.
 
 This prompt has been evolved across four batches (014/017/039, 013/019/024, 018/036/044, 009/045/046). The current form bakes in those lessons. See `~/.claude/projects/-Users-gmoney-Development-security-atlas/memory/feedback_parallel_batch_patterns.md` for the full lesson set.
 
+> **STATUS MODEL UPDATED — 2026-06-10 (supersedes the status-flip mechanics below).** > `docs/issues/_STATUS.md` is now **generated** (`just status`), not hand-edited. Status is
+> derived from `git log` + open PRs + branches + `_events.jsonl`. This **removes the
+> per-flip status-only-PR overhead** that the steps below describe:
+>
+> - **Ready set:** run `just ready` (instead of reading `_STATUS.md` rows).
+> - **Claim a slice:** just **push its `feat/NNN-…` branch** — that branch IS the claim;
+>   `just status` shows it `in-progress`. **No claim-stake status PR needed.** (Optionally
+>   `just event <NNN> in-progress` for a pre-branch reservation.)
+> - **in-review / merged:** **derived automatically** — do NOT add `chore(status)` flip
+>   commits to the slice PR or a batch-final reconcile PR. Opening the PR → `in-review`;
+>   the squash commit `type(scope): slice NNN` → `merged`.
+> - **Refresh the tracker:** once per batch, run `just status` and commit the regenerated
+>   `_STATUS.md` (one docs change, not one-per-slice). `just status-check` gates CI.
+> - **Non-derivable states** (blocked/deferred/not-ready): `just event <NNN> <state> "<why>"`.
+>
+> The detailed status-only-PR steps below are retained for context but are **deprecated** —
+> follow the bullets above. See [`docs/issues/_GENERATOR.md`](../../docs/issues/_GENERATOR.md).
+
 ## Prompt
 
 ````
