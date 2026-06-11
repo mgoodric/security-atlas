@@ -739,6 +739,12 @@
       "functions": 98,
       "lines": 98
     },
+    "lib/api/vendor-burndown-format.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "lib/auth.ts": {
       "statements": 98,
       "branches": 98,
