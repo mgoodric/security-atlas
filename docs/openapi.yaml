@@ -1029,6 +1029,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/audit-periods/{id}/oscal-export:download:
+    post:
+      summary: POST /v1/audit-periods/{id}/oscal-export:download
+      tags: [audit-periods]
+      operationId: post-v1-audit-periods-id-oscal-export_download
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/audit-periods/{id}/populations/{popID}:
     post:
       summary: POST /v1/audit-periods/{id}/populations/{popID}

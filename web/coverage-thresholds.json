@@ -19,7 +19,7 @@
       "functions": 98,
       "lines": 97
     },
-    "app/(authed)/audits/oscal-export-future.ts": {
+    "app/(authed)/audits/oscal-export.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,
@@ -312,6 +312,12 @@
       "branches": 64,
       "functions": 98,
       "lines": 88
+    },
+    "app/api/audits/[id]/oscal-export/route.ts": {
+      "statements": 98,
+      "branches": 73,
+      "functions": 98,
+      "lines": 98
     },
     "app/api/audits/route.ts": {
       "statements": 93,

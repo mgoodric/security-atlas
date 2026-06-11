@@ -571,6 +571,13 @@ func (s *Server) httpHandler() http.Handler {
 	if s.oscalExporter != nil {
 		oscalExportH := oscalexportapi.New(s.oscalExporter)
 		root.Post("/v1/audit-periods/{id}/oscal-export", oscalExportH.Export)
+		// Slice 457: browser download surface. Same tenant-scoped export,
+		// served with a Content-Disposition: attachment header so the UI
+		// can drop the signed bundle as a downloadable .json artifact. The
+		// literal :download verb is declared alongside the bare
+		// /oscal-export so chi's declaration-order match keeps both ahead
+		// of periodsH.Get below.
+		root.Post("/v1/audit-periods/{id}/oscal-export:download", oscalExportH.Download)
 	}
 	root.Get("/v1/audit-periods/{id}", periodsH.Get)
 	// Slice 027: walkthrough recording primitive. Routes appended per the

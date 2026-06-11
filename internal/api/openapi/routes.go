@@ -209,6 +209,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/audit-periods", Tag: "audit-periods", Tier: "bearer", Internal: false, Summary: "POST /v1/audit-periods"},
 	{Method: "POST", Path: "/v1/audit-periods/{id}/freeze", Tag: "audit-periods", Tier: "bearer", Internal: false, Summary: "POST /v1/audit-periods/{id}/freeze"},
 	{Method: "POST", Path: "/v1/audit-periods/{id}/oscal-export", Tag: "audit-periods", Tier: "bearer", Internal: false, Summary: "POST /v1/audit-periods/{id}/oscal-export"},
+	{Method: "POST", Path: "/v1/audit-periods/{id}/oscal-export:download", Tag: "audit-periods", Tier: "bearer", Internal: false, Summary: "POST /v1/audit-periods/{id}/oscal-export:download"},
 	{Method: "POST", Path: "/v1/audit-periods/{id}/populations/{popID}", Tag: "audit-periods", Tier: "bearer", Internal: false, Summary: "POST /v1/audit-periods/{id}/populations/{popID}"},
 	{Method: "POST", Path: "/v1/board-briefs", Tag: "board", Tier: "bearer", Internal: false, Summary: "POST /v1/board-briefs"},
 	{Method: "POST", Path: "/v1/board-packs", Tag: "board", Tier: "bearer", Internal: false, Summary: "POST /v1/board-packs"},

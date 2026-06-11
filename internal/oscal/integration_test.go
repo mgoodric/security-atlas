@@ -243,6 +243,59 @@ func TestExport_RejectsUnknownPeriod(t *testing.T) {
 	}
 }
 
+// ===== Slice 457: cross-tenant download isolation (invariant #6) =====
+//
+// The slice-457 browser download surface
+// (POST /v1/audit-periods/{id}/oscal-export:download) serves the signed
+// bundle as a downloadable artifact. Its headline threat is
+// information-disclosure across tenants: a Tenant-B operator must NOT be
+// able to download Tenant-A's bundle. The download handler adds no
+// cross-tenant reach — it reuses this exact Exporter, which reads under
+// the request's tenant context. This test pins the property at the
+// authoritative RLS boundary: a frozen period seeded for tenant A,
+// exported under tenant B's context, must resolve to ErrPeriodNotFound
+// (the same denial the download serves as a 404). No bridge is needed —
+// RLS denies the read in the Aggregate stage, before any bridge call.
+func TestExport_CrossTenantPeriodIsNotExportable(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+
+	tenantA := freshTenant(t, admin)
+	tenantB := freshTenant(t, admin)
+	fwVersion := seedFrameworkVersion(t, admin)
+
+	// A FROZEN period that genuinely exists — under tenant A.
+	periodID, _ := seedPeriod(t, admin, tenantA, fwVersion, true /* frozen */)
+
+	signer, _ := oscal.NewEphemeralSigner()
+	e := oscal.NewExporter(app, nil, signer)
+
+	// Sanity: tenant A CAN see its own frozen period reaches the bridge
+	// stage (a nil bridge surfaces as ErrBridgeUnavailable — NOT
+	// ErrPeriodNotFound). This proves the period resolves for its owner,
+	// so the cross-tenant denial below is genuine isolation, not a
+	// not-found that would fire for anyone.
+	_, ownErr := e.Export(ctxFor(t, tenantA), oscal.ExportInput{
+		AuditPeriodID: periodID,
+		SystemName:    "Tenant A System",
+	})
+	if errors.Is(ownErr, oscal.ErrPeriodNotFound) {
+		t.Fatalf("tenant A could not see its OWN frozen period; isolation test is invalid: %v", ownErr)
+	}
+
+	// The isolation assertion: tenant B asks to export tenant A's period.
+	// RLS scopes the read to tenant B, which has no such period -> the
+	// Aggregate stage returns ErrPeriodNotFound. Tenant B never sees a
+	// byte of tenant A's bundle.
+	_, err := e.Export(ctxFor(t, tenantB), oscal.ExportInput{
+		AuditPeriodID: periodID,
+		SystemName:    "Tenant B System",
+	})
+	if !errors.Is(err, oscal.ErrPeriodNotFound) {
+		t.Fatalf("cross-tenant export of tenant A's period under tenant B should be ErrPeriodNotFound, got %v", err)
+	}
+}
+
 // ===== Full pipeline against the real Python bridge =====
 
 func TestExport_FrozenPeriodProducesSignedBundle(t *testing.T) {
