@@ -56,19 +56,42 @@ type periodLister interface {
 	List(ctx context.Context) ([]period.Period, error)
 }
 
+// periodReader is the read seam the Get (GET /v1/audit-periods/{id}) and
+// ControlState (GET /v1/audit-periods/{id}/control-state) paths read
+// through (slice 687, contract-tier tail rollout — extends the slice-411
+// list-only periodLister to the two remaining audit-period READ routes the
+// follow-on covers). It carries JUST the two read methods those endpoints
+// need — deliberately narrow (the wider period.Store surface adds
+// Create/Freeze/AttachPopulation writes the contract recorder never
+// exercises). The contract-tier recorder (handler_contract_test.go) injects
+// a fixed-row stub satisfying this seam so the two wire shapes record on the
+// plain `go test ./...` unit surface with no Postgres pool (ADR-0007 /
+// P0-409-1). The production *period.Store satisfies it verbatim; the seam is
+// unexported and New(*period.Store) is unchanged (P0-409-2). The write
+// handlers (Create/Freeze/AttachPopulation) keep using the concrete store.
+type periodReader interface {
+	Get(ctx context.Context, id uuid.UUID) (period.Period, error)
+	ControlState(ctx context.Context, periodID, controlID uuid.UUID) ([]period.ControlStateObservation, error)
+}
+
 // Handler bundles the slice-028 routes over a single period.Store.
 //
 // lister is the slice-411 list-only read seam the List path reads through;
-// New points it at store, so production behavior is identical. Every other
-// handler keeps using store directly.
+// reader is the slice-687 read seam the Get/ControlState paths read through;
+// New points both at store, so production behavior is identical. Every
+// write handler keeps using store directly.
 type Handler struct {
 	store  *period.Store
 	lister periodLister
+	reader periodReader
 }
 
-// New constructs a Handler. The slice-411 list-only seam (lister) is wired to
-// the same store — the public signature is unchanged (P0-409-2).
-func New(store *period.Store) *Handler { return &Handler{store: store, lister: store} }
+// New constructs a Handler. The slice-411 list-only seam (lister) and the
+// slice-687 read seam (reader) are wired to the same store — the public
+// signature is unchanged (P0-409-2).
+func New(store *period.Store) *Handler {
+	return &Handler{store: store, lister: store, reader: store}
+}
 
 // newHandlerWithLister constructs a Handler whose List path reads through an
 // arbitrary list-only seam. It exists ONLY for the slice-411 contract
@@ -77,6 +100,15 @@ func New(store *period.Store) *Handler { return &Handler{store: store, lister: s
 // surface.
 func newHandlerWithLister(lister periodLister) *Handler {
 	return &Handler{lister: lister}
+}
+
+// newHandlerWithReader constructs a Handler whose Get/ControlState paths read
+// through an arbitrary read seam. It exists ONLY for the slice-687 contract
+// recorder, which injects a fixed-row stub so the GET /v1/audit-periods/{id}
+// + /control-state wire shapes record with no Postgres pool. Unexported —
+// not part of the public surface.
+func newHandlerWithReader(reader periodReader) *Handler {
+	return &Handler{reader: reader}
 }
 
 // ----- wire shapes -----
@@ -183,7 +215,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	p, err := h.store.Get(ctx, id)
+	p, err := h.reader.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, period.ErrNotFound) {
 			httpresp.WriteError(w, http.StatusNotFound, "audit period not found")
@@ -275,7 +307,7 @@ func (h *Handler) ControlState(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "control must be a UUID")
 		return
 	}
-	obs, err := h.store.ControlState(ctx, id, ctrlID)
+	obs, err := h.reader.ControlState(ctx, id, ctrlID)
 	if err != nil {
 		if errors.Is(err, period.ErrNotFound) {
 			httpresp.WriteError(w, http.StatusNotFound, "audit period not found")
