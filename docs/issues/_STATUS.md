@@ -7,20 +7,20 @@
 >
 > Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
 
-**Generated:** 2026-06-11 · **Total slices:** 606
+**Generated:** 2026-06-11 · **Total slices:** 607
 
 ## Counts
 
 | State | Count |
 | --- | --- |
-| merged | 524 |
+| merged | 526 |
 | in-progress | 1 |
-| ready | 79 |
+| ready | 78 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 682 687 688
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 688 689
 
 ## In-flight
 
@@ -631,10 +631,11 @@
 | 679 | Vendor UX/data: name/domain spacing, missing Delete control, ... | merged |  | 2026-06-11 | a490e17a |
 | 680 | Data-quality + scoring clarity: audit-period labels, residual... | merged |  | 2026-06-11 | d9ca9533 |
 | 681 | Risk register UX: column sorting + per-risk detail; sidebar "... | merged |  | 2026-06-11 | 35dca30d |
-| 682 | Demo seed: anchor controls to SCF + give the demo framework r... | ready |  |  |  |
+| 682 | Demo seed: anchor controls to SCF + give the demo framework r... | merged |  | 2026-06-11 | 76344c22 |
 | 683 | OSCAL component-definitions edge migration-lag (deploy-note /... | not-ready | #1261 |  | OSCAL edge migration-lag deploy-note; blocked on maintainer edge access |
 | 684 | Risks page count is inconsistent (header "N of M risks" vs fo... | merged |  | 2026-06-11 | 6f5289ca |
 | 685 | Wire dashboard "Recent activity" filter chips to a real kind ... | not-ready |  |  | wire dashboard activity chips — blocked on backend endpoint filter support (spillover from 667) |
 | 686 | Read-only vendor detail page with review history | merged |  | 2026-06-11 | 84e6386c |
-| 687 | Contract-tier rollout: controls-detail + audit-workspace REMA... | ready |  |  |  |
+| 687 | Contract-tier rollout: controls-detail + audit-workspace REMA... | merged |  | 2026-06-11 | fb9b03b4 |
 | 688 | vendor_reviews ledger (per-review history surface) | ready |  |  |  |
+| 689 | Contract-tier rollout: audit-workspace read tail (populations... | ready |  |  |  |
