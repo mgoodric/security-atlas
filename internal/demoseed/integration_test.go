@@ -28,6 +28,7 @@ package demoseed_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -37,6 +38,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/board"
 	"github.com/mgoodric/security-atlas/internal/demoseed"
 )
 
@@ -193,6 +195,88 @@ func TestApply_Happy(t *testing.T) {
 	// AC-12 / P0-A2: the printed password is at least 16 chars + not empty.
 	if len(res.PlaintextPasswd) < 16 {
 		t.Errorf("password length: got %d; want >= 16", len(res.PlaintextPasswd))
+	}
+}
+
+// TestApply_BoardPackSectionShape verifies slice 662 AC-4: the seeded
+// board pack's `content` deserializes cleanly into board.Pack (the exact
+// operation the GET / LIST endpoints perform via storedPackFromRow) and
+// carries ALL eight fixed SectionKeys, each with a non-empty title. The
+// prior fixture wrote `sections` as a JSON ARRAY missing the key field,
+// which failed json.Unmarshal into Pack.Sections (map[string]Section) and
+// 500'd the board-packs list endpoint (slice 673) and the detail page.
+// Asserting the unmarshal succeeds here is the 673 cross-check: a row that
+// deserializes is a row the list endpoint serves with 200.
+func TestApply_BoardPackSectionShape(t *testing.T) {
+	const slug = "demo-it-bp-shape"
+	cleanupTenant(t, slug)
+
+	seeder, err := demoseed.NewSeeder(adminPool, demoseed.DefaultScale)
+	if err != nil {
+		t.Fatalf("NewSeeder: %v", err)
+	}
+	res, err := seeder.Apply(context.Background(), demoseed.ApplyInput{
+		Slug:          slug,
+		ActorUserID:   uuid.Nil,
+		ActorTenantID: uuid.Nil,
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	// Read the seeded pack's raw content JSONB and unmarshal it the same
+	// way storedPackFromRow does. A deserialize error here is exactly the
+	// 500 slice 673 reported.
+	rows, err := adminPool.Query(context.Background(),
+		`SELECT content FROM board_packs WHERE tenant_id = $1`, res.TenantID)
+	if err != nil {
+		t.Fatalf("query board_packs: %v", err)
+	}
+	defer rows.Close()
+
+	packCount := 0
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			t.Fatalf("scan content: %v", err)
+		}
+		var pack board.Pack
+		if err := json.Unmarshal(raw, &pack); err != nil {
+			t.Fatalf("unmarshal pack content (this is the slice 673 500): %v", err)
+		}
+		packCount++
+
+		if len(pack.Sections) != len(board.SectionKeys) {
+			t.Errorf("section count: got %d; want %d (all SectionKeys)",
+				len(pack.Sections), len(board.SectionKeys))
+		}
+		for _, key := range board.SectionKeys {
+			sec, ok := pack.Sections[key]
+			if !ok {
+				t.Errorf("seeded pack missing section %q", key)
+				continue
+			}
+			if sec.Title == "" {
+				t.Errorf("section %q has an empty title", key)
+			}
+			if sec.Key != key {
+				t.Errorf("section %q carries mismatched key %q", key, sec.Key)
+			}
+		}
+		// The vendor_burndown section (§05) carries its generated scalars
+		// so the FE §05 visual renders end-to-end.
+		if vb, ok := pack.Sections[board.SectionVendorBurndown]; ok {
+			if vb.Data.VendorBurndownTotal <= 0 {
+				t.Errorf("vendor_burndown total: got %d; want > 0",
+					vb.Data.VendorBurndownTotal)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows iteration: %v", err)
+	}
+	if packCount == 0 {
+		t.Fatal("no board_packs seeded for tenant")
 	}
 }
 
