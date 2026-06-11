@@ -571,6 +571,12 @@
       "functions": 98,
       "lines": 98
     },
+    "components/calendar/is-today.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "components/calendar/link-for.ts": {
       "statements": 98,
       "branches": 98,

@@ -25,7 +25,33 @@
 // events, month-grid view renders, day-popover opens on click, ICS-copy
 // button puts a URL on the clipboard.
 
-import { test } from "@playwright/test";
+import { expect, test } from "./fixtures";
+
+test.describe("compliance calendar — today highlight (slice 668)", () => {
+  // AC-3: the month grid marks the ACTUAL current day (not a hardcoded
+  // value). This spec needs no seed data — the today affordance renders
+  // for any signed-in user — so it runs live (not quarantined). The
+  // expected day number is derived from the same wall-clock the renderer
+  // reads, so the assertion is deterministic regardless of run date.
+  test("AC-668: month grid marks today with aria-current='date' and an emphasized day number", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/calendar?view=month");
+
+    // Exactly one cell is the current day.
+    const todayCell = page.locator('button[aria-current="date"]');
+    await expect(todayCell).toHaveCount(1);
+    await expect(todayCell).toBeVisible();
+
+    // AC-1 / AC-3: that cell shows the real current day-of-month. The grid
+    // keys cells on LOCAL dates, so compare against the local day number.
+    const expectedDay = String(new Date().getDate());
+    await expect(todayCell).toContainText(expectedDay);
+
+    // The today affordance is also tagged for the unit/e2e contract.
+    await expect(todayCell).toHaveAttribute("data-today", "true");
+  });
+});
 
 test.describe("compliance calendar", () => {
   test("AC-9: /calendar renders the calendar view for any signed-in user", async () => {
