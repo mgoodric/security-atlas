@@ -133,6 +133,22 @@ export async function updateVendor(
   return decoded.vendor;
 }
 
+export async function deleteVendor(bearer: string, id: string): Promise<void> {
+  const res = await fetch(
+    `${apiBaseURL()}/v1/vendors/${encodeURIComponent(id)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${bearer}` },
+    },
+  );
+  // The platform returns 204 No Content on a successful delete (and on an
+  // idempotent re-delete — Store.Delete is idempotent). Anything else is
+  // an error the caller surfaces.
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+}
+
 export async function getVendorBurndown(
   bearer: string,
   filter?: VendorListFilter,

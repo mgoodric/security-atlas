@@ -189,17 +189,27 @@ function VendorTable({ vendors }: { vendors: Vendor[] }) {
         {vendors.map((v) => (
           <TableRow key={v.id} className="cursor-pointer">
             <TableCell>
-              <Link
-                href={`/vendors/${v.id}`}
-                className="text-sm font-medium hover:underline"
-              >
-                {v.name}
-              </Link>
-              {v.domain ? (
-                <span className="ml-2 text-xs text-muted-foreground">
-                  {v.domain}
-                </span>
-              ) : null}
+              {/* Slice 679 (ATLAS-030): name and domain render on
+                  separate lines as primary + secondary text so the two
+                  values never read as one concatenated string
+                  ("Pinecone Bankpineconebank.example"). */}
+              <div className="flex flex-col gap-0.5">
+                <Link
+                  href={`/vendors/${v.id}`}
+                  className="text-sm font-medium hover:underline"
+                  data-testid="vendor-name"
+                >
+                  {v.name}
+                </Link>
+                {v.domain ? (
+                  <span
+                    className="text-xs text-muted-foreground"
+                    data-testid="vendor-domain"
+                  >
+                    {v.domain}
+                  </span>
+                ) : null}
+              </div>
             </TableCell>
             <TableCell>
               <CriticalityBadge value={v.criticality} />
