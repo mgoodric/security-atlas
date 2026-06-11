@@ -54,6 +54,7 @@ import {
   fetchDashboardFreshness,
   type FreshnessReport,
 } from "@/lib/api/dashboard";
+import { freshnessPctFromReport } from "@/lib/api/freshness-consistency";
 import { useCurrentTenantName } from "@/lib/auth/use-current-tenant-name";
 
 // ---------------------------------------------------------------------
@@ -74,10 +75,10 @@ export function computeFreshnessPct(
   total: number,
   totalStale: number,
 ): number | null {
-  if (total <= 0) return null;
-  const stale = Math.max(0, Math.min(totalStale, total));
-  const pct = 100 * (1 - stale / total);
-  return Math.round(pct);
+  // Slice 677 / ATLAS-020: delegate to the shared single-source-of-truth
+  // definition so the dashboard subtitle and the metrics-view board KPI
+  // can never disagree on the freshness figure (they call one function).
+  return freshnessPctFromReport({ total, total_stale: totalStale });
 }
 
 /**

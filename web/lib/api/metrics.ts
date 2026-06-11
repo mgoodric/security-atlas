@@ -393,9 +393,13 @@ export function reassembleCascade(nodes: CascadeNode[]): CascadeTreeNode[] {
 // metric value against its target row. Pure function so vitest can
 // exercise every branch.
 //
-// Rules (per AC-3):
-//   * No target set                          -> "green"  (nothing to fail against)
-//   * No observation yet                     -> "neutral"
+// Rules (per slice 097 AC-3, amended slice 677 / ATLAS-023):
+//   * No observation yet                     -> "neutral" (no data)
+//   * No target set / no target_value        -> "neutral" (no target to
+//       measure against). Slice 677: green is reserved for value-meets-
+//       target; a metric with no configured target — including a 0.0%
+//       board KPI — must NOT render green "on target", which is actively
+//       misleading to executives reading the board pack at face value.
 //   * direction=higher_is_better:
 //       value >= target           -> "green"
 //       value < target  but value >= warning  -> "yellow"
@@ -422,11 +426,11 @@ export function thresholdBadgeColor(
   > | null,
 ): ThresholdColor {
   if (value === undefined) return "neutral";
-  if (!target) return "green";
+  if (!target) return "neutral";
   const t = parseNum(target.target_value);
   const w = parseNum(target.warning_threshold);
   const c = parseNum(target.critical_threshold);
-  if (t === undefined) return "green";
+  if (t === undefined) return "neutral";
   if (target.direction === "higher_is_better") {
     if (c !== undefined && value <= c) return "red";
     if (value >= t) return "green";
@@ -447,4 +451,30 @@ export function thresholdBadgeColor(
   if (distance <= innerBand) return "green";
   if (distance <= outerBand) return "yellow";
   return "red";
+}
+
+// neutralBadgeLabel disambiguates the two `neutral` cases (slice 677 /
+// ATLAS-023) so the muted badge tells the operator WHY it is neutral:
+//
+//   * no observation yet (value undefined)            -> "no data"
+//   * a value exists but no target is configured      -> "no target"
+//   * a value exists and a target_value is configured -> "no data"
+//     (the only way to reach neutral with a target_value present is a
+//     missing observation, handled by the first branch — so this final
+//     case is a defensive default)
+//
+// Both render the SAME muted neutral badge — neither is ever green — but
+// the copy is honest about the cause. The color decision stays entirely
+// in `thresholdBadgeColor`; this is label-only.
+export function neutralBadgeLabel(
+  parsedValue: number | undefined,
+  target: Pick<MetricTarget, "target_value"> | null,
+): string {
+  if (parsedValue === undefined) return "no data";
+  const hasTargetValue =
+    target != null &&
+    target.target_value !== undefined &&
+    target.target_value !== null &&
+    target.target_value !== "";
+  return hasTargetValue ? "no data" : "no target";
 }
