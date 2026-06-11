@@ -126,17 +126,42 @@ describe("GET /api/audits/[id]/oscal-export (slice 457 download BFF)", () => {
     expect(res.headers.get("Content-Type")).toBe("application/json");
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
 
-    // Body is the verbatim signed envelope (the signing manifest rides
-    // in the downloaded bundle — AC-4).
+    // AC-4 (AUTHORITATIVE tier): the downloaded artifact carries the
+    // slice-413 signing manifest. This is the reliable home for the
+    // manifest-in-bundle proof — the e2e asserts the download FIRES with
+    // the deterministic filename, but reading a route-mocked same-origin
+    // download body via `download.createReadStream()` is flaky (Playwright
+    // cancels the stream once the browser consumes the mocked body), so
+    // the byte-faithful manifest assertion lives here + in the Go
+    // `download_test.go`. The BFF streams the platform body verbatim, so a
+    // full-shape assertion here proves the manifest survives the
+    // BFF passthrough.
     const text = await res.text();
     const parsed = JSON.parse(text) as {
       audit_period_id: string;
-      signature: { algorithm: string };
-      members: unknown[];
+      signature: {
+        mode: string;
+        algorithm: string;
+        digest: string;
+        signature: string;
+      };
+      members: { model_type: string }[];
     };
     expect(parsed.audit_period_id).toBe(PERIOD_ID);
+    // The full slice-413 signing manifest survived the passthrough.
+    expect(parsed.signature.mode).toBe("embedded-ed25519");
     expect(parsed.signature.algorithm).toBe("ed25519");
-    expect(parsed.members).toHaveLength(4);
+    expect(parsed.signature.digest).toMatch(/^[0-9a-f]{64}$/);
+    expect(parsed.signature.signature.length).toBeGreaterThan(0);
+    // The four canonical OSCAL members (invariant #8 wire format).
+    expect(parsed.members.map((m) => m.model_type)).toEqual(
+      expect.arrayContaining([
+        "system-security-plan",
+        "assessment-plan",
+        "assessment-results",
+        "plan-of-action-and-milestones",
+      ]),
+    );
 
     // The bearer must never be echoed into the response.
     expect(text).not.toContain("test-bearer-457");

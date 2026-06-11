@@ -1,12 +1,26 @@
 # Slice 457 — OSCAL signed-export download surface · decisions log
 
-- detection_tier_actual: none
-- detection_tier_target: none
+- detection_tier_actual: playwright
+- detection_tier_target: playwright
 
 Slice type: JUDGMENT. The subjective calls below are the download
-packaging, the endpoint shape, and the UX placement. No bug surfaced
-during the slice (the headline tenant-isolation property is a new test,
-not a fix).
+packaging, the endpoint shape, the UX placement, and the AC-4 verification
+tier. Two bugs surfaced in CI during the slice, both at the Playwright
+tier (`target=playwright` was correct — they are browser-download-contract
+bugs that only manifest in a real browser, not unit-testable):
+
+1. **Download filename fell back to `oscal-export.txt`** — a BARE anchor
+   `download` attribute let the browser derive the name from the URL last
+   segment, overriding the BFF `Content-Disposition` for the same-origin
+   case. Fixed by setting the `download` attribute to the deterministic
+   filename VALUE (`oscalExportDownloadFilename`, mirroring the Go-side
+   builder); guarded by a module-tier vitest + an e2e DOM assertion on the
+   anchor attribute (so a regression now trips at the cheaper vitest tier
+   too).
+2. **`download.createReadStream()` "canceled"** — reading a route-mocked
+   same-origin download body via the download stream is a flaky Playwright
+   harness seam (the browser consumes the mocked body before the stream is
+   read). Resolved by the D6 tier split below.
 
 ## Decisions made
 
@@ -125,6 +139,45 @@ is genuine isolation, not a not-found that fires for everyone. The
 handler-level + BFF-level unit/vitest tiers assert the attachment headers,
 the filename, and the error-path "no attachment on error" property.
 
+### D6 — AC-3 vs AC-4 e2e verification tier split
+
+**Context.** The slice-457 download e2e originally proved AC-4 ("the
+downloaded artifact carries the slice-413 signing manifest") by reading
+the fired download's body via `download.createReadStream()`. In CI this
+threw `download.createReadStream: canceled`: for a **route-mocked
+same-origin** anchor-download, Playwright frequently cancels the download
+stream (the browser already consumed/cached the mocked body before the
+stream is read). This is a test-harness brittleness, not a product bug.
+
+**Decision.** Split the two ACs across the reliable tier for each:
+
+- **AC-3 (download fires + deterministic filename)** stays in the e2e and
+  is fully deterministic: `context.waitForEvent("download")` fires and
+  `download.suggestedFilename()` equals the pinned
+  `oscal-bundle-<period>-<frozen-date>.json` (the anchor `download`
+  attribute drives it; a sibling DOM assertion pins the attribute value).
+  The e2e does **not** call `download.createReadStream()`.
+- **AC-4 (signing manifest rides in the bundle)** is verified at the
+  tiers where the bundle body is read reliably:
+  - **BFF vitest** (`web/app/api/audits/[id]/oscal-export/route.test.ts`)
+    — the AUTHORITATIVE manifest-in-bundle assertion: the BFF streams the
+    platform body verbatim, so a full-shape assertion (mode + algorithm +
+    digest + signature + the four members) proves the manifest survives
+    the passthrough.
+  - **Go `download_test.go`** — the handler serializes the same
+    `exportResponse` (the signature is an inline field).
+  - **slice-423 envelope e2e** (same file, line 159, passing) — already
+    asserts "export produces a signed OSCAL bundle envelope".
+  - As in-flow corroboration the slice-457 e2e reads the bundle from the
+    BFF **response** object (`page.waitForResponse(...).json()`) — the
+    reliable seam, NOT the download stream.
+
+**Rationale.** Reading a route-mocked same-origin download body is the
+flaky seam; the `response.json()` path returns the fulfilled body
+verbatim. Pushing the byte-faithful manifest proof down to the
+vitest/Go tier follows the project's "catch it at the cheapest reliable
+tier" discipline and removes a class of CI flake.
+
 ## Revisit once in use
 
 1. **Detached-`.sig`-over-files packaging (D2).** If real auditors /
@@ -157,3 +210,4 @@ the filename, and the error-path "no attachment on error" property.
 | D3 — GET-here → POST-upstream at the BFF          | high       |
 | D4 — per-frozen-period row link + toolbar note    | high       |
 | D5 — cross-tenant test at the integration tier    | high       |
+| D6 — AC-3/AC-4 e2e verification tier split        | high       |
