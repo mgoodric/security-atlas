@@ -474,8 +474,15 @@ func (s *Seeder) buildFixtures(slug string) *fixtureSet {
 			DPASignedAt:    signedAt,
 			Cadence:        vCadence[i%len(vCadence)],
 			LastReviewDate: now.AddDate(0, -3-i%6, 0),
-			OwnerUser:      ownerRoles[i%len(ownerRoles)],
-			Notes:          "Demo vendor — fictional.",
+			// ATLAS-032 (slice 679): the vendor "Owner (email)" field is
+			// contractually an email (label + placeholder + the slice-139
+			// export's MaskEmail masking all read it as one). The prior
+			// seed stamped a role string ("Head of Security"), which the
+			// form's new email validation rejects and which renders as a
+			// broken cell in the masked export. Seed a real fictional
+			// person email at @demo.example instead.
+			OwnerUser: fictionalUserEmail(i),
+			Notes:     "Demo vendor — fictional.",
 		})
 	}
 

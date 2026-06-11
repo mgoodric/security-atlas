@@ -10,6 +10,7 @@ import { APIError } from "@/lib/api/base";
 import { Vendor } from "@/lib/api/vendors";
 
 import { VendorForm } from "../vendor-form";
+import { DeleteVendorButton } from "../delete-vendor-button";
 import { updateVendorFromCookieSession } from "../actions";
 
 async function fetchVendor(id: string): Promise<Vendor> {
@@ -56,14 +57,29 @@ export default function VendorEditPage({
         </Alert>
       ) : null}
       {data ? (
-        <VendorForm
-          initial={data}
-          onSubmit={async (body) => {
-            await updateVendorFromCookieSession(id, body);
-            router.push("/vendors");
-          }}
-          submitLabel="Save changes"
-        />
+        <>
+          <VendorForm
+            initial={data}
+            onSubmit={async (body) => {
+              await updateVendorFromCookieSession(id, body);
+              router.push("/vendors");
+            }}
+            submitLabel="Save changes"
+          />
+          <div className="flex items-center justify-between rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+            <div>
+              <p className="text-sm font-medium">Delete vendor</p>
+              <p className="text-xs text-muted-foreground">
+                Removes the row and its cell bindings. This cannot be undone.
+              </p>
+            </div>
+            <DeleteVendorButton
+              vendorId={id}
+              vendorName={data.name}
+              onDeleted={() => router.push("/vendors")}
+            />
+          </div>
+        </>
       ) : null}
     </div>
   );
