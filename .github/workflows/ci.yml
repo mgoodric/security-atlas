@@ -115,6 +115,27 @@ jobs:
               - 'buf.gen.yaml'
               - 'scripts/**'
 
+  # Slice status drift — informational gate (NOT in branch-protection.json, never blocks).
+  # Runs on push to `main` only: on PR branches the slice's own not-yet-merged commit would
+  # look "merged" and false-flag. After a merge lands on `main`, this surfaces "a merge isn't
+  # reflected in docs/issues/_STATUS.md — run `just status`". Deterministic (git+events
+  # merged-set only), so no `gh` auth or local branches required. See docs/issues/_GENERATOR.md.
+  status-drift:
+    name: Slice status · drift check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0 # full history — the merged-set is derived from git log
+      - name: _STATUS.md is current with main
+        run: bash scripts/check-status-drift.sh
+
   build-go:
     name: Go · build + test
     needs: changes
