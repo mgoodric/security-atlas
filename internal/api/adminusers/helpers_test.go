@@ -3,11 +3,78 @@
 package adminusers
 
 import (
+	"context"
 	"encoding/base64"
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/auth/jwt"
+	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 )
+
+// TestActorFromContext_StripsUserPrefix is the regression test for the
+// "actor user_id not on context" bug: the real auth substrate mints the atlas
+// JWT Subject as "user:<uuid>" (internal/api/auth/http.go), and jwtmw bridges
+// the same value into the credential's UserID. actorFromContext must strip the
+// prefix before parsing, or every real-auth caller of the self-assign path
+// resolves to uuid.Nil and gets a 500. The prior integration tests masked this
+// by minting a BARE-UUID subject.
+func TestActorFromContext_StripsUserPrefix(t *testing.T) {
+	t.Parallel()
+	id := uuid.New()
+
+	cases := []struct {
+		name string
+		ctx  func() context.Context
+	}{
+		{
+			name: "jwt subject with user: prefix (real auth path)",
+			ctx: func() context.Context {
+				claims := &jwt.AtlasClaims{
+					RegisteredClaims: jwt.RegisteredClaims{Subject: "user:" + id.String()},
+				}
+				return jwtmw.WithClaimsForTest(context.Background(), claims)
+			},
+		},
+		{
+			name: "bare-uuid jwt subject (legacy/test path) still works",
+			ctx: func() context.Context {
+				claims := &jwt.AtlasClaims{
+					RegisteredClaims: jwt.RegisteredClaims{Subject: id.String()},
+				}
+				return jwtmw.WithClaimsForTest(context.Background(), claims)
+			},
+		},
+		{
+			name: "credential fallback with user: prefix",
+			ctx: func() context.Context {
+				return authctx.WithCredential(context.Background(),
+					credstore.Credential{UserID: "user:" + id.String()})
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := actorFromContext(tc.ctx()); got != id {
+				t.Errorf("actorFromContext = %s, want %s", got, id)
+			}
+		})
+	}
+}
+
+// TestActorFromContext_NilWhenAbsent confirms the genuine no-actor case still
+// resolves to uuid.Nil (the self-assign 500 guard depends on this).
+func TestActorFromContext_NilWhenAbsent(t *testing.T) {
+	t.Parallel()
+	if got := actorFromContext(context.Background()); got != uuid.Nil {
+		t.Errorf("actorFromContext(empty) = %s, want uuid.Nil", got)
+	}
+}
 
 func TestValidateAssign(t *testing.T) {
 	t.Parallel()

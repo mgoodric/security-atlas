@@ -749,12 +749,15 @@ func isSuperAdmin(ctx context.Context) bool {
 // bearer credential.
 func actorFromContext(ctx context.Context) uuid.UUID {
 	if claims := jwtmw.FromContext(ctx); claims != nil {
-		if u, err := uuid.Parse(claims.Subject); err == nil {
+		// The atlas JWT Subject is "user:<uuid>" (auth-substrate-v2
+		// convention); strip the prefix before parsing or every real-auth
+		// caller resolves to uuid.Nil.
+		if u, err := uuid.Parse(jwtmw.SubjectUserID(claims.Subject)); err == nil {
 			return u
 		}
 	}
 	if cred, ok := credentialFromContext(ctx); ok {
-		if u, err := uuid.Parse(cred.UserID); err == nil {
+		if u, err := uuid.Parse(jwtmw.SubjectUserID(cred.UserID)); err == nil {
 			return u
 		}
 	}
