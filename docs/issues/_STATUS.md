@@ -7,20 +7,20 @@
 >
 > Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
 
-**Generated:** 2026-06-10 · **Total slices:** 601
+**Generated:** 2026-06-11 · **Total slices:** 601
 
 ## Counts
 
 | State | Count |
 | --- | --- |
-| merged | 504 |
+| merged | 507 |
 | in-progress | 1 |
-| ready | 95 |
+| ready | 92 |
 | not-ready | 1 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 271 272 304 323 330 336 338 339 354 355 356 357 358 368 384 390 412 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 663 664 665 666 667 668 669 670 674 675 676 677 678 679 680 681 682
+095 112 113 114 115 118 134 228 230 232 271 272 304 323 330 336 338 339 354 355 356 357 358 368 384 390 412 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 663 666 667 668 670 674 675 676 677 678 679 680 681 682
 
 ## In-flight
 
@@ -613,12 +613,12 @@
 | 661 | Global search returns no results for controls / SCF anchors | merged | #1252 | 2026-06-10 | 078746fb |
 | 662 | Board pack §05 (Vendor burndown) not rendered; raw key leaks... | merged | #1258 | 2026-06-10 | 07b24d13 |
 | 663 | Risk creation is a dead end on a fresh tenant (mitigate requi... | ready |  |  |  |
-| 664 | Vendor "Review burndown" shows 100% on-time with 0 vendors (d... | ready |  |  |  |
-| 665 | Board pack "Generate draft" gives no feedback when quarter-en... | ready |  |  |  |
+| 664 | Vendor "Review burndown" shows 100% on-time with 0 vendors (d... | merged |  | 2026-06-10 | ea8c06b4 |
+| 665 | Board pack "Generate draft" gives no feedback when quarter-en... | merged |  | 2026-06-10 | a263b530 |
 | 666 | Controls page count is inconsistent (header "53 of 53" vs foo... | ready |  |  |  |
 | 667 | Dashboard "Recent activity" filter chips are inert; placehold... | ready |  |  |  |
 | 668 | Calendar month view does not highlight "today" | ready |  |  |  |
-| 669 | Activity ledger is dominated by internal read-telemetry (low ... | ready |  |  |  |
+| 669 | Activity ledger is dominated by internal read-telemetry (low ... | merged |  | 2026-06-11 | 4e26fd21 |
 | 670 | Pre-GA copy & metadata pass (titles, breadcrumbs, raw IDs, ty... | ready |  |  |  |
 | 671 | Seeded demo tenant shows no evaluated control state / zero me... | merged | #1249 | 2026-06-10 | 2894827a |
 | 672 | Policy detail link 404s — `/policies/{id}` route does not e... | merged | #1255 | 2026-06-10 | d8a8763c |
